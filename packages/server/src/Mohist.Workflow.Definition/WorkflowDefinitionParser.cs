@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
@@ -97,6 +98,9 @@ public static class WorkflowDefinitionParser
         private static readonly string[] ExpectKeys = { "files", "markers" };
         private static readonly string[] MarkerKeys = { "path", "oneOf", "failIf", "contains" };
         private static readonly string[] ArtifactKeys = { "files" };
+        private static readonly Regex YamlIntegerPattern = new(
+            @"^[+-]?(?:[0-9][0-9_]*|0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+)$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
         public static WorkflowDefinition? Build(YamlNode root, List<ValidationError> errors, HashSet<string> emittedPaths)
         {
@@ -567,15 +571,17 @@ public static class WorkflowDefinitionParser
                 return JsonDocument.Parse(raw).RootElement.Clone();
             }
 
+            var normalized = raw.Replace("_", "", StringComparison.Ordinal);
             if (style is ScalarStyle.Plain
-                && long.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var longValue))
+                && IsYamlInteger(raw)
+                && TryParseYamlInteger(normalized, out var longValue))
             {
                 return NumberToJsonElement(longValue);
             }
 
             if (style is ScalarStyle.Plain
                 && double.TryParse(
-                    raw,
+                    normalized,
                     System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture,
                     out var doubleValue))
@@ -874,8 +880,76 @@ public static class WorkflowDefinitionParser
 
         private static bool IsStringScalar(YamlScalarNode scalar)
         {
+            if (scalar.Style is ScalarStyle.Plain && IsYamlInteger(scalar.Value))
+                return false;
+
             var value = YamlScalarToJsonElement(scalar, "");
             return value.ValueKind == JsonValueKind.String;
+        }
+
+        private static bool IsYamlInteger(string? raw) =>
+            raw is not null && YamlIntegerPattern.IsMatch(raw);
+
+        private static bool TryParseYamlInteger(string raw, out long value)
+        {
+            var sign = 1;
+            var digits = raw;
+            if (digits.StartsWith('+'))
+            {
+                digits = digits[1..];
+            }
+            else if (digits.StartsWith('-'))
+            {
+                sign = -1;
+                digits = digits[1..];
+            }
+
+            if (digits.StartsWith("0x", StringComparison.Ordinal))
+                return long.TryParse(digits[2..], System.Globalization.NumberStyles.AllowHexSpecifier, System.Globalization.CultureInfo.InvariantCulture, out value)
+                    && ApplySign(sign, value, out value);
+
+            if (digits.StartsWith("0o", StringComparison.Ordinal))
+                return TryParseBaseInteger(digits[2..], 8, sign, out value);
+
+            if (digits.StartsWith("0b", StringComparison.Ordinal))
+                return TryParseBaseInteger(digits[2..], 2, sign, out value);
+
+            if (!long.TryParse(digits, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out value))
+                return false;
+
+            return ApplySign(sign, value, out value);
+        }
+
+        private static bool TryParseBaseInteger(string digits, int numberBase, int sign, out long value)
+        {
+            value = 0;
+            foreach (var digit in digits)
+            {
+                var number = digit switch
+                {
+                    >= '0' and <= '9' => digit - '0',
+                    >= 'a' and <= 'f' => digit - 'a' + 10,
+                    >= 'A' and <= 'F' => digit - 'A' + 10,
+                    _ => numberBase,
+                };
+                if (number >= numberBase || value > (long.MaxValue - number) / numberBase)
+                    return false;
+                value = value * numberBase + number;
+            }
+
+            return ApplySign(sign, value, out value);
+        }
+
+        private static bool ApplySign(int sign, long value, out long signedValue)
+        {
+            if (sign < 0 && value > long.MaxValue)
+            {
+                signedValue = 0;
+                return false;
+            }
+
+            signedValue = sign < 0 ? -value : value;
+            return true;
         }
 
         private static void AddError(

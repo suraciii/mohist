@@ -240,6 +240,43 @@ public class TypeErrorTests
     }
 
     [Fact]
+    public void Parse_NonDecimalYamlNumberScalarsInStringFields_Rejected()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: 0x10
+                tasks:
+                  - id: 1_000
+                    uses: action
+                checks: []
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e =>
+            e.Path == "stages[0].stage" && e.Message == "'stage' must be a string");
+        Assert.Contains(result.Errors, e =>
+            e.Path == "stages[0].tasks[0].id" && e.Message == "'id' must be a string");
+    }
+
+    [Fact]
+    public void Parse_NonDecimalYamlNumberInWith_DoesNotCrash()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: build
+                tasks:
+                  - id: t1
+                    uses: action
+                    with:
+                      hexadecimal: 0x10
+                      underscored: 1_000
+                checks: []
+            """);
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
     public void Parse_QuotedScalarForTypedFields_Rejected()
     {
         var result = WorkflowDefinitionParser.Parse("""
