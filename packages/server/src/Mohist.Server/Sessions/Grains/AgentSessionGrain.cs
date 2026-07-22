@@ -6,11 +6,13 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Runner.Services.SignalR;
 
 namespace Mohist.Server.Sessions.Grains;
 
 public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 {
+    private static readonly TimeSpan FollowupLeaseWindow = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan PersistTimerDueTime = TimeSpan.FromMilliseconds(200);
     private const string OpenCodeRuntime = "opencode";
     private const string PiRuntime = "pi";
@@ -21,6 +23,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly ITranscriptEventPublisher _transcriptPublisher;
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TimeProvider _timeProvider;
+    private readonly RunnerConnectionTracker _connections;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
     private bool _sessionReloadRequired;
@@ -38,6 +41,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IDbContextFactory<MohistDbContext> dbFactory,
         ITranscriptEventPublisher transcriptPublisher,
         TimeProvider timeProvider,
+        RunnerConnectionTracker connections,
         ILogger<AgentSessionGrain> log)
     {
         _stateStore = stateStore;
@@ -45,6 +49,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _dbFactory = dbFactory;
         _transcriptPublisher = transcriptPublisher;
         _timeProvider = timeProvider;
+        _connections = connections;
         _log = log;
     }
 
@@ -108,6 +113,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
+        _connections.RegisterSession(_session.Runtime.RunnerId, SessionId);
         return await ToInfoAsync(_session);
     }
 
@@ -155,10 +161,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             await _stateStore.SaveAsync(SessionId, session);
             _session = session;
+            _connections.RegisterSession(session.Runtime.RunnerId, SessionId);
             return await ToInfoAsync(session);
         }
 
         await CommitAsync(session, events);
+        _connections.RegisterSession(session.Runtime.RunnerId, SessionId);
         return await ToInfoAsync(session);
     }
 
@@ -491,7 +499,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             var startedAt = lease.Accepted ? lease.AcceptedAt : lease.StartedAt;
             return startedAt is { } timestamp
-                && now - timestamp <= AgentSessionJsonHelper.ActiveRuntimeEventWindow;
+                && now - timestamp <= FollowupLeaseWindow;
         }).ToArray();
         if (remaining.Length == pending.Count) return;
         SetPendingFollowups(session, remaining);
@@ -531,7 +539,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {
         if (GetPendingFollowups(session).Count > 0
-            || AgentSessionJsonHelper.StatusName(session, Now()) == "active")
+            || session.Status.Activity != AgentSessionActivity.Idle)
             throw new InvalidOperationException(
                 $"AgentSession {session.Id} is currently active; Compact and Reset require an idle session.");
     }
@@ -717,10 +725,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private static string ToTranscriptPartType(string eventType) => eventType switch
     {
-        RuntimeEventTypes.SessionFollowupFailed => TranscriptPartTypes.Status,
-        RuntimeEventTypes.SessionFollowupCompleted => TranscriptPartTypes.Status,
         RuntimeEventTypes.SessionLiveness => TranscriptPartTypes.Status,
-        RuntimeEventTypes.SessionClosed => TranscriptPartTypes.SessionClosed,
+        RuntimeEventTypes.SessionActivity => TranscriptPartTypes.SessionActivity,
+        RuntimeEventTypes.SessionContextReset => TranscriptPartTypes.SessionContextReset,
+        RuntimeEventTypes.TurnFailed => TranscriptPartTypes.Status,
         RuntimeEventTypes.Compaction => TranscriptPartTypes.Compaction,
         RuntimeEventTypes.ProviderRetry => TranscriptPartTypes.ProviderRetry,
         _ => eventType,
@@ -750,168 +758,26 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command)
     {
-        if (command.RuntimeEvents.Any(e => !string.Equals(e.Type, RuntimeEventTypes.SessionClosed, StringComparison.Ordinal)))
-            throw new InvalidOperationException("System AgentSession events are limited to session.closed.");
+        if (command.RuntimeEvents.Any(e => !string.Equals(e.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal)))
+            throw new InvalidOperationException("System AgentSession events are limited to session.activity.");
         return AppendEventsAsync(command.RuntimeEvents, null, requireCurrentRuntimeBinding: false);
     }
 
-    /// <summary>
-    /// Idempotent AgentJob-owned close command (issue-449 design decision 2).
-    /// Synchronously persists the <c>session.closed</c> transcript fact with
-    /// the stable AgentJob delivery id as the correlation key, then returns
-    /// success only after the state and the transcript row are durable.
-    /// The AgentJob uses this acknowledgement to clear its pending payload
-    /// and unregister its recovery reminder; any failure throws so the
-    /// AgentJob reminder / activation / report replay retries the same
-    /// delivery until it succeeds.
-    /// </summary>
-    /// <remarks>
-    /// The AgentJob owns the canonical terminal delivery; a second call with
-    /// the same <see cref="AppendTerminalCloseCommand.DeliveryId"/> is a
-    /// no-op and reports <see cref="AppendTerminalCloseResult.AlreadyPersisted"/>
-    /// = true so callers can distinguish "durable" from "first write".
-    /// Throws on persistence failure to drive AgentJob retry; on success
-    /// the durable transcript row is the observable close fact for any
-    /// downstream projection (generic-session summary, CLI, issue-feed).
-    /// </remarks>
     public async Task<AppendTerminalCloseResult> AppendTerminalCloseAsync(AppendTerminalCloseCommand command)
     {
-        RejectIfReloadRequired();
-        if (command is null) throw new ArgumentNullException(nameof(command));
-        if (!string.Equals(command.SessionId, SessionId, StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                $"AppendTerminalCloseAsync delivery id {command.DeliveryId} targets session {command.SessionId}; this grain owns {SessionId}.");
-
-        var session = await GetRequiredAsync();
-
-        if (await CloseAlreadyPersistedAsync(command.DeliveryId, default))
+        var payload = JSON.Serialize(new Dictionary<string, object?>
         {
-            _log.LogDebug(
-                "AgentSession {SessionId} acknowledged duplicate terminal delivery {DeliveryId} (already durable)",
-                SessionId, command.DeliveryId);
-            return new AppendTerminalCloseResult(SessionId, command.DeliveryId, true);
-        }
-
-        // Runtime binding gate: when the AgentJob's bound runtime has
-        // been superseded by a reset, the new runtime owns the session
-        // and the old AgentJob's close is dropped on the floor (the
-        // replacement runtime never asked for it). Acknowledging the
-        // delivery with AlreadyPersisted=true lets the AgentJob clear its
-        // pending payload without retrying forever — this matches the
-        // previous fire-and-forget semantics where the runner-bound
-        // AppendRuntimeEventsAsync silently returned [].
-        var currentRuntime = session.Status.AgentRuntimeSessionId;
-        if (!string.IsNullOrWhiteSpace(command.RuntimeSessionId)
-            && !string.Equals(command.RuntimeSessionId, currentRuntime, StringComparison.Ordinal))
-        {
-            _log.LogDebug(
-                "AgentSession {SessionId} dropped terminal delivery {DeliveryId}: bound runtime {Bound} superseded by {Current}",
-                SessionId, command.DeliveryId, command.RuntimeSessionId, currentRuntime ?? "(none)");
-            return new AppendTerminalCloseResult(SessionId, command.DeliveryId, true);
-        }
-
-        var recordedAt = command.RecordedAt.UtcDateTime;
-        if (session.Status.CurrentTurnEndedAt is null
-            || session.Status.CurrentTurnEndedAt < recordedAt)
-        {
-            session.Status = session.Status with { CurrentTurnEndedAt = recordedAt };
-            _stateDirty = true;
-        }
-
-        // When the AgentJob is unbound to a runtime (e.g. an AgentJob
-        // that failed pre-execution before the runner opened the
-        // Session) the close is recorded as a system event with no
-        // runtime binding. When the AgentJob is bound, the close goes
-        // onto that runtime's turn so the transcript store's
-        // (sessionId, runtimeSessionId) lookup routes it correctly.
-        var runtimeSessionId = string.IsNullOrWhiteSpace(command.RuntimeSessionId)
-            ? null
-            : command.RuntimeSessionId;
-        var turn = new AgentSessionTranscriptTurnUpsert(
-            SessionId: session.Id,
-            Sequence: 0,
-            PromptText: string.Empty,
-            PromptKind: AgentSessionJsonHelper.NormalizePromptKind("task"),
-            StartedAt: recordedAt,
-            UpdatedAt: recordedAt,
-            RuntimeSessionId: runtimeSessionId);
-        var part = new AgentSessionTranscriptPartDelta(
-            Type: TranscriptPartTypes.SessionClosed,
-            CorrelationKey: command.DeliveryId,
-            CorrelationId: command.DeliveryId,
-            TextDelta: null,
-            PayloadJson: command.PayloadJson,
-            FirstSeenAt: recordedAt,
-            LastSeenAt: recordedAt,
-            RawEventCount: 1,
-            IsIdempotent: true);
-        var flush = new AgentSessionTranscriptFlush(
-            StartNewTurn: true,
-            Turn: turn,
-            Parts: [part]);
-
-        var pendingEvents = _pendingDomainEvents.Count == 0
-            ? Array.Empty<AgentSessionEvent>()
-            : _pendingDomainEvents.ToArray();
-        try
-        {
-            await _stateStore.SaveAsync(SessionId, session, pendingEvents, default);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex,
-                "AgentSession {SessionId} failed to persist state for terminal delivery {DeliveryId}",
-                SessionId, command.DeliveryId);
-            _sessionReloadRequired = true;
-            DeactivateOnIdle();
-            throw;
-        }
-        _pendingDomainEvents.Clear();
-        _stateDirty = false;
-        _session = session;
-
-        try
-        {
-            await _transcriptStore.SaveAsync(flush, default);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex,
-                "AgentSession {SessionId} failed to persist transcript for terminal delivery {DeliveryId}",
-                SessionId, command.DeliveryId);
-            // State already durable; the next retry must not duplicate
-            // the close row. The idempotency check at the top of this
-            // method will short-circuit a retry that finds the part
-            // already saved.
-            throw;
-        }
-
-        _cachedSummary = null;
-        _log.LogInformation(
-            "AgentSession {SessionId} persisted terminal delivery {DeliveryId} (status={Status})",
-            SessionId, command.DeliveryId, command.Status);
-
+            ["activity"] = "idle",
+            ["observedAt"] = command.RecordedAt.ToString("o"),
+            ["operationId"] = command.DeliveryId,
+            ["status"] = command.Status,
+            ["failureReason"] = command.FailureReason,
+        });
+        await AppendEventsAsync(
+            [new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, payload)],
+            command.RuntimeSessionId,
+            requireCurrentRuntimeBinding: !string.IsNullOrWhiteSpace(command.RuntimeSessionId));
         return new AppendTerminalCloseResult(SessionId, command.DeliveryId, false);
-    }
-
-    private async Task<bool> CloseAlreadyPersistedAsync(string deliveryId, CancellationToken ct)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var turnIds = await db.AgentSessionTranscriptTurns.AsNoTracking()
-            .Where(t => t.SessionId == SessionId)
-            .Select(t => t.Id)
-            .ToListAsync(ct);
-        if (turnIds.Count == 0) return false;
-
-        // Match by correlation key (the durable identity AgentJob wrote
-        // on the part). The same payload is also embedded into the part
-        // for backward compatibility, but the correlation key is the
-        // authoritative dedup key — every retry reuses it.
-        return await db.AgentSessionTranscriptParts.AsNoTracking()
-            .Where(p => turnIds.Contains(p.TurnId)
-                && p.Type == TranscriptPartTypes.SessionClosed
-                && p.CorrelationKey == deliveryId)
-            .AnyAsync(ct);
     }
 
     private async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendEventsAsync(
@@ -935,18 +801,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return [];
         }
 
-        var followupTerminals = runtimeEvents
-            .Where(e => IsFollowupTerminal(e.Type))
-            .ToArray();
-        if (followupTerminals.Length > 0 && requireCurrentRuntimeBinding)
-        {
-            var terminalEntries = await CompleteFollowupTerminalsAsync(session, runtimeSessionId!, followupTerminals);
-            runtimeEvents = runtimeEvents
-                .Where(e => !IsFollowupTerminal(e.Type))
-                .ToArray();
-            if (runtimeEvents.Count == 0)
-                return terminalEntries;
-        }
+        if (runtimeEvents.Any(e => e.Type == RuntimeEventTypes.SessionInput)
+            && session.Status.Activity == AgentSessionActivity.Unknown)
+            return [];
 
         // `session.input` is the canonical cross-source turn delimiter.
         // Before the new input reaches `TranscriptAccumulator` (which
@@ -971,14 +828,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
 
         var now = Now();
-        if (runtimeEvents.Any(e => string.Equals(e.Type, RuntimeEventTypes.SessionClosed, StringComparison.Ordinal)))
-            session.Status = session.Status with { CurrentTurnEndedAt = now };
-        if (requireCurrentRuntimeBinding && runtimeEvents.Any(e => TerminatesFollowupLease(e.Type)))
-        {
-            SetPendingFollowups(session, GetPendingFollowups(session)
-                .Where(lease => !string.Equals(lease.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal))
-                .ToArray());
-        }
         var events = new List<AgentSessionEvent>();
         if (runtimeEvents.Any(ShouldRecordActivity)
             && (session.Status.CurrentTurnEndedAt is null || runtimeEvents.Any(ResumesTurn)))
@@ -996,7 +845,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             events.AddRange(domainEvents);
 
             var payloadJson = string.IsNullOrWhiteSpace(e.PayloadJson) ? "{}" : e.PayloadJson;
-            var classifiedPayload = ClassifySessionClosedPayload(session, e.Type, payloadJson, now);
+            var classifiedPayload = ClassifyTurnFailedPayload(session, e.Type, payloadJson, now);
             if (classifiedPayload is not null)
             {
                 payloadJson = classifiedPayload;
@@ -1060,69 +909,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return entries.Select(e => ToEventInfo(e)).ToList();
     }
 
-    private async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> CompleteFollowupTerminalsAsync(
-        AgentSession session,
-        string runtimeSessionId,
-        IReadOnlyList<AgentSessionRuntimeEventInput> terminals)
-    {
-        var pending = GetPendingFollowups(session).ToList();
-        var entries = new List<RuntimeEventEnvelope>();
-        var evidence = session.Status.PendingTranscriptEvidence?.ToList() ?? [];
-        var now = Now();
-
-        foreach (var terminal in terminals)
-        {
-            var payload = JSON.DeserializeElement(terminal.PayloadJson);
-            var operationId = AgentSessionJsonHelper.GetStringProp(payload, "operationId");
-            if (string.IsNullOrWhiteSpace(operationId))
-                continue;
-
-            var index = pending.FindIndex(lease =>
-                string.Equals(lease.OperationId, operationId, StringComparison.Ordinal)
-                && string.Equals(lease.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal));
-            if (index < 0)
-                continue;
-
-            pending.RemoveAt(index);
-            var payloadJson = string.IsNullOrWhiteSpace(terminal.PayloadJson) ? "{}" : terminal.PayloadJson;
-            entries.Add(new RuntimeEventEnvelope
-            {
-                Id = -(_realtimeSequence + 1),
-                SessionId = session.Id,
-                AgentSessionId = runtimeSessionId,
-                Sequence = ++_realtimeSequence,
-                Type = terminal.Type,
-                PayloadJson = payloadJson,
-                CreatedAt = now,
-            });
-            evidence.Add(new AgentSessionTranscriptEvidence(
-                $"followup:{operationId}",
-                runtimeSessionId,
-                terminal.Type,
-                payloadJson,
-                now,
-                "followup"));
-        }
-
-        if (entries.Count == 0)
-            return [];
-
-        SetPendingFollowups(session, pending);
-        session.Status = session.Status with { PendingTranscriptEvidence = evidence };
-        await CommitAsync(session, []);
-        _session = session;
-        _cachedSummary = null;
-        if (!await FlushPendingTranscriptEvidenceAsync(session, CancellationToken.None))
-            EnsurePersistenceTimer();
-        await FanOutRealtimeAsync(session, entries, []);
-        return entries.Select(ToEventInfo).ToList();
-    }
-
     private static bool ShouldRecordActivity(AgentSessionRuntimeEventInput runtimeEvent)
     {
-        if (string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionClosed, StringComparison.Ordinal)
-            || IsFollowupTerminal(runtimeEvent.Type))
-            return false;
         if (!string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionInput, StringComparison.Ordinal))
             return true;
 
@@ -1146,13 +934,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             or RuntimeEventTypes.ToolCallUpdated
             or RuntimeEventTypes.ToolCallCompleted;
 
-    private static bool IsFollowupTerminal(string? type) =>
-        string.Equals(type, RuntimeEventTypes.SessionFollowupFailed, StringComparison.Ordinal)
-        || string.Equals(type, RuntimeEventTypes.SessionFollowupCompleted, StringComparison.Ordinal);
-
-    private string? ClassifySessionClosedPayload(AgentSession session, string type, string payloadJson, DateTime now)
+    private string? ClassifyTurnFailedPayload(AgentSession session, string type, string payloadJson, DateTime now)
     {
-        if (!string.Equals(type, "session.closed", StringComparison.Ordinal))
+        if (!string.Equals(type, RuntimeEventTypes.TurnFailed, StringComparison.Ordinal))
             return null;
 
         JsonElement payload;
@@ -1166,7 +950,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
         if (payload.ValueKind != JsonValueKind.Object) return null;
 
-        var status = AgentSessionJsonHelper.GetStringProp(payload, "status");
         var usage = AgentSessionJsonHelper.Usage(session);
         var elapsed = session.Status.LastDataAt is { } last
             && session.Status.BoundAt is { } bound
@@ -1179,7 +962,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             ?? false;
 
         var result = ContextExhaustionClassifier.ClassifyClose(
-            status,
+            "failed",
             usage.ContextWindowUsed,
             usage.ContextWindowSize,
             elapsed,
@@ -1189,7 +972,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             // Try the rapid-completion heuristic for successful closes that
             // look suspiciously fast and did not produce expected output.
             result = ContextExhaustionClassifier.ClassifyRapidCompletion(
-                status,
+                "failed",
                 AgentSessionJsonHelper.ContextUsagePercent(usage.ContextWindowUsed, usage.ContextWindowSize),
                 elapsed,
                 producedArtifacts);
@@ -1333,17 +1116,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             PersistTimerDueTime);
     }
 
-    // A follow-up lease blocks Compact/Reset while an idle follow-up turn is in
-    // flight. It clears when the turn reaches a terminal outcome on the bound
-    // runtime: session.closed (the task path ends the session) or
-    // session.followup_failed (the follow-up's prompt rejected without
-    // producing a turn). Without the latter an idle session whose follow-up
-    // prompt rejected stays PendingFollowup forever and Compact/Reset are
-    // permanently rejected as session_active.
-    private static bool TerminatesFollowupLease(string? type) =>
-        string.Equals(type, RuntimeEventTypes.SessionClosed, StringComparison.Ordinal)
-        || string.Equals(type, RuntimeEventTypes.SessionFollowupFailed, StringComparison.Ordinal);
-
     private async Task PersistCallback()
     {
         if (_session is null || (!_stateDirty
@@ -1486,6 +1258,16 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         EnsureRuntimeSessionPresent(session);
     }
 
+    public async Task RunnerDisconnectedAsync()
+    {
+        var session = await GetRequiredAsync();
+        if (session.Status.Activity != AgentSessionActivity.Active) return;
+        var now = Now();
+        session.SetActivity(AgentSessionActivity.Unknown, now);
+        var payload = JSON.Serialize(new { activity = "unknown", observedAt = now.ToString("o"), reason = "runner-disconnected" });
+        await AppendEventsAsync([new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, payload)], session.Status.AgentRuntimeSessionId, true);
+    }
+
     public Task DeactivateForTestAsync()
     {
         DeactivateOnIdle();
@@ -1619,8 +1401,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var payload = JSON.DeserializeElement(runtimeEvent.PayloadJson);
         return runtimeEvent.Type switch
         {
+            RuntimeEventTypes.SessionInput => session.SetActivity(
+                session.Status.Activity == AgentSessionActivity.Unknown
+                    ? AgentSessionActivity.Unknown
+                    : AgentSessionActivity.Active,
+                now),
+            RuntimeEventTypes.SessionActivity => session.SetActivity(
+                ParseActivity(payload),
+                now),
             RuntimeEventTypes.SessionLiveness => session.RecordActivity(now),
-            RuntimeEventTypes.SessionClosed => [],
             RuntimeEventTypes.UsageUpdated => session.ApplyUsage(
                 AgentSessionJsonHelper.GetLongProp(payload, "inputTokens"),
                 AgentSessionJsonHelper.GetLongProp(payload, "outputTokens"),
@@ -1639,4 +1428,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             _ => []
         };
     }
+
+    private static AgentSessionActivity ParseActivity(JsonElement payload) =>
+        AgentSessionJsonHelper.GetStringProp(payload, "activity")?.ToLowerInvariant() switch
+        {
+            "active" => AgentSessionActivity.Active,
+            "unknown" => AgentSessionActivity.Unknown,
+            _ => AgentSessionActivity.Idle,
+        };
 }

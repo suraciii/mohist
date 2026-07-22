@@ -106,6 +106,17 @@ public static partial class AgentSessionExtensions
             return [];
         }
 
+        public IReadOnlyList<AgentSessionEvent> SetActivity(AgentSessionActivity activity, DateTime now)
+        {
+            session.Status = session.Status with
+            {
+                Activity = activity,
+                LastDataAt = now,
+                CurrentTurnEndedAt = activity == AgentSessionActivity.Idle ? now : session.Status.CurrentTurnEndedAt,
+            };
+            return [];
+        }
+
         public IReadOnlyList<AgentSessionEvent> ApplyUsage(
             long? inputTokens,
             long? outputTokens,

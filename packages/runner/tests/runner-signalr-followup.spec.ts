@@ -218,7 +218,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     errorSpy.mockRestore()
   })
 
-  it("Followup_Completion_RecordsFollowupCompletedTerminal", async () => {
+  it("Followup_Completion_RecordsIdleActivity", async () => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
@@ -229,11 +229,11 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     })
     await flush()
 
-    expect(recording.producedFactCalls.find((r) => r.event.type === "session.followup_completed")).toMatchObject({
+    expect(recording.producedFactCalls.find((r) => r.event.type === "session.activity")).toMatchObject({
       acknowledgementPolicy: "successful-response",
       target: { kind: "generic", projectId: "proj-1", sessionId: "session-1" },
       event: {
-        type: "session.followup_completed",
+        type: "session.activity",
         payload: expect.objectContaining({
           status: "completed",
           operationId: "followup-1",
@@ -243,7 +243,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     })
   })
 
-  it("Followup_Failure_RecordsFollowupFailedTerminal", async () => {
+  it("Followup_Failure_RecordsUnknownActivity", async () => {
     runtime.setFollowupResult({
       ok: false,
       error: {
@@ -266,11 +266,11 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       await flush()
       await flush()
 
-      const terminal = recording.producedFactCalls.find((r) => r.event.type === "session.followup_failed")
+      const terminal = recording.producedFactCalls.find((r) => r.event.type === "session.activity")
       expect(terminal).toMatchObject({
         acknowledgementPolicy: "successful-response",
         event: {
-          type: "session.followup_failed",
+          type: "session.activity",
           payload: expect.objectContaining({
             status: "failed",
             failureReason: "opencode crashed",

@@ -37,6 +37,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task AbandonFollowupAsync(string operationId);
     Task<AgentSessionInfo?> GetAsync();
     Task EnsureRuntimeSessionPresentAsync();
+    Task RunnerDisconnectedAsync();
 
     /// <summary>
     /// Test-only hook: deactivates the grain so the next request

@@ -1,0 +1,14 @@
+## Codebase Patterns
+
+- AgentSession state and domain events are persisted by AgentSessionGrain; runtime transcript parts are accumulated and flushed separately by TranscriptAccumulator.
+- Runner workflow facts are durable through AgentSessionRuntimeEventOutbox; turn reporters enqueue input before execution and settle produced facts after the turn.
+- DTO status fields remain compatibility shims in T-001; T-004 owns the breaking API activity field.
+
+## T-001
+
+- Added persisted AgentSessionActivity (Idle, Active, Unknown), defaulting to Idle.
+- session.input applies idle to active and session.activity applies runner-reported idle/unknown/active transitions.
+- Runner Pi, workflow reporter, and follow-up paths now emit session.activity; failed turns also emit turn.failed for context exhaustion classification.
+- Removed grain terminal-close special handling and ReadTerminalStateAsync status derivation. Legacy constants remain only for old persisted/test data compilation and are not written by runner paths.
+- ContextExhaustionClassifier now runs on turn.failed payloads; old terminal-event fixtures are expected to be migrated with the activity contract.
+- Full legacy server spec suite still contains assertions for removed terminal lifecycle behavior and needs migration to the T-001 contract before it can be green.

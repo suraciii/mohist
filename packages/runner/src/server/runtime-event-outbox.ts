@@ -4,8 +4,7 @@
 // by `RunnerHost`. It replaces `FollowupFailureOutbox` and absorbs the
 // direct Workflow reporter / follow-up uploads into one durable ordered
 // queue while preserving the existing operation-fenced terminal
-// settlement semantics for follow-up `session.followup_completed` /
-// `session.followup_failed` outcomes.
+// settlement semantics for follow-up activity outcomes.
 //
 // Two acknowledgement policies share the same ordered state:
 //   - `matching-receipt` (Workflow input/activity/close and follow-up
@@ -669,9 +668,9 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       const id = `legacy-followup-terminal:${entry.operationId}`
       if (this.records.has(id)) continue
       const sequence = this.monotonicSequence()
-      const type = entry.status === "failed" ? "session.followup_failed" : "session.followup_completed"
+      const type = "session.activity"
       const payload: Record<string, unknown> = {
-        status: entry.status,
+        activity: entry.status === "failed" ? "unknown" : "idle",
         source: "followup",
         operationId: entry.operationId,
         runtimeSessionId: entry.runtimeSessionId,

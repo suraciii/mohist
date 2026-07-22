@@ -22,8 +22,7 @@
 //     returns `unavailable` without invoking the runtime, so command
 //     delivery can be retried
 //   - invokes `runtime.followup` exactly once; the resolve/reject
-//     handler enqueues the corresponding `session.followup_completed`
-//     or `session.followup_failed` record (operation-correlated)
+//     handler enqueues the corresponding session.activity record
 //   - server upload failure does NOT change the accepted result and
 //     does NOT re-invoke the prompt — the durable record is now under
 //     the outbox's retry/recovery policy
@@ -121,22 +120,22 @@ async function handleFollowup(
       (result) => {
         if (!result.ok) {
           const message = readErrorMessage(result)
-          recordFollowupTerminal(outbox, sessionTarget, target, payload.operationId, "failed", message)
+          recordFollowupActivity(outbox, sessionTarget, target, payload.operationId, "unknown", message)
           if (readErrorKind(result) === "unavailable-runtime") {
             console.error("followup runtime unavailable:", message)
           }
           return
         }
-        recordFollowupTerminal(outbox, sessionTarget, target, payload.operationId, "completed", null)
+        recordFollowupActivity(outbox, sessionTarget, target, payload.operationId, "idle")
       },
       (error) => {
         console.error("followup runtime.followup rejected:", error instanceof Error ? error.message : String(error))
-        recordFollowupTerminal(outbox, sessionTarget, target, payload.operationId, "failed", error)
+        recordFollowupActivity(outbox, sessionTarget, target, payload.operationId, "unknown", error)
       },
     )
   } catch (error) {
     console.error("followup runtime.followup threw:", error instanceof Error ? error.message : String(error))
-    recordFollowupTerminal(outbox, sessionTarget, target, payload.operationId, "failed", error)
+    recordFollowupActivity(outbox, sessionTarget, target, payload.operationId, "unknown", error)
     return unavailable()
   }
   return { accepted: true }
@@ -209,28 +208,28 @@ async function enqueueFollowupInput(
   await outbox.enqueueBeforeExecution(record)
 }
 
-function recordFollowupTerminal(
+function recordFollowupActivity(
   outbox: AgentSessionRuntimeEventOutbox,
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   operationId: string | undefined,
-  status: "completed" | "failed",
-  error: unknown,
+  activity: "idle" | "unknown",
+  error?: unknown,
 ): void {
   if (!operationId) return
-  const message = error === null ? null : error instanceof Error ? error.message : errorMessage(error)
   const completedAt = new Date().toISOString()
   const record: RuntimeEventRecord = {
-    id: `followup-terminal:${operationId}:${status}:${completedAt}`,
+    id: `followup-activity:${operationId}:${activity}:${completedAt}`,
     producerFamily: sessionTarget.kind === "workflow" ? "workflow-session" : "generic-followup",
     target: sessionTargetToRuntimeTarget(sessionTarget),
     runtimeSessionId: target.runtimeSessionId,
     work: null,
     event: {
-      type: status === "failed" ? "session.followup_failed" : "session.followup_completed",
+      type: "session.activity",
       payload: {
-        status,
-        ...(message ? { failureReason: message } : {}),
+        activity,
+        status: activity === "idle" ? "completed" : "failed",
+        ...(error ? { failureReason: error instanceof Error ? error.message : errorMessage(error) } : {}),
         source: "followup",
         operationId,
         runtimeSessionId: target.runtimeSessionId,

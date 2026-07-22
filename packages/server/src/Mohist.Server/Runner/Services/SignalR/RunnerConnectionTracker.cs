@@ -6,6 +6,7 @@ namespace Mohist.Server.Runner.Services.SignalR;
 public class RunnerConnectionTracker : ISingletonService
 {
     private readonly ConcurrentDictionary<string, string> _connections = new();
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _sessions = new();
 
     public void Register(string runnerId, string connectionId)
     {
@@ -16,6 +17,16 @@ public class RunnerConnectionTracker : ISingletonService
     {
         _connections.TryRemove(runnerId, out _);
     }
+
+    public IReadOnlyList<string> UnregisterAndGetSessions(string runnerId)
+    {
+        _connections.TryRemove(runnerId, out _);
+        if (!_sessions.TryRemove(runnerId, out var sessions)) return [];
+        return sessions.Keys.ToArray();
+    }
+
+    public void RegisterSession(string runnerId, string sessionId) =>
+        _sessions.GetOrAdd(runnerId, _ => new ConcurrentDictionary<string, byte>())[sessionId] = 0;
 
     public string? GetConnectionId(string runnerId)
     {

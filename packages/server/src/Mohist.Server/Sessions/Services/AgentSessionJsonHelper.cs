@@ -7,15 +7,12 @@ namespace Mohist.Server.Sessions.Services;
 public static class AgentSessionJsonHelper
 {
     internal static readonly TimeSpan ActiveRuntimeEventWindow = TimeSpan.FromMinutes(5);
-
-    public static string StatusName(AgentSession session, DateTime now) =>
-        session.Status.AgentRuntimeSessionId is not null
-        && (session.Status.CurrentTurnEndedAt is null
-            || session.Status.LastDataAt is not null && session.Status.LastDataAt > session.Status.CurrentTurnEndedAt)
-        && session.Status.LastDataAt is not null
-        && now - session.Status.LastDataAt.Value <= ActiveRuntimeEventWindow
-            ? "active"
-            : "inactive";
+    public static string StatusName(AgentSession session, DateTime now) => session.Status.Activity switch
+    {
+        AgentSessionActivity.Active => "active",
+        AgentSessionActivity.Unknown => "unknown",
+        _ => "inactive",
+    };
 
     public static DateTime LastActivityAt(AgentSession session) =>
         session.Status.LastDataAt ?? session.Status.BoundAt ?? session.Status.CreatedAt;

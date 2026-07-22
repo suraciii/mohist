@@ -125,7 +125,8 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
     try {
       await reportWithTerminalSignal(report, [
         ...events,
-        { id: `session-closed-${context.workId}`, type: "session.closed", runtimeSessionId, workDir: context.workDir, payload: { status: "failed", errorCode: "turn-failed" } },
+        { id: `turn-failed-${context.workId}`, type: "turn.failed", runtimeSessionId, workDir: context.workDir, payload: { status: "failed", errorCode: "turn-failed" } },
+        activityEvent(runtimeSessionId, "idle", context),
       ])
     } catch {
       terminalReportingFailed = true
@@ -141,7 +142,8 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
   const finalFacts = [...events]
   const submittedFailure = !result.ok && (result.error.kind === "deadline-exceeded" || result.error.kind === "interrupted" || result.error.kind === "turn-failed")
   if (result.ok || submittedFailure) {
-    finalFacts.push({ id: `session-closed-${context.workId}`, type: "session.closed", runtimeSessionId, workDir: context.workDir, payload: { status: result.ok ? "completed" : "failed", ...(runtimeCode ? { errorCode: runtimeCode } : {}) } })
+    if (!result.ok) finalFacts.push({ id: `turn-failed-${context.workId}`, type: "turn.failed", runtimeSessionId, workDir: context.workDir, payload: { status: "failed", errorCode: runtimeCode ?? "turn-failed", message: result.error.message } })
+    finalFacts.push(activityEvent(runtimeSessionId, "idle", context))
   }
   try {
     await reportWithTerminalSignal(report, finalFacts)
@@ -205,6 +207,10 @@ async function parseInput(context: ActionInvocationContext): Promise<{ kind: "ok
 
 function inputEvent(runtimeSessionId: string, prompt: string, context: ActionInvocationContext): PiRuntimeEvent {
   return { id: `session-input-${context.workId}`, type: "session.input", runtimeSessionId, workDir: context.workDir, payload: { text: prompt, kind: context.workType, source: "workflow", role: "user", runtimeSessionId } }
+}
+
+function activityEvent(runtimeSessionId: string, activity: "idle" | "unknown", context: ActionInvocationContext): PiRuntimeEvent {
+  return { id: `session-activity-${context.workId}-${activity}`, type: "session.activity", runtimeSessionId, workDir: context.workDir, payload: { activity, observedAt: new Date().toISOString() } }
 }
 
 function runtimeErrorCode(kind: string): string {

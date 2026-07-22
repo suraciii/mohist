@@ -231,6 +231,13 @@ public sealed record AgentSessionRuntime(
 
 public sealed record AgentSessionSettings(string? Model = null);
 
+public enum AgentSessionActivity
+{
+    Idle,
+    Active,
+    Unknown,
+}
+
 /// <summary>
 /// One entry in the ordered lineage of runtime sessions bound to an
 /// <see cref="AgentSession"/> during its lifetime. The Mohist
@@ -264,7 +271,8 @@ public sealed record AgentSessionStatusSnapshot(
     AgentSessionFollowupLease? PendingFollowup = null,
     IReadOnlyList<AgentSessionFollowupLease>? PendingFollowups = null,
     IReadOnlyList<AgentSessionTranscriptEvidence>? PendingTranscriptEvidence = null,
-    DateTime? CurrentTurnEndedAt = null)
+    DateTime? CurrentTurnEndedAt = null,
+    AgentSessionActivity Activity = AgentSessionActivity.Idle)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), RuntimeSessionLineage: [], ContextUsageHistory: []);

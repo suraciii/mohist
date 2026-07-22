@@ -37,9 +37,7 @@ public class AgentSessionQuerier : IScopedService
         var sessions = await _sessionQuery.ListByLabelsAsync(
             AgentSessionDtoMapper.Labels((AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)),
             ct: ct);
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var terminalFacts = await LoadTerminalFactsAsync(db, sessions, ct);
-        return sessions.Select(record => ToWorkflowDto(record, terminalFacts.GetValueOrDefault(record.Session.Id))).ToList();
+        return sessions.Select(ToWorkflowDto).ToList();
     }
 
     public async Task<WorkflowSessionDetailDto?> GetByWorkflowAsync(string workflowRunId, string sessionName, CancellationToken ct = default)
@@ -53,8 +51,7 @@ public class AgentSessionQuerier : IScopedService
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var transcript = await LoadTranscriptAsync(db, session.Session.Id, null, ct);
-        var currentRuntimeTranscript = await LoadTranscriptAsync(db, session.Session.Id, session.Session.Status.AgentRuntimeSessionId, ct);
-        return new WorkflowSessionDetailDto(ToWorkflowDto(session, TerminalFact.FromTranscript(currentRuntimeTranscript)), SessionTranscriptBuilder.Build(transcript));
+        return new WorkflowSessionDetailDto(ToWorkflowDto(session), SessionTranscriptBuilder.Build(transcript));
     }
 
     public async Task<IReadOnlyList<WorkflowSessionDto>> ListByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
@@ -64,9 +61,7 @@ public class AgentSessionQuerier : IScopedService
                 (AgentSessionQueryMetadataKeys.ProjectId, projectId),
                 (AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())),
             ct: ct);
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var terminalFacts = await LoadTerminalFactsAsync(db, sessions, ct);
-        return sessions.Select(record => ToWorkflowDto(record, terminalFacts.GetValueOrDefault(record.Session.Id))).ToList();
+        return sessions.Select(ToWorkflowDto).ToList();
     }
 
     public async Task<IReadOnlyList<AgentSessionSummaryDto>> ListSummariesByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
@@ -151,7 +146,7 @@ public class AgentSessionQuerier : IScopedService
             var s = record.Session;
             var fact = terminalFacts.GetValueOrDefault(s.Id);
             var summary = eventSummaries.GetValueOrDefault(s.Id);
-            var status = ResolveAgentSessionListStatus(record, fact);
+            var status = ResolveAgentSessionListStatus(record);
             return new AgentSessionListItemDto(
                 s.Id,
                 record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty,
@@ -217,7 +212,7 @@ public class AgentSessionQuerier : IScopedService
         {
             var s = record.Session;
             var fact = terminalFacts.GetValueOrDefault(s.Id);
-            var status = ResolveAgentSessionListStatus(record, fact);
+            var status = ResolveAgentSessionListStatus(record);
             return new AgentSessionContextAssociationDto(
                 s.Id,
                 record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty,
@@ -237,15 +232,14 @@ public class AgentSessionQuerier : IScopedService
     /// protocol's legacy <c>cancelled</c> alias is normalised to the
     /// spec vocabulary's <c>stopped</c>.
     /// </summary>
-    private static string ResolveAgentSessionListStatus(AgentSessionRecord record, TerminalFact? fact)
+    private static string ResolveAgentSessionListStatus(AgentSessionRecord record)
     {
-        if (fact is not null)
+        return record.Session.Status.Activity switch
         {
-            return string.Equals(fact.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
-                ? "stopped"
-                : fact.Status;
-        }
-        return record.Row.AgentSessionId is not null ? "running" : "pending";
+            AgentSessionActivity.Active => "running",
+            AgentSessionActivity.Unknown => "unknown",
+            _ => record.Row.AgentSessionId is not null ? "inactive" : "pending",
+        };
     }
 
     /// <summary>
@@ -282,13 +276,11 @@ public class AgentSessionQuerier : IScopedService
         if (string.IsNullOrWhiteSpace(runnerId) || string.IsNullOrWhiteSpace(workflowRunId))
             return null;
 
-        var terminalState = await ReadTerminalStateAsync(db, session.Id, session.Status.AgentRuntimeSessionId, ct);
-
         return new FollowupTarget(
             runnerId,
             workflowRunId,
             record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? sessionName,
-            terminalState,
+            null,
             AgentSessionJsonHelper.StatusName(session, Now()) == "active");
     }
 
@@ -330,12 +322,10 @@ public class AgentSessionQuerier : IScopedService
         // and let the endpoint return 409 (matching the issue-scoped
         // followup behaviour for inactive sessions).
         var runnerId = record.Row.RunnerId;
-        var terminalState = await ReadTerminalStateAsync(db, sessionId, record.Session.Status.AgentRuntimeSessionId, ct);
-
         return new GenericFollowupTarget(
             runnerId ?? string.Empty,
             sessionId,
-            terminalState,
+            null,
             AgentSessionJsonHelper.StatusName(record.Session, Now()) == "active");
     }
 
@@ -370,7 +360,7 @@ public class AgentSessionQuerier : IScopedService
             sourceKind!,
             workflowRunId,
             sessionName,
-            await ReadTerminalStateAsync(db, session.Id, session.Status.AgentRuntimeSessionId, ct),
+            null,
             session.Runtime.Runtime,
             session.Status.AgentRuntimeSessionId,
             session.Runtime.WorkDir);
@@ -400,7 +390,7 @@ public class AgentSessionQuerier : IScopedService
             sourceKind!,
             workflowRunId,
             sessionName,
-            await ReadTerminalStateAsync(db, sessionId, record.Session.Status.AgentRuntimeSessionId, ct),
+            null,
             record.Session.Runtime.Runtime,
             record.Session.Status.AgentRuntimeSessionId,
             record.Session.Runtime.WorkDir);
@@ -438,12 +428,10 @@ public class AgentSessionQuerier : IScopedService
             return null;
 
         var runnerId = record.Row.RunnerId;
-        var terminalState = await ReadTerminalStateAsync(db, sessionId, record.Session.Status.AgentRuntimeSessionId, ct);
-
         return new GenericCancelTarget(
             runnerId ?? string.Empty,
             sessionId,
-            terminalState);
+            null);
     }
 
     /// <summary>
@@ -454,44 +442,6 @@ public class AgentSessionQuerier : IScopedService
     /// <see cref="ResolveGenericCancelTargetAsync"/> to short-circuit the
     /// cancel endpoint on already-terminal sessions (issue-129 T-005).
     /// </summary>
-    private static async Task<string?> ReadTerminalStateAsync(
-        MohistDbContext db,
-        string sessionId,
-        string? runtimeSessionId,
-        CancellationToken ct)
-    {
-        var turns = db.AgentSessionTranscriptTurns.AsNoTracking()
-            .Where(t => t.SessionId == sessionId);
-        if (!string.IsNullOrWhiteSpace(runtimeSessionId))
-            turns = turns.Where(t => t.RuntimeSessionId == runtimeSessionId);
-        var turnIds = await turns.Select(t => t.Id).ToListAsync(ct);
-        if (turnIds.Count == 0) return null;
-
-        var closed = await db.AgentSessionTranscriptParts.AsNoTracking()
-            .Where(p => turnIds.Contains(p.TurnId)
-                && p.Type == TranscriptPartTypes.SessionClosed)
-            .OrderByDescending(p => p.Sequence)
-            .ThenByDescending(p => p.Id)
-            .Select(p => p.PayloadJson)
-            .FirstOrDefaultAsync(ct);
-        if (string.IsNullOrWhiteSpace(closed)) return null;
-
-        JsonElement payload;
-        try { payload = JSON.DeserializeElement(closed); }
-        catch { return null; }
-        if (payload.ValueKind != JsonValueKind.Object) return null;
-
-        var status = AgentSessionJsonHelper.GetStringProp(payload, "status");
-        if (string.IsNullOrWhiteSpace(status)) return null;
-        if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, "stopped", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase))
-        {
-            return status.ToLowerInvariant();
-        }
-        return null;
-    }
 
     public async Task<AgentSessionMetadataDto?> GetSessionMetadataAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
     {
@@ -563,8 +513,7 @@ public class AgentSessionQuerier : IScopedService
                     Type: e.Type,
                     PayloadJson: e.PayloadJson)));
 
-        var terminalFacts = await LoadTerminalFactsAsync(db, [record], ct);
-        var status = ResolveAgentSessionListStatus(record, terminalFacts.GetValueOrDefault(session.Id));
+        var status = ResolveAgentSessionListStatus(record);
 
         var usage = AgentSessionJsonHelper.Usage(session);
 
@@ -757,11 +706,11 @@ public class AgentSessionQuerier : IScopedService
         }
     }
 
-    private WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record, TerminalFact? terminalFact = null)
+    private WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record)
     {
         var s = record.Session;
         var issueNumber = record.IssueNumber();
-        var status = terminalFact?.Status ?? (AgentSessionJsonHelper.StatusName(s, Now()) == "active" ? "running" : "inactive");
+        var status = ResolveAgentSessionListStatus(record);
         return new(
         s.Id,
         record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId) ?? string.Empty,
@@ -773,7 +722,7 @@ public class AgentSessionQuerier : IScopedService
         s.Runtime.RunnerId,
         status, record.Label(AgentSessionQueryMetadataKeys.Stage), s.Settings.Model, s.Runtime.WorkDir, null,
         s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
-        terminalFact?.CompletedAt.ToString("o"), terminalFact?.FailureReason, terminalFact?.ExitCode,
+        null, null, null,
         new AgentEventSummaryDto(null, null, null, null, null, null),
         AgentSessionDtoMapper.ToUsageDto(s));
     }
@@ -826,7 +775,7 @@ public class AgentSessionQuerier : IScopedService
         var recordBySessionId = records.ToDictionary(record => record.Session.Id, StringComparer.Ordinal);
         if (recordBySessionId.Count == 0) return [];
 
-        var loaded = await TranscriptPartLoader.LoadAsync(db, recordBySessionId.Keys, ct, partType: TranscriptPartTypes.SessionClosed);
+        var loaded = await TranscriptPartLoader.LoadAsync(db, recordBySessionId.Keys, ct, partType: TranscriptPartTypes.SessionActivity);
         if (loaded.Parts.Count == 0) return [];
 
         var runtimeByTurnId = loaded.Turns.ToDictionary(turn => turn.Id, turn => turn.RuntimeSessionId);
@@ -882,7 +831,7 @@ internal sealed record TerminalFact(
     int? ExitCode)
 {
     public static TerminalFact? FromTranscript(AgentSessionTranscriptData transcript) => transcript.Parts
-        .Where(part => part.Type == TranscriptPartTypes.SessionClosed)
+        .Where(part => part.Type == TranscriptPartTypes.SessionActivity)
         .OrderBy(part => transcript.Turns.FirstOrDefault(turn => turn.Id == part.TurnId)?.Sequence ?? 0)
         .ThenBy(part => part.Sequence)
         .ThenBy(part => part.Id)
