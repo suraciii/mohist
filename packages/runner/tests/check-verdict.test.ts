@@ -126,7 +126,7 @@ describe("Check verdict validation", () => {
   it("renders a check declaration from its dispatch snapshot before validation", async () => {
     let capturedInputs: JsonObject | null = null
     capturedHandler = async (inputs) => {
-      capturedInputs = inputs
+      capturedInputs = inputs as JsonObject
       return { output: null }
     }
     const work = makeCheckWork([{

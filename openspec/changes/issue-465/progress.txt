@@ -24,3 +24,5 @@
 - Full `npm run verify` initially failed the Server architecture size ratchet because issue-465 regression coverage grew `WorkflowItemTranslatorSpecs.cs` to 24,003 bytes without an allowance and `DispatchAndLoadingSpecs.cs` to 29,546 bytes against a 27,215-byte allowance.
 - The cause was test-file growth, not an implementation or assertion failure. Raw translator dispatch tests and variable-snapshot retry tests were moved into dedicated `*Specs.cs` files, preserving their assertions and keeping each source below the 24,000-byte budget.
 - The focused architecture ratchet, affected Server specs, and Runner typecheck/tests passed after the repair.
+- The subsequent full verify exposed two additional Runner test-only defects: `check-verdict.test.ts` assigned `unknown` Action input to a known object capture, and `executor-raw-with.spec.ts` used a task id in a test title. The capture now explicitly records the validated object shape, and the title names the behavior instead of the historical task id.
+- Runner test typecheck, boundary checks, and all 1,350 Runner tests pass after those fixes.

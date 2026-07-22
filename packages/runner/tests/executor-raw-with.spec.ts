@@ -163,7 +163,7 @@ describe("WorkExecutor action input boundary", () => {
   })
 })
 
-describe("Dispatch rendering boundary (T-001)", () => {
+describe("Dispatch rendering boundary", () => {
   it("renders immediate nested templates against the carried snapshot", async () => {
     let capturedInputs: JsonObject | null = null
     const registry = new ActionRegistry([
