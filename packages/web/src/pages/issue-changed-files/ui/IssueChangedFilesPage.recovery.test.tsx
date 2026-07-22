@@ -194,6 +194,7 @@ describe('IssueChangedFilesPage', () => {
         expect(state.issueRequestCount).toBe(1)
         expect(state.diffRequestCount).toBe(1)
         expect(state.commitsRequestCount).toBe(1)
+        expect(state.getIssueQueryFetchStatus()).toBe('idle')
       })
       fireEvent.click(screen.getByTestId('issue-files-recovery-retry'))
       await waitFor(() => {

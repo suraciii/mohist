@@ -208,3 +208,7 @@
   passed 1358 CLI, 1290 server unit, 30 architecture, 3008 server spec,
   5156 Web, and 1370 Runner tests. The issue-476 CLI-focused selection passed
   110 tests.
+- A subsequent `npm run verify` passed both the build and complete test
+  pipeline. The retry test additionally waits for the issue query's
+  `fetchStatus` to become `idle`, not just request-start counts, so an initial
+  in-flight issue request cannot be deduplicated with the explicit Retry.

@@ -181,6 +181,9 @@ export function useIssueChangedFilesPageFixture() {
     getSessionsQueryStatus: () => currentQueryClient
       ?.getQueryState(['workflow-runs', 'wr-1', 'sessions'])
       ?.status,
+    getIssueQueryFetchStatus: () => currentQueryClient
+      ?.getQueryState(['issue-detail', 'proj-1', 123])
+      ?.fetchStatus,
   }
   const queryClients = new Set<QueryClient>()
 
