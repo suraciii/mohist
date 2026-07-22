@@ -43,10 +43,11 @@ Runtime。OpenCode 的默认 agent、tools、plugins、permissions 与自动压�
 仍含遗留键（如 `type`、liveness 配置）的已持久化 `vars.agent` 可以继续绑定，直到
 写入路径完成收敛。`model` 或 `variant` 存在但不是字符串时，返回 invalid input。
 
-Action 不读取 Workflow variables。`with` 在 dispatch 前完成模板展开（语义与示例见
-[`profile.md`](../workflow/profile.md)），展开后的 Action Input 是本次执行唯一的配置
-事实。`variant` 可以和 `model` 一起提供，也可以单独提供；省略 `model` 时，OpenCode
-把它应用到当前或默认 model。
+Action 不读取 Workflow Variables。Runner Action executor 按
+[`task-dispatch.md`](../workflow/task-dispatch.md) 在调用 Action 前展开并校验 `with`；
+`OpenCodeActionInput` 只是本次 attempt 的最终执行输入，不承担 declaration、Variables 或
+context 的传播。`variant` 可以和 `model` 一起提供，也可以单独提供；省略 `model` 时，
+OpenCode 把它应用到当前或默认 model。
 
 创建新的物理 Session 时，把显式 model 传给 Session creation 和第一个 Prompt。复用
 现有物理 Session 时，每个 Prompt 携带本次指定的 model 与 variant；成熟 Session API

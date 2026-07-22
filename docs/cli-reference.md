@@ -52,7 +52,10 @@ task-command     = mo <task> [target] [flags]
 - 一项能力只有一个规范路径。筛选条件和便捷寻址使用 flag，不复制一组同义命令。
 - 根层不强求语法上的“全是名词”。`install`、`update`、`info` 直接表达任务，比人为包装进抽象资源更清楚。
 
-目标命令面不提供 `show/get/view`、`update/edit`、`unarchive/restore` 这类内建同义路径。用户自己的 shell alias 不属于 `mo` 契约。
+目标命令面只保留一组规范动词：读取资源使用 `view`，不再并列 `show` 或 `get`；修改资源
+使用 `edit`，不再并列 `update`；恢复软删除资源使用 `restore`，不再并列 `unarchive`。
+`get` / `set` / `unset` 只用于下文明确声明的键值行为；资源不需要为了对称同时提供三者。
+用户自己的 shell alias 不属于 `mo` 契约。
 
 ### 动词词表
 
@@ -65,7 +68,7 @@ task-command     = mo <task> [target] [flags]
 | 永久删除 | `delete` | 资源不再存在 |
 | 加入或移出集合 | `add` / `remove` | 不删除被关联对象本身 |
 | 软删除与恢复 | `archive` / `restore` | 保留身份和历史 |
-| 键值配置 | `get` / `set` / `unset` | 只用于 `config` 或明确的键值子资源 |
+| 键值配置 | `get` / `set` / `unset` | 只提供该资源已经定义的键值行为，不补齐对称命令 |
 | 领域动作 | `start`、`approve`、`retry` 等 | 直接使用 Mohist 的状态变化语言 |
 
 `retry`、`rerun`、`pause`、`stop` 不是同义词：
@@ -88,6 +91,9 @@ task-command     = mo <task> [target] [flags]
 
 ### 核心命令组
 
+命令地图只登记已经有明确产品行为的能力。相邻资源拥有相似动作，不足以成为新增命令的
+理由；没有独立场景和语义的对称命令不进入 DSL。
+
 | 命令组 | 规范动作 |
 |---|---|
 | `project` | `list`、`view`、`create`、`edit`、`use`、`delete`、`status`；`prompt list/view/set/unset/preview`；`variable list/get/set/unset` |
@@ -96,7 +102,7 @@ task-command     = mo <task> [target] [flags]
 | `epic` | `list`、`view`、`create`、`edit`、`link`、`unlink`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
 | `label` | `list`、`view`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`set-default`、`validate`；`view --yaml` 读取原始 Workflow Definition |
-| `run` | `list`、`view`、`watch`、`logs`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；只读 `variable list/get` |
+| `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；只读 `variable list/get` |
 | `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch` |
 | `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
 | `event` | `list`、`tail`；`dead-letter list/redeliver` |
@@ -111,7 +117,7 @@ task-command     = mo <task> [target] [flags]
 | `runtime` | `list`、`view`；只读 `model list` |
 | `notification` | `setup` |
 | `otel` | `status`、`query` |
-| `config` | `list`、`get`、`set`、`unset` |
+| `config` | `list`、`get`、`set` |
 | `skill` | `list`、`view`、`install`、`path`、`sync` |
 | `help` | 查看 `output`、`environment`、`exit-codes` 等共用规则 |
 | `install` | 安装 `server` 或 `runner` |
@@ -128,10 +134,10 @@ task-command     = mo <task> [target] [flags]
 
 ## Workflow Profile
 
-`mo workflow` 管理 Project 范围的 Workflow Profile。WorkflowRun 启动时确定使用的 Profile；
-之后修改 Issue 的选择或 Project 默认值，只影响未来的 Run。编辑已选 Profile 的
-Definition 会用于进行中 Run 后续进入的 Stage；已进入的 Stage 和已经开始的 task 不被
-追溯改变，Variables 在每个 task 开始前重新解析。
+`mo workflow` 管理 Project 范围的 Workflow Profile。WorkflowRun 启动时绑定 Profile ID，
+而不是复制 Definition。修改 Issue 的选择或 Project 默认值只影响未来的 Run；编辑已绑定
+Profile 会影响活动 Run。完整生效时机以 [Workflow Profile](workflow-profiles.md#选择-profile)
+为准，`workflow edit --help` 必须明确提示对活动 Run 的影响。
 
 `workflow` 与 `run` 的分工沿用 GitHub CLI 中 workflow definition 与 run execution 的心智模型，但使用 Mohist 自己的 WorkflowProfile 和 WorkflowRun 语义。
 
@@ -221,6 +227,8 @@ hint: start it with `mo issue start 42`
 - 第一行说明失败对象、原因和稳定错误码。
 - `hint:` 只在存在明确恢复动作时出现，并给出可执行命令或缺失参数。
 - 参数错误同时展示相关 usage，不倾倒整个根帮助。
+- 未知 area 或 action 是用法错误：返回 `2`，只展示最近一级的相关 usage；不得回退到根帮助
+  后以 `0` 退出。
 - 服务返回的领域错误保留其具体原因，不替换成笼统的 “request failed”。
 - 默认不输出调用栈或内部通信细节。
 
@@ -282,6 +290,8 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - 资源读取和修改混用 `show`、`get`、`update` 等词。目标统一为 `view`、`edit`。
 - 项目作用域、输出模式和默认输出尚未统一。目标只保留 `--project` 与字段选择式 `--json`。
 - 当前根帮助、叶子帮助和 Mohist Skill 含有重复信息及部分内部实现描述。目标按本文的渐进披露边界重写。
+- 当前部分未知 area 或 action 会回退到根帮助并以 `0` 退出；目标是返回 `2`，只展示最近
+  一级的相关 usage。
 - 当前 `system`、`opencode` 等实现导向入口尚未归入目标的 `server`、`runtime` 命令组。
 - 其它用户指南在迁移期间仍可能展示当前可运行的旧路径；完成命令迁移后再一次性更新示例。
 

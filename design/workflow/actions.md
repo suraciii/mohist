@@ -39,7 +39,8 @@ export const rebaseAction = defineAction({
 
 - `name` 是 `uses` 匹配键,小写,`<namespace>/<action>` 形式,无版本段。
 - `inputs` 每项声明 `type`(`string | number | boolean | object | array`)、
-  `required` 或 `default`(二者互斥)、`description`。
+  `required` 或 `default`(二者互斥)、`description`。默认 `render: immediate`；只有需要把
+  内部模板传播为后续 task declaration 的 input 才能声明 `render: deferred`。
 - `outputs` 声明成功 output 的字段,是文档与投影契约(`setVars`、
   `tasks.<id>.outputs.*` 的可用路径来源)。
 - `errors` 声明该 Action 全部业务 error code(kebab-case)及含义,供 recovery
@@ -92,8 +93,9 @@ Runner 内置 Action 在一处列表注册,registry 由 manifest 构建,`uses` �
 
 ### 输入
 
-输入单通道:Action 的全部输入来自 `with`,engine 展开模板后按 manifest 校验,再
-调用 `run`。
+输入单通道:Action 的全部输入来自 `with`。Runner 按
+[`task-dispatch.md`](task-dispatch.md) 使用本次 attempt context 生成局部 rendered input，
+再按 manifest 校验并调用 `run`。Action 看不到原始 task、Variables 或 dispatch context。
 
 ```yaml
 - id: integrate:rebase
@@ -103,13 +105,17 @@ Runner 内置 Action 在一处列表注册,registry 由 manifest 构建,`uses` �
     remote: origin
 ```
 
-校验顺序与失败行为(engine 执行,Action 不做重复校验):
+校验顺序与失败行为由 Runner Action executor 执行，Action 不做重复校验：
 
-1. 模板展开(未解析引用按 dispatch 契约失败,见 [`task-dispatch.md`](task-dispatch.md))。
+1. 普通 input 递归展开模板；`render: deferred` input 保留内部表达式。
 2. 未知输入键 → `invalid-input` 失败,不静默忽略。
 3. 缺失 `required` 输入 → `invalid-input` 失败。
 4. 类型不匹配 → `invalid-input` 失败。
 5. 应用 `default`,交给 `run` 的是完整、强类型的 inputs。
+
+`render: deferred` 只改变该 input 内部表达式的展开时机，不创建第二条输入通道。它仍接受
+manifest 的 required、type 与未知键校验；Action 只能把这份声明性数据按自己的契约传播，
+不能借此读取 Variables 或要求完整 attempt context。
 
 输入之间的一致性约束(例如 merge 前置条件)属于 Action 语义,写在 `run` 开头,
 失败返回 manifest 声明的 error code 或 `invalid-input`。
@@ -311,3 +317,6 @@ checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自�
    `ActionContext` 全量暴露 server 连接与 runtime 句柄;目标收敛为默认 host + 声明式
    能力注入。
 5. **文档缺口**:已闭合——`docs/actions/` 中的契约页已按 manifest 编齐并保持一致（issue #448）。
+6. **task input 展开边界**:当前 Server 先展开 `with` / `expect`,Runner recovery 又从
+   rendered input 构造 continuation。issue #465 改为持久化原始 declaration、Runner 执行前
+   统一展开，并补齐 `render: deferred`。
