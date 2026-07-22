@@ -31,7 +31,7 @@
         "An unknown uses is rejected naming the task/check id, the Action name, the YAML path, and labeled ValidationSource.Action",
         "A tombstoned uses produces a distinct 'removed' message that includes the tombstone guidance text, distinguishable from an unknown uses",
         "An unknown with field is rejected naming the field and the Action; the engine-reserved working-directory key is exempt",
-        "A missing required input (with no catalog default) is rejected naming the field; a required input that has a catalog default is accepted when omitted",
+        "A missing required input is rejected naming the field (a catalog input is never both required and defaulted, and applying defaults is a dispatch-time concern, so the save-time required check considers only presence); an optional input may be omitted without error",
         "A constant value whose JSON kind is not in the declared set is rejected naming the field, the accepted kinds in canonical order, and the actual kind, with no coercion; an explicit null on an optional input is treated as absent",
         "A declared input whose value contains a ${{ }} template is accepted without a type assertion; a template value on an undeclared field is still rejected by name",
         "The validator re-implements no Definition or template-namespace rule: a Definition-only error leaves the validator silent",

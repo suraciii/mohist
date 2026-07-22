@@ -59,14 +59,14 @@ For a task or check whose `uses` resolves to a declared Action, every top-level 
 
 ### Requirement: Missing required inputs are rejected
 
-For a resolved Action, a required input that `with` omits and for which the catalog declares no default SHALL be rejected at save. The error SHALL name the field.
+For a resolved Action, a required input that `with` omits SHALL be rejected at save, mirroring dispatch-time validation. The error SHALL name the field. A catalog input is never simultaneously required and defaulted (the manifest forbids the combination), and applying defaults is a dispatch-time concern, so the save-time required check considers only whether the field is present.
 
 #### Scenario: omitted required input is rejected
 - **WHEN** an Action declares a required input `prompt` and a task's `with` omits `prompt`
 - **THEN** the save SHALL reject naming `prompt` as required
 
-#### Scenario: required input with a catalog default is accepted when omitted
-- **WHEN** an Action declares input `remote` as required with default `origin` and a task's `with` omits `remote`
+#### Scenario: an optional input may be omitted
+- **WHEN** an Action declares an optional input `remote` (defaulted or not) and a task's `with` omits `remote`
 - **THEN** the save SHALL NOT reject the omission
 
 ### Requirement: Constant-value type mismatches are rejected
@@ -88,6 +88,11 @@ For a declared input supplied with a constant value containing no template expre
 #### Scenario: an optional explicit null is treated as absent
 - **WHEN** an Action declares an optional input and a task supplies an explicit `null` for it
 - **THEN** the save SHALL treat the null as absent rather than a type mismatch
+
+#### Scenario: an explicit null on a required input is rejected
+- **WHEN** an Action declares a required input `prompt` and a task supplies `with.prompt: null`
+- **THEN** the save SHALL reject it as a type mismatch, since `null` matches no declared kind
+- **AND** the behavior SHALL mirror dispatch, where a present-but-null required value fails the kind check
 
 ### Requirement: Template-expression inputs are validated by field name only
 
