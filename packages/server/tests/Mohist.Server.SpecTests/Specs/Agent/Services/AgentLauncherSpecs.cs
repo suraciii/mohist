@@ -8,6 +8,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Events.Grains;
+using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
@@ -261,6 +262,44 @@ public class AgentLauncherSpecs
     }
 
     [Fact]
+    public async Task LaunchRouted_WithIssueRuntimeOverride_OpensSessionWithOverride()
+    {
+        var projectId = await CreateProjectAsync("launcher-routed-runtime-override");
+        var agent = await CreateAgentAsync(projectId, "routed-runtime-override-agent");
+        var eventId = $"evt-routed-runtime-override-{Guid.NewGuid():N}";
+        var ruleId = "rule-routed-runtime-override";
+        var sessionId = StableSessionId(projectId, eventId, ruleId);
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+            await launcher.LaunchRoutedAsync(
+                agent,
+                "use the issue override",
+                new RoutedExecutionContext(
+                    WorkflowRunId: "workflow-runtime-override",
+                    ProjectId: projectId,
+                    IssueNumber: 7,
+                    EpicNumber: null,
+                    WorkspacePath: "/tmp/routed-runtime-override",
+                    TerminalRun: false),
+                new CloudEvent(
+                    id: eventId,
+                    source: new Uri($"/mohist/issues/{projectId}/7", UriKind.Relative),
+                    type: EventCatalog.ReverseDns.IssueCreated,
+                    time: DateTimeOffset.UnixEpoch,
+                    data: null),
+                ruleId,
+                runtimeOverride: "pi");
+        }
+
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var info = await session.GetAsync();
+        Assert.NotNull(info);
+        Assert.Equal("pi", info!.Runtime);
+    }
+
+    [Fact]
     public async Task Launch_WithEmptyTriggerLabels_ProducesNoTriggerMetadataLabels()
     {
         var projectId = await CreateProjectAsync("launcher-empty-trigger");
@@ -367,6 +406,13 @@ public class AgentLauncherSpecs
         var identity = $"{projectId}\n{eventId}\n{subscriptionId}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
         return $"agent-job-trigger-{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
+    }
+
+    private static string StableSessionId(string projectId, string eventId, string ruleId)
+    {
+        var identity = $"{projectId}\n{eventId}\n{ruleId}";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
+        return $"agent-session-{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
     }
 
     private async Task<AgentSessionRecord?> LoadSessionByIdAsync(string sessionId)

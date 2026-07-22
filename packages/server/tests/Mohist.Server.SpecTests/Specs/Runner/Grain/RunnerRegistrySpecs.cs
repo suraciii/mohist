@@ -127,6 +127,63 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task ListCoderModelsByRuntimeAsync_AggregatesCatalogsPerRuntime()
+    {
+        var firstRunnerId = $"runner-catalog-a-{Guid.NewGuid():N}";
+        var secondRunnerId = $"runner-catalog-b-{Guid.NewGuid():N}";
+        var firstRunner = Grains.GetGrain<IRunnerGrain>(firstRunnerId);
+        var secondRunner = Grains.GetGrain<IRunnerGrain>(secondRunnerId);
+        var firstCatalogs = new Dictionary<string, RuntimeCatalogEntry>
+        {
+            ["opencode"] = new(["openai/opencode-a"], new Dictionary<string, string[]>
+            {
+                ["openai/opencode-a"] = ["low"],
+            }),
+            ["pi"] = new(["anthropic/pi-a"], new Dictionary<string, string[]>
+            {
+                ["anthropic/pi-a"] = ["medium"],
+            }),
+        };
+        var secondCatalogs = new Dictionary<string, RuntimeCatalogEntry>
+        {
+            ["opencode"] = new(["openai/opencode-b"], new Dictionary<string, string[]>
+            {
+                ["openai/opencode-b"] = ["high"],
+            }),
+            ["pi"] = new(["openai/pi-b"], new Dictionary<string, string[]>
+            {
+                ["openai/pi-b"] = ["low", "high"],
+            }),
+        };
+
+        await firstRunner.RegisterAsync(new RunnerInfo(firstRunnerId, ["spec/*"], "catalog-a", null, RuntimeCatalogs: firstCatalogs));
+        await secondRunner.RegisterAsync(new RunnerInfo(secondRunnerId, ["spec/*"], "catalog-b", null, RuntimeCatalogs: secondCatalogs));
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+
+        try
+        {
+            var piModels = await registry.ListCoderModelsByRuntimeAsync("pi");
+            var opencodeModels = await registry.ListCoderModelsByRuntimeAsync("opencode");
+            Assert.Contains("anthropic/pi-a", piModels);
+            Assert.Contains("openai/pi-b", piModels);
+            Assert.DoesNotContain("openai/opencode-a", piModels);
+            Assert.DoesNotContain("openai/opencode-b", piModels);
+            Assert.Contains("openai/opencode-a", opencodeModels);
+            Assert.Contains("openai/opencode-b", opencodeModels);
+            Assert.DoesNotContain("anthropic/pi-a", opencodeModels);
+            Assert.DoesNotContain("openai/pi-b", opencodeModels);
+            var piVariants = await registry.ListCoderModelVariantsByRuntimeAsync("pi");
+            Assert.Equal(["medium"], piVariants["anthropic/pi-a"]);
+            Assert.Equal(["low", "high"], piVariants["openai/pi-b"]);
+        }
+        finally
+        {
+            await registry.UnregisterAsync(firstRunnerId);
+            await registry.UnregisterAsync(secondRunnerId);
+        }
+    }
+
+    [Fact]
     public async Task ListEligibleRunnersAsync_DeduplicatesByRunnerId()
     {
         var runnerId = $"runner-dup-{Guid.NewGuid():N}";

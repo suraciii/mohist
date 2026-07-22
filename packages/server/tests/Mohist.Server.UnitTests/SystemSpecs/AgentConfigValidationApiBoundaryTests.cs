@@ -6,14 +6,16 @@ using Xunit;
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
 /// <summary>
-/// Covers the #410 T-002 API-boundary validation: <see cref="AgentConfigSchema"/>
-/// is the single source of truth for which keys an <c>agentConfig</c> body may
-/// carry. <see cref="IssueModelMetadata.ValidateAgentConfig"/> is the
-/// issue-route-facing helper that delegates to the schema. The acceptance
-/// criteria reject <c>type</c>, <c>livenessQuietThresholdMs</c>,
+/// Covers the #410 T-002 + issue-452 T-001 API-boundary validation:
+/// <see cref="AgentConfigSchema"/> is the single source of truth for
+/// which keys an <c>agentConfig</c> body may carry.
+/// <see cref="IssueModelMetadata.ValidateAgentConfig"/> is the
+/// issue-route-facing helper that delegates to the schema. The
+/// acceptance criteria reject <c>type</c>, <c>livenessQuietThresholdMs</c>,
 /// <c>probeTimeoutMs</c>, <c>sessionStartTimeoutMs</c>, and
 /// <c>compaction</c> with an actionable validation error so legacy
-/// ACP/liveness keys never reach persistence.
+/// ACP/liveness keys never reach persistence; the same gate now also
+/// accepts <c>runtime</c> as a backend dimension (issue-452 D1).
 /// </summary>
 public class AgentConfigValidationApiBoundaryTests
 {
@@ -32,7 +34,7 @@ public class AgentConfigValidationApiBoundaryTests
         Assert.NotNull(error);
         Assert.Contains($"agentConfig.{forbiddenKey}", error);
         Assert.Contains("not allowed", error, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("model, variant", error);
+        Assert.Contains("runtime", error);
     }
 
     [Theory]
@@ -63,6 +65,29 @@ public class AgentConfigValidationApiBoundaryTests
         Assert.Null(IssueModelMetadata.ValidateAgentConfig(raw));
     }
 
+    [Theory]
+    [InlineData("opencode")]
+    [InlineData("pi")]
+    public void IssueModelMetadata_AcceptsRuntime(string runtime)
+    {
+        var raw = JsonDocument.Parse($$"""{"model":"openai/gpt-5.6","variant":"high","runtime":"{{runtime}}"}""").RootElement;
+
+        Assert.Null(IssueModelMetadata.ValidateAgentConfig(raw));
+    }
+
+    [Fact]
+    public void IssueModelMetadata_RejectsUnknownRuntime()
+    {
+        var raw = JsonDocument.Parse("""{"model":"openai/gpt-5.6","runtime":"mystery"}""").RootElement;
+
+        var error = IssueModelMetadata.ValidateAgentConfig(raw);
+
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.runtime", error);
+        Assert.Contains("opencode", error);
+        Assert.Contains("pi", error);
+    }
+
     [Fact]
     public void IssueModelMetadata_AcceptsMixedAcceptedAndForbidden_ReportsFirstForbidden()
     {
@@ -77,7 +102,7 @@ public class AgentConfigValidationApiBoundaryTests
     [Fact]
     public void AgentConfigSchema_Validate_RejectsUnknownKey()
     {
-        // Converged surface is {model, variant}; anything else is rejected.
+        // Converged surface is {model, variant, runtime}; anything else is rejected.
         var raw = JsonDocument.Parse("""{"model":"openai/gpt-5.6","temperature":0.5}""").RootElement;
 
         var error = AgentConfigSchema.Validate(raw);

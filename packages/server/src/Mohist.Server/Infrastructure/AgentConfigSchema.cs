@@ -14,13 +14,33 @@ namespace Mohist.Server.Infrastructure;
 /// persisted bundle. Stored legacy keys remain in storage (no data
 /// rewrite); the mohist/opencode runtime's <c>unknownKeys</c> diagnostic
 /// path covers them when they reach an execution request.
+///
+/// <para>
+/// Per issue-452 design D1, the whitelist also carries the execution
+/// backend dimension (<c>runtime</c>: <c>opencode</c> | <c>pi</c>).
+/// Absent / unset resolves to <c>opencode</c>; any other value is
+/// rejected as invalid. The same validation covers Agent CRUD and the
+/// issue-level <c>agentConfig</c> write surface because both go through
+/// <see cref="Validate"/> (Agent CRUD directly; issue agentConfig via
+/// <c>IssueModelMetadata.ValidateAgentConfig</c> which delegates here).
+/// </para>
 /// </summary>
 public static class AgentConfigSchema
 {
+    public const string OpenCodeRuntime = "opencode";
+    public const string PiRuntime = "pi";
+
+    public static readonly IReadOnlySet<string> AllowedRuntimes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        OpenCodeRuntime,
+        PiRuntime,
+    };
+
     public static readonly IReadOnlySet<string> AllowedKeys = new HashSet<string>(StringComparer.Ordinal)
     {
         "model",
         "variant",
+        "runtime",
     };
 
     public static readonly IReadOnlySet<string> ForbiddenKeys = new HashSet<string>(StringComparer.Ordinal)
@@ -34,10 +54,11 @@ public static class AgentConfigSchema
 
     /// <summary>
     /// Validate the open-shape <c>agentConfig</c> body. Returns
-    /// <c>null</c> when every key is in the allowed whitelist;
-    /// otherwise returns the first offending key in a user-facing
-    /// message. The function accepts the raw JSON element so the route
-    /// layer can read presence without a re-deserialization round trip.
+    /// <c>null</c> when every key is in the allowed whitelist and every
+    /// known-enum key carries a valid value; otherwise returns the first
+    /// offending key (or value) in a user-facing message. The function
+    /// accepts the raw JSON element so the route layer can read presence
+    /// without a re-deserialization round trip.
     /// </summary>
     public static string? Validate(JsonElement? agentConfig)
     {
@@ -52,6 +73,51 @@ public static class AgentConfigSchema
             }
         }
 
+        return ValidateRuntime(agentConfig.Value);
+    }
+
+    /// <summary>
+    /// Validate the <c>runtime</c> field when present. An absent key is
+    /// valid (the resolver defaults to <see cref="OpenCodeRuntime"/>); a
+    /// non-string or out-of-set value is rejected with an actionable
+    /// message that lists the accepted backends. Lives separately so the
+    /// write-side projection paths can apply the same value check on a
+    /// dictionary shape.
+    /// </summary>
+    public static string? ValidateRuntime(JsonElement agentConfig)
+    {
+        if (agentConfig.ValueKind != JsonValueKind.Object) return null;
+        if (!agentConfig.TryGetProperty("runtime", out var runtime)) return null;
+        if (runtime.ValueKind == JsonValueKind.Null) return null;
+        if (runtime.ValueKind != JsonValueKind.String)
+        {
+            return "agentConfig.runtime must be one of opencode, pi.";
+        }
+        var raw = runtime.GetString();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "agentConfig.runtime must be one of opencode, pi.";
+        }
+        if (!AllowedRuntimes.Contains(raw))
+        {
+            return $"agentConfig.runtime '{raw}' is not supported; the agent runtime accepts only {string.Join(", ", AllowedRuntimes)}.";
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Validate the <c>runtime</c> field on an already-deserialized
+    /// dictionary. Same semantics as the JsonElement overload; an absent
+    /// key is valid.
+    /// </summary>
+    public static string? ValidateRuntime(IDictionary<string, object?>? agentConfig)
+    {
+        if (agentConfig is null || !agentConfig.TryGetValue("runtime", out var value) || value is null)
+            return null;
+        if (value is not string raw)
+            return "agentConfig.runtime must be one of opencode, pi.";
+        if (!AllowedRuntimes.Contains(raw))
+            return $"agentConfig.runtime '{raw}' is not supported; the agent runtime accepts only {string.Join(", ", AllowedRuntimes)}.";
         return null;
     }
 
@@ -80,12 +146,15 @@ public static class AgentConfigSchema
     /// down to the converged whitelist. Used by write-side merge paths
     /// (IssueVariableBuilder, MohistIssueWorkflowProfileBase,
     /// ConfigService) that hold agent config as a plain dictionary.
+    /// Iterates <see cref="AllowedKeys"/> so the projection tracks the
+    /// validation whitelist — adding a new key to the validation surface
+    /// automatically flows into the write-side merge (issue-452 D1).
     /// </summary>
     public static Dictionary<string, object?>? Filter(IDictionary<string, object?>? agentConfig)
     {
         if (agentConfig is null || agentConfig.Count == 0) return null;
         Dictionary<string, object?>? result = null;
-        foreach (var key in new[] { "model", "variant" })
+        foreach (var key in AllowedKeys)
         {
             if (!agentConfig.TryGetValue(key, out var value) || value is null) continue;
             result ??= new Dictionary<string, object?>(StringComparer.Ordinal);

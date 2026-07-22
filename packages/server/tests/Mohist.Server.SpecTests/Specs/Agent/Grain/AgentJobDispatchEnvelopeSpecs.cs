@@ -184,4 +184,37 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
         Assert.Equal(projectId, polled!.ProjectId);
         Assert.Equal(sessionId, polled.AgentSessionId);
     }
+
+    [Fact]
+    public async Task SubmitAsync_WithResolvedRuntime_EmitsRuntimeOnDispatchEnvelope()
+    {
+        // Issue-452 design D4: the dispatch envelope carries the
+        // snapshot-fixed runtime so the runner executor can pick the
+        // right runtime. Both opencode and pi are accepted values.
+        await AssertDispatchEnvelopeEmitsRuntimeAsync("opencode");
+        await AssertDispatchEnvelopeEmitsRuntimeAsync("pi");
+    }
+
+    private async Task AssertDispatchEnvelopeEmitsRuntimeAsync(string runtime)
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-runtime-dispatch-{runtime}-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-runtime-dispatch-{runtime}-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        var input = new AgentJobInput(
+            Prompt: $"run on {runtime}",
+            WorkspacePath: $"/tmp/agent-job-runtime-{runtime}",
+            ProjectId: projectId,
+            Runtime: runtime);
+
+        await job.SubmitAsync(input);
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
+        Assert.NotNull(polled);
+        Assert.False(string.IsNullOrWhiteSpace(polled!.With));
+        var with = JsonSerializer.Deserialize<JsonElement>(polled.With!);
+        Assert.Equal(runtime, with.GetProperty("runtime").GetString());
+    }
 }

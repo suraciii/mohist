@@ -311,6 +311,11 @@ export interface RunnerOptions {
   modelRediscoveryIntervalMs?: number
 }
 
+export interface RuntimeCatalogEntry {
+  models: string[]
+  variants: Record<string, string[]>
+}
+
 export interface RunnerRegistration {
   capabilities: string[]
   actionCatalog: ActionCatalog
@@ -318,6 +323,7 @@ export interface RunnerRegistration {
   hostname?: string
   coderModels?: string[]
   coderModelVariants?: Record<string, string[]>
+  runtimeCatalogs?: Record<string, RuntimeCatalogEntry>
   buildGitHash?: string | null
   connectionId?: string | null
 }

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Runner.Grains;
 
@@ -48,8 +49,13 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
 
     public Task<IReadOnlyList<string>> ListCoderModelsAsync()
     {
+        return ListCoderModelsByRuntimeAsync(AgentConfigSchema.OpenCodeRuntime);
+    }
+
+    public Task<IReadOnlyList<string>> ListCoderModelsByRuntimeAsync(string runtime)
+    {
         var models = _runners.Values
-            .SelectMany(r => r.CoderModels ?? [])
+            .SelectMany(r => CatalogFor(r, runtime)?.Models ?? [])
             .Where(model => !string.IsNullOrWhiteSpace(model))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)
@@ -59,13 +65,19 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
 
     public Task<IReadOnlyDictionary<string, string[]>> ListCoderModelVariantsAsync()
     {
+        return ListCoderModelVariantsByRuntimeAsync(AgentConfigSchema.OpenCodeRuntime);
+    }
+
+    public Task<IReadOnlyDictionary<string, string[]>> ListCoderModelVariantsByRuntimeAsync(string runtime)
+    {
         var aggregated = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var runner in _runners.Values)
         {
-            if (runner.CoderModelVariants is null || runner.CoderModelVariants.Count == 0)
+            var variants = CatalogFor(runner, runtime)?.Variants;
+            if (variants is null || variants.Count == 0)
                 continue;
 
-            foreach (var entry in runner.CoderModelVariants)
+            foreach (var entry in variants)
             {
                 if (string.IsNullOrWhiteSpace(entry.Key))
                     continue;
@@ -97,6 +109,24 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
             .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
         return Task.FromResult<IReadOnlyDictionary<string, string[]>>(materialized);
+    }
+
+    private static RuntimeCatalogEntry? CatalogFor(RunnerInfo runner, string runtime)
+    {
+        if (runner.RuntimeCatalogs is not null)
+        {
+            foreach (var entry in runner.RuntimeCatalogs)
+            {
+                if (string.Equals(entry.Key, runtime, StringComparison.OrdinalIgnoreCase))
+                    return entry.Value;
+            }
+        }
+
+        if (!string.Equals(runtime, AgentConfigSchema.OpenCodeRuntime, StringComparison.OrdinalIgnoreCase))
+            return null;
+        if (runner.CoderModels is null && runner.CoderModelVariants is null)
+            return null;
+        return new RuntimeCatalogEntry(runner.CoderModels ?? [], runner.CoderModelVariants);
     }
 
     public Task<IReadOnlyList<RunnerInfo>> ListAllAsync()

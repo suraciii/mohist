@@ -344,6 +344,64 @@ public class IssueModelVariantApiSpecs
         Assert.False(detail.TryGetProperty("modelVariant", out _));
     }
 
+    [Fact]
+    public async Task OpencodeModels_RuntimeQueryReturnsSelectedCatalogAndDefaultsToOpenCode()
+    {
+        var projectId = await CreateProjectAsync("runtime-models");
+        var runnerId = $"runtime-model-runner-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = Array.Empty<string>(),
+            hostname = "runtime-model-host",
+            runtimeCatalogs = new
+            {
+                opencode = new
+                {
+                    models = new[] { "openai/catalog-opencode" },
+                    variants = new Dictionary<string, string[]> { ["openai/catalog-opencode"] = ["low"] },
+                },
+                pi = new
+                {
+                    models = new[] { "anthropic/catalog-pi" },
+                    variants = new Dictionary<string, string[]> { ["anthropic/catalog-pi"] = ["high"] },
+                },
+            },
+        });
+
+        try
+        {
+            var pi = await _fixture.Client.GetDataAsync<CatalogDto>($"/api/projects/{projectId}/opencode/models?runtime=pi");
+            var opencode = await _fixture.Client.GetDataAsync<CatalogDto>($"/api/projects/{projectId}/opencode/models?runtime=opencode");
+            var defaultCatalog = await _fixture.Client.GetDataAsync<CatalogDto>($"/api/projects/{projectId}/opencode/models");
+
+            Assert.Contains("anthropic/catalog-pi", pi.Models);
+            Assert.DoesNotContain("openai/catalog-opencode", pi.Models);
+            Assert.Equal(["high"], pi.ModelVariants["anthropic/catalog-pi"]);
+            Assert.Contains("openai/catalog-opencode", opencode.Models);
+            Assert.Equal(["low"], opencode.ModelVariants["openai/catalog-opencode"]);
+            Assert.Contains("openai/catalog-opencode", defaultCatalog.Models);
+            Assert.DoesNotContain("anthropic/catalog-pi", defaultCatalog.Models);
+            Assert.Equal(opencode.ModelVariants, defaultCatalog.ModelVariants);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task CreateIssue_WithModelAbsentFromCatalog_RemainsConfigurable()
+    {
+        var projectId = await CreateProjectAsync("catalog-absent-model");
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues",
+            new { title = "Catalog absent model", model = "openai/catalog-absent" });
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    private sealed record CatalogDto(string[] Models, Dictionary<string, string[]> ModelVariants);
+
     private async Task<string> CreateProjectAsync(string prefix)
     {
         var response = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>("/api/projects", $"{prefix}-{Guid.NewGuid():N}");

@@ -84,7 +84,14 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            return ApiResults.Ok(await issueProfileManager.SetVariablesAsync(project.Id, number, bundle));
+            try
+            {
+                return ApiResults.Ok(await issueProfileManager.SetVariablesAsync(project.Id, number, bundle));
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_agent_config");
+            }
         });
 
         group.MapPatch("/{number:int}/workflow-profile/variables", async (
@@ -100,7 +107,14 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            return ApiResults.Ok(await issueProfileManager.PatchVariablesAsync(project.Id, number, patch));
+            try
+            {
+                return ApiResults.Ok(await issueProfileManager.PatchVariablesAsync(project.Id, number, patch));
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_agent_config");
+            }
         });
 
         group.MapGet("/{number:int}/workflow/status", async (

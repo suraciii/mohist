@@ -47,7 +47,7 @@ describe('selectModelVariants', () => {
 
 describe('availableModelIdsQueryOptions', () => {
   it('reads from the same project-scoped opencode-model-ids query as useModelVariants', () => {
-    expect(availableModelIdsQueryOptions('proj-1').queryKey).toEqual(['opencode-model-ids', 'proj-1'])
+    expect(availableModelIdsQueryOptions('proj-1').queryKey).toEqual(['opencode-model-ids', 'opencode', 'proj-1'])
     expect(availableModelIdsQueryOptions('proj-1').enabled).toBe(true)
   })
 })

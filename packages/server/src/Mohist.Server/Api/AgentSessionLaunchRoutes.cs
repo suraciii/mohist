@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Domain;
@@ -7,6 +6,7 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
 
@@ -48,6 +48,7 @@ public static class AgentSessionLaunchRoutes
             AgentSessionLaunchRequest req,
             AgentQuerier agentQuerier,
             IssueQuerier issueQuerier,
+            IssueWorkflowProfileManager issueWorkflowProfileManager,
             EpicQuerier epicQuerier,
             IAgentLauncher launcher,
             CancellationToken ct) =>
@@ -84,10 +85,29 @@ public static class AgentSessionLaunchRoutes
                 WorkspacePath: req.Context?.WorkspacePath,
                 Title: null);
 
+            var runtimeOverride = req.Runtime;
+            if (runtimeOverride is null && req.Context?.IssueNumber is int issueNumber)
+            {
+                runtimeOverride = await issueWorkflowProfileManager
+                    .GetAgentRuntimeOverrideAsync(project.Id, issueNumber);
+            }
+
+            var runtimeError = ValidateRuntimeOverride(runtimeOverride);
+            if (runtimeError is not null)
+            {
+                return ApiResults.BadRequest(runtimeError, "runtime_invalid");
+            }
+
             AgentLaunchResult result;
             try
             {
-                result = await launcher.LaunchAsync(agent, prompt, launchContext, triggerLabels: null, ct);
+                result = await launcher.LaunchAsync(
+                    agent,
+                    prompt,
+                    launchContext,
+                    triggerLabels: null,
+                    runtimeOverride: runtimeOverride,
+                    ct: ct);
             }
             catch (ArgumentException ex)
             {
@@ -134,6 +154,18 @@ public static class AgentSessionLaunchRoutes
 
         return null;
     }
+
+    private static string? ValidateRuntimeOverride(string? runtime)
+    {
+        if (runtime is null) return null;
+        if (!Mohist.Server.Infrastructure.AgentConfigSchema.AllowedRuntimes.Contains(runtime))
+        {
+            return $"runtime '{runtime}' is not supported; the agent runtime accepts only " +
+                string.Join(", ", Mohist.Server.Infrastructure.AgentConfigSchema.AllowedRuntimes) + ".";
+        }
+        return null;
+    }
+
 }
 
 /// <summary>
@@ -144,7 +176,15 @@ public static class AgentSessionLaunchRoutes
 /// </summary>
 public sealed record AgentSessionLaunchRequest(
     string? Prompt = null,
-    AgentSessionLaunchContextRef? Context = null);
+    AgentSessionLaunchContextRef? Context = null,
+    /// <summary>
+    /// Optional launch-time override of the execution backend
+    /// (issue-452 design D2). When set, wins over the Agent's configured
+    /// <c>runtime</c> in <c>agentConfig</c>; when absent, the Agent's
+    /// configured backend applies (defaulting to <c>opencode</c>).
+    /// Accepted values: <c>opencode</c>, <c>pi</c>.
+    /// </summary>
+    string? Runtime = null);
 
 public sealed record AgentSessionLaunchContextRef(
     int? IssueNumber = null,

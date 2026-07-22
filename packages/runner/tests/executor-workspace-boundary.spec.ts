@@ -42,7 +42,7 @@ describe("workspace preparation across stages", () => {
       "/runner",
       undefined,
       fakeRuntime() as never,
-      new AgentJobExecutor(connection() as never, fakeRuntime() as never),
+      new AgentJobExecutor(connection() as never, { openCode: fakeRuntime() as never, pi: null }),
     )
 
     const result = await executor.execute(

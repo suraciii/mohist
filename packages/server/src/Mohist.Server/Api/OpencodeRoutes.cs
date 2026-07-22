@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SystemInfo;
@@ -13,10 +14,16 @@ public static class OpencodeRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/opencode")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        group.MapGet("/models", async (IGrainFactory grains) =>
+        group.MapGet("/models", async (string? runtime, IGrainFactory grains) =>
         {
+            var selectedRuntime = string.IsNullOrWhiteSpace(runtime)
+                ? AgentConfigSchema.OpenCodeRuntime
+                : runtime.Trim().ToLowerInvariant();
+            if (!AgentConfigSchema.AllowedRuntimes.Contains(selectedRuntime))
+                return ApiResults.BadRequest("runtime must be 'opencode' or 'pi'", "runtime_invalid");
+
             var registry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-            var models = (await registry.ListCoderModelsAsync()).ToArray();
+            var models = (await registry.ListCoderModelsByRuntimeAsync(selectedRuntime)).ToArray();
 
             var visibleModels = models
                 .Where(model => !string.IsNullOrWhiteSpace(model))
@@ -24,7 +31,7 @@ public static class OpencodeRoutes
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            var modelVariants = await registry.ListCoderModelVariantsAsync();
+            var modelVariants = await registry.ListCoderModelVariantsByRuntimeAsync(selectedRuntime);
 
             return ApiResults.Ok(new { models = visibleModels, modelVariants });
         });

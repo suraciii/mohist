@@ -91,7 +91,7 @@ function makeQueryClient() {
   queryClient.setQueryData(['config'], GENERAL_CONFIG)
   queryClient.setQueryData(['log-level'], { level: GENERAL_CONFIG.logLevel })
   queryClient.setQueryData(['opencode-runtime'], { mode: 'local', command: 'opencode', model: null, note: '' })
-  queryClient.setQueryData(['opencode-model-ids', 'proj-1'], {
+  queryClient.setQueryData(['opencode-model-ids', 'opencode', 'proj-1'], {
     models: ['openai/gpt-4', 'anthropic/claude-3'],
     modelVariants: {},
   })

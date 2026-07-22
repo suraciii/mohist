@@ -184,6 +184,35 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
     }
 
+    protected async Task<AgentRef> CreateAgentAsync(string projectId, string name, string runtime)
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents",
+            new
+            {
+                name,
+                description = $"description for {name}",
+                instructions = $"instructions for {name}",
+                agentConfig = new { model = "openai/gpt-5.6", runtime },
+                skills = new[] { "coding" },
+                maxConcurrentRuns = 1,
+            });
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
+    }
+
+    protected async Task PatchAgentRuntimeAsync(string projectId, string agentId, string runtime)
+    {
+        using var response = await _fixture.Client.PatchAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agentId}",
+            new
+            {
+                agentConfig = new { runtime },
+            });
+        response.EnsureSuccessStatusCode();
+    }
+
     protected async Task<int> CreateIssueAsync(string projectId, string title)
     {
         using var response = await _fixture.Client.PostAsJsonAsync(

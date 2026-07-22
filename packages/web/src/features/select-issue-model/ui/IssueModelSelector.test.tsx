@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { mocks, renderSelector, resetIssueModelSelectorTestState } from './IssueModelSelectorTestSupport'
 
 beforeEach(() => {
@@ -9,6 +10,35 @@ beforeEach(() => {
 })
 
 describe('IssueModelSelector default-model variant chips', () => {
+  it('loads the Pi catalog after selecting the Pi backend', async () => {
+    mocks.useAvailableModelIds.mockImplementation((runtime: string) => ({
+      data: {
+        models: runtime === 'pi' ? ['pi/anthropic/claude'] : ['openai/gpt-4'],
+        modelVariants: {},
+      },
+      isLoading: false,
+      error: null,
+    }))
+    renderSelector()
+
+    const user = userEvent.setup()
+    const runtimeSelector = await screen.findByTestId('issue-runtime-selector')
+    expect(runtimeSelector.tagName).not.toBe('SELECT')
+    await user.click(runtimeSelector)
+    await user.click(await screen.findByRole('option', { name: 'Pi' }))
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(42, 'agent', { runtime: 'pi' }, 'proj_test')
+    })
+
+    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
+    fireEvent.click(trigger)
+
+    expect(await waitFor(() => document.querySelector('[data-model-id="pi/anthropic/claude"]'))).toBeInTheDocument()
+    expect(document.querySelector('[data-model-id="openai/gpt-4"]')).not.toBeInTheDocument()
+    expect(runtimeSelector).toHaveTextContent('Pi')
+  })
+
   it('renders no variant chips for a model that has no variants', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: { models: ['openai/gpt-4'], modelVariants: {} },
@@ -335,7 +365,7 @@ describe('IssueModelSelector default-model popover accessibility and keyboard', 
     const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
     fireEvent.click(trigger)
 
-    const combobox = await waitFor(() => screen.getByRole('combobox'))
+    const combobox = await waitFor(() => screen.getByPlaceholderText('Search models...'))
     expect(combobox).toBeTruthy()
     expect(combobox.getAttribute('aria-expanded')).toBe('true')
 

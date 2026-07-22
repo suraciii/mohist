@@ -13,7 +13,7 @@ import {
   writeAgentModelAndVariant,
 } from '../../../entities/agent'
 import type { AgentInfo, AgentCreateRequest, AgentUpdateRequest } from '../../../entities/agent'
-import { useAvailableModelIds, useModelVariants } from '../../../entities/settings'
+import { AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI, useAvailableModelIds, useModelVariants, type AgentRuntime } from '../../../entities/settings'
 import { useProjectPath } from '../../../entities/project'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { Button } from '@/shared/ui/components/button'
@@ -60,9 +60,6 @@ export function AgentProfileEditor({
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
   const { createAgent, updateAgent, archiveAgent } = operationsHook()
-  const { data: availableModels } = useAvailableModelIds()
-  const modelVariantsMap = useModelVariants()
-
   const isEditing = !!agent
   const initialModelVariant = useMemo(() => readAgentModelAndVariant(agent), [agent])
 
@@ -71,10 +68,14 @@ export function AgentProfileEditor({
   const [skillsText, setSkillsText] = useState(agent?.skills?.join(', ') ?? '')
   const [model, setModel] = useState<string | null>(initialModelVariant.model)
   const [variant, setVariant] = useState<string | null>(initialModelVariant.variant)
+  const [runtime, setRuntime] = useState<AgentRuntime>(initialModelVariant.runtime)
   const [errors, setErrors] = useState<FormErrors>({})
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
 
   const isSaving = createAgent.isPending || updateAgent.isPending
+
+  const { data: availableModels } = useAvailableModelIds(runtime)
+  const modelVariantsMap = useModelVariants(runtime)
 
   const allModels: string[] = useMemo(() => availableModels?.models ?? [], [availableModels])
 
@@ -94,6 +95,7 @@ export function AgentProfileEditor({
       agent?.agentConfig ?? null,
       model,
       variant,
+      runtime,
     )
 
     if (isEditing && agent) {
@@ -177,6 +179,25 @@ export function AgentProfileEditor({
                 {errors.api}
               </div>
             )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-runtime">Execution backend</Label>
+              <select
+                id="agent-runtime"
+                aria-label="Execution backend"
+                data-testid="agent-runtime"
+                value={runtime}
+                onChange={(event) => {
+                  setRuntime(event.target.value as AgentRuntime)
+                  setModel(null)
+                  setVariant(null)
+                }}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+              >
+                <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
+                <option value={AGENT_RUNTIME_PI}>Pi</option>
+              </select>
+            </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="agent-name">Name *</Label>
