@@ -14,7 +14,7 @@ Constraints: Orleans snapshot fields are append-only (never reorder); `agentConf
 ## Goals / Non-Goals
 
 **Goals:**
-- Make execution backend (`opencode` | `pi`, default `opencode`) a first-class, snapshot-fixed dimension of Mohist Agent config, with issue-level override precedence.
+- Make execution backend (`opencode` | `pi`, default `opencode`) a first-class, snapshot-fixed dimension of Mohist Agent config, with launch-time override precedence.
 - Make a Mohist Agent Job execute on its snapshot-selected backend through the existing AgentSession infrastructure.
 - Make the model catalog per-runtime (Pi = configured-credential models only) and have Web model selectors present models for the selected backend.
 

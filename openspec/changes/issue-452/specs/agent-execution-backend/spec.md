@@ -13,15 +13,15 @@ A Mohist Agent's configuration SHALL carry an execution-backend dimension accept
 - **WHEN** an Agent's config specifies a backend other than `opencode` or `pi`
 - **THEN** the value SHALL be rejected as invalid rather than silently coerced to a default
 
-### Requirement: Issue-level override precedence
-A backend resolved from an issue-scoped launch override SHALL take precedence over the Agent's configured backend. Absent an override, the Agent's configured backend SHALL be used.
+### Requirement: Launch-time override precedence
+A backend supplied as a launch-time override SHALL take precedence over the Agent's configured backend. Absent an override, the Agent's configured backend SHALL be used.
 
 #### Scenario: Override wins over Agent config
-- **WHEN** an Agent configured for `pi` is launched with an issue-scoped override of `opencode`
+- **WHEN** an Agent configured for `pi` is launched with a launch-time override of `opencode`
 - **THEN** the resolved backend for that launch SHALL be `opencode`
 
 #### Scenario: No override falls back to Agent config
-- **WHEN** an Agent configured for `pi` is launched without an issue-scoped override
+- **WHEN** an Agent configured for `pi` is launched without a launch-time override
 - **THEN** the resolved backend SHALL be `pi`
 
 ### Requirement: Backend fixed to the launch snapshot
