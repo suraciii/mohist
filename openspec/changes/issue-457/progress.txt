@@ -231,3 +231,8 @@
 
 - `npm run test:ci -w packages/web` initially failed in `check:test-boundaries`, not Vitest: `WorkflowSessionsPanel.test.tsx` had 553 lines, exceeding the 500-line test budget. The growth came from the T-003 shared-Select interaction coverage.
 - Split the filter/select interaction tests into `WorkflowSessionsPanel.filters.test.tsx`; the original suite is now below the enforced budget and all filter assertions remain covered in the new suite.
+
+## Follow-up Verification
+
+- The current worktree was clean before verification and `npm run verify` completed successfully: build succeeded, .NET tests passed (5,623 total), Web CI passed (383 files / 5,097 tests), and Runner CI passed (110 files / 1,275 tests).
+- Verification produced no Git-visible changes, so no implementation repair was required after the test-budget fix.
