@@ -51,12 +51,22 @@ public interface IAgentLauncher
     /// downstream visibility queries can resolve triggering event back
     /// from session.
     /// </param>
+    /// <param name="runtimeOverride">
+    /// Optional launch-time override of the execution backend
+    /// (issue-452 design D2). When non-null, wins over the Agent's
+    /// configured backend; when null, the Agent's configured backend
+    /// resolves, defaulting to <c>opencode</c>. Manual HTTP launch
+    /// passes the caller-supplied <c>runtime</c> from the request body;
+    /// the subscription dispatch path passes <c>null</c> because the
+    /// routed backend is the Agent's configured value.
+    /// </param>
     /// <param name="ct">Cancellation token propagated to grain calls.</param>
     Task<AgentLaunchResult> LaunchAsync(
         AgentInfo agent,
         string prompt,
         AgentLaunchContext context,
         IReadOnlyDictionary<string, string>? triggerLabels = null,
+        string? runtimeOverride = null,
         CancellationToken ct = default);
 
     /// <summary>

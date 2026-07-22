@@ -136,7 +136,8 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             AgentConfigJson: agent.AgentConfig is { ValueKind: not System.Text.Json.JsonValueKind.Undefined } config ? config.GetRawText() : null,
             Model: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Model,
             Variant: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Variant,
-            Prompt: outcome.RenderedPromptPreview);
+            Prompt: outcome.RenderedPromptPreview,
+            Runtime: AgentLauncher.ResolveRuntime(agent.AgentConfig, launchOverride: null));
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
     }

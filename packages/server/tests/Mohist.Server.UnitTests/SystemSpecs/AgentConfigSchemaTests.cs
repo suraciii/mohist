@@ -43,6 +43,49 @@ public class AgentConfigSchemaTests
         Assert.Null(AgentConfigSchema.Validate(element));
     }
 
+    [Theory]
+    [InlineData("opencode")]
+    [InlineData("pi")]
+    public void Validate_RuntimeAccepted(string runtime)
+    {
+        var element = JsonDocument.Parse($$"""{"model":"openai/gpt-5.5","runtime":"{{runtime}}"}""").RootElement;
+        Assert.Null(AgentConfigSchema.Validate(element));
+    }
+
+    [Fact]
+    public void Validate_RuntimeAbsent_IsValid()
+    {
+        var element = JsonDocument.Parse("""{"model":"openai/gpt-5.5"}""").RootElement;
+        Assert.Null(AgentConfigSchema.Validate(element));
+    }
+
+    [Fact]
+    public void Validate_RuntimeUnknown_ReturnsActionableError()
+    {
+        var element = JsonDocument.Parse("""{"runtime":"unknown"}""").RootElement;
+        var error = AgentConfigSchema.Validate(element);
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.runtime", error);
+        Assert.Contains("opencode", error);
+        Assert.Contains("pi", error);
+    }
+
+    [Fact]
+    public void Validate_RuntimeNotString_ReturnsActionableError()
+    {
+        var element = JsonDocument.Parse("""{"runtime":42}""").RootElement;
+        var error = AgentConfigSchema.Validate(element);
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.runtime", error);
+    }
+
+    [Fact]
+    public void Validate_RuntimeNull_IsValid()
+    {
+        var element = JsonDocument.Parse("""{"runtime":null}""").RootElement;
+        Assert.Null(AgentConfigSchema.Validate(element));
+    }
+
     [Fact]
     public void Validate_MixedAcceptedAndForbidden_ReportsFirstForbidden()
     {
@@ -63,6 +106,20 @@ public class AgentConfigSchemaTests
         Assert.Equal(2, projected!.Count);
         Assert.Equal("openai/gpt-5.5", projected["model"]?.ToString());
         Assert.Equal("high", projected["variant"]?.ToString());
+    }
+
+    [Fact]
+    public void Project_KeepsRuntimeAlongsideModelAndVariant()
+    {
+        var element = JsonDocument.Parse("""
+            {"model":"openai/gpt-5.5","variant":"high","runtime":"pi"}
+            """).RootElement;
+        var projected = AgentConfigSchema.Project(element);
+        Assert.NotNull(projected);
+        Assert.Equal(3, projected!.Count);
+        Assert.Equal("openai/gpt-5.5", projected["model"]?.ToString());
+        Assert.Equal("high", projected["variant"]?.ToString());
+        Assert.Equal("pi", projected["runtime"]?.ToString());
     }
 
     [Fact]
@@ -114,5 +171,37 @@ public class AgentConfigSchemaTests
     {
         Assert.Null(AgentConfigSchema.Filter(null));
         Assert.Null(AgentConfigSchema.Filter(new Dictionary<string, object?>()));
+    }
+
+    [Fact]
+    public void Filter_Dictionary_RoundTripsRuntimeAlongsideModelAndVariant()
+    {
+        var input = new Dictionary<string, object?>
+        {
+            ["model"] = "openai/gpt-5.5",
+            ["variant"] = "high",
+            ["runtime"] = "pi",
+            ["type"] = "opencode",
+        };
+        var filtered = AgentConfigSchema.Filter(input);
+        Assert.NotNull(filtered);
+        Assert.Equal(3, filtered!.Count);
+        Assert.Equal("openai/gpt-5.5", filtered["model"]?.ToString());
+        Assert.Equal("high", filtered["variant"]?.ToString());
+        Assert.Equal("pi", filtered["runtime"]?.ToString());
+    }
+
+    [Fact]
+    public void Filter_Dictionary_RuntimeOnlySurvives()
+    {
+        var input = new Dictionary<string, object?>
+        {
+            ["runtime"] = "pi",
+            ["type"] = "opencode",
+        };
+        var filtered = AgentConfigSchema.Filter(input);
+        Assert.NotNull(filtered);
+        Assert.Single(filtered!);
+        Assert.Equal("pi", filtered["runtime"]?.ToString());
     }
 }

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
@@ -57,6 +58,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string prompt,
         AgentLaunchContext context,
         IReadOnlyDictionary<string, string>? triggerLabels = null,
+        string? runtimeOverride = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
@@ -78,11 +80,13 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ? metadata
             : WithTriggerLabels(metadata, triggerLabels);
 
+        var resolvedRuntime = ResolveRuntime(agent.AgentConfig, runtimeOverride);
+
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
             new OpenAgentSessionCommand(
                 RunnerId: string.Empty,
-                AgentRuntime: "opencode",
+                AgentRuntime: resolvedRuntime,
                 WorkDir: context.WorkspacePath,
                 Metadata: durableMetadata));
 
@@ -93,6 +97,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Model: resolvedModel,
             WorkspacePath: context.WorkspacePath,
             ProjectId: context.ProjectId,
+            Runtime: resolvedRuntime,
             AgentId: agent.Id,
             AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
             AgentConfig: agent.AgentConfig?.Clone(),
@@ -171,6 +176,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var jobKey = _sessions.StableJobKey(executionContext.ProjectId, triggeringEvent.Id, ruleId);
 
         var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
+        var resolvedRuntime = ResolveRuntime(agent.AgentConfig, launchOverride: null);
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()
             : null;
@@ -194,7 +200,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentConfigJson: agentConfigJson,
             Model: resolvedModel,
             Variant: resolvedVariant,
-            Prompt: trimmedPrompt);
+            Prompt: trimmedPrompt,
+            Runtime: resolvedRuntime);
 
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
         var canonical = await jobGrain.EnsurePreparedAsync(resolvedPlan);
@@ -271,6 +278,41 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var model = TryReadString(config, "model");
         var variant = string.IsNullOrWhiteSpace(model) ? null : TryReadString(config, "variant");
         return (model, variant);
+    }
+
+    /// <summary>
+    /// Resolves the execution backend as
+    /// <c>launchOverride ?? agentConfig.runtime ?? "opencode"</c>
+    /// (issue-452 design D2). The launch-time override wins over the
+    /// Agent's configured backend; absent an override, the Agent's
+    /// configured backend is used; absent both, the backend resolves to
+    /// <see cref="AgentConfigSchema.OpenCodeRuntime"/>. Manual HTTP
+    /// launch passes the caller-supplied override from
+    /// <c>AgentSessionLaunchRequest.Runtime</c>; the routed
+    /// subscription launch passes no override so the Agent's configured
+    /// backend applies.
+    /// </summary>
+    internal static string ResolveRuntime(JsonElement? agentConfig, string? launchOverride)
+    {
+        if (!string.IsNullOrWhiteSpace(launchOverride)
+            && AgentConfigSchema.AllowedRuntimes.Contains(launchOverride))
+        {
+            return launchOverride;
+        }
+
+        if (agentConfig is { ValueKind: JsonValueKind.Object } obj
+            && obj.TryGetProperty("runtime", out var value)
+            && value.ValueKind == JsonValueKind.String)
+        {
+            var raw = value.GetString();
+            if (!string.IsNullOrWhiteSpace(raw)
+                && AgentConfigSchema.AllowedRuntimes.Contains(raw))
+            {
+                return raw;
+            }
+        }
+
+        return AgentConfigSchema.OpenCodeRuntime;
     }
 
     private static string? TryReadString(JsonElement obj, string propertyName)

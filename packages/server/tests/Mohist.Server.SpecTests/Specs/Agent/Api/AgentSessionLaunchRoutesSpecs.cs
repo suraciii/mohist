@@ -182,4 +182,249 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
+
+    [Fact]
+    public async Task Launch_WithRuntimeOverride_PersistsRuntimeOnSessionAndDispatch()
+    {
+        // Agent config runtime is opencode; the request body overrides
+        // to pi. The resolved backend must flow into both the session
+        // (so generic open/attach see it) and the dispatch envelope.
+        var projectId = await CreateProjectAsync("launch-runtime-override");
+        var runnerId = $"launch-runtime-override-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "runtime-override-agent", runtime: "opencode");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+
+        try
+        {
+            using var response = await _fixture.Client.PostAsJsonAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+                new
+                {
+                    prompt = "execute on pi",
+                    runtime = "pi",
+                });
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+
+            var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            var sessionInfo = await sessionGrain.GetAsync();
+            Assert.NotNull(sessionInfo);
+            Assert.Equal("pi", sessionInfo!.Runtime);
+
+            var snapshot = await PollDispatchForSessionAsync(runnerId, sessionId);
+            Assert.False(string.IsNullOrWhiteSpace(snapshot.WorkId));
+
+            var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            Assert.Equal("pi", ReadRuntimeFromDispatch(polledDispatch));
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task Launch_WithoutRuntimeOverride_UsesAgentConfigRuntime()
+    {
+        // Agent config runtime is pi; no override in the request body.
+        // The resolved backend must be pi.
+        var projectId = await CreateProjectAsync("launch-runtime-from-config");
+        var runnerId = $"launch-runtime-from-config-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "config-runtime-agent", runtime: "pi");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+
+        try
+        {
+            using var response = await _fixture.Client.PostAsJsonAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+                new { prompt = "execute on pi via config" });
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+
+            var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            var sessionInfo = await sessionGrain.GetAsync();
+            Assert.NotNull(sessionInfo);
+            Assert.Equal("pi", sessionInfo!.Runtime);
+
+            var snapshot = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            Assert.Equal("pi", ReadRuntimeFromDispatch(polledDispatch));
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task Launch_WithoutRuntimeOverrideOrConfig_DefaultsToOpenCode()
+    {
+        var projectId = await CreateProjectAsync("launch-runtime-default");
+        var runnerId = $"launch-runtime-default-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "default-runtime-agent");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+
+        try
+        {
+            using var response = await _fixture.Client.PostAsJsonAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+                new { prompt = "default runtime" });
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+
+            var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            var sessionInfo = await sessionGrain.GetAsync();
+            Assert.NotNull(sessionInfo);
+            Assert.Equal("opencode", sessionInfo!.Runtime);
+
+            var snapshot = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            Assert.Equal("opencode", ReadRuntimeFromDispatch(polledDispatch));
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task Launch_WithUnknownRuntimeOverride_Returns400()
+    {
+        var projectId = await CreateProjectAsync("launch-runtime-invalid");
+        var agent = await CreateAgentAsync(projectId, "runtime-invalid-agent");
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+            new
+            {
+                prompt = "execute on unknown",
+                runtime = "mystery",
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("runtime_invalid", body.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task CreateAgent_WithInvalidRuntime_Returns400()
+    {
+        // Issue-452 design D1: AgentConfigSchema.Validate rejects an
+        // unknown runtime on the Agent CRUD write surface.
+        var projectId = await CreateProjectAsync("agent-create-runtime-invalid");
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents",
+            new
+            {
+                name = "bad-runtime-agent",
+                description = "agent description",
+                instructions = "instructions",
+                agentConfig = new { model = "openai/gpt-5.6", runtime = "mystery" },
+                skills = new[] { "coding" },
+                maxConcurrentRuns = 1,
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("invalid_agent_config", body.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task CreateAgent_WithPiRuntime_Accepts()
+    {
+        var projectId = await CreateProjectAsync("agent-create-runtime-pi");
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents",
+            new
+            {
+                name = "pi-runtime-agent",
+                description = "agent description",
+                instructions = "instructions",
+                agentConfig = new { model = "openai/gpt-5.6", runtime = "pi" },
+                skills = new[] { "coding" },
+                maxConcurrentRuns = 1,
+            });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var data = body.GetProperty("data");
+        Assert.Equal("pi", data.GetProperty("agentConfig").GetProperty("runtime").GetString());
+    }
+
+    [Fact]
+    public async Task Launch_EditingAgentRuntimeAfterLaunch_DoesNotChangeInFlightRuntime()
+    {
+        // Snapshot fixation (issue-452 D2): editing the Agent's runtime
+        // config after launch must not change the in-flight job's
+        // runtime. The dispatch envelope and the session must remain on
+        // the launch-time runtime.
+        var projectId = await CreateProjectAsync("launch-snapshot-fixed");
+        var runnerId = $"launch-snapshot-fixed-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "snapshot-agent", runtime: "pi");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+
+        try
+        {
+            using var response = await _fixture.Client.PostAsJsonAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+                new { prompt = "snapshot" });
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+
+            var snapshot = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var firstDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            Assert.Equal("pi", ReadRuntimeFromDispatch(firstDispatch));
+
+            // Edit the Agent's runtime to opencode while the job is
+            // still in flight.
+            await PatchAgentRuntimeAsync(projectId, agent.Id, "opencode");
+
+            // The in-flight dispatch already pinned pi; the runner
+            // envelope still carries pi. Re-poll to confirm.
+            var sessionInfo = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
+            Assert.Equal("pi", sessionInfo!.Runtime);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    private async Task<JsonElement> PollDispatchEnvelopeAsync(string runnerId, string workId)
+    {
+        for (var i = 0; i < 50; i++)
+        {
+            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            var dispatches = await poll.ReadDispatchElementsAsync();
+            foreach (var data in dispatches)
+            {
+                if (string.Equals(data.GetProperty("workId").GetString(), workId, StringComparison.Ordinal))
+                    return data;
+                await DrainDispatchElementAsync(runnerId, data);
+            }
+        }
+
+        throw new InvalidOperationException($"No polled dispatch for workId '{workId}'");
+    }
+
+    private static string ReadRuntimeFromDispatch(JsonElement dispatch)
+    {
+        // WorkDispatchResponse.With is a serialized JSON string carrying
+        // the agent-job payload (prompt/instructions/model/variant/runtime).
+        // Parse the inner object and read the runtime field.
+        var withJson = dispatch.GetProperty("with").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(withJson));
+        using var doc = JsonDocument.Parse(withJson!);
+        return doc.RootElement.GetProperty("runtime").GetString()!;
+    }
 }

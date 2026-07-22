@@ -372,9 +372,14 @@ public static class RunnerRoutes
             // — labels are intentionally left untouched so the launch
             // identity (projectId, agentId, agentName, source-kind) is
             // preserved by AgentSessionMetadata.Merge.
+            //
+            // The session's own runtime is authoritative (issue-452
+            // design D5): the launch endpoint pinned the backend at
+            // launch time, so we read it back from the session rather
+            // than hardcoding opencode.
             var session = await grain.OpenAsync(new OpenAgentSessionCommand(
                 runnerId,
-                "opencode",
+                existing.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
                 WorkDir: req.WorkDir,
                 Metadata: BuildGenericAgentSessionMetadata(req)));
             return Results.Ok(ToRunnerGenericAgentSession(session));
@@ -394,8 +399,13 @@ public static class RunnerRoutes
 
             try
             {
+                // Issue-452 design D5: the session's persisted runtime is
+                // authoritative for the generic path. The launch endpoint
+                // pinned it at launch time; attach binds the physical
+                // session to that backend rather than a hardcoded literal.
                 var session = await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
-                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid, Runtime: "opencode"));
+                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid,
+                    Runtime: existing.Runtime ?? AgentConfigSchema.OpenCodeRuntime));
                 if (!string.IsNullOrWhiteSpace(req.AgentJobId)
                     && !string.IsNullOrWhiteSpace(req.WorkId))
                 {

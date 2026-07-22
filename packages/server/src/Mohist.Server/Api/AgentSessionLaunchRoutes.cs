@@ -84,10 +84,22 @@ public static class AgentSessionLaunchRoutes
                 WorkspacePath: req.Context?.WorkspacePath,
                 Title: null);
 
+            var runtimeError = ValidateRuntimeOverride(req.Runtime);
+            if (runtimeError is not null)
+            {
+                return ApiResults.BadRequest(runtimeError, "runtime_invalid");
+            }
+
             AgentLaunchResult result;
             try
             {
-                result = await launcher.LaunchAsync(agent, prompt, launchContext, triggerLabels: null, ct);
+                result = await launcher.LaunchAsync(
+                    agent,
+                    prompt,
+                    launchContext,
+                    triggerLabels: null,
+                    runtimeOverride: req.Runtime,
+                    ct: ct);
             }
             catch (ArgumentException ex)
             {
@@ -134,6 +146,17 @@ public static class AgentSessionLaunchRoutes
 
         return null;
     }
+
+    private static string? ValidateRuntimeOverride(string? runtime)
+    {
+        if (string.IsNullOrWhiteSpace(runtime)) return null;
+        if (!Mohist.Server.Infrastructure.AgentConfigSchema.AllowedRuntimes.Contains(runtime))
+        {
+            return $"runtime '{runtime}' is not supported; the agent runtime accepts only " +
+                string.Join(", ", Mohist.Server.Infrastructure.AgentConfigSchema.AllowedRuntimes) + ".";
+        }
+        return null;
+    }
 }
 
 /// <summary>
@@ -144,7 +167,15 @@ public static class AgentSessionLaunchRoutes
 /// </summary>
 public sealed record AgentSessionLaunchRequest(
     string? Prompt = null,
-    AgentSessionLaunchContextRef? Context = null);
+    AgentSessionLaunchContextRef? Context = null,
+    /// <summary>
+    /// Optional launch-time override of the execution backend
+    /// (issue-452 design D2). When set, wins over the Agent's configured
+    /// <c>runtime</c> in <c>agentConfig</c>; when absent, the Agent's
+    /// configured backend applies (defaulting to <c>opencode</c>).
+    /// Accepted values: <c>opencode</c>, <c>pi</c>.
+    /// </summary>
+    string? Runtime = null);
 
 public sealed record AgentSessionLaunchContextRef(
     int? IssueNumber = null,

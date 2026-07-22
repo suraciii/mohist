@@ -1,0 +1,112 @@
+## T-001 Server runtime-routing work — learned patterns & gotchas
+
+### Where `runtime` lives at every layer
+
+- **Agent definition / write API** — `agentConfig.runtime` validated by
+  `AgentConfigSchema.Validate` (`opencode|pi`); same gate covers Agent
+  CRUD and the issue-level `agentConfig` write surface (via
+  `IssueModelMetadata.ValidateAgentConfig`).
+- **Launch-time override** — optional `runtime` field on the manual
+  `AgentSessionLaunchRequest` body. Manual path passes it to
+  `ResolveRuntime`; routed path passes no override (uses Agent config).
+- **Resolution helper** — `AgentLauncher.ResolveRuntime(agentConfig,
+  launchOverride)` implementing `launchOverride ?? agentConfig.runtime
+  ?? "opencode"`. Reused by manual launch, routed launch, routed
+  preflight, and the AgentSession open/attach fallback.
+- **Snapshot** — `AgentJobInput.Runtime` (Orleans Id(4), append-only)
+  and `RoutedAgentLaunchPlan.Runtime` (Orleans Id(19), append-only).
+  Recovery on activation loss reads the snapshot, not fresh Agent
+  config (matches model/variant D2 pattern).
+- **Dispatch envelope** — `BuildDispatch` now emits
+  `with["runtime"] = input.Runtime` so the runner
+  `AgentJobExecutor` (T-002) can select the right runtime.
+- **Session** — `OpenAgentSessionCommand.AgentRuntime` carries the
+  resolved runtime; the session's own `Runtime` field is the single
+  source of truth for generic open/attach (no more hardcoded literal).
+
+### Orleans field id rule (verified)
+
+`AgentJobInput` uses Ids `0,1,2,3,5,6,7,8,9` (Id(4) was the next free
+slot — `Runtime` lands there). `RoutedAgentLaunchPlan` uses Ids `0..18`
+(Id(19) was the next free slot — `Runtime` lands there). All existing
+Ids untouched; older persisted snapshots deserialize with `Runtime =
+null` and resolve as `opencode` (the default).
+
+### `AgentConfigSchema` gotchas
+
+- TWO key surfaces need `runtime`:
+  1. `AllowedKeys` (used by `Validate` for key-presence checks).
+  2. `Filter`'s hardcoded list. Refactored to iterate `AllowedKeys`
+     directly so a new key automatically flows into the write-side
+     merge paths (IssueVariableBuilder, ConfigService,
+     MohistIssueWorkflowProfileBase, IssueWorkflowProfileStorageIntegrity).
+- `ValidateRuntime` is split into two overloads: one on
+  `JsonElement` (API boundary) and one on `IDictionary<string,object?>`
+  (write-side merge paths). Both treat an absent key as valid; an
+  out-of-set string returns an actionable error that lists
+  `AllowedRuntimes`.
+
+### `EquivalentInput` / `DescribeInputDifferences` on AgentJobGrain
+
+`Runtime` MUST be in both the equivalence and the difference-descriptor
+checks. Otherwise a SubmitAsync that arrives with a different runtime
+would be wrongly accepted as a no-op replay (or, conversely, the
+grain would say "different submission" without naming runtime).
+
+### Test infra: reading dispatch envelope from runner poll
+
+`WorkDispatchResponse.With` is a serialized JSON string (not an
+object). Tests asserting on dispatch fields under `with` must
+`JsonDocument.Parse(data.GetProperty("with").GetString())` first —
+getting `GetProperty("with").GetProperty("runtime")` directly throws
+"element of type 'Object', but the target element has type 'String'".
+Added `ReadRuntimeFromDispatch` helper in
+`AgentSessionLaunchRoutesSpecs` to keep the call sites readable.
+
+### Build / test commands that worked
+
+```
+dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj -p:SkipWebBuild=true
+dotnet build packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj -p:SkipWebBuild=true
+dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true
+dotnet build packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj -p:SkipWebBuild=true
+```
+
+(`-p:SkipWebBuild=true` skips the `npm run build -w packages/web`
+target that `Mohist.Server.csproj` runs as a pre-build step — the
+`web` package is unchanged by T-001 and isn't part of the C# build
+gate.)
+
+Test results:
+- UnitTests: 1299 / 1299 pass (including new
+  `AgentLauncherResolveRuntimeTests` and updated `AgentConfigSchemaTests`
+  + `AgentConfigValidationApiBoundaryTests`).
+- SpecTests: 2987 / 2987 pass (including new
+  `Launch_WithRuntimeOverride_PersistsRuntimeOnSessionAndDispatch`,
+  `Launch_WithoutRuntimeOverride_UsesAgentConfigRuntime`,
+  `Launch_WithoutRuntimeOverrideOrConfig_DefaultsToOpenCode`,
+  `Launch_WithUnknownRuntimeOverride_Returns400`,
+  `CreateAgent_WithInvalidRuntime_Returns400`,
+  `CreateAgent_WithPiRuntime_Accepts`,
+  `Launch_EditingAgentRuntimeAfterLaunch_DoesNotChangeInFlightRuntime`,
+  `AdvancePreparedLaunchAsync_PiRuntime_OpensSessionWithPi`,
+  `OnActivate_AfterCrash_ReusesSnapshottedRuntime`,
+  `SubmitAsync_WithResolvedRuntime_EmitsRuntimeOnDispatchEnvelope`,
+  and the dedicated `GenericAgentSessionRuntimeOpenAttachSpecs`).
+- ArchTests: 30 / 30 pass.
+
+### Codebase patterns to carry forward (T-002 / T-003)
+
+- Snapshot-first: any Agent-driven value that controls execution must
+  be captured on the AgentJobInput / RoutedAgentLaunchPlan at launch
+  time, then read from the snapshot in recovery/dispatch. Mirrors the
+  model/variant pattern already in `ResolveModelAndVariant`.
+- `AgentConfigSchema` is the single source of truth: extend
+  `AllowedKeys` + write an enum validator, derive `Filter`'s iteration
+  from `AllowedKeys` so write-side merges track the validation
+  surface.
+- `OpenAgentSessionCommand.AgentRuntime` is the launch-time
+  authoritative runtime. The session's own `Runtime` field is the
+  authoritative value for everything downstream (open, attach, command
+  routing). Do not hardcode "opencode" in any generic agent-session
+  route.
