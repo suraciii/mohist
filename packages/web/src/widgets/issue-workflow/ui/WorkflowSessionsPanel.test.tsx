@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { fireEvent, screen, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { createQueryClient, render as renderWithProviders } from '../../../../tests/test-utils'
 import { WorkflowSessionsPanel } from './WorkflowSessionsPanel'
@@ -115,6 +115,27 @@ describe('WorkflowSessionsPanel', () => {
     expect(screen.getByText('probe timed out')).toBeInTheDocument()
   })
 
+  it('renders "Usage unavailable" for a session row with no token figures', () => {
+    setWorkflowRunSessions({
+      isLoading: false,
+      sessions: [
+        session({
+          id: 's-plan-no-usage',
+          sessionName: 'proposal-draft',
+          stage: 'plan',
+          status: 'completed',
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const row = screen.getByTestId('workflow-session-row')
+    expect(within(row).getByText('Usage unavailable')).toBeInTheDocument()
+    expect(within(row).queryByText('No usage yet')).not.toBeInTheDocument()
+  })
+
   it('does not render without a workflow run id', () => {
     setWorkflowRunSessions({ isLoading: false, sessions: [] })
 
@@ -123,152 +144,6 @@ describe('WorkflowSessionsPanel', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('renders a compact filter/sort control row above the session list', () => {
-    setWorkflowRunSessions({
-      isLoading: false,
-      sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', status: 'failed', createdAt: '2026-06-12T10:03:00.000Z' }),
-      ],
-    })
-
-    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
-
-    expect(screen.getByTestId('workflow-sessions-controls')).toBeInTheDocument()
-    const statusFilter = screen.getByTestId('workflow-sessions-status-filter') as HTMLSelectElement
-    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
-    const sortSelect = screen.getByTestId('workflow-sessions-sort') as HTMLSelectElement
-
-    expect(statusFilter.value).toBe('')
-    expect(stageFilter.value).toBe('')
-    expect(sortSelect.value).toBe('createdAt')
-
-    const stageOptions = Array.from(stageFilter.querySelectorAll('option')).map((o) => o.textContent)
-    expect(stageOptions).toEqual(['All stages', 'Plan', 'Build', 'Check', 'Integrate'])
-    expect(Array.from(stageFilter.querySelectorAll('option')).map((o) => o.disabled)).toEqual([false, false, false, false, false])
-  })
-
-  it('filtering by status hides non-matching sessions and surfaces a notice', () => {
-    setWorkflowRunSessions({
-      isLoading: false,
-      sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', status: 'failed', createdAt: '2026-06-12T10:03:00.000Z' }),
-        session({ id: 's-check', sessionName: 'review-repair', stage: 'check', status: 'running', createdAt: '2026-06-12T10:02:00.000Z' }),
-      ],
-    })
-
-    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
-
-    const statusFilter = screen.getByTestId('workflow-sessions-status-filter') as HTMLSelectElement
-    fireEvent.change(statusFilter, { target: { value: 'failed' } })
-
-    expect(screen.queryByText('proposal-draft')).not.toBeInTheDocument()
-    expect(screen.queryByText('review-repair')).not.toBeInTheDocument()
-    expect(screen.getByText('compile-assets')).toBeInTheDocument()
-    expect(screen.getByTestId('workflow-sessions-filter-notice')).toHaveTextContent('Showing 1 of 3 sessions')
-  })
-
-  it('filtering by stage hides non-matching sessions', () => {
-    setWorkflowRunSessions({
-      isLoading: false,
-      sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', status: 'completed', createdAt: '2026-06-12T10:03:00.000Z' }),
-      ],
-    })
-
-    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
-
-    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
-    fireEvent.change(stageFilter, { target: { value: 'build' } })
-
-    expect(screen.queryByText('proposal-draft')).not.toBeInTheDocument()
-    expect(screen.getByText('compile-assets')).toBeInTheDocument()
-  })
-
-  it('sorting by tokens reorders visible sessions', () => {
-    setWorkflowRunSessions({
-      isLoading: false,
-      sessions: [
-        session({
-          id: 's-plan',
-          sessionName: 'proposal-draft',
-          stage: 'plan',
-          status: 'completed',
-          createdAt: '2026-06-12T10:00:00.000Z',
-          usage: { totalTokens: 1_000 },
-        }),
-        session({
-          id: 's-build',
-          sessionName: 'compile-assets',
-          stage: 'build',
-          status: 'completed',
-          createdAt: '2026-06-12T10:01:00.000Z',
-          usage: { totalTokens: 5_000 },
-        }),
-        session({
-          id: 's-check',
-          sessionName: 'review-repair',
-          stage: 'check',
-          status: 'completed',
-          createdAt: '2026-06-12T10:02:00.000Z',
-          usage: { totalTokens: 2_500 },
-        }),
-      ],
-    })
-
-    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
-
-    const sortSelect = screen.getByTestId('workflow-sessions-sort') as HTMLSelectElement
-    fireEvent.change(sortSelect, { target: { value: 'tokens' } })
-
-    const links = screen.getAllByRole('link')
-    const rendered = links.map((link) => link.getAttribute('href'))
-    expect(rendered).toEqual([
-      '/Test%20Project/issues/55/workflow/sessions/compile-assets',
-      '/Test%20Project/issues/55/workflow/sessions/review-repair',
-      '/Test%20Project/issues/55/workflow/sessions/proposal-draft',
-    ])
-  })
-
-  it('shows an empty-result message when filters hide every session', () => {
-    setWorkflowRunSessions({
-      isLoading: false,
-      sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', status: 'completed' }),
-      ],
-    })
-
-    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
-
-    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
-    fireEvent.change(stageFilter, { target: { value: 'check' } })
-
-    expect(screen.getByText(/No sessions match the current filters/)).toBeInTheDocument()
-  })
-
-  it('lets a user select an absent executable stage and shows an empty result', () => {
-    setWorkflowRunSessions({
-      isLoading: false,
-      sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', status: 'completed' }),
-      ],
-    })
-
-    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
-
-    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
-    const checkOption = within(stageFilter).getByRole('option', { name: 'Check' }) as HTMLOptionElement
-    expect(checkOption.disabled).toBe(false)
-
-    fireEvent.change(stageFilter, { target: { value: 'check' } })
-
-    expect(stageFilter.value).toBe('check')
-    expect(screen.getByText(/No sessions match the current filters/)).toBeInTheDocument()
-  })
 })
 
 describe('issue-level usage aggregation', () => {

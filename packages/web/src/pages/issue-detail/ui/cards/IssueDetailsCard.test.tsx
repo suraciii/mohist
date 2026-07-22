@@ -81,6 +81,19 @@ describe('IssueDetailsCard status metadata removal', () => {
     expect(within(details).getByTestId('repository-git-url')).toHaveTextContent('https://github.com/suraciii/mohist.git')
   })
 
+  it('labels the parent reference row and the child-issues row distinctly', () => {
+    renderCard(baseIssue)
+    const details = screen.getByTestId('issue-detail-details-metadata')
+
+    const parentRow = within(details).getByTestId('parent-issue-metadata-row')
+    const childRow = within(details).getByTestId('child-issues-metadata-row')
+
+    expect(within(parentRow).getByText('Parent Issue')).toBeTruthy()
+    expect(within(childRow).getByText('Parent of')).toBeTruthy()
+    expect(within(childRow).queryByText('Parent Issue')).toBeNull()
+    expect(within(details).getAllByText('Parent Issue')).toHaveLength(1)
+  })
+
   it('omits Issue Stage and Workflow Stage even when workflowStage data is present in the source issue', () => {
     const issue = {
       ...baseIssue,

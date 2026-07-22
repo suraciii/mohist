@@ -38,16 +38,29 @@ describe('IssueDetailPage reference-rail — lightest visual weight', () => {
     expect(flowWeight).toBeGreaterThan(railWeight)
   })
 
-  it('does not place sticky or heavy-fill chrome on the reference rail', async () => {
+  it('uses desktop sticky positioning without applying sticky behavior on narrow viewports', async () => {
     mockIssue(makeIssue({ recovery: DEFAULT_RECOVERY }))
 
     renderPage()
 
     const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
-    expect(referenceRail.querySelector('[data-sticky="true"]')).toBeNull()
-    expect(referenceRail.className).not.toMatch(/bg-(info|warning|danger|success)-subtle/)
-    expect(referenceRail.className).not.toMatch(/\bsticky\b/)
+    expect(referenceRail.className).toContain('lg:sticky')
+    expect(referenceRail.className).toContain('lg:top-6')
+    expect(referenceRail.className).toContain('lg:self-start')
+    expect(referenceRail.className).toContain('lg:max-h-[calc(100vh-3rem)]')
+    expect(referenceRail.className).toContain('lg:overflow-y-auto')
   })
+
+  it('does not apply desktop sticky classes to the narrow rail', async () => {
+    mockMatchMedia(true)
+    mockIssue(makeIssue({ recovery: DEFAULT_RECOVERY }))
+
+    renderPage()
+
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    expect(referenceRail.className).not.toMatch(/(?:^|\s)sticky(?:\s|$)/)
+  })
+
 
   it('does not nest same-name CardSection chrome inside expanded rail cards', async () => {
     mockIssue(makeIssue({

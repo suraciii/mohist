@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { WorkflowProfileControl, type WorkflowProfileControlDataHook } from './WorkflowProfileControl'
 import type { Issue } from '../../../entities/issue'
 
@@ -116,11 +117,13 @@ describe('WorkflowProfileControl', () => {
 
     renderControl(makeIssue({ workflowProfileId: 'mohist/local', status: 'backlog' as Issue['status'] }))
 
-    await screen.findByRole('option', { name: 'PR' })
-    const select = screen.getByTestId('issue-workflow-profile-select') as HTMLSelectElement
-    expect(select.disabled).toBe(false)
+    const user = userEvent.setup()
+    const select = screen.getByTestId('issue-workflow-profile-select')
+    expect(select.tagName).not.toBe('SELECT')
+    expect(select).not.toBeDisabled()
 
-    fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
+    await user.click(select)
+    await user.click(await screen.findByRole('option', { name: 'PR' }))
 
     await waitFor(() => expect(updateRequests).toHaveLength(1))
     expect(updateRequests[0]).toEqual({ issueNumber: 14, workflowProfileId: 'mohist/github-pr' })
@@ -134,8 +137,9 @@ describe('WorkflowProfileControl', () => {
 
     renderControl(makeIssue({ workflowProfileId: 'mohist/github-pr', status: 'in_progress' as Issue['status'], workflowRunId: 'wr-1' }))
 
-    const select = await screen.findByTestId('issue-workflow-profile-select') as HTMLSelectElement
-    expect(select.disabled).toBe(true)
+    const select = await screen.findByTestId('issue-workflow-profile-select')
+    expect(select.tagName).not.toBe('SELECT')
+    expect(select).toBeDisabled()
     const reason = screen.getByTestId('issue-workflow-profile-locked-reason')
     expect(reason).toHaveTextContent(/started/i)
     expect(reason).toHaveTextContent(/locked/i)
@@ -162,8 +166,10 @@ describe('WorkflowProfileControl', () => {
 
     renderControl(makeIssue({ workflowProfileId: 'mohist/local', status: 'backlog' as Issue['status'] }))
 
-    const select = await screen.findByTestId('issue-workflow-profile-select') as HTMLSelectElement
-    fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
+    const user = userEvent.setup()
+    const select = await screen.findByTestId('issue-workflow-profile-select')
+    await user.click(select)
+    await user.click(await screen.findByRole('option', { name: 'PR' }))
 
     await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-error')).toHaveTextContent(/active/))
 
@@ -184,7 +190,7 @@ describe('WorkflowProfileControl', () => {
       expect(control.dataset.defaultProfile).toBe('mohist/github-pr')
       expect(control.dataset.effectiveProfile).toBe('mohist/github-pr')
       expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/github-pr')
-      expect(screen.getByTestId('issue-workflow-profile-select')).toHaveValue('mohist/github-pr')
+      expect(screen.getByTestId('issue-workflow-profile-select')).toHaveTextContent('PR')
     })
   })
 
@@ -201,7 +207,7 @@ describe('WorkflowProfileControl', () => {
       expect(control.dataset.defaultProfile).toBe('mohist/local')
       expect(control.dataset.effectiveProfile).toBe('mohist/local')
       expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/local')
-      expect(screen.getByTestId('issue-workflow-profile-select')).toHaveValue('mohist/local')
+      expect(screen.getByTestId('issue-workflow-profile-select')).toHaveTextContent('Default')
     })
   })
 
@@ -214,8 +220,9 @@ describe('WorkflowProfileControl', () => {
     renderControl(makeIssue({ workflowProfileId: null }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('issue-workflow-profile-select')).toHaveValue('mohist/github-pr')
-      expect(screen.getByRole('option', { name: 'mohist/github-pr' })).toBeInTheDocument()
+      expect(screen.getByTestId('issue-workflow-profile-select')).toHaveTextContent('mohist/github-pr')
     })
+    await userEvent.setup().click(screen.getByTestId('issue-workflow-profile-select'))
+    expect(await screen.findByRole('option', { name: 'mohist/github-pr' })).toBeInTheDocument()
   })
 })

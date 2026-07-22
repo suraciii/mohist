@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { baseRender, screen, fireEvent, waitFor, within } from './test-utils'
+import userEvent from '@testing-library/user-event'
 import { IssueDetailPage } from '../src/pages/issue-detail/ui/IssueDetailPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
@@ -1066,8 +1067,8 @@ describe('IssueDetailPage workflow profile integration', () => {
 
     renderWithQueryClient(<IssueDetailPage />)
 
-    const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select') as HTMLSelectElement)
-    expect(select.disabled).toBe(true)
+    const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select'))
+    expect(select).toBeDisabled()
     const reason = screen.getByTestId('issue-workflow-profile-locked-reason')
     expect(reason).toHaveTextContent(/started/i)
   })
@@ -1098,11 +1099,12 @@ describe('IssueDetailPage workflow profile integration', () => {
 
     renderWithQueryClient(<IssueDetailPage />)
 
-    await screen.findByRole('option', { name: 'PR' })
-    const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select') as HTMLSelectElement)
-    expect(select.disabled).toBe(false)
+    const user = userEvent.setup()
+    const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select'))
+    expect(select).not.toBeDisabled()
 
-    fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
+    await user.click(select)
+    await user.click(await screen.findByRole('option', { name: 'PR' }))
 
     await waitFor(() => expect(_patchHandler).toHaveBeenCalledTimes(1))
     expect(_patchHandler).toHaveBeenCalledWith(1, 'mohist/github-pr', TEST_PROJECT.id)
@@ -1139,8 +1141,10 @@ describe('IssueDetailPage workflow profile integration', () => {
 
     renderWithQueryClient(<IssueDetailPage />)
 
-    const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select') as HTMLSelectElement)
-    fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
+    const user = userEvent.setup()
+    const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select'))
+    await user.click(select)
+    await user.click(await screen.findByRole('option', { name: 'PR' }))
 
     await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-error')).toHaveTextContent(/active/))
     expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/local')

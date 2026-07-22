@@ -1,0 +1,245 @@
+## Codebase Patterns
+
+- BranchBar.tsx, PrDeliveryIndicator.tsx, and WorkflowSessionsPanel.tsx use inline English strings (no i18n layer). The PR indicator prefixes the PR number with `Merged via PR #{prNumber}` (consistent with the rest of the app's copy register).
+- The session panel `usageText(session)` already returns three honest states: a `totalTokens` summary line, an input/output breakdown, or — when no token figures are present — `'Usage unavailable'`. The aggregate header computes its own summary independently and never falls back to usage-placeholder copy.
+
+## T-001 Implementation Notes
+
+### Surprises / things worth knowing
+
+- The BranchBar.test.tsx had four assertions on the Chinese string `未能检查上游` (3 `getByText` and 1 `queryByText`); all four needed swapping to the English copy `Upstream check unavailable`. Confirmed via ripgrep that no other file in the repo references the literal string in any form.
+- The PrDeliveryIndicator.test.tsx had three coupled assertions (`'经由 PR'`, `'#42'`, `'合并'`) in the same `expect(... textContent).toContain(...)` chain. After the copy fix, the indicator's textContent becomes `Merged via PR #42` — kept one `toContain('Merged via PR')` assertion and the PR-number assertion; dropped the standalone `'合并'` assertion since the merged English copy no longer contains a separate substring matching it.
+- WorkflowSessionsPanel.tsx had no test for the `'No usage yet'` placeholder (existing tests all provided `usage` data on each session). Added one new test (`renders "Usage unavailable" for a session row with no token figures`) that constructs a session with `usage: undefined` (the helper's default) and asserts the per-row text via `within(row).getByText('Usage unavailable')`. Also asserts `'No usage yet'` is absent to lock the negative.
+
+### Decisions confirmed against spec
+
+- Used `Merged via PR #{prNumber}` (exact wording from the design D1 proposal).
+- Used `Upstream check unavailable` (exact wording from D1).
+- Replaced `'No usage yet'` with `'Usage unavailable'` per D2 — the design's preferred truthful label.
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 377 files / 5067 tests passed.
+- Focused run of the three affected test files — 3 files / 45 tests passed.
+- `rg "[\p{Han}]" BranchBar.tsx PrDeliveryIndicator.tsx WorkflowSessionsPanel.tsx` — no CJK characters.
+- `rg "[\p{Han}]" BranchBar.test.tsx PrDeliveryIndicator.test.tsx WorkflowSessionsPanel.test.tsx` — no CJK characters.
+
+### Out of scope (noted, not done)
+
+- Other Chinese strings still exist in the repo (e.g., `packages/web/src/widgets/coder-session/ui/SessionTimeline.tsx`) but the AC for T-001 scopes to the three listed files only. These belong to other issues or follow-up.
+- Did not touch BranchBar palette classes (amber/blue/gray/red/green) — that is T-002's scope (theme tokens), not T-001 (copy).
+
+## T-002 Implementation Notes
+
+### Surprises / things worth knowing
+
+- The BranchBar behind-state rebase button passed three token classes via `enabledClassName` (the `RebaseAction` component takes them as a string). Existing tests asserted those classes directly (`'border-amber-300', 'text-amber-800', 'hover:bg-amber-50'`); updated to the warning-family token strings (`'border-warning-border', 'text-warning', 'hover:bg-warning-subtle'`). Same swap for the negative assertion in the loading-state test.
+- TaskLogPanel's light-surface chrome has six distinct surface tokens (panel, header label, truncation badge, search icon, search input, download button, source chips × 2 variants). All eight light-surface palette references swapped cleanly to `bg-card / border-border / text-muted-foreground / text-foreground / bg-background / border-input / bg-warning-subtle / text-warning / focus:border-info / focus:ring-info / placeholder:text-muted-foreground / hover:bg-muted`.
+- The dark console interior (`bg-slate-900 text-slate-100` + `text-slate-500` timestamps + `text-sky-300` source brackets + `text-violet-200/300` + `bg-violet-400/10` + `text-red-300` + `text-slate-400` empty/error states) is preserved exactly. The acceptance criterion explicitly carves this out, and the new `TaskLogPanel.theme.test.tsx` locks it with three assertions (scroll container classes, source-bracket span, timestamp spans).
+- TaskLogPanel has no colocated test file; added a new `TaskLogPanel.theme.test.tsx` next to the existing `*.viewing.test.tsx`, `*.merge.test.tsx`, `*.milestones.test.tsx`, `*.liveAppend.test.tsx` suite. Four tests: chrome-tokenized surfaces; dark console preserved (with `querySelector('span.text-sky-300')` and `querySelectorAll('span.text-slate-500')` to lock the line colors); disabled chip uses muted tokens; loading boundary still renders inside the dark console.
+- The disabled-chip click test had to be wrapped in `act(async () => { chip.click() })` — the first run failed with "An update to TaskLogPanel inside a test was not wrapped in act(...)" because clicking toggles `disabledSources` state.
+- The panel header label color moved from `text-slate-500` to `text-muted-foreground` (the label is OUTSIDE the dark console, in the light-surface chrome header row).
+- WorkflowRunStatusPill.tsx is intentionally untouched — confirmed not rendered on the issue detail page; out of scope per design D3.
+
+### Decisions confirmed against spec
+
+- Mapped per design D3:
+  - amber (behind / rebase-available / Done retention copy) → `bg-warning-subtle` + `border-warning-border` + `text-warning`.
+  - blue (rebasing / in-progress) → `bg-info-subtle` + `border-info-border` + `text-info`.
+  - gray (upstream unknown; disabled rebase) → `bg-muted` + `border-border` + `text-muted-foreground`.
+  - red (errors / conflicts) → `bg-danger-subtle` + `text-danger`.
+  - green (up to date) → `text-success`.
+- TaskLogPanel chrome mapped per design D3:
+  - Outer panel: `bg-white border-slate-200` → `bg-card border-border`.
+  - Header label: `text-slate-500` → `text-muted-foreground`.
+  - Truncation badge: `bg-amber-100 text-amber-800` → `bg-warning-subtle text-warning`.
+  - Search input: `bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:ring-sky-500` → `bg-background border-input text-foreground placeholder:text-muted-foreground focus:border-info focus:ring-info`.
+  - Search icon: `text-slate-400` → `text-muted-foreground`.
+  - Download button: `bg-white border-slate-300 text-slate-700 hover:bg-slate-50` → `bg-background border-input text-foreground hover:bg-muted`.
+  - Source chip (enabled): `bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200` → `bg-background border-input text-foreground hover:bg-muted`.
+  - Source chip (disabled): `bg-white border-slate-200 text-slate-400` → `bg-muted border-border text-muted-foreground`.
+- Deliberately left alone (preserved dark console):
+  - `bg-slate-900 text-slate-100` on the scroll container.
+  - `text-slate-400` for loading/error/empty/no-match boundary text (rendered inside the scroll container).
+  - `text-slate-500` timestamps, `text-sky-300` source brackets, `text-violet-200/300` + `border-violet-400/40` + `bg-violet-400/10` milestones, `text-red-300` failed milestone detail.
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 378 files / 5071 tests passed (+1 file / +4 tests over T-001 baseline).
+- Focused run of BranchBar + all TaskLogPanel tests — 6 files / 72 tests passed (11 BranchBar tests, 4 new TaskLogPanel.theme tests, 57 existing TaskLogPanel tests).
+- `rg "border-(amber|blue|gray|red|green|violet|sky)\d|text-(amber|blue|gray|red|green|violet|sky)\d|bg-(amber|blue|gray|red|green|violet|sky)\d|hover:bg-(amber|gray)\d|focus:(border|ring)-(sky|amber)\d|bg-white|border-slate-\d|text-slate-\d" BranchBar.tsx` — zero matches.
+- `rg "border-(amber|sky|gray|red|blue|green)\d|text-(amber|sky|gray|red|blue|green)\d|bg-(amber|sky|gray|red|blue|green|white)\d|hover:bg-(sky|gray)\d|focus:(border|ring)-sky\d|bg-white|placeholder-slate" TaskLogPanel.tsx` — zero matches in the chrome (only matches are inside `renderScrollBody` lines, which is the preserved dark console interior).
+- `git diff --stat` confirms WorkflowRunStatusPill.tsx is not modified.
+
+### Out of scope (noted, not done)
+
+- The deliberate dark log-console interior (bg-slate-900, text-slate-500/sky-300/violet-200/300/red-300) is preserved by design — tokenizing it would break legibility on the terminal surface.
+- Other on-page literal palette blocks (PrDeliveryIndicator, ReviewSummary, WorkflowSessionsPanel status icons, CompositeParentOverview, ReviewReportModal, ArtifactContentViewer, ArtifactTextContent, composite-parent violet badge, NotFoundState's gray/blue) remain untouched — documented out of scope per design D3 scope reconciliation; tracked as follow-up.
+- The `_taskLogPanelTestUtils.tsx` mock was not changed; the new test file uses the same `renderWithTaskLogProviders`, `fakeConnections`, `makeLine`, `makePage`, `projects`, `newQueryClient` fixtures as the existing TaskLogPanel test suite.
+
+## T-003 Implementation Notes
+
+### Surprises / things worth knowing
+
+- The shared `Select` is base-ui's combobox-style trigger + popup (role="combobox" on the trigger, role="option" on the items, popup rendered through a portal). Native `<select>` + `<option>` is gone — the existing tests had to be rewritten to drive the control via `userEvent.click(trigger)` + `userEvent.click(option)`.
+- The `data-testid` hook moves onto the `SelectTrigger` (which spreads `...props` to the underlying combobox); `getByTestId` resolves to the trigger element, not to a `<select>`. Confirmed against the existing `ProjectDefaultWorkflowControl.test.tsx` pattern, which already exercises `screen.getByTestId('project-default-workflow-select')` on a `SelectTrigger`.
+- base-ui `Select` accepts `value=""` as a normal item (no rejection, no special-casing). The `stringifyAsValue` helper preserves empty strings (vs. the `value == null` → `''` serialization, which only fires for nullish values, not for the literal empty string). So the `__all__` sentinel fallback in design D4 was not needed.
+- `SelectValue` exposes a `placeholder` prop for the "no selection" display, but the more reliable approach is to render the label as children when known and let the placeholder show only when the resolved value is empty/null. So the trigger is wrapped in `<SelectValue placeholder="All statuses">{statusFilter ? statusLabel(statusFilter) : 'All statuses'}</SelectValue>` — this keeps the displayed label deterministic and tests `within(trigger).getByText('All statuses')` / `'Failed'` / etc. without having to open the popup.
+- The `SelectTrigger` `size="sm"` token gives the existing compact 7px height, and the explicit `className="h-7 min-w-[140px] text-xs font-normal"` carries over the visual treatment (small height, tokenized border, small font, no bold) so the row still matches the original look. `font-normal` is needed because the trigger's default style declares `text-sm` (not bold) but the visual context is a label-row that does not want weight contrast; it is also necessary because the inherited parent label is `text-[11px]` and the trigger's `text-sm` would otherwise feel too big.
+- The 5-options stage list assertion (`['All stages', 'Plan', 'Build', 'Check', 'Integrate']`) used to read off `select.querySelectorAll('option')` directly. After the migration, base-ui only mounts the option elements when the popup is open, so the test now opens the popup via `user.click(stageFilter)` and reads `screen.findAllByRole('option')`. The order matches because `WORKFLOW_PIPELINE_STAGES` is the pipeline order and the leading `SelectItem value=""` (the "All stages" item) is rendered first.
+- The "option is not disabled" check that used to be `checkOption.disabled` is now `checkOption.getAttribute('data-disabled')` — base-ui emits `data-disabled` on the option element. When the option is not disabled, the attribute is absent (returns `null`), so the assertion becomes `expect(...).toBeNull()`.
+- For the sort control, the test used to assert `sortSelect.value === 'createdAt'`. After the migration, there is no `.value` to read on a combobox; the test now asserts `within(sortSelect).getByText('Created')` (the visible label inside the trigger) plus a `tagName !== 'SELECT'` guard so the native-select invariant is locked in code.
+- Added one extra test that exercises the empty-string "All …" path end-to-end (`lets a user clear a filter by selecting the "All …" option`) — set a status filter, observe the notice appear, then re-open the popup and pick "All statuses" and confirm the notice disappears and both sessions are visible. This locks the null-mapping boundary that the migration just introduced (`v === '' ? null : v`).
+
+### Decisions confirmed against spec
+
+- Used the shared `Select` / `SelectContent` / `SelectItem` / `SelectTrigger` / `SelectValue` from `@/shared/ui/components/select` (same import path as the rest of the app).
+- Modeled the "All …" null option as `value=""` (per design D4). The `__all__` sentinel fallback was not needed because base-ui accepts empty-string item values.
+- Preserved the existing `data-testid` hooks (`workflow-sessions-status-filter`, `workflow-sessions-stage-filter`, `workflow-sessions-sort`) by moving them onto the `SelectTrigger`.
+- Reused the existing `STATUS_LABELS / STAGE_LABELS / SORT_LABELS` maps for option labels and the trigger's displayed value.
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 378 files / 5072 tests passed (+1 test over T-002 baseline: the new "All …" clear-filter test).
+- Focused run of `WorkflowSessionsPanel.test.tsx` — 17 tests passed, including the rewritten shared-Select interactions and the new "All …" clear test.
+- `rg "<select|HTMLSelectElement|querySelectorAll\('option'\)" packages/web/src/widgets/issue-workflow/ui/WorkflowSessionsPanel.tsx packages/web/src/widgets/issue-workflow/ui/WorkflowSessionsPanel.test.tsx` — zero matches.
+- `rg "data-testid" packages/web/src/widgets/issue-workflow/ui/WorkflowSessionsPanel.tsx` — all three filter hooks (`workflow-sessions-status-filter`, `workflow-sessions-stage-filter`, `workflow-sessions-sort`) are still present, now on the `SelectTrigger` instead of a `<select>`.
+
+### Out of scope (noted, not done)
+
+- The deliberate dark log-console interior (bg-slate-900, text-slate-500/sky-300/violet-200/300/red-300) is preserved by design — tokenizing it would break legibility on the terminal surface.
+- Other on-page literal palette blocks (PrDeliveryIndicator, ReviewSummary, WorkflowSessionsPanel status icons, CompositeParentOverview, ReviewReportModal, ArtifactContentViewer, ArtifactTextContent, composite-parent violet badge, NotFoundState's gray/blue) remain untouched — documented out of scope per design D3 scope reconciliation; tracked as follow-up.
+- The `_taskLogPanelTestUtils.tsx` mock was not changed; the new test file uses the same `renderWithTaskLogProviders`, `fakeConnections`, `makeLine`, `makePage`, `projects`, `newQueryClient` fixtures as the existing TaskLogPanel test suite.
+
+## T-004 Implementation Notes
+
+### Surprises / things worth knowing
+
+- Only one line of production code changed: `IssueDetailsCard.tsx:71` swapped `<dt>Parent Issue</dt>` → `<dt>Parent of</dt>` (the row's `<dd>` content "is a parent (N child issues)" stays exactly as it was). The other Details-card rows (Parent Issue, Parent of, Children, Project, Repository) now each carry their own descriptive label, matching design D5.
+- No cross-file ripple. `IssueDetailPage.relationships.test.tsx` and `IssueDetailPage.status-uniqueness.test.tsx` only assert on the row's `data-testid` and the `<dd>` text ("is a parent (3 child issues)"), both unaffected by the label change, so neither needed editing. Confirmed by the full `npm run test:run -w packages/web` run (378 files / 5073 tests passed).
+- The new test (`labels the parent reference row and the child-issues row distinctly`) locks the invariant in four assertions: the parent row contains "Parent Issue", the child row contains "Parent of", the child row does NOT contain "Parent Issue", and across the whole Details card the string "Parent Issue" appears exactly once. The fourth assertion is the acceptance criterion's "an issue that is a parent no longer renders two rows both labeled 'Parent Issue'."
+
+### Decisions confirmed against spec
+
+- Used `Parent of` (exact wording from design D5 proposal). The label is short, distinct from `Parent Issue`, and reads naturally next to the row value "is a parent (N child issues)" — semantically the row says "this issue is a parent of N child issues", so "Parent of" is the right label.
+- Did not merge or restructure the child-issues row into the children-progress row (out of scope per task notes; belongs to the sibling reading-flow issue).
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 378 files / 5073 tests passed (+1 test over T-003 baseline).
+- Focused run of `IssueDetailsCard.test.tsx` — 7 tests passed (6 existing + 1 new "labels the parent reference row and the child-issues row distinctly").
+- `rg "Parent Issue" packages/web/src` — only one production-code occurrence remains (the parent-reference row at `IssueDetailsCard.tsx:56`); the other three matches are the test's own positive + negative assertions.
+
+### Out of scope (noted, not done)
+
+- Did not touch the "Children" progress row or the parent-reference row beyond the relabel — no merging, no reordering, no value-text changes.
+- Did not touch other Details-card rows (Recommended workflow, Recommendation reason, Risk, Project, Repository) — task scope is the two "Parent Issue" labels only.
+
+## T-005 Implementation Notes
+
+### Surprises / things worth knowing
+
+- The title span in `CollapsibleRailCard.tsx:59` was `flex-1 truncate` — dropping `truncate` is enough for "Configuration" to render in full, but the span still sits inside a flex row with a `shrink-0` chevron. Added `min-w-0` to let the title shrink to the parent's width and `break-words text-balance` to wrap onto multiple lines if a title is ever wider than the rail column. The collapsed summary keeps its own `truncate` so narrow-rail summaries still elide (per design D6).
+- The sticky rail is wired with `lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto`. `lg:self-start` is required: a sticky element inside a CSS grid row without it would stretch to the full row height and the `top` offset would push it off-screen as soon as the user scrolls. `lg:max-h` + `lg:overflow-y-auto` ensures a very tall rail (drift + convergence + configuration all expanded) stays scrollable within the rail column instead of clipping or pushing the page.
+- The narrow-viewport class branch (`isNarrowViewport ? 'min-w-0 space-y-4' : ...`) is untouched — Tailwind's `lg:` prefix only kicks in at the `lg` breakpoint, so narrow viewports never get sticky behavior. The existing narrow-viewport test continues to pass unchanged.
+- The visual-weight test `does not place sticky or heavy-fill chrome on the reference rail` asserted `referenceRail.className).not.toMatch(/\bsticky\b/)`. That assertion is no longer valid because the desktop rail now legitimately carries `lg:sticky`. Replaced it with two narrower tests: (1) `uses desktop sticky positioning without applying sticky behavior on narrow viewports` asserts the five `lg:sticky / lg:top-6 / lg:self-start / lg:max-h-[calc(100vh-3rem)] / lg:overflow-y-auto` classes are present on the rail; (2) `does not apply desktop sticky classes to the narrow rail` asserts the narrow-viewport rail's className has no plain `sticky` token (so desktop sticky is opt-in, not unconditional). The color/fill and shadow assertions from the original test are kept in the second `lightest visual weight` describe block below, so the visual-weight invariant is still locked.
+- The contents test `exposes metadata, model, workflow-profile control, and prerequisites in the rail` now also asserts the `Configuration` rail card's title renders the full word (via `within(configurationToggle).getByText('Configuration')`) and that no `CONF…` fragment is present. This locks the "no truncation at desktop width" invariant in the contents test file.
+- The layout test `marks the rail as desktop mode and lays it out as a right column narrower than the reading flow` was already asserting `grid.className).toMatch(/lg:grid-cols-3/)`, but the matching `grid` was never actually referenced by a separate `screen.getByTestId('issue-detail-content-grid')` — that query existed but its result was unused. Added a new test `keeps the desktop rail visible with a capped internally scrollable sticky column` that asserts all five sticky/scroll class tokens on the rail container.
+
+### Decisions confirmed against spec
+
+- Dropped `truncate` from the rail-card title span only (`CollapsibleRailCard.tsx:59`); summary span keeps `truncate` (D6 / AC #1).
+- Applied desktop-only sticky + max-h + internal overflow to the rail column (`IssueDetailPage.tsx:553-554`); narrow-viewport branch untouched (D6 / AC #2).
+- Did not add JS scroll-spy or `position: fixed` — CSS `sticky` only (D6 alternative-rejected rationale).
+- Did not add a separate "Actions" rail card; design notes the rail has Details / Workflow Profile / Base Drift / Convergence / Configuration / Start Prerequisites / Readiness, and the sticky rule applies to the whole rail column.
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 378 files / 5075 tests passed (+2 tests over T-004 baseline: 1 in layout, 1 in visual-weight, plus the contents test added two in-test assertions and a renamed test).
+- Focused run of the three reference-rail test files — 3 files / 41 tests passed.
+- `git diff --stat` — 5 files changed, 34 insertions, 6 deletions. No collateral edits.
+
+### Out of scope (noted, not done)
+
+- Did not tokenize the page-level container's `overflow-y-auto` or add `position: relative` to it; the page's existing scroll ancestor already supports `position: sticky` (confirmed by the contents-test scroll flow), so the simple `lg:sticky` works without any plumbing changes.
+- Did not introduce JS-driven scroll-spy, `position: fixed`, or `IntersectionObserver` — the design rejects those (D6 alternative-rejected).
+- Did not change the rail card ordering, the rail card set, the narrow-viewport stacking behavior, or any of the other tier weights. The change is purely the two cosmetic/D6 concerns.
+
+
+## T-006 Implementation Notes
+
+### Surprises / things worth knowing
+
+- The skeleton originally reused `data-testid="status-header-tier"` for its top region. That collided with the page's real `status-header-tier` — when `waitFor(() => screen.getByTestId('status-header-tier'))` was used by `IssueDetailPage.status-header.test.tsx`, the skeleton satisfied it first, and the subsequent assertions on `status-headline` / `issue-decision-surface` (which don't exist in the skeleton) failed. Renamed the skeleton's top region to `status-header-tier-skeleton` so the loading and loaded phases have disjoint testids. The cross-tier and navigation tests that previously passed still pass with this rename.
+- `IssueDetailPage.navigation.spec.tsx` had a single assertion `expect(screen.getByText('Loading...')).toBeInTheDocument()` for the "waits for asynchronous issue content before revealing the requested target" test. Per the spec requirement (per-section skeletons, no bare Loading... line), replaced with `expect(screen.getByTestId('issue-detail-page-skeleton')).toBeInTheDocument()` and added a negative `expect(screen.queryByText(/^Loading\.{0,3}$/)).toBeNull()` to lock the absence.
+- The new `ErrorState` component only renders its Retry button when `onRetry` is provided. Tests that exercise the default branch must pass an `onRetry` (even a noop) to get the button to appear. This is the same shape `SectionState` uses for its error variant, so it matches existing app conventions.
+- `ApiError` is imported from `@/shared/api/client`. The 404 classification is `error instanceof ApiError && error.status === 404` — same pattern used by `RunnerDetailPage.tsx:297`, so the invariant "404 vs transient" is consistent across the app.
+- Added two MSW helpers to `_issueDetailMsw.tsx`: `mockIssueError(status, message)` (returns `{ success: false, error, code }` with the given HTTP status, tagging the code as `not_found` for 404 or `transport_error` otherwise) and `mockIssuePending()` (returns a never-resolving promise + a `resolve(issue)` callback, mirroring the existing `mockIssueDiffPending` shape). The `mockIssueError` defaults to a non-404 transient error so callers don't accidentally pass 404 by mistake; the 404 case is an explicit second-arg call site.
+- `ErrorState` uses semantic theme tokens (`bg-danger-subtle`, `border-danger-border`, `text-danger`, `text-danger-foreground/80`) — no literal palette. The `ErrorState.test.tsx` locks this with a class-name negative assertion (`/border-(red|amber|gray|blue)-\d/` and `/bg-(red|amber|gray|blue)-\d/` both absent), same shape the BranchBar/TaskLogPanel tests use for the theme-tokens invariant.
+- `ErrorState` carries `data-error-state="transient"` on its outer div. This is the visible-distinct signal vs `NotFoundState` (which uses no such marker and renders `text-gray-400` / `text-blue-600`); tests rely on testid divergence but a downstream test could also assert the attribute.
+
+### Decisions confirmed against spec
+
+- Used `Failed to load issue` as the title (matches D7's "lightweight ErrorState with `Button variant='outline'` retry" intent; truthful, not generic).
+- Used the original `ApiError.message` when present; falls back to the generic copy only when the error has no message (e.g. a plain thrown value). Matches D7's "Retry button wired to `refetch()`" — the message tells the user what failed, the Retry button gives them a path forward.
+- The Retry button uses the shared `Button` `variant="outline"` (per D7), not a destructive or primary variant — it is an affordance, not the page's primary action.
+- Reused the existing `Skeleton` primitive from `@/shared/ui/components/skeleton` (no new skeleton component, per the design's "reuse existing primitives" goal).
+- Did NOT tokenize `NotFoundState`'s literal `gray-400` / `blue-600` palette (explicitly out of scope per D7 and the task notes).
+- Did NOT touch the page-level container, narrow-viewport behavior, scroll ancestor, or any other layout concern (the scope is loading + error only).
+- Did NOT add a JS-driven `refetch` retry interval, a refresh-button outside the ErrorState, or a separate `error-state-retry` icon — design D7 specifies "Retry button wired to `refetch()`", nothing more.
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 381 files / 5090 tests passed (+3 files / +15 tests over T-005 baseline).
+- Focused run of the three new test files — 15 tests passed (5 async-states, 4 skeleton, 6 ErrorState).
+- `rg "Loading\\.\\.\\.|Loading\\.\\.\\.\\." packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` — zero matches. The bare Loading... line is gone.
+- `rg "border-(red|amber|blue|gray)\\d|text-(red|amber|blue|gray)\\d|bg-(red|amber|blue|gray)\\d" packages/web/src/shared/ui/error-state.tsx` — zero matches; only semantic `danger-*` tokens.
+- `rg "data-testid=\"status-header-tier\"" packages/web/src/pages/issue-detail/ui/IssueDetailPageSkeleton.tsx` — zero matches; the skeleton's top region is `status-header-tier-skeleton` (disjoint from the page's `status-header-tier`).
+- `git diff --stat` — 3 modified files (IssueDetailPage.tsx, _issueDetailMsw.tsx, IssueDetailPage.navigation.spec.tsx), 5 new files (IssueDetailPageSkeleton.tsx, IssueDetailPageSkeleton.test.tsx, IssueDetailPage.async-states.test.tsx, error-state.tsx, error-state.test.tsx).
+
+### Out of scope (noted, not done)
+
+- NotFoundState's literal `text-gray-400` / `text-blue-600` palette is untouched (per task notes and D7 — out of scope; tracked as follow-up).
+- The narrow-viewport loading branch still gets the same desktop+rail skeleton (the skeleton's `lg:col-span-2` / `lg:grid-cols-3` collapse via Tailwind's responsive prefix); no narrow-viewport-specific skeleton variant was added (the design says "a small IssueDetailPageSkeleton that mirrors page structure").
+- Section-level skeletons (commits, diff) still use their own `Loading changes...` / `Loading artifact list...` copy; the page-level fix is the issue-detail-page-skeleton shell per design D7. The sub-section degradation is documented as out of scope.
+- `ErrorState` is a generic shared component (default title + message). Per-call sites can override, but no call site other than `IssueDetailPage` consumes it yet; downstream widgets may adopt it later.
+
+## T-007 Implementation Notes
+
+### Decisions confirmed against spec
+
+- Replaced the shared Button's `disabled:opacity-50` treatment with `disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground`. The disabled pseudo-class keeps the neutral background and foreground authoritative over every Button variant while enabled variants remain unchanged.
+- Added shared Button coverage for enabled, primary-disabled, destructive-disabled, and outline-disabled states. Added issue-detail comment coverage for the empty-comment submit and in-flight delete buttons, which inherit the shared primitive styling without per-call-site overrides.
+
+### Verification
+
+- Focused regression run (`button.test.tsx` and `IssueCommentsSection.test.tsx`) — 2 files / 15 tests passed.
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 382 files / 5097 tests passed.
+
+### Out of scope (noted, not done)
+
+- No changes were made to the decision surface; its disabled behavior remains owned by the sibling decision-surface work.
+
+## Verification Repair
+
+- `npm run test:ci -w packages/web` initially failed in `check:test-boundaries`, not Vitest: `WorkflowSessionsPanel.test.tsx` had 553 lines, exceeding the 500-line test budget. The growth came from the T-003 shared-Select interaction coverage.
+- Split the filter/select interaction tests into `WorkflowSessionsPanel.filters.test.tsx`; the original suite is now below the enforced budget and all filter assertions remain covered in the new suite.
+
+## Follow-up Verification
+
+- The current worktree was clean before verification and `npm run verify` completed successfully: build succeeded, .NET tests passed (5,623 total), Web CI passed (383 files / 5,097 tests), and Runner CI passed (110 files / 1,275 tests).
+- Verification produced no Git-visible changes, so no implementation repair was required after the test-budget fix.
+
+## Review Repair
+
+- The review found that `WorkflowProfileControl.tsx` still rendered a native workflow-profile `<select>` inside the issue-detail reference rail, violating the page-wide shared-select requirement.
+- Replaced it with the shared `Select`/`SelectTrigger`/`SelectContent`/`SelectItem` components while preserving the existing test id, accessible label target, selected profile display, disabled lock state, title, and async update handler.
+- Updated `WorkflowProfileControl.test.tsx` for portaled shared-select interaction and added a reference-rail regression assertion that no native `<select>` is rendered on the issue-detail page.
+- Verification: focused workflow-profile and reference-rail/integration tests passed (69 tests); Web typecheck passed; `npm run test:ci -w packages/web` passed (383 files / 5,097 tests, FSD and test-boundary checks included); `npm run build:web` passed.

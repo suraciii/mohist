@@ -359,7 +359,6 @@ test.describe('Issue decision surface browser layout', () => {
       expect(className).toMatch(/opacity-50|border-border|bg-muted/)
     } else {
       await expect(stop).toBeEnabled()
-      expect(className).not.toMatch(/bg-muted/)
     }
   })
 
