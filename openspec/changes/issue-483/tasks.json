@@ -6,13 +6,15 @@
       "id": "T-001",
       "title": "Implement Server Turn protocol and Session migration",
       "spec": "specs/agent-session-turn-protocol-migration/spec.md#complete-legacy-transcript-conversion",
-      "description": "Make the Session bounded context the authoritative interpreter for Turn and Follow-up facts. Replace terminal Session state and close-specific grain operations with Turn activity, binding, current/latest Turn summaries, operation fences, Turn-keyed transcript persistence, and Session command/API contracts. Add the schema and startup migration that converts persisted transcript and Session state before new protocol traffic is admitted.",
+      "description": "Make the Session bounded context the authoritative interpreter for Turn and Follow-up facts. Replace terminal Session state and close-specific grain operations with Turn activity, binding, current/latest Turn summaries, operation fences, Turn-keyed transcript persistence, and Session command/API contracts. Add the schema/startup migration, legacy Follow-up migration resolver, and version-2 Runner admission gate that convert persisted state and reject mismatched runners before new protocol traffic is admitted.",
       "acceptanceCriteria": [
         "The Session grain accepts only canonical `turn.*` and `followup.*` execution facts, enforces stable Turn identity, per-Turn ordering, one start, at most one finish, and rejects legacy terminal event names.",
         "Finished Turns leave the logical Session idle with its Runtime binding intact; missing bindings, unknown activity, Follow-up, Cancel, Compact, and Reset use the specified eligibility rules without changing TaskRun or AgentJob work results.",
         "Follow-up reservations persist stable operation and new-Turn identities, atomically record admitted input facts, retain ambiguous delivery for reconciliation, and never automatically resend uncertain Runtime input.",
-        "The EF schema and startup migration convert legacy transcript/Session state transactionally, preserve history, map legacy terminal outcomes to Turns, and project unprovable in-flight execution as `unknown`.",
-        "Server unit and spec coverage exercises Turn invariants, command gates, Follow-up state convergence, legacy-event rejection, and migrated transcript state; `npm test` passes."
+        "The EF schema and startup migration group legacy Follow-up transcript facts by operation, atomically write admitted plus started for each persisted input, and project unprovable in-flight execution as `unknown` without an admitted fact.",
+        "A migration-only Server resolver consumes one Runner migration-resolution record per legacy Follow-up group, acknowledges an already migrated admitted pair idempotently, and otherwise records delivery-unconfirmed without accepting any legacy runtime event name.",
+        "Runner registration, heartbeat, runtime-event upload, poll, and Hub tracking require `sessionProtocolVersion: 2`; missing or mismatched versions return `runner_session_protocol_incompatible`, leave the runner unavailable, and cannot receive Session commands.",
+        "Server unit and spec coverage exercises Turn invariants, command gates, Follow-up state convergence, legacy-event rejection, migrated transcript state, and matching/mismatched Runner protocol admission; `npm test` passes."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -20,19 +22,21 @@
       "output": "Server Session domain, transcript persistence, API contracts, and durable migration implementing the Turn protocol.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Expose one versioned Server protocol contract for Runner and Web consumers; do not retain legacy event compatibility after migration."
+      "notes": "Persist the runner protocol version in RunnerInfo and enforce it on both REST and Hub entry points; do not retain legacy event compatibility after migration."
     },
     {
       "id": "T-002",
       "title": "Migrate Runner Turn reporting and durable delivery",
       "spec": "specs/agent-session-followup-delivery/spec.md#follow-up-operation-convergence",
-      "description": "Update OpenCode and Pi execution reporters, AgentJob execution, workflow actions, Follow-up handling, Cancel outcomes, and the shared runtime-event outbox to produce the Server Turn protocol. Version and migrate Runner outbox snapshots before delivery, preserving operation identity and converting ambiguous legacy Follow-up effects to delivery-unconfirmed without rerunning Runtime input.",
+      "description": "Update OpenCode and Pi execution reporters, AgentJob execution, workflow actions, Follow-up handling, Cancel outcomes, and the shared runtime-event outbox to produce the Server Turn protocol. Version and migrate Runner outbox snapshots before delivery by grouping legacy records per Follow-up operation and replacing each group with a durable migration-resolution record; the Server, not the Runner, classifies persisted-input groups as admitted-plus-started and all other groups as delivery-unconfirmed without rerunning Runtime input.",
       "acceptanceCriteria": [
         "OpenCode and Pi emit replay-stable Turn IDs and the same `turn.started`, Turn-scoped runtime facts, and `turn.finished` outcomes for Workflow and AgentJob execution.",
         "Runner Follow-up handling emits admitted, rejected, or delivery-unconfirmed facts with the original operation and Turn identities; it never emits legacy Follow-up terminal events or re-invokes an ambiguous Runtime operation.",
         "Cancel and failure paths report confirmed Turn outcomes only; inability to confirm Runtime stop leaves the Server able to project `unknown` rather than receiving a fabricated terminal event.",
-        "The outbox migrates persisted v1 records atomically before it becomes ready, preserves delivery ordering and acknowledgement semantics, and does not lose facts or duplicate Runtime input across crash/retry recovery.",
-        "Runner unit/spec coverage covers both runtimes, workflow and AgentJob paths, active/idle Follow-up, ambiguity, cancellation, v1 outbox conversion, and legacy-event removal; `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass."
+        "The outbox replaces each v1 Follow-up group with one ordered, durable migration-resolution record before it becomes ready; it preserves group identity and acknowledgement semantics, never emits admitted itself, and invokes no duplicate Runtime input.",
+        "The Server migration resolver classifies each migration-resolution record against migrated transcript evidence, returns the existing admitted-plus-started pair only for a persisted input, and otherwise atomically records delivery-unconfirmed for absent-input, unusable-identity, and failed-only groups.",
+        "The host supplies `sessionProtocolVersion: 2` on registration, heartbeat, and Hub setup, and treats protocol incompatibility as a permanent unavailable state that prevents outbox drain, polling, and Session-command handling.",
+        "Runner unit/spec coverage covers both runtimes, workflow and AgentJob paths, active/idle Follow-up, ambiguity, cancellation, every legacy Follow-up group classification, v1 outbox crash recovery, matching/mismatched protocol admission, and legacy-event removal; `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass."
       ],
       "priority": 2,
       "mode": "AFK",
@@ -42,7 +46,7 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Use the protocol-version gate supplied by T-001; do not implement a legacy fallback or dual-write path."
+      "notes": "Use the protocol-version gate supplied by T-001; do not implement a legacy fallback, dual-write path, or automatic retry of a migration-unconfirmed operation."
     },
     {
       "id": "T-003",
