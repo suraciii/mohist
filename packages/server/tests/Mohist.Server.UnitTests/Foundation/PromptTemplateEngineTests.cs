@@ -13,144 +13,118 @@ public class PromptTemplateEngineTests
     }
 
     [Fact]
-    public void Render_ResolvedStringSubstitutesValueAndLeavesMissingListEmpty()
+    public void Render_CompleteAndEmbeddedScalarsPreservePromptText()
     {
-        var engine = new PromptTemplateEngine();
+        var result = new PromptTemplateEngine().Render(
+            "issue-${{ issue.number }} / ${{ vars.flag }} / ${{ vars.nil }}",
+            Variables("{ \"issue\": { \"number\": 42 }, \"vars\": { \"flag\": true, \"nil\": null } }"));
 
-        var (rendered, missing, _) = engine.Render(
-            "Hello ${{ issue.number }}",
-            Variables("{ \"issue\": { \"number\": 42 } }"));
-
-        Assert.Equal("Hello 42", rendered);
-        Assert.Empty(missing);
+        Assert.Equal("issue-42 / true / ", result.Rendered);
+        Assert.Empty(result.Errors);
     }
 
     [Fact]
-    public void Render_NestedPathResolvesThroughObjects()
+    public void Render_MissingWholeAndEmbeddedReferencesReportErrorsAndDoNotRemain()
     {
-        var engine = new PromptTemplateEngine();
+        var result = new PromptTemplateEngine().Render(
+            "before ${{ vars.missing }} after ${{ tasks.unknown.outputs.result }}",
+            Variables("{}"));
 
-        var (rendered, missing, _) = engine.Render(
-            "Owner: ${{ project.name }}",
-            Variables("{ \"project\": { \"name\": \"Mohist\" } }"));
-
-        Assert.Equal("Owner: Mohist", rendered);
-        Assert.Empty(missing);
+        Assert.DoesNotContain("${{", result.Rendered);
+        Assert.Equal(new[] { "tasks.unknown.outputs.result", "vars.missing" }, result.MissingVariables);
+        Assert.All(result.Errors, error => Assert.Equal("missing_reference", error.Code));
     }
 
     [Fact]
-    public void Render_MissingVariableIsLeftInPlaceAndRecorded()
+    public void Render_ObjectsAndArraysAreRejectedInCompleteAndEmbeddedExpressions()
     {
-        var engine = new PromptTemplateEngine();
+        var variables = Variables("{ \"vars\": { \"object\": { \"x\": 1 }, \"array\": [1, 2] } }");
 
-        var (rendered, missing, depth) = engine.Render(
-            "Hello ${{ issue.priority }}",
-            Variables("{ \"issue\": { \"number\": 42 } }"));
+        var complete = new PromptTemplateEngine().Render("${{ vars.object }}", variables);
+        var embedded = new PromptTemplateEngine().Render("value=${{ vars.array }}", variables);
 
-        Assert.Contains("${{ issue.priority }}", rendered);
-        Assert.Contains("issue.priority", missing);
-        Assert.DoesNotContain("issue.number", missing);
-        Assert.Equal(0, depth);
+        Assert.Contains(complete.Errors, error => error.Code == "invalid_type" && error.Path == "vars.object");
+        Assert.Contains(embedded.Errors, error => error.Code == "invalid_type" && error.Path == "vars.array");
+        Assert.DoesNotContain("${{", complete.Rendered);
+        Assert.DoesNotContain("${{", embedded.Rendered);
     }
 
     [Fact]
-    public void Render_ChainedStringExpansionConvergesWithinFivePasses()
+    public void Render_EscapedReferenceRemainsLiteral()
     {
-        var engine = new PromptTemplateEngine();
+        var result = new PromptTemplateEngine().Render(
+            @"use \${{ vars.foo }}",
+            Variables("{ \"vars\": { \"foo\": \"expanded\" } }"));
 
-        var (rendered, missing, depth) = engine.Render(
-            "${{ a }}",
-            Variables("{ \"a\": \"${{ b }}\", \"b\": \"${{ c }}\", \"c\": \"value\" }"));
-
-        Assert.Equal("value", rendered);
-        Assert.Empty(missing);
-        Assert.True(
-            depth <= PromptTemplateEngine.MaxPasses,
-            $"Convergence must happen within {PromptTemplateEngine.MaxPasses} passes, but engine ran {depth}.");
-        Assert.Equal(3, depth);
+        Assert.Equal("use ${{ vars.foo }}", result.Rendered);
+        Assert.Empty(result.Errors);
     }
 
     [Fact]
-    public void Render_NonConvergingCyclicInputIsBoundedByMaxPasses()
+    public void Render_ChainedStringExpansionConverges()
     {
-        var engine = new PromptTemplateEngine();
+        var result = new PromptTemplateEngine().Render(
+            "${{ vars.a }}",
+            Variables("{ \"vars\": { \"a\": \"${{ vars.b }}\", \"b\": \"${{ vars.c }}\", \"c\": \"value\" } }"));
 
-        var (rendered, missing, depth) = engine.Render(
-            "${{ a }}",
-            Variables("{ \"a\": \"${{ b }}\", \"b\": \"${{ a }}\" }"));
-
-        Assert.Equal(PromptTemplateEngine.MaxPasses, depth);
-        Assert.NotEmpty(missing);
-        Assert.Contains("${{", rendered);
+        Assert.Equal("value", result.Rendered);
+        Assert.Empty(result.Errors);
+        Assert.Equal(3, result.Depth);
     }
 
     [Fact]
-    public void Render_SelfReferentialTokenDoesNotLoopAndIsReportedAsMissing()
+    public void Render_CyclesAndOverDepthFailDeterministically()
     {
-        var engine = new PromptTemplateEngine();
+        var cycle = new PromptTemplateEngine().Render(
+            "${{ vars.a }}",
+            Variables("{ \"vars\": { \"a\": \"${{ vars.b }}\", \"b\": \"${{ vars.a }}\" } }"));
+        var deep = new PromptTemplateEngine().Render(
+            "${{ vars.a }}",
+            Variables("{ \"vars\": { \"a\": \"${{ vars.b }}\", \"b\": \"${{ vars.c }}\", \"c\": \"${{ vars.d }}\", \"d\": \"${{ vars.e }}\", \"e\": \"${{ vars.f }}\", \"f\": \"done\" } }"));
 
-        var (rendered, missing, depth) = engine.Render(
-            "${{ a }}",
-            Variables("{ \"a\": \"${{ a }}\" }"));
-
-        Assert.Equal("${{ a }}", rendered);
-        Assert.Contains("a", missing);
-        Assert.Equal(0, depth);
-    }
-
-    [Fact]
-    public void Render_ObjectArrayNumberAndBooleanAreJsonStringified()
-    {
-        var engine = new PromptTemplateEngine();
-
-        var variables = Variables(
-            "{ \"data\": { \"obj\": { \"x\": 1 }, \"arr\": [1, 2], \"n\": 42, \"flag\": true } }");
-
-        var (objectRendered, objectMissing, _) = engine.Render("${{ data.obj }}", variables);
-        var (arrayRendered, arrayMissing, _) = engine.Render("${{ data.arr }}", variables);
-        var (numberRendered, numberMissing, _) = engine.Render("${{ data.n }}", variables);
-        var (boolRendered, boolMissing, _) = engine.Render("${{ data.flag }}", variables);
-
-        Assert.Equal("{ \"x\": 1 }", objectRendered);
-        Assert.Empty(objectMissing);
-        Assert.Equal("[1, 2]", arrayRendered);
-        Assert.Empty(arrayMissing);
-        Assert.Equal("42", numberRendered);
-        Assert.Empty(numberMissing);
-        Assert.Equal("true", boolRendered);
-        Assert.Empty(boolMissing);
-    }
-
-    [Fact]
-    public void Render_NullValueResolvesToLiteralStringNull()
-    {
-        var engine = new PromptTemplateEngine();
-
-        var variables = Variables("{ \"data\": { \"nil\": null } }");
-
-        var (rendered, missing, _) = engine.Render("${{ data.nil }}", variables);
-
-        Assert.Equal("null", rendered);
-        Assert.Empty(missing);
+        Assert.Contains(cycle.Errors, error => error.Code == "cycle");
+        Assert.Contains(deep.Errors, error => error.Code == "max_depth");
+        Assert.DoesNotContain("${{", cycle.Rendered);
+        Assert.DoesNotContain("${{", deep.Rendered);
     }
 
     [Fact]
     public void ExtractVariables_ReturnsSortedDeduplicatedPathsWithoutRendering()
     {
-        var body = "Use ${{ openspecChangeDir }} and ${{ issue.number }} and ${{ openspecChangeDir }}";
+        var variables = PromptTemplateEngine.ExtractVariables(
+            "Use ${{ vars.foo }} and ${{ issue.number }} and ${{ vars.foo }}");
 
-        var variables = PromptTemplateEngine.ExtractVariables(body);
-
-        Assert.Equal(new[] { "issue.number", "openspecChangeDir" }, variables.ToArray());
+        Assert.Equal(new[] { "issue.number", "vars.foo" }, variables.ToArray());
     }
 
     [Fact]
-    public void ExtractVariables_DoesNotRequireVariablesToBeResolvable()
+    public void ExtractVariables_IgnoresEscapedReferences()
     {
-        var body = "${{ does.not.exist }} nested with ${{ another.missing }}";
+        var variables = PromptTemplateEngine.ExtractVariables(
+            @"Use \${{ vars.literal }} and ${{ vars.actual }}");
 
-        var variables = PromptTemplateEngine.ExtractVariables(body);
+        Assert.Equal(new[] { "vars.actual" }, variables.ToArray());
+    }
 
-        Assert.Equal(new[] { "another.missing", "does.not.exist" }, variables.ToArray());
+    [Fact]
+    public void ExtractVariables_CanValidateReferencesWithTheSameRenderer()
+    {
+        var body = "see ${{ vars.missing }} and ${{ vars.object }}";
+        var result = new PromptTemplateEngine().Render(body, Variables("{ \"vars\": { \"object\": {} } }"));
+
+        Assert.Contains(result.Errors, error => error.Code == "missing_reference" && error.Path == "vars.missing");
+        Assert.Contains(result.Errors, error => error.Code == "invalid_type" && error.Path == "vars.object");
+    }
+
+    [Fact]
+    public void Render_RejectsBareVariablesAndOffTableRoots()
+    {
+        var result = new PromptTemplateEngine().Render(
+            "${{ foo }} ${{ project.id }} ${{ vars.foo }}",
+            Variables("{ \"foo\": \"bare\", \"project\": { \"id\": \"project-1\" }, \"vars\": { \"foo\": \"namespaced\" } }"));
+
+        Assert.Equal("  namespaced", result.Rendered);
+        Assert.Contains(result.Errors, error => error.Code == "missing_reference" && error.Path == "foo");
+        Assert.Contains(result.Errors, error => error.Code == "missing_reference" && error.Path == "project.id");
     }
 }

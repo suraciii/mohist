@@ -1,0 +1,94 @@
+{
+  "project": "mohist-local",
+  "description": "Close the Workflow template language to ten roots, enforce fail-fast rendering across all entry points, relocate approval feedback under work.approvalFeedback, and migrate builtin profiles and prompts to the closed namespace.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Close server dispatch context to ten roots, relocate feedback, extend inline-agent set",
+      "spec": "specs/template-namespace-closure/spec.md#Closed template root set",
+      "description": "Separate runtime context from the VariableBundle in IssueVariableBuilder.BuildBuiltInContext and WorkflowItemTranslator.BuildPayloadAsync. Stop injecting mohist, project, openspecChangeName, openspecChangeDir, workspace.changeDir, and the vars-key hoisting loop. Build issue, repository, and workspace roots directly as payload entries alongside the existing workflow, stage, work roots. Relocate ApprovalFeedback from a bare approvalFeedback root to work.approvalFeedback with fields id, stage, createdAt, summary; remove the command field and BuildFeedbackShowCommand. Extend IsInlineAgentUses in both WorkflowItemTranslator and WorkflowYamlSerializer to match mohist/pi alongside mohist/opencode. Complete the failure dispatch root to include error.code and error.message for consistency. BuildRootVariables stops hoisting and stops injecting runtime facts, producing only vars and prompts.",
+      "acceptanceCriteria": [
+        "Dispatch payload variable roots are limited to workflow, stage, work, issue, repository, workspace, vars, tasks, prompts, failure",
+        "No mohist, project, openspecChangeName, openspecChangeDir, bare approvalFeedback, or runner root appears in the dispatch payload",
+        "Effective Variable keys are not hoisted to top-level bare names; vars contains only merged Variables without runtime context, tasks, prompts, or failure copies",
+        "ApprovalFeedback facts appear under work.approvalFeedback with fields id, stage, createdAt, summary only in feedback tasks; non-feedback tasks carry no work.approvalFeedback",
+        "No pre-rendered command field exists anywhere in the dispatch payload",
+        "IsInlineAgentUses matches both mohist/opencode and mohist/pi in WorkflowItemTranslator and WorkflowYamlSerializer",
+        "Server unit and spec tests pass for dispatch payload shape, feedback nesting, inline-agent validation for both agents, and vars-only resolution; dotnet build and the affected Server test suite pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server dispatch context produces exactly the ten documented roots with feedback nested under work.approvalFeedback and both inline agents sharing the same validation surface",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Foundational task: the runner and content migration depend on the clean dispatch payload. The work root is built as a dictionary so approvalFeedback is added conditionally. IssueVariableBuilder.BuildRootVariables (persisted variables) also stops hoisting and injecting runtime facts."
+    },
+    {
+      "id": "T-002",
+      "title": "Enforce fail-fast rendering and closed variable assembly in the runner",
+      "spec": "specs/template-evaluation-semantics/spec.md#Unresolvable expression fails the task",
+      "description": "Make renderTemplate throw on any unresolvable reference whether whole-string or embedded, removing the embedded-unresolved-as-literal passthrough. Remove the tasks.* empty-string fallback in resolvePath so missing task outputs fail like any missing path. Enforce scalar-only string interpolation: an embedded expression resolving to object or array fails. Switch the executor pre-dispatch check from wholeStringUnresolvedReferences to unresolvedReferences. Update executor.variables() to stop spreading userVariables into a flat root, stop adding the runner root, and override only workspace.path and workspace.branch (no changeDir). Update workspace.ts to stop reading openspecChangeDir and mohist.runId from the variable context; compute workspace identity from workflow.runId. Drop changeDir from ResolvedWorkspace and resolvedWorkspaceToVariables. Add runner-side behavior-vector tests covering complete value type preservation, embedded scalar concatenation, embedded object/array rejection, missing reference (whole and embedded), tasks.* present and missing, escape, nesting and cycle, failure recovery-only scoping, and work.approvalFeedback context differences.",
+      "acceptanceCriteria": [
+        "renderTemplate throws on any unresolvable ${{ path }} whether whole-string or embedded, identifying the offending expression",
+        "Missing ${{ tasks.<id>.outputs.* }} paths fail instead of resolving to empty string or literal text",
+        "Embedded expressions resolving to object or array fail the task; complete expressions preserve JSON type",
+        "\\${{ produces literal ${{ ; reference cycles and over-depth nesting fail deterministically without leaving unexpanded text",
+        "${{ failure.* }} resolves only in recovery tasks and fails in non-recovery tasks; recovery expansion semantics are unchanged",
+        "executor.variables() does not add a runner root, does not expose workspace.changeDir, and does not spread userVariables as bare roots",
+        "workspace.ts resolves workspace identity from workflow.runId without reading openspecChangeDir or mohist.runId",
+        "npm run typecheck -w packages/runner and npm test -w packages/runner pass, including behavior-vector unit tests for renderTemplate and executor spec tests for fail-fast rendering and workspace resolution"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner renders templates strictly fail-fast across all behavior vectors and assembles variables from only the ten dispatch roots",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The #465 raw-declaration and attempt-snapshot invariants must remain intact: this task only changes what roots the snapshot exposes and how rendering fails, not when or how the snapshot is built. Switching uses between mohist/opencode and mohist/pi must produce identical rendering and error behavior."
+    },
+    {
+      "id": "T-003",
+      "title": "Converge server preview engine onto shared behavior vectors",
+      "spec": "specs/template-evaluation-semantics/spec.md#Unified rendering behavior across entry points",
+      "description": "Rewrite PromptTemplateEngine.Render to apply the same rendering rules as the runner: report unresolvable references as errors rather than leaving literal text, honor the \\${{ escape, enforce a deterministic nesting stop with cycle detection, and reject embedded object or array values. Update the TemplateRoutes extract-variables and system-template endpoints to surface missing references and type violations as actionable errors. Add server-side behavior-vector tests mirroring the runner matrix so preview and execution entry points produce identical results for the same input.",
+      "acceptanceCriteria": [
+        "PromptTemplateEngine.Render reports unresolvable references as errors rather than leaving literal ${{ }} text in the output",
+        "Preview honors \\${{ escape and enforces a nesting depth limit with cycle detection",
+        "Embedded object or array values in prompt preview are reported as errors",
+        "Server preview tests pass with the same behavior-vector matrix as the runner: complete value, embedded value, missing reference, escape, nesting and cycle produce consistent results",
+        "TemplateRoutes extract-variables and system-template endpoints return results consistent with the converged engine; affected Server tests pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server preview engine applies the same fail-fast rendering rules as the runner, with no entry point retaining a separate set of missing-value, type-coercion, or escape rules",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Prompt bodies are always strings; a complete expression resolving to object or array is reported as an error in preview, consistent with embedded interpolation rules. The preview may return structured errors (missing refs, type violations) rather than throwing, so the web UI can surface them per-expression."
+    },
+    {
+      "id": "T-004",
+      "title": "Migrate builtin profiles, prompts, web fixtures, and documentation",
+      "spec": "specs/builtin-content-migration/spec.md#Builtin profiles use only the closed namespace",
+      "description": "Rewrite both builtin profile YAMLs (mohist-local, mohist-github-pr) and all builtin prompts to use only the closed namespace. Replace every ${{ openspecChangeDir }} with the literal openspec/changes/issue-${{ issue.number }} template, ${{ project.id }} with ${{ issue.projectId }} (with --project flag), ${{ approvalFeedback.id }} with ${{ work.approvalFeedback.id }}, and remove ${{ approvalFeedback.command }} usage. The apply-feedback prompt builds the mo issue feedback show invocation from work.approvalFeedback.id, issue.number, and issue.projectId. Escape any literal ${{ }} documentation or example text in prompts with \\${{. Update web preview fixtures, editor sample context, and test defaults to use only the closed namespace. Sync docs (workflow-definition.md template reference and gap notes, task-dispatch.md, definition.md, prompt-management.md) to remove resolved gap sections. Add end-to-end regression tests verifying Plan artifact location, recovery, approval feedback application, retry, and GitHub PR delivery are unchanged.",
+      "acceptanceCriteria": [
+        "No builtin profile or prompt references openspecChangeDir, openspecChangeName, project.id, bare approvalFeedback root, or approvalFeedback.command",
+        "Builtin prompts needing project identity use ${{ issue.projectId }} with the --project flag; the apply-feedback prompt reads ${{ work.approvalFeedback.id }}",
+        "OpenSpec paths in profiles and prompts resolve to the same on-disk locations as before migration (e.g. openspec/changes/issue-N/proposal.md)",
+        "Literal ${{ }} documentation text in prompts is escaped with \\${{ so it survives rendering",
+        "Web preview fixtures, editor sample context, and test defaults use only the closed namespace",
+        "Product and design docs no longer describe off-table roots or the old server pre-expansion boundary; resolved gap notes are removed",
+        "End-to-end tests pass: Plan artifacts land under openspec/changes/issue-N/, approval feedback works via work.approvalFeedback, recovery fires correctly, retry works, GitHub PR delivery completes",
+        "npm run typecheck and npm test pass for affected packages; server tests pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Builtin profiles, prompts, web fixtures, and docs fully migrated to the closed namespace with no end-to-end behavior change",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Coordinated content migration performed after the engine and dispatch changes land. Resolved paths must match pre-migration locations exactly. Verify that switching a task's uses between mohist/opencode and mohist/pi produces identical end-to-end results."
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+## Why
+
+The template language is documented as a closed set of ten roots, but the built-in profiles, prompts, and dispatch context still inject off-table bare names (`openspecChangeDir`, `openspecChangeName`, `project.id`, bare `approvalFeedback`, `mohist`, `workspace.changeDir`, runner-local `runner`), and every Variable key is also reachable as a top-level bare name. Authors cannot tell what is public syntax versus implementation leftover, and unresolvable expressions can still pass through as literal text or empty values, surfacing failures late. This closes those gaps so the language has one documented surface, one rendering behavior, and fail-fast errors.
+
+## What Changes
+
+- **BREAKING** Close the template language to the ten roots `workflow`, `stage`, `work`, `issue`, `repository`, `workspace`, `vars`, `tasks`, `prompts`, `failure`. Remove the off-table bare roots `mohist`, `project`, `openspecChangeName`, `openspecChangeDir`, bare `approvalFeedback`, and the runner-local `runner` root. `${{ openspecChangeDir }}`, `${{ project.id }}`, `${{ mohist.* }}` and similar references fail.
+- **BREAKING** Effective Variables resolve only through `${{ vars.* }}`. Variable keys are no longer hoisted to top-level bare names (so `${{ foo }}` fails when `vars.foo` exists), and runtime context (`workflow`, `issue`, `tasks`, etc.) is not copied or merged into `vars`.
+- Remove `workspace.changeDir`. OpenSpec change paths are written literally as `openspec/changes/issue-${{ issue.number }}` wherever needed; no root computes or injects them.
+- Relocate ApprovalFeedback from a bare `approvalFeedback.*` root to `work.approvalFeedback.*`, exposing only `id`, `stage`, `createdAt`, `summary`, and only in the task that the feedback produced. Drop the pre-rendered `command` field; the consuming prompt builds the invocation from `work.approvalFeedback.id`, `issue.number`, and `issue.projectId`.
+- Unify template evaluation into one fail-fast behavior across task input rendering, live-read Prompt rendering, and the retained preview/extract entry points: a complete `${{ path }}` preserves the JSON type; an expression embedded in a string accepts only scalars and fails on object/array; any unresolvable reference (including a missing `tasks.<id>.outputs.*`) fails the task and identifies the offending expression; `\${{` yields a literal `${{`; nested expansion has a deterministic stop (depth limit and cycle detection). `${{ failure.* }}` stays recovery-task-only with unchanged recovery semantics.
+- Treat `mohist/opencode` and `mohist/pi` as the same-layer Inline Agent set so switching `uses` between them does not change template rendering, Prompt behavior, completion requirements, or error semantics.
+- Migrate the built-in profiles (`mohist/local`, `mohist/github-pr`) and all builtin prompts to the closed namespace: project identity uses `issue.projectId` / `--project`, and every OpenSpec path is the literal `openspec/changes/issue-${{ issue.number }}` template.
+- Update the product template reference, dispatch timing design, and shared behavior-vector documentation to remove descriptions of the old server pre-expansion boundary and off-table roots.
+
+## Capabilities
+
+- `template-namespace-closure`: Closes the dispatch context (server payload building) and runner variable assembly to the ten documented roots. Removes off-table bare roots (`mohist`, `project`, `openspecChangeName`, `openspecChangeDir`, bare `approvalFeedback`, `runner`) and `workspace.changeDir`, and stops hoisting Effective Variable keys to top-level bare names or merging runtime context into `vars`. Covers `IssueVariableBuilder.BuildBuiltInContext`, `WorkflowItemTranslator.BuildPayloadAsync` root assembly, and the runner `executor.variables` assembly.
+- `template-evaluation-semantics`: Defines the single, fail-fast rendering behavior shared by every author-visible entry point — task input, live-read Prompt, and retained preview/extract. Covers complete-expression JSON type preservation, scalar-only string interpolation (object/array fails), unresolvable-reference failure with offending-expression location (including missing `tasks.<id>.outputs.*`), `\${{` literal escape, deterministic nested-expansion stop (depth limit and cycle detection), `failure.*` recovery-only scoping with unchanged recovery semantics, and identical results when the same Inline Agent task switches `uses` between `mohist/opencode` and `mohist/pi`. Covers the runner `renderTemplate` engine and the convergence of the server `PromptTemplateEngine` preview path onto the same behavior vectors.
+- `approval-feedback-context`: Exposes ApprovalFeedback only as `work.approvalFeedback.{id,stage,createdAt,summary}` in the task produced by that feedback, removes the pre-rendered `command`, and ensures non-feedback tasks carry no `work.approvalFeedback`.
+- `builtin-content-migration`: Rewrites the built-in profiles and all builtin prompts onto the closed namespace (literal `openspec/changes/issue-${{ issue.number }}`, `issue.projectId` / `--project`, no `openspecChangeDir`/`openspecChangeName`/`project.id`/`approvalFeedback.command`), while preserving existing Workflow end-to-end behavior — Plan artifact location, recovery, approval feedback, retry, and GitHub PR delivery.
+
+## Impact
+
+- **Server** (`packages/server/src/Mohist.Server/`):
+  - `Issue/Services/IssueVariableBuilder.cs` (`BuildBuiltInContext`, `BuildRootVariables`) — stop producing `mohist`, `project`, `openspecChangeName`, `openspecChangeDir`, `workspace.changeDir`, and vars-key hoisting.
+  - `Runner/Services/WorkflowItemTranslator.cs` (`BuildPayloadAsync`, `IsInlineAgentUses`) — emit only the ten roots, relocate feedback to `work.approvalFeedback`, drop `command`, and treat `mohist/pi` as an inline agent for parity.
+  - `Workflow/Services/Prompts/PromptTemplateEngine.cs` and `Api/TemplateRoutes.cs` — converge preview/extract behavior onto the shared rendering vectors.
+- **Runner** (`packages/runner/src/`):
+  - `core/template.ts` (`renderTemplate`) — enforce strict failure, type preservation, scalar-only interpolation, escape, and nesting stop.
+  - `runtime/executor.ts` (`variables`, rendering calls) — drop the `runner` root and stop overriding `workspace` with off-table fields.
+  - `runtime/recovery.ts` — `failure.*` scoping unchanged under the unified engine.
+- **Built-in content**: `Workflow/Services/Profiles/*.workflow.yaml` (both profiles) and `Workflow/Services/Prompts/builtins/*.prompt` (11 of 13 prompts) — rewrite off-table references.
+- **Web** (`packages/web/src/`): preview fixtures, defaults, and editor sample context that still carry `openspecChangeDir` / `project.id`.
+- **Docs**: `docs/workflow-definition.md` (template reference + 实装差距), `design/workflow/task-dispatch.md`, `design/workflow/definition.md`, `design/prompt-management.md` — sync to target, drop the now-resolved gaps.
+- **Risk**: high — the change touches dispatch context, Runner expansion, built-in Profile/Prompt, approval feedback, and both Inline Agent paths simultaneously; verified against the shared behavior vectors spanning complete value, embedded value, missing reference, `tasks.*`, escape, nesting/cycle, `failure`, and `work.approvalFeedback` context differences.

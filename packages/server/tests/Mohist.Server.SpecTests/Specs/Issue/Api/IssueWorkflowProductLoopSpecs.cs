@@ -430,7 +430,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
                 title: Load tasks from plan
                 uses: mohist/openspec-tasks
                 with:
-                  path: ${{ openspecChangeDir }}/tasks.json
+                  path: "openspec/changes/issue-${{ issue.number }}/tasks.json"
                   task:
                     uses: mohist/opencode
                     with:
@@ -438,7 +438,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
                       prompt:
                         uses: mohist/openspec-task-prompt
                         with:
-                          file: ${{ openspecChangeDir }}/tasks.json
+                          file: "openspec/changes/issue-${{ issue.number }}/tasks.json"
                           items: tasks
                           base: ${{ prompts.build }}
             checks:

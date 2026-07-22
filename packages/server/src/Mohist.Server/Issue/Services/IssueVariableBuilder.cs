@@ -11,8 +11,8 @@ using MohistIssue = Mohist.Server.Issue.Domain.Issue;
 namespace Mohist.Server.Issue.Services;
 
 /// <summary>
-/// Builds the built-in calling context bundle persisted on
-/// <c>IssueWorkflowProfile</c> at issue start (T1).
+/// Builds the variable bundle persisted on <c>IssueWorkflowProfile</c> at
+/// issue start (T1).
 ///
 /// The issue profile stores ONLY the issue's static identity context
 /// (<c>mohist</c> / <c>issue</c> / <c>project</c> / <c>repository</c> /
@@ -21,14 +21,13 @@ namespace Mohist.Server.Issue.Services;
 /// (<c>config.jsonc</c>) or project <c>Variables</c>: those layers are merged
 /// live at resolution time (dispatch + display) so that subsequent edits to
 /// project or global <c>Variables</c> propagate to already-created issues.
-/// Resolution order is <c>MergeAll(global, project, issue)</c>.
+/// Runtime context is assembled separately when a task is dispatched.
 /// </summary>
 public static class IssueVariableBuilder
 {
     /// <summary>
-    /// Builds the T1 issue-context bundle: only the built-in calling context,
-    /// no global/project user variables. This is what gets persisted on the
-    /// issue profile at start.
+    /// Builds the T1 issue variable bundle without global/project user
+    /// variables. This is what gets persisted on the issue profile at start.
     /// </summary>
     public static VariableBundle BuildContextBundle(
         string workflowRunId,
@@ -77,10 +76,12 @@ public static class IssueVariableBuilder
         IReadOnlyDictionary<string, string>? prompts = null)
     {
         var bundle = Build(workflowRunId, issue, project, workspace, agentConfig);
-        var root = ToRootDictionary(bundle);
-        root["vars"] = bundle.Vars.HasValue && bundle.Vars.Value.ValueKind == JsonValueKind.Object
-            ? bundle.Vars.Value.Clone()
-            : JSON.DeserializeElement("{}");
+        var root = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
+        {
+            ["vars"] = bundle.Vars.HasValue && bundle.Vars.Value.ValueKind == JsonValueKind.Object
+                ? bundle.Vars.Value.Clone()
+                : JSON.DeserializeElement("{}"),
+        };
 
         if (prompts is not null)
             root["prompts"] = JSON.SerializeToElement(prompts);
@@ -228,47 +229,7 @@ public static class IssueVariableBuilder
         WorkflowProjectContext project,
         WorkspaceIdentity workspace)
     {
-        var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
-        {
-            ["mohist"] = JSON.SerializeToElement(
-                new { system = "mohist", runId = workflowRunId }),
-            ["issue"] = JSON.SerializeToElement(
-                new
-                {
-                    projectId = issue.ProjectId,
-                    number = issue.Number,
-                    title = issue.Title,
-                    body = issue.Body ?? string.Empty,
-                }),
-            ["project"] = JSON.SerializeToElement(
-                new
-                {
-                    id = project.Id,
-                    name = project.Name,
-                }),
-            ["repository"] = JSON.SerializeToElement(
-                new
-                {
-                    name = project.RepositoryName,
-                    gitUrl = project.RepositoryGitUrl,
-                    baseBranch = project.RepositoryBaseBranch,
-                }),
-            ["openspecChangeName"] = JSON.SerializeToElement(
-                MohistDefaultWorkflowProjection.ChangeName(issue.Number)),
-            ["openspecChangeDir"] = JSON.SerializeToElement(
-                MohistDefaultWorkflowProjection.ChangeDir(issue.Number)),
-            ["workspace"] = JSON.SerializeToElement(
-                new
-                {
-                    path = workspace.Path,
-                    branch = workspace.Branch,
-                    changeDir = workspace.ChangeDir,
-                }),
-        };
-
-        var varsJson = JSON.Serialize(variables);
-        var varsElement = JSON.DeserializeElement(varsJson);
-        return new VariableBundle(varsElement);
+        return FromRoot(new Dictionary<string, JsonElement?>(StringComparer.Ordinal));
     }
 
     private static VariableBundle FromRoot(Dictionary<string, JsonElement?> variables)
@@ -376,14 +337,4 @@ public static class IssueVariableBuilder
         return a.Value.GetRawText() == b.Value.GetRawText();
     }
 
-    private static Dictionary<string, JsonElement?> ToRootDictionary(VariableBundle bundle)
-    {
-        var result = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        if (bundle.Vars is not { ValueKind: JsonValueKind.Object } vars) return result;
-
-        foreach (var property in vars.EnumerateObject())
-            result[property.Name] = property.Value.Clone();
-
-        return result;
-    }
 }

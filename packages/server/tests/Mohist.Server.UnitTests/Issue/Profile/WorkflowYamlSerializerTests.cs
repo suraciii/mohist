@@ -72,6 +72,24 @@ public class WorkflowYamlSerializerTests
     }
 
     [Fact]
+    public void WorkflowYamlSerializer_ValidatesLegacyInputForPiInlineAgent()
+    {
+        var error = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: build
+            tasks:
+              - id: task
+                title: Task
+                uses: mohist/pi
+                with:
+                  agent: legacy
+            checks: []
+        """));
+
+        Assert.Contains("with.agent", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WorkflowYamlSerializer_RoundTripsDescriptionField()
     {
         var definition = MohistWorkflow.Definition;

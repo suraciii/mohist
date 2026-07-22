@@ -76,14 +76,14 @@ function renderString(value: string, variables: JsonObject): JsonValue {
   // Consume \${{ -> sentinel so it survives template expansion as a literal ${{.
   let current = value.replace(ESCAPE_PATTERN, ESCAPE_SENTINEL)
 
+  const seenValues = new Set<string>()
   for (let pass = 0; pass < MAX_TEMPLATE_PASSES; pass += 1) {
+    if (seenValues.has(current)) throw new Error("Template variable expansion cycle detected")
+    seenValues.add(current)
     const full = current.match(/^\s*\$\{\{\s*([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}\s*$/)
     if (full) {
       const resolved = resolvePath(variables, full[1])
       if (resolved === undefined) {
-        // Whole-string reference and unresolvable — this is the workflow author's
-        // typo / missing-key case, surface it as a hard error. (Embedded
-        // unresolved references are handled in the else branch below.)
         throw new Error(`Template variable '${full[1]}' was not found`)
       }
       if (typeof resolved !== "string") return resolved
@@ -93,21 +93,15 @@ function renderString(value: string, variables: JsonObject): JsonValue {
       const next = current.replace(REFERENCE_PATTERN, (match, path: string) => {
         const resolved = resolvePath(variables, path)
         if (resolved === undefined) {
-          // Embedded reference that does not resolve: leave the literal
-          // `${{ path }}` text in place. This matches the server-side
-          // `PromptTemplateEngine` semantics and lets task descriptions,
-          // documentation, and code samples that legitimately mention the
-          // `${{ ... }}` syntax survive rendering. Use `\${{ ... }}` in
-          // source to suppress this same behavior (it consumes the escape
-          // sentinel and restores `${{` byte-identically).
-          return match
+          throw new Error(`Template variable '${path}' was not found`)
+        }
+        if (isObjectOrArray(resolved)) {
+          throw new Error(`Template variable '${path}' resolves to an object or array and cannot be embedded in a string`)
         }
         resolvedAny = true
         return templateString(resolved)
       })
       if (next === current || !resolvedAny) {
-        // No progress — every remaining reference is unresolvable. Stop
-        // expanding to avoid the 5-pass cap eating unrelated resolution.
         return next.split(ESCAPE_SENTINEL).join("${{")
       }
       current = next
@@ -123,7 +117,11 @@ function renderString(value: string, variables: JsonObject): JsonValue {
 function templateString(value: JsonValue) {
   if (value === null) return ""
   if (typeof value === "string") return value
-  return JSON.stringify(value)
+  return String(value)
+}
+
+function isObjectOrArray(value: JsonValue): value is JsonValue[] | { [key: string]: JsonValue } {
+  return Array.isArray(value) || (typeof value === "object" && value !== null)
 }
 
 function appendPath(current: string, segment: string): string {
@@ -152,7 +150,7 @@ function walkForReferences(value: JsonValue, currentPath: string, refs: Set<stri
   if (isLiteralFieldPath(currentPath)) return
   if (typeof value === "string") {
     const unescaped = value.replace(ESCAPE_PATTERN, "")
-    for (const match of unescaped.matchAll(REFERENCE_PATTERN)) {
+    for (const match of unescaped.matchAll(new RegExp(REFERENCE_PATTERN.source, "g"))) {
       refs.add(match[1])
     }
     return
@@ -173,11 +171,8 @@ export function unresolvedReferences(input: JsonValue | null | undefined, variab
   return refs.filter((path) => resolvePath(variables, path) === undefined)
 }
 
-// Returns only those unresolved references that occupy the entire value of a
-// string field. Embedded references (`... ${{ unknown }} ...`) are tolerated
-// by `renderTemplate` (left as literal text) and are intentionally excluded
-// from this list so legitimate documentation, code samples, and task
-// descriptions that mention the `${{ ... }}` syntax do not fail dispatch.
+// Retained for callers that need to distinguish whole-value references. Strict
+// rendering uses unresolvedReferences so embedded references are checked too.
 export function wholeStringUnresolvedReferences(input: JsonValue | null | undefined, variables: JsonObject): string[] {
   const unresolved = new Set<string>()
   if (input === null || input === undefined) return []
@@ -216,8 +211,5 @@ function resolvePath(variables: JsonObject, path: string): JsonValue | undefined
     if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
     return current[part]
   }, variables)
-  if (result === undefined && path.startsWith("tasks.")) {
-    return ""
-  }
   return result
 }

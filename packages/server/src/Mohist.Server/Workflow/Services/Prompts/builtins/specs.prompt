@@ -7,7 +7,7 @@ stage: plan
 Read the current Mohist issue details before interpreting this task:
 
 ```bash
-mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+mo issue show ${{ issue.number }} --project ${{ issue.projectId }}
 ```
 
 <artifact id="specs" schema="mohist-default">
@@ -21,13 +21,13 @@ Each spec describes the required behavior this change must deliver, as normative
 Read these files for context before creating this artifact:
 
 <dependency id="proposal" status="expected">
-  <path>${{ openspecChangeDir }}/proposal.md</path>
+  <path>openspec/changes/issue-${{ issue.number }}/proposal.md</path>
   <description>Initial proposal document outlining the change</description>
 </dependency>
 </dependencies>
 
 <output>
-Write to: `${{ openspecChangeDir }}/specs/<capability>/spec.md`
+Write to: `openspec/changes/issue-${{ issue.number }}/specs/<capability>/spec.md`
 </output>
 
 <instruction>

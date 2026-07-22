@@ -37,7 +37,7 @@ const SYSTEM_TEMPLATES: SystemTemplate[] = [
     description: 'Creates the OpenSpec proposal.md for an issue',
     tags: ['plan', 'openspec'],
     stage: 'plan',
-    body: 'system proposal body ${{ openspecChangeDir }}',
+    body: 'system proposal body openspec/changes/issue-${{ issue.number }}',
   },
   {
     key: 'build',

@@ -44,7 +44,7 @@ function silentConnection(): ServerConnection {
 function executorFor(registry: ActionRegistry): WorkExecutor {
   return new WorkExecutor(
     registry,
-    verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+     verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
     silentConnection(),
     workDir,
   )
@@ -59,7 +59,7 @@ function buildWork(overrides: Partial<DispatchWorkItem>): DispatchWorkItem {
     title: "Removed Action test",
     uses: "mohist/acp-agent",
     with: {},
-    variables: { workspace: { path: workDir, branch: null, changeDir: null } },
+     variables: { workspace: { path: workDir, branch: null } },
     ...overrides,
   }
 }

@@ -7,12 +7,12 @@ stage: plan
 Read the current Mohist issue details before interpreting this task:
 
 ```bash
-mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+mo issue show ${{ issue.number }} --project ${{ issue.projectId }}
 ```
 
-Review the plan artifacts under `${{ openspecChangeDir }}/` (`proposal.md`,
+Review the plan artifacts under `openspec/changes/issue-${{ issue.number }}/` (`proposal.md`,
 `design.md`, `tasks.json`, `specs/`) against the issue, and write your findings
-to `${{ openspecChangeDir }}/self-review.md`.
+to `openspec/changes/issue-${{ issue.number }}/self-review.md`.
 
 You are a reviewer, not a fixer: do not modify any file other than
 `self-review.md`. A separate task fixes every problem you report.

@@ -117,6 +117,3 @@ Issue 和 WorkflowRun 不提供 Prompt API。
   只保留 Project `/prompts` resource。
 - 当前部分 Profile 解析代码会预先组装 Prompt map；目标实现只传 key，并在执行时读取
   单个 Project Prompt。
-- 当前 builtin Prompt 仍使用 `openspecChangeDir`、`project`、`approvalFeedback` 等表外根，
-  且未解析表达式仍可能保留原文；目标是与 Workflow Definition 使用同一封闭语言与失败
-  语义。

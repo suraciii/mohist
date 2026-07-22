@@ -174,16 +174,28 @@ EpicNumber: ReadEpicNumber(run),
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         var effectiveVarsJson = resolved.Vars ?? JSON.DeserializeElement("{}");
 
-        if (effectiveVarsJson.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var property in effectiveVarsJson.EnumerateObject())
-                payload[property.Name] = property.Value.Clone();
-        }
-
         payload["vars"] = effectiveVarsJson;
         payload["workflow"] = JSON.SerializeToElement(new { runId = workflowRunId });
         payload["stage"] = JSON.SerializeToElement(new { name = stage });
-        payload["work"] = JSON.SerializeToElement(new { id = workId, type = workType, title, attempt });
+        var work = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["id"] = workId,
+            ["type"] = workType,
+            ["title"] = title,
+            ["attempt"] = attempt,
+        };
+        payload["work"] = JSON.SerializeToElement(work);
+        payload["issue"] = JSON.SerializeToElement(new
+        {
+            projectId = TryGetAnnotation(run, "projectId", out var projectId) ? projectId : null,
+            number = ReadIssueNumber(run),
+        });
+        payload["repository"] = run.Repository is { } repository
+            ? JSON.SerializeToElement(new { name = repository.Name, gitUrl = repository.GitUrl, baseBranch = repository.BaseBranch })
+            : JSON.SerializeToElement<object?>(null);
+        payload["workspace"] = run.Workspace is { } workspace
+            ? JSON.SerializeToElement(new { path = workspace.Path, branch = workspace.Branch })
+            : JSON.SerializeToElement<object?>(null);
 
         WorkflowDispatchHelpers.MergeTaskOutputsIntoPayload(payload, run);
 
@@ -194,12 +206,17 @@ EpicNumber: ReadEpicNumber(run),
             if (task?.CausedByFailedTaskId is { } failedTaskId)
             {
                 var failedTask = FindFailedTask(run, failedTaskId);
-                if (failedTask?.Output is { } failedOutput && failedOutput.ValueKind == JsonValueKind.Object)
+                if (failedTask is not null)
                 {
                     var failureObj = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
                     {
-                        ["output"] = failedOutput.Clone(),
+                        ["output"] = failedTask.Output is { } failedOutput && failedOutput.ValueKind == JsonValueKind.Object
+                            ? failedOutput.Clone()
+                            : null,
                     };
+                    var error = failedTask.Error ?? run.Failure?.Error;
+                    failureObj["error"] = JSON.SerializeToElement(error ?? new ExecutionError(
+                        "task_failed", run.Failure?.Message ?? "The task failed."));
                     payload["failure"] = JSON.SerializeToElement(failureObj);
                 }
             }
@@ -208,17 +225,14 @@ EpicNumber: ReadEpicNumber(run),
                 var feedback = run.Feedback.FirstOrDefault(f => f.Id == feedbackId);
                 if (feedback is not null)
                 {
-                    var issueNumber = TryGetAnnotation(run, "issueNumber", out var numStr) && int.TryParse(numStr, out var n) ? (int?)n : null;
-                    var projectId = TryGetAnnotation(run, "projectId", out var pid) ? pid : "";
-
-                    payload["approvalFeedback"] = JSON.SerializeToElement(new
+                    work["approvalFeedback"] = new
                     {
                         id = feedback.Id,
                         stage = feedback.Stage,
                         createdAt = feedback.CreatedAt.ToString("O"),
                         summary = WorkflowRunExtensions.BuildFeedbackSummary(feedback.Body),
-                        command = WorkflowRunExtensions.BuildFeedbackShowCommand(issueNumber, feedback.Id, projectId),
-                    });
+                    };
+                    payload["work"] = JSON.SerializeToElement(work);
                 }
             }
         }
@@ -279,7 +293,8 @@ EpicNumber: ReadEpicNumber(run),
     }
 
     private static bool IsInlineAgentUses(string? uses) =>
-        string.Equals(uses, "mohist/opencode", StringComparison.Ordinal);
+        string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/pi", StringComparison.Ordinal);
 
     private static bool HasWorkflowCompletionPolicy(JsonElement expectElement)
     {

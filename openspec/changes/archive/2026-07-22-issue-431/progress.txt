@@ -1,0 +1,34 @@
+## Codebase Patterns
+
+- Workflow dispatch variables are assembled by `WorkflowItemTranslator`; persisted profile/run variables must remain separate from runtime roots.
+- Workflow run annotations provide `projectId` and `issueNumber`; repository and workspace facts are available from `WorkflowRun.Repository` and `WorkflowRun.Workspace`.
+- Inline-agent legacy-input validation is duplicated in `WorkflowItemTranslator` and `WorkflowYamlSerializer`, so both sites must recognize the same uses values.
+
+## T-001
+
+- Removed runtime context and top-level variable-key hoisting from the server variable bundle and dispatch payload.
+- Dispatch now uses `issue.projectId`, conditionally populated repository/workspace roots, and `work.approvalFeedback` with only `id`, `stage`, `createdAt`, and `summary`.
+- Failure recovery payloads now include a structured `error` object with `code` and `message`; the pre-rendered feedback command helper was removed.
+
+## T-002
+
+- Runner template rendering now fails for unresolved whole or embedded references, including missing `tasks.*` outputs, rejects embedded objects/arrays, preserves complete JSON values, and detects repeated expansion states plus the depth limit.
+- Executor preflight uses `unresolvedReferences`; variable assembly copies only the documented dispatch roots except `failure` (which remains recovery-only), then overrides workspace with `{ path, branch }`.
+- Workspace preparation and identity use `workflowRunId` from the dispatch work item and no longer read `openspecChangeDir` or `mohist.runId`; `WorkspaceInfo` and resolved template workspace facts no longer include `changeDir`.
+- Updated runner behavior vectors and executor/artifact/workspace fixtures to use namespaced variables and strict failure semantics. `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass.
+- The initial full runner regression run had one unrelated concurrent task-log routing failure; the subsequent full run passed 116 files and 1,353 tests.
+
+## T-003
+
+- Server `PromptTemplateEngine` now follows the runner's five-pass behavior: escaped openings are protected, missing references fail with paths, embedded objects/arrays fail, scalar interpolation matches runner null/string rules, and cycles/depth overflow return deterministic structured errors without unresolved template text.
+- Preview results retain `missingVariables` for existing consumers and add structured `errors` with `code`, `path`, and `message`; both project preview routes expose the same result. The extract-variables route accepts optional context and validates it through the same engine.
+- Replaced the old lenient server tests with behavior vectors for scalar/embedded values, missing task outputs, object/array rejection, escape, nesting, cycles, and depth; route tests cover actionable missing/type errors.
+- Focused verification passed: 8 `PromptTemplateEngineTests` and 22 template/project preview route specs.
+- Full Server unit tests pass (1,268). Full Server spec tests currently report four T-001 baseline failures that still assert removed runtime roots or vars hoisting; no T-003 preview failures were observed.
+
+## T-004
+
+- Migrated both builtin profiles and all builtin prompts to literal `openspec/changes/issue-${{ issue.number }}` paths, `issue.projectId` with `--project`, and `work.approvalFeedback.id`; removed the pre-rendered feedback command example.
+- Updated runner/server workflow fixtures and profile assertions, web preview/editor defaults, and the affected end-to-end workflow coverage. Existing recovery, retry, artifact, feedback, and GitHub PR tests now assert the closed namespace without changing resolved paths.
+- Removed resolved namespace and old Server pre-expansion gap notes from product/design docs. Focused runner, web, Server unit, and Server spec verification passed; `git diff --check` passed.
+- Full `npm test` passes: CLI 1,374, Server unit 1,268, architecture 30, Server spec 2,987, Web 5,151, and Runner 1,353 tests, with all boundary/typecheck gates passing.

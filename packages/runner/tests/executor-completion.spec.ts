@@ -27,13 +27,13 @@ function execute(result: ActionResult) {
   })
   const executor = new WorkExecutor(
     actions,
-    verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+     verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
     {} as never,
     workDir,
   )
   const work: DispatchWorkItem = {
     workflowRunId: "wf-completion", workId: "review.1", workType: "task", stage: "check",
-    title: "Review", uses: "test/action", with: {}, variables: { workspace: { path: workDir, branch: null, changeDir: null } },
+     title: "Review", uses: "test/action", with: {}, variables: { workspace: { path: workDir, branch: null } },
   }
   return executor.execute(work, new AbortController().signal)
 }

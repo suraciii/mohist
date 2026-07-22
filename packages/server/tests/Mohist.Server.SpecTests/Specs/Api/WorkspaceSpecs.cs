@@ -333,11 +333,11 @@ public class WorkspaceSpecs
 
         using var scope = _fixture.Services.CreateScope();
         var workflowQuerier = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
-        var variables = await workflowQuerier.GetEffectiveVariablesAsync(workflowRunId);
-        var repository = variables.GetProperty("repository");
-        Assert.Equal(expectedRepository.Name, repository.GetProperty("name").GetString());
-        Assert.Equal(expectedRepository.GitUrl, repository.GetProperty("gitUrl").GetString());
-        Assert.Equal(expectedRepository.BaseBranch, repository.GetProperty("baseBranch").GetString());
+        var repository = await workflowQuerier.GetRepositoryContextAsync(workflowRunId);
+        Assert.NotNull(repository);
+        Assert.Equal(expectedRepository.Name, repository!.Name);
+        Assert.Equal(expectedRepository.GitUrl, repository.GitUrl);
+        Assert.Equal(expectedRepository.BaseBranch, repository.BaseBranch);
         return workflowRunId;
     }
 

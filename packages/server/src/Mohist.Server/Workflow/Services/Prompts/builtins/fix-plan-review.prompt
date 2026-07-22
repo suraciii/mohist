@@ -4,9 +4,9 @@ description: "Fixes the problems reported by the plan self-review"
 tags: [plan, review]
 stage: plan
 ---
-`${{ openspecChangeDir }}/self-review.md` lists the problems found by the plan
+`openspec/changes/issue-${{ issue.number }}/self-review.md` lists the problems found by the plan
 review. Fix every one of them in the plan artifacts under
-`${{ openspecChangeDir }}/`.
+`openspec/changes/issue-${{ issue.number }}/`.
 
 You may be interrupted at any time: commit incrementally and keep your progress
 notes current.

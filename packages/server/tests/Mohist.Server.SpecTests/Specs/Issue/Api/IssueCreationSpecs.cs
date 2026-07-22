@@ -177,13 +177,14 @@ public class IssueCreationSpecs
 
         Assert.Equal(wrId, work.WorkflowRunId);
         Assert.NotNull(work.Variables);
-        Assert.Contains("My Project", work.Variables);
-        Assert.Contains("repository", work.Variables);
-        Assert.Contains("workspace", work.Variables);
+         Assert.Contains("repository", work.Variables);
+         Assert.Contains("workspace", work.Variables);
         Assert.DoesNotContain("project.path", work.Variables);
         Assert.DoesNotContain("project.baseBranch", work.Variables);
-        using var variables = JsonDocument.Parse(work.Variables);
-        var repository = variables.RootElement.GetProperty("repository");
+         using var variables = JsonDocument.Parse(work.Variables);
+         var issue = variables.RootElement.GetProperty("issue");
+         Assert.Equal(project.Id, issue.GetProperty("projectId").GetString());
+         var repository = variables.RootElement.GetProperty("repository");
         Assert.Equal("main", repository.GetProperty("name").GetString());
         Assert.Equal("git@example.com:main.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("main", repository.GetProperty("baseBranch").GetString());

@@ -237,65 +237,7 @@ public class WorkflowProfileManager : IScopedService
     internal async Task<VariableBundle> ResolveEffectiveVariableBundleAsync(string runId, string? stage)
     {
         var layered = await ResolveLayeredVariablesAsync(runId);
-        var stageVariables = layered.ResolveStageVars(stage);
-        var (repository, workspace, projectId, issueNumber) = await LoadRoutingSnapshotAsync(runId);
-
-        if (repository is null && workspace is null)
-            return new VariableBundle(stageVariables, layered.Stages);
-
-        var authoritative = AuthoritativeRoutingOverlay.Apply(
-            stageVariables,
-            runId,
-            repository,
-            workspace,
-            projectId,
-            issueNumber);
-        return new VariableBundle(authoritative.Vars, layered.Stages);
-    }
-
-    private async Task<(
-        Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext? Repository,
-        Mohist.Server.Workflow.Domain.Run.WorkspaceIdentity? Workspace,
-        string? ProjectId,
-        int? IssueNumber)>
-        LoadRoutingSnapshotAsync(string runId)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.WorkflowRuns.AsNoTracking()
-            .Where(x => x.WorkflowRunId == runId)
-            .Select(x => new { x.State })
-            .FirstOrDefaultAsync();
-        if (row is null) return (null, null, null, null);
-
-        var run = TryDeserializeRun(row.State);
-        if (run is null) return (null, null, null, null);
-
-        var projectId = run.Metadata?.Annotations is { } a
-            && a.TryGetValue("projectId", out var pid)
-            && !string.IsNullOrWhiteSpace(pid) ? pid : null;
-        int? issueNumber = null;
-        if (run.Metadata?.Annotations is { } an
-            && an.TryGetValue("issueNumber", out var numText)
-            && int.TryParse(numText, out var num))
-        {
-            issueNumber = num;
-        }
-
-        return (run.Repository, run.Workspace, projectId, issueNumber);
-    }
-
-    private static Mohist.Server.Workflow.Domain.Run.WorkflowRun? TryDeserializeRun(string? stateJson)
-    {
-        if (string.IsNullOrWhiteSpace(stateJson)) return null;
-        try
-        {
-            return JsonSerializer.Deserialize<Mohist.Server.Workflow.Domain.Run.WorkflowRun>(
-                stateJson, JSON.Options);
-        }
-        catch
-        {
-            return null;
-        }
+        return new VariableBundle(layered.ResolveStageVars(stage), layered.Stages);
     }
 
     public async Task<WorkspaceIdentity?> LoadIssueWorkspaceAsync(string projectId, int issueNumber)
@@ -500,8 +442,8 @@ public class WorkflowProfileManager : IScopedService
 
     public PromptPreviewResult RenderPrompt(string body, JsonElement variables)
     {
-        var (rendered, missing, depth) = _engine.Render(body, variables);
-        return new PromptPreviewResult(rendered, missing, depth);
+        var result = _engine.Render(body, variables);
+        return new PromptPreviewResult(result.Rendered, result.MissingVariables, result.Depth, result.Errors);
     }
 
     private static async Task<ResolvedTemplate?> LoadProjectTemplateAsync(

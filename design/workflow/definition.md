@@ -136,19 +136,6 @@ lockBehavior 缺少 resources：
 stages[1]: lockBehavior 需要同时声明非空 resources
 ```
 
-模板引用了表外的命名空间：
-
-```yaml
-- id: proposal
-  uses: mohist/opencode
-  with:
-    prompt: 阅读 ${{ openspecChangeDir }}/proposal.md
-```
-
-```text
-stages[0].tasks[0].with.prompt: 未知命名空间 openspecChangeDir
-```
-
 Definition 校验器不检查 `with` 内部 key：键名由各 Action 契约管理，只检查值里的模板
 表达式。Profile 保存入口随后可以把同一任务交给 Action catalog，因此“Definition 合法”
 不等于“所选 Action 及其输入在当前 Project 可用”。
@@ -174,14 +161,6 @@ Definition 校验器不检查 `with` 内部 key：键名由各 Action 契约管�
   （目标 `id`）。
 - 模型仍持有 workflow 级 `Variables` / `Defaults` / `Artifacts` 与 stage 级
   `Variables` 字段（目标移除：Variables 是独立资源）。
-- 现行注入裸根名 `mohist`、`project`、`openspecChangeName`、`openspecChangeDir` 与
-  `workspace.changeDir`，并把 Effective Variables 的 key 复制成顶层裸名；审批反馈还使用
-  表外 `approvalFeedback` 根。目标：Runtime context 与 Variables 分离，审批反馈移到
-  `work.approvalFeedback.*`，内置 Profile 与 Prompt 改写字面模板
-  `openspec/changes/issue-${{ issue.number }}`，server 不再计算 openspec 路径公式；
-  命名空间白名单即产品参考表内的十个根。
-- task 或 live-read Prompt 字符串内的表达式解析不出值时，现行路径仍可能保留原文；目标
-  是统一失败。
 - 独立类库、`mo workflow validate --file`、docs 示例进 CI 均未实现。
 - Runner 已按 Action manifest 在执行入口校验 `uses` / `with`；catalog 上报与 Profile
   保存期常量输入校验仍未实现，且不属于 Definition 校验器。

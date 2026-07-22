@@ -430,8 +430,8 @@ public class ProjectWorkflowProfileManager : IScopedService
         var effective = await GetPromptAsync(projectId, key)
             ?? throw new ArgumentException($"Prompt '{key}' not found");
 
-        var (rendered, missing, depth) = _engine.Render(effective.Body, variables);
-        return new PromptPreviewResult(rendered, missing, depth);
+        var result = _engine.Render(effective.Body, variables);
+        return new PromptPreviewResult(result.Rendered, result.MissingVariables, result.Depth, result.Errors);
     }
 
     // =======================================================================

@@ -22,7 +22,7 @@ const SYSTEM_TARGET: ProjectTemplate = {
   description: 'Creates the OpenSpec proposal.md for an issue',
   tags: ['plan', 'openspec'],
   stage: 'plan',
-  body: 'proposal body for ${{ issue.number }} and ${{ project.id }} and ${{ unknownVar }}',
+  body: 'proposal body for ${{ issue.number }} and ${{ issue.projectId }} and ${{ vars.unknownVar }}',
   source: 'system',
 }
 
@@ -57,10 +57,10 @@ const testHooks = {
   usePreview: () => useMutation({
     mutationFn: async ({ variables }: { variables: Record<string, unknown> }) => {
       const issue = (variables.issue as { number?: unknown } | undefined) ?? {}
-      const project = (variables.project as { id?: unknown } | undefined) ?? {}
+      const issueProject = (variables.issue as { projectId?: unknown } | undefined) ?? {}
       return {
-        rendered: `proposal body for ${issue.number ?? '<missing>'} and ${project.id ?? '<missing>'} and <missing>`,
-        missingVariables: ['unknownVar'],
+        rendered: `proposal body for ${issue.number ?? '<missing>'} and ${issueProject.projectId ?? '<missing>'} and <missing>`,
+        missingVariables: ['vars.unknownVar'],
         depth: 1,
       }
     },
@@ -130,11 +130,11 @@ describe('TemplateEditor', () => {
       'data-available',
       'yes',
     )
-    expect(within(variablesList).getByTestId('template-editor-variable-project.id')).toHaveAttribute(
+    expect(within(variablesList).getByTestId('template-editor-variable-issue.projectId')).toHaveAttribute(
       'data-available',
       'yes',
     )
-    expect(within(variablesList).getByTestId('template-editor-variable-unknownVar')).toHaveAttribute(
+    expect(within(variablesList).getByTestId('template-editor-variable-vars.unknownVar')).toHaveAttribute(
       'data-available',
       'no',
     )

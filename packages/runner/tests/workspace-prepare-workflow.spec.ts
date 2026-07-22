@@ -86,7 +86,7 @@ function installWorkspacePrepareGit(residual: { rebase: boolean }) {
 function buildExecutor(registry: ActionRegistry): WorkExecutor {
   return new WorkExecutor(
     registry,
-    verifyOnlyWorkspaceManager({ path: workspacePath, branch: EXPECTED_BRANCH, changeDir: null }),
+     verifyOnlyWorkspaceManager({ path: workspacePath, branch: EXPECTED_BRANCH }),
     { async report() {}, async uploadArtifact() { throw new Error("uploadArtifact should not be called") } } as unknown as ServerConnection,
     workspacePath,
   )
@@ -102,7 +102,7 @@ function work(workId: string, uses: string, overrides: Partial<DispatchWorkItem>
     uses,
     with: uses === "mohist/workspace-prepare" ? { expectedBranch: EXPECTED_BRANCH } : {},
     variables: {
-      workspace: { path: workspacePath, branch: EXPECTED_BRANCH, changeDir: null },
+       workspace: { path: workspacePath, branch: EXPECTED_BRANCH },
     },
     ...overrides,
   }

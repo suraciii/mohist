@@ -308,7 +308,7 @@ public class PathContractRegressionSpecs
         Assert.Equal(System.Net.HttpStatusCode.OK, varsResponse.StatusCode);
         var varsJson = JsonDocument.Parse(await varsResponse.Content.ReadAsStringAsync()).RootElement;
         var variables = varsJson.GetProperty("data");
-        AssertDispatchVariablesHaveWorkspaceContract(variables);
+        AssertEffectiveVariablesContainNoRuntimeContext(variables);
     }
 
     [Fact]

@@ -37,10 +37,10 @@ stages:
           options: ${{ vars.agent }}
         expect:
           files:
-            - path: ${{ openspecChangeDir }}/proposal.md
+            - path: openspec/changes/issue-${{ issue.number }}/proposal.md
         artifacts:
           files:
-            - path: ${{ openspecChangeDir }}/proposal.md
+            - path: openspec/changes/issue-${{ issue.number }}/proposal.md
       - id: specs
         title: Write specs
         uses: mohist/opencode
@@ -50,7 +50,7 @@ stages:
           options: ${{ vars.agent }}
         artifacts:
           files:
-            - path: ${{ openspecChangeDir }}/specs
+            - path: openspec/changes/issue-${{ issue.number }}/specs
       - id: design
         title: Create design
         uses: mohist/opencode
@@ -60,10 +60,10 @@ stages:
           options: ${{ vars.agent }}
         expect:
           files:
-            - path: ${{ openspecChangeDir }}/design.md
+            - path: openspec/changes/issue-${{ issue.number }}/design.md
         artifacts:
           files:
-            - path: ${{ openspecChangeDir }}/design.md
+            - path: openspec/changes/issue-${{ issue.number }}/design.md
       - id: tasks
         title: Generate tasks
         uses: mohist/opencode
@@ -73,10 +73,10 @@ stages:
           options: ${{ vars.agent }}
         expect:
           files:
-            - path: ${{ openspecChangeDir }}/tasks.json
+            - path: openspec/changes/issue-${{ issue.number }}/tasks.json
         artifacts:
           files:
-            - path: ${{ openspecChangeDir }}/tasks.json
+            - path: openspec/changes/issue-${{ issue.number }}/tasks.json
       - id: self-review
         title: Self review
         uses: mohist/opencode
@@ -86,7 +86,7 @@ stages:
           options: ${{ vars.agent }}
         expect:
           markers:
-            - path: ${{ openspecChangeDir }}/self-review.md
+            - path: openspec/changes/issue-${{ issue.number }}/self-review.md
               oneOf:
                 - <promise>PASS</promise>
                 - <promise>FAIL</promise>
@@ -106,13 +106,13 @@ stages:
               retrySelf: true
         artifacts:
           files:
-            - path: ${{ openspecChangeDir }}/self-review.md
+            - path: openspec/changes/issue-${{ issue.number }}/self-review.md
     checks:
       - name: plan-artifacts
         title: Plan artifacts complete
         uses: mohist/openspec-artifacts
         with:
-          changeDir: ${{ openspecChangeDir }}
+          changeDir: openspec/changes/issue-${{ issue.number }}
       - name: health
         title: Health
         uses: core/script
@@ -131,7 +131,7 @@ stages:
         title: Load tasks from plan
         uses: mohist/openspec-tasks
         with:
-          path: ${{ openspecChangeDir }}/tasks.json
+          path: openspec/changes/issue-${{ issue.number }}/tasks.json
           task:
             uses: mohist/opencode
             with:
@@ -139,7 +139,7 @@ stages:
               prompt:
                 uses: mohist/openspec-task-prompt
                 with:
-                  file: ${{ openspecChangeDir }}/tasks.json
+                  file: openspec/changes/issue-${{ issue.number }}/tasks.json
                   items: tasks
                   base: ${{ prompts.build }}
       - id: build-health
@@ -208,7 +208,7 @@ stages:
           options: ${{ vars.agent }}
         expect:
           markers:
-            - path: ${{ openspecChangeDir }}/review.md
+            - path: openspec/changes/issue-${{ issue.number }}/review.md
               oneOf:
                 - <promise>PASS</promise>
                 - <promise>FAIL</promise>
@@ -228,7 +228,7 @@ stages:
               retrySelf: true
         artifacts:
           files:
-            - path: ${{ openspecChangeDir }}/review.md
+            - path: openspec/changes/issue-${{ issue.number }}/review.md
       - id: check-health
         title: Health
         uses: core/script
@@ -299,7 +299,7 @@ stages:
         title: Archive change
         uses: mohist/archive-change
         with:
-          changeDir: ${{ openspecChangeDir }}
+          changeDir: openspec/changes/issue-${{ issue.number }}
           archiveHint: ${{ vars.archive }}
         recovery:
           budget: 3

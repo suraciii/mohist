@@ -130,7 +130,7 @@ public class IssueVariableBuilderTests
     }
 
     [Fact]
-    public void BuiltInContext_AlwaysPresent_EvenWhenNoGlobalOrProject()
+    public void BuiltInContext_IsNotPersistedInVariables()
     {
         var result = IssueVariableBuilder.Build(
             globalBundle: VariableBundle.Empty,
@@ -143,16 +143,11 @@ public class IssueVariableBuilderTests
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var root = doc.RootElement;
 
-        Assert.Equal("mohist", root.GetProperty("mohist").GetProperty("system").GetString());
-        Assert.Equal("wr_x", root.GetProperty("mohist").GetProperty("runId").GetString());
-        Assert.Equal(80, root.GetProperty("issue").GetProperty("number").GetInt32());
-        Assert.Equal("proj_test", root.GetProperty("project").GetProperty("id").GetString());
-        Assert.Equal("issue-80", root.GetProperty("openspecChangeName").GetString());
-        Assert.Equal("openspec/changes/issue-80", root.GetProperty("openspecChangeDir").GetString());
+        Assert.Empty(root.EnumerateObject());
     }
 
     [Fact]
-    public void BuiltInContextWinsOverProjectAndGlobal()
+    public void RuntimeLikeVariableNamesRemainUserVariables()
     {
         // Even if project or global vars try to override a context key
         // (mohist / issue / project / repository / openspec*), the built-in
@@ -179,8 +174,8 @@ public class IssueVariableBuilderTests
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var root = doc.RootElement;
 
-        Assert.Equal(80, root.GetProperty("issue").GetProperty("number").GetInt32());
-        Assert.Equal("proj_test", root.GetProperty("project").GetProperty("id").GetString());
+        Assert.Equal(999, root.GetProperty("issue").GetProperty("number").GetInt32());
+        Assert.Equal("sneaky-override", root.GetProperty("project").GetProperty("id").GetString());
     }
 
     [Fact]

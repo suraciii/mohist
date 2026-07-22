@@ -71,12 +71,10 @@ internal static class WorkflowDispatchHelpers
 
     internal static WorkIssueRef? BuildIssueRef(Dictionary<string, JsonElement?> payload)
     {
-        if (!payload.TryGetValue("project", out var projectEl) || !projectEl.HasValue) return null;
         if (!payload.TryGetValue("issue", out var issueEl) || !issueEl.HasValue) return null;
-        if (projectEl.Value.ValueKind != JsonValueKind.Object) return null;
         if (issueEl.Value.ValueKind != JsonValueKind.Object) return null;
 
-        if (!projectEl.Value.TryGetProperty("id", out var projectIdEl)) return null;
+        if (!issueEl.Value.TryGetProperty("projectId", out var projectIdEl)) return null;
         if (!issueEl.Value.TryGetProperty("number", out var numberEl)) return null;
 
         var projectId = projectIdEl.ValueKind == JsonValueKind.String ? projectIdEl.GetString() : projectIdEl.GetRawText();

@@ -112,7 +112,7 @@ public class MohistWorkflowDefinitionTests
         Assert.Contains("\"uses\":\"mohist/opencode\"", withJson);
         Assert.Contains("\"prompt\":", withJson);
         Assert.Contains("\"uses\":\"mohist/openspec-task-prompt\"", withJson);
-        Assert.Contains("${{ openspecChangeDir }}/tasks.json", withJson);
+         Assert.Contains("openspec/changes/issue-${{ issue.number }}/tasks.json", withJson);
         Assert.Contains("\"items\":\"tasks\"", withJson);
         Assert.Contains("\"base\":\"${{ prompts.build }}\"", withJson);
     }
@@ -142,7 +142,7 @@ public class MohistWorkflowDefinitionTests
 
         Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
         Assert.Equal("load-tasks", loadTask.Id);
-        Assert.Equal("${{ openspecChangeDir }}/tasks.json", pathElement.GetString());
+         Assert.Equal("openspec/changes/issue-${{ issue.number }}/tasks.json", pathElement.GetString());
     }
 
     [Fact]

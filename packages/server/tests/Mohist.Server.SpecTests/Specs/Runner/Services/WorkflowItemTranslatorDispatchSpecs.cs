@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -38,6 +39,45 @@ public partial class WorkflowItemTranslatorSpecs
         Assert.Equal("${{ vars.marker }}", JsonDocument.Parse(dispatch.Expect!).RootElement.GetProperty("marker").GetString());
         Assert.DoesNotContain("model-a", dispatch.With, StringComparison.Ordinal);
         Assert.True(JsonDocument.Parse(dispatch.Variables!).RootElement.TryGetProperty("vars", out _));
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_TaskItem_UsesOnlyClosedRootsAndDoesNotHoistVariables()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-translate-roots");
+        var dispatch = await _translator.TranslateToDispatchAsync(
+            WorkItem.Task("build", "task-1.1", "Task 1", "spec/task",
+                With(@"{ ""custom"": ""value"" }")),
+            runId, run, "runner-1");
+
+        using var doc = JsonDocument.Parse(dispatch.Variables!);
+        var roots = doc.RootElement.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        Assert.Subset(
+            new HashSet<string>(["workflow", "stage", "work", "issue", "repository", "workspace", "vars"], StringComparer.Ordinal),
+            roots);
+        Assert.DoesNotContain("custom", roots);
+        Assert.DoesNotContain("mohist", roots);
+        Assert.DoesNotContain("project", roots);
+        Assert.DoesNotContain("approvalFeedback", roots);
+        Assert.DoesNotContain("runner", roots);
+        Assert.Empty(doc.RootElement.GetProperty("vars").EnumerateObject());
+    }
+
+    [Theory]
+    [InlineData("mohist/opencode")]
+    [InlineData("mohist/pi")]
+    public async Task TranslateToDispatch_InlineAgentsRejectLegacyAgentInput(string uses)
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-translate-inline");
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", uses,
+            With(@"{ ""agent"": ""legacy"" }"));
+
+        var error = await Assert.ThrowsAsync<WorkflowDispatchRejectedException>(
+            () => _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
+
+        Assert.Contains("with.agent", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
