@@ -12,10 +12,24 @@
 - `WorkflowProfileDataUpgrader` converts old persisted definition rows once, preserving project/template and issue identities. Rows with embedded variables fail with a diagnostic containing the profile identity and variable paths.
 - Effective variable resolution no longer patches Definition/global-config variables. Issue/Run default initialization and remaining variable behavior are reserved for T-002.
 
+## T-002 Decisions
+
+- `VariableBundle` gains `DefaultVars` and `DefaultStages` fields that mirror the explicit `Vars` and `Stages` trees but carry initialization-default markers. `Patch` and `ToJson` round-trip both trees; `HasExplicitContent` and `HasDefaultContent` make bundle-shape branching explicit at the call site.
+- Effective Variable resolution merges defaults → Project → Issue → explicit Run top-level values (and the same order for selected-stage overlays). The defaults layer sits at the bottom of the resource precedence stack so explicit Project, Issue, and stage writes always win; once an explicit write covers a default key the marker is cleared and the explicit value follows the standard precedence.
+- `WorkflowRunProfileRow` gains a `DefaultVariables` JSON column alongside `Variables`. The two columns separate explicit values from marked defaults so an explicit write (setVars / PUT / PATCH) can clear only the affected default keys without touching unrelated markers.
+- `WorkflowRunProfileManager.EnsureArchiveDefaultAsync(workflowRunId)` is the WorkflowRun-creation entry point. It is idempotent, never overwrites an explicit `archive` value, and is called from `IssueGrain.PrepareWorkflowStartContextAsync` after the issue bundle is persisted but before the run becomes dispatchable.
+- `IssueVariableBuilder.BuildContextBundle` now accepts the issue's existing bundle and seeds `vars.agent = {}` only when the existing issue does not already define an `agent` key. Explicit user-chosen agent configurations are preserved across repeated start attempts.
+- `WorkflowProfileManager.ResolveConfiguredVariablesAsync` consults only Project, Issue, and WorkflowRun resources. `ConfigService.GetVariables()` is no longer read on the effective-Variables path. Profile parsing and Definition loading cannot contribute variables.
+- `VariableBundle.ClearDefaultsCoveredByExplicit(explicitOverlay)` strips default keys that the supplied explicit overlay also writes, leaving unrelated default keys (and stages) intact. The caller passes the freshly-merged explicit bundle so the marker-clear semantics match the new top-level value.
+- `VariableBundle.ResolveStageVars(stage)` assumes the caller's `Vars` and `Stages` trees already have defaults merged in at the bottom (the resolver merges them before constructing the bundle it returns). The method then overlays the merged selected-stage tree on top of the merged top-level tree. Direct calls that bypass `ResolveConfiguredVariablesAsync` (the unit tests) build the tree with defaults baked in to match the resolution-path shape.
+
 ## Verification Notes
 
 - `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore` passes.
-- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-build --no-restore` passes: 1298 tests.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-build --no-restore` passes: 1302 tests.
+- `dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj --no-restore` passes: 30 tests (no size-ratchet regressions).
 - Workflow YAML focused unit tests pass: 36 tests.
 - Workflow profile catalog focused spec passes: 16 tests.
+- New `WorkflowVariableResolutionDefaultsSpecs` passes: 12 tests covering embedded-variable absence, scope and stage precedence, archive default seed/idempotency/default-does-not-overwrite-explicit, marker resolves below explicit Project/Issue/stage, marker wins when nothing else supplies, PATCH/PUT clear the marker, archive visibility across re-reads, global config ignored, repeated start idempotency, and Issue agent seed.
+- New `VariableBundleInitializationDefaultTests` passes: 4 tests covering the VariableBundle merge and marker-clear mechanics.
 - The pre-existing full spec suite still contains failures based on embedded Definition Variables and old definition-shaped fixtures; those scenarios are explicitly migrated by issue-474 T-002 / fixture updates rather than restored with a dual-read path.

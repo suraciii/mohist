@@ -710,6 +710,7 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.WorkflowRunId);
             entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
             entity.Property(e => e.Variables).IsRequired();
+            entity.Property(e => e.DefaultVariables).IsRequired().HasDefaultValue("{}");
         });
 
         modelBuilder.Entity<ProjectPromptTemplateRow>(entity =>

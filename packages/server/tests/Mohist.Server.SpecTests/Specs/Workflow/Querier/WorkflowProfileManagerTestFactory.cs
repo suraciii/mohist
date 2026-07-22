@@ -35,13 +35,12 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
 
     protected static string SerializeDefinition(
         string id,
-        int stageCount = 1,
-        Dictionary<string, JsonElement?>? variables = null)
+        int stageCount = 1)
     {
         var stages = new List<StageDefinition>();
         for (var i = 0; i < stageCount; i++)
             stages.Add(new StageDefinition($"stage-{i}", [], []));
-        var def = new WorkflowDefinition(id, stages, Variables: variables);
+        var def = new WorkflowDefinition(id, stages);
         return JsonSerializer.Serialize(def, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
