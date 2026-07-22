@@ -47,12 +47,12 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _database.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [Fact]

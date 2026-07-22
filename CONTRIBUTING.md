@@ -109,9 +109,13 @@ npm --prefix packages/web run test:run
 
 ### 阶段状态专项测试
 
+测试运行在 Microsoft Testing Platform (MTP) 下，过滤语法与 VSTest 不同——通过 `--` 透传 MTP 原生选项：
+
 ```bash
-dotnet test Mohist.sln --filter "Stage"
+dotnet test Mohist.sln -- --filter-class "*Stage*"
 ```
+
+其它常用 MTP 过滤选项：`--filter-method`、`--filter-fully-qualified-name`、`--filter-test-node-uids`。
 
 ## Commit 规范
 

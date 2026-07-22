@@ -20,19 +20,19 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
     private DeadLetterStore _store = null!;
     private EventStore _events = null!;
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         _database = TestSqliteDatabase.CreateMigrated();
         _factory = new TestDbContextFactory(_database.Options);
         _store = new DeadLetterStore(_factory);
         _events = new EventStore(_factory, NullLogger<EventStore>.Instance);
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _database.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [Fact]

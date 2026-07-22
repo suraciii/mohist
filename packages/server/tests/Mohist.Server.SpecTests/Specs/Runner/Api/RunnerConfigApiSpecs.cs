@@ -39,8 +39,8 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
     // keeps leftover online runners from stealing a later test's agent-job
     // dispatch. The single shared silo/web host is owned by the fixture
     // and persists across the whole class.
-    public Task InitializeAsync() => Task.CompletedTask;
-    public Task DisposeAsync() => _fixture.UnregisterRunnersAsync();
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync() => new(_fixture.UnregisterRunnersAsync());
 
     [Fact]
     public async Task Config_ConfiguredPolicy_ProjectsAllFields()
@@ -282,7 +282,7 @@ public class RunnerConfigFixture : IAsyncLifetime
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         var dbName = $"runner-config-{Guid.NewGuid():N}";
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
@@ -367,7 +367,7 @@ public class RunnerConfigFixture : IAsyncLifetime
         _registeredRunnerIds.Clear();
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         Client?.Dispose();
         _factory?.Dispose();

@@ -25,12 +25,12 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         _transcriptStore = new AgentSessionTranscriptStore(new TestDbContextFactory(_database.Options));
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _database.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [Fact]

@@ -28,8 +28,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         _client = fixture.Client;
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
-    public Task DisposeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     [Fact]
     public async Task GivenProjectRepositoryConfigChanges_AfterIssueCreation_WhenUserOpensWorkspaceDiff_ThenBaseBranchComesFromRunSnapshot()

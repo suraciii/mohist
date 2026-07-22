@@ -1,7 +1,7 @@
 using ArchUnitNET.Domain;
 using ArchUnitNET.Fluent;
 using ArchUnitNET.Loader;
-using ArchUnitNET.xUnit;
+using ArchUnitNET.xUnitV3;
 using Mohist.Server.Infrastructure.Data.Db;
 using Xunit;
 using static ArchUnitNET.Fluent.ArchRuleDefinition;
@@ -18,12 +18,12 @@ public class ArchitectureRules
         .Build();
 
     private static readonly IObjectProvider<IType> OrleansGeneratedTypes = Types()
-        .That().ResideInNamespace("OrleansCodeGen", true)
+        .That().ResideInNamespaceMatching("OrleansCodeGen")
         .As("Orleans Generated Types");
 
     // Layer definitions
     private static readonly IObjectProvider<IType> DomainLayer = Types()
-        .That().ResideInNamespace("Mohist.Server.*.Domain", useRegularExpressions: true)
+        .That().ResideInNamespaceMatching("Mohist.Server.*.Domain")
         .As("Domain Layer");
 
     private static readonly IObjectProvider<IType> ApiLayer = Types()
@@ -31,24 +31,24 @@ public class ArchitectureRules
         .As("API Layer");
 
     private static readonly IObjectProvider<IType> GrainLayer = Types()
-        .That().ResideInNamespace("Mohist.Server.*.Grains", useRegularExpressions: true)
+        .That().ResideInNamespaceMatching("Mohist.Server.*.Grains")
         .As("Grain Layer");
 
     private static readonly IObjectProvider<IType> ApplicationLayer = Types()
-        .That().ResideInNamespace("Mohist.Server.*.(Grains|Services)", useRegularExpressions: true)
-        .And().DoNotResideInNamespace("Mohist.Server.Infrastructure", useRegularExpressions: true)
+        .That().ResideInNamespaceMatching("Mohist.Server.*.(Grains|Services)")
+        .And().DoNotResideInNamespaceMatching("Mohist.Server.Infrastructure")
         .As("Application Layer");
 
     private static readonly IObjectProvider<IType> GrainInterfaces = Interfaces()
-        .That().ResideInNamespace("Mohist.Server.*.Grains", useRegularExpressions: true)
+        .That().ResideInNamespaceMatching("Mohist.Server.*.Grains")
         .As("Grain Interfaces");
 
     private static readonly IObjectProvider<IType> DataLayer = Types()
-        .That().ResideInNamespace("Mohist.Server.Infrastructure.Data", useRegularExpressions: true)
+        .That().ResideInNamespaceMatching("Mohist.Server.Infrastructure.Data")
         .As("Data Layer");
 
     private static readonly IObjectProvider<IType> QuerierLayer = Types()
-        .That().ResideInNamespace("Mohist.Server.*.Services", useRegularExpressions: true)
+        .That().ResideInNamespaceMatching("Mohist.Server.*.Services")
         .And().HaveNameEndingWith("Querier")
         .As("Querier Layer");
 
@@ -108,7 +108,7 @@ public class ArchitectureRules
         // (D5) as the intended wiring.
         var applicationLayerExcludingEventsGrains = Types()
             .That().Are(ApplicationLayer)
-            .And().DoNotResideInNamespace("Mohist.Server.Events.Grains", useRegularExpressions: false)
+            .And().DoNotResideInNamespace("Mohist.Server.Events.Grains")
             .As("Application Layer excluding Events.Grains");
 
         Types().That().Are(DataLayer)
@@ -121,7 +121,7 @@ public class ArchitectureRules
     public void DataStores_AreInInfrastructureData()
     {
         Classes().That().HaveNameEndingWith("Store")
-            .And().ResideInNamespace("Mohist.Server.Infrastructure.Data", useRegularExpressions: true)
+            .And().ResideInNamespaceMatching("Mohist.Server.Infrastructure.Data")
             .Should().Exist()
             .Because("database-backed stores should be in Infrastructure.Data namespace")
             .Check(_architecture);
@@ -130,9 +130,9 @@ public class ArchitectureRules
     [Fact]
     public void RowModels_AreInInfrastructureData()
     {
-        Classes().That().ResideInNamespace("Mohist.Server", useRegularExpressions: true)
+        Classes().That().ResideInNamespaceMatching("Mohist.Server")
             .And().HaveNameEndingWith("Row")
-            .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data(\\..*)?", useRegularExpressions: true)
+            .Should().ResideInNamespaceMatching("Mohist.Server.Infrastructure.Data(\\..*)?")
             .Because("EF row models are persistence data models and belong under Infrastructure.Data")
             .Check(_architecture);
     }
@@ -140,9 +140,9 @@ public class ArchitectureRules
     [Fact]
     public void DbContexts_AreInInfrastructureData()
     {
-        Classes().That().ResideInNamespace("Mohist.Server", useRegularExpressions: true)
+        Classes().That().ResideInNamespaceMatching("Mohist.Server")
             .And().AreAssignableTo(typeof(Microsoft.EntityFrameworkCore.DbContext))
-            .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data(\\..*)?", useRegularExpressions: true)
+            .Should().ResideInNamespaceMatching("Mohist.Server.Infrastructure.Data(\\..*)?")
             .Because("database contexts are infrastructure data concerns")
             .Check(_architecture);
     }
@@ -150,9 +150,9 @@ public class ArchitectureRules
     [Fact]
     public void Migrations_AreInInfrastructureData()
     {
-        Classes().That().ResideInNamespace("Mohist.Server", useRegularExpressions: true)
+        Classes().That().ResideInNamespaceMatching("Mohist.Server")
             .And().AreAssignableTo(typeof(Microsoft.EntityFrameworkCore.Migrations.Migration))
-            .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data.Migrations", useRegularExpressions: true)
+            .Should().ResideInNamespaceMatching("Mohist.Server.Infrastructure.Data.Migrations")
             .Because("EF migrations should live with database schema artifacts under Infrastructure.Data")
             .Check(_architecture);
     }
@@ -160,9 +160,9 @@ public class ArchitectureRules
     [Fact]
     public void ModelSnapshots_AreInInfrastructureData()
     {
-        Classes().That().ResideInNamespace("Mohist.Server", useRegularExpressions: true)
+        Classes().That().ResideInNamespaceMatching("Mohist.Server")
             .And().HaveNameEndingWith("ModelSnapshot")
-            .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data.Migrations", useRegularExpressions: true)
+            .Should().ResideInNamespaceMatching("Mohist.Server.Infrastructure.Data.Migrations")
             .Because("EF model snapshots should live with database schema artifacts under Infrastructure.Data")
             .Check(_architecture);
     }
@@ -273,7 +273,7 @@ public class ArchitectureRules
         Classes().That().HaveNameEndingWith("Grain")
             .And().DoNotHaveNameStartingWith("I")
             .And().AreNot(OrleansGeneratedTypes)
-            .And().DoNotResideInNamespace("OrleansCodeGen", true)
+            .And().DoNotResideInNamespaceMatching("OrleansCodeGen")
             .Should().BeAssignableTo(typeof(Orleans.Grain))
             .Because("Grain implementations must inherit from Orleans.Grain")
             .Check(_architecture);
@@ -301,7 +301,7 @@ public class ArchitectureRules
     public void GrainInterfaces_ShouldBeInGrainsNamespace()
     {
         Interfaces().That().HaveNameEndingWith("Grain")
-            .Should().ResideInNamespace("Mohist.Server.*.Grains", useRegularExpressions: true)
+            .Should().ResideInNamespaceMatching("Mohist.Server.*.Grains")
             .Because("Grain interfaces must be in Grains namespace")
             .Check(_architecture);
     }
@@ -322,18 +322,18 @@ public class ArchitectureRules
         var participantInterfaces = Interfaces()
             .That().HaveNameEndingWith("BindingParticipant")
             .Or().HaveNameEndingWith("BindingTarget")
-            .And().ResideInNamespace("Mohist.Server.*.Grains.Coordinator", useRegularExpressions: true)
+            .And().ResideInNamespaceMatching("Mohist.Server.*.Grains.Coordinator")
             .As("IssueRepositoryBindingParticipantInterfaces");
 
         var coordinatorGrain = Classes()
             .That().HaveNameEndingWith("CoordinatorGrain")
-            .And().ResideInNamespace("Mohist.Server.*.Grains.Coordinator", useRegularExpressions: true)
+            .And().ResideInNamespaceMatching("Mohist.Server.*.Grains.Coordinator")
             .As("IssueRepositoryCoordinatorGrain");
 
         Classes().That().AreNot(coordinatorGrain)
             .And().DoNotHaveNameEndingWith("BindingParticipantProxy")
             .And().DoNotHaveName("IssueGrain")
-            .And().DoNotResideInNamespace("OrleansCodeGen", useRegularExpressions: true)
+            .And().DoNotResideInNamespaceMatching("OrleansCodeGen")
             .Should().NotDependOnAny(participantInterfaces)
             .Because("only the IssueRepositoryCoordinatorGrain and its binding-participant proxies may depend on the narrow binding-participant interfaces; production routes / services / other grains must call the coordinator instead")
             .Check(_architecture);
@@ -425,13 +425,13 @@ public class ArchitectureRules
                 if (from == to || AllowedDomainDependencies.Contains((from, to))) continue;
 
                 var fromTypes = Types()
-                    .That().ResideInNamespace($@"Mohist\.Server\.{from}(\.|$)", useRegularExpressions: true)
-                    .And().DoNotResideInNamespace("OrleansCodeGen", true)
+                    .That().ResideInNamespaceMatching($@"Mohist\.Server\.{from}(\.|$)")
+                    .And().DoNotResideInNamespaceMatching("OrleansCodeGen")
                     .As($"{from}");
 
                 var toTypes = Types()
-                    .That().ResideInNamespace($@"Mohist\.Server\.{to}(\.|$)", useRegularExpressions: true)
-                    .And().DoNotResideInNamespace("OrleansCodeGen", true)
+                    .That().ResideInNamespaceMatching($@"Mohist\.Server\.{to}(\.|$)")
+                    .And().DoNotResideInNamespaceMatching("OrleansCodeGen")
                     .As($"{to}");
 
                 Types().That().Are(fromTypes)

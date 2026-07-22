@@ -24,9 +24,9 @@ public class OtlpRoutesIntegrationSpecs : IAsyncLifetime
         _fixture = fixture;
     }
 
-    public Task InitializeAsync() => _fixture.ResetOtelStateAsync();
+    public ValueTask InitializeAsync() => new(_fixture.ResetOtelStateAsync());
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     [Fact]
     public async Task PostValidJson_IngestPayload_Returns200AndEmptyObject()

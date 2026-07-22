@@ -66,12 +66,12 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         public Dictionary<string, string> LoadAll() => new(StringComparer.Ordinal);
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _database.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     private async Task<WorkflowRun> SeedRunningWorkflowAsync(string workflowRunId, string projectId)

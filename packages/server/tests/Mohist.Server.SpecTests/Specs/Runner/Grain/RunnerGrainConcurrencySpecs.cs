@@ -33,15 +33,15 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         _fixture = fixture;
     }
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         _fixture.DispatchObserver.Reset();
         _fixture.RunnerAssignmentObserver.Reset();
         _fixture.CloseoutObserver.Reset();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private IGrainFactory Grains => _fixture.Grains;
     private IServiceProvider Services => _fixture.Cluster.GetSiloServiceProvider(null);

@@ -20,12 +20,12 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         _manager = new ProjectWorkflowProfileManager(new TestDbContextFactory(_database.Options), new StubPromptLoader(), new PromptTemplateEngine());
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _database.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     // ===================== System templates =====================

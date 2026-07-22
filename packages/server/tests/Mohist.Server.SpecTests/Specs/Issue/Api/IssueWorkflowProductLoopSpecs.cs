@@ -27,9 +27,9 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         _client = fixture.Client;
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (!string.IsNullOrWhiteSpace(_runnerId))
         {

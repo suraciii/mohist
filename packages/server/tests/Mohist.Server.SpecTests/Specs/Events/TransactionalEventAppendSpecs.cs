@@ -44,7 +44,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         db.Epics.Add(new EpicRow
@@ -61,10 +61,10 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         await db.SaveChangesAsync();
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _database.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [Fact]
