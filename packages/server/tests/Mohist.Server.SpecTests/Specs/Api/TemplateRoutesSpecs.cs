@@ -120,6 +120,24 @@ public class TemplateRoutesSpecs
     }
 
     [Fact]
+    public async Task ExtractVariables_IgnoresEscapedReferences()
+    {
+        var response = await _fixture.Client.PostAsJsonAsync(
+            "/api/templates/extract-variables",
+            new { body = @"Use \${{ vars.literal }} and ${{ vars.actual }}" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var variables = payload.GetProperty("data").GetProperty("variables")
+            .EnumerateArray()
+            .Select(item => item.GetString())
+            .ToArray();
+
+        Assert.Equal(new[] { "vars.actual" }, variables);
+    }
+
+    [Fact]
     public async Task ExtractVariables_WithContextReturnsRendererErrors()
     {
         var response = await _fixture.Client.PostAsJsonAsync(

@@ -100,7 +100,8 @@ public sealed class PromptTemplateEngine : ISingletonService
         ArgumentNullException.ThrowIfNull(body);
 
         var paths = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (Match match in TokenRegex.Matches(body))
+        var normalized = body.Replace("\\${{", EscapeSentinel, StringComparison.Ordinal);
+        foreach (Match match in TokenRegex.Matches(normalized))
         {
             paths.Add(match.Groups["path"].Value);
         }

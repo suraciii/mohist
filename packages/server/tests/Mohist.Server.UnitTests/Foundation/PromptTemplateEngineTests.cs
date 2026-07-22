@@ -98,6 +98,15 @@ public class PromptTemplateEngineTests
     }
 
     [Fact]
+    public void ExtractVariables_IgnoresEscapedReferences()
+    {
+        var variables = PromptTemplateEngine.ExtractVariables(
+            @"Use \${{ vars.literal }} and ${{ vars.actual }}");
+
+        Assert.Equal(new[] { "vars.actual" }, variables.ToArray());
+    }
+
+    [Fact]
     public void ExtractVariables_CanValidateReferencesWithTheSameRenderer()
     {
         var body = "see ${{ vars.missing }} and ${{ vars.object }}";
