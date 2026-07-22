@@ -49,7 +49,7 @@ internal static partial class RunCommands
 
     private static readonly ResourceDescriptor RunViewDescriptor = new(
         ResourceCardinality.Single,
-        ["status", "issueRef"]);
+        ["id", "status", "currentStage", "stages", "issueRef"]);
 
     public static void RegisterReads(Command runCommand, MohistCliApi api)
     {
@@ -206,15 +206,37 @@ internal static partial class RunCommands
                 if (yaml)
                     return await PrintRunYamlAsync(api, resolvedRunId!).ConfigureAwait(false);
 
-                return await api.PrintResourceAsync(
-                    WorkflowRunPath(resolvedRunId!, ""),
-                    RunViewDescriptor,
-                    selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail))
-                    .ConfigureAwait(false);
+                var (dataExit, data) = await api.GetDataOrPrintErrorAsync(
+                    WorkflowRunPath(resolvedRunId!, "")).ConfigureAwait(false);
+                if (dataExit != 0)
+                    return dataExit;
+
+                if (selection.Kind == JsonSelectionKind.Selected)
+                {
+                    var projected = selection.Project(
+                        ProjectRunViewData(data), RunViewDescriptor.Cardinality);
+                    return await new CliResultWriter(api.Invocation)
+                        .WriteSuccessAsync(projected).ConfigureAwait(false);
+                }
+
+                return await api.RenderTableAsync(
+                    data, MohistCliApi.TableShape.WorkflowRunDetail).ConfigureAwait(false);
             }
         });
         return cmd;
+    }
+
+    private static JsonObject ProjectRunViewData(JsonNode? data)
+    {
+        var status = data?["status"] as JsonObject;
+        return new JsonObject
+        {
+            ["id"] = status?["workflowRunId"]?.DeepClone(),
+            ["status"] = status?["status"]?.DeepClone(),
+            ["currentStage"] = status?["currentStage"]?.DeepClone(),
+            ["stages"] = status?["stages"]?.DeepClone(),
+            ["issueRef"] = data?["issueRef"]?.DeepClone(),
+        };
     }
 
     // Fetches `GET /api/workflow-runs/{id}/yaml` and prints the rendered

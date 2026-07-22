@@ -720,6 +720,19 @@ public class CliRunControlSpecs
     }
 
     [Fact]
+    public async Task Stop_WithIssueWithoutYesInNonInteractiveMode_FailsBeforeResolvingIssue()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["run", "stop", "--issue", "42"], output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--yes", error.ToString());
+    }
+
+    [Fact]
     public async Task Stop_BothRunIdAndIssue_FailsLocallyWithoutHttp()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();

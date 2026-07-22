@@ -366,6 +366,33 @@ public class CliRunReadsSpecs
         Assert.DoesNotContain(handler.Requests, r => r.RequestUri?.PathAndQuery.Contains("/projects/") == true);
     }
 
+    [Fact]
+    public async Task View_WithJsonFieldSelection_ProjectsRunFields()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get
+                && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = SampleRunDetail() });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["run", "view", WrId, "--json", "id,status,currentStage"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(handler.Requests);
+        var selected = Assert.IsType<JsonObject>(JsonNode.Parse(output.ToString()));
+        Assert.Equal(
+            new HashSet<string> { "id", "status", "currentStage" },
+            selected.Select(property => property.Key).ToHashSet());
+        Assert.Equal(WrId, selected["id"]?.GetValue<string>());
+        Assert.Equal("running", selected["status"]?.GetValue<string>());
+        Assert.Equal("build", selected["currentStage"]?.GetValue<string>());
+    }
+
     // ────────────────────────────────────────────────────────────────────
     //  view — --issue target resolution
     // ────────────────────────────────────────────────────────────────────

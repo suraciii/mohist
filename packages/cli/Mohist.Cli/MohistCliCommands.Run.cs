@@ -91,22 +91,11 @@ internal static partial class RunCommands
         string? issueNumber,
         string? project)
     {
+        var shapeExit = await ValidateRunTargetShapeAsync(api, runId, issueNumber).ConfigureAwait(false);
+        if (shapeExit != 0)
+            return (null, shapeExit);
+
         var hasRunId = !string.IsNullOrWhiteSpace(runId);
-        var hasIssue = !string.IsNullOrWhiteSpace(issueNumber);
-
-        if (hasRunId && hasIssue)
-        {
-            await api.Error.WriteLineAsync(
-                "Provide either a Run ID or --issue, not both.").ConfigureAwait(false);
-            return (null, CliExitCode.For(CliExitOutcome.UsageFailure));
-        }
-
-        if (!hasRunId && !hasIssue)
-        {
-            await api.Error.WriteLineAsync(
-                "A Run ID or --issue <number> is required.").ConfigureAwait(false);
-            return (null, CliExitCode.For(CliExitOutcome.UsageFailure));
-        }
 
         if (hasRunId)
             return (runId, 0);
@@ -129,6 +118,31 @@ internal static partial class RunCommands
         }
 
         return (workflowRunId, 0);
+    }
+
+    private static async Task<int> ValidateRunTargetShapeAsync(
+        MohistCliApi api,
+        string? runId,
+        string? issueNumber)
+    {
+        var hasRunId = !string.IsNullOrWhiteSpace(runId);
+        var hasIssue = !string.IsNullOrWhiteSpace(issueNumber);
+
+        if (hasRunId && hasIssue)
+        {
+            await api.Error.WriteLineAsync(
+                "Provide either a Run ID or --issue, not both.").ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.UsageFailure);
+        }
+
+        if (!hasRunId && !hasIssue)
+        {
+            await api.Error.WriteLineAsync(
+                "A Run ID or --issue <number> is required.").ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.UsageFailure);
+        }
+
+        return 0;
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -522,6 +536,18 @@ internal static partial class RunCommands
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(RunControlDescriptor, selection);
 
+                var targetShapeExit = await ValidateRunTargetShapeAsync(
+                    api, runId, issue).ConfigureAwait(false);
+                if (targetShapeExit != 0)
+                    return targetShapeExit;
+
+                if (!yes && !api.Invocation.PromptsEnabled)
+                {
+                    await api.Error.WriteLineAsync(
+                        "--yes is required to confirm this irreversible action.").ConfigureAwait(false);
+                    return CliExitCode.For(CliExitOutcome.OperationFailure);
+                }
+
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
                     api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
                 if (resolveExit != 0)
@@ -529,13 +555,6 @@ internal static partial class RunCommands
 
                 if (!yes)
                 {
-                    if (!api.Invocation.PromptsEnabled)
-                    {
-                        await api.Error.WriteLineAsync(
-                            "--yes is required to confirm this irreversible action.").ConfigureAwait(false);
-                        return CliExitCode.For(CliExitOutcome.OperationFailure);
-                    }
-
                     await api.Error.WriteAsync(
                         $"Stop {resolvedRunId} permanently? This cannot be undone. [y/N] ").ConfigureAwait(false);
                     var line = await api.Invocation.Input
