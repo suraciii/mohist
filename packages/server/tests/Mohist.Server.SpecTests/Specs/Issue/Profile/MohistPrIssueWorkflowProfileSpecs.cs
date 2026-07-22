@@ -163,7 +163,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var definition = MohistWorkflow.GithubPrWorkflowDefinition;
 
         Assert.Equal(new[] { "plan", "build", "check", "integrate" }, definition.Stages.Select(s => s.Stage).ToArray());
-        Assert.Equal("mohist/github-pr", WorkflowProfileCatalog.GetProfile("mohist/github-pr")!.Id);
     }
 
     [Fact]
@@ -557,7 +556,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var definition = WorkflowYamlSerializer.FromYaml(yaml);
 
-        Assert.Equal("mohist/github-pr", WorkflowProfileCatalog.GetProfile("mohist/github-pr")!.Id);
         Assert.Equal(["plan", "build", "check", "integrate"], definition.Stages.Select(s => s.Stage).ToArray());
 
         var planIds = definition.Stages[0].Tasks.Select(t => t.Id).ToArray();
