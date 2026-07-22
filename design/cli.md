@@ -62,7 +62,8 @@ aggregate 是内部实现，不机械决定命令导航。跨 context 的关系�
 - `issue start` 开始一项工作并取得当前 WorkflowRun；它是 Issue 动作。
 - `run approve/reject/retry/rerun/pause/resume/stop` 改变 WorkflowRun；不在 `issue` 下复制。
 - `project workflow set-default` 修改 Project 的默认 Profile 引用；`workflow` 只管理 Profile
-  collection，Issue 的显式选择由 `issue create/edit` 修改。
+  collection，Issue 的显式选择由 `issue create/edit --workflow-profile` 修改，并由
+  `issue edit --inherit-workflow-profile` 清除；两个 flag 互斥。
 - `agent launch` 启动 Mohist Agent 工作并返回 AgentJob 与 AgentSession；Job 的工作结果从
   `agent job` 读取，Session 不裁定 Job。
 - `session transcript/followup/compact/reset/cancel` 改变或读取 AgentSession；不按 Issue 来源和 Agent 来源复制两套路径。
