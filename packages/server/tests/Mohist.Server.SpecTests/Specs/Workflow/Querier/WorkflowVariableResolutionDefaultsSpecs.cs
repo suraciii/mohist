@@ -301,6 +301,35 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     }
 
     [Fact]
+    public async Task PatchRunVariables_PreservesDefaultsForKeysItDoesNotTouch()
+    {
+        // Issue-474 review: PatchVariablesAsync must derive the cleared
+        // defaults from the row read under the same ETag snapshot as the
+        // write, not from a detached snapshot taken before it. A PATCH that
+        // does not touch archive must leave a seeded archive default intact
+        // even though the patch was computed against a snapshot.
+        var runId = "wr_patch_preserves_default01";
+        var dbFactory = new TestDbContextFactory(Database.Options);
+        var runManager = new WorkflowRunProfileManager(dbFactory);
+        await runManager.EnsureArchiveDefaultAsync(runId);
+
+        await runManager.PatchVariablesAsync(
+            runId,
+            new VariableBundle(
+                Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+                {
+                    unrelated = "patched",
+                }))));
+
+        var defaults = await runManager.GetDefaultVariablesAsync(runId);
+        Assert.Equal(string.Empty, defaults.DefaultVars!.Value.GetProperty("archive").GetString());
+
+        var explicitBundle = await runManager.GetVariablesAsync(runId);
+        Assert.Equal("patched", explicitBundle.Vars!.Value.GetProperty("unrelated").GetString());
+        Assert.False(explicitBundle.Vars.Value.TryGetProperty("archive", out _));
+    }
+
+    [Fact]
     public async Task PutRunVariables_ClearsMarkedDefaultAndWins()
     {
         var runId = "wr_put_replace01";

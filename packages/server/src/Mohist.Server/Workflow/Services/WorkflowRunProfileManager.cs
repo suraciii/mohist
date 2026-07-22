@@ -44,12 +44,7 @@ public class WorkflowRunProfileManager : IScopedService
 
     public async Task<VariableBundle> SetVariablesAsync(string workflowRunId, VariableBundle bundle)
     {
-        var current = await LoadRowAsync(workflowRunId);
-        var defaults = current is null
-            ? VariableBundle.Empty
-            : VariableBundle.FromJson(current.DefaultVariables);
-        var clearedDefaults = defaults.ClearDefaultsCoveredByExplicit(bundle);
-        return await SetVariablesInternalAsync(workflowRunId, bundle, preservedDefaults: clearedDefaults);
+        return await MutateVariablesAsync(workflowRunId, _ => bundle);
     }
 
     /// <summary>
@@ -115,42 +110,44 @@ public class WorkflowRunProfileManager : IScopedService
 
     public async Task<VariableBundle> PatchVariablesAsync(string workflowRunId, VariableBundle patch)
     {
-        var current = await LoadRowAsync(workflowRunId);
-        var explicitVars = current is null
-            ? VariableBundle.Empty
-            : VariableBundle.FromJson(current.Variables);
-        var defaults = current is null
-            ? VariableBundle.Empty
-            : VariableBundle.FromJson(current.DefaultVariables);
-
-        var merged = VariableBundle.Patch(explicitVars, patch);
-        var clearedDefaults = defaults.ClearDefaultsCoveredByExplicit(merged);
-        return await SetVariablesInternalAsync(
+        return await MutateVariablesAsync(
             workflowRunId,
-            merged,
-            preservedDefaults: clearedDefaults);
+            current => VariableBundle.Patch(
+                current is null ? VariableBundle.Empty : VariableBundle.FromJson(current.Variables),
+                patch));
     }
 
-    private async Task<VariableBundle> SetVariablesInternalAsync(
+    /// <summary>
+    /// Single tracked read-modify-write for explicit Run variables. The
+    /// <paramref name="buildDesiredExplicit"/> strategy runs against the row
+    /// read under the same ETag snapshot that is later written, so the desired
+    /// explicit bundle and the cleared defaults both derive from the current
+    /// row instead of a detached snapshot taken before it. An interleaved
+    /// writer either bumps ETag (raising DbUpdateConcurrencyException here) or
+    /// is itself rejected by this write's token — the defaults column is
+    /// never silently restored to a stale value.
+    /// </summary>
+    private async Task<VariableBundle> MutateVariablesAsync(
         string workflowRunId,
-        VariableBundle bundle,
-        VariableBundle? preservedDefaults = null)
+        Func<WorkflowRunProfileRow?, VariableBundle> buildDesiredExplicit)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.WorkflowRunProfiles
             .FirstOrDefaultAsync(x => x.WorkflowRunId == workflowRunId);
 
-        var effectiveDefaults = preservedDefaults ?? (row is null
+        var desiredExplicit = buildDesiredExplicit(row);
+        var currentDefaults = row is null
             ? VariableBundle.Empty
-            : VariableBundle.FromJson(row.DefaultVariables));
+            : VariableBundle.FromJson(row.DefaultVariables);
+        var clearedDefaults = currentDefaults.ClearDefaultsCoveredByExplicit(desiredExplicit);
 
         if (row is null)
         {
             row = new WorkflowRunProfileRow
             {
                 WorkflowRunId = workflowRunId,
-                Variables = bundle.ToJson(),
-                DefaultVariables = effectiveDefaults.ToJson(),
+                Variables = desiredExplicit.ToJson(),
+                DefaultVariables = clearedDefaults.ToJson(),
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             db.WorkflowRunProfiles.Add(row);
@@ -158,8 +155,8 @@ public class WorkflowRunProfileManager : IScopedService
         }
         else
         {
-            row.Variables = bundle.ToJson();
-            row.DefaultVariables = effectiveDefaults.ToJson();
+            row.Variables = desiredExplicit.ToJson();
+            row.DefaultVariables = clearedDefaults.ToJson();
             row.UpdatedAt = DateTimeOffset.UtcNow;
             BumpETag(db.Entry(row));
         }
@@ -167,10 +164,10 @@ public class WorkflowRunProfileManager : IScopedService
         await db.SaveChangesAsync();
 
         return new VariableBundle(
-            bundle.Vars,
-            bundle.Stages,
-            effectiveDefaults.DefaultVars,
-            effectiveDefaults.DefaultStages);
+            desiredExplicit.Vars,
+            desiredExplicit.Stages,
+            clearedDefaults.DefaultVars,
+            clearedDefaults.DefaultStages);
     }
 
     private static void BumpETag(EntityEntry<WorkflowRunProfileRow> entry)
