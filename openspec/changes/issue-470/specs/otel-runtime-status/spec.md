@@ -1,6 +1,6 @@
 ### Requirement: OTel status has exactly three states
 
-The OTel status API and `mo otel status` SHALL report exactly one state: `off`, `healthy` or `degraded`. `off` SHALL mean observability is disabled and its collector and maintenance work are not running. `healthy` SHALL mean observability is enabled, ingestion and storage are usable, and no rejection or data-loss protection is active. `degraded` SHALL mean observability is enabled but ingestion or storage is unavailable, a write has failed, or a protection component has reported that telemetry is currently being rejected or dropped. The status read surface SHALL remain available while the Mohist Server is reachable, including when observability is `off`. This change defines the rejection/drop publication and read contract; it SHALL NOT introduce the storage/admission policy that decides to reject data.
+The OTel status API and `mo otel status` SHALL report exactly one state: `off`, `healthy` or `degraded`. `off` SHALL mean observability is disabled and its collector and maintenance work are not running. `healthy` SHALL mean observability is enabled, ingestion, storage and process-resource sampling are usable, and no rejection or data-loss protection is active. `degraded` SHALL mean observability is enabled but ingestion, storage or process-resource sampling is unavailable, a write has failed, or a protection component has reported that telemetry is currently being rejected or dropped. The status read surface SHALL remain available while the Mohist Server is reachable, including when observability is `off`. This change defines the rejection/drop publication and read contract; it SHALL NOT introduce the storage/admission policy that decides to reject data.
 
 #### Scenario: Observability is disabled
 
@@ -21,6 +21,19 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 - **WHEN** observability is enabled and the OTel database cannot be read
 - **THEN** the status API and `mo otel status` SHALL report `degraded`
 - **AND** SHALL expose a reason identifying the read failure instead of substituting zero values that appear healthy
+
+#### Scenario: Process resources cannot be sampled
+
+- **WHEN** the process-resource reader fails while observability is enabled
+- **THEN** the status API and `mo otel status` SHALL report `degraded` with `process_read_failed`
+- **AND** the unavailable process values SHALL be `null` rather than stale or fabricated values
+- **AND** a later successful sample SHALL clear that source
+
+#### Scenario: Process resources cannot be sampled while off
+
+- **WHEN** the process-resource reader fails while observability is disabled
+- **THEN** status SHALL remain `off` and expose `process_read_failed` with unavailable process values
+- **AND** it SHALL NOT start the collector or storage maintenance to recover the sample
 
 #### Scenario: A write fails or a protection component reports telemetry loss
 

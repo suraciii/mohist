@@ -7,15 +7,18 @@ Issue 470 plan repair progress
 - [completed] F6: fallback attempts stop and disposal, constructs an alternate only if both succeed, and treats either shutdown failure as terminal.
 - [completed] F7: incoming Orleans calls suppress ambient scope, Snapshot() is an accepted dependency, test composition roots are covered, and the oversized baseline is split into publication core (T-001), status (T-002), and sampling (T-003).
 - [completed] Follow-up feasibility check: readiness uses PRAGMA schema_version rather than SELECT 1 so the probe touches database metadata/read locking without history scans.
-- [completed] Final audit follow-up: production probe tests use IOtelReadinessConnectionFactory + FakeFileSystem seams; continuous sampler replaces the one-shot initializer; request accounting and route aggregation are separate tasks.
+- [completed] Final audit follow-up: production probe tests use IOtelReadinessConnectionFactory + FakeFileSystem seams; the continuous sampler solely owns startup/repeated probing with no temporary initializer; request accounting and route aggregation are separate tasks.
 - [completed] Validated proposal/spec/design/task consistency, 7-task JSON anchors/DAG, 14 requirements/35 scenarios, and confirmed self-review.md remains unchanged.
 
 Current self-review repair:
 - [completed] New F1/F4: immediate working-set/GC-heap pressure remains available in `off` and CPU is null only for first-sample warm-up; collector/storage work, route retention and all Meter measurements remain disabled, with construction distinguished from measurement.
 - [completed] New F2: request accounting closes atomically at response completion, adapters no-op after close, detached launchers suppress scope flow, and separate tests prove close immutability, null child scope and both launcher migrations.
 - [completed] New F3: T-002 owns `OtelDb.OpenReadinessConnection` using `Default Timeout=1` before connection construction/initialization plus nullable `IFileSystem.GetFileLength` across all implementations/fakes.
-- [pending] Revalidate all artifacts and confirm `self-review.md` remains untouched.
+- [completed] Final consistency follow-up: `process_read` has explicit enabled/off/recovery semantics, and T-003 is the sole hosted startup/repeated sampler while T-002 delivers an unhosted reusable probe.
+- [completed] Revalidated all artifacts with two independent PASS reviews: 7-task DAG and anchors, 14 requirements/38 scenarios, clean diff checks, and unchanged `self-review.md` hash `acb584c33f262a196b334b8e18f6cfa3e8f22b85c937d07db2fdc87441e1e955`.
 
 Commits:
 - afdff7b3e records the existing failing self-review unchanged.
 - 4a03b9d95 contains the first complete F1-F7 repair batch; subsequent refinements close probe testability, startup ownership, literal aliases, and task sizing before the final progress commit.
+- 4103fe5a4 repairs off-state process/status and Meter-measurement semantics.
+- f2f8c1c9b defines the storage readiness and request close/detach boundaries.
