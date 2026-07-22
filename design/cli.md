@@ -33,9 +33,18 @@ CLI 导航以用户意图为主，同时尊重领域所有权。顶层命令不�
 | `epic` | Epic | 与 Issue 同一限界上下文，但有独立身份和生命周期 |
 | `workflow` | WorkflowProfile | Project 范围的 Workflow 定义入口，不表示一次执行 |
 | `run` | WorkflowRun | 一次 Workflow 执行及其审批、恢复和终止动作 |
-| `agent` | Mohist Agent | Project 范围的可复用 Named Agent |
+| `agent` | Mohist Agent | Project 范围的可复用 Named Agent；AgentJob 是其工作子资源 |
 | `session` | AgentSession | 稳定的逻辑会话，与来源无关地统一寻址 |
-| `runner` | Runner | 执行资源及受管服务操作 |
+| `activity` | AgentOps Activity feed | Project 范围的跨领域只读活动记录 |
+| `runner` | Runner | Server 已注册的执行资源、presence 与 capacity |
+| `server` | Mohist Server | 当前连接的控制平面应用及其状态、健康和应用日志 |
+| `service` | Managed Service | 本机受管的 Server 或 Runner 进程；不是领域上下文 |
+| `event` | Event delivery operations | 实时信封流与 dead-letter 恢复；不是业务领域资源 |
+
+Runtime adapter、Runtime Session 和 model catalog 不形成顶层 area。Runtime 是 Agent 配置、
+Session binding 或 Action 选择中的维度；模型目录通过 `agent model list --runtime` 提供配置
+辅助。根级 `config` 也不是产品资源：所有者不同的设置必须留在 Project、Agent、Run 或本机
+Service 等明确边界，不能用任意 key/value 命令重新聚合。
 
 `run` 是 WorkflowRun 的命令行短名。`workflow` 是 WorkflowProfile 的导航名；group help 的首句必须写明它管理 Workflow Profile，不能让用户把它理解成 WorkflowRun。CLI 短名不引入新的领域概念，也不改变 [`domain-analysis.md`](domain-analysis.md) 的所有权。
 
@@ -46,15 +55,25 @@ Definition 与 Variables 的生效时机由产品 [Workflow Profile spec](../doc
 
 ### Canonical ownership
 
-动作只放在拥有该状态变化的 area：
+每个领域意图只有一个规范入口。area 选择用户正在表达的主要对象或关系；持久化字段位于哪个
+aggregate 是内部实现，不机械决定命令导航。跨 context 的关系必须在路径中显式给出拥有该
+关系的 scope，不能把引用伪装成被引用资源自身的属性：
 
 - `issue start` 开始一项工作并取得当前 WorkflowRun；它是 Issue 动作。
 - `run approve/reject/retry/rerun/pause/resume/stop` 改变 WorkflowRun；不在 `issue` 下复制。
-- `agent launch` 启动 Mohist Agent 工作并返回 AgentSession；它是 Agent 动作。
+- `project workflow set-default` 修改 Project 的默认 Profile 引用；`workflow` 只管理 Profile
+  collection，Issue 的显式选择由 `issue create/edit` 修改。
+- `agent launch` 启动 Mohist Agent 工作并返回 AgentJob 与 AgentSession；Job 的工作结果从
+  `agent job` 读取，Session 不裁定 Job。
 - `session transcript/followup/compact/reset/cancel` 改变或读取 AgentSession；不按 Issue 来源和 Agent 来源复制两套路径。
+- `epic link/unlink` 表达 Epic membership 这一用户意图；Issue 仍是当前 EpicNumber 的唯一
+  写入权威，CLI 不暴露跨 aggregate 协调过程。
 - `--issue`、`--run`、`--agent` 是解析或筛选条件，不转移动作所有权。
 
-subarea 用于没有独立操作入口的从属资源（`issue comment`、`project prompt`），或只服务于一个 area 的窄目录（`issue template`、`routing rule`）。AgentSession 有稳定 ID、独立生命周期且经常直接操作，因此必须是顶层 `session`。
+subarea 用于没有独立操作入口的从属资源（`issue comment`、`project prompt`、`agent job`），
+只服务于一个 area 的窄目录（`issue template`、`routing rule`、`agent model`），或表达拥有者
+scope 下的关系（`project workflow`）。AgentSession 有稳定 ID、独立生命周期且经常直接
+操作，因此必须是顶层 `session`。
 
 ## Command language
 
@@ -101,6 +120,10 @@ resource command 表达资源及其状态变化。subarea 最多一层，用于 
 | Skill 维护完整命令表，或增加机器可读 command catalog | 初次读取看似完整，但与运行版本重复、容易过期，并消耗大量上下文 | 不采用；Skill 做决策，运行时 help 做语法发现 |
 | 所有结果使用通用 `{ok,data,error}` envelope | 统一了传输形状，却增加无信息字段并迫使人类输出绕过同一模型 | 不采用；成功输出原始资源，失败使用退出码和 stderr |
 | 默认倾倒完整 JSON，由 Agent 自行过滤 | 实现简单，但把无关字段和 token 成本推给每次调用 | 不采用；默认人类视图，自动化显式选择 JSON 字段 |
+| 在 `runner` / `server` 下同时放远程资源行为和本机进程生命周期 | 根命令较少，但同一个 action 会因 area 和机器状态改变目标、权限与失败语义 | 不采用；远程对象留在 `runner` / `server`，本机生命周期统一到 `service <action> <target>` |
+| 用 `server logs --source` 合并应用日志与本机服务日志 | 命令表更短，但两种日志的连接、权限、流和失败结果不同 | 不采用；保留 `server logs` 与 `service logs server` 两个明确行为 |
+| 为执行后端建立 `runtime list/view/model list` | 看似对称，但把 Runner 内部 adapter 与配置目录提升成不存在的产品资源 | 不采用；Runtime 只作为配置维度，模型目录放在 `agent model list --runtime` |
+| 保留根级 `config get/set` | 容易增加设置，却隐藏 Project、Agent、Workflow 与本机 Service 的不同所有权 | 不采用；只增加由明确资源拥有的类型化设置入口 |
 
 ## Context architecture
 
@@ -300,6 +323,17 @@ hint: <one executable recovery, only when certain>
 CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、网络或墙钟：
 
 - 命令树中每项能力只有一个规范路径；同一 group 内没有同义 action。
+- `run variable` 能读写 Run Variables；effective read 保持只读，并证明新 attempt 使用更新值、
+  已接受 attempt 保持自己的 context snapshot。
+- Project / Issue / Run 的 `variable` 命令共享 dotted key path、`--stage` 和 string / explicit
+  JSON value 规则；`--json` 仍只表示输出字段选择，不能被重载成输入值。
+- `agent launch` 返回 Job ID 与 Session ID；AgentJob read model 与 AgentSession 命令不会互相
+  声称拥有对方的状态或结果。
+- `runner` / `server` 命令不得调用本机 service manager，`service` 命令不得依赖 Project 或
+  把本机进程状态表示成 Runner resource 状态。
+- Activity list、Event tail 和 dead-letter recovery 分别锁定持久读模型、实时流和投递恢复
+  的不同结果；不得用 source/mode flag 合并。
+- 目标命令树不存在顶层 `runtime` 或泛化 `config`。
 - root、group、leaf help 满足各自结构，`--help` 不触发远程依赖。
 - 文档、Skill 和 help 中的命令示例都由真实命令树解析。
 - help 声明的 JSON fields 与字段选择器完全一致；选择后的 object 不出现额外字段。
@@ -313,11 +347,20 @@ CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、
 
 ## Status
 
-当前实现与目标设计的主要差距记录在 [`docs/cli-reference.md`](../docs/cli-reference.md#实装差距)。落地顺序是：
+当前实现与目标设计的主要差距记录在 [`docs/cli-reference.md`](../docs/cli-reference.md#实装差距)。落地按独立产品价值切片：
 
-1. 先清理 help 与 Mohist Skill 的上下文边界，不改变行为。
-2. 建立字段选择式 JSON、统一 ProjectRef 和 stdout/stderr 契约。
-3. 一次性迁移 `workflow/run/session`、规范动词和唯一入口；不保留内建旧 alias。
-4. 更新所有用户示例并删除旧路径测试，确保仓库只表达目标语言。
+1. 先建立字段选择式 JSON、统一 ProjectRef、stdout/stderr、退出码与非交互契约。
+2. 在共享契约上分别迁移 Issue / WorkflowRun、Agent / AgentJob / AgentSession、
+   WorkflowProfile collection、Project / Issue / Run Variables，以及 Runner / Server / Service /
+   Activity / Event；每个切片同时交付自己的 leaf help 和契约测试。
+3. 把其余低成本动词、scope 和旧 alias 清理合并成一个 chore 批次，不为每个小命令单独建
+   issue。
+4. 命令面稳定后，最后收口 root/group help、help topics、Mohist Skill 和全部用户示例，删除
+   旧路径说明与测试。
 
-每一步都保持当前命令树、帮助和测试内部一致；不能先发布一套命令、再靠 Skill 解释另一套语法。
+Agent 模型目录切片以前置产品能力为准；WorkflowProfile 与 Variables 切片必须建立在既有
+Definition / Variables 分离、attempt context snapshot 和权威校验链之上。多个领域切片可以
+在共享 CLI 契约完成后并行，不增加为了排序而存在的依赖。
+
+每一步都保持当时的命令树、帮助和测试内部一致；不能先发布一套命令、再靠 Skill 解释另一
+套语法。

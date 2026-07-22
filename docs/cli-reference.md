@@ -85,9 +85,9 @@ task-command     = mo <task> [target] [flags]
 | 分组 | 命令组 | 管理的对象 |
 |---|---|---|
 | Work | `project`、`repo`、`issue`、`epic`、`label` | 项目空间、工作项与组织关系 |
-| Automation | `workflow`、`run`、`agent`、`session`、`event`、`routing` | 工作流定义、执行、Agent 与事件响应 |
-| Operations | `runner`、`server`、`runtime`、`notification`、`otel` | 执行资源、服务与可观测性 |
-| Tools | `help`、`config`、`skill`、`install`、`update`、`info` | 帮助主题、本机配置、Skill 和安装维护 |
+| Automation | `workflow`、`run`、`agent`、`session`、`activity`、`routing` | 工作流定义与执行、Agent 工作、对话和项目活动 |
+| Operations | `runner`、`server`、`service`、`event`、`notification`、`otel` | 执行资源、Server、本机服务、事件投递与可观测性 |
+| Tools | `help`、`skill`、`install`、`update`、`info` | 帮助主题、Skill 和安装维护 |
 
 ### 核心命令组
 
@@ -96,28 +96,28 @@ task-command     = mo <task> [target] [flags]
 
 | 命令组 | 规范动作 |
 |---|---|
-| `project` | `list`、`view`、`create`、`edit`、`use`、`delete`、`status`；`prompt list/view/set/unset/preview`；`variable list/get/set/unset` |
+| `project` | `list`、`view`、`create`、`use`、`delete`；`workflow set-default`；`prompt list/view/set/unset/preview`；`variable list/get/set/unset` |
 | `repo` | `list`、`view`、`add`、`edit`、`remove`、`set-default` |
 | `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`；`comment list/add`；`commit list`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset` |
 | `epic` | `list`、`view`、`create`、`edit`、`link`、`unlink`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
 | `label` | `list`、`view`、`create`、`edit`、`delete` |
-| `workflow` | `list`、`view`、`create`、`edit`、`delete`、`set-default`、`validate`；`view --yaml` 读取原始 Workflow Definition |
-| `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；只读 `variable list/get` |
-| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch` |
+| `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
+| `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
+| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`；`job list/view`；只读 `model list --runtime` |
 | `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
-| `event` | `list`、`tail`；`dead-letter list/redeliver` |
+| `activity` | `list` |
 | `routing` | `rule list/view/create/edit/archive/restore/move`；`test` 评估整张路由表 |
 
 ### 运维与工具命令组
 
 | 命令组 | 规范动作 |
 |---|---|
-| `runner` | `list`、`view`、`status`、`start`、`stop`、`restart`、`logs`、`uninstall` |
-| `server` | `status`、`health`、`info`、`start`、`stop`、`restart`、`logs`、`uninstall`；`logs --source` 区分应用与受管服务日志 |
-| `runtime` | `list`、`view`；只读 `model list` |
+| `runner` | `list`、`view`、`status` |
+| `server` | `status`、`health`、`info`、`logs` |
+| `service` | `start`、`stop`、`restart`、`status`、`logs`、`uninstall`，target 为 `server` 或 `runner` |
+| `event` | `tail`；`dead-letter list/redeliver` |
 | `notification` | `setup` |
 | `otel` | `status`、`query` |
-| `config` | `list`、`get`、`set` |
 | `skill` | `list`、`view`、`install`、`path`、`sync` |
 | `help` | 查看 `output`、`environment`、`exit-codes` 等共用规则 |
 | `install` | 安装 `server` 或 `runner` |
@@ -139,6 +139,11 @@ task-command     = mo <task> [target] [flags]
 Profile 会影响活动 Run。完整生效时机以 [Workflow Profile](workflow-profiles.md#选择-profile)
 为准，`workflow edit --help` 必须明确提示对活动 Run 的影响。
 
+Profile collection 属于 Workflow；Project 默认选择和 Issue 显式选择是对 Profile 的引用，
+不属于 Profile 自身。Project 使用 `mo project workflow set-default <profile>`，Issue 在
+`create` 或 `edit` 时使用 `--workflow-profile <profile>`。`mo workflow` 不复制这两种选择
+动作。
+
 `workflow` 与 `run` 的分工沿用 GitHub CLI 中 workflow definition 与 run execution 的心智模型，但使用 Mohist 自己的 WorkflowProfile 和 WorkflowRun 语义。
 
 `mo workflow validate --file <path>` 纯本地校验 Workflow Definition；`--file -` 从 stdin
@@ -157,17 +162,58 @@ mo run retry --issue 42
 
 位置参数直接使用 WorkflowRun ID；`--issue` 解析该 Issue 当前绑定的 Run。两者必须且只能提供一个。Issue 号在 Project 内唯一，因此可同时使用 `--project`。
 
-## Agent 与 Session
+Project、Issue 和 WorkflowRun 各自拥有一份 Variables。三个 scope 使用相同的
+`variable list/get/set/unset` 键值语言；`run variable list/get --effective` 读取 Project →
+Issue → Run 合并后的只读结果，并可用 `--stage` 查看指定 Stage。修改任一 scope 后，已经
+接受的 attempt 保持原输入，尚未开始的 task、人工 retry 和 recovery continuation 使用开始
+时的最新 Variables。
 
-`agent` 是 Project 内有稳定身份的 Mohist Agent。`session` 是可独立寻址的 AgentSession，不属于两套不同的命令树。
+Variables 命令使用与 `${{ vars.* }}` 相同的点分 key path。`--stage <stage>` 把读写限定到
+该 scope 的 Stage Variables；不传时操作 workflow-wide Variables。`set` 的位置值按字符串
+保存；需要 boolean、number、object 或 array 时改用互斥的 `--value-json <json>`。因此 Agent
+无需猜测 shell 文本是否会被自动转换类型：
 
-- `mo agent launch <agent>` 创建一次 Agent 工作并返回 Session ID。
+```bash
+mo issue variable set 42 agent.model openai/gpt-5
+mo issue variable set 42 review.strict --value-json true --stage check
+mo issue variable unset 42 review.strict --stage check
+```
+
+`list` 和 `get` 读取被选 scope 自己保存的值；只有 Run 提供 `--effective`，因为合并结果是
+WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--value-json` 之一。
+
+## Agent、AgentJob 与 Session
+
+`agent` 是 Project 内有稳定身份的 Mohist Agent。AgentJob 是该 Agent 的一次工作，回答
+执行是否完成及结果是什么；AgentSession 是可独立寻址的对话，回答发生了哪些消息、上下文
+和用量。CLI 不用 Session 状态代替 AgentJob 结果。
+
+- `mo agent launch <agent>` 创建 AgentJob 与 AgentSession，并返回 Job ID 和 Session ID。
+- `mo agent job list <agent>` 与 `mo agent job view <job-id>` 读取工作状态和结果。
+- `mo agent model list --runtime <runtime>` 读取 Agent 与 Issue 配置时可选择的模型；Runtime
+  是配置维度，不是独立命令资源。
 - `mo session list --agent <agent>` 查看该 Agent 发起的 Session。
 - `mo session list --issue <number>` 查看该 Issue 的 Workflow 产生的 Session。
 - `mo session list --run <run-id>` 查看该 Run 的 Session。
 - 后续读取、follow-up、compact、reset 和 cancel 都使用稳定的 Session ID。
 
 来源只是筛选和便捷查找条件，不创造 `mo issue session` 与 `mo agent session` 两套重复能力。
+`session cancel` 请求中断当前 Runtime 回合；它不表示取消或重写 AgentJob 生命周期。
+
+## Activity、Event 与本机 Service
+
+`activity` 是 Project 范围的只读活动记录，用于回答 Issue、WorkflowRun 和 AgentSession 最近
+发生了什么。`event tail` 是从订阅建立后开始的实时 Event 信封流，`event dead-letter` 是
+投递恢复操作；三者不共享读取语义，因此不合并为一个带 mode 或 source flag 的命令。
+
+`runner` 只表示 Server 已注册的执行资源及其 presence、capacity 和状态。`server` 只表示
+当前连接的 Mohist Server 应用。对本机受管进程的启动、停止和日志读取统一使用
+`mo service <action> <server|runner>`。因此 `server logs` 返回应用日志，
+`service logs server` 返回本机服务管理器日志，不用 `--source` 在两种行为间切换。
+
+CLI 不提供泛化的根级 `config`。Project Variables、Prompt、Agent 配置和其它产品设置由各自
+资源管理；本机安装或服务设置只有出现明确产品场景时才增加类型化命令，不暴露任意 key/value
+透传入口。
 
 ## Project 作用域
 
@@ -264,6 +310,14 @@ mo session transcript session_abc123
 # 从 stdin 提交长内容
 mo issue comment add 42 --body-file -
 
+# 调整当前 Run 的变量；后续 attempt 使用新值
+mo run variable set --issue 42 agent.model openai/gpt-5
+mo run variable get --issue 42 agent.model --effective --stage check
+
+# 区分远程 Runner 资源和本机 Runner 服务
+mo runner status
+mo service status runner
+
 # 不连接 Server，校验本地 Workflow Definition
 mo workflow validate --file workflow.yaml
 ```
@@ -292,7 +346,16 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - 当前根帮助、叶子帮助和 Mohist Skill 含有重复信息及部分内部实现描述。目标按本文的渐进披露边界重写。
 - 当前部分未知 area 或 action 会回退到根帮助并以 `0` 退出；目标是返回 `2`，只展示最近
   一级的相关 usage。
-- 当前 `system`、`opencode` 等实现导向入口尚未归入目标的 `server`、`runtime` 命令组。
+- 当前 Run Variables 只有 effective read CLI；目标允许显式读写 Run scope，并保留独立的
+  effective read。
+- 当前 Agent launch 只返回 Session，CLI 也没有 AgentJob read surface；目标同时暴露 Job
+  与 Session 的稳定身份和各自事实。
+- 当前 `runner`、`server` 同时包含远程资源或应用行为与本机受管服务行为；目标把本机进程
+  操作移到 `service`，并把当前 `project status` 移到 `server status`。
+- 当前持久 Activity feed、实时 Event tail 和 dead-letter 操作共用 `events` 导航；目标把
+  Activity read model 与 Event delivery operations 分开。
+- 当前 `opencode` 和根级 `config` 是实现或配置容器导向的入口；目标把模型目录放到 Agent
+  配置辅助命令，并删除没有明确资源所有者的泛化 config 命令。
 - 其它用户指南在迁移期间仍可能展示当前可运行的旧路径；完成命令迁移后再一次性更新示例。
 
 对应源码：`packages/cli/`。
