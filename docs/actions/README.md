@@ -22,9 +22,9 @@ Mohist Agent。
 
 ## 当前 Action
 
-- [`mohist/opencode`](opencode.md) —— 通过 OpenCode 执行一个回合,定义模型选项、
+- [`mohist/opencode`](opencode.md) —— 通过 OpenCode 执行一次输入,定义模型选项、
   Workflow Session 和 Session 操作语义。
-- [`mohist/pi`](pi.md) —— 通过 Pi 执行一个回合;与 `mohist/opencode` 同层,共享
+- [`mohist/pi`](pi.md) —— 通过 Pi 执行一次输入;与 `mohist/opencode` 同层,共享
   模型选项形状与 Session 语义,但安装与信任边界不同。
 
 **Git Actions**:工作区准备、rebase、rebase 状态、merge readiness 和 push 的显式 `with`

@@ -131,7 +131,7 @@ checks、其它 stage、其它 Action、AgentJob 与普通 issue 均不附加。
 
 父背景是 HTTP 派发响应的可选执行上下文，不进入 Workflow `WorkDispatch`、WorkflowRun
 metadata/state、task `with`、Variables 或 Prompts，也不新增模板表达式命名空间。Runner 只
-负责透传；所选 Inline Agent Action 在每次适用 turn 中，把 JSON 编码的父标题与 body 作为
+负责透传；所选 Inline Agent Action 在每次适用执行中，把 JSON 编码的父标题与 body 作为
 只读背景置于已解析 task prompt 之前，并明确当前子 issue body 是交付范围权威。无父背景时，
 已解析 prompt 保持不变。
 

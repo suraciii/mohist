@@ -59,7 +59,7 @@ Runner 有最大并发限制（默认 8）。意思是：
 
 **别盲目调高**：
 
-- 每个 AgentSession turn 占 CPU 和内存
+- 每个 AgentSession 执行占 CPU 和内存
 - 同时跑太多 → 模型 API 限速、机器负载爆、git lock 冲突
 - 个人开发机建议 4-8
 
@@ -69,7 +69,7 @@ Runner 有最大并发限制（默认 8）。意思是：
 
 1. **准备 workspace**：为 WorkflowRun 创建独立分支和工作目录
 2. **渲染 prompt**：用 issue body、artifacts、模板拼出 prompt
-3. **执行 Action**：`mohist/opencode` 把这次 turn 交给已安装的 OpenCode
+3. **执行 Action**：`mohist/opencode` 把本次输入交给已安装的 OpenCode
 4. **流式接收**：实时把 Action 执行事实回传 Server（更新 UI）
 5. **验证产出**：检查 expect.files 是否存在
 6. **回收 workspace**：WorkflowRun 结束后清理（或暂时保留供 debug）

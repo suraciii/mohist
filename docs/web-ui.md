@@ -119,23 +119,23 @@ URL: `/issues/<number>/files`
 
 这里展示 Workflow 或 Mohist Agent 执行时的对话记录。可以：
 
-- 看每个回合的消息和工具调用
-- 看模型、用量、压缩记录和会话沿革，包括底层 Session 为什么被替换
-- 提交 follow-up：执行中进入当前回合，空闲时开始下一回合
+- 按顺序查看消息和工具调用
+- 看模型、用量、压缩记录和当前活动状态
+- 提交 follow-up：执行中加入当前执行，空闲时开始新的执行
 - Compact：使用当前执行后端的原生能力压缩上下文
-- Reset：在 Session 空闲时开始一段没有旧上下文的新对话，同时保留旧会话记录
-- 调试某个回合为什么产生当前结果
+- Reset：让后续输入从空 Runtime 上下文继续，同时保留已记录的会话内容
+- 调试一次执行为什么产生当前结果
 
 Compact 不会创建一段伪装成原 Session 的新对话。Reset 会主动建立新的底层 Session；
-开始新 Turn 前确认原 Session 已不存在时，Mohist 也会自动建立新的底层 Session。两者都
-继续显示在同一个 AgentSession 下，并在会话沿革中标明 `Reset` 或“缺失恢复”，不会把
-空上下文显示成原对话仍然存在。Session 来源与身份见
+提交新的独立输入前确认原 Session 已不存在时，Mohist 也会自动建立新的底层 Session。
+两者都继续显示在同一个 AgentSession 下；页面以“上下文已重置”说明后续从空上下文开始，
+但不展示底层 Session 历史。Session 来源与身份见
 [Agent 与 AgentSession](agents.md)；OpenCode 操作语义见
 [`mohist/opencode` Action](actions/opencode.md)。
 
 ### 实装差距
 
-缺失恢复及其会话沿革原因尚未落地，当前页面还不能展示“缺失恢复”这一替换原因。对应
+缺失恢复尚未落地，当前页面还不能展示“后续从空上下文开始”这一状态。对应
 实施 issue 待从 AgentSession spec 创建。
 
 ## Epics 页

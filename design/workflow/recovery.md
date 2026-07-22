@@ -82,7 +82,7 @@ TaskRun 复用旧 identity。这样默认以 Work ID 命名的 Workflow AgentSes
 
 ## Runtime binding 修复不属于 Workflow recovery
 
-AgentSession 在新 Turn 提交前发现当前 Runtime Session 已明确不存在时，按
+AgentSession 在提交新的独立输入前发现当前 Runtime Session 已明确不存在时，按
 [`agent-execution.md`](../agent-execution.md#runtime-session-缺失恢复) 修复 physical binding。
 这发生在 Action 形成成功或失败结果之前：修复成功时原 TaskRun attempt 继续，不创建
 recovery task、不递减 `recoveryRemaining`，也不需要人工 Retry；修复失败时 Action 才把

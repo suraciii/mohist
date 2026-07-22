@@ -99,9 +99,9 @@ Inline Agent 是 Workflow 直接通过 `mohist/opencode` 等 Action 调用 Agent
 方式，没有独立 Agent ID。Mohist Agent 则是 Project 内有稳定 ID、名称、Instructions
 和配置的 Named Agent，可以手动启动或响应事件。
 
-AgentSession 不是 Agent，也不是工作结果；它记录一段对话的消息、上下文、用量和
-会话沿革。Workflow TaskRun 或 AgentJob 负责工作生命周期，AgentSession 只负责
-会话与审计。
+AgentSession 不是 Agent，也不是工作结果；它记录一段对话的消息、上下文、用量、
+活动状态和当前 Runtime Session。Workflow TaskRun 或 AgentJob 负责工作生命周期，
+AgentSession 只负责会话与审计。
 
 完整关系见 [Agent 与 AgentSession](agents.md)；OpenCode Action 配置见
 [`mohist/opencode` Action](actions/opencode.md)。

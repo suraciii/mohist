@@ -71,11 +71,11 @@ Action 不接触 Run Variables、server 连接、runtime 句柄、recovery 声�
 
 | 能力 | 注入 | 用途 |
 | --- | --- | --- |
-| `agent-turn` | `host.agent.turn({ prompt, session?, options? })` | 执行一个 Agent 回合。Session 打开/attach、Runtime 生命周期由能力实现层处理,Action 只表达意图 |
+| `agent-execution` | `host.agent.execute({ prompt, session?, options? })` | 执行一次 Agent 输入。Session 打开/attach、Runtime 生命周期由能力实现层处理,Action 只表达意图 |
 | `add-tasks` | 允许结果携带 `addTasks` | 追加后续 task,由 engine 统一上报,Action 不直连 server |
 | `write-vars` | `host.writeVars(vars)` | 执行中即时持久化 `vars.*`(与完成后投影的 `setVars` 不同,失败不回滚,供重试观察) |
 
-声明 `agent-turn` 同时意味着:该 Action 的回合会产生 Runner-private turn fact
+声明 `agent-execution` 同时意味着:该 Action 的执行会产生 Runner-private execution fact
 (最终 assistant 文本),由能力实现层记录,供 `expect` 的 `_output` marker 匹配;
 Action 结果本身不携带它。
 
@@ -148,11 +148,11 @@ Action 的公开结果是二选一:
 
 `TaskRun.Output` 只保存 Action 成功 output。Action 成功后被 `expect`、工作区约束
 或其他 Runner 后置检查判定失败时,TaskRun 可以同时保存原 output 与 Runner 产生的
-error。Task status、exit code 和 Runner-private turn fact 属于 Task 执行协议,不属于
+error。Task status、exit code 和 Runner-private execution fact 属于 Task 执行协议,不属于
 Action 公开结果。
 
 engine 对结果的通用处理不解释任何 Action 的业务语义。唯一按能力分派的行为:声明
-`agent-turn` 的 Action,其 output 由 task executor 依据 `expect` 投影为
+`agent-execution` 的 Action,其 output 由 task executor 依据 `expect` 投影为
 `null | { promise }`(见下文 expect 节);其余 Action 的 output 原样保留。不存在
 按 `uses` 名单的特判。
 
@@ -208,8 +208,8 @@ task executor 在 attempt 快照上渲染 `expect`,只在 Action 成功后应用
 失败、取消或超时时直接保留原始失败,不读取文件或 marker。Action 与能力实现层都不
 解释它,渲染后的 `expect` 也不进入 Action 输入通道。
 
-marker 的 `path` 可以是特殊值 `_output`,表示对回合最终 assistant 文本匹配,而不是
-文件内容。task executor 从 `agent-turn` 能力记录的 turn fact 中取得该文本;它不进入
+marker 的 `path` 可以是特殊值 `_output`,表示对本次执行最终 assistant 文本匹配,而不是
+文件内容。task executor 从 `agent-execution` 能力记录的 execution fact 中取得该文本;它不进入
 Action output,也不要求 Action 额外声明。
 
 `_output` 只识别 promise-tag 形式(`<promise>VALUE</promise>`)。多个被接受的值出现
@@ -242,7 +242,7 @@ pass/fail 的映射由 check 宿主完成,Action 不感知自己运行在 task �
 
 ### `mohist/opencode`
 
-Runtime 特有的 `agent-turn` Action;它与 Agent / Session 的所有权关系(直接使用即
+Runtime 特有的 `agent-execution` Action;它与 Agent / Session 的所有权关系(直接使用即
 Inline Agent、不解析 Agent 定义等不变量)见 [`../agent-execution.md`](../agent-execution.md)。
 Runtime 已由 `uses` 选择,输入不需要 `kind` 或 `type` discriminator。
 
@@ -261,7 +261,7 @@ type OpenCodeActionInput = {
 
 `options` 通常由 `${{ vars.agent }}` 整值展开而来,模板求值时机以
 [`task-dispatch.md`](task-dispatch.md) 为权威。`options` 中除 `model` 与 `variant`
-之外的键被忽略并记入诊断,不使回合失败。Workflow 把 `expect` 作为 task 完成契约单独
+之外的键被忽略并记入诊断,不使执行失败。Workflow 把 `expect` 作为 task 完成契约单独
 提供;旧结构 `with.expect`、`with.agent` 在 profile 加载阶段就被可操作错误拒绝。
 
 输出契约:
@@ -270,7 +270,7 @@ type OpenCodeActionInput = {
 type OpenCodeActionOutput = null | { promise: string }
 ```
 
-该 `{ promise }` output 由 task executor 依据 `expect` 对 `agent-turn` Action 合成;
+该 `{ promise }` output 由 task executor 依据 `expect` 对 `agent-execution` Action 合成;
 Action 与能力实现层都不产生它。Runtime Session 身份、model、usage、transcript、
 诊断信息和 expectation 明细保存在各自所属模型中,不复制到 Action output。OpenCode
 实现见 [`../runtimes/opencode.md`](../runtimes/opencode.md)。
@@ -315,7 +315,7 @@ checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自�
 2. **Action 输入边界**:交付类 Action 已通过 manifest 和显式 `with` 输入声明
    repository、branch、remote 与 PR identity;凭据仍是外部交付的授权边界。
 3. **engine 内按名特判**:executor 的 `PROMISE_PROJECTED_ACTIONS` 与
-   `REMOVED_ACTIONS` 名单,目标分别由 `agent-turn` 能力声明与 catalog tombstone
+   `REMOVED_ACTIONS` 名单,目标分别由 `agent-execution` 能力声明与 catalog tombstone
    取代。
 4. **Action 越权访问**:`openspec-tasks` 直连 `serverConnection.addTasks`,
    `ActionContext` 全量暴露 server 连接与 runtime 句柄;目标收敛为默认 host + 声明式

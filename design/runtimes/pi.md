@@ -14,7 +14,7 @@ Action。它与 Agent / Session 的所有权模型（Inline Agent、工作所有
   移除 `mohist/acp-agent`、不保留 ACP fallback 的既有决策一致。
 - **不用 `--mode rpc`**。RPC 模式的 `prompt` 响应只确认受理，完成要靠事件流判断；
   一个 RPC 进程同时只持有一个活跃 Session，多会话并发要管理多个子进程；并且没有
-  类型安全。SDK 的 `session.prompt()` 直接 await 到回合结束，与 `OpenCodeRuntime`
+  类型安全。SDK 的 `session.prompt()` 直接 await 到执行结束，与 `OpenCodeRuntime`
   的「prompt 响应即唯一完成判据」语义同构。若未来出现进程隔离的硬需求（Pi 崩溃
   不拖垮 Runner），可以再评估 RPC 模式；换底只改变 `PiRuntime` 内部，不改变
   Workflow Action 或 Session 产品契约。
@@ -52,9 +52,9 @@ type PiActionOutput = null | {
   由 Pi 最终校验。
 - `variant` 映射为 Pi 的 thinking level（`off` / `minimal` / `low` / `medium` /
   `high` / `xhigh` / `max`）。它始终是独立字段，不能拼进 model ID；非法取值由 Pi
-  拒绝并规范化为回合失败，Mohist 不预校验档位集合。
+  拒绝并规范化为执行失败，Mohist 不预校验档位集合。
 
-`options` 中除 `model` 与 `variant` 之外的键被忽略并记入诊断，不使回合失败；这让
+`options` 中除 `model` 与 `variant` 之外的键被忽略并记入诊断，不使执行失败；这让
 含有 `runtime` 键（供 Mohist Agent 路径读取）或遗留键的已持久化 `vars.agent` 可以
 继续绑定到本 Action。`options` 不携带 `runtime`：Workflow 路径的后端选择点就是
 `uses`。
@@ -69,13 +69,13 @@ type PiActionOutput = null | {
 |---|---|
 | 创建物理 Session | `SessionManager.create(cwd, sessionDir?)`，配合 `createAgentSession({ sessionManager, modelRuntime, settingsManager, resourceLoader, ... })` |
 | 恢复物理 Session | `SessionManager.open(sessionFile)`，配合同一组显式服务创建 `AgentSession` |
-| 执行并等待 Workflow / AgentJob 回合 | `await session.prompt(text, { expandPromptTemplates: false })` |
-| 回合中注入收尾警告 | `session.steer(text)` |
-| 提交用户 Follow-up（回合执行中） | `session.steer(text)` |
+| 执行并等待 Workflow / AgentJob Prompt | `await session.prompt(text, { expandPromptTemplates: false })` |
+| 执行中注入收尾警告 | `session.steer(text)` |
+| 提交用户 Follow-up（执行中） | `session.steer(text)` |
 | 提交用户 Follow-up（Session 空闲） | `session.prompt(text)`，不等待其完成 |
 | 中断执行 | `await session.abort()`；停止确认读取 `session.isStreaming`，不是 abort 返回值 |
 | 压缩 context | `session.compact()` |
-| 应用回合模型与推理档位 | `session.setModel()`、`session.setThinkingLevel()` |
+| 应用执行模型与推理档位 | `session.setModel()`、`session.setThinkingLevel()` |
 | 读取 Session 状态与消息 | `session.sessionId`、`session.sessionFile`、`session.messages`、`session.isStreaming` |
 | 接收实时事件 | `session.subscribe(listener)` |
 | 读取 model catalog | `ModelRuntime.create({ ... })` 后 `await modelRuntime.getAvailable()` |
@@ -101,14 +101,14 @@ type PiActionOutput = null | {
 边界规则与 `OpenCodeRuntime` 相同：`mohist/pi` Action、AgentJob execution adapter 与
 Session command handler 只依赖 Mohist 定义的 request / result 类型
 （`runtime/pi/types.ts`，`runtime` 字面量为 `"pi"`），不暴露 SDK 类型。Runtime 接收
-已经组装好的回合输入与 Session 绑定；它不接收 Mohist Agent ID / name，也不加载
+已经组装好的执行输入与 Session 绑定；它不接收 Mohist Agent ID / name，也不加载
 Mohist Agent 定义。model string 解析、`Model` 对象构造、调用顺序、实例缓存和 Pi
 error 解释全部封装在该模块内。
 
-它不是逐方法透传的 SDK wrapper。调用者请求 run turn、follow up、compact、reset 等
+它不是逐方法透传的 SDK wrapper。调用者请求 execute prompt、follow up、compact、reset 等
 Mohist 能力，由模块决定使用哪些 SDK operation 才能完成该能力。
 
-回合输入按纯文本提交：`PiRuntime` 不加载 prompt templates，也不做斜杠命令展开——
+执行输入按纯文本提交：`PiRuntime` 不加载 prompt templates，也不做斜杠命令展开——
 以 `/` 开头的工作流 prompt 仍须原样进入模型。0.80.10 的 `prompt()` 默认会展开
 文件型 prompt template，因此每次 Workflow 调用必须显式传入
 `{ expandPromptTemplates: false }`。
@@ -117,7 +117,7 @@ Mohist 能力，由模块决定使用哪些 SDK operation 才能完成该能力�
 
 每个 Runner 进程拥有一个 `PiRuntime`，由所有 Pi Session 共享。每个活跃物理 Session
 对应一个进程内 `AgentSession` 实例：按绑定首次使用时创建并缓存，Runner 重启后从
-持久化绑定 lazy 恢复。不为每个 Action 创建独立进程，也不为每个回合重建 Session
+持久化绑定 lazy 恢复。不为每个 Action 创建独立进程，也不为每次执行重建 Session
 实例。
 
 Mohist 认为逻辑 AgentSession 的 workDir 与物理 Session 的 directory 都不可变。工作目录
@@ -132,13 +132,13 @@ Runner 注册或领取工作前必须：
 2. 成功加载 model catalog。
 
 catalog 加载成功即 ready；catalog 为空（没有任何已配置凭证的 provider）记 warning
-诊断但不阻止 ready——模型合法性始终由 Pi 在回合时最终校验。服务装配失败或 catalog
+诊断但不阻止 ready——模型合法性始终由 Pi 在执行时最终校验。服务装配失败或 catalog
 加载失败时，`PiRuntime` 不 ready，Runner 停止领取新工作并重建；这与
 `OpenCodeRuntime` 的就绪 gate 对齐，两个 Runtime 的就绪状态都纳入领活条件。
 
 与 OpenCode 的进程拓扑差异及其语义：Pi 在 Runner 进程内执行，Runner 进程终止时所有
-执行中的 Pi 回合随之终止——不存在独立 Server 的退出、重建与事件流重连。持久化的
-物理 Session（JSONL 文件）不受影响，Runner 重启后按绑定恢复；已终止的回合不自动
+执行中的 Pi Prompt 随之终止——不存在独立 Server 的退出、重建与事件流重连。持久化的
+物理 Session（JSONL 文件）不受影响，Runner 重启后按绑定恢复；已终止的执行不自动
 replay，由工作所有者的 redelivery 语义兜底。
 
 ## Session 绑定
@@ -160,28 +160,27 @@ AgentSession 所有权与来源见 [`agent-execution.md`](../agent-execution.md)
 缓存或绑定中的 session 文件路径恢复；请求落在其它 Runner 时必须先路由回绑定所属 Runner
 或明确失败，其本地文件不存在不构成 missing 证据。绑定所属 Runner 缓存未命中时用
 `SessionManager.open()` 恢复，messages、model 与 thinking level 由 SDK 自动还原。只有
-绑定路径明确不存在，才产生 `definitely-missing` 事实并允许在新 Turn 前自动创建
+绑定路径明确不存在，才产生 `definitely-missing` 事实并允许在提交新的独立输入前自动创建
 replacement。文件存在但无法打开、JSONL 损坏、权限失败或 SDK 返回无法分类的错误时，
 本次工作失败，不能用空 Session 掩盖数据或兼容性问题。
 
 Pi 在 session 出现第一条 assistant 消息之前不落盘 session 文件。首个 Prompt 执行中
 Runner 崩溃会留下「绑定存在、文件从未生成」的状态，重启后的恢复因此按上段的文件
-缺失规则处理。原 Prompt 的提交状态仍由原 Turn 与工作所有者裁决，Runtime 不自动重放；
-只有后续独立的新 Turn 才能建立 replacement。丢失的至多是一个提交状态本就不确定的
-未完成回合，与 redelivery 可能重复回合的限制同属一类。
+缺失规则处理。原 Prompt 的提交状态仍由工作所有者裁决，Runtime 不自动重放；
+只有后续独立输入才能建立 replacement。丢失的至多是一次提交状态本就不确定的
+未完成执行，与 redelivery 可能重复执行的限制同属一类。
 
-Runtime 变化与 Reset 会创建新物理绑定并追加 lineage，不迁移上下文；Compact 与
-model / variant 变化必须保持同一 session 文件。model 与 thinking level 是回合执行
+Runtime 变化与 Reset 会创建新物理 Session，并原子替换 current binding，不迁移上下文；
+Compact 与 model / variant 变化必须保持同一 session 文件。model 与 thinking level 是执行
 参数：复用已有 Session 时，Runtime 在原物理 Session 上 `setModel()` /
-`setThinkingLevel()` 应用本次选择后执行 Prompt，不触发 attach replacement 或追加
-lineage。
+`setThinkingLevel()` 应用本次选择后执行 Prompt，不触发 binding replacement。
 
 worktree cleanup follow-up 的处理与 `OpenCodeRuntime` 相同：executor 再次调用原
 task 已解析的 Action，走同一 Runtime 和物理 Session，不得替换绑定。
 
-## 回合执行
+## Prompt 执行
 
-Workflow Action adapter 或 AgentJob executor 请求的回合按以下顺序执行：
+Workflow Action adapter 或 AgentJob executor 请求的 Prompt 按以下顺序执行：
 
 1. 解析可选 model string；
 2. 无 binding 时创建物理 Session；有 binding 时从缓存或 `SessionManager.open()` 恢复，
@@ -197,38 +196,38 @@ Workflow Action adapter 或 AgentJob executor 请求的回合按以下顺序执�
 `session.prompt()` resolve 即整个 agent run（含工具循环与自动重试）结束，它就是
 唯一完成判据，不存在第二次 wait；`agent_end` 事件只用于投影，不作为完成权威。
 `PiRuntime` 不执行 Workflow expectations，也不判断 AgentJob 成功。调用者必须声明工作
-回合的 duration。issue #450 的 Workflow task executor 通过 Runner-private Action context
+执行的 duration。issue #450 的 Workflow task executor 通过 Runner-private Action context
 固定提供 60 分钟，`mohist/pi` Action Input 不可见也不能覆盖。Action 完成 open/bind、输入
-报告与 model/thinking 应用后，把 duration 交给 `runTurn`；Runtime 在调用
+报告与 model/thinking 应用后，把 duration 交给 `executePrompt`；Runtime 在调用
 `session.prompt()` 前读取注入时钟并形成绝对 deadline。队列等待、绑定与输入报告不占 Prompt
-预算；cleanup Prompt 是独立回合并取得新的 60 分钟。AgentJob executor 的期限由其所属
+预算；cleanup Prompt 是独立执行并取得新的 60 分钟。AgentJob executor 的期限由其所属
 issue 单独定义。
 
 in-process 调用没有 transport timeout；executor 的 AbortSignal 与声明的期限是单一
-回合期限权威。期限到达时 Runtime 将回合结果固定为 `deadline-exceeded`，随后调用
+执行期限权威。期限到达时 Runtime 将执行结果固定为 `deadline-exceeded`，随后调用
 `session.abort()` 收尾；迟到 resolve 的 `prompt()` 不能翻转该结果。任何失败都不
-自动重放提交状态不确定的 Prompt；redelivery 在 crash window 内可能造成重复回合，
+自动重放提交状态不确定的 Prompt；redelivery 在 crash window 内可能造成重复执行，
 这是与 OpenCode 一致的已接受限制。
 
-## 回合期限与两段式收尾
+## Prompt 期限与两段式收尾
 
-期限协议与 [`opencode.md`](opencode.md) 的「回合期限与两段式收尾」相同：期限前 5
-分钟注入一次任务无关的收尾警告（期限不足 5 分钟时回合开始即注入），期限到达先
+期限协议与 [`opencode.md`](opencode.md) 的「Prompt 期限与两段式收尾」相同：期限前 5
+分钟注入一次任务无关的收尾警告（期限不足 5 分钟时执行开始即注入），期限到达先
 固定 `deadline-exceeded` 再中断收尾。Pi 侧的差异只是通道：
 
-- 警告注入使用 `session.steer(text)`。steer 消息在运行中回合的迭代边界（当前模型
+- 警告注入使用 `session.steer(text)`。steer 消息在当前执行的迭代边界（当前模型
   调用及其工具调用完成后）被拾取，语义与 OpenCode 的 `promptAsync` 注入一致；
   正在执行的长工具调用会延迟拾取，期限到达仍 abort。
 - 终止使用 `await session.abort()`，并通过 Session 事件与 `isStreaming` 核对确认停止；
-  无法确认时返回中断未确认诊断，不声称回合已经安全停止。
+  无法确认时返回中断未确认诊断，不声称执行已经安全停止。
 
 0.80.10 没有独立的 stop-confirmation operation，也没有布尔型 `abort()` 返回值；
 `abort()` 的 Promise 只表示中断请求已处理，停止确认必须观察 `isStreaming` 与事件序列。
 
 ## 事件与状态核对
 
-共同的 Turn 生命周期、transcript 事件名称与结束规则以
-[`agent-execution.md`](../agent-execution.md#turn-生命周期与-transcript-dsl) 为准；本节只定义
+共同的 activity 与 transcript 契约以
+[`agent-execution.md`](../agent-execution.md#activity-与-transcript) 为准；本节只定义
 Pi 信号如何成为这些规范事实。
 
 `PiRuntime` 对每个活跃 `AgentSession` 实例维护一个 `session.subscribe()` 订阅。
@@ -247,14 +246,14 @@ compaction 事实：
 改变 Workflow 或 Session 状态。
 
 事件通道是进程内回调，没有传输层，因此不存在 OpenCode 侧的断流重连与 snapshot
-核对机制；回合的最终状态以 `prompt()` 的 resolve 值与 `session.messages` 为准。
-Runner 进程终止即事件通道与执行中回合一并终止（见「进程拓扑与就绪」），重启后不
-重建「回合仍在执行」的假象。
+核对机制；执行的最终状态以 `prompt()` 的 resolve 值与 `session.messages` 为准。
+Runner 进程终止即事件通道与当前执行一并终止（见「进程拓扑与就绪」），重启后不
+重建“仍在执行”的假象。
 
 ## Provider 错误失败策略
 
 判定规则与 [`opencode.md`](opencode.md) 的「Provider 错误失败策略」相同：可恢复
-错误交 Pi 重试，不可恢复错误 abort 回合并失败。Pi 侧的信号来源：
+错误交 Pi 重试，不可恢复错误 abort 当前执行并失败。Pi 侧的信号来源：
 
 - `auto_retry_start` 事件携带 `attempt`、`maxAttempts`、`delayMs` 与 `errorMessage`，
   是重试事实的唯一来源；不扫描日志。
@@ -263,11 +262,11 @@ Runner 进程终止即事件通道与执行中回合一并终止（见「进程�
   中英文额度措辞，runner 级可配置追加）。普通 rate limit 不因文案兜底在首次出现
   时失败。
 - 按证据不可恢复：可恢复错误连续重试，`attempt` 达到阈值 N（默认 5，runner 级可
-  配置）而回合仍未完成，abort+失败。计数直接消费事件的 `attempt` 字段，不另建
+  配置）而执行仍未完成，abort+失败。计数直接消费事件的 `attempt` 字段，不另建
   状态。
 - Pi 自己判不可恢复的错误（auth、invalid request、context overflow 等）结束自动
-  重试并以 `stopReason: "error"` 完成回合，`prompt()` 正常 resolve；Runtime 从末条
-  assistant 消息的 error 信息规范化出 `turn-failed`，不额外处理。
+  重试并以 `stopReason: "error"` 完成执行，`prompt()` 正常 resolve；Runtime 从末条
+  assistant 消息的 error 信息规范化出 `execution-failed`，不额外处理。
 
 命中不可恢复判定时执行 `session.abort()` 并确认停止（见上节），随后向调用者返回
 带原始 provider message 的失败事实。AgentSession 与物理 Session 绑定保持不变，不
@@ -281,7 +280,7 @@ binding、不轮换 AgentSession ID）与 [`opencode.md`](opencode.md) 的「Ses
 
 ### Follow-up
 
-- 回合执行中：`session.steer(text)` 注入当前回合；Session 空闲：
+- 执行中：`session.steer(text)` 注入当前执行；Session 空闲：
   `session.prompt(text, { preflightResult })`；preflight 回调是「确认 Pi 已接收」的
   落点（Pi 的 RPC 模式使用同一钩子），preflight 拒绝（如 model 或凭证缺失）作为
   命令失败返回给用户；受理后立即返回，完成过程继续通过 Session 事件呈现。
@@ -303,15 +302,14 @@ transcript。
 
 只有逻辑 Session idle 时才允许 Reset。先读取当前 model / thinking level（如果存
 在），再在同一工作目录用 `SessionManager.create(cwd)` 建立新的空 Pi Session。创建
-成功后才替换逻辑 Session 绑定（新 session 文件路径），并把新物理绑定追加到
-lineage。旧 session 文件保留查询和审计能力，但其上下文不进入新 Session。旧路径已经
-不存在时跳过 model / thinking level 继承并继续创建；其它读取失败仍明确失败。Reset 的
-lineage reason 是 `reset`。
+成功后才替换逻辑 Session 的 current binding（新 session 文件路径）。AgentSession 不保存
+旧 binding；已有 transcript 保留，新物理 Session 的上下文为空。旧路径已经不存在时跳过
+model / thinking level 继承并继续创建；其它读取失败仍明确失败。
 
 ### Cancel
 
-对执行中的回合调用 `session.abort()`。`cancelled: true` 只表示中断请求已被 Runtime
-接受并执行；回合是否立刻停下由 Pi 决定，Runtime 如实报告这次尝试。
+对当前执行调用 `session.abort()`。`cancelled: true` 只表示中断请求已被 Runtime
+接受并执行；执行是否立刻停下由 Pi 决定，Runtime 如实报告这次尝试。
 
 ## 权限、项目信任与错误
 
@@ -338,7 +336,7 @@ diagnostic 或 runtime event 前统一脱敏，结构化 request/result 与 Runn
 
 在 `PiRuntime` 边界把 SDK error 规范化为少量 Mohist result（kebab-case，与 wire 值
 一致）：`invalid-input`、`unavailable-runtime`、`missing-session`、
-`incompatible-runtime`、`deadline-exceeded`、`interrupted` 与 `turn-failed`。
+`incompatible-runtime`、`deadline-exceeded`、`interrupted` 与 `execution-failed`。
 Provider-specific detail 只作为诊断信息，不成为 Action output 字段。
 
 ## 模型目录
@@ -367,8 +365,8 @@ Pi 是第二个 Runtime，以下既有单 Runtime 假设需要泛化（均不改
 - 模型 catalog API：opencode 专属路由泛化为按 runtime 查询，或并列新增 Pi 路由。
 - Session 命令 handler（Follow-up / Cancel / Compact / Reset）：按 AgentSession 当前
   绑定的 runtime 路由到对应 Runtime。
-- Runner host：构造并启动 `PiRuntime`，由 manifest 声明的 `agent-turn` capability 向
-  Workflow Action 注入回合能力，并向 `AgentJobExecutor` 注入 Runtime；promise 投影按
+- Runner host：构造并启动 `PiRuntime`，由 manifest 声明的 `agent-execution` capability 向
+  Workflow Action 注入执行能力，并向 `AgentJobExecutor` 注入 Runtime；promise 投影按
   capability 驱动。#450 若先于能力收窄 issue #447 落地，会暂时沿用当前 runtime-bearing
   `ActionContext` 与按名投影机制；这是 #447 明确拥有的实现差距，不是本设计的目标接口。
 - Web：Mohist Agent 编辑与 issue 模型选择增加执行后端维度；模型列表按所选后端
@@ -383,9 +381,9 @@ clock。SDK 的全部依赖锁在 `PiRuntime` 模块内，经 factory seam 注�
 覆盖至少包括：
 
 - Action Input expansion，并确认不存在隐藏 `vars.agent` fallback；
-- `options` 未知键（含 `runtime`）忽略并记诊断，不使回合失败；
+- `options` 未知键（含 `runtime`）忽略并记诊断，不使执行失败；
 - model string 内含多层 `/`，variant 保持独立并映射 thinking level；
-- Workflow 与 AgentJob 拥有的回合共享 Runtime code，但不共享工作 / Session 身份；
+- Workflow 与 AgentJob 的执行共享 Runtime code，但不共享工作 / Session 身份；
 - 物理 Session 复用与 rotation 不变量；model / thinking level 变化不触发 rotation；
 - 绑定恢复：缓存命中、lazy open、路径明确不存在时只 create 一次，并在 input / Prompt
   前持久化 expected binding replacement；
@@ -395,9 +393,9 @@ clock。SDK 的全部依赖锁在 `PiRuntime` 模块内，经 factory seam 注�
 - `steer` 注入（运行中 Follow-up 与期限警告）、空闲 Follow-up（含 missing recovery）、
   原生 compact、Reset（含旧路径 missing）、stale-binding rejection；
 - `projectTrusted: false` 装配断言：项目级 `.pi/` 资源不进入执行；
-- provider 错误策略：模式命中即失败、阈值失败、Pi 自判不可恢复的 `turn-failed`
+- provider 错误策略：模式命中即失败、阈值失败、Pi 自判不可恢复的 `execution-failed`
   规范化；
-- 两段式收尾：期限前 steer 警告（仅一次）、期限不足 5 分钟时回合开始即警告、期限
+- 两段式收尾：期限前 steer 警告（仅一次）、期限不足 5 分钟时执行开始即警告、期限
   到达 abort、被警告后提前结束不再 abort；全部以 fake clock 驱动；
 - 最小 `{ promise }` Workflow Action Output 与现有 expectation 语义。
 
@@ -417,8 +415,8 @@ Pi 是 0.x 快速演进的依赖（约每周一个 minor），SDK 的 breaking c
 
 Workflow 与 AgentJob 两条路径均已实装：`PiRuntime`、`mohist/pi` Action、AgentJob runtime
 选择、runtime-aware Session binding、模型目录 API 与 Web 选择器，以及现有 Session
-transcript/tool/status/compaction/model/usage/cost/lineage 展示均已落地。
+transcript/tool/status/compaction/model/usage/cost 展示均已落地。
 
-缺失的 Pi session 文件目前仍直接形成 `missing-session`；新 Turn 尚未执行
+缺失的 Pi session 文件目前仍直接形成 `missing-session`；新的独立输入尚未执行
 `definitely-missing → create → expected binding replacement`。对应实施 issue 待从本
 spec 创建。

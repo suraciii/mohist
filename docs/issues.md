@@ -205,7 +205,7 @@ workflow 的停止或完成历史，并与 workflow 正常完成一样计入 Epi
 ## 中断、停止与关闭
 
 ```bash
-# 可恢复暂停（force-stop）—— 终止当前执行回合，保留 AgentSession，后续用 resume 接着跑
+# 可恢复暂停（force-stop）—— 终止当前执行，保留 AgentSession，后续用 resume 接着跑
 mo issue force-stop 42
 
 # 永久停止（stop）—— terminal，不能 resume
@@ -223,7 +223,7 @@ mo issue reopen 42
 
 | 操作 | 适用场景 | 后果 |
 |---|---|---|
-| `force-stop` | 暂时停止、Inline Agent 卡住、想保留恢复入口 | 终止当前回合，workflow 进入可 `resume` 的 paused 状态 |
+| `force-stop` | 暂时停止、Inline Agent 卡住、想保留恢复入口 | 终止当前执行，workflow 进入可 `resume` 的 paused 状态 |
 | `stop` | 确定不再继续这次 workflow | 永久停止 workflow run，terminal，不能 resume |
 | `done` | workflow 外已经完成并交付 | Issue 进入 Done；workflow 历史保持原样 |
 | `close` | 这个 issue 不做了 | 进入 cancelled 终态，可 reopen |
