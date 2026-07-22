@@ -13,6 +13,7 @@ export interface SessionCommandRequest {
   command: SessionCommand
   expectedRuntimeSessionId?: string | null
   operationId: string
+  projectId?: string | null
 }
 
 export interface SessionCommandResult {
@@ -62,8 +63,9 @@ export function registerSessionCommandHandler(
     const operation = handleCommand(request, handler, journal, deps.reconcileStarted)
     inFlight.set(key, { request, operation })
     try {
-      return await operation
-    } catch {
+      const result = await operation
+      return result
+    } catch (error) {
       return { ok: false, error: "unavailable" } satisfies SessionCommandResult
     } finally {
       if (inFlight.get(key)?.operation === operation) inFlight.delete(key)
@@ -132,6 +134,7 @@ export function isValidSessionCommandRequest(value: unknown): value is SessionCo
     && (request.expectedRuntimeSessionId === undefined || request.expectedRuntimeSessionId === null || typeof request.expectedRuntimeSessionId === "string")
     && typeof request.operationId === "string"
     && request.operationId.length > 0
+    && (request.projectId === undefined || request.projectId === null || typeof request.projectId === "string")
     && isValidCommandBinding(request)
 }
 
@@ -149,13 +152,14 @@ function isValidCommandBinding(request: Partial<SessionCommandRequest>): boolean
 
 function sameRequest(left: SessionCommandRequest, right: SessionCommandRequest): boolean {
   return left.sessionId === right.sessionId
-    && left.runtime === right.runtime
-    && left.runtimeSessionId === right.runtimeSessionId
-    && left.runnerId === right.runnerId
-    && left.workDir === right.workDir
-    && left.command === right.command
-    && left.expectedRuntimeSessionId === right.expectedRuntimeSessionId
-    && left.operationId === right.operationId
+  && left.runtime === right.runtime
+  && left.runtimeSessionId === right.runtimeSessionId
+  && left.runnerId === right.runnerId
+  && left.workDir === right.workDir
+  && left.command === right.command
+  && left.expectedRuntimeSessionId === right.expectedRuntimeSessionId
+  && left.operationId === right.operationId
+  && left.projectId === right.projectId
 }
 
 function unavailable(): SessionCommandResult {

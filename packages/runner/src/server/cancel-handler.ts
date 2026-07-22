@@ -1,10 +1,19 @@
-// Issue-461 T-001 / design D1 + D7: the cancel handler does NOT
-// consult outbox health — it is the one SignalR operation that must
-// remain available while the durable snapshot is being recovered.
-// It captures the runtime via the host-owned invocation-time accessor
-// at command time (a runtime initialized or replaced after SignalR
-// client construction is therefore visible) and resolves the binding
-// through the binding-only `followupTargetResolver`.
+// Issue-461 T-001 / design D1 + D7 + issue-451 T-004 / design D2 + D6:
+// the cancel handler does NOT consult outbox health — it is the one
+// SignalR operation that must remain available while the durable
+// snapshot is being recovered. It captures the runtime via the host-owned
+// invocation-time accessor at command time (a runtime initialized or
+// replaced after SignalR client construction is therefore visible) and
+// resolves the binding through the binding-only `followupTargetResolver`.
+//
+// The cancel reply carries `interruptUnconfirmed` whenever the bound
+// runtime reports a stop it could not confirm (issue-451 T-004 / design
+// D6). The flag is surfaced end-to-end so the API/user is never told a
+// still-running turn has been safely stopped. OpenCode replies never
+// carry the flag because the OpenCode abort is authoritative (no
+// `stopConfirmed` field on the result); Pi's `cancel` reports
+// `stopConfirmed: false` exactly when the upper layers must surface
+// `interruptUnconfirmed: true`.
 
 import * as signalR from "@microsoft/signalr"
 import {
@@ -14,11 +23,18 @@ import {
   type FollowupTargetResolution,
   type FollowupTargetResolver,
 } from "./session-target.js"
-import type { OpenCodeRuntime } from "../runtime/opencode/index.js"
+import {
+  callCancel,
+  readCancelFacts,
+  resolveCommandRuntime,
+  type CancelCallTarget,
+  type CommandRuntimeAccessors,
+} from "./command-runtime.js"
 
 export interface CancelHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
-  openCodeRuntime?: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
+  openCodeRuntime?: CommandRuntimeAccessors["openCode"]
+  piRuntime?: CommandRuntimeAccessors["pi"]
 }
 
 export function registerCancelHandler(
@@ -40,15 +56,19 @@ async function handleCancel(
 
   const sessionTarget = sessionTargetFromWireTarget(payload.target)
   if (!sessionTarget) return { state: "not-cancellable" }
+  const binding = sessionTarget.binding
+  if (!binding) return { state: "not-cancellable" }
 
   const resolver = deps.followupTargetResolver ?? null
-  const runtimeAccessor = deps.openCodeRuntime ?? null
-  if (!resolver || !runtimeAccessor) {
+  if (!resolver) {
     return { state: "not-cancellable" }
   }
-  const runtime = resolveRuntime(runtimeAccessor)
-  if (!runtime) return { state: "not-cancellable" }
-  if (!runtime.ready()) {
+  const handle = resolveCommandRuntime(binding, {
+    openCode: deps.openCodeRuntime,
+    pi: deps.piRuntime,
+  })
+  if (!handle) return { state: "not-cancellable" }
+  if (!handle.runtime.ready()) {
     return { state: "unavailable" }
   }
 
@@ -65,34 +85,42 @@ async function handleCancel(
   }
 
   try {
-    const result = await runtime.cancel({
-      target: {
-        runtime: "opencode",
-        runtimeSessionId: resolved.runtimeSessionId,
-        workDir: resolved.workDir,
-      },
-    })
+    const workDir = binding.workDir
+    if (!workDir) return { state: "not-cancellable" }
+    const cancelTarget: CancelCallTarget = {
+      runtime: binding.runtime,
+      runtimeSessionId: binding.runtimeSessionId,
+      workDir,
+    }
+    const result = await callCancel(handle, cancelTarget)
     if (!result.ok) {
-      if (result.error.kind === "unavailable-runtime") {
+      const kind = readErrorKind(result)
+      if (kind === "unavailable-runtime") {
         return { state: "unavailable" }
       }
-      if (result.error.kind === "missing-session") {
+      if (kind === "missing-session") {
         return { state: "not-cancellable" }
       }
-      console.error("cancel runtime.cancel rejected:", result.error.message)
+      console.error("cancel runtime.cancel rejected:", readErrorMessage(result))
       return { state: "not-cancellable" }
     }
-    if (!result.value.facts.cancelled) {
+    const facts = readCancelFacts(result)
+    if (!facts || !facts.cancelled) {
       return { state: "not-cancellable" }
     }
-    return { state: "cancelled" }
+    return facts.stopConfirmed === false
+      ? { state: "cancelled", interruptUnconfirmed: true }
+      : { state: "cancelled" }
   } catch (error) {
     console.error("cancel runtime.cancel threw:", error instanceof Error ? error.message : String(error))
     return { state: "not-cancellable" }
   }
 }
 
-function resolveRuntime(accessor: OpenCodeRuntime | (() => OpenCodeRuntime | null)): OpenCodeRuntime | null {
-  if (typeof accessor === "function") return accessor()
-  return accessor
+function readErrorKind(result: { readonly error?: { readonly kind?: string } }): string {
+  return result.error?.kind ?? ""
+}
+
+function readErrorMessage(result: { readonly error?: { readonly message?: string } }): string {
+  return result.error?.message ?? "runtime error"
 }

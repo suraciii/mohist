@@ -1,0 +1,86 @@
+## Codebase Patterns
+
+- T-001 is the only task permitted to import or construct the real Pi SDK. Product runtime code must remain absent until this gate is complete.
+- The Runner workspace uses the root lockfile; dependency changes are made with `npm install -w packages/runner`.
+- Pi SDK 0.80.10 requires Node >=22.19.0. The repository uses Node 22.19.0 as its concrete supported release.
+- SDK project trust is fixed with `SettingsManager.create(cwd, agentDir, { projectTrusted: false })`; the same settings manager and explicit `cwd` / `agentDir` are passed to `DefaultResourceLoader` and `createAgentSession`.
+- SDK `prompt()` expands file prompt templates by default. Literal Workflow input requires `{ expandPromptTemplates: false }`.
+- SDK `abort()` returns `Promise<void>` and has no separate stop-confirmation operation; stop confirmation observes `isStreaming` and session events.
+- `SessionManager.create(cwd, sessionDir?)` and `SessionManager.open(sessionFile)` expose the persisted absolute session path through `session.sessionFile` / `getSessionFile()`.
+- SDK custom tools can run headlessly with `noTools: "builtin"`; no per-tool approval callback or confirmation state is involved.
+
+## T-001 Notes
+
+- Smoke verified `compact(customInstructions?: string): Promise<CompactionResult>`, `prompt(text: string, options?: PromptOptions): Promise<void>` with `preflightResult?: (success: boolean) => void` in `PromptOptions`, `abort(): Promise<void>`, and `get isStreaming(): boolean` directly against SDK 0.80.10 with an isolated temp HOME/agentDir (no provider auth or network). The probe invokes the preflight hook with a real session and confirms the hook receives a boolean.
+- The Pi boundary in `runtime/pi/sdk.ts` now exposes `compact(): Promise<void>` and `PiPromptOptions { expandPromptTemplates?: boolean; preflight?: (success: boolean) => void }`. The SDK is invoked as `session.prompt(text, { expandPromptTemplates: false, preflight: <callback> })`; the boundary normalises `preflight` here so product code does not import the SDK type.
+- Boundary types added to `runtime/pi/types.ts`: `PiFollowupRequest`/`PiFollowupFacts`/`PiFollowupResult`, `PiCancelRequest`/`PiCancelFacts`/`PiCancelResult`, `PiCompactRequest`/`PiCompactFacts`/`PiCompactResult`, `PiResetRequest`/`PiResetFacts`/`PiResetResult`. All results use `PiResult<T>` so failures carry the existing `PiError` taxonomy (`missing-session`, `conflict`, `turn-failed`); `PiCancelFacts.stopConfirmed: boolean` is the first-class honesty signal that D6 will surface end-to-end.
+- `PiCompactResult` deliberately omits `runtimeSessionId` on success (matches `isValidSessionCommandResult`'s compact rule), while `PiResetResult` returns a non-empty `runtimeSessionId` differing from the request id (matches the reset rule). These shapes are the contract T-003 implements against.
+- The fake `FakeSession` in `packages/runner/tests/pi-runtime.test.ts` now carries a `compactCalls` counter and a `compact()` method stub so the test boundary continues to type-check; T-003 will exercise the behaviour through real PiRuntime.compact tests.
+- `runtime/pi/index.ts` re-exports the new types and `PiPromptOptions` / `PiPromptPreflightResult`. No SDK DTO leaks across the module boundary.
+- T-001 verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, and `npm test -w packages/runner` all pass (108 files / 1,258 tests).
+
+## T-002 Notes
+
+- `PiRuntime` now owns a per-physical-session async mutex — `Map<sessionPath, Promise<unknown>>` plus a private `withSessionLock(path, operation)` helper. The helper invokes `operation()` synchronously when no predecessor is queued (preserves the existing single-microtask latency that the existing tests rely on, e.g. `expect(session.promptCalls).toEqual([...])` after one `await Promise.resolve()`); otherwise it chains onto the previous tail so concurrent callers wait without re-ordering. `shutdown()` clears the map.
+- `PiRuntime.runTurn` now wraps the `session.prompt` race inside `withSessionLock(path, …)`. Workflow turns are still serialized externally by `WorkflowSessionTurnCoordinator`, but this is the load-bearing mutual-exclusion for the follow-up path.
+- `PiRuntime.followup(request, observer?)` branches on the physical Pi session's `isStreaming`:
+  - Busy → `await session.steer(text)`; resolves accepted with the persisted `runtimeSessionId`. `steer` does NOT acquire the mutex — it injects into the active turn whose projection is owned by `runTurn`'s subscription.
+  - Idle → acquires the mutex, subscribes a `createPiProjector` filtered through the optional observer, and calls `session.prompt(text, { expandPromptTemplates: false, preflight })`. The follow-up resolves on the first `preflight(success)` / `preflight(failure)` callback (or the `prompt()` rejection) — no replay. A background continuation holds the mutex and the subscription until `prompt()` resolves, then `report(projector.reconcile(session.messages))` runs and the subscription is torn down in `finally`.
+  - `runtimeSessionId` is unchanged on either branch (test `does not rotate the physical Pi Session binding across a Follow-up (busy or idle)` enforces this).
+  - Missing bound file → `missing-session` + `resetDiagnostic` + an error message containing "Reset", surfaced through `resolveFollowupSession`. The runtime never silently creates a new session.
+- `PiRuntime.cancel(request)` opens the session (missing → `missing-session` + Reset hint), then `await session.abort()` followed by reading `session.isStreaming`. The result facts carry `cancelled: true` plus `stopConfirmed: boolean` (`false` when `isStreaming` persists or abort threw). `cancel` does NOT acquire the prompt mutex — it must be able to interrupt an in-flight prompt.
+- A private `resolveFollowupSession(path, workDir)` helper centralises the open-or-cache path for `followup` and `cancel`. Both surface the Reset hint as part of the error message body (not just diagnostics) so the user-facing assertion `expect(error.message.toLowerCase()).toContain("reset")` matches.
+- `FakeSession` was extended to support `PiPromptOptions` (the new `preflight` callback is invoked via `queueMicrotask` to mimic the SDK's async-reception semantics) and to maintain a queue of pending prompt completions so concurrent follow-ups are observable; `nextPreflightResult` lets a test force a preflight rejection. The fake's `prompt()` no longer auto-sets `isStreaming` — `complete()` and `abort()` still do. This decoupling lets both concurrent follow-ups observe `isStreaming === false` so the mutex (not the busy branch) is what serializes them; existing tests that exercise the busy path continue to set `session.isStreaming = true` explicitly.
+- New fake-SDK tests (in `tests/pi-runtime.test.ts`):
+  - followup busy → steer (no new turn)
+  - followup idle accepted after preflight
+  - followup idle preflight rejected → failure with `preflight-rejected` diagnostic, no retry
+  - followup idle projects events through the observer until `complete()` resolves the prompt; events after `complete()` are NOT delivered (subscription torn down)
+  - followup missing-session + Reset hint
+  - cancel confirmed → `stopConfirmed: true`, no diagnostic
+  - cancel unconfirmed (abort clears then `isStreaming` is reset) → `stopConfirmed: false` + `abort-unconfirmed` diagnostic
+  - cancel missing-session + Reset hint
+  - `serializes a concurrent idle follow-up with an in-flight workflow turn on the same session` — only one `prompt()` on the wire until the first completes, then the second fires
+  - `serializes two concurrent idle follow-ups on the same session` — same invariant for two concurrent follow-ups
+  - `does not rotate the physical Pi Session binding across a Follow-up (busy or idle)` — `runtimeSessionId` unchanged on both branches
+- T-002 verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, and `npm test -w packages/runner` all pass (108 files / 1,269 tests).
+
+## T-003 Notes
+
+- The Pi boundary in `runtime/pi/sdk.ts` now exposes two new getters on `PiSdkSession` — `getModel(): unknown` and `getThinkingLevel(): string` — so Reset can read the live `AgentSession.model` / `AgentSession.thinkingLevel` and carry them onto the freshly created session. The real `realPiSdkFactory` wraps the live `AgentSession` with `wrapAgentSession` so the AgentSession getters stay live (no value-spread that would snapshot `isStreaming` / `sessionFile` at wrap time). The fake `FakeSession` in tests exposes the same surface via `currentModel` / `currentThinkingLevel` fields, mutated by `setModel` / `setThinkingLevel`, and uses a non-`readonly` `sessionFile` so tests can override it for the new-session path.
+- `PiRuntime.compact(request, observer?)` (issue #451 / design D7):
+  - Resolves the bound session through the existing `resolveFollowupSession` (missing → `missing-session` + Reset hint).
+  - Acquires the per-session prompt mutex so a concurrent workflow turn / idle follow-up / second compact on the same physical session cannot collide.
+  - Inside the mutex, guards `session.isStreaming` — a streaming session is reported as `conflict` (the physical-session backstop; the AgentSession grain already enforces logical idleness).
+  - Subscribes a `createPiProjector` filtered through the optional observer so `compaction_start` / `compaction_end` events are projected through the existing session event channel, then calls `session.compact()` natively. Reconciles `session.messages` after the call.
+  - On any compact failure returns `turn-failed` carrying `compact-failed` diagnostic. Never synthesises a summary or fabricates a compaction record. The `runtimeSessionId` in the result is the unchanged persisted path; the handler (T-004) translates to a `SessionCommandResult` that omits `runtimeSessionId` per `isValidSessionCommandResult`'s compact rule.
+  - Added `conflict` to the `PiErrorKind` union (still absent from the spec vocabulary — the runtime returns it as a kebab-case kind; the handler is responsible for mapping to `SessionCommandError`).
+- `PiRuntime.reset(request)` (issue #451 / design D8):
+  - Best-effort reads the bound session's `getModel()` / `getThinkingLevel()` (via a small `readCarryOver` helper that consults the cache first, then `services.openSession`, and returns `null` on open failure). Reset is the recovery operation — a missing prior session still proceeds, just without carry-over.
+  - Calls `services.createSession(workDir)` for a fresh empty Pi session in the same work directory. On `createSession` failure: rolls back any newly opened prior session back into the cache and returns `turn-failed` with `reset-create-failed` diagnostic.
+  - Applies the carried model and thinking level onto the new session via `setModel` / `setThinkingLevel`. Carry-over failures surface as `reset-model-carry-failed` / `reset-thinking-carry-failed` diagnostics but do not fail Reset — the new session is still valid.
+  - Caches the new `PiSdkSession` under the new path, disposes the prior session handle (best-effort), and removes the prior entry from the sessions map. The prior session file remains on disk for audit. The returned `runtimeSessionId` is the new session file path (necessarily different from the request id, satisfying the reset rule).
+  - The runtime does not touch lineage; the Server-side grain performs the binding replacement and lineage append using the returned id (existing contract).
+- The new compact and reset tests live in `packages/runner/tests/pi-runtime-compact-reset.test.ts` (a separate file from the existing `pi-runtime.test.ts` to stay under the 500-line test-file budget). The shared `FakeSession` helpers are duplicated in the new file (small enough to copy rather than refactor into a shared helper).
+- The 500-line test-file budget is the only check that required the split — the new FakeSession in `pi-runtime-compact-reset.test.ts` is a focused minimal copy (no `nextPreflightResult` / `preflightCalls` since the compact/reset paths don't use them).
+- New fake-SDK tests (in `tests/pi-runtime-compact-reset.test.ts`):
+  - compact: native `compact()` invoked; `runtimeSessionId` unchanged after compaction; `compaction_start` / `compaction_end` projected through the observer
+  - compact: returns the unchanged `runtimeSessionId` so the handler can omit it from `SessionCommand`
+  - compact: busy (`isStreaming === true`) → `conflict`, no `compact()` invoked
+  - compact: native call throws → `turn-failed` + `compact-failed` diagnostic, no synthetic `messages` entry
+  - compact: missing session file → `missing-session` + Reset hint, no `compact()` invoked
+  - compact: serialises with an in-flight workflow turn on the same session (no `compact()` until `runTurn` completes)
+  - reset: new empty session in the same `workDir`, model and thinking level carried over, returned `runtimeSessionId` differs from request id
+  - reset: missing prior session still succeeds and skips carry-over (`modelCalls` / `thinkingCalls` empty on the new session)
+  - reset: prior session file retained for audit; the cached handle is disposed via the runtime
+  - reset: returned `runtimeSessionId` is non-empty and differs from the request id
+- T-003 verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, `npm run check:test-boundaries -w packages/runner`, and `npm test -w packages/runner` all pass (109 files / 1,279 tests). Full repository: `npm test` (5,050 tests across all packages) also passes.
+
+## T-004 Notes
+
+- Runtime routing is selected per command from the persisted wire binding via `resolveCommandRuntime`; OpenCode and Pi remain parallel deep-module call surfaces. Missing or unknown runtime accessors return the existing `unavailable` outcome without invoking a backend.
+- `RunnerSignalRClient` now registers the existing `SessionCommand` journal handler in production, sharing a host-owned file journal. Pi compact/reset map runtime failures into the existing SessionCommand vocabulary; OpenCode compact/reset explicitly return `unavailable`, preserving their prior user-visible outcome.
+- Follow-up and cancel now carry the binding runtime through to Pi or OpenCode. Pi cancel facts with `stopConfirmed: false` become `interruptUnconfirmed: true` in the runner reply, and the Server mirrors that optional field into HTTP responses; confirmed and OpenCode cancels omit it.
+- The server Pi gate was removed while retaining the existing registered-runtime and idle, missing-binding, and expected-binding guards. The API stale-binding check is represented by the grain-level `Reset_StaleExpectedBinding_RejectsWithoutMutation` spec because the recovery endpoint obtains its expected binding from the persisted reservation, not an HTTP body.
+- Removed the stale Pi Session-command gap entries from `docs/actions/pi.md` and `design/runtimes/pi.md`.
+- T-004 verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, `npm run check:test-boundaries -w packages/runner`, and `npm test -w packages/runner` pass (1,298 runner tests); focused Server recovery/cancel API and grain specs pass (58 tests).

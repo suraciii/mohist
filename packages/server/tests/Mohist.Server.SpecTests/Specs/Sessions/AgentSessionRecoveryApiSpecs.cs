@@ -336,41 +336,85 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state.Status.AgentRuntimeSessionId);
     }
 
-    [Fact]
-    public async Task RuntimeEventsEndpoint_IgnoresOldPhysicalBindingAfterReset()
+  [Fact]
+  public async Task RuntimeEventsEndpoint_IgnoresOldPhysicalBindingAfterReset()
+  {
+    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("stale-runtime-events", sessionName: "build", attachIdle: true);
+    using var reset = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
+    Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+    var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
+    var afterReset = await grain.GetAsync();
+    Assert.NotNull(afterReset);
+    Assert.NotEqual(currentSession.Id, afterReset!.AgentSessionId);
+
+    _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+    using var staleEvent = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
     {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("stale-runtime-events", sessionName: "build", attachIdle: true);
-        using var reset = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
-        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
-        var afterReset = await grain.GetAsync();
-        Assert.NotNull(afterReset);
-        Assert.NotEqual(currentSession.Id, afterReset!.AgentSessionId);
+      runtimeSessionId = currentSession.Id,
+      runtimeEvents = new[] { new { type = "session.closed", payload = new { status = "completed" } } },
+    });
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
-        using var staleEvent = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
-        {
-            runtimeSessionId = currentSession.Id,
-            runtimeEvents = new[] { new { type = "session.closed", payload = new { status = "completed" } } },
-        });
+    Assert.Equal(HttpStatusCode.OK, staleEvent.StatusCode);
+    var afterStaleEvent = await grain.GetAsync();
+    Assert.Equal(afterReset.AgentSessionId, afterStaleEvent?.AgentSessionId);
+    Assert.Equal(afterReset.Status, afterStaleEvent?.Status);
+    Assert.Equal(afterReset.LastDataAt, afterStaleEvent?.LastDataAt);
 
-        Assert.Equal(HttpStatusCode.OK, staleEvent.StatusCode);
-        var afterStaleEvent = await grain.GetAsync();
-        Assert.Equal(afterReset.AgentSessionId, afterStaleEvent?.AgentSessionId);
-        Assert.Equal(afterReset.Status, afterStaleEvent?.Status);
-        Assert.Equal(afterReset.LastDataAt, afterStaleEvent?.LastDataAt);
+    await grain.FlushForTestAsync();
+    await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+    var closedParts = await db.AgentSessionTranscriptParts.AsNoTracking()
+      .Join(
+        db.AgentSessionTranscriptTurns.AsNoTracking().Where(turn => turn.SessionId == currentSession.Id),
+        part => part.TurnId,
+        turn => turn.Id,
+        (part, _) => part)
+      .Where(part => part.Type == "session.closed")
+      .ToListAsync();
+    Assert.Empty(closedParts);
+  }
 
-        await grain.FlushForTestAsync();
-        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var closedParts = await db.AgentSessionTranscriptParts.AsNoTracking()
-            .Join(
-                db.AgentSessionTranscriptTurns.AsNoTracking().Where(turn => turn.SessionId == currentSession.Id),
-                part => part.TurnId,
-                turn => turn.Id,
-                (part, _) => part)
-            .Where(part => part.Type == "session.closed")
-            .ToListAsync();
-        Assert.Empty(closedParts);
-    }
+  [Fact]
+  public async Task CompactEndpoint_PiBoundSession_AdmitsCommandAndStampsPiRuntimeOnWire()
+  {
+    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-pi-bound", sessionName: "plan", attachIdle: true);
+    await SetPersistedRuntimeAsync(currentSession.Id, "pi");
 
+    using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
+
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var request = AssertSingleSessionCommandInvocation();
+    Assert.Equal(SessionCommandKind.Compact, request.Command);
+    Assert.Equal("pi", request.Runtime);
+    Assert.Equal(currentSession.Id, request.RuntimeSessionId);
+  }
+
+  [Fact]
+  public async Task ResetEndpoint_PiBoundSession_AdmitsCommandAndStampsPiRuntimeOnWire()
+  {
+    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-pi-bound", sessionName: "build", attachIdle: true);
+    await SetPersistedRuntimeAsync(currentSession.Id, "pi");
+
+    using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
+
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var request = AssertSingleSessionCommandInvocation();
+    Assert.Equal(SessionCommandKind.Reset, request.Command);
+    Assert.Equal("pi", request.Runtime);
+    Assert.Equal(currentSession.Id, request.ExpectedRuntimeSessionId);
+  }
+
+  [Fact]
+  public async Task CompactEndpoint_PiBoundActiveSession_StillRejectsWithIdleConflict()
+  {
+    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-pi-active", sessionName: "plan", attachAndStart: true);
+    await SetPersistedRuntimeAsync(currentSession.Id, "pi");
+
+    using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
+
+    Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    var body = await response.Content.ReadAsStringAsync();
+    using var doc = JsonDocument.Parse(body);
+    Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
+    Assert.Empty(RunnerHub.Invocations);
+  }
 }

@@ -337,6 +337,7 @@ export function buildClient(opts: {
   resolver?: AnyFn | null
   outbox?: AgentSessionRuntimeEventOutbox | null
   openCodeRuntime?: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
+  piRuntime?: unknown
 }): RunnerSignalRClient {
   builders.length = 0
   const resolver = opts.resolver === undefined ? null : opts.resolver
@@ -351,6 +352,7 @@ export function buildClient(opts: {
       followupTargetResolver: resolver as never,
       agentSessionRuntimeEventOutbox: outbox,
       openCodeRuntime: openCodeRuntime as never,
+      ...(opts.piRuntime !== undefined ? { piRuntime: opts.piRuntime as never } : {}),
     },
   )
 }
@@ -373,9 +375,35 @@ export async function flush(): Promise<void> {
 
 export function genericPayload(text: string): ReceiveFollowupPayload {
   return {
-    target: { kind: "generic", projectId: "proj-1", sessionId: "gen-session-1" },
+    target: {
+      kind: "generic",
+      projectId: "proj-1",
+      sessionId: "gen-session-1",
+      binding: defaultOpenCodeBinding(),
+    },
     text,
   }
+}
+
+export function workflowPayload(text: string): ReceiveFollowupPayload {
+  return {
+    target: {
+      kind: "workflow",
+      projectId: "proj-1",
+      workflowRunId: "wr-1",
+      sessionName: "work-1",
+      binding: defaultOpenCodeBinding(),
+    },
+    text,
+  }
+}
+
+export function defaultOpenCodeBinding(): { runtime: "opencode"; runtimeSessionId: string; runnerId: string; workDir: string } {
+  return { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" }
+}
+
+export function defaultPiBinding(): { runtime: "pi"; runtimeSessionId: string; runnerId: string; workDir: string } {
+  return { runtime: "pi", runtimeSessionId: "/virtual/sessions/one.jsonl", runnerId: "runner-1", workDir: "/workspace" }
 }
 
 export type { AgentSessionRuntimeEventReceipt }

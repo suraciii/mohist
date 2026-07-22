@@ -119,7 +119,7 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
   const request: PiTurnRequest = { target: { runtime: "pi", runtimeSessionId, workDir: context.workDir }, prompt, durationMs: PI_TURN_DURATION_MS, options: { model: options.model ?? null, variant: options.variant ?? null, unknownKeys: options.unknownKeys } }
   let result
   try {
-    result = await runtime.runTurn(request, context.signal, { onEvent: (event) => events.push(event) })
+    result = await runtime.runTurn(request, context.signal, { onEvent: (event) => { events.push(event) } })
   } catch (error) {
     let terminalReportingFailed = false
     try {
