@@ -9,7 +9,7 @@ public class WorkflowRunInvariantTests
 {
     private static WorkflowRun BuildRun(bool requiresApproval = false, bool assign = true)
     {
-        var run = WorkflowRun.Create("wr_1", new WorkflowDefinition("spec/workflow", [
+        var run = WorkflowRun.Create("wr_1", new WorkflowDefinition( [
             new StageDefinition("build", [new("compile", "Compile", "spec/task")], [],
                 RequiresApproval: requiresApproval)
         ]), DateTimeOffset.UnixEpoch);
@@ -22,7 +22,7 @@ public class WorkflowRunInvariantTests
 
     private static WorkflowRun BuildMultiTaskRun()
     {
-        var run = WorkflowRun.Create("wr_1", new WorkflowDefinition("spec/workflow", [
+        var run = WorkflowRun.Create("wr_1", new WorkflowDefinition( [
             new StageDefinition("build", [new("compile", "Compile", "spec/task"), new("test", "Test", "spec/task")], [])
         ]), DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);

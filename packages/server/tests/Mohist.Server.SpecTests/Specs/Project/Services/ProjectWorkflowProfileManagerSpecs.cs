@@ -48,9 +48,10 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("proj-create", info.ProjectId);
         Assert.Equal("my-template", info.TemplateId);
 
-        var def = await _manager.GetTemplateAsync("proj-create", "my-template");
-        Assert.NotNull(def);
-        Assert.Equal("my-template", def.Id);
+        var profile = await _manager.GetTemplateProfileAsync("proj-create", "my-template");
+        Assert.NotNull(profile);
+        Assert.Equal("my-template", profile.Id);
+        Assert.Equal("my-template", profile.Name);
     }
 
     [Fact]

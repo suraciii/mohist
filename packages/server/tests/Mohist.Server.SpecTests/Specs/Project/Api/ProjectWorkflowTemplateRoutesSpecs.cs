@@ -40,7 +40,7 @@ public class ProjectWorkflowTemplateRoutesSpecs
 
         var pathDetail = await _client.GetFromJsonAsync<JsonElement>(
             $"/api/projects/{project.Id}/workflow-templates/{templateId}");
-        Assert.Equal(templateId, pathDetail.GetProperty("data").GetProperty("definition").GetProperty("id").GetString());
+        Assert.Equal(templateId, pathDetail.GetProperty("data").GetProperty("profile").GetProperty("id").GetString());
 
         using var update = await _client.PutAsJsonAsync(
             $"/api/projects/{project.Id}/workflow-templates/{encodedTemplateId}", new { yaml });

@@ -294,12 +294,22 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // via POST/PATCH /api/issues) are preserved by PATCH-merging the
         // context bundle on top of any existing variables, so an issue whose
         // agent config was set during creation survives the T1 merge.
+        //
+        // Issue-474 T-002: the context bundle seeds `vars.agent = {}` when
+        // the issue's existing variables do not already define the key, so
+        // built-in workflows can still template-bind
+        // `options: ${{ vars.agent }}` without the issue page having to set
+        // it explicitly. Explicit issue values (including a user-chosen
+        // agent block) are preserved by passing the existing bundle into
+        // the builder — the seed only fires when the issue would otherwise
+        // expose `vars.agent` as undefined.
+        var existingVariables = await _issueProfileManager.GetVariablesAsync(issue.ProjectId, issue.Number);
         var issueBundle = IssueVariableBuilder.BuildContextBundle(
             wrId,
             issue,
             projectContext,
-            workspace);
-        var existingVariables = await _issueProfileManager.GetVariablesAsync(issue.ProjectId, issue.Number);
+            workspace,
+            existingVariables);
         var mergedVariables = VariableBundle.Patch(existingVariables, issueBundle);
         await _issueProfileManager.SetVariablesAsync(issue.ProjectId, issue.Number, mergedVariables);
 

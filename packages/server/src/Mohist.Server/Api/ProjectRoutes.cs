@@ -338,9 +338,9 @@ public static class ProjectRoutes
         {
             var templateId = Uri.UnescapeDataString(tid);
             var project = context.GetResolvedProject();
-            var def = await manager.GetTemplateAsync(project.Id, templateId);
-            return def is not null
-                ? ApiResults.Ok(new { projectId = project.Id, templateId, definition = def })
+            var profile = await manager.GetTemplateProfileAsync(project.Id, templateId);
+            return profile is not null
+                ? ApiResults.Ok(new { projectId = project.Id, templateId, profile })
                 : ApiResults.NotFound("Project template not found");
         });
 

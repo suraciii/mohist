@@ -86,9 +86,9 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Null(row.SourceTemplateId);
         Assert.NotNull(row.Template);
 
-        var def = await _manager.GetTemplateAsync(ProjectId, 2);
-        Assert.NotNull(def);
-        Assert.Equal("my-custom", def.Id);
+        var state = await _manager.GetStateAsync(ProjectId, 2);
+        Assert.NotNull(state.Template);
+        Assert.Equal("my-custom", state.Template!.Id);
     }
 
     [Fact]

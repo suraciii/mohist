@@ -1,0 +1,52 @@
+{
+  "project": "mohist-local",
+  "description": "Separate Workflow Profile metadata, pure Definition behavior, and independently owned Project, Issue, and WorkflowRun Variables.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Migrate Workflow Profiles to pure Definition assets",
+      "spec": "specs/workflow-profile-assets/spec.md#profile-owns-identity-and-presentation",
+      "description": "Introduce the Profile envelope carrying id, name, description, and a pure Definition; migrate project and issue custom-template persistence and API assembly to that shape. Refactor Definition domain types, serializers, catalog assets, and resolver call sites so Project defaults, Issue selection, built-ins, startup, and later-stage loads all use the same Profile boundary; include the one-shot persisted-profile migration and removed-field diagnostics.",
+      "acceptanceCriteria": [
+        "WorkflowDefinition and StageDefinition no longer model Profile metadata, top-level defaults/artifacts, or embedded Variables; task-level artifacts, recovery, and setVars remain executable Definition behavior",
+        "Definition YAML and JSON conversion preserves approval and stages, emits no removed fields, and rejects id, name, description, variables, defaults, top-level artifacts, and stage.variables without becoming a general unknown-field validator",
+        "Project templates and Issue custom Profiles persist and return Profile metadata separately from their pure Definition, while Project default and Issue selection continue to resolve by Profile identity",
+        "The built-in catalog, rather than built-in YAML, supplies the existing Local and GitHub PR names, descriptions, and default designation; both built-in Definitions retain their ordered executable stages",
+        "Workflow startup and a later stage entry resolve custom Issue, referenced Project, Project-default, and built-in Profiles through the same resolver without deriving metadata from a Definition",
+        "The persisted-profile migration preserves storage identities, writes Profile envelopes for convertible records, and reports a named Profile plus Variable paths for records requiring an explicit Variables relocation; no dual-read compatibility path remains",
+        "Spec/unit coverage updates the existing WorkflowProfileCatalog, Mohist Local/GitHub PR profile, project-template, issue-profile, template-selection, stage, and YAML serializer specs for all Profile and Definition scenarios",
+        "npm run build and npm test pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Pure WorkflowDefinition/Profile envelope domain and persistence conversion, built-in catalog and assets, unified profile resolver/API call sites, one-shot migration, and focused server specs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Also implements specs/workflow-definition-language/spec.md. Keep the language parser narrow: explicitly reject only the removed known fields; #432 owns broad unknown-field validation. Do not introduce a new Profile collection or Settings UI."
+    },
+    {
+      "id": "T-002",
+      "title": "Resolve Variables only from Project, Issue, and WorkflowRun resources",
+      "spec": "specs/workflow-variable-resolution/spec.md#variables-have-independent-resource-owners",
+      "description": "Remove global-config and Definition-derived Variables from effective resolution, retaining the existing deep merge and selected-stage behavior for Project, Issue, and WorkflowRun resources. Seed Issue agent and a provenance-marked WorkflowRun archive default in their owning resources, so explicit Project, Issue, and stage values beat the default while an explicit Run write clears the marker and wins; keep setVars-backed Run writes visible to retries and stage re-entry.",
+      "acceptanceCriteria": [
+        "Effective Variable resolution consults only Project, Issue, and WorkflowRun VariableBundles; Profile parsing, Definition loading, and live stage reads cannot add a Variable source",
+        "Project, Issue, and explicit WorkflowRun Variables deep-merge in that order, and selected-stage overlays preserve the same resource precedence; a marked Run initialization default resolves below explicit Project, Issue, and stage values",
+        "Built-in workflow startup ensures Issue vars.agent is an empty object and WorkflowRun vars.archive is an empty string marked as an initialization default when absent, while preserving explicitly supplied values and remaining idempotent across repeated start attempts",
+        "A Project, Issue, or selected-stage archive value overrides the marked empty Run default; setVars or a Run API write to archive clears the marker and the written Run value follows the existing top-level and selected-stage precedence rules",
+        "setVars continues to patch WorkflowRun Variables only, and a task retry or stage re-entry resolves the latest persisted archive value rather than a Definition or dispatch snapshot",
+        "Global config Variables do not affect effective Workflow Variables after the switchover",
+        "Focused specs cover no embedded-variable contribution, scope and stage precedence, built-in agent/archive initialization, default-origin behavior against Project/Issue/stage values, explicit Run replacement, and archive visibility after retry or re-entry without real time or external dependencies",
+        "npm run build and npm test pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Three-resource Variable resolver, idempotent Issue/WorkflowRun default initialization, live Run-variable dispatch behavior, and focused server specs",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "T-001 removes Definition-owned Variables and supplies the pure Profile resolver consumed by this task. Reuse VariableBundle merge semantics and existing Project, Issue, and Run storage/API routes; do not rename or migrate those resources."
+    }
+  ]
+}

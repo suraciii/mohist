@@ -35,7 +35,7 @@ public class RunnerStatusApiSpecs
         string projectId = "test-project")
     {
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowId);
-        var definition = new WorkflowDefinition("spec/workflow",
+        var definition = new WorkflowDefinition(
         [
             new StageDefinition(stage,
                 [new TaskDefinition(workId.Contains('.', StringComparison.Ordinal) ? workId[..workId.LastIndexOf('.')] : workId, title, "spec/task")],
@@ -62,14 +62,15 @@ public class RunnerStatusApiSpecs
             .Options;
 
         await using var db = new MohistDbContext(options);
-        var templateJson = global::System.Text.Json.JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
-        var template = await db.ProjectWorkflowTemplates.FindAsync(projectId, definition.Id);
+        const string templateId = "spec/workflow";
+        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(definition);
+        var template = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
         if (template is null)
         {
             db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = projectId,
-                TemplateId = definition.Id,
+                TemplateId = templateId,
                 Template = templateJson,
             });
         }
@@ -85,12 +86,12 @@ public class RunnerStatusApiSpecs
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = "test-project",
-                DefaultTemplateId = definition.Id,
+                DefaultTemplateId = templateId,
             });
         }
         else
         {
-            profile.DefaultTemplateId = definition.Id;
+            profile.DefaultTemplateId = templateId;
             profile.UpdatedAt = FixedNow;
         }
 

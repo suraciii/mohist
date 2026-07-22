@@ -67,7 +67,6 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
     private async Task<WorkflowRun> SeedRunAsync(string projectId, string runId)
     {
         var definition = new WorkflowDefinition(
-            "spec/workflow",
             [new StageDefinition("build", [new("task-1", "Task 1", "spec/task")], [])]);
         var run = WorkflowRunExtensions.Create(
             runId,
@@ -81,7 +80,7 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
                     ["projectId"] = projectId,
                     ["issueNumber"] = "42",
                 }));
-        var definitionJson = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+        var definitionJson = WorkflowGrainTestHelpers.SerializeProfile(definition);
 
         await using var db = new MohistDbContext(_database.Options);
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile

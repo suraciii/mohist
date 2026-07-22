@@ -45,7 +45,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     {
         var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
 
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.GithubPrWorkflowDefinition), profile.Description);
+        Assert.Equal(WorkflowProfileCatalog.GithubPrProfileAsset.Description, profile.Description);
         Assert.EndsWith("`gh` CLI on the runner host and `gh auth login` against the target repository.", profile.Description);
     }
 
@@ -56,7 +56,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         Assert.Same(MohistWorkflow.GithubPrWorkflowDefinition, profile.Definition);
         Assert.NotSame(MohistWorkflow.Definition, profile.Definition);
-        Assert.Equal("mohist/github-pr", profile.Definition.Id);
+        Assert.Equal("mohist/github-pr", profile.Id);
     }
 
     // ===================== Registry exposure =====================
@@ -140,8 +140,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         Assert.False(string.IsNullOrWhiteSpace(defaultEntry.Description));
         Assert.False(string.IsNullOrWhiteSpace(prEntry.Description));
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), defaultEntry.Description);
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.GithubPrWorkflowDefinition), prEntry.Description);
+        Assert.Equal(WorkflowProfileCatalog.Profile.Description, defaultEntry.Description);
+        Assert.Equal(WorkflowProfileCatalog.GithubPrProfileAsset.Description, prEntry.Description);
     }
 
     [Fact]
@@ -163,7 +163,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var definition = MohistWorkflow.GithubPrWorkflowDefinition;
 
         Assert.Equal(new[] { "plan", "build", "check", "integrate" }, definition.Stages.Select(s => s.Stage).ToArray());
-        Assert.Equal("mohist/github-pr", definition.Id);
     }
 
     [Fact]
@@ -555,9 +554,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     {
         var yaml = ReadResourceYaml("mohist-github-pr.workflow.yaml");
 
-        var definition = WorkflowYamlSerializer.FromYaml(yaml, "mohist/github-pr");
+        var definition = WorkflowYamlSerializer.FromYaml(yaml);
 
-        Assert.Equal("mohist/github-pr", definition.Id);
         Assert.Equal(["plan", "build", "check", "integrate"], definition.Stages.Select(s => s.Stage).ToArray());
 
         var planIds = definition.Stages[0].Tasks.Select(t => t.Id).ToArray();
@@ -602,7 +600,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     {
         var yaml = ReadResourceYaml("mohist-github-pr.workflow.yaml");
 
-        var definition = WorkflowYamlSerializer.FromYaml(yaml, "mohist/github-pr");
+        var definition = WorkflowYamlSerializer.FromYaml(yaml);
         var emitted = WorkflowYamlSerializer.ToYaml(definition);
 
         Assert.Contains("mohist/create-github-pr", emitted);
@@ -616,7 +614,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("prompt: ${{ prompts.fix-ci }}", emitted);
         Assert.Contains("retrySelf: true", emitted);
 
-        var reparsed = WorkflowYamlSerializer.FromYaml(emitted, "mohist/github-pr");
+        var reparsed = WorkflowYamlSerializer.FromYaml(emitted);
         Assert.Equal(definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
         Assert.Equal(
             definition.Stages.SelectMany(s => s.Tasks).Select(t => t.Id),

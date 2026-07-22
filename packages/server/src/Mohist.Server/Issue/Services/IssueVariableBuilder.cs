@@ -29,12 +29,63 @@ public static class IssueVariableBuilder
     /// Builds the T1 issue variable bundle without global/project user
     /// variables. This is what gets persisted on the issue profile at start.
     /// </summary>
+    /// <remarks>
+    /// Issue-474 T-002: when the issue's existing <see cref="VariableBundle"/>
+    /// does not carry a <c>vars.agent</c> entry, the bundle seeds an empty
+    /// object so built-in workflows that template-bind
+    /// <c>options: ${{ vars.agent }}</c> still resolve to a usable surface.
+    /// Explicit issue values (including <c>agent</c> shapes chosen by the
+    /// user before start) are preserved verbatim — the seed only fires when
+    /// the issue would otherwise expose <c>vars.agent</c> as undefined.
+    /// </remarks>
     public static VariableBundle BuildContextBundle(
         string workflowRunId,
         MohistIssue issue,
         WorkflowProjectContext project,
-        WorkspaceIdentity workspace)
-        => BuildBuiltInContext(workflowRunId, issue, project, workspace);
+        WorkspaceIdentity workspace,
+        VariableBundle? existingIssueBundle = null)
+    {
+        var builtIn = BuildBuiltInContext(workflowRunId, issue, project, workspace);
+        if (HasAgentKey(existingIssueBundle?.Vars) || HasAgentKey(builtIn.Vars))
+        {
+            return builtIn;
+        }
+        return WithEmptyAgent(builtIn);
+    }
+
+    private static bool HasAgentKey(JsonElement? vars)
+    {
+        return vars is { ValueKind: JsonValueKind.Object }
+            && vars.Value.TryGetProperty("agent", out _);
+    }
+
+    private static VariableBundle WithEmptyAgent(VariableBundle source)
+    {
+        if (source.Vars is not { ValueKind: JsonValueKind.Object } vars)
+        {
+            var emptyRoot = JsonSerializer.SerializeToElement(
+                new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
+                {
+                    ["agent"] = JsonSerializer.SerializeToElement(
+                        new Dictionary<string, object?>(StringComparer.Ordinal),
+                        WorkflowVariableJson.Options),
+                },
+                WorkflowVariableJson.Options);
+            return new VariableBundle(emptyRoot, source.Stages);
+        }
+
+        var dict = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        foreach (var property in vars.EnumerateObject())
+        {
+            dict[property.Name] = property.Value.Clone();
+        }
+        dict["agent"] = JsonSerializer.SerializeToElement(
+            new Dictionary<string, object?>(StringComparer.Ordinal),
+            WorkflowVariableJson.Options);
+        return new VariableBundle(
+            JsonSerializer.SerializeToElement(dict, WorkflowVariableJson.Options),
+            source.Stages);
+    }
 
     public static VariableBundle Build(
         VariableBundle? globalBundle,

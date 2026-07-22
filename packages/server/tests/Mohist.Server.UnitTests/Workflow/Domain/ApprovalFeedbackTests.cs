@@ -20,7 +20,7 @@ public partial class ApprovalFeedbackTests
     private static string NextFeedbackId(WorkflowRun run) => $"fb_{run.Feedback.Count + 1}";
 
     private static WorkflowDefinition ApprovalStageDefinition() =>
-        new("spec/workflow", [
+        new([
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
                 [new("plan-ok", "Plan OK", "spec/check")],
@@ -110,7 +110,7 @@ public partial class ApprovalFeedbackTests
     [Fact]
     public void RequestChanges_Throws_OnNonAwaitingStage()
     {
-        var run = WorkflowRun.Create("wf-2", new WorkflowDefinition("spec/workflow", [
+        var run = WorkflowRun.Create("wf-2", new WorkflowDefinition( [
             new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [new("build-ok", "Build OK", "spec/check")])
@@ -244,7 +244,7 @@ public partial class ApprovalFeedbackTests
     [Fact]
     public void IsCurrentStageRetryableFailure_TrueForOrdinaryTaskFailure()
     {
-        var run = WorkflowRun.Create("wf-3", new WorkflowDefinition("spec/workflow", [
+        var run = WorkflowRun.Create("wf-3", new WorkflowDefinition( [
             new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [new("build-ok", "Build OK", "spec/check")])

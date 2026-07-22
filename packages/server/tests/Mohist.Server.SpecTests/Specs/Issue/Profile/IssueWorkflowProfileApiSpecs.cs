@@ -138,7 +138,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var savedData = saved.GetProperty("data");
         var savedYaml = savedData.GetProperty("yaml").GetString();
         Assert.NotNull(savedYaml);
-        Assert.Contains("custom-issue-workflow", savedYaml);
+        Assert.DoesNotContain("custom-issue-workflow", savedYaml);
         Assert.Contains("custom-task", savedYaml);
         Assert.Equal("custom", savedData.GetProperty("updateMode").GetString());
         // The PUT /workflow-profile/template path is an advanced override and
@@ -267,7 +267,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var saved = await saveResponse.Content.ReadFromJsonAsync<JsonElement>();
         var savedData = saved.GetProperty("data");
         var savedYaml = savedData.GetProperty("yaml").GetString();
-        Assert.Contains("synced-workflow", savedYaml!);
+        Assert.DoesNotContain("synced-workflow", savedYaml!);
 
         var statusAfterSave = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
         var planStageAfterSave = Assert.Single(statusAfterSave.Workflow!.Stages, s => s.Stage == "plan");
@@ -292,8 +292,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
 
     private const string NoArtifactTemplateYaml = """
         id: mohist-test-noartifacts-profile
-        variables:
-          agent: {}
         stages:
           - stage: plan
             requiresApproval: true

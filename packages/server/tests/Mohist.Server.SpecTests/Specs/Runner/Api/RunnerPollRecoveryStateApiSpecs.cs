@@ -187,21 +187,21 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             }),
         };
         var definition = new WorkflowDefinition(
-            "spec/recovery-poll",
             [new StageDefinition("check", [new TaskDefinition("review", "Review", "spec/review", Expect: expect, Recovery: recovery)], [])]);
+        const string templateId = "spec/recovery-poll";
         var factory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using (var db = await factory.CreateDbContextAsync())
         {
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
-                DefaultTemplateId = definition.Id,
+                DefaultTemplateId = templateId,
             });
             db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = projectId,
-                TemplateId = definition.Id,
-                Template = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions),
+                TemplateId = templateId,
+                Template = WorkflowGrainTestHelpers.SerializeProfile(definition, templateId),
             });
             await db.SaveChangesAsync();
         }
