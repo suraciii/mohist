@@ -1,0 +1,89 @@
+{
+  "project": "mohist-local",
+  "description": "Deliver a unified read/write `variable` CLI for Project, Issue, and Run: clean /variables resource API with write-boundary validation, the shared variable command group, and removal of legacy config variable flags.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Establish the clean Variables resource API with write-boundary validation",
+      "spec": "specs/variable-resources/spec.md",
+      "description": "Rename Project, Issue, and Run variable routes from workflow-profile/variables to clean /variables (GET/PUT/PATCH) in ProjectRoutes, IssueRoutes.WorkflowProfile, and WorkflowRoutes, and remove the now-redundant workflow-profile variable routes. Add a shared VariableBundleShapeValidator invoked at the top of each manager's Set/Patch (ProjectWorkflowProfileManager, IssueWorkflowProfileManager, WorkflowRunProfileManager) that rejects non-object vars roots and non-object stages.<stage>.vars roots before any save, leaving the original value unchanged. Update the Runner setVars patch URL (packages/runner/src/server/connection.ts) to /api/workflow-runs/{id}/variables. Keep effective read routes, the merge algorithm, ProjectVariablesFilter, and the Run ETag read-modify-write unchanged. Cover with server specs and a runner setVars spec on the clean path.",
+      "acceptanceCriteria": [
+        "GET /api/projects/{id}/variables, /api/projects/{id}/issues/{number}/variables, and /api/workflow-runs/{id}/variables each return only that scope's own Variables",
+        "PUT replaces and PATCH deep-merges the addressed scope only (Project/Issue/Run), with null in a PATCH acting as a delete instruction that is not persisted",
+        "GET/PUT/PATCH on .../workflow-profile/variables for Project, Issue, and Run are no longer mapped",
+        "A PUT or PATCH whose vars root is a JSON array or scalar is rejected with an actionable domain error, and the scope's stored Variables is unchanged",
+        "A PATCH whose stages.<stage>.vars root is non-object is rejected with a domain error; the original value is unchanged",
+        "A PATCH body that cannot be parsed as JSON is rejected with a domain error; the original value is unchanged",
+        "Effective read routes (/variables/effective and /variables/effective/{keyPath} with optional ?stage=) remain unchanged and still return the Project→Issue→Run merge and stage overlay",
+        "Runner setVars PATCH targets /api/workflow-runs/{id}/variables with a vars-only body (no stages), verified by connection.ts and a runner spec",
+        "dotnet build Mohist.sln succeeds with TreatWarningsAsErrors and the new server specs pass; npm test -w packages/runner passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Renamed variable routes in ProjectRoutes.cs, IssueRoutes.WorkflowProfile.cs, WorkflowRoutes.cs; new VariableBundleShapeValidator wired into the three managers; updated packages/runner/src/server/connection.ts; server specs and runner setVars spec",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D4 (validation in managers as single authority) and D5 (in-place rename, no aliases). No VariableBundle shape, merge, precedence, or DefaultVars/DefaultStages change (owned by #474). The Runner URL update is bundled because setVars breaks the moment the route is renamed."
+    },
+    {
+      "id": "T-002",
+      "title": "Build the shared variable command group under project, issue, and run",
+      "spec": "specs/variable-commands/spec.md",
+      "description": "Add a VariableCommands partial class exposing a shared BuildVariableGroup(api, scope) that produces a `variable` command carrying list/get/set/unset, registered under project, issue, and run. Implement a VariableKeyPath helper that converts a dotted key plus value into the nested PATCH document ({vars:{...}} or {stages:<stage>.vars:{...}}) and emits a null leaf for unset, rejecting empty segments and non-object traversal. Implement positional-string storage and mutually-exclusive --value-json typing (parse with JsonDocument; local usage error exit 2, no HTTP), --stage scoping, scope-local list/get, Run target resolution reused from RunCommands.ResolveRunTargetAsync, and Run-only --effective reads against the effective routes. Render reads via ResourceDescriptor/PrintResourceAsync and mutations via PrintMutationResourceAsync over the WorkflowVariables shape. Cover with CLI specs asserting shared rules across all three scopes.",
+      "acceptanceCriteria": [
+        "mo project/issue/run each expose `variable list`, `variable get`, `variable set`, and `variable unset`",
+        "set agent.model openai/gpt-5 stores the positional value as the JSON string \"openai/gpt-5\"; get agent.model returns it, matching the ${ vars.agent.model } path",
+        "set review.strict --value-json true --stage check stores the boolean true in that scope's Stage Variables; a workflow-wide get returns the string value instead",
+        "set <key> <value> --value-json <json> (both) exits 2 with a usage error and issues no HTTP request",
+        "set <key> with neither positional value nor --value-json exits 2 with a usage error and no HTTP request",
+        "set <key> --value-json <invalid> exits 2 locally with no HTTP request",
+        "unset <key> removes the current scope's value; a subsequent effective read inherits the parent scope's value and the persisted document holds no null for that key",
+        "unset <key> --stage <stage> clears that scope's Stage declaration and restores stage inheritance",
+        "project/issue variable list/get return only that scope's own values and do not surface other scopes",
+        "project variable list --effective and issue variable get <key> --effective exit 2 with a usage error and no HTTP request",
+        "run variable list <run> --effective returns the Project→Issue→Run merge; run variable get <run> <key> --effective --stage <stage> returns the Effective Stage value at that path",
+        "run variable set/unset <run> ... --effective exit 2 with a usage error (effective is read-only)",
+        "run variable leaves accept exactly one target: positional Run ID or --issue <number>; both or neither exits 2 with no HTTP request",
+        "run variable list --issue <number> resolves the issue's bound run and reads its Variables",
+        "an invalid or malformed key path is rejected locally with exit 2 and no HTTP request",
+        "--json <fields> selects output fields only and is never accepted as a value input to set",
+        "results go to stdout and diagnostics to stderr; project resolution uses the single --project from the shared contract",
+        "dotnet build Mohist.sln succeeds with TreatWarningsAsErrors and the CLI variable specs pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/VariableCommands.cs (and registration under project/issue/run), VariableKeyPath/value helpers, packages/cli/tests/Mohist.Cli.Tests CLI variable specs",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Design D1 (one shared scope-parameterized builder), D2 (dotted key → nested PATCH client-side), D3 (string vs --value-json mutual exclusion), D6 (effective reads reuse existing read-only routes), D7 (shared output contract). CLI targets the clean /variables routes from T-001; building against the renamed routes first avoids rework. Legacy config variable flags are removed in T-003, not here."
+    },
+    {
+      "id": "T-003",
+      "title": "Remove legacy config variable flags and align docs",
+      "spec": "specs/variable-commands/spec.md#unified-variable-command-surface",
+      "description": "Remove the --var, --stage-var, and --vars-file flags and their ad-hoc <stage>.k parsing from the project and issue workflow config set/clear commands (MohistCliCommands.ProjectWorkflow.cs and the Issue workflow-config commands), leaving their prompt/default-template handling intact. Update command-tree and help tests so no test references the removed variable flags, and migrate docs (docs/cli-reference.md examples, and the design/cli.md and design/workflow/variables.md gap notes) to the unified variable verbs. This is the switchover: the new variable commands (T-002) are the only variable path after this task.",
+      "acceptanceCriteria": [
+        "mo project/issue workflow config set|clear no longer accept --var, --stage-var, or --vars-file",
+        "help for the config commands does not advertise any variable flag",
+        "no CLI test references the removed variable flags; command-tree tests pass",
+        "docs/cli-reference.md examples use mo project/issue/run variable verbs instead of config --var/--stage-var",
+        "design/workflow/variables.md no longer lists the workflow-profile path as an open gap; design/cli.md records the string-vs-JSON value rule as delivered",
+        "the prompt/default-template handling of config set/clear still works after the variable flags are removed",
+        "dotnet build Mohist.sln succeeds with TreatWarningsAsErrors and the full CLI test suite passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Updated MohistCliCommands.ProjectWorkflow.cs and Issue workflow-config commands (variable flags removed), updated CLI command-tree/help tests, aligned docs/cli-reference.md, design/cli.md, design/workflow/variables.md",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Switchover task: legacy variable paths are removed only after the unified variable commands (T-002) are in place. Only variable flags are removed; prompt/default-template config handling is out of scope and must keep working. Per AGENTS.md there is no version-compatibility obligation, so no deprecation aliases."
+    }
+  ]
+}
