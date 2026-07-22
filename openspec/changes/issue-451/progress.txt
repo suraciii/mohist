@@ -75,3 +75,12 @@
   - reset: prior session file retained for audit; the cached handle is disposed via the runtime
   - reset: returned `runtimeSessionId` is non-empty and differs from the request id
 - T-003 verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, `npm run check:test-boundaries -w packages/runner`, and `npm test -w packages/runner` all pass (109 files / 1,279 tests). Full repository: `npm test` (5,050 tests across all packages) also passes.
+
+## T-004 Notes
+
+- Runtime routing is selected per command from the persisted wire binding via `resolveCommandRuntime`; OpenCode and Pi remain parallel deep-module call surfaces. Missing or unknown runtime accessors return the existing `unavailable` outcome without invoking a backend.
+- `RunnerSignalRClient` now registers the existing `SessionCommand` journal handler in production, sharing a host-owned file journal. Pi compact/reset map runtime failures into the existing SessionCommand vocabulary; OpenCode compact/reset explicitly return `unavailable`, preserving their prior user-visible outcome.
+- Follow-up and cancel now carry the binding runtime through to Pi or OpenCode. Pi cancel facts with `stopConfirmed: false` become `interruptUnconfirmed: true` in the runner reply, and the Server mirrors that optional field into HTTP responses; confirmed and OpenCode cancels omit it.
+- The server Pi gate was removed while retaining the existing registered-runtime and idle, missing-binding, and expected-binding guards. The API stale-binding check is represented by the grain-level `Reset_StaleExpectedBinding_RejectsWithoutMutation` spec because the recovery endpoint obtains its expected binding from the persisted reservation, not an HTTP body.
+- Removed the stale Pi Session-command gap entries from `docs/actions/pi.md` and `design/runtimes/pi.md`.
+- T-004 verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, `npm run check:test-boundaries -w packages/runner`, and `npm test -w packages/runner` pass (1,298 runner tests); focused Server recovery/cancel API and grain specs pass (58 tests).

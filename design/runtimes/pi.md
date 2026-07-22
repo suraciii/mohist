@@ -400,5 +400,4 @@ Session binding，以及现有 Session transcript/tool/status/compaction/model/u
 lineage 展示均已落地。以下设计触及面仍是实现差距：
 
 - AgentJob executor 与 Agent 配置中的 runtime 选择仍未接入，Mohist Agent 固定使用 OpenCode。
-- Follow-up、Cancel、Compact、Reset 等 Pi Session command handler 仍未接入。
 - runtime-aware model catalog API 与 Web 模型选择 UI 仍未接入。

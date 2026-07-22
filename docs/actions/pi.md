@@ -184,5 +184,4 @@ Workflow AgentSession，并在现有 Session 页面展示 transcript、工具、
 用量、成本与 lineage。以下能力仍属于后续工作：
 
 - Mohist Agent 的 AgentJob 执行后端选择仍未实装，当前 Mohist Agent 固定使用 OpenCode。
-- Pi 的 Follow-up、Compact、Reset、Cancel 等 Session 命令仍未实装。
 - 面向 runtime 的模型 catalog 与 Web 模型选择 UI 仍未实装。

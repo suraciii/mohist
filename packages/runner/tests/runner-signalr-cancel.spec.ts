@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
 import { RunnerSignalRClient, type CancelAgentSessionPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { SessionTarget } from "../src/server/session-target.js"
@@ -9,6 +9,7 @@ import type {
   RuntimeCancelResult,
   RuntimeResult,
 } from "../src/runtime/opencode/index.js"
+import { makeFakePiRuntime, type FakePiRuntimeHandles } from "./support/pi-runtime-fixture.js"
 
 
 interface CapturedBuilder {
@@ -138,6 +139,7 @@ function buildClient(opts: {
   resolver?: AnyFn | null
   outbox?: AgentSessionRuntimeEventOutbox | null
   openCodeRuntime?: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
+  piRuntime?: unknown
 }) {
   builders.length = 0
   const resolver = opts.resolver === undefined ? null : opts.resolver
@@ -151,6 +153,7 @@ function buildClient(opts: {
       followupTargetResolver: resolver as never,
       agentSessionRuntimeEventOutbox: opts.outbox ?? null,
       openCodeRuntime: openCodeRuntime as never,
+      ...(opts.piRuntime !== undefined ? { piRuntime: opts.piRuntime as never } : {}),
     },
   )
   return client
@@ -165,7 +168,12 @@ function emitCancel(builder: CapturedBuilder, payload: CancelAgentSessionPayload
 describe("RunnerSignalRClient CancelAgentSession handler", () => {
   function genericCancelPayload(sessionId: string): CancelAgentSessionPayload {
     return {
-      target: { kind: "generic", projectId: "proj-1", sessionId },
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId,
+        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
+      },
     }
   }
 
@@ -374,7 +382,13 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, {
-      target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wr-1", sessionName: "work-1" },
+      target: {
+        kind: "workflow",
+        projectId: "proj-1",
+        workflowRunId: "wr-1",
+        sessionName: "work-1",
+        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
+      },
     })) as { state: string }
 
     expect(reply).toEqual({ state: "cancelled" })
@@ -412,5 +426,106 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
     expect(reply).toEqual({ state: "cancelled" })
     expect(initialRuntime).toBeNull()
+  })
+})
+
+describe("RunnerSignalRClient CancelAgentSession routes by persisted binding runtime", () => {
+  let opencode: ReturnType<typeof makeFakeRuntime>
+  let pi: FakePiRuntimeHandles
+
+  function piCancelPayload(sessionId: string): CancelAgentSessionPayload {
+    return {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId,
+        binding: { runtime: "pi", runtimeSessionId: "/virtual/sessions/one.jsonl", runnerId: "runner-1", workDir: "/workspace" },
+      },
+    }
+  }
+
+  function opencodeCancelPayload(sessionId: string): CancelAgentSessionPayload {
+    return {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId,
+        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
+      },
+    }
+  }
+
+  beforeEach(() => {
+    builders.length = 0
+    opencode = makeFakeRuntime()
+    pi = makeFakePiRuntime()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    builders.length = 0
+    setRunnerSignalRGitRunnerForTest(null)
+    setRunnerSignalRExistsCheckerForTest(null)
+  })
+
+  it("PiBinding_CancelConfirmed_RepliesCancelled_WithoutInterruptUnconfirmed", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", projectId: "proj-1" }))
+    buildClient({ resolver, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, piCancelPayload("gen-session-1"))) as { state: string; interruptUnconfirmed?: boolean }
+
+    expect(reply.state).toBe("cancelled")
+    expect(reply.interruptUnconfirmed).toBeUndefined()
+    expect(pi.cancelCalls).toHaveLength(1)
+    expect(pi.cancelCalls[0].target.runtime).toBe("pi")
+    expect(opencode.cancelCalls).toHaveLength(0)
+  })
+
+  it("PiBinding_CancelStopUnconfirmed_RepliesCancelledWithInterruptUnconfirmedTrue", async () => {
+    pi.setCancelResult({
+      ok: true,
+      value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", cancelled: true, stopConfirmed: false },
+      diagnostics: [{ severity: "error", code: "abort-unconfirmed", message: "still streaming" }],
+    })
+    const resolver = vi.fn(() => ({ runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", projectId: "proj-1" }))
+    buildClient({ resolver, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, piCancelPayload("gen-session-1"))) as { state: string; interruptUnconfirmed?: boolean }
+
+    expect(reply).toEqual({ state: "cancelled", interruptUnconfirmed: true })
+    expect(pi.cancelCalls).toHaveLength(1)
+  })
+
+  it("OpenCodeBinding_CancelRepliesCancelled_WithoutInterruptUnconfirmed", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    buildClient({ resolver, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, opencodeCancelPayload("gen-session-1"))) as { state: string; interruptUnconfirmed?: boolean }
+
+    expect(reply).toEqual({ state: "cancelled" })
+    expect(opencode.cancelCalls).toHaveLength(1)
+    expect(pi.cancelCalls).toHaveLength(0)
+  })
+
+  it("UnknownBinding_RepliesNotCancellable_AndDoesNotCallAnyRuntime", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-x", workDir: "/work/project", projectId: "proj-1" }))
+    buildClient({ resolver, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "gen-session-1",
+        binding: { runtime: "acp", runtimeSessionId: "runtime-x", runnerId: "runner-1", workDir: "/work/project" },
+      },
+    })) as { state: string; interruptUnconfirmed?: boolean }
+
+    expect(reply).toEqual({ state: "not-cancellable" })
+    expect(opencode.cancelCalls).toHaveLength(0)
+    expect(pi.cancelCalls).toHaveLength(0)
   })
 })

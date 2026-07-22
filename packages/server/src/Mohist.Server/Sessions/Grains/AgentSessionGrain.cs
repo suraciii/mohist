@@ -166,7 +166,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
-        EnsureCommandRuntimeAvailable(session);
         EnsureRuntimeSessionPresent(session);
         EnsureSessionIdleForRecovery(session);
 
@@ -203,7 +202,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
-        EnsureCommandRuntimeAvailable(session);
         EnsureSessionIdleForRecovery(session);
         session.EnsureExpectedRuntimeSession(command.ExpectedRuntimeSessionId);
 
@@ -251,7 +249,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
-        EnsureCommandRuntimeAvailable(session);
         EnsureSessionIdleForRecovery(session);
         var key = RecoveryIdempotencyKey(idempotencyKey);
         var commandName = CommandName(command);
@@ -378,7 +375,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionFollowupReservation> BeginFollowupAsync()
     {
         var session = await GetRequiredAsync();
-        EnsureCommandRuntimeAvailable(session);
         EnsureRuntimeSessionPresent(session);
         if (session.Status.PendingReset is { } recovery)
         {
@@ -530,12 +526,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private static bool IsRuntimeRegistered(string runtime) =>
         string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase)
         || string.Equals(runtime, PiRuntime, StringComparison.OrdinalIgnoreCase);
-
-    private static void EnsureCommandRuntimeAvailable(AgentSession session)
-    {
-        if (string.Equals(session.Runtime.Runtime, PiRuntime, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Session commands are unavailable for the pi runtime.");
-    }
 
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {

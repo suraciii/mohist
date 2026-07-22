@@ -62,8 +62,9 @@ export function registerSessionCommandHandler(
     const operation = handleCommand(request, handler, journal, deps.reconcileStarted)
     inFlight.set(key, { request, operation })
     try {
-      return await operation
-    } catch {
+      const result = await operation
+      return result
+    } catch (error) {
       return { ok: false, error: "unavailable" } satisfies SessionCommandResult
     } finally {
       if (inFlight.get(key)?.operation === operation) inFlight.delete(key)
@@ -149,13 +150,13 @@ function isValidCommandBinding(request: Partial<SessionCommandRequest>): boolean
 
 function sameRequest(left: SessionCommandRequest, right: SessionCommandRequest): boolean {
   return left.sessionId === right.sessionId
-    && left.runtime === right.runtime
-    && left.runtimeSessionId === right.runtimeSessionId
-    && left.runnerId === right.runnerId
-    && left.workDir === right.workDir
-    && left.command === right.command
-    && left.expectedRuntimeSessionId === right.expectedRuntimeSessionId
-    && left.operationId === right.operationId
+  && left.runtime === right.runtime
+  && left.runtimeSessionId === right.runtimeSessionId
+  && left.runnerId === right.runnerId
+  && left.workDir === right.workDir
+  && left.command === right.command
+  && left.expectedRuntimeSessionId === right.expectedRuntimeSessionId
+  && left.operationId === right.operationId
 }
 
 function unavailable(): SessionCommandResult {

@@ -144,9 +144,16 @@ export interface CancelAgentSessionPayload {
  * the API can never fake success (design D6). Recognised values:
  * `cancelled`, `not-cancellable`, and the terminal-state names
  * (`completed` / `failed` / `stopped`).
+ *
+ * `interruptUnconfirmed` (issue-451 T-004 / design D6) is the honest
+ * stop-confirmation flag the API needs to surface when a runtime
+ * (currently Pi) could not confirm the turn actually stopped. OpenCode
+ * replies never set the flag — the OpenCode abort is authoritative —
+ * so confirmed-cancel HTTP responses stay byte-identical to today.
  */
 export interface CancelAgentSessionReply {
   state: string
+  interruptUnconfirmed?: boolean
 }
 
 // Issue-129 T-004: derives a discriminated `SessionTarget` from the

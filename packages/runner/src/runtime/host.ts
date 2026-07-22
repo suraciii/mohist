@@ -27,6 +27,7 @@ import {
   type DiscoveredOpencodeModels,
 } from "./opencode-models.js"
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from "./pi/index.js"
+import { SessionCommandJournal } from "./session-command-journal.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
@@ -114,6 +115,13 @@ export class RunnerHost {
   private openCodeRuntime: OpenCodeRuntime | null = null
   private piRuntime: PiRuntime | null = null
   private providerPolicyDiagnostic: string | null = null
+  /**
+   * Per-runner journal for SessionCommand dedup/recovery
+   * (issue-451 T-004 / design D4). Shared with `RunnerSignalRClient`
+   * so its `registerSessionCommandHandler` reuses the in-flight
+   * dedup + on-disk recovery the host owns.
+   */
+  private readonly sessionCommandJournal: SessionCommandJournal
 
   // The active outer-run signal. The onReconnected callback fires from
   // outside the run loop, so we capture the signal here to bound the
@@ -167,6 +175,7 @@ export class RunnerHost {
       options.runnerRoot,
     )
     this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry)
+    this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
       options.runnerId,
@@ -178,6 +187,8 @@ export class RunnerHost {
         agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
         registry: this.workspaceRegistry,
         openCodeRuntime: () => this.openCodeRuntime,
+        piRuntime: () => this.piRuntime,
+        sessionCommandJournal: this.sessionCommandJournal,
       },
     )
   }
@@ -186,7 +197,8 @@ export class RunnerHost {
     if (this.options.projectId && this.options.projectId !== target.projectId) return null
     const binding = target.binding ?? null
     if (!binding) return null
-    if (binding.runtime.toLowerCase() !== "opencode") return null
+    const runtime = binding.runtime.toLowerCase()
+    if (runtime !== "opencode" && runtime !== "pi") return null
     if (binding.runnerId !== this.options.runnerId) return null
     if (!binding.runtimeSessionId) return null
     if (!binding.workDir) return null

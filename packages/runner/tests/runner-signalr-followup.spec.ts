@@ -2,16 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   buildClient,
   buildRecordingOutbox,
+  defaultPiBinding,
   emitFollowup,
   flush,
   invokeFollowup,
   lastBuilder,
   makeFakeRuntime,
   resetBuilders,
+  workflowPayload,
   type FakeRuntimeHandles,
   type RecordingOutbox,
 } from "./support/followup-handler-fixture.js"
 import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
+import { makeFakePiRuntime, type FakePiRuntimeHandles } from "./support/pi-runtime-fixture.js"
 
 let runtime: FakeRuntimeHandles
 let recording: RecordingOutbox
@@ -33,7 +36,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
-    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "add a logout button" })
+    emitFollowup(builder, workflowPayload("add a logout button"))
     await flush()
 
     expect(runtime.followupCalls).toHaveLength(1)
@@ -59,7 +62,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
-    const delivery = invokeFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ship it" })
+    const delivery = invokeFollowup(builder, workflowPayload("ship it"))
     await flush()
     expect(followupCalls).toHaveLength(1)
     await expect(delivery).resolves.toEqual({ accepted: true })
@@ -93,7 +96,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     }
 
     buildClient({ resolver, outbox, openCodeRuntime: runtime.runtime })
-    emitFollowup(lastBuilder(), { workflowRunId: "wr-1", sessionName: "work-1", text: "ship while enqueue settles" })
+    emitFollowup(lastBuilder(), workflowPayload("ship while enqueue settles"))
     await flush()
 
     expect(order).toEqual(["before:session.input", "followup"])
@@ -103,7 +106,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    emitFollowup(lastBuilder(), { workflowRunId: "wr-1", sessionName: "work-1", text: "tag me" })
+    emitFollowup(lastBuilder(), workflowPayload("tag me"))
     await flush()
 
     expect(recording.beforeExecutionCalls).toHaveLength(1)
@@ -129,7 +132,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
-    expect(() => emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ignored" })).not.toThrow()
+    expect(() => emitFollowup(builder, workflowPayload("ignored"))).not.toThrow()
     await flush()
 
     expect(runtime.followupCalls).toHaveLength(0)
@@ -140,9 +143,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     const resolver = vi.fn(() => null)
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    await expect(invokeFollowup(lastBuilder(), {
-      workflowRunId: "wr-1", sessionName: "work-1", text: "resume",
-    })).resolves.toEqual({ accepted: false, error: "missing" })
+    await expect(invokeFollowup(lastBuilder(), workflowPayload("resume"))).resolves.toEqual({ accepted: false, error: "missing" })
   })
 
   it("Followup_ReturnsUnavailableWhileRuntimeIsInitializing", async () => {
@@ -150,9 +151,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    await expect(invokeFollowup(lastBuilder(), {
-      workflowRunId: "wr-1", sessionName: "work-1", text: "resume",
-    })).resolves.toEqual({ accepted: false, error: "unavailable" })
+    await expect(invokeFollowup(lastBuilder(), workflowPayload("resume"))).resolves.toEqual({ accepted: false, error: "unavailable" })
     expect(runtime.followupCalls).toHaveLength(0)
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
@@ -173,9 +172,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
 
     buildClient({ resolver, outbox, openCodeRuntime: runtime.runtime })
 
-    await expect(invokeFollowup(lastBuilder(), {
-      workflowRunId: "wr-1", sessionName: "work-1", text: "resume",
-    })).resolves.toEqual({ accepted: false, error: "unavailable" })
+    await expect(invokeFollowup(lastBuilder(), workflowPayload("resume"))).resolves.toEqual({ accepted: false, error: "unavailable" })
     expect(runtime.followupCalls).toHaveLength(0)
   })
 
@@ -196,9 +193,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
 
     buildClient({ resolver, outbox, openCodeRuntime: runtime.runtime })
 
-    await expect(invokeFollowup(lastBuilder(), {
-      workflowRunId: "wr-1", sessionName: "work-1", text: "resume",
-    })).resolves.toEqual({ accepted: false, error: "unavailable" })
+    await expect(invokeFollowup(lastBuilder(), workflowPayload("resume"))).resolves.toEqual({ accepted: false, error: "unavailable" })
     expect(runtime.followupCalls).toHaveLength(0)
     expect(errorSpy).toHaveBeenCalledWith(
       "followup durable input enqueue failed:",
@@ -214,7 +209,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
-    expect(() => emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ignored" })).not.toThrow()
+    expect(() => emitFollowup(builder, workflowPayload("ignored"))).not.toThrow()
     await flush()
 
     expect(runtime.followupCalls).toHaveLength(0)
@@ -228,7 +223,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
     emitFollowup(lastBuilder(), {
-      target: { kind: "generic", projectId: "proj-1", sessionId: "session-1" },
+      target: { kind: "generic", projectId: "proj-1", sessionId: "session-1", binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" } },
       text: "continue",
       operationId: "followup-1",
     })
@@ -264,7 +259,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
       emitFollowup(lastBuilder(), {
-        target: { kind: "generic", projectId: "proj-1", sessionId: "session-1" },
+        target: { kind: "generic", projectId: "proj-1", sessionId: "session-1", binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" } },
         text: "continue",
         operationId: "followup-1",
       })
@@ -293,7 +288,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
-    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "" })
+    emitFollowup(builder, workflowPayload(""))
     await flush()
 
     expect(runtime.followupCalls).toHaveLength(0)
@@ -304,7 +299,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     buildClient({ resolver: null, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
-    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "noop" })
+    emitFollowup(builder, workflowPayload("noop"))
     await flush()
 
     expect(runtime.followupCalls).toHaveLength(0)
@@ -315,7 +310,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     buildClient({ resolver, outbox: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
-    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "noop" })
+    emitFollowup(builder, workflowPayload("noop"))
     await flush()
 
     expect(runtime.followupCalls).toHaveLength(0)
@@ -326,7 +321,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: null })
     const builder = lastBuilder()
 
-    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "noop" })
+    emitFollowup(builder, workflowPayload("noop"))
     await flush()
 
     expect(recording.beforeExecutionCalls).toHaveLength(0)
@@ -349,11 +344,132 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    emitFollowup(lastBuilder(), { workflowRunId: "wr-1", sessionName: "work-1", text: "go" })
+    emitFollowup(lastBuilder(), workflowPayload("go"))
     await flush()
     await recording.flush()
     await flush()
 
     expect(runtime.followupCalls).toHaveLength(1)
+  })
+})
+
+describe("RunnerSignalRClient routes follow-up by persisted binding runtime", () => {
+  let opencode: FakeRuntimeHandles
+  let pi: FakePiRuntimeHandles
+
+  beforeEach(() => {
+    resetBuilders()
+    opencode = makeFakeRuntime()
+    pi = makeFakePiRuntime()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("PiBinding_DispatchesToPiRuntime_WithThePiTarget", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", projectId: "proj-1" }))
+    const recording = buildRecordingOutbox()
+    buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "session-1",
+        binding: defaultPiBinding(),
+      },
+      text: "follow me",
+    })
+    await flush()
+
+    expect(pi.followupCalls).toHaveLength(1)
+    expect(pi.followupCalls[0].target.runtime).toBe("pi")
+    expect(pi.followupCalls[0].prompt).toBe("follow me")
+    expect(opencode.followupCalls).toHaveLength(0)
+  })
+
+  it("OpenCodeBinding_DispatchesToOpenCodeRuntime_AndDoesNotInvokePi", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    const recording = buildRecordingOutbox()
+    buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "session-1",
+        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
+      },
+      text: "stay on opencode",
+    })
+    await flush()
+
+    expect(opencode.followupCalls).toHaveLength(1)
+    expect(opencode.followupCalls[0].target.runtime).toBe("opencode")
+    expect(pi.followupCalls).toHaveLength(0)
+  })
+
+  it("PiFollowup_PreflightAccepted_ResolvesAcceptedWithoutRotation", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", projectId: "proj-1" }))
+    const recording = buildRecordingOutbox()
+    buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
+    const builder = lastBuilder()
+
+    const delivery = invokeFollowup(builder, {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "session-1",
+        binding: defaultPiBinding(),
+      },
+      text: "go",
+    })
+    await expect(delivery).resolves.toEqual({ accepted: true })
+    expect(pi.followupCalls[0].target.runtimeSessionId).toBe("/virtual/sessions/one.jsonl")
+  })
+
+  it("UnknownRuntime_ReportsUnavailable_AndDoesNotCallAnyRuntime", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-x", workDir: "/work/project", projectId: "proj-1" }))
+    const recording = buildRecordingOutbox()
+    buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
+    const builder = lastBuilder()
+
+    await expect(invokeFollowup(builder, {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "session-1",
+        binding: { runtime: "acp", runtimeSessionId: "runtime-x", runnerId: "runner-1", workDir: "/work/project" },
+      },
+      text: "no go",
+    })).resolves.toEqual({ accepted: false, error: "unavailable" })
+    expect(opencode.followupCalls).toHaveLength(0)
+    expect(pi.followupCalls).toHaveLength(0)
+  })
+
+  it("PostResetBinding_HonorsTheReplacedRuntimeImmediately", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "/virtual/sessions/two.jsonl", workDir: "/workspace", projectId: "proj-1" }))
+    const recording = buildRecordingOutbox()
+    buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: opencode.runtime, piRuntime: pi.runtime })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "session-1",
+        binding: { runtime: "pi", runtimeSessionId: "/virtual/sessions/two.jsonl", runnerId: "runner-1", workDir: "/workspace" },
+      },
+      text: "after reset",
+    })
+    await flush()
+
+    expect(pi.followupCalls).toHaveLength(1)
+    expect(pi.followupCalls[0].target.runtimeSessionId).toBe("/virtual/sessions/two.jsonl")
+    expect(pi.followupCalls[0].target.runtime).toBe("pi")
+    expect(opencode.followupCalls).toHaveLength(0)
   })
 })
