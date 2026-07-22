@@ -8,12 +8,18 @@ import type {
   PiCancelFacts,
   PiCancelRequest,
   PiCancelResult,
+  PiCompactFacts,
+  PiCompactRequest,
+  PiCompactResult,
   PiDiagnostic,
   PiFollowupRequest,
   PiFollowupResult,
   PiProviderErrorPolicy,
   PiReadyState,
   PiCatalog,
+  PiResetFacts,
+  PiResetRequest,
+  PiResetResult,
   PiResult,
   PiRuntimeEvent,
   PiSessionCreateRequest,
@@ -282,6 +288,161 @@ export class PiRuntime {
     return { ok: true, value: facts, diagnostics }
   }
 
+  /**
+   * Compact against the bound Pi Session (issue #451 / design D7).
+   *
+   * Acquires the per-session prompt mutex (so a concurrent `prompt()`
+   * from a Workflow turn, an idle Follow-up, or another compact cannot
+   * race on the same physical session), then guards the physical
+   * session's `isStreaming` flag — a streaming session is reported as
+   * `conflict` (the AgentSession grain already enforces logical
+   * idleness; this is the physical-session backstop). On the success
+   * path the runtime subscribes a `createPiProjector` so the
+   * `compaction_start` / `compaction_end` events are projected through
+   * the existing session event channel, then calls Pi's native
+   * `session.compact()`. The result carries the unchanged
+   * `runtimeSessionId` so the handler can translate it into the
+   * SessionCommand contract (which omits `runtimeSessionId` for
+   * compact, since the identity is preserved).
+   *
+   * The optional `observer` is the same shape as the Follow-up
+   * observer — when present, the projector delivers the projected
+   * events through it so the handler can mirror them into the
+   * AgentSession event channel. The runtime itself does not retain
+   * a long-lived subscription; the subscription is torn down in
+   * `finally` after the compact call resolves.
+   *
+   * On any compact failure the runtime returns a `turn-failed`
+   * carrying the underlying error — it MUST NOT synthesize a summary
+   * or fabricate a compaction record (`design/runtimes/pi.md` D7).
+   * A missing bound file surfaces as `missing-session` with a Reset
+   * hint (no silent new session).
+   */
+  async compact(request: PiCompactRequest, observer?: PiTurnObserver): Promise<PiCompactResult> {
+    if (!this.state.ready || !this.state.services) return this.unavailable()
+    const runtimeSessionId = request.target.runtimeSessionId
+    if (!runtimeSessionId) return this.failure("missing-session", "Pi compact requires a bound Session", [resetDiagnostic()])
+    const path = normalizedPath(runtimeSessionId)
+    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    const session = await this.resolveFollowupSession(path, request.target.workDir)
+    if (!session.ok) return session.failure
+
+    const projector = createPiProjector(path, request.target.workDir, this.deps.masker ?? createCredentialMaskerFromEnvironment())
+    return this.withSessionLock(path, async () => {
+      if (session.value.isStreaming) {
+        return this.failure(
+          "conflict",
+          "Pi compact refused: the physical session is still streaming",
+          [diagnostic("session-streaming", "Cannot compact while the Pi session is streaming; wait for the turn to finish")],
+        )
+      }
+      const diagnostics: PiDiagnostic[] = []
+      diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), "info")))
+      const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
+      let unsubscribe: () => void = () => {}
+      try {
+        unsubscribe = session.value.subscribe((event) => report(projector.project(event)))
+        await session.value.compact()
+        report(projector.reconcile(session.value.messages))
+        const facts: PiCompactFacts = { runtimeSessionId: path, workDir: request.target.workDir }
+        return { ok: true, value: facts, diagnostics }
+      } catch (cause) {
+        return this.failure(
+          "turn-failed",
+          "Pi compact failed",
+          [diagnostic("compact-failed", this.mask(message(cause)))],
+        )
+      } finally {
+        unsubscribe()
+      }
+    })
+  }
+
+  /**
+   * Reset against a bound Pi Session (issue #451 / design D8).
+   *
+   * Best-effort opens the bound session to read the current model and
+   * thinking level; if the bound file is missing, Reset still proceeds
+   * and skips the carry-over (it is the recovery operation).
+   * `services.createSession(workDir)` produces a fresh empty Pi
+   * session in the same work directory; the carried model and thinking
+   * level, when available, are applied onto the new session via
+   * `setModel` / `setThinkingLevel`. The new session is cached under
+   * the new path; the prior session file is left on disk for audit.
+   *
+   * The returned `runtimeSessionId` is the new session file path
+   * (necessarily different from the request id, which the
+   * `SessionCommand` reset rule validates). The Server-side grain
+   * performs the binding replacement and lineage append using the
+   * returned id — `PiRuntime.reset` does not touch lineage itself.
+   */
+  async reset(request: PiResetRequest): Promise<PiResetResult> {
+    if (!this.state.ready || !this.state.services) return this.unavailable()
+    const workDir = request.target.workDir
+    const priorPath = request.target.runtimeSessionId ? normalizedPath(request.target.runtimeSessionId) : null
+    const cachedPrior: PiSdkSession | null = priorPath ? (this.sessions.get(priorPath) ?? null) : null
+    let openedPrior: PiSdkSession | null = null
+    const carry = await this.readCarryOver(priorPath, workDir, cachedPrior, (session) => { openedPrior = session })
+
+    let nextSession: PiSdkSession
+    try { nextSession = await this.state.services.createSession(workDir) }
+    catch (cause) {
+      if (openedPrior && priorPath) this.sessions.set(priorPath, openedPrior)
+      return this.failure("turn-failed", "Pi reset failed: could not create a new Pi session", [diagnostic("reset-create-failed", this.mask(message(cause)))])
+    }
+    const newPath = normalizedPath(nextSession.sessionFile)
+    if (!newPath) {
+      nextSession.dispose()
+      if (openedPrior && priorPath) this.sessions.set(priorPath, openedPrior)
+      return this.failure("incompatible-runtime", "Pi did not return an absolute session-file path for the new session")
+    }
+
+    const diagnostics: PiDiagnostic[] = []
+    if (carry?.model !== undefined) {
+      try { await nextSession.setModel(carry.model) }
+      catch (cause) {
+        diagnostics.push(diagnostic("reset-model-carry-failed", this.mask(message(cause))))
+      }
+    }
+    if (carry?.thinkingLevel) {
+      try { nextSession.setThinkingLevel(carry.thinkingLevel) }
+      catch (cause) {
+        diagnostics.push(diagnostic("reset-thinking-carry-failed", this.mask(message(cause))))
+      }
+    }
+
+    const priorToDispose: PiSdkSession | null = openedPrior ?? cachedPrior
+    if (priorToDispose && priorPath) {
+      try { priorToDispose.dispose() } catch { /* best-effort cleanup */ }
+      if (this.sessions.get(priorPath) === priorToDispose) this.sessions.delete(priorPath)
+    }
+    this.sessions.set(newPath, nextSession)
+
+    const facts: PiResetFacts = { runtimeSessionId: newPath, workDir }
+    return { ok: true, value: facts, diagnostics }
+  }
+
+  private async readCarryOver(
+    priorPath: string | null,
+    workDir: string,
+    cached: PiSdkSession | null,
+    capture: (session: PiSdkSession) => void,
+  ): Promise<{ model: unknown; thinkingLevel: string } | null> {
+    const services = this.state.services
+    if (!services || !priorPath) return null
+    if (cached) {
+      capture(cached)
+      return { model: cached.getModel(), thinkingLevel: cached.getThinkingLevel() }
+    }
+    try {
+      const session = await services.openSession(priorPath, workDir)
+      capture(session)
+      return { model: session.getModel(), thinkingLevel: session.getThinkingLevel() }
+    } catch {
+      return null
+    }
+  }
+
   private async resolveFollowupSession(path: string, workDir: string): Promise<{ ok: true; value: PiSdkSession } | { ok: false; failure: PiResult<never> }> {
     if (!this.state.services) return { ok: false, failure: this.unavailable() }
     let session: PiSdkSession
@@ -327,7 +488,7 @@ export class PiRuntime {
   private mask(value: string): string { return (this.deps.masker ?? createCredentialMaskerFromEnvironment()).mask(value) }
   private readyState(): PiReadyState { return { ready: this.state.ready, diagnostic: this.state.diagnostic, catalog: this.state.catalog } }
   private unavailable(): PiResult<never> { return { ok: false, error: piError("unavailable-runtime", "Pi runtime is not ready", this.state.diagnostic ? [this.state.diagnostic] : []), diagnostics: this.state.diagnostic ? [this.state.diagnostic] : [] } }
-  private failure(kind: "invalid-input" | "missing-session" | "incompatible-runtime" | "turn-failed", messageText: string, diagnostics: readonly PiDiagnostic[] = []): PiResult<never> { return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics } }
+  private failure(kind: "invalid-input" | "missing-session" | "incompatible-runtime" | "turn-failed" | "conflict", messageText: string, diagnostics: readonly PiDiagnostic[] = []): PiResult<never> { return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics } }
   private finishFailure(kind: "deadline-exceeded" | "interrupted" | "turn-failed", messageText: string, diagnostics: PiDiagnostic[] = []): PiResult<PiTurnResult> { return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics } }
 }
 

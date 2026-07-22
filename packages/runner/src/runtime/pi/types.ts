@@ -15,6 +15,7 @@ export type PiErrorKind =
   | "deadline-exceeded"
   | "interrupted"
   | "turn-failed"
+  | "conflict"
 
 export interface PiError {
   readonly kind: PiErrorKind

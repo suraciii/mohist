@@ -44,3 +44,34 @@
   - `serializes two concurrent idle follow-ups on the same session` — same invariant for two concurrent follow-ups
   - `does not rotate the physical Pi Session binding across a Follow-up (busy or idle)` — `runtimeSessionId` unchanged on both branches
 - T-002 verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, and `npm test -w packages/runner` all pass (108 files / 1,269 tests).
+
+## T-003 Notes
+
+- The Pi boundary in `runtime/pi/sdk.ts` now exposes two new getters on `PiSdkSession` — `getModel(): unknown` and `getThinkingLevel(): string` — so Reset can read the live `AgentSession.model` / `AgentSession.thinkingLevel` and carry them onto the freshly created session. The real `realPiSdkFactory` wraps the live `AgentSession` with `wrapAgentSession` so the AgentSession getters stay live (no value-spread that would snapshot `isStreaming` / `sessionFile` at wrap time). The fake `FakeSession` in tests exposes the same surface via `currentModel` / `currentThinkingLevel` fields, mutated by `setModel` / `setThinkingLevel`, and uses a non-`readonly` `sessionFile` so tests can override it for the new-session path.
+- `PiRuntime.compact(request, observer?)` (issue #451 / design D7):
+  - Resolves the bound session through the existing `resolveFollowupSession` (missing → `missing-session` + Reset hint).
+  - Acquires the per-session prompt mutex so a concurrent workflow turn / idle follow-up / second compact on the same physical session cannot collide.
+  - Inside the mutex, guards `session.isStreaming` — a streaming session is reported as `conflict` (the physical-session backstop; the AgentSession grain already enforces logical idleness).
+  - Subscribes a `createPiProjector` filtered through the optional observer so `compaction_start` / `compaction_end` events are projected through the existing session event channel, then calls `session.compact()` natively. Reconciles `session.messages` after the call.
+  - On any compact failure returns `turn-failed` carrying `compact-failed` diagnostic. Never synthesises a summary or fabricates a compaction record. The `runtimeSessionId` in the result is the unchanged persisted path; the handler (T-004) translates to a `SessionCommandResult` that omits `runtimeSessionId` per `isValidSessionCommandResult`'s compact rule.
+  - Added `conflict` to the `PiErrorKind` union (still absent from the spec vocabulary — the runtime returns it as a kebab-case kind; the handler is responsible for mapping to `SessionCommandError`).
+- `PiRuntime.reset(request)` (issue #451 / design D8):
+  - Best-effort reads the bound session's `getModel()` / `getThinkingLevel()` (via a small `readCarryOver` helper that consults the cache first, then `services.openSession`, and returns `null` on open failure). Reset is the recovery operation — a missing prior session still proceeds, just without carry-over.
+  - Calls `services.createSession(workDir)` for a fresh empty Pi session in the same work directory. On `createSession` failure: rolls back any newly opened prior session back into the cache and returns `turn-failed` with `reset-create-failed` diagnostic.
+  - Applies the carried model and thinking level onto the new session via `setModel` / `setThinkingLevel`. Carry-over failures surface as `reset-model-carry-failed` / `reset-thinking-carry-failed` diagnostics but do not fail Reset — the new session is still valid.
+  - Caches the new `PiSdkSession` under the new path, disposes the prior session handle (best-effort), and removes the prior entry from the sessions map. The prior session file remains on disk for audit. The returned `runtimeSessionId` is the new session file path (necessarily different from the request id, satisfying the reset rule).
+  - The runtime does not touch lineage; the Server-side grain performs the binding replacement and lineage append using the returned id (existing contract).
+- The new compact and reset tests live in `packages/runner/tests/pi-runtime-compact-reset.test.ts` (a separate file from the existing `pi-runtime.test.ts` to stay under the 500-line test-file budget). The shared `FakeSession` helpers are duplicated in the new file (small enough to copy rather than refactor into a shared helper).
+- The 500-line test-file budget is the only check that required the split — the new FakeSession in `pi-runtime-compact-reset.test.ts` is a focused minimal copy (no `nextPreflightResult` / `preflightCalls` since the compact/reset paths don't use them).
+- New fake-SDK tests (in `tests/pi-runtime-compact-reset.test.ts`):
+  - compact: native `compact()` invoked; `runtimeSessionId` unchanged after compaction; `compaction_start` / `compaction_end` projected through the observer
+  - compact: returns the unchanged `runtimeSessionId` so the handler can omit it from `SessionCommand`
+  - compact: busy (`isStreaming === true`) → `conflict`, no `compact()` invoked
+  - compact: native call throws → `turn-failed` + `compact-failed` diagnostic, no synthetic `messages` entry
+  - compact: missing session file → `missing-session` + Reset hint, no `compact()` invoked
+  - compact: serialises with an in-flight workflow turn on the same session (no `compact()` until `runTurn` completes)
+  - reset: new empty session in the same `workDir`, model and thinking level carried over, returned `runtimeSessionId` differs from request id
+  - reset: missing prior session still succeeds and skips carry-over (`modelCalls` / `thinkingCalls` empty on the new session)
+  - reset: prior session file retained for audit; the cached handle is disposed via the runtime
+  - reset: returned `runtimeSessionId` is non-empty and differs from the request id
+- T-003 verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, `npm run check:test-boundaries -w packages/runner`, and `npm test -w packages/runner` all pass (109 files / 1,279 tests). Full repository: `npm test` (5,050 tests across all packages) also passes.

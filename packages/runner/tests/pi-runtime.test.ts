@@ -3,7 +3,7 @@ import { CredentialMasker } from "../src/runtime/task-log.js"
 import { PiRuntime, createPiProjector, parseProviderErrorPolicy, type PiClock, type PiPromptOptions, type PiSdkFactory, type PiSdkSession, type PiSdkServices } from "../src/runtime/pi/index.js"
 
 class FakeSession implements PiSdkSession {
-  readonly sessionFile = "/virtual/sessions/one.jsonl"
+  sessionFile: string = "/virtual/sessions/one.jsonl"
   readonly sessionId = "sdk-session"
   messages: Array<{ role: string; content: unknown; stopReason?: string }> = []
   isStreaming = false
@@ -13,6 +13,8 @@ class FakeSession implements PiSdkSession {
   compactCalls = 0
   modelCalls: unknown[] = []
   thinkingCalls: string[] = []
+  currentModel: unknown = undefined
+  currentThinkingLevel: string = "off"
   private listeners = new Set<(event: unknown) => void>()
   private completions: Array<{ resolve: () => void; text: string }> = []
   /** When set to false, the next preflight callback will be invoked with false. Resets to true after use. */
@@ -35,8 +37,10 @@ class FakeSession implements PiSdkSession {
   steer(text: string): Promise<void> { this.steerCalls.push(text); return Promise.resolve() }
   abort(): Promise<void> { this.abortCalls++; this.isStreaming = false; return Promise.resolve() }
   compact(): Promise<void> { this.compactCalls++; return Promise.resolve() }
-  setModel(model: unknown): Promise<void> { this.modelCalls.push(model); return Promise.resolve() }
-  setThinkingLevel(level: string): void { this.thinkingCalls.push(level) }
+  setModel(model: unknown): Promise<void> { this.modelCalls.push(model); this.currentModel = model; return Promise.resolve() }
+  setThinkingLevel(level: string): void { this.thinkingCalls.push(level); this.currentThinkingLevel = level }
+  getModel(): unknown { return this.currentModel }
+  getThinkingLevel(): string { return this.currentThinkingLevel }
   dispose(): void {}
   emit(event: unknown): void { this.listeners.forEach((listener) => listener(event)) }
   complete(content = "final answer"): void {
