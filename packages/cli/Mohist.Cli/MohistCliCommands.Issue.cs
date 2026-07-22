@@ -14,17 +14,9 @@ internal static partial class IssueCommands
         issue.Subcommands.Add(BuildShow(api));
         issue.Subcommands.Add(BuildUpdate(api));
         issue.Subcommands.Add(BuildAction("start", "Start workflow", api));
-        issue.Subcommands.Add(BuildAction("approve", "Approve workflow", api));
         issue.Subcommands.Add(BuildAction("done", "Mark as done", api));
         issue.Subcommands.Add(BuildAction("close", "Close issue", api));
         issue.Subcommands.Add(BuildAction("reopen", "Reopen issue", api));
-        issue.Subcommands.Add(BuildAction("retry", "Retry issue", api));
-        issue.Subcommands.Add(BuildRerun(api));
-        issue.Subcommands.Add(BuildRerunFromStage(api));
-        issue.Subcommands.Add(BuildAction("force-stop", "Force stop workflow", api));
-        issue.Subcommands.Add(BuildAction("resume", "Resume workflow", api));
-        issue.Subcommands.Add(BuildReject(api));
-        issue.Subcommands.Add(BuildStop(api));
         issue.Subcommands.Add(BuildRebase(api));
         issue.Subcommands.Add(BuildArchive(api));
         issue.Subcommands.Add(BuildAction("unarchive", "Unarchive issue", api));
@@ -35,7 +27,6 @@ internal static partial class IssueCommands
         issue.Subcommands.Add(BuildSessions(api));
         issue.Subcommands.Add(BuildSession(api));
         issue.Subcommands.Add(BuildWorkflow(api));
-        issue.Subcommands.Add(BuildFeedback(api));
         issue.Subcommands.Add(BuildPrereq(api));
         issue.Subcommands.Add(BuildComment(api));
         issue.Subcommands.Add(BuildTemplate(api));

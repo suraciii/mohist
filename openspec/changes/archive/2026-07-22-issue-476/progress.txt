@@ -1,0 +1,214 @@
+# issue-476 / mo run consolidation — working memory
+
+## T-001 (completed) — `mo run` command tree + target resolver + seven control verbs
+
+### What landed
+- `packages/cli/Mohist.Cli/MohistCliCommands.Run.cs` — new `internal static partial class RunCommands` with:
+  - `Build(MohistCliApi api)` registering the `run` command at root with seven
+    subcommands: approve / reject / retry / rerun / pause / resume / stop.
+  - `ResolveRunTargetAsync(api, runId, issueNumber, project)` shared helper:
+    mutual-exclusion / missing-target validation fail locally with exit 2 and
+    zero HTTP requests; `--issue` resolution reads the issue's `workflowRunId`
+    via one-shot GET to `/api/projects/{projectId}/issues/{number}`; missing
+    `workflowRunId` exits non-zero with `Issue #N has no active workflow run.`.
+  - Each verb shares the same Run ID / `--issue` / `--project` option set and
+    uses `PrintMutationResourceAsync` with the shared `RunControlDescriptor`
+    (fields: `workflowRunId, approved, rejected, retried, rerun, rerunFromStage,
+    paused, resumed, stopped, status, stage, issueRef`) so `--json` field
+    selection + bare `--json` discovery work uniformly.
+- `packages/cli/Mohist.Cli/MohistCliCommands.cs` — registers `RunCommands.Build(api)`
+  at root, immediately before the existing `WorkflowCommands.Build(api)` (the
+  legacy workflow command is still present at this stage; T-004 deletes it).
+- `packages/cli/tests/Mohist.Cli.Tests/CliRunControlSpecs.cs` — 40 tests
+  covering every acceptance criterion: help shape (seven verbs, no
+  `rerun-from-stage`), Run-ID vs `--issue` vs both-vs-neither, missing
+  `workflowRunId` diagnostic, server-error surfacing, `--json` field
+  projection (no `{success,data,error}` wrapper), reject without `--message`
+  (exit 1, no HTTP), rerun `--from-stage` (including blank), pause without
+  `--yes`, stop `--yes` / non-interactive prompt gating.
+
+### Design / contract decisions worth remembering
+- **Output option**: each control verb uses `MohistCliCommands.JsonSelectionOption()`
+  (no default value, `Arity.ZeroOrOne`) so bare `--json` returns Discovery and
+  `--json a,b` returns Selected. The Discovery / Invalid branch is checked
+  BEFORE the target resolver runs, so `mo run approve wr_abc --json` lists
+  fields and exits 0 without any HTTP call.
+- **Resolver return contract**: `(string? RunId, int Exit)`. Exit 0 with a
+  non-null run id means "proceed"; exit 2 (UsageFailure) means a usage error
+  (both / neither target provided); exit 1 (OperationFailure) means the issue
+  GET failed or the issue has no bound run. The error message is written to
+  `api.Error` before returning so the verb's caller doesn't need to repeat it.
+- **`--project` merging**: verbs accept the canonical `--project` plus the
+  hidden legacy `--project-id` alias (issue #475). `MergeProject(project, projectId)`
+  picks whichever is set; the resolver still surfaces mismatches via
+  `api.ResolveProject(project, projectId)`.
+- **Stop confirmation prompt**: writes the confirmation prompt to `api.Error`
+  (matches design D5) and reads a line from `api.Invocation.Input`. Confirmed
+  if the line (trimmed) starts with `y`/`Y` (case-insensitive). Non-interactive
+  contexts (no prompts → standard input is `TextReader.Null` or
+  `MOHIST_PROMPT_DISABLED=1`) require `--yes` and exit 1 without HTTP.
+- **No `--dry-run`**: per design Open Questions, the new `run` commands do
+  not inherit the legacy `--dry-run` flag. The acceptance criteria don't ask
+  for it.
+- **No `rerun-from-stage` subcommand**: only the `rerun --from-stage` flag
+  variant exists. The help text + acceptance criteria explicitly forbid the
+  `rerun-from-stage` subcommand.
+
+### Cross-task coordination
+- The shared `ResolveRunTargetAsync` helper is exposed as
+  `internal static` so T-002 (reads: `run view` / `watch`) and T-003
+  (feedback: `run feedback list/view`) can reuse it. Their target-resolution
+  spec is identical: one of positional Run ID or `--issue`, never both.
+- T-004 owns the actual removal of:
+  - `MohistCliCommands.Workflow.cs` and `MohistCliCommands.Workflow.Reads.cs`
+  - The `WorkflowCommands.Build(api)` registration
+  - Control verbs from `MohistCliCommands.Issue.Lifecycle.cs`
+    (`BuildAction("approve"/"retry"/"force-stop"/"resume")`, `BuildReject`,
+    `BuildRerun`, `BuildRerunFromStage`, `BuildStop`)
+  - `MohistCliCommands.Issue.Feedback.cs`
+  - The corresponding `CliWorkflowControlSpecs` (rename to
+    `CliRunControlSpecs` — done here in T-001; the legacy file is preserved
+    for now and will be removed in T-004), `CliIssueRejectAndStopSpecs`,
+    `CliIssueRerunFromStageSpecs`, feedback portions of
+    `CliIssueCommentAndFeedbackSpecs`, and the rename of
+    `CliWorkflowReadsSpecs` to `CliRunReadsSpecs`.
+  - `CliRootCommandShapeTests.survivingResourceGroups`: drop `"workflow"`, add
+    `"run"`.
+
+### Test patterns worth keeping
+- `CliTestFactory.CreateSync(responder, activeProjectId)` builds the
+  standard `RecordingHttpHandler` + `HttpClient` (base address
+  `http://localhost:3456`) + `StringWriter`s + `FakeFileSystem`
+  (which carries the active project id via
+  `~/.mohist/cli-state.json`). Use `activeProjectId: null` to assert that
+  the verb does not consult the active project.
+- For `--issue` resolution tests, mock two endpoints:
+  - `GET /api/projects/{projectId}/issues/{number}` → `data.workflowRunId`
+  - `POST /api/workflow-runs/{boundRunId}/{verb}` → success envelope
+- For server-error surfacing, `RecordingHttpHandler.JsonError(message, code, statusCode)`
+  produces a `{ success: false, error, code }` body that
+  `MohistCliApi.WriteFailureAsync` surfaces verbatim on stderr with the
+  `(code=…)` suffix.
+
+## T-002 (completed) — `mo run` reads: list, view, and watch
+
+### What landed
+- `MohistCliCommands.Run.Reads.cs` registers `list`, `view`, and `watch` under
+  the T-001 `run` command tree.
+- `run list` resolves the project and derives run rows from the project issue
+  collection, filtering unbound issues and projecting `id`, `status`, `stage`,
+  `currentStage`, and `issueNumber`.
+- `run view` reuses `ResolveRunTargetAsync`, supports table/selected JSON output,
+  and fetches `/yaml` directly for `--yaml`; `--yaml` plus `--json` fails before
+  target resolution or HTTP.
+- `run watch` polls run detail, emits `{id,status,stage}` NDJSON only when the
+  snapshot changes, uses `MohistCliApi.TimeProvider` for its interval, and
+  exits on terminal status or cancellation.
+- Added `RunList` table rendering and `TimeProvider` plumbing through
+  `MohistCliCommands.RunAsync` and `MohistCliApi`.
+- Added 26 focused specs covering list derivation/selection, view targeting and
+  YAML behavior, mutual exclusion, and fake-time watch polling.
+
+### Design / test notes
+- The server detail shape nests run state under `status`; the existing
+  `WorkflowRunDetail` renderer remains the canonical human-readable view.
+- Watch tests serialize the new read spec collection and use an explicit task
+  completion between request capture and fake-clock advancement to avoid racing
+  the polling continuation. No wall-clock delay or assertion is used.
+
+## T-003 (completed) - `mo run feedback list/view`
+
+### What landed
+- `packages/cli/Mohist.Cli/MohistCliCommands.Run.Feedback.cs` registers
+  `run feedback list` and `run feedback view`.
+- Feedback is read from the existing issue-scoped endpoint
+  `/api/projects/{projectId}/issues/{number}/feedback`.
+- Run-ID targets first read `/api/workflow-runs/{id}` and use its `issueRef`
+  (`projectId` and `number`) to construct the feedback path. `--issue` targets
+  reuse the shared resolver and the supplied issue number/project.
+- `list` supports `--stage`, empty collections, and `--json` field selection.
+  `view` supports exactly one of `--feedback <id>` and `--latest`; latest first
+  reads the filtered collection and then fetches the selected record.
+- `packages/cli/tests/Mohist.Cli.Tests/CliRunFeedbackSpecs.cs` covers both
+  target forms, stage filtering, specific/latest view, local selector failure,
+  missing run diagnostics, and selected JSON output.
+
+### Verification
+- Focused feedback specs: 8 passed.
+- Existing T-001/T-002 regression specs: 66 passed.
+- Full CLI test project: 1473 passed.
+- `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj --no-restore`:
+  0 warnings, 0 errors.
+
+## T-004 (in progress) — issue start binding and legacy path removal
+
+### Implementation notes
+- `IssueDescriptor` now exposes the API field `workflowRunId` (the old
+  `workflowRun` field name was incorrect), and the issue detail table prints a
+  bound run ID when present.
+- Removed the CLI registrations and implementations for Issue WorkflowRun
+  controls and feedback, removed the root `workflow` command tree, and kept
+  issue workflow reads/configuration intact.
+- Deleted obsolete tests for the removed `issue` and `workflow` surfaces;
+  retained focused issue comment coverage and added start/output and removed
+  path coverage.
+- Updated `docs/cli-reference.md` and `docs/issues.md` control examples to
+  use `mo run` with `--issue` targeting.
+
+### Verification
+- Existing legacy command regression tests passed before removal: 105 tests.
+- Focused post-change CLI tests passed: 121 tests.
+- Serial CLI build passed with 0 warnings and 0 errors after the transient
+  parallel-invocation file-lock warning.
+- Full CLI test project passed: 1360 tests.
+- `npm test` passed all .NET solution tests (CLI 1360, server unit 1290,
+  architecture 30, spec 3008), then failed in optional JS workspace checks
+  because this workspace has no installed `tsx`/`tsc` binaries.
+
+## Verification repair
+
+- Reproduced the JS failure after dependencies became available: Web Vitest
+  failed 16 existing jsdom tests under default file parallelism, mostly with
+  30-second timeouts and shared-state `act` diagnostics. The same focused
+  files passed with one worker.
+- `packages/web/vite.config.ts` now disables file parallelism. This matches the
+  existing `isolate: false` configuration and shared process-level test fakes.
+- Re-ran Web and Runner workspace CI checks: Web 388 files / 5156 tests passed;
+  Runner 117 files / 1370 tests passed. Issue-476 CLI-focused selection passed
+  110 tests.
+- A later full `npm test` run reached the server spec suite but timed out in
+  `RunnerGrainConcurrencySpecs.ReconcileAgentJobsAsync_DuringRealAgentJobRetry_ReleasesLifecycleGate`.
+- The timeout was reproduced as a verification side effect: the prior timed-out
+  `dotnet test Mohist.sln` left its test host alive in this workspace. After
+  terminating only that process tree, the isolated test passed in 421 ms and
+  the full server suite passed all 3008 tests.
+- A subsequent full Web run passed all 388 files / 5156 tests, and the full
+  Runner suite passed all 1370 tests. The original full verification is now
+  complete after removing the stale verifier process.
+- Final verification: `npm test` passed the full .NET solution (1358 CLI,
+  1290 server unit, 30 architecture, 3008 server spec tests), Web CI (5156),
+  and Runner CI (1370). The focused issue-476 CLI selection passed 110 tests.
+- Follow-up: a separate commit `7d566857f` dropped the wall-clock-only
+  `[Fact(Timeout=5000)]` on `ReconcileAgentJobsAsync_DuringRealAgentJobRetry_ReleasesLifecycleGate`
+  because xUnit v2 cannot inject its token into the observer-signal await,
+  so the timeout stalls the runner instead of unblocking it. The remaining
+  tests rely on the count-gated signal pattern (the same fixture used by 13
+  other specs in this file), and the isolated + file-scoped suites both pass.
+- One Web retry test (`IssueChangedFilesPage.recovery › keeps the recovery
+  surface available with the same actions when the failure persists`) was
+  observed to flake once under the full `npm test` path. After 25+ reruns of
+  that file in isolation and 10 full `npm test` reruns, all pass. The flake
+  was then reproduced under full verification. The recovery surface could
+  render after the diff request failed while the initial issue request was
+  still in flight; React Query deduplicated the Retry refetch against that
+  request, leaving the count at 1. The test now waits for all three initial
+  request counts to reach 1 before clicking Retry, preserving the exact
+  retry-count assertions.
+- The focused recovery file passed 5 consecutive runs. Final `npm test`
+  passed 1358 CLI, 1290 server unit, 30 architecture, 3008 server spec,
+  5156 Web, and 1370 Runner tests. The issue-476 CLI-focused selection passed
+  110 tests.
+- A subsequent `npm run verify` passed both the build and complete test
+  pipeline. The retry test additionally waits for the issue query's
+  `fetchStatus` to become `idle`, not just request-start counts, so an initial
+  in-flight issue request cannot be deduplicated with the explicit Retry.

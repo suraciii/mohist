@@ -38,12 +38,12 @@ then load the matching scenario skill for the detailed mechanics:
 - **Create an issue** (frontmatter, workflow/risk, labeling, confirmation) → `mo skills get mohist-create-issue`
 - **Create an epic** (milestone description, link issues, prerequisites, lifecycle) → `mo skills get mohist-create-epic`
 
-The issue/epic lifecycle commands below (start, approve, reject, retry, rerun,
-stop, force-stop, resume, rebase, close, and the epic autopilot trio) are **not**
-covered by a dedicated scenario skill — they are reference-level operations
-fully answerable by `mo <cmd> --help`. They live here so the dispatcher is the
-single source of truth for day-to-day driving of issues and epics, and an
-agent does not have to guess, omit, or invent a command.
+The issue/epic lifecycle commands below (start, rebase, close, and the epic
+autopilot trio) plus the WorkflowRun control commands are **not** covered by a
+dedicated scenario skill — they are reference-level operations fully answerable
+by `mo <cmd> --help`. They live here so the dispatcher is the single source of
+truth for day-to-day driving of issues and runs, and an agent does not have to
+guess, omit, or invent a command.
 
 ### Sibling skills
 
@@ -55,31 +55,39 @@ agent does not have to guess, omit, or invent a command.
 
 ## Issue lifecycle commands
 
-These are the state-changing entry points for driving an issue through its
-full lifecycle. All take `<number>` (issue number in the active project, or use
-`--project` / `--project-id` to target another project).
+These commands manage the work item itself. They take `<number>` (issue number
+in the active project, or use `--project` / `--project-id` to target another
+project). WorkflowRun state changes use `mo run` below.
 
 | Operation | CLI | Effect |
 |---|---|---|
 | Start | `mo issue start <number>` | Drive the issue into the workflow (Draft → Plan). |
-| Approve | `mo issue approve <number>` | Approve at an approval gate (Plan → Build, Check → Integrate). |
-| Reject | `mo issue reject <number> --message <m>` | Reject at an approval gate with a change request. |
-| Retry | `mo issue retry <number>` | Re-run the current stage after a recoverable failure. |
-| Rerun | `mo issue rerun <number>` | Re-run from the beginning of the workflow with fresh attempts. |
-| Rerun from stage | `mo issue rerun-from-stage <number> --stage <stage>` | Invalidate the target stage and everything after it; create new attempts from that stage. |
-| Stop | `mo issue stop <number>` | **Terminal** stop — cannot be resumed. Use only when you intend to abandon the run. |
-| Force-stop | `mo issue force-stop <number>` | Hard-kill the in-flight agent; recoverable with `resume`. |
-| Resume | `mo issue resume <number>` | Continue from a paused state. |
 | Done | `mo issue done <number>` | Mark externally delivered work Done after its workflow is stopped or completed. |
 | Rebase | `mo issue rebase <number> [--base-branch <b>]` | Rebase the issue branch onto its base. |
 | Close | `mo issue close <number>` | Close a completed/abandoned issue. |
 | Reopen | `mo issue reopen <number>` | Reopen a closed issue. |
 
+## WorkflowRun control commands
+
+Use a Run ID or `--issue <number>` as the target. Use `--project` when the
+issue belongs to another project.
+
+| Operation | CLI | Effect |
+|---|---|---|
+| Approve | `mo run approve <run-id>` / `mo run approve --issue <number>` | Approve at an approval gate (Plan → Build, Check → Integrate). |
+| Reject | `mo run reject <run-id> --message <m>` | Reject at an approval gate with a change request. |
+| Retry | `mo run retry <run-id>` | Retry the current failure point and restore the manual-retry budget. |
+| Rerun | `mo run rerun <run-id>` | Rerun the whole workflow from the beginning. |
+| Rerun from stage | `mo run rerun <run-id> --from-stage <stage>` | Invalidate the target stage and everything after it, then rerun. |
+| Pause | `mo run pause <run-id>` | Pause the run while preserving the `resume` entry. |
+| Resume | `mo run resume <run-id>` | Continue a paused run. |
+| Stop | `mo run stop <run-id> --yes` | **Terminal** stop. Use only when you intend to abandon the run. |
+
 Key distinctions:
 
-- **`stop` vs `force-stop`**: `stop` is terminal (the workflow run ends permanently); `force-stop` is a soft kill — the run is paused and `mo issue resume` brings it back. Choose `stop` only when you mean to abandon.
+- **`pause` vs `stop`**: `pause` preserves a resume entry; `stop` is terminal and cannot be resumed. Automated `stop` calls require `--yes`.
 - **`done` vs `close`**: `done` records delivered work after a terminal workflow; `close` cancels work that will not be delivered.
-- **`retry` vs `rerun` vs `rerun-from-stage`**: `retry` re-runs the current stage; `rerun` re-runs the whole workflow from the beginning; `rerun-from-stage` invalidates one named stage and everything after it.
+- **`retry` vs `rerun --from-stage`**: `retry` retries the current failure point; `rerun` re-runs the whole workflow from the beginning; `rerun --from-stage` invalidates one named stage and everything after it.
 - **`reject` vs `stop`**: `reject` bounces back at an approval gate with a change request (the issue stays alive for another pass); `stop` ends the run.
 
 Read-only and aux helpers (also useful while driving):
@@ -140,6 +148,6 @@ All issue/epic commands accept these unless documented otherwise:
 |---|---|
 | `--project <name>` / `--project-id <id>` | Target project; canonical is `--project`. `--project-id` is a backwards-compatible alias. |
 | `-o, --output <table\|json>` | Output format (table by default; many commands default to JSON). |
-| `--message <m>` / `-m <m>` | Required by `mo issue reject` to carry the change-request reason. |
+| `--message <m>` / `-m <m>` | Required by `mo run reject` to carry the change-request reason. |
 
 For the full flag surface on any command, run `mo <cmd> --help`.

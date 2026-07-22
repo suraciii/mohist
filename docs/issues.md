@@ -149,15 +149,15 @@ mo issue start 42
 Plan / Check 完成后，issue 进入 `awaiting approval`。这表示 workflow 停在审批点，等待 approve / reject 决策：
 
 ```bash
-mo issue approve 42     # 通过，进下一阶段
-mo issue reject 42 --message "Missing error handling in proposal"  # 打回，Inline Agent 重做当前阶段
+mo run approve --issue 42     # 通过，进下一阶段
+mo run reject --issue 42 --message "Missing error handling in proposal"  # 打回，Inline Agent 重做当前阶段
 ```
 
 `reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么（审批者可以是人也可以是自动化，见 [核心概念 · Approval](concepts.md#approval审批)）。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
 
 ```bash
 mo issue comment add 42 --body "Reject because: missing error handling in proposal"
-mo issue reject 42 -m "See comment: missing error handling"
+mo run reject --issue 42 -m "See comment: missing error handling"
 ```
 
 ## Comment（评论）
@@ -195,7 +195,7 @@ mo issue done 42
 ```
 
 这个命令只适用于正在进行、没有子 Issue，并且 workflow 已永久停止或已经完成的
-Issue。失败的 workflow 仍可重试，必须先用 `mo issue stop 42` 明确终止，再标记完成；
+Issue。失败的 workflow 仍可重试，必须先用 `mo run stop --issue 42 --yes` 明确终止，再标记完成；
 命令不会替你停止 workflow，也不会重置 Session。
 
 重复标记已经 Done 的 Issue 会直接成功，不会产生第二次完成记录。手工完成保留原
@@ -205,11 +205,11 @@ workflow 的停止或完成历史，并与 workflow 正常完成一样计入 Epi
 ## 中断、停止与关闭
 
 ```bash
-# 可恢复暂停（force-stop）—— 终止当前执行，保留 AgentSession，后续用 resume 接着跑
-mo issue force-stop 42
+# 可恢复暂停——终止当前执行回合，保留 AgentSession，后续用 resume 接着跑
+mo run pause --issue 42
 
 # 永久停止（stop）—— terminal，不能 resume
-mo issue stop 42
+mo run stop --issue 42 --yes
 
 # 手工完成（done）—— workflow 已终止，但工作已通过其它方式交付
 mo issue done 42
@@ -223,7 +223,7 @@ mo issue reopen 42
 
 | 操作 | 适用场景 | 后果 |
 |---|---|---|
-| `force-stop` | 暂时停止、Inline Agent 卡住、想保留恢复入口 | 终止当前执行，workflow 进入可 `resume` 的 paused 状态 |
+| `pause` | 暂时停止、Inline Agent 卡住、想保留恢复入口 | 终止当前回合，workflow 进入可 `resume` 的 paused 状态 |
 | `stop` | 确定不再继续这次 workflow | 永久停止 workflow run，terminal，不能 resume |
 | `done` | workflow 外已经完成并交付 | Issue 进入 Done；workflow 历史保持原样 |
 | `close` | 这个 issue 不做了 | 进入 cancelled 终态，可 reopen |
@@ -235,11 +235,11 @@ mo issue reopen 42
 
 | 场景 | 命令 |
 |---|---|
-| Issue blocked，想重试当前阶段 | `mo issue retry 42` |
-| Issue paused，继续当前 workflow | `mo issue resume 42` |
+| Issue blocked，想重试当前阶段 | `mo run retry --issue 42` |
+| Issue paused，继续当前 workflow | `mo run resume --issue 42` |
 | Workflow 已停止，但工作已由其它方式交付 | `mo issue done 42` |
-| 想完全重做当前阶段（丢弃产物） | `mo issue rerun 42` |
-| 想从指定阶段重做（丢弃该阶段及之后产物） | `mo issue rerun 42 --from-stage build` |
+| 想完全重做当前阶段（丢弃产物） | `mo run rerun --issue 42` |
+| 想从指定阶段重做（丢弃该阶段及之后产物） | `mo run rerun --issue 42 --from-stage build` |
 | Base branch drift 了，rebase issue 分支 | `mo issue rebase 42` |
 
 ## 归档
