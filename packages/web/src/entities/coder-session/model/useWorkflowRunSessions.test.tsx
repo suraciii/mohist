@@ -157,6 +157,43 @@ describe('useWorkflowRunSessions', () => {
       expect(result.current.sessions[0]?.runtimeSessionId).toBe('runtime-new')
     })
 
+    it.each([
+      ['session.followup_completed', 'completed'],
+      ['session.followup_failed', 'failed'],
+    ] as const)('refetches sessions for %s without applying %s as a global session status', async (eventName, status) => {
+      _sessionsResponses = [
+        [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', status: 'running' })],
+        [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', status: 'inactive' })],
+      ]
+
+      const queryClient = createQueryClient()
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      )
+      const { result } = renderHook(
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
+        { wrapper },
+      )
+
+      await flush()
+      expect(result.current.sessions[0]?.status).toBe('running')
+
+      act(() => {
+        dispatchAgentEvent(eventName, {
+          sessionId: 'sess-1',
+          runtimeSessionId: 'runtime-1',
+          runtime: 'opencode',
+          operationId: 'operation-1',
+          status,
+        })
+      })
+
+      expect(result.current.sessions[0]?.status).toBe('running')
+      await flush()
+      expect(workflowRunSessionsFetcher).toHaveBeenCalledTimes(2)
+      expect(result.current.sessions[0]?.status).toBe('inactive')
+    })
+
     it('ignores runtime events without a physical binding', async () => {
       _sessionsData = [session({ id: 'sess-1', status: 'running' })]
 

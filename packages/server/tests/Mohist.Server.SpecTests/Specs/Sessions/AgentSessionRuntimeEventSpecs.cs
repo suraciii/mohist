@@ -257,6 +257,32 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     }
 
     [Fact]
+    public async Task RunnerAppendsResolvedModelEvent_WithoutResolvedModelField_DoesNotSetModel()
+    {
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model-divergent");
+
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        {
+            runtimeSessionId = session.Id,
+            runtimeEvents = new[]
+            {
+                new
+                {
+                    type = "model.resolved",
+                    payload = new { model = "anthropic/claude-sonnet-4-20250514", source = "newSession" }
+                }
+            }
+        });
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
+
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
+        Assert.NotNull(grainSession);
+        Assert.Null(grainSession.ResolvedModel);
+    }
+
+    [Fact]
     public async Task RunnerAppendsTerminalEvent_WithFailureCategory_PersistsCategory()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("failure-category");

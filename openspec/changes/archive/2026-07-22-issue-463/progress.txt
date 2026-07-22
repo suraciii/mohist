@@ -1,0 +1,28 @@
+## Codebase Patterns
+
+- Transcript event delivery subscriptions come from `TRANSCRIPT_EVENT_TYPES`; `EVENT_TYPES` is sent to SignalR and `AGENT_DETAIL_ROUTED_EVENT_TYPES` feeds the typed in-process event bus.
+- Transcript terminal rendering belongs in `useSessionTranscript`; reverse-DNS `ROUTE` rows are not used for transcript events.
+- Session-wide `session.closed` uses finalizing presentation, while operation-scoped follow-up terminals invalidate session queries without marking the session finalizing or globally terminal.
+- Workflow session cards converge by invalidating the workflow-run sessions query; agent activity converges through `AGENT_ACTIVITY_EVENT_NAMES` in `routeEvent`.
+
+## T-001
+
+- Added `session.followup_completed` and `session.followup_failed` to the canonical transcript subscription set and typed event map.
+- Completed follow-ups close the latest round; failed follow-ups close it and append a failed error part. Both clear thinking/streaming and invalidate session queries without changing global session status.
+- Both events refetch workflow-run session lists and invalidate agent activity.
+- Verification passed: web typecheck, focused tests, full 5,100-test suite, FSD boundaries, and test-boundary checks.
+
+## T-002
+
+- Pi SDK `model_change` entries use flat `provider` and `modelId` fields. The projector now emits `model.resolved` with `resolvedModel`, while accepting string or structured model payloads defensively and preserving status events for thinking/turn/agent lifecycle facts.
+- Server live-state application and transcript summary projection both read only `resolvedModel`; model-only `model.resolved` payloads are intentionally ignored.
+- Web `model.resolved` live-event typing now exposes only `resolvedModel`.
+- Verification passed: runner typecheck, runner projector tests, runner test-boundary/typecheck checks, server summary unit tests, server runtime-event specs, and web typecheck/contract test.
+
+## T-003
+
+- Follow-up `session.input` still appends the prompt turn, but no longer engages thinking or streaming presentation. Transcript-only notifications can opt out of activity engagement; the existing running-without-content inference also stays idle for a follow-up-only turn until a runtime response event arrives.
+- Server activity semantics and recovery code were left unchanged.
+- Verification passed: focused transcript tests (19), full web suite (5,104 tests), web typecheck, and `Compact_AfterFollowupPromptRejected_ClearsLeaseViaFollowupFailedEvent` server spec.
+- Review fix: follow-up terminal events record transcript content without re-enabling the streaming indicator after the operation has ended; completed and failed terminal tests assert the indicator remains idle.
+- Review-fix verification passed: web typecheck and focused transcript/provider/model contract tests (38 tests).

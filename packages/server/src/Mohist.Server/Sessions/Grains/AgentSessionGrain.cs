@@ -1643,7 +1643,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 now,
                 AgentSessionJsonHelper.GetLongProp(payload, "cachedWriteTokens")),
             RuntimeEventTypes.ModelResolved => session.ResolveModel(
-                AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? AgentSessionJsonHelper.GetStringProp(payload, "model"),
+                AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel"),
                 now),
             _ => []
         };
