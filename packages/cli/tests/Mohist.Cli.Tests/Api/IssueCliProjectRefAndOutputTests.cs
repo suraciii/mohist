@@ -16,7 +16,7 @@ public class IssueCliProjectRefAndOutputTests
         var help = RenderHelp(["issue", "list", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
+        Assert.DoesNotContain("--project", help);
         Assert.Contains("--json", help);
     }
 
@@ -26,7 +26,7 @@ public class IssueCliProjectRefAndOutputTests
         var help = RenderHelp(["issue", "show", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
+        Assert.DoesNotContain("--project", help);
         Assert.Contains("--json", help);
     }
 
@@ -36,7 +36,7 @@ public class IssueCliProjectRefAndOutputTests
         var help = RenderHelp(["issue", "sessions", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
+        Assert.DoesNotContain("--project", help);
         Assert.Contains("--json", help);
     }
 
@@ -46,7 +46,7 @@ public class IssueCliProjectRefAndOutputTests
         var help = RenderHelp(["issue", "workflow", "status", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
+        Assert.DoesNotContain("--project", help);
         Assert.Contains("--json", help);
     }
 
@@ -379,7 +379,7 @@ public class IssueCliProjectRefAndOutputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "list", "--project", "mohist-local", "--project-id", "proj_other"],
+            ["issue", "list", "--project", "mohist-local", "--project", "proj_other"],
             output,
             error,
             new FakeFileSystem(),

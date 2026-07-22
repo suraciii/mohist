@@ -12,7 +12,7 @@ public class CliOptionFactoryTests
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
 
         Assert.Equal("--project", project.Name);
-        Assert.Equal("--project-id", projectId.Name);
+        Assert.Equal("--project", projectId.Name);
         Assert.True(projectId.Hidden);
     }
 
@@ -23,7 +23,7 @@ public class CliOptionFactoryTests
 
         Assert.NotNull(project.Description);
         Assert.Contains("Project name or id", project.Description);
-        Assert.DoesNotContain("--project-id", project.Description);
+        Assert.DoesNotContain("--project", project.Description);
     }
 
     [Fact]

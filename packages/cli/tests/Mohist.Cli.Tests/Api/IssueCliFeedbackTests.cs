@@ -26,7 +26,7 @@ public class IssueCliFeedbackTests
 
         Assert.Contains("--stage", help);
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
+        Assert.DoesNotContain("--project", help);
         Assert.Contains("--json", help);
     }
 

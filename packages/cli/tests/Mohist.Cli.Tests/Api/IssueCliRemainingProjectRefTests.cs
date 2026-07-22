@@ -16,7 +16,7 @@ public class IssueCliRemainingProjectRefTests
         var help = RenderHelp(["issue", "create", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
+        Assert.DoesNotContain("--project", help);
     }
 
     [Fact]
@@ -25,7 +25,7 @@ public class IssueCliRemainingProjectRefTests
         var help = RenderHelp(["issue", "update", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
+        Assert.DoesNotContain("--project", help);
     }
 
     [Theory]
@@ -51,7 +51,7 @@ public class IssueCliRemainingProjectRefTests
         var help = RenderHelp(["issue", subcommand, "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
+        Assert.DoesNotContain("--project", help);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class IssueCliRemainingProjectRefTests
         var help = RenderHelp(["issue", "workflow", "timeline", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
+        Assert.DoesNotContain("--project", help);
     }
 
     [Fact]
@@ -251,7 +251,7 @@ public class IssueCliRemainingProjectRefTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "close", "83", "--project", "mohist-local", "--project-id", "proj_other"],
+            ["issue", "close", "83", "--project", "mohist-local", "--project", "proj_other"],
             output,
             error,
             new FakeFileSystem(),

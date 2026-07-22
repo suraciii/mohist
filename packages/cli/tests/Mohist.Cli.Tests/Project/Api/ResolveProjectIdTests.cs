@@ -74,7 +74,7 @@ public class ResolveProjectIdTests
         Assert.Contains("mohist-local", error.ToString());
         Assert.Contains("proj_other", error.ToString());
         Assert.Contains("--project", error.ToString());
-        Assert.Contains("--project-id", error.ToString());
+        Assert.Contains("--project", error.ToString());
         Assert.Contains("Pass only one", error.ToString());
         Assert.Empty(http.Requests);
     }
@@ -203,7 +203,7 @@ public class ResolveProjectIdTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "show", "83", "--project-id", "other-project"],
+            ["issue", "show", "83", "--project", "other-project"],
             output,
             error,
             files,

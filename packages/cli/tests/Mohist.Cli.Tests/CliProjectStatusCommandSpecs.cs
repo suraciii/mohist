@@ -74,7 +74,7 @@ public class CliProjectStatusCommandSpecs
         // a project argument nor `--project` / `--project-id` flags make
         // sense. Neither should be advertised in the help.
         Assert.DoesNotContain("--project", stdout);
-        Assert.DoesNotContain("--project-id", stdout);
+        Assert.DoesNotContain("--project", stdout);
     }
 
     [Fact]

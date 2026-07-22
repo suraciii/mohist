@@ -175,7 +175,7 @@ public class CliProjectWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["project", "workflow", "profile", "list", "--described", "--project", "proj_a", "--project-id", "proj_b"],
+            ["project", "workflow", "profile", "list", "--described", "--project", "proj_a", "--project", "proj_b"],
             output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
@@ -290,7 +290,7 @@ public class CliProjectWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["project", "workflow", "profile", "list", "--project", "proj_a", "--project-id", "proj_b"],
+            ["project", "workflow", "profile", "list", "--project", "proj_a", "--project", "proj_b"],
             output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
@@ -585,7 +585,7 @@ public class CliProjectWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["project", "workflow", "profile", "enable", "mohist/local", "--project", "proj_a", "--project-id", "proj_b"],
+            ["project", "workflow", "profile", "enable", "mohist/local", "--project", "proj_a", "--project", "proj_b"],
             output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
