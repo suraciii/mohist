@@ -223,3 +223,14 @@ Test results:
   dispatch label. This is essential for caller diagnostics — a Pi
   failure must not be mislabeled as OpenCode.
 
+## T-003 Per-runtime model catalog — patterns & gotchas
+
+- Runner registration carries `runtimeCatalogs`, keyed by runtime. Each entry has `models` and `variants`; OpenCode is emitted from the existing discovered snapshot and Pi maps `provider/id` to thinking-level variants.
+- `PiRuntime.catalog()` is already configured-credential-only because its SDK source uses `getAvailable()`. Registration reads that catalog as-is and never filters or validates selected models against it.
+- Server keeps `CoderModels` and `CoderModelVariants` as a legacy OpenCode fallback for older runners, while new `RuntimeCatalogs` entries are authoritative when a runtime key is present. This preserves the existing OpenCode route and runner status behavior.
+- `RunnerRegistryGrain` exposes runtime-specific model and variant unions. Catalog lookup is case-insensitive; an explicit runtime entry, including an empty one, prevents fallback to the legacy OpenCode pair.
+- `/api/projects/{projectRef}/opencode/models` accepts `runtime=opencode|pi`, defaults to OpenCode, and preserves `{ models, modelVariants }`. Invalid runtime values return `runtime_invalid` rather than selecting another catalog.
+- Catalog normalization trims and deduplicates reported data only; there is no model-legality prevalidation. Runtime execution remains the final validator.
+- Focused baseline tests passed before implementation: runner 47 tests and server 35 tests. Focused T-003 runner tests passed: 24 tests; focused server registry/API tests passed: 37 tests.
+- Final verification passed: runner typecheck, test typecheck, boundary check, and 117 files / 1354 tests; `dotnet build Mohist.sln -p:SkipWebBuild=true`; server/CLI/unit/spec/architecture tests, 5692 tests total across the .NET test projects.
+

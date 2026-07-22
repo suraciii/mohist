@@ -109,6 +109,11 @@ public sealed record ActionCatalogTombstone(
     [property: Id(1)] string Guidance);
 
 [GenerateSerializer]
+public sealed record RuntimeCatalogEntry(
+    [property: Id(0)] string[]? Models = null,
+    [property: Id(1)] Dictionary<string, string[]>? Variants = null);
+
+[GenerateSerializer]
 public record RunnerInfo(
     string RunnerId,
     string[] Capabilities,
@@ -119,7 +124,8 @@ public record RunnerInfo(
     DateTimeOffset? RegisteredAt = null,
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null,
-    ActionCatalog? ActionCatalog = null);
+    ActionCatalog? ActionCatalog = null,
+    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null);
 
 [GenerateSerializer]
 public record WorkDispatch(

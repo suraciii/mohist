@@ -26,7 +26,7 @@ import {
   opencodeModelSetsEqual,
   type DiscoveredOpencodeModels,
 } from "./opencode-models.js"
-import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from "./pi/index.js"
+import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiCatalog, type PiRuntime } from "./pi/index.js"
 import { SessionCommandJournal } from "./session-command-journal.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { DispatchWorkItem } from "../core/types.js"
@@ -87,6 +87,16 @@ function workKey(work: DispatchWorkItem): string {
  */
 export function getRunnerBuildGitHash(): string | null {
   return loadBuildInfo().gitHash
+}
+
+function piCatalogToRuntimeCatalog(catalog: PiCatalog): { models: string[]; variants: Record<string, string[]> } {
+  const models = catalog.models.map((model) => `${model.provider}/${model.id}`)
+  const variants = Object.fromEntries(
+    catalog.models
+      .filter((model) => model.thinkingLevels.length > 0)
+      .map((model) => [`${model.provider}/${model.id}`, [...model.thinkingLevels]]),
+  )
+  return { models, variants }
 }
 
 export class RunnerHost {
@@ -826,12 +836,22 @@ export class RunnerHost {
   }
 
   private registrationState(): RunnerRegistration {
+    const runtimeCatalogs: NonNullable<RunnerRegistration["runtimeCatalogs"]> = {
+      opencode: {
+        models: this.coderModels,
+        variants: this.coderModelVariants,
+      },
+    }
+    const piCatalog = this.piRuntime?.catalog()
+    if (piCatalog) runtimeCatalogs.pi = piCatalogToRuntimeCatalog(piCatalog)
+
     return {
       capabilities: [],
       actionCatalog: this.actions.catalog(),
       projectId: this.options.projectId,
       coderModels: this.coderModels,
       coderModelVariants: this.coderModelVariants,
+      runtimeCatalogs,
       connectionId: this.signalR.getConnectionId(),
     }
   }

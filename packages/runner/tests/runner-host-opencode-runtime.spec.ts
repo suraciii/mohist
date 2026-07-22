@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import { setOpencodeModelDiscoveryForTest } from "../src/runtime/opencode-models.js"
+import { setPiRuntimeFactoryForTest, type PiRuntime } from "../src/runtime/pi/index.js"
 import type { ActionDefinition } from "../src/actions/manifest.js"
 import { deferred } from "./support/deferred.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
@@ -142,6 +143,7 @@ beforeEach(() => {
 afterEach(() => {
   setExecutorGitRunnerForTest(null)
   clearOpenCodeRuntimeFactoryForTest()
+  setPiRuntimeFactoryForTest(null)
 })
 
 function hostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
@@ -206,6 +208,54 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       expect(connectArg?.actionCatalog).toEqual(expectedActionCatalog())
       expect(JSON.stringify(connectArg?.actionCatalog)).not.toContain("run")
       expect(JSON.stringify(connectArg?.actionCatalog)).not.toContain("private")
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
+  it("RunnerRegistration reports runtime-tagged OpenCode and Pi catalogs", async () => {
+    installFakeOpenCodeRuntimeFactory()
+    setOpencodeModelDiscoveryForTest(async () => ({
+      models: ["openai/gpt-5"],
+      variants: { "openai/gpt-5": ["low", "high"] },
+    }))
+    const piCatalog = {
+      models: [
+        { provider: "anthropic", id: "claude-sonnet-4", thinkingLevels: ["off"] },
+        { provider: "openai", id: "gpt-5.5", thinkingLevels: ["low", "high"] },
+      ],
+    }
+    const piRuntime = {
+      start: vi.fn(async () => ({ ok: true as const, value: { ready: true, diagnostic: null, catalog: piCatalog }, diagnostics: [] })),
+      ready: () => true,
+      diagnostic: () => null,
+      catalog: () => piCatalog,
+      shutdown: vi.fn(async () => undefined),
+    } as unknown as PiRuntime
+    setPiRuntimeFactoryForTest(() => piRuntime)
+    const connected = deferred<void>()
+    connect.mockImplementation(async () => { connected.resolve() })
+    const controller = new AbortController()
+    const host = new RunnerHost(hostOptions())
+    const run = host.run(controller.signal)
+    try {
+      await connected.promise
+      const registration = connect.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(registration.runtimeCatalogs).toEqual({
+        opencode: {
+          models: ["openai/gpt-5"],
+          variants: { "openai/gpt-5": ["low", "high"] },
+        },
+        pi: {
+          models: ["anthropic/claude-sonnet-4", "openai/gpt-5.5"],
+          variants: {
+            "anthropic/claude-sonnet-4": ["off"],
+            "openai/gpt-5.5": ["low", "high"],
+          },
+        },
+      })
+      expect(registration.runtimeCatalogs).not.toHaveProperty("pi.models", expect.arrayContaining(["google/gemini"]))
     } finally {
       controller.abort()
       await run.catch(() => undefined)
