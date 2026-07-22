@@ -3,5 +3,5 @@ Issue 470 current plan repair
 - [completed] F2: design names `SuppressInstrumentationScope` and its exact HTTP/background lifetime, composed with existing inbound/exporter filters.
 - [completed] F3: `MohistHostRunner`, `IMohistHostFactory`, `IMohistHost`, and `IOtelBindFailureClassifier` define the deterministic fallback test boundary.
 - [completed] F4: process/storage failure atomically invalidates cached fields and growth/CPU baselines; recovery starts fresh warm-up.
-- [in progress] F1: merge status mapping, readiness, and sampler/startup into one independently usable task and update the DAG.
-- [pending] Revalidate proposal/spec/design/task consistency and confirm `self-review.md` remains unchanged.
+- [completed] F1: merged status mapping, readiness, sampler/startup, normal collector publication, and complete off/healthy/degraded behavior into one usable T-003; downstream tasks were renumbered and dependencies updated.
+- [completed] Revalidated proposal/spec/design/task consistency, task IDs and dependencies; `self-review.md` remains unchanged for the next review.
