@@ -1,0 +1,66 @@
+{
+  "project": "mohist-local",
+  "description": "Fix three cross-layer follow-up inconsistencies: deliver follow-up terminal events to the web, unify the resolved-model event across OpenCode/Pi runtimes, and reconcile follow-up user-input activity state between web and server.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Web follow-up terminal event visibility",
+      "spec": "specs/agent-session-followup-terminal-visibility/spec.md",
+      "description": "Add session.followup_completed and session.followup_failed to the web canonical transcript subscription set so the server delivery filter stops dropping them, and handle them as transcript terminals: close the in-flight follow-up round to the corresponding outcome and invalidate the agent-session/agent-activity queries so the session card/list refetches status. Reuse the existing session.closed handling pattern rather than adding a new dispatch domain.",
+      "acceptanceCriteria": [
+        "The web canonical transcript event set (canonical-event-types.ts) includes session.followup_completed and session.followup_failed, with the subscription/routing compile-time guard still typechecking.",
+        "A follow-up completed/failed event is no longer dropped by the server per-connection delivery filter because the web now subscribes to both types.",
+        "On receiving session.followup_completed the session's presented state becomes completed; on session.followup_failed it becomes failed (web unit/DOM tests).",
+        "agent-session and agent-activity queries are invalidated on follow-up terminal receipt so the card/list converges (web test)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web subscription + transcript terminal handling for follow-up completed/failed, with unit/DOM tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "These are transcript events (handled before the reverse-DNS ROUTE table); do not add a ROUTE row. Mirror useSessionTranscript.ts session.closed handling and useWorkflowRunSessions.ts live-state update."
+    },
+    {
+      "id": "T-002",
+      "title": "Unified resolved-model event across runtimes",
+      "spec": "specs/agent-session-model-resolution-event/spec.md",
+      "description": "Make the Pi projector emit a model.resolved event carrying resolvedModel (normalized to <provider>/<model> where parts are available, else the raw model string) instead of collapsing model changes into the dropped status event; keep the remaining status concerns (variant/stopReason) unchanged. On the server, standardize on resolvedModel in both the grain and TranscriptEventSummaryProjector by removing the divergent model fallback so live state and summary agree. OpenCode path is unchanged.",
+      "acceptanceCriteria": [
+        "The Pi projector emits a model.resolved event with resolvedModel on a model change (runner projector unit test, no real network/process/wall-clock).",
+        "The remaining Pi status semantics (thinking level / stopReason / variant) are unchanged; model resolution is no longer carried only under status/model.",
+        "The server grain and TranscriptEventSummaryProjector both read resolvedModel and produce equal resolved-model values for the same event (server spec/unit tests).",
+        "The divergent model fallback is removed from the grain and no emitter relies on a model-only payload.",
+        "A session under either runtime surfaces its resolved model name via the transcript summary read model."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Pi model.resolved emission + server resolvedModel field standardization, with runner and server tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "OpenCode already emits model.resolved/resolvedModel and needs no change. Confirm the Pi model_change event model field shape (string vs object) at implementation and normalize defensively."
+    },
+    {
+      "id": "T-003",
+      "title": "Web follow-up activity-state reconciliation",
+      "spec": "specs/agent-session-followup-activity-state/spec.md",
+      "description": "On the web, stop driving the follow-up round's active/thinking/streaming indicators from the follow-up session.input event alone; gate them on runtime response events (message.delta, reasoning.delta, tool_call.*) which are the server's real activity signal, so the page never claims active while the server reports inactive. The follow-up prompt still renders as a round. Server activity semantics and the recovery invariant are left untouched.",
+      "acceptanceCriteria": [
+        "A follow-up session.input no longer flips the active/thinking presentation on its own (web unit/DOM test).",
+        "While the session is reported inactive, the web does not present the follow-up input as a new active/thinking round; a runtime response event re-engages the active/thinking affordance.",
+        "Server ShouldRecordActivity, StatusName, and the Compact-after-rejected-followup recovery behavior are unchanged (existing AgentSessionRecoveryGrainSpecs test stays green).",
+        "After a rejected follow-up whose session.followup_failed is delivered (via T-001), the follow-up round renders as failed, consistent with the inactive status."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web follow-up activity presentation gated on response events, with web tests",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Server-side LastDataAt refresh on the follow-up input is intentionally NOT taken: the input is uploaded before session.followup_failed even in the rejection path, so it would break the recovery invariant (AgentSessionRecoveryGrainSpecs.cs:322)."
+    }
+  ]
+}
