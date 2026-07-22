@@ -51,6 +51,11 @@ internal static partial class RunCommands
         run.Subcommands.Add(BuildResume(api));
         run.Subcommands.Add(BuildStop(api));
 
+        // Reads live in `MohistCliCommands.Run.Reads.cs` to keep each
+        // partial focused on one concern (control verbs vs. reads vs.
+        // feedback — see design D1).
+        RegisterReads(run, api);
+
         return run;
     }
 

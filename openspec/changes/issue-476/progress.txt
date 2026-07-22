@@ -89,3 +89,29 @@
   produces a `{ success: false, error, code }` body that
   `MohistCliApi.WriteFailureAsync` surfaces verbatim on stderr with the
   `(code=…)` suffix.
+
+## T-002 (completed) — `mo run` reads: list, view, and watch
+
+### What landed
+- `MohistCliCommands.Run.Reads.cs` registers `list`, `view`, and `watch` under
+  the T-001 `run` command tree.
+- `run list` resolves the project and derives run rows from the project issue
+  collection, filtering unbound issues and projecting `id`, `status`, `stage`,
+  `currentStage`, and `issueNumber`.
+- `run view` reuses `ResolveRunTargetAsync`, supports table/selected JSON output,
+  and fetches `/yaml` directly for `--yaml`; `--yaml` plus `--json` fails before
+  target resolution or HTTP.
+- `run watch` polls run detail, emits `{id,status,stage}` NDJSON only when the
+  snapshot changes, uses `MohistCliApi.TimeProvider` for its interval, and
+  exits on terminal status or cancellation.
+- Added `RunList` table rendering and `TimeProvider` plumbing through
+  `MohistCliCommands.RunAsync` and `MohistCliApi`.
+- Added 26 focused specs covering list derivation/selection, view targeting and
+  YAML behavior, mutual exclusion, and fake-time watch polling.
+
+### Design / test notes
+- The server detail shape nests run state under `status`; the existing
+  `WorkflowRunDetail` renderer remains the canonical human-readable view.
+- Watch tests serialize the new read spec collection and use an explicit task
+  completion between request capture and fake-clock advancement to avoid racing
+  the polling continuation. No wall-clock delay or assertion is used.
