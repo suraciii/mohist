@@ -32,11 +32,11 @@ mo issue show <number>
 
 | 场景 | 命令 | 说明 |
 |---|---|---|
-| AI 自检失败（check 没过） | `mo issue retry <n>` | 重新跑当前阶段 |
-| Runner 崩了且自动恢复失败 | `mo issue retry <n>` | Runner 恢复后重试失败阶段 |
-| 想完全重做当前阶段 | `mo issue rerun <n>` | 丢弃当前产物重跑 |
-| 当前阶段彻底卡死 | `mo issue force-stop <n>` | 终止当前 Inline Agent 执行，再 retry/resume |
-| 不想继续了 | `mo issue stop <n>` | 终止运行（保留状态） |
+| AI 自检失败（check 没过） | `mo run retry --issue <n>` | 重新跑当前失败点 |
+| Runner 崩了且自动恢复失败 | `mo run retry --issue <n>` | Runner 恢复后重试失败点 |
+| 想完全重做当前阶段 | `mo run rerun --issue <n> --from-stage <stage>` | 丢弃目标阶段及之后产物重跑 |
+| 当前阶段彻底卡死 | `mo run pause --issue <n>` | 暂停当前执行，后续用 resume 继续 |
+| 不想继续了 | `mo run stop --issue <n> --yes` | 永久终止运行，不能恢复 |
 | Workflow 已停止，工作已通过其它方式交付 | `mo issue done <n>` | 进入 Done，保留原 workflow 历史 |
 | 完全放弃 | `mo issue close <n>` | 进 cancelled 终态 |
 
@@ -120,7 +120,7 @@ mo issue rebase <n>     # 尝试自动 rebase
 1. 进 worktree：`cd <repo>/.mohist/worktrees/issue-<n>/`
 2. 手动解决冲突
 3. `git add` + `git rebase --continue`
-4. 回到 Mohist：`mo issue resume <n>`
+4. 回到 Mohist：`mo run resume --issue <n>`
 
 ### 5. Runner 不可用
 
@@ -151,10 +151,10 @@ mo system logs          # 看应用级日志（Mohist server 自身的 log tail�
 **解决**：
 
 ```bash
-mo issue force-stop <n>     # 强杀
-mo issue resume <n>         # 从断点继续
+mo run pause --issue <n>    # 暂停
+mo run resume --issue <n>   # 从断点继续
 # 或
-mo issue retry <n>          # 重做这个阶段
+mo run retry --issue <n>    # 重试失败点
 ```
 
 ### 7. Drift 警告
