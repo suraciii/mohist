@@ -164,7 +164,7 @@ public class CliEpicCommandSpecs
                 HttpStatusCode.Conflict)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "link", "8", "5", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "link", "8", "5"], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("DUPLICATE_EPIC_MEMBERSHIP", error.ToString(), StringComparison.Ordinal);
@@ -182,7 +182,7 @@ public class CliEpicCommandSpecs
                 HttpStatusCode.Conflict)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "done", "8", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "done", "8"], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("EPIC_NOT_READY_TO_MARK_DONE", error.ToString(), StringComparison.Ordinal);
@@ -200,7 +200,7 @@ public class CliEpicCommandSpecs
                 HttpStatusCode.Conflict)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "close", "8", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "close", "8"], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("EPIC_ALREADY_TERMINAL", error.ToString(), StringComparison.Ordinal);
@@ -220,7 +220,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "unlink", "8", "5", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "unlink", "8", "5"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("Unlinked issue #5 from epic #8", output.ToString(), StringComparison.Ordinal);
@@ -348,7 +348,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "start", "8", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "start", "8"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -482,7 +482,7 @@ public class CliEpicCommandSpecs
                 HttpStatusCode.Conflict)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "start", "8", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "start", "8"], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("EPIC_ALREADY_TERMINAL", error.ToString(), StringComparison.Ordinal);
@@ -514,10 +514,10 @@ public class CliEpicCommandSpecs
             throw new InvalidOperationException("API must not be called when output mode is invalid"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "start", "8", "-o", "yaml"], output, error, fileSystem, executor);
+            http, ["epic", "start", "8", "--output", "yaml"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -532,7 +532,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "pause", "8", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "pause", "8"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -602,10 +602,10 @@ public class CliEpicCommandSpecs
             throw new InvalidOperationException("API must not be called when output mode is invalid"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "pause", "8", "-o", "yaml"], output, error, fileSystem, executor);
+            http, ["epic", "pause", "8", "--output", "yaml"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -620,7 +620,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "resume", "8", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "resume", "8"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -690,10 +690,10 @@ public class CliEpicCommandSpecs
             throw new InvalidOperationException("API must not be called when output mode is invalid"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "resume", "8", "-o", "yaml"], output, error, fileSystem, executor);
+            http, ["epic", "resume", "8", "--output", "yaml"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 }

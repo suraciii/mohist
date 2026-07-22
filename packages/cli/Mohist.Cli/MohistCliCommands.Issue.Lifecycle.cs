@@ -4,6 +4,10 @@ namespace Mohist.Cli;
 
 internal static partial class IssueCommands
 {
+    private static readonly ResourceDescriptor ArchiveCompletedDescriptor = new(
+        ResourceCardinality.Single,
+        ["archived", "skipped", "skippedNumbers", "message"]);
+
     private static Command BuildAction(string name, string description, MohistCliApi api)
     {
         var cmd = new Command(name, $"{description} an issue");
@@ -275,19 +279,19 @@ internal static partial class IssueCommands
                     return 1;
                 }
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
-
                 if (allCompleted)
                 {
-                    var selection = JsonSelection.Parse(IssueListDescriptor, jsonProvided, json);
+                    var selection = JsonSelection.Parse(ArchiveCompletedDescriptor, jsonProvided, json);
                     if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
-                        return api.WriteJsonSelectionResult(IssueListDescriptor, selection);
+                        return api.WriteJsonSelectionResult(ArchiveCompletedDescriptor, selection);
+
+                    var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                    if (resolveExit != 0) return resolveExit;
                     return await api.PrintMutationResourceAsync(
                         HttpMethod.Post,
                         ProjectIssuesPath(resolvedProjectId, "/issues/archive-completed"),
                         new { },
-                        IssueListDescriptor,
+                        ArchiveCompletedDescriptor,
                         selection,
                         data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueArchiveCompleted));
                 }
@@ -295,9 +299,11 @@ internal static partial class IssueCommands
                 var issueSelection = JsonSelection.Parse(IssueDescriptor, jsonProvided, json);
                 if (issueSelection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(IssueDescriptor, issueSelection);
+                var (resolvedIssueProjectId, issueResolveExit) = await api.ResolveProject(project, projectId);
+                if (issueResolveExit != 0) return issueResolveExit;
                 return await api.PrintMutationResourceAsync(
                     HttpMethod.Post,
-                    ProjectIssuesPath(resolvedProjectId, $"/issues/{Uri.EscapeDataString(number!)}/archive"),
+                    ProjectIssuesPath(resolvedIssueProjectId, $"/issues/{Uri.EscapeDataString(number!)}/archive"),
                     new { },
                     IssueDescriptor,
                     issueSelection,

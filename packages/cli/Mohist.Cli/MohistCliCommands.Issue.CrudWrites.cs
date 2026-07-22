@@ -159,8 +159,8 @@ internal static partial class IssueCommands
                     selection,
                     data =>
                     {
-                        PrintCreateGuidance(data, api.Output);
-                        return Task.FromResult(0);
+                        PrintCreateGuidance(data, api.Error);
+                        return api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow);
                     });
             }
         });
