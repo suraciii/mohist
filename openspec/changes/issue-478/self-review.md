@@ -1,71 +1,56 @@
 # Self-Review — issue-478 (unified Project/Issue/Run Variables read/write CLI)
 
-Reviewed artifacts: `proposal.md`, `design.md`, `tasks.json`, `specs/variable-commands/spec.md`,
-`specs/variable-resources/spec.md`, against the issue body and the current codebase.
+Re-review after the fix task. Reviewed artifacts: `proposal.md`, `design.md`, `tasks.json`,
+`specs/variable-commands/spec.md`, `specs/variable-resources/spec.md`, against the issue body and
+the current codebase.
 
 ## Summary
 
-The plan is coherent and the specs are well-formed: both capability specs use exactly
-`### Requirement:` / `#### Scenario:` (4 hashtags), every requirement has at least one scenario,
-language is normative (SHALL/MUST), and there are no `ADDED/MODIFIED/REMOVED` delta headers.
-All nine issue acceptance criteria map onto a spec requirement and a task. The task graph is a
-clean DAG (T-001 → T-002 → T-003), each task bundles its tests, and dependencies point only to
-strictly lower-priority tasks.
+The blocker from the prior review is resolved. The `workflow-profile/variables` → `variables`
+route rename now accounts for every caller, including the production Web UI clients that the
+first review found missing:
 
-However, there is one blocker that makes the plan not ready to build as written.
+- `proposal.md` Impact now has a dedicated **Web** bullet (`entities/settings/api/client.ts`,
+  `entities/issue/api/client.ts` + MSW/tests) and a corrected Runner file reference
+  (`server/connection.ts`).
+- `design.md` D5 lists the Web production clients by file and line, the alias alternative is
+  explicitly rejected in favor of migrating clients, the route-rename risk names Runner/Web/test
+  callers, and Migration step 4 covers Web clients + path-contract specs.
+- `tasks.json` T-001 description/output/notes and three new acceptance criteria cover the Web
+  clients, MSW handlers, Web specs, and the server path-contract regression specs; the build line
+  adds `npm run typecheck`/`test:run` for `packages/web`.
 
-## Finding 1 — BLOCKER: the `workflow-profile/variables` → `variables` rename omits the Web UI's production API clients
+## Verification performed
 
-T-001 renames the Project/Issue/Run variable routes and removes the `workflow-profile/variables`
-routes, but the plan only accounts for the Runner (`connection.ts`) as a caller to update.
-The Web frontend has **production** API clients that call the removed paths:
-
-- `packages/web/src/entities/settings/api/client.ts:64` — `getProjectVariables` GETs
-  `/api/projects/{projectId}/workflow-profile/variables`
-- `packages/web/src/entities/settings/api/client.ts:68` — patches the same path (Settings → AI
-  variables)
-- `packages/web/src/entities/issue/api/client.ts:266,274,281` — Issue workflow variables
-  GET/PUT/PATCH on `/issues/{number}/workflow-profile/variables` (Issue detail page)
-
-T-001 acceptance criterion ("GET/PUT/PATCH on `.../workflow-profile/variables` for Project,
-Issue, and Run are no longer mapped") therefore ships a change that makes the Settings page and
-the Issue-detail page 404 at runtime. The omission is systemic across all three plan artifacts:
-
-- `proposal.md` Impact lists CLI, Server, Runner, Tests, Docs — Web is absent.
-- `design.md` D5 and Migration say "Update the single Runner caller" and drop the redundant
-  routes; Web is not mentioned.
-- `tasks.json` T-001 output and acceptance criteria name server + runner + tests only.
-
-Required fix (for the fixer, not me): the route-rename task must also update the two Web
-production clients (`entities/settings/api/client.ts`, `entities/issue/api/client.ts`) to the
-`/variables` path, their MSW handlers (`pages/issue-detail/ui/_issueDetailMsw.tsx`,
-`pages/settings/ui/AiSettingsSectionTestSupport.tsx`), the Web tests
-(`SettingsPage.spec.tsx`, `IssueDetailPage.spec.tsx`, and the browser specs under
-`packages/web/tests/browser/*.spec.ts` that route-intercept `workflow-profile/variables`), and
-the server path-contract regression test `PathContractRegressionSpecs.cs:320-378` plus the other
-server specs asserting the old path (`IssueWorkflowProfileApiConsistencySpecs.cs`,
-`IssueWorkflowProductLoopSpecs.cs`, `RuntimeSettingsSpecs.cs`,
-`AgentSessionLaunchRoutesSpecs.cs`). T-001 acceptance criteria should add: Web Settings and
-Issue-detail variable reads/writes target `/variables` and `npm run typecheck`/`npm run test:run`
-in `packages/web` pass.
-
-The design's rejection of alias routes (D5) is correct; the fix is to update the Web clients, not
-to keep dual paths.
+- **Spec format**: both specs use exactly `### Requirement:` / `#### Scenario:` (4 hashtags); no
+  3-hashtag scenarios; every requirement has ≥1 scenario; normative SHALL/MUST language; no
+  `ADDED/MODIFIED/REMOVED` headers. variable-commands = 11 requirements / 21 scenarios;
+  variable-resources = 8 requirements / 17 scenarios.
+- **Acceptance-criteria coverage**: all nine issue acceptance criteria map onto a spec
+  requirement and a task (shared verbs/key-path/`--stage`/value typing; string-vs-`--value-json`
+  mutual exclusion; `unset` inheritance without persisted `null`; scope-local reads; Run
+  `--effective` merge + stage; Run target resolution; attempt-snapshot invariant for accepted vs.
+  not-yet-dispatched; write-boundary rejection of non-object root / invalid JSON / invalid key path).
+- **Task graph**: valid JSON; 3-task DAG (T-001 → T-002 → T-003); every `dependsOn` references a
+  strictly lower-priority task; each task bundles its own tests (no standalone test tasks); splits
+  are by feature module (server resource API / CLI command group / legacy switchover), not by
+  technical step.
+- **Minor item resolved**: the previously unspecified `list --stage` behavior is now a scenario
+  ("list --stage returns the scope's own raw stage slice, no merge").
 
 ## Minor observations (not blockers)
 
-- `specs/variable-commands/spec.md` "Stage selection via --stage" clearly scopes `set`/`get`/`unset`
-  to Stage Variables, but does not state what `list --stage` returns for a scope-local list. The
-  design lists this as an Open Question (raw stage slice, no merge). Worth a one-line scenario to
-  remove ambiguity, but the design already resolves the intent.
-- `proposal.md`/`tasks.json` treat the Web update as out of scope only because it was overlooked
-  (see Finding 1); once the Web clients are added to T-001, the proposal Impact section should list
-  Web too.
+- `design.md` Open Questions still lists the `list --stage` question as "design assumes yes", which
+  is now superseded by the spec scenario that mandates it. The two are consistent (not
+  contradictory); the OQ could simply be marked resolved. Does not affect buildability.
+- The `issue variable` positional issue-number argument is implicit (it follows the existing
+  `<number>` convention used by all `mo issue` commands and appears in the spec examples), rather
+  than stated as an explicit requirement. Consistent with convention; not a gap.
 
 ## Verdict
 
-Finding 1 is a must-fix: the plan as written would build a breaking route removal without updating
-the Web UI clients that depend on it. The plan is not ready to build until T-001 (and the proposal
-Impact section) cover the Web client migration.
+The plan accounts for all consumers of the renamed API (Runner, Web production clients, MSW/test
+handlers, and server path-contract specs), the specs are well-formed and cover every issue
+acceptance criterion, and the task graph is a sound DAG. The plan is ready to build.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
