@@ -524,6 +524,7 @@ function watchPiStop(session: PiSdkSession, clock: PiClock): { readonly wait: Pr
   let resolveWait: (confirmed: boolean) => void = () => {}
   const wait = new Promise<boolean>((resolve) => { resolveWait = resolve })
   let settled = false
+  let stopEventObserved = false
   let timeout: unknown | null = null
   let unsubscribe: (() => void) | null = null
   const complete = (confirmed: boolean) => {
@@ -534,14 +535,17 @@ function watchPiStop(session: PiSdkSession, clock: PiClock): { readonly wait: Pr
     resolveWait(confirmed)
   }
   const removeListener = session.subscribe((event) => {
-    if (isPiStopEvent(event)) complete(true)
+    if (isPiStopEvent(event)) {
+      stopEventObserved = true
+      if (!session.isStreaming) complete(true)
+    }
   })
   unsubscribe = removeListener
   if (settled) {
     removeListener()
     return { wait, dispose: () => complete(false) }
   }
-  timeout = clock.setTimeout(() => complete(false), CANCEL_CONFIRMATION_TIMEOUT_MS)
+  timeout = clock.setTimeout(() => complete(stopEventObserved && !session.isStreaming), CANCEL_CONFIRMATION_TIMEOUT_MS)
   return { wait, dispose: () => complete(false) }
 }
 async function abortAndDiagnose(session: PiSdkSession, diagnostics: PiDiagnostic[], mask: (text: string) => string): Promise<void> { try { await session.abort(); await Promise.resolve(); if (session.isStreaming) diagnostics.push(diagnostic("abort-unconfirmed", mask("Pi did not confirm that the turn stopped"))) } catch (cause) { diagnostics.push(diagnostic("abort-unconfirmed", mask(message(cause)))) } }
