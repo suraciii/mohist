@@ -1,5 +1,5 @@
 import type { ActionError, JsonObject, JsonValue, WorkItemResult } from "../core/types.js"
-import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
+import { renderWithSkippedFields, wholeStringUnresolvedReferences } from "../core/template.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import { validateActionInput, deferredInputFields, injectEngineInputs } from "../actions/input-validation.js"
 import { malformedToUnexpectedError, normalizeActionResult } from "../actions/result-validation.js"
@@ -168,17 +168,7 @@ function renderDeferred(
   variables: JsonObject,
   deferred: Set<string>,
 ): JsonObject | null {
-  if (!withInput) return null
-  if (deferred.size === 0) return renderTemplate(withInput, variables)
-  const rendered: JsonObject = {}
-  for (const [key, value] of Object.entries(withInput)) {
-    if (!deferred.has(key)) {
-      rendered[key] = renderTemplate(value as JsonObject | null, variables)
-    } else {
-      rendered[key] = value
-    }
-  }
-  return rendered
+  return renderWithSkippedFields(withInput, variables, deferred)
 }
 
 function checkFailureDetails(
