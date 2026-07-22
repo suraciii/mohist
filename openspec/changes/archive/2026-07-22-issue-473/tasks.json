@@ -1,0 +1,27 @@
+{
+  "project": "mohist-local",
+  "description": "Stop sending the undeclared `repository` field in the operator-triggered rebase task's `with` payload so it conforms to the `mohist/rebase` Action manifest and dispatches past input validation; preserve run-owned repository context defaulting and missing-context rejection.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Make the rebase task payload conform to the mohist/rebase Action inputs",
+      "spec": "specs/workflow-run-rebase/spec.md#Rebase task payload conforms to the declared Action inputs, specs/workflow-run-rebase/spec.md#Omitted base branch defaults from the run-owned repository context, specs/workflow-run-rebase/spec.md#Missing repository context rejects the rebase before queueing, specs/workflow-run-rebase/spec.md#Rebase conflict recovery behavior is unchanged",
+      "description": "In `BuildRebaseTaskWith`, stop emitting the `repository` object so the `with` payload carries only the `baseBranch` and `remote` inputs the `mohist/rebase` Action declares, and drop the now-unused `repository` parameter so the signature collapses to `BuildRebaseTaskWith(string baseBranch)`. Update the single call site in the rebase route to pass only `baseBranch` (it already resolves the default from `runSnapshot` and still uses `runSnapshot` for the missing-context rejection), then rewrite and rename the unit test that encoded the dead `repository` contract to assert the corrected payload plus an explicit absence of the `repository` key.",
+      "acceptanceCriteria": [
+        "`BuildRebaseTaskWith(baseBranch)` returns a `with` payload whose only top-level keys are `baseBranch` (equal to the argument) and `remote` (equal to `origin`); no `repository` property exists on the element.",
+        "The rebase route handler still reads `runSnapshot` for the `missing_repository_context` rejection (returning Conflict `missing_repository_context` with no task queued when absent) and for defaulting `baseBranch` when the request omits one; only the mirroring of the snapshot into the Action `with` is removed.",
+        "The rewritten unit test (renamed away from `BuildRebaseTaskWith_UsesResolvedRepositoryContext`) asserts `baseBranch` and `remote`, asserts no `repository` property is present, and no longer constructs a `WorkflowRepositoryContext` fixture; the sibling `ManualRebaseRecovery_ReferencesNamedPromptAndAgent_NeverInlines` test is unchanged and still passes.",
+        "Existing rebase spec coverage (`IssueWorkspaceRepositoryResolutionSpecs` defaulting + removed-repository cases, `ApiContractSpecs.IssueRebaseApi_QueuesWorkflowTask` happy-path + duplicate detection) passes unchanged because it asserts only the HTTP response `data.baseBranch`/`status`/`taskId`, never the internal `with.repository` payload.",
+        "No change to the `mohist/rebase` Action manifest/inputs/implementation, Action input validation, the `recover:resolve-rebase-conflicts` recovery task construction, CLI surface, persisted models, or database schema.",
+        "`npm test` (server, with C# `TreatWarningsAsErrors` as lint) passes and verification leaves no Git-visible generated changes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Conforming `BuildRebaseTaskWith(string baseBranch)` in `IssueRoutes.Helpers.cs`, updated single call site in `IssueRoutes.Rebase.cs`, and a rewritten/renamed `IssueRebaseRecoveryTests` unit test encoding the corrected payload contract.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep this as one rebase-task-construction vertical slice: the helper signature, its single call site, and the test that encodes its contract are tightly coupled and must switch atomically — `runSnapshot` stays in scope at the route handler for missing-context rejection and base-branch defaulting; only the field handed to the Action goes away. Verified single caller (`IssueRoutes.Rebase.cs:56`)."
+    }
+  ]
+}
