@@ -167,8 +167,8 @@ const TRANSPORT_MESSAGE = 'The file changes could not be loaded.'
 
 function selectRelatedSession(sessions: WorkflowRunSession[]): WorkflowRunSession | undefined {
   return [...sessions].sort((left, right) => {
-    const leftIsLive = left.status === 'active' || left.status === 'running' || left.status === 'probing'
-    const rightIsLive = right.status === 'active' || right.status === 'running' || right.status === 'probing'
+    const leftIsLive = left.activity === 'active'
+    const rightIsLive = right.activity === 'active'
     if (leftIsLive !== rightIsLive) return leftIsLive ? -1 : 1
     return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
   })[0]

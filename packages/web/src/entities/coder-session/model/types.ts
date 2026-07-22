@@ -1,6 +1,7 @@
 import type { SessionEvent } from '../../session/@x/session-view'
 
-export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
+export type AgentSessionActivity = 'idle' | 'active' | 'unknown'
+export type SessionStatusKind = AgentSessionActivity
 
 /**
  * One sample in the bounded context-usage history exposed by
@@ -65,34 +66,15 @@ export interface AgentSessionMetadataCounts {
 
 export type AgentSessionEvent = SessionEvent
 
-/**
- * One entry in the ordered lineage of runtime sessions bound to a
- * Mohist session over its lifetime. The Mohist `sessionId` is the
- * stable identity; each `runtimeSessionId` is a mutable runtime
- * facet created by compact/reset rebinds (see `design/conventions.md`
- * identity rules). The chain starts with the original runtime
- * session; each subsequent entry records a compact/reset rebind
- * successor. Predecessor / successor are derived by position.
- *
- * Projected from `AgentSessionMetadataDto.runtimeSessionLineage` (T-001).
- * Absent on the wire for sessions compacted before T-001 — the
- * projection synthesizes a single entry from the current binding, so
- * legacy sessions surface as a single-entry chain and the UI hides the
- * link automatically.
- */
-export interface RuntimeSessionLineageEntry {
-  runtimeSessionId: string
-  runtime?: string | null
-  boundAt: string
-}
-
 export interface AgentSessionMetadata {
   id: string
   sessionName: string
   runtimeSessionId: string | null
   runtime?: string | null
-  status: string
-  statusKind?: SessionStatusKind
+  activity?: AgentSessionActivity | string
+  status?: string
+  statusKind?: string
+  runtimeSessionLineage?: unknown
   model: string | null
   stage: string | null
   title: string | null
@@ -108,15 +90,6 @@ export interface AgentSessionMetadata {
   metadata: AgentSessionMetadataCounts
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
-  /**
-   * Ordered lineage of runtime sessions bound to this Mohist session
-   * over its lifetime. Null when the session is truly unbound; a
-   * single entry when there has been no compaction/reset; multiple
-   * entries when compact/reset has rebound the runtime session.
-   * Hidden by the UI when the chain is a single entry (no compaction
-   * relationship).
-   */
-  runtimeSessionLineage?: RuntimeSessionLineageEntry[] | null
 }
 
 export interface FileChangeSummary {
@@ -134,7 +107,8 @@ export interface CoderSessionSummary {
   runtimeSessionId: string | null
   executionId: string | null
   taskDescription: string | null
-  status: string
+  activity?: AgentSessionActivity
+  status?: string
   createdAt: string
   completedAt: string | null
   model: string | null
@@ -147,7 +121,6 @@ export interface CoderSessionSummary {
   failureReason: string | null
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
-  runtimeSessionLineage?: RuntimeSessionLineageEntry[] | null
 }
 
 export interface WorkflowRunSession {
@@ -159,7 +132,8 @@ export interface WorkflowRunSession {
   projectId: string | null
   issueNumber: number | null
   runnerId: string | null
-  status: string
+  activity?: AgentSessionActivity
+  status?: string
   stage: string | null
   model: string | null
   workDir: string | null
@@ -199,8 +173,9 @@ export interface SessionMetadata {
   runtime?: string | null
   executionId: string | null
   title: string | null
-  status: string
-  statusKind?: SessionStatusKind
+  activity?: AgentSessionActivity | string
+  status?: string
+  statusKind?: string
   model: string | null
   stage: string | null
   createdAt: string
@@ -222,7 +197,6 @@ export interface SessionMetadata {
   hasUnknownTools?: boolean
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
-  runtimeSessionLineage?: RuntimeSessionLineageEntry[] | null
 }
 
 export interface TextPart {
@@ -300,7 +274,8 @@ export interface CoderSessionDetail {
   runtimeSessionId: string
   executionId: string | null
   taskDescription: string | null
-  status: string
+  activity?: AgentSessionActivity | string
+  status?: string
   createdAt: string
   completedAt: string | null
   model: string | null

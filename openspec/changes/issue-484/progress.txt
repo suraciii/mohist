@@ -27,3 +27,11 @@
 - Added the server missing-recovery grain command using the T-002 idle-only rebind transition and `session.context_reset` reason, without Workflow recovery or work-attempt changes.
 - OpenCode Reset now creates an empty session through `OpenCodeRuntime.createSession`; Compact and Cancel remain non-recovering. Recovery-related runtime_session_missing responses no longer carry hint:reset, and missing Cancel returns not-cancellable.
 - Runner typecheck and all 1,379 runner tests pass; `npm run build` passes. Focused missing-recovery server specs pass. Full `npm test` still has the pre-existing T-001 legacy terminal/status failures noted above; route tests expecting old reset hints also need migration to the new T-003 contract.
+
+## T-004
+
+- AgentSessionSummaryDto/GenericAgentSessionSummaryDto and WorkflowSessionDto now expose the persisted activity value directly; Web session metadata and list models consume the shared idle/active/unknown mapper.
+- Removed Web subscriptions to session.closed and session.followup_* for status patches. Session activity events now reconcile transcript/list queries, and Compact/Reset eligibility is idle-only while Follow-up remains available for idle and active sessions.
+- Removed the runtime-session lineage component and historical runtime matching path from the transcript hook. The remaining legacy test fixtures still mention removed lineage fields but no production consumer reads them.
+- Added direct activity-mapper coverage for idle/active/unknown, unknown fallback, follow-up eligibility, and idle-only recovery eligibility.
+- `npm run typecheck -w packages/web` passes. The focused activity tests pass. Full Web tests still contain pre-T-004 terminal/history expectations; full `npm run build`/`npm test` also remain blocked by the pre-existing T-001/T-002 server spec compilation failures and the runner-disconnect architecture-rule failure.

@@ -779,7 +779,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var usage = AgentSessionJsonHelper.Usage(session);
         return new AgentSessionRecoveryResult(
             session.Id,
-            AgentSessionJsonHelper.StatusName(session, Now()),
+            AgentSessionJsonHelper.ActivityName(session),
             usage.ContextWindowSize ?? size,
             usage.ContextWindowUsed ?? usedBefore,
             AgentSessionJsonHelper.ContextUsagePercent(usage.ContextWindowUsed ?? usedBefore, usage.ContextWindowSize ?? size),
@@ -1360,7 +1360,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         s.Id,
         s.Runtime.RunnerId,
         s.Status.AgentRuntimeSessionId,
-        AgentSessionJsonHelper.StatusName(s, Now()),
+        AgentSessionJsonHelper.ActivityName(s),
         s.Settings.Model,
         s.Runtime.WorkDir,
         s.Status.CreatedAt.ToString("o"),

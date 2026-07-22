@@ -13,18 +13,15 @@ public sealed class AgentSessionListAssembler : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly AgentSessionQuery _sessionQuery;
-    private readonly TimeProvider _timeProvider;
     private readonly ILogger<AgentSessionListAssembler> _logger;
 
     public AgentSessionListAssembler(
         IDbContextFactory<MohistDbContext> dbFactory,
         AgentSessionQuery sessionQuery,
-        TimeProvider timeProvider,
         ILogger<AgentSessionListAssembler> logger)
     {
         _dbFactory = dbFactory;
         _sessionQuery = sessionQuery;
-        _timeProvider = timeProvider;
         _logger = logger;
     }
 
@@ -55,7 +52,7 @@ public sealed class AgentSessionListAssembler : IScopedService
                 IssueTitleLookup.Resolve(issueTitles, issueNumber),
                 record.Label(AgentSessionQueryMetadataKeys.Stage) ?? string.Empty,
                 session.Id,
-                AgentSessionJsonHelper.StatusName(session, _timeProvider.GetUtcNow().UtcDateTime),
+                AgentSessionJsonHelper.ActivityName(session),
                 session.Settings.Model,
                 null,
                 session.Status.CreatedAt.ToString("o"),

@@ -425,7 +425,7 @@ describe('selectTranscriptSession', () => {
   })
 
   it('falls back to the most recently started session when no active one exists', () => {
-    const noActive: typeof sessions = sessions.filter((s) => !['active', 'running', 'probing'].includes(s.status))
+    const noActive: typeof sessions = sessions.filter((s) => !['active', 'running', 'probing'].includes(s.status ?? ''))
     expect(selectTranscriptSession(noActive)?.sessionName).toBe('queued')
   })
 

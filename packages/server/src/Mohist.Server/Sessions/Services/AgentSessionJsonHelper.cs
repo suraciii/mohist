@@ -6,12 +6,11 @@ namespace Mohist.Server.Sessions.Services;
 
 public static class AgentSessionJsonHelper
 {
-    internal static readonly TimeSpan ActiveRuntimeEventWindow = TimeSpan.FromMinutes(5);
-    public static string StatusName(AgentSession session, DateTime now) => session.Status.Activity switch
+    public static string ActivityName(AgentSession session) => session.Status.Activity switch
     {
         AgentSessionActivity.Active => "active",
         AgentSessionActivity.Unknown => "unknown",
-        _ => "inactive",
+        _ => "idle",
     };
 
     public static DateTime LastActivityAt(AgentSession session) =>

@@ -13,18 +13,15 @@ public class WorkflowActivityQuerier : IScopedService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly AgentSessionQuery _sessionQuery;
-    private readonly TimeProvider _timeProvider;
 
     public WorkflowActivityQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
         WorkflowQuerier workflowQuerier,
-        AgentSessionQuery sessionQuery,
-        TimeProvider timeProvider)
+        AgentSessionQuery sessionQuery)
     {
         _dbFactory = dbFactory;
         _workflowQuerier = workflowQuerier;
         _sessionQuery = sessionQuery;
-        _timeProvider = timeProvider;
     }
 
     public async Task<IReadOnlyList<ActiveAgentDto>> ListActiveAgentsAsync(string? projectId = null, CancellationToken ct = default)
@@ -40,7 +37,6 @@ public class WorkflowActivityQuerier : IScopedService
                 AgentSessionQueryOrder.CreatedDescending,
                 ct: ct);
         var workflowStatuses = await LoadRunningWorkflowStatusesAsync(db, sessions, projectId, ct);
-        var now = _timeProvider.GetUtcNow().UtcDateTime;
         var result = new List<ActiveAgentDto>();
 
         foreach (var record in sessions)
@@ -57,7 +53,7 @@ public class WorkflowActivityQuerier : IScopedService
 
             if (string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
             {
-                if (!string.Equals(AgentSessionJsonHelper.StatusName(session, now), "active", StringComparison.Ordinal))
+                if (session.Status.Activity != AgentSessionActivity.Active)
                     continue;
 
                 var agentId = record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty;
