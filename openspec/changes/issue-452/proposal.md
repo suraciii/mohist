@@ -12,7 +12,7 @@ Pi already executes Workflow Inline Agent turns (issue 450 delivered `mohist/pi`
 - Reuse the existing AgentSession infrastructure for Pi Agent execution — transcript, tools, usage, cost, compaction, and lineage render through the same Session views; session commands (Follow-up / Cancel / Compact / Reset) already route by the session's current binding runtime.
 - Launching with a model whose provider has no configured credentials fails with an actionable error; model legality is finally validated by the execution backend.
 - Runner reports the Pi model catalog (only models with configured credentials) alongside the OpenCode catalog, tagged by runtime.
-- Generalize the OpenCode-only model catalog endpoint to serve models by runtime; **BREAKING** for the `/opencode/models` response shape / route, replaced by a runtime-aware catalog query (the Web app, its only consumer, is updated in the same change).
+- Generalize the OpenCode-only model catalog endpoint to serve models by runtime. The existing `/opencode/models` route and its `{models, modelVariants}` response shape are preserved (additive): an optional `?runtime=opencode|pi` query selects the backend's catalog, defaulting to `opencode` when omitted, so legacy callers behave exactly as before.
 - Web Mohist Agent editor gains an execution-backend selector that drives which catalog feeds the model picker; issue-level and per-stage model selection list models grouped by the selected backend, with the Pi group showing only configured-credential models.
 - **No change** to Workflow Profile `uses` backend selection (delivered by issue 450), provider credential management UI (add/remove keys), or the OpenCode catalog/selection experience beyond accepting a runtime dimension.
 
