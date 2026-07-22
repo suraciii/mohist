@@ -500,8 +500,8 @@ public class WorkflowProfileManager : IScopedService
 
     public PromptPreviewResult RenderPrompt(string body, JsonElement variables)
     {
-        var (rendered, missing, depth) = _engine.Render(body, variables);
-        return new PromptPreviewResult(rendered, missing, depth);
+        var result = _engine.Render(body, variables);
+        return new PromptPreviewResult(result.Rendered, result.MissingVariables, result.Depth, result.Errors);
     }
 
     private static async Task<ResolvedTemplate?> LoadProjectTemplateAsync(

@@ -17,3 +17,11 @@
 - Workspace preparation and identity use `workflowRunId` from the dispatch work item and no longer read `openspecChangeDir` or `mohist.runId`; `WorkspaceInfo` and resolved template workspace facts no longer include `changeDir`.
 - Updated runner behavior vectors and executor/artifact/workspace fixtures to use namespaced variables and strict failure semantics. `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass.
 - The initial full runner regression run had one unrelated concurrent task-log routing failure; the subsequent full run passed 116 files and 1,353 tests.
+
+## T-003
+
+- Server `PromptTemplateEngine` now follows the runner's five-pass behavior: escaped openings are protected, missing references fail with paths, embedded objects/arrays fail, scalar interpolation matches runner null/string rules, and cycles/depth overflow return deterministic structured errors without unresolved template text.
+- Preview results retain `missingVariables` for existing consumers and add structured `errors` with `code`, `path`, and `message`; both project preview routes expose the same result. The extract-variables route accepts optional context and validates it through the same engine.
+- Replaced the old lenient server tests with behavior vectors for scalar/embedded values, missing task outputs, object/array rejection, escape, nesting, cycles, and depth; route tests cover actionable missing/type errors.
+- Focused verification passed: 8 `PromptTemplateEngineTests` and 22 template/project preview route specs.
+- Full Server unit tests pass (1,268). Full Server spec tests currently report four T-001 baseline failures that still assert removed runtime roots or vars hoisting; no T-003 preview failures were observed.

@@ -421,11 +421,11 @@ public class MohistLocalWorkflowProfileSpecs
             openspecChangeDir = "openspec/changes/issue-42",
         });
         using var variables = JsonDocument.Parse(variablesJson);
-        var (rendered, missing, _) = new PromptTemplateEngine().Render(prompts["proposal"], variables.RootElement);
+        var result = new PromptTemplateEngine().Render(prompts["proposal"], variables.RootElement);
 
-        Assert.Empty(missing);
-        Assert.Contains("mo issue show 42 --project-id project-1", rendered, StringComparison.Ordinal);
-        Assert.DoesNotContain("prompts.issue-context", rendered, StringComparison.Ordinal);
+        Assert.Empty(result.Errors);
+        Assert.Contains("mo issue show 42 --project-id project-1", result.Rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("prompts.issue-context", result.Rendered, StringComparison.Ordinal);
     }
 
     [Fact]

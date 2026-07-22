@@ -307,6 +307,39 @@ public class ProjectTemplateRoutesSpecs
         Assert.Empty(missing);
     }
 
+    [Fact]
+    public async Task Preview_ReportsMissingAndObjectReferencesAsActionableErrors()
+    {
+        var project = await CreateProjectAsync();
+
+        await UpsertOverrideAsync(project.Id, "proposal", new
+        {
+            displayName = "Preview proposal",
+            description = "Preview test",
+            tags = Array.Empty<string>(),
+            stage = "plan",
+            body = "missing=${{ vars.missing }} object=${{ vars.object }}",
+        });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/templates/proposal/preview",
+            new { variables = new { vars = new { @object = new { value = 1 } } } });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var data = payload.GetProperty("data");
+        Assert.DoesNotContain("${{", data.GetProperty("rendered").GetString());
+
+        var errors = data.GetProperty("errors");
+        Assert.Contains(errors.EnumerateArray(), error =>
+            error.GetProperty("code").GetString() == "missing_reference" &&
+            error.GetProperty("path").GetString() == "vars.missing");
+        Assert.Contains(errors.EnumerateArray(), error =>
+            error.GetProperty("code").GetString() == "invalid_type" &&
+            error.GetProperty("path").GetString() == "vars.object");
+    }
+
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var name = $"template-routes-{Guid.NewGuid():N}";

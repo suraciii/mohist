@@ -120,6 +120,29 @@ public class TemplateRoutesSpecs
     }
 
     [Fact]
+    public async Task ExtractVariables_WithContextReturnsRendererErrors()
+    {
+        var response = await _fixture.Client.PostAsJsonAsync(
+            "/api/templates/extract-variables",
+            new
+            {
+                body = "value=${{ vars.missing }} and ${{ vars.object }}",
+                variables = new { vars = new { @object = new { value = 1 } } },
+            });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var errors = payload.GetProperty("data").GetProperty("errors");
+        Assert.Contains(errors.EnumerateArray(), error =>
+            error.GetProperty("code").GetString() == "missing_reference" &&
+            error.GetProperty("path").GetString() == "vars.missing");
+        Assert.Contains(errors.EnumerateArray(), error =>
+            error.GetProperty("code").GetString() == "invalid_type" &&
+            error.GetProperty("path").GetString() == "vars.object");
+    }
+
+    [Fact]
     public async Task ExtractVariables_WithEmptyBody_ReturnsBadRequest()
     {
         var response = await _fixture.Client.PostAsJsonAsync(
