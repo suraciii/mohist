@@ -13,11 +13,19 @@ Variable resolution SHALL deep-merge Project, Issue, and WorkflowRun Variables i
 - **THEN** the effective value follows Project, then Issue, then WorkflowRun precedence, with selected-stage values overriding the merged top-level values
 
 ### Requirement: Built-in runs initialize required independent Variables
-When a built-in workflow starts without explicit values, its Issue Variables SHALL contain `agent` as an empty object and its WorkflowRun Variables SHALL contain `archive` as an empty string. Explicit Project, Issue, stage, or WorkflowRun values MUST continue to override these initial values according to variable-resolution precedence.
+When a built-in workflow starts without explicit values, its Issue Variables SHALL contain `agent` as an empty object and its WorkflowRun Variables SHALL contain `archive` as an empty string marked as an initialization default. An initialization default MUST resolve below explicit Project, Issue, and selected-stage values; an explicit WorkflowRun write to `archive` MUST replace the default and retain normal WorkflowRun precedence.
 
 #### Scenario: Start a built-in workflow without variable configuration
 - **WHEN** a built-in workflow starts and no scope supplies `agent` or `archive`
 - **THEN** `vars.agent` resolves to an empty object and `vars.archive` resolves to an empty string
+
+#### Scenario: Resolve an explicit lower-scope archive value
+- **WHEN** a WorkflowRun contains only its initialized `archive` default and Project, Issue, or the selected stage provides `archive`
+- **THEN** `vars.archive` resolves to that explicit Project, Issue, or stage value rather than the initialized empty string
+
+#### Scenario: Replace the archive default through a Run write
+- **WHEN** `setVars` or an explicit WorkflowRun update writes `archive` after initialization
+- **THEN** the initialized-default marker is removed and the written value participates as an explicit WorkflowRun top-level value, subject to the existing selected-stage overlay rules
 
 ### Requirement: Dispatch reads current WorkflowRun Variables
 Workflow task dispatch, retries, and stage re-entry SHALL resolve Variables from the current WorkflowRun Variables resource rather than a snapshot or embedded Definition Variables. Values written by `setVars` MUST be visible to subsequent dispatches.

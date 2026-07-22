@@ -41,13 +41,13 @@ Alternative considered: silently ignore removed fields. Rejected because a workf
 
 Replace `ResolvedTemplate` with a resolved Profile result containing the selected Profile identity and its pure Definition. The existing selection cascade remains: Issue custom Profile, Issue project-template reference, Project default, then enabled built-in Profile. `LoadStructureAsync`, `LoadStageSpecsAsync`, and approval loading all use that resolver, so later stage entries continue to observe Definition updates through the same boundary.
 
-Remove `EmbeddedVariables`, `ExtractEmbeddedVariables`, Definition variable fields, and the template load performed only to resolve Variables. `ResolveEffectiveVariableBundleAsync` loads Project, Issue, and WorkflowRun `VariableBundle`s, deep-merges them in that order, and applies selected-stage overlays using the existing bundle mechanics. `ConfigService.GetVariables()` is removed from this path because global configuration is not a Variables resource in the target model.
+Remove `EmbeddedVariables`, `ExtractEmbeddedVariables`, Definition variable fields, and the template load performed only to resolve Variables. `ResolveEffectiveVariableBundleAsync` loads Project, Issue, and WorkflowRun `VariableBundle`s and applies selected-stage overlays using the existing bundle mechanics. Explicit values deep-merge in Project, Issue, then WorkflowRun order. `ConfigService.GetVariables()` is removed from this path because global configuration is not a Variables resource in the target model.
 
 Alternative considered: keep `ResolvedTemplate.EmbeddedVariables` empty as a compatibility placeholder. Rejected because it retains a second variable-source contract and invites reintroduction of Definition-owned Variables.
 
 ### Initialize defaults in their owning resources, idempotently
 
-`IssueVariableBuilder.BuildContextBundle` will add `agent: {}` to the Issue bundle. The existing deep patch preserves explicit Issue values. A narrow `WorkflowRunProfileManager` initialization operation will ensure `archive: ""` exists when a WorkflowRun is created, using a merge that never overwrites an existing Run value. Call it from the WorkflowRun creation path before work can be dispatched.
+`IssueVariableBuilder.BuildContextBundle` will add `agent: {}` to the Issue bundle. The existing deep patch preserves explicit Issue values. A narrow `WorkflowRunProfileManager` initialization operation will ensure `archive: ""` exists when a WorkflowRun is created, using a merge that never overwrites an existing Run value. The Run profile records that this path is an initialization default. Resolution merges top-level values as marked Run defaults, Project, Issue, then explicit Run values; it then applies selected-stage overlays in the existing Project, Issue, Run order. A `setVars` or Run API write to `archive` clears its default marker, making that Run value an ordinary explicit Run top-level value. Call initialization from the WorkflowRun creation path before work can be dispatched.
 
 Task completion already carries `setVars` into workflow follow-up handling. That path will continue to patch `WorkflowRunProfile` only. Variable resolution remains live, so a retry or re-entered stage reads the persisted Run value rather than a task or Definition snapshot.
 
@@ -58,7 +58,7 @@ Alternative considered: put both defaults into built-in Definition YAML. Rejecte
 - [Persisted custom Definitions can contain embedded Variables with no unambiguous owner] -> Migration identifies these records and requires their values to be moved explicitly to Project, Issue, or WorkflowRun Variables; it never silently broadens their scope.
 - [Profile-envelope migration changes persisted JSON consumed by old binaries] -> Deploy as a single version and retain a database backup; no dual-read compatibility path is added.
 - [Removing global Variables changes an implicit source] -> Focused specs verify only Project, Issue, and Run contribute effective values, including selected-stage overlays.
-- [Run initialization races with first dispatch or overwrites user input] -> Make `archive` initialization idempotent and execute it before the run becomes dispatchable; merge only when the key is absent.
+- [Run initialization races with first dispatch or masks lower-scope configuration] -> Make `archive` initialization idempotent, record its default origin, execute it before the run becomes dispatchable, and clear that origin on an explicit Run write.
 - [Built-in content loses behavior during extraction] -> Lock catalog names, descriptions, default selection, and ordered stages with resource parsing and profile-resolution specs.
 
 ## Migration Plan
@@ -66,7 +66,7 @@ Alternative considered: put both defaults into built-in Definition YAML. Rejecte
 1. Add the Profile envelope/domain conversion and pure Definition serializer, then update catalog, project-template, issue-custom-template, API, and resolver call sites together.
 2. Convert persisted custom Profile records in one migration: retain each storage identity as Profile metadata and write the pure Definition into the envelope. Records with embedded Variables stop migration with a diagnostic naming the Profile and affected paths; operators move those values to their intended resource before retrying.
 3. Move built-in descriptions to the catalog, remove their YAML variables, and seed `agent` and `archive` through the Issue and WorkflowRun initialization paths.
-4. Add high-risk tests for all Profile sources, pure parse/serialize behavior, rejected removed fields, scoped Variable precedence, default initialization, and `setVars` visibility after retry or stage re-entry.
+4. Add high-risk tests for all Profile sources, pure parse/serialize behavior, rejected removed fields, scoped Variable precedence, default-origin behavior against Project/Issue/stage values, explicit Run replacement, and `setVars` visibility after retry or stage re-entry.
 5. Deploy the server and built-in assets atomically. Roll back by restoring the pre-migration database backup and the prior server/assets release; do not run old binaries against migrated Profile envelopes.
 
 ## Open Questions
