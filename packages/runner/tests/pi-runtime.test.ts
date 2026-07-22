@@ -395,6 +395,21 @@ describe("PiRuntime", () => {
     expect(result).toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: false } })
   })
 
+  it("does not treat turn_end as a fully settled cancellation", async () => {
+    const session = new FakeSession()
+    session.isStreaming = true
+    session.abort = async () => {
+      session.abortCalls++
+      session.isStreaming = false
+      session.emit({ type: "turn_end", id: "turn-end-1" })
+    }
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+
+    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
+    expect(result).toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: false } })
+  })
+
   it("does not require a stop event when cancelling an already-idle session", async () => {
     const session = new FakeSession()
     const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
