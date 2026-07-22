@@ -300,7 +300,7 @@ internal sealed class MohistCliApi
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return (FailureExitCode(ex.StatusCode), null);
         }
         catch (HttpRequestException)
@@ -359,7 +359,7 @@ internal sealed class MohistCliApi
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return FailureExitCode(ex.StatusCode);
         }
 
@@ -469,7 +469,7 @@ internal sealed class MohistCliApi
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return FailureExitCode(ex.StatusCode);
         }
 
@@ -592,7 +592,7 @@ internal sealed class MohistCliApi
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return FailureExitCode(ex.StatusCode);
         }
 
@@ -1080,7 +1080,7 @@ internal sealed class MohistCliApi
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return FailureExitCode(ex.StatusCode);
         }
         catch (HttpRequestException)
@@ -1134,7 +1134,7 @@ internal sealed class MohistCliApi
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return FailureExitCode(ex.StatusCode);
         }
         catch (HttpRequestException)
@@ -1231,7 +1231,7 @@ internal sealed class MohistCliApi
         if (envelope.Success)
             return envelope.Data;
 
-        throw new ApiResponseException(response.StatusCode, envelope.Error, envelope.Code);
+        throw new ApiResponseException(response.StatusCode, envelope.Error, envelope.Code, envelope.Details);
     }
 
     private async Task<int> PrintResponseAsync(HttpResponseMessage response, JsonNode? successDataFallback = null)
@@ -1305,16 +1305,25 @@ internal sealed class MohistCliApi
         return new PostResult(0, data, null, null);
     }
 
+    private void WriteApiFailure(ApiResponseException failure)
+    {
+        var details = failure.Details is null ? string.Empty : $" details={failure.Details.ToJsonString()}";
+        var code = string.IsNullOrWhiteSpace(failure.Code) ? $"http-{(int)failure.StatusCode}" : failure.Code;
+        _err.WriteLine($"{failure.Message} (code={code}){details}");
+    }
+
     private sealed class ApiResponseException : Exception
     {
-        public ApiResponseException(HttpStatusCode statusCode, string message, string? code = null) : base(message)
+        public ApiResponseException(HttpStatusCode statusCode, string message, string? code = null, JsonNode? details = null) : base(message)
         {
             StatusCode = statusCode;
             Code = code;
+            Details = details;
         }
 
         public HttpStatusCode StatusCode { get; }
         public string? Code { get; }
+        public JsonNode? Details { get; }
     }
 
     internal sealed record Envelope(
