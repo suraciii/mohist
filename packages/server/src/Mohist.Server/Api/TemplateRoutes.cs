@@ -1,5 +1,6 @@
-using Mohist.Server.Workflow.Services.Prompts;
+using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Prompts;
+using Mohist.Server.Workflow.Services.Prompts;
 
 namespace Mohist.Server.Api;
 
@@ -17,18 +18,23 @@ public static class TemplateRoutes
             return ApiResults.Ok(sorted);
         });
 
-        app.MapPost("/api/templates/extract-variables", (ExtractVariablesRequest? request) =>
+        app.MapPost("/api/templates/extract-variables", (ExtractVariablesRequest? request, PromptTemplateEngine engine) =>
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Body))
                 return ApiResults.BadRequest("body is required");
 
             var variables = PromptTemplateEngine.ExtractVariables(request.Body);
-            return ApiResults.Ok(new ExtractVariablesResponse(variables));
+            var errors = request.Variables is { } context
+                ? engine.Render(request.Body, context).Errors
+                : Array.Empty<TemplateRenderError>();
+            return ApiResults.Ok(new ExtractVariablesResponse(variables, errors));
         });
 
         return app;
     }
 }
 
-public record ExtractVariablesRequest(string? Body);
-public record ExtractVariablesResponse(IReadOnlyList<string> Variables);
+public record ExtractVariablesRequest(string? Body, JsonElement? Variables = null);
+public record ExtractVariablesResponse(
+    IReadOnlyList<string> Variables,
+    IReadOnlyList<TemplateRenderError> Errors);

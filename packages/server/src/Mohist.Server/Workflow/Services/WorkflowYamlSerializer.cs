@@ -291,7 +291,8 @@ public static class WorkflowYamlSerializer
     }
 
     private static bool IsInlineAgentUses(string? uses) =>
-        string.Equals(uses, "mohist/opencode", StringComparison.Ordinal);
+        string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/pi", StringComparison.Ordinal);
 
     private static bool IsVerdictMarker(string? value)
     {

@@ -86,7 +86,7 @@ public class TemplateRoutesSpecs
     {
         var response = await _fixture.Client.PostAsJsonAsync(
             "/api/templates/extract-variables",
-            new { body = "Use ${{ openspecChangeDir }} and ${{ issue.number }} and ${{ openspecChangeDir }}" });
+             new { body = "Use openspec/changes/issue-${{ issue.number }} and ${{ issue.number }} and openspec/changes/issue-${{ issue.number }}" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -98,7 +98,7 @@ public class TemplateRoutesSpecs
             .Select(item => item.GetString())
             .ToArray();
 
-        Assert.Equal(new[] { "issue.number", "openspecChangeDir" }, variables);
+         Assert.Equal(new[] { "issue.number" }, variables);
     }
 
     [Fact]
@@ -117,6 +117,47 @@ public class TemplateRoutesSpecs
             .ToArray();
 
         Assert.Equal(new[] { "another.missing", "does.not.exist" }, variables);
+    }
+
+    [Fact]
+    public async Task ExtractVariables_IgnoresEscapedReferences()
+    {
+        var response = await _fixture.Client.PostAsJsonAsync(
+            "/api/templates/extract-variables",
+            new { body = @"Use \${{ vars.literal }} and ${{ vars.actual }}" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var variables = payload.GetProperty("data").GetProperty("variables")
+            .EnumerateArray()
+            .Select(item => item.GetString())
+            .ToArray();
+
+        Assert.Equal(new[] { "vars.actual" }, variables);
+    }
+
+    [Fact]
+    public async Task ExtractVariables_WithContextReturnsRendererErrors()
+    {
+        var response = await _fixture.Client.PostAsJsonAsync(
+            "/api/templates/extract-variables",
+            new
+            {
+                body = "value=${{ vars.missing }} and ${{ vars.object }}",
+                variables = new { vars = new { @object = new { value = 1 } } },
+            });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var errors = payload.GetProperty("data").GetProperty("errors");
+        Assert.Contains(errors.EnumerateArray(), error =>
+            error.GetProperty("code").GetString() == "missing_reference" &&
+            error.GetProperty("path").GetString() == "vars.missing");
+        Assert.Contains(errors.EnumerateArray(), error =>
+            error.GetProperty("code").GetString() == "invalid_type" &&
+            error.GetProperty("path").GetString() == "vars.object");
     }
 
     [Fact]

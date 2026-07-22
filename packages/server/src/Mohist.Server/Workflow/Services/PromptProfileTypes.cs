@@ -1,3 +1,5 @@
+using Mohist.Server.Workflow.Services.Prompts;
+
 namespace Mohist.Server.Workflow.Services;
 
 public sealed record ResolvedPrompt(
@@ -21,4 +23,5 @@ public sealed record EffectivePrompt(
 public sealed record PromptPreviewResult(
     string Rendered,
     IReadOnlyList<string> MissingVariables,
-    int Depth);
+    int Depth,
+    IReadOnlyList<TemplateRenderError> Errors);

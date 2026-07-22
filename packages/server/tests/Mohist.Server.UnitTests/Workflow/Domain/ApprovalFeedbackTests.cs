@@ -421,32 +421,6 @@ public partial class ApprovalFeedbackTests
     }
 
     [Fact]
-    public void BuildFeedbackShowCommand_AllValuesPresent_FormatsCliInvocation()
-    {
-        var command = WorkflowRunExtensions.BuildFeedbackShowCommand(
-            issueNumber: "42",
-            feedbackId: "fb_abc",
-            projectId: "proj_1");
-
-        Assert.Equal(
-            "mo issue feedback show 42 --feedback fb_abc --project-id proj_1 --output json",
-            command);
-    }
-
-    [Fact]
-    public void BuildFeedbackShowCommand_MissingMetadata_UsesLiterals()
-    {
-        var command = WorkflowRunExtensions.BuildFeedbackShowCommand(
-            issueNumber: (string?)null,
-            feedbackId: "fb_abc",
-            projectId: null);
-
-        Assert.Equal(
-            "mo issue feedback show <number> --feedback fb_abc --project-id <project-id> --output json",
-            command);
-    }
-
-    [Fact]
     public void ExtractResolutionSummary_EmptyOrNull_ReturnsNull()
     {
         Assert.Null(WorkflowRunExtensions.ExtractResolutionSummary(null));

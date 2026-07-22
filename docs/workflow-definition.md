@@ -292,10 +292,6 @@ stages:
 
 ## 实装差距
 
-- 内置 Profile 与 Prompt 仍直接使用 `${{ openspecChangeDir }}`，部分运行上下文与
-  Variables 也仍以表外裸名暴露；目标是只保留上表命名空间，并把 OpenSpec 路径改为
-  字面模板 `openspec/changes/issue-${{ issue.number }}`。
-- task 与 Prompt 字符串中的表达式解析不出值时，当前仍可能保留原文而非让任务失败。
 - check 当前用 `name` 声明标识；目标是 `id`。
-- 未知 Definition 字段、错误字段类型、表外模板根和本地校验命令尚未按本篇目标统一实现。
+- 未知 Definition 字段、错误字段类型和本地校验命令尚未按本篇目标统一实现。
 - `with` 已在任务派发时按 Action 契约最终校验；保存 Profile 时的提前校验尚未提供。

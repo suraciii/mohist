@@ -85,7 +85,7 @@ function buildWork(artifacts: JsonObject | null, uses = "test/action"): Dispatch
     title: "Test task",
     uses,
     with: {},
-    variables: { workspace: { path: workDir, branch: null, changeDir: null } },
+    variables: { workspace: { path: workDir, branch: null } },
     artifacts,
   }
 }
@@ -95,7 +95,7 @@ describe("WorkExecutor artifact capture", () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ error: { code: "base-moved", message: "base moved" } }), [{ code: "base-moved" }]),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -168,7 +168,7 @@ describe("WorkExecutor artifact capture", () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { done: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -185,7 +185,7 @@ describe("WorkExecutor artifact capture", () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { done: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -204,7 +204,7 @@ describe("WorkExecutor artifact capture", () => {
     connection.uploadFailures.set("review.md", new Error("server 503"))
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { done: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -225,7 +225,7 @@ describe("WorkExecutor artifact capture", () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: null })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -245,7 +245,7 @@ describe("WorkExecutor artifact capture", () => {
         status: "success",
         output: { producedArtifacts: [{ path: "diagnostic.log" }] },
       })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -268,7 +268,7 @@ describe("WorkExecutor artifact capture", () => {
         status: "success",
         output: { producedArtifacts: [{ path: "diagnostic.log" }] },
       })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -284,7 +284,7 @@ describe("WorkExecutor artifact capture", () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ error: { code: "action-failed", message: "agent crashed" } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -301,7 +301,7 @@ describe("WorkExecutor artifact capture", () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { ok: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -315,23 +315,23 @@ describe("WorkExecutor artifact capture", () => {
 
   it("rendersTemplateVariablesInDeclaredArtifactPathsBeforeCapture", async () => {
     // The default workflow declares every artifact `path` as a
-    // `${{ openspecChangeDir }}`-prefixed template. The runner must
+    // issue-number-based template. The runner must
     // substitute that variable (against `work.variables`) so the
     // capture layer reads from the resolved workspace-relative
-    // path, not a literal `${{ openspecChangeDir }}` directory.
+    // path, not a literal template directory.
     const changeDir = "openspec/changes/issue-55"
     const reviewPath = `${changeDir}/review.md`
     const reviewAbsolute = join(workDir, changeDir, "review.md")
     await mkdir(join(workDir, changeDir), { recursive: true })
     await writeFile(reviewAbsolute, "looks good", "utf8")
 
-    const work = buildWork({ files: [{ path: "${{ openspecChangeDir }}/review.md" }] })
-    work.variables = { ...(work.variables ?? {}), openspecChangeDir: changeDir }
+    const work = buildWork({ files: [{ path: "${{ vars.changeDir }}/review.md" }] })
+    work.variables = { ...(work.variables ?? {}), vars: { changeDir } }
 
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { done: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -341,14 +341,14 @@ describe("WorkExecutor artifact capture", () => {
     expect(result.status).toBe("completed")
     expect(result.artifactUploadIds).toEqual(["artup_1"])
     // The upload must report the rendered path, not the raw
-    // `${{ openspecChangeDir }}/review.md` literal.
+    // raw template literal.
     expect(connection.uploads).toHaveLength(1)
     expect(connection.uploads[0].path).toBe(reviewPath)
   })
 
   it("rendersTemplateVariablesInDeclaredDirectoryArtifactPathsBeforeCapture", async () => {
     // Same template-substitution contract for a directory artifact:
-    // the runner resolves `${{ openspecChangeDir }}` before the
+    // the runner resolves the issue-number path before the
     // capture layer walks the directory.
     const changeDir = "openspec/changes/issue-55"
     const specsPath = `${changeDir}/specs`
@@ -357,13 +357,13 @@ describe("WorkExecutor artifact capture", () => {
     await writeFile(join(specsAbsolute, "a.md"), "alpha", "utf8")
     await writeFile(join(specsAbsolute, "sub", "b.md"), "beta", "utf8")
 
-    const work = buildWork({ files: [{ path: "${{ openspecChangeDir }}/specs" }] })
-    work.variables = { ...(work.variables ?? {}), openspecChangeDir: changeDir }
+    const work = buildWork({ files: [{ path: "${{ vars.changeDir }}/specs" }] })
+    work.variables = { ...(work.variables ?? {}), vars: { changeDir } }
 
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: null })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -390,7 +390,7 @@ describe("WorkExecutor artifact capture", () => {
         actionWorkDir = host.workDir
         return { output: null }
       }),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -410,7 +410,7 @@ describe("WorkExecutor artifact capture", () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: null })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -425,12 +425,12 @@ describe("WorkExecutor artifact capture", () => {
     // Whole-string unresolvable reference in a declared artifact
     // path: the runner should surface a clean error rather than
     // attempt to capture from a literal `${{ ... }}` directory.
-    const work = buildWork({ files: [{ path: "${{ openspecChangeDir }}/review.md" }] })
+    const work = buildWork({ files: [{ path: "openspec/changes/issue-${{ issue.number }}/review.md" }] })
 
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { ok: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -439,7 +439,7 @@ describe("WorkExecutor artifact capture", () => {
 
     expect(result.status).toBe("failed")
     expect(result.message).toMatch(/artifact declaration references undefined variable/)
-    expect(result.message).toMatch(/openspecChangeDir/)
+    expect(result.message).toMatch(/issue\.number/)
     expect(connection.uploads).toEqual([])
     expect(result.artifactUploadIds).toBeUndefined()
   })
@@ -458,7 +458,7 @@ describe("WorkExecutor artifact capture", () => {
         registryInvoked = true
         return { output: { reached: false } }
       }),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as never,
       workDir,
       undefined,

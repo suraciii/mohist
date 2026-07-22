@@ -7,7 +7,7 @@ stage: plan
 Read the current Mohist issue details before interpreting this task:
 
 ```bash
-mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+mo issue show ${{ issue.number }} --project ${{ issue.projectId }}
 ```
 
 <artifact id="tasks" schema="mohist-default">
@@ -21,23 +21,23 @@ Implementation task graph for autonomous Mohist execution.
 Read these files for context before creating this artifact:
 
 <dependency id="proposal" status="expected">
-  <path>${{ openspecChangeDir }}/proposal.md</path>
+  <path>openspec/changes/issue-${{ issue.number }}/proposal.md</path>
   <description>Initial proposal document outlining the change</description>
 </dependency>
 
 <dependency id="specs" status="expected">
-  <path>${{ openspecChangeDir }}/specs</path>
+  <path>openspec/changes/issue-${{ issue.number }}/specs</path>
   <description>Detailed specifications for the change</description>
 </dependency>
 
 <dependency id="design" status="expected">
-  <path>${{ openspecChangeDir }}/design.md</path>
+  <path>openspec/changes/issue-${{ issue.number }}/design.md</path>
   <description>Technical design document with implementation details</description>
 </dependency>
 </dependencies>
 
 <output>
-Write to: `${{ openspecChangeDir }}/tasks.json`
+Write to: `openspec/changes/issue-${{ issue.number }}/tasks.json`
 </output>
 
 <instruction>

@@ -140,6 +140,9 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
         Assert.Equal("opencode", agent.GetProperty("type").GetString());
         Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
         Assert.Equal(122, result.GetProperty("issue").GetProperty("number").GetInt32());
+        Assert.False(result.TryGetProperty("mohist", out _));
+        Assert.False(result.TryGetProperty("project", out _));
+        Assert.False(result.TryGetProperty("workspace", out _));
     }
 
     [Fact]
@@ -260,6 +263,9 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
         Assert.Equal(JsonValueKind.Object, result.ValueKind);
         Assert.False(result.TryGetProperty("vars", out _));
         Assert.False(result.TryGetProperty("stages", out _));
+        Assert.False(result.TryGetProperty("mohist", out _));
+        Assert.False(result.TryGetProperty("project", out _));
+        Assert.False(result.TryGetProperty("workspace", out _));
         Assert.True(result.GetProperty("stageOnly").GetBoolean());
         Assert.True(result.GetProperty("issueOnly").GetBoolean());
         var agent = result.GetProperty("agent");

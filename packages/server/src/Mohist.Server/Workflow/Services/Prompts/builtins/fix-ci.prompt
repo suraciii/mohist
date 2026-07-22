@@ -16,11 +16,11 @@ Run the relevant verification again and confirm the worktree is clean before fin
 
 <dependencies>
 Read the context files before fixing:
-- `${{ openspecChangeDir }}/proposal.md`
-- `${{ openspecChangeDir }}/design.md`
-- `${{ openspecChangeDir }}/tasks.json`
-- relevant specs under `${{ openspecChangeDir }}/specs/`
-- `${{ openspecChangeDir }}/progress.txt` if it exists
+- `openspec/changes/issue-${{ issue.number }}/proposal.md`
+- `openspec/changes/issue-${{ issue.number }}/design.md`
+- `openspec/changes/issue-${{ issue.number }}/tasks.json`
+- relevant specs under `openspec/changes/issue-${{ issue.number }}/specs/`
+- `openspec/changes/issue-${{ issue.number }}/progress.txt` if it exists
 </dependencies>
 
 <instruction>
@@ -39,7 +39,7 @@ Read the context files before fixing:
 </repair_policy>
 
 <progress_tracking>
-`${{ openspecChangeDir }}/progress.txt` is this issue's working memory.
+`openspec/changes/issue-${{ issue.number }}/progress.txt` is this issue's working memory.
 Record noteworthy discoveries as you work. Before finishing, review and record the key result.
 </progress_tracking>
 

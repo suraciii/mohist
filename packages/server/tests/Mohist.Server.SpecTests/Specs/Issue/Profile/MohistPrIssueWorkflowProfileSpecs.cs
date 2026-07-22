@@ -237,7 +237,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var check = plan.Checks.Single();
         Assert.Equal("plan-artifacts", check.Name);
         Assert.Equal("mohist/openspec-artifacts", check.Uses);
-        Assert.Equal("${{ openspecChangeDir }}", ReadStringWith(check, "changeDir"));
+         Assert.Equal("openspec/changes/issue-${{ issue.number }}", ReadStringWith(check, "changeDir"));
 
         var names = plan.Checks.Select(c => c.Name).ToArray();
         Assert.DoesNotContain(names, n => n == "proposal-complete");
@@ -257,7 +257,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var planArtifacts = plan.Checks.Single(c => c.Name == "plan-artifacts");
         Assert.Equal("mohist/openspec-artifacts", planArtifacts.Uses);
-        Assert.Equal("${{ openspecChangeDir }}", ReadStringWith(planArtifacts, "changeDir"));
+         Assert.Equal("openspec/changes/issue-${{ issue.number }}", ReadStringWith(planArtifacts, "changeDir"));
 
         Assert.DoesNotContain(plan.Checks, c => c.Name == "proposal-complete");
         Assert.DoesNotContain(plan.Checks, c => c.Name == "specs-complete");
@@ -377,7 +377,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var archiveChange = integrate.Tasks.Single(t => t.Id == "archive-change");
         Assert.Equal("mohist/archive-change", archiveChange.Uses);
-        Assert.Equal("${{ openspecChangeDir }}", ReadStringWith(archiveChange, "changeDir"));
+         Assert.Equal("openspec/changes/issue-${{ issue.number }}", ReadStringWith(archiveChange, "changeDir"));
 
         var push = integrate.Tasks.Single(t => t.Id == "push");
         Assert.Equal("mohist/push", push.Uses);

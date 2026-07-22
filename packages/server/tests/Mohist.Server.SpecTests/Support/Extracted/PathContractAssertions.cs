@@ -31,39 +31,17 @@ internal static class PathContractAssertions
         Assert.True(repo.TryGetProperty("baseBranch", out _), "repository response missing 'baseBranch'");
     }
 
-    public static void AssertDispatchVariablesHaveWorkspaceContract(JsonElement variables)
+    public static void AssertEffectiveVariablesContainNoRuntimeContext(JsonElement variables)
     {
         if (variables.ValueKind != JsonValueKind.Object)
         {
-            Assert.Fail($"expected dispatch variables to be a JSON object, got {variables.ValueKind}");
+            Assert.Fail($"expected effective variables to be a JSON object, got {variables.ValueKind}");
             return;
         }
 
-        if (variables.TryGetProperty("project", out var projectVar)
-            && projectVar.ValueKind == JsonValueKind.Object)
-        {
-            Assert.False(projectVar.TryGetProperty("path", out _), "project dispatch variable unexpectedly contained 'path'");
-            Assert.False(projectVar.TryGetProperty("effectivePath", out _), "project dispatch variable unexpectedly contained 'effectivePath'");
-            Assert.False(projectVar.TryGetProperty("baseBranch", out _), "project dispatch variable unexpectedly contained 'baseBranch'");
-            Assert.False(projectVar.TryGetProperty("defaultBranch", out _), "project dispatch variable unexpectedly contained 'defaultBranch'");
-        }
-
-        if (variables.TryGetProperty("repository", out var repoVar)
-            && repoVar.ValueKind == JsonValueKind.Object)
-        {
-            Assert.False(repoVar.TryGetProperty("path", out _), "repository dispatch variable unexpectedly contained 'path'");
-            Assert.False(repoVar.TryGetProperty("remote", out _), "repository dispatch variable unexpectedly contained 'remote'");
-            Assert.False(repoVar.TryGetProperty("resolvedPath", out _), "repository dispatch variable unexpectedly contained 'resolvedPath'");
-            Assert.True(repoVar.TryGetProperty("gitUrl", out _), "repository dispatch variable missing 'gitUrl'");
-            Assert.True(repoVar.TryGetProperty("baseBranch", out _), "repository dispatch variable missing 'baseBranch'");
-        }
-
-        Assert.True(variables.TryGetProperty("workspace", out var workspace),
-            "dispatch variables missing 'workspace'");
-        if (workspace.ValueKind == JsonValueKind.Object)
-        {
-            Assert.True(workspace.TryGetProperty("path", out _), "workspace dispatch variable missing 'path'");
-            Assert.True(workspace.TryGetProperty("branch", out _), "workspace dispatch variable missing 'branch'");
-        }
+        Assert.False(variables.TryGetProperty("mohist", out _));
+        Assert.False(variables.TryGetProperty("project", out _));
+        Assert.False(variables.TryGetProperty("repository", out _));
+        Assert.False(variables.TryGetProperty("workspace", out _));
     }
 }

@@ -297,7 +297,7 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task StartWork_DispatchVariables_ExposeWorkspacePathAndRepositoryMetadataOnly()
     {
-        var (projectId, projectName, _, _, wrId) = await SeedIssueInProgressAsync();
+         var (_, _, _, _, wrId) = await SeedIssueInProgressAsync();
 
         using var scope = _services.CreateScope();
         var query = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
@@ -306,25 +306,10 @@ public class IssueWorkflowLifecycleSpecs
         using var doc = JsonDocument.Parse(snapshot.GetRawText());
         var root = doc.RootElement;
 
-        var project = root.GetProperty("project");
-        Assert.Equal(projectId, project.GetProperty("id").GetString());
-        Assert.Equal(projectName, project.GetProperty("name").GetString());
-        Assert.False(project.TryGetProperty("path", out _));
-        Assert.False(project.TryGetProperty("effectivePath", out _));
-
-        var repository = root.GetProperty("repository");
-        Assert.Equal("origin", repository.GetProperty("name").GetString());
-        Assert.Equal("git@example.com:mohist-local.git", repository.GetProperty("gitUrl").GetString());
-        Assert.Equal("main", repository.GetProperty("baseBranch").GetString());
-        Assert.False(repository.TryGetProperty("path", out _));
-        Assert.False(repository.TryGetProperty("remote", out _));
-        Assert.False(repository.TryGetProperty("resolvedPath", out _));
-
-        var workspace = root.GetProperty("workspace");
-        Assert.False(string.IsNullOrWhiteSpace(workspace.GetProperty("path").GetString()));
-        var headBranch = workspace.GetProperty("branch").GetString();
-        Assert.StartsWith("mohist/run-", headBranch);
-        Assert.False(string.IsNullOrWhiteSpace(workspace.GetProperty("changeDir").GetString()));
+         Assert.False(root.TryGetProperty("mohist", out _));
+         Assert.False(root.TryGetProperty("project", out _));
+         Assert.False(root.TryGetProperty("repository", out _));
+         Assert.False(root.TryGetProperty("workspace", out _));
     }
 
     private async Task<(string projectId, string projectName)> SeedProjectAsync()

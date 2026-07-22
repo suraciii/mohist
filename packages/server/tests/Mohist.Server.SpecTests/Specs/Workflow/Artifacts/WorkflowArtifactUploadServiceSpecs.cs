@@ -651,7 +651,7 @@ public class WorkflowArtifactUploadServiceSpecs
     public async Task BindAsync_DeclaredPathWithTemplateVariable_RendersAndMatchesUploadedPath()
     {
         // The default workflow declares every artifact `path` as a
-        // `${{ openspecChangeDir }}`-prefixed template. The runner
+         // issue-number-based template. The runner
         // renders that template before upload, so the pending upload
         // records the resolved workspace path. The bind service must
         // render the declared path with the same variables so the
@@ -679,8 +679,8 @@ public class WorkflowArtifactUploadServiceSpecs
         // Bind with a declared path that uses a template variable.
         // The variables mirror what the grain would resolve at bind
         // time (see WorkflowGrain.ResolveBindVariablesAsync).
-        var variables = JsonDocument.Parse(
-            "{\"openspecChangeDir\":\"openspec/changes/issue-55\"}").RootElement.Clone();
+         var variables = JsonDocument.Parse(
+             "{\"issue\":{\"number\":55}}").RootElement.Clone();
 
         var bindService = new WorkflowArtifactBindService(
             _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
@@ -689,7 +689,7 @@ public class WorkflowArtifactUploadServiceSpecs
         var declaredArtifacts = new TaskArtifactCapture(
             new List<TaskArtifactDeclaration>
             {
-                new("${{ openspecChangeDir }}/review.md"),
+             new("openspec/changes/issue-${{ issue.number }}/review.md"),
             });
         var bindResult = await bindService.BindAsync(
             workflowRunId, workId, taskRunId,
@@ -746,7 +746,7 @@ public class WorkflowArtifactUploadServiceSpecs
         var declaredArtifacts = new TaskArtifactCapture(
             new List<TaskArtifactDeclaration>
             {
-                new("${{ openspecChangeDir }}/review.md"),
+             new("openspec/changes/issue-${{ issue.number }}/review.md"),
             });
         var bindResult = await bindService.BindAsync(
             workflowRunId, workId, taskRunId,

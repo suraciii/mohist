@@ -146,7 +146,6 @@ describe("WorkspaceManager.prepare", () => {
     expect(workspace).toEqual({
       path: expectedPath,
       branch: "mohist/run-wr-1",
-      changeDir: join(expectedPath, "openspec/changes/issue-9"),
     })
     expect(gitRunner.commandArgs()).toContainEqual(["ls-remote", "--heads", "https://example.test/mohist.git", "master"])
     expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${expectedPath}.preparing`)])
@@ -476,11 +475,8 @@ function work(workflowRunId: string, baseBranch = "master") {
     workType: "task",
     uses: "mohist/opencode",
     variables: {
-      mohist: { runId: workflowRunId },
       issue: { number: 9 },
-      project: { id: "project-1", name: "Mohist Local" },
       repository: { name: "master", gitUrl: "https://example.test/mohist.git", baseBranch },
-      openspecChangeDir: "openspec/changes/issue-9",
     },
   }
 }

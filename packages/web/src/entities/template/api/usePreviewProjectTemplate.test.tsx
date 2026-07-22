@@ -16,10 +16,10 @@ const PROJECT_ID = 'test-project'
 const KEY = 'proposal'
 
 const VARIABLES = {
-  openspecChangeDir: 'openspec/changes/issue-1',
-  issue: { number: 1, title: 'Demo issue' },
-  project: { id: 'demo-project', name: 'Demo' },
-  mohist: { system: 'mohist' },
+  issue: { number: 1, projectId: 'demo-project', title: 'Demo issue' },
+  repository: { baseBranch: 'main' },
+  workspace: { branch: 'feature/issue-1' },
+  vars: {},
 }
 
 const PREVIEW_RESPONSE = {

@@ -15,7 +15,7 @@ describe("Check verdict validation", () => {
     let capturedHandler: ((inputs: unknown, host: ActionHost) => Promise<ActionResult>) | null
 
   beforeEach(async () => {
-    const mockWorkspaceManager = verifyOnlyWorkspaceManager({ path: "/tmp/test-work", branch: "main", changeDir: "/tmp/test-work" })
+    const mockWorkspaceManager = verifyOnlyWorkspaceManager({ path: "/tmp/test-work", branch: "main" })
 
     const mockConnection = {} as unknown as ServerConnection
 

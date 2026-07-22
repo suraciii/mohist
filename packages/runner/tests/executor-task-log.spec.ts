@@ -44,7 +44,7 @@ function makeRegistry(handler: (inputs: JsonObject, host: ActionHost) => Promise
   })
 }
 
-function buildExecutor(registry: ActionRegistry, workspaceManager: WorkspaceManager = verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null })): WorkExecutor {
+ function buildExecutor(registry: ActionRegistry, workspaceManager: WorkspaceManager = verifyOnlyWorkspaceManager({ path: workDir, branch: null })): WorkExecutor {
   return new WorkExecutor(
     registry,
     workspaceManager,
@@ -103,7 +103,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
     const patches: Array<Record<string, unknown>> = []
     const executor = new WorkExecutor(
       createDefaultRegistry(),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+       verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       { patchRunVars: async (_workflowRunId: string, vars: Record<string, unknown>) => { patches.push(vars) } } as never,
       workDir,
     )
@@ -129,7 +129,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
   it("PassesWorkspacePreparationOutputThroughWorkspacePrepSource", async () => {
     const registry = makeRegistry(async () => ({ output: { ok: true } }))
     const workspaceManager = verifyOnlyWorkspaceManager(
-      { path: workDir, branch: null, changeDir: null },
+       { path: workDir, branch: null },
       (log) => log?.write("workspace-prep", "clone output from workspace preparation"),
     )
 

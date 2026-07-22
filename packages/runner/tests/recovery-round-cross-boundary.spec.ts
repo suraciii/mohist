@@ -52,7 +52,7 @@ function executor(): WorkExecutor {
   })
   const result = new WorkExecutor(
     registry,
-    verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+     verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
     {} as never,
     workDir,
   )
@@ -82,7 +82,7 @@ function dispatch(workId: string, recoveryRemaining: number | null, model: strin
     title: "Review",
     uses: "test/matching",
     with: JSON.stringify({ options: "${{ vars.agent }}" }),
-    variables: JSON.stringify({ vars: { agent: { model } }, workspace: { path: workDir, branch: null, changeDir: null } }),
+   variables: JSON.stringify({ vars: { agent: { model } }, workspace: { path: workDir, branch: null } }),
     recovery: JSON.stringify(recovery),
     recoveryRemaining,
   }
