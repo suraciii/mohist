@@ -66,12 +66,20 @@ internal static class MohistCliCommands
         return (project, projectId);
     }
 
-    internal static Option<string> OutputOption(string defaultValue = "json", string formats = "table, json") =>
-        new("--output", "-o")
+    internal static Option<string?> OutputOption(string defaultValue = "table", string formats = "table, json") =>
+        CreateOutputOption(defaultValue);
+
+    private static Option<string?> CreateOutputOption(string defaultValue)
+    {
+        var option = new Option<string?>("--json")
         {
-            Description = $"Output format ({formats})",
+            Description = "Return selected fields, or list available fields when no value is supplied",
             DefaultValueFactory = _ => defaultValue,
+            Arity = ArgumentArity.ZeroOrOne,
         };
+        option.Validators.Add(result => OutputOptionState.Explicit = !result.Implicit);
+        return option;
+    }
 
     internal static Option<string?> JsonSelectionOption() =>
         new("--json")
@@ -82,6 +90,17 @@ internal static class MohistCliCommands
 
     internal const string NoActiveProjectMessage =
         "Run 'mo project use <name-or-id>' or pass --project <name-or-id>";
+
+    internal static class OutputOptionState
+    {
+        private static readonly AsyncLocal<bool> ExplicitValue = new();
+
+        public static bool Explicit
+        {
+            get => ExplicitValue.Value;
+            set => ExplicitValue.Value = value;
+        }
+    }
 
     private const string ProjectRefOptionDescription = "Project name or id";
 
@@ -140,6 +159,7 @@ internal static class MohistCliCommands
 
     internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null)
     {
+        OutputOptionState.Explicit = false;
         environment ??= SystemEnvironmentVariableProvider.Instance;
         getUserHome ??= fileSystem is RealFileSystem
             ? null

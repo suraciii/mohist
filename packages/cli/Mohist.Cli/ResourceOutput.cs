@@ -13,6 +13,54 @@ internal sealed record ResourceDescriptor(
     ResourceCardinality Cardinality,
     IReadOnlyList<string> Fields);
 
+internal static class ResourceOutputCatalog
+{
+    private static readonly IReadOnlyList<string> CommonFields =
+        ["id", "number", "name", "title", "description", "status", "state", "stage", "priority", "labels", "createdAt", "updatedAt"];
+
+    public static ResourceDescriptor For(string? tableShape)
+    {
+        if (!Enum.TryParse<MohistCliApi.TableShape>(tableShape, ignoreCase: false, out var shape))
+            return new(ResourceCardinality.Single, CommonFields);
+
+        var cardinality = shape switch
+        {
+            MohistCliApi.TableShape.ProjectList or
+            MohistCliApi.TableShape.IssueList or
+            MohistCliApi.TableShape.RepoList or
+            MohistCliApi.TableShape.FeedbackList or
+            MohistCliApi.TableShape.AgentList or
+            MohistCliApi.TableShape.EpicList or
+            MohistCliApi.TableShape.Sessions or
+            MohistCliApi.TableShape.RunnerList or
+            MohistCliApi.TableShape.WorkflowRunEvents or
+            MohistCliApi.TableShape.WorkflowRunVariables or
+            MohistCliApi.TableShape.WorkflowVariables or
+            MohistCliApi.TableShape.ProjectTemplateList or
+            MohistCliApi.TableShape.IssueTemplateList or
+            MohistCliApi.TableShape.RoutingRuleList or
+            MohistCliApi.TableShape.DeadLetterList or
+            MohistCliApi.TableShape.OpencodeModels => ResourceCardinality.Collection,
+            _ => ResourceCardinality.Single,
+        };
+
+        var fields = shape switch
+        {
+            MohistCliApi.TableShape.WorkflowRunEvents => ["id", "type", "source", "subject", "time", "data"],
+            MohistCliApi.TableShape.WorkflowVariables => ["vars", "stages"],
+            MohistCliApi.TableShape.WorkflowProfile => ["id", "displayName", "description", "enabled", "defaultTemplate", "variables", "prompts"],
+            MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "name", "target", "priority", "enabled", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.DeadLetterList or MohistCliApi.TableShape.DeadLetterRedelivery => ["id", "eventId", "handler", "attempts", "status", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.OpencodeModels => ["id", "name", "provider"],
+            MohistCliApi.TableShape.RunnerShow => ["id", "kind", "hostname", "scope", "capabilities", "coderModels", "capacity", "status", "connectionState", "lastHeartbeatAt"],
+            MohistCliApi.TableShape.SystemInfo => ["running", "source", "install", "update", "services", "paths"],
+            _ => CommonFields,
+        };
+
+        return new(cardinality, fields);
+    }
+}
+
 internal enum JsonSelectionKind
 {
     None,

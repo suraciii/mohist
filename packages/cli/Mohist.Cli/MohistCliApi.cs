@@ -229,6 +229,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintPutWithOutputAsync(string path, object body, string mode, string? tableShape = null)
     {
+        var localExit = HandleLocalJsonSelection(mode, tableShape);
+        if (localExit is not null)
+            return localExit.Value;
         using var response = await SendAsync(HttpMethod.Put, path, body);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
@@ -335,6 +338,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintRunnerListAsync(string projectId, RunnerScopeFilter scope, string mode, bool colorEnabled)
     {
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.RunnerList));
+        if (localExit is not null)
+            return localExit.Value;
         if (string.IsNullOrWhiteSpace(projectId))
         {
             _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
@@ -377,11 +383,8 @@ internal sealed class MohistCliApi
             filtered.Add(obj.DeepClone());
         }
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            _out.WriteLine(filtered.ToJsonString(JsonOptions));
-            return 0;
-        }
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+            return await WriteSelectedDataAsync(filtered, mode, nameof(TableShape.RunnerList));
 
         if (filtered.Count == 0)
         {
@@ -398,6 +401,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintRunnerShowAsync(string projectId, string runnerIdEncoded, string mode)
     {
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.RunnerShow));
+        if (localExit is not null)
+            return localExit.Value;
         if (string.IsNullOrWhiteSpace(projectId))
         {
             _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
@@ -433,11 +439,8 @@ internal sealed class MohistCliApi
             return 1;
         }
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            _out.WriteLine(runner.ToJsonString(JsonOptions));
-            return 0;
-        }
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+            return await WriteSelectedDataAsync(runner, mode, nameof(TableShape.RunnerShow));
 
         RenderRunnerShow(runner);
         return 0;
@@ -445,6 +448,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintRunnerStatusAsync(string projectId, string mode)
     {
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.RunnerList));
+        if (localExit is not null)
+            return localExit.Value;
         if (string.IsNullOrWhiteSpace(projectId))
         {
             _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
@@ -475,11 +481,8 @@ internal sealed class MohistCliApi
 
         var runners = data["runners"] as JsonArray ?? new JsonArray();
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            _out.WriteLine(data.ToJsonString(JsonOptions));
-            return 0;
-        }
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+            return await WriteSelectedDataAsync(runners, mode, nameof(TableShape.RunnerList));
 
         if (runners.Count == 0)
         {
@@ -568,6 +571,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintOpencodeModelsAsync(string projectId, string mode)
     {
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.OpencodeModels));
+        if (localExit is not null)
+            return localExit.Value;
         if (string.IsNullOrWhiteSpace(projectId))
         {
             _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
@@ -596,13 +602,9 @@ internal sealed class MohistCliApi
             return 1;
         }
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            _out.WriteLine(data.ToJsonString(JsonOptions));
-            return 0;
-        }
-
         var models = data["models"] as JsonArray ?? new JsonArray();
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+            return await WriteSelectedDataAsync(models, mode, nameof(TableShape.OpencodeModels));
         foreach (var item in models)
         {
             var id = item?.GetValue<string>();
@@ -614,6 +616,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintSystemInfoAsync(string mode)
     {
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.SystemInfo));
+        if (localExit is not null)
+            return localExit.Value;
         HttpResponseMessage response;
         try
         {
@@ -643,11 +648,8 @@ internal sealed class MohistCliApi
 
         var data = envelope.Data;
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            _out.WriteLine(data is null ? "null" : data.ToJsonString(JsonOptions));
-            return 0;
-        }
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+            return await WriteSelectedDataAsync(data, mode, nameof(TableShape.SystemInfo));
 
         if (data is JsonObject obj)
         {
@@ -806,14 +808,20 @@ internal sealed class MohistCliApi
 
     public static OutputModeResult ValidateOutputMode(string? mode)
     {
-        if (string.IsNullOrWhiteSpace(mode) || string.Equals(mode, "json", StringComparison.Ordinal))
-            return new OutputModeResult.Valid("json");
-
-        if (string.Equals(mode, "table", StringComparison.Ordinal))
+        if (string.Equals(mode, "table", StringComparison.Ordinal)
+            && !MohistCliCommands.OutputOptionState.Explicit)
             return new OutputModeResult.Valid("table");
 
-        return new OutputModeResult.Invalid(
-            $"--output must be 'table' or 'json' (got '{mode}')");
+        if (string.Equals(mode, "table", StringComparison.Ordinal))
+            return new OutputModeResult.Valid("discover");
+
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+            return new OutputModeResult.Valid("discover");
+
+        if (!string.IsNullOrWhiteSpace(mode))
+            return new OutputModeResult.Valid($"json:{mode}");
+
+        return new OutputModeResult.Valid("table");
     }
 
     public (string Mode, int Exit) ResolveOutputMode(string? output)
@@ -868,6 +876,9 @@ internal sealed class MohistCliApi
         string? tableShape = null,
         IReadOnlyDictionary<string, string>? headers = null)
     {
+        var localExit = HandleLocalJsonSelection(mode, tableShape);
+        if (localExit is not null)
+            return localExit.Value;
         using var response = await SendAsync(HttpMethod.Get, path, body: null, headers: headers);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
@@ -880,18 +891,27 @@ internal sealed class MohistCliApi
         bool rawJson = false,
         IReadOnlyDictionary<string, string>? headers = null)
     {
+        var localExit = HandleLocalJsonSelection(mode, tableShape);
+        if (localExit is not null)
+            return localExit.Value;
         using var response = await SendAsync(HttpMethod.Post, path, body, headers: headers);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape, rawJson: rawJson);
     }
 
     public async Task<int> PrintPatchWithOutputAsync(string path, object body, string mode, string? tableShape = null)
     {
+        var localExit = HandleLocalJsonSelection(mode, tableShape);
+        if (localExit is not null)
+            return localExit.Value;
         using var response = await SendAsync(HttpMethod.Patch, path, body);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
 
     public async Task<int> PrintDeleteWithOutputAsync(string path, string mode, string? tableShape = null, JsonNode? successDataFallback = null)
     {
+        var localExit = HandleLocalJsonSelection(mode, tableShape);
+        if (localExit is not null)
+            return localExit.Value;
         using var response = await SendAsync(HttpMethod.Delete, path, body: null);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape, successDataFallback);
     }
@@ -911,8 +931,66 @@ internal sealed class MohistCliApi
             return await PrintResponseAsync(response);
 
         var data = await ReadSuccessDataAsync(response) ?? successDataFallback?.DeepClone();
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+        {
+            var descriptor = ResourceOutputCatalog.For(tableShape);
+            var selection = JsonSelection.Parse(descriptor, true, mode[5..]);
+            if (selection.Kind == JsonSelectionKind.Invalid)
+                return WriteJsonSelectionResult(descriptor, selection);
+            try
+            {
+                return await new CliResultWriter(Invocation).WriteSuccessAsync(
+                    selection.Project(data, descriptor.Cardinality)).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return await new CliResultWriter(Invocation).WriteFailureAsync(
+                    new CliFailure("invalid-response", ex.Message, null)).ConfigureAwait(false);
+            }
+        }
         var shape = ParseTableShape(tableShape);
         return await RenderTableAsync(data, shape);
+    }
+
+    internal int? HandleLocalJsonSelection(string mode, string? tableShape)
+    {
+        if (mode == "table")
+            return null;
+
+        var descriptor = ResourceOutputCatalog.For(tableShape);
+        if (mode == "discover")
+            return WriteJsonSelectionResult(descriptor, new JsonSelection(JsonSelectionKind.Discovery, descriptor.Fields, null));
+
+        if (!mode.StartsWith("json:", StringComparison.Ordinal))
+            return null;
+
+        var selection = JsonSelection.Parse(descriptor, true, mode[5..]);
+        return selection.Kind == JsonSelectionKind.Invalid
+            ? WriteJsonSelectionResult(descriptor, selection)
+            : null;
+    }
+
+    internal async Task<int> WriteSelectedDataAsync(JsonNode? data, string mode, string? tableShape)
+    {
+        if (mode == "discover")
+            return WriteJsonSelectionResult(ResourceOutputCatalog.For(tableShape), new JsonSelection(JsonSelectionKind.Discovery, ResourceOutputCatalog.For(tableShape).Fields, null));
+        if (!mode.StartsWith("json:", StringComparison.Ordinal))
+            return await RenderTableAsync(data, ParseTableShape(tableShape)).ConfigureAwait(false);
+
+        var descriptor = ResourceOutputCatalog.For(tableShape);
+        var selection = JsonSelection.Parse(descriptor, true, mode[5..]);
+        if (selection.Kind == JsonSelectionKind.Invalid)
+            return WriteJsonSelectionResult(descriptor, selection);
+        try
+        {
+            return await new CliResultWriter(Invocation).WriteSuccessAsync(
+                selection.Project(data, descriptor.Cardinality)).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await new CliResultWriter(Invocation).WriteFailureAsync(
+                new CliFailure("invalid-response", ex.Message, null)).ConfigureAwait(false);
+        }
     }
 
     public enum TableShape
@@ -937,6 +1015,9 @@ internal sealed class MohistCliApi
         IssueTemplateList,
         IssueTemplateShow,
         RunnerList,
+        RunnerShow,
+        OpencodeModels,
+        SystemInfo,
         WorkflowProfile,
         WorkflowVariables,
         WorkflowProfilePrompt,

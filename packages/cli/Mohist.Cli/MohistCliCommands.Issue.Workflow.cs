@@ -25,10 +25,12 @@ internal static partial class IssueCommands
 
             async Task<int> StatusAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
+                var localExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.WorkflowStatus));
+                if (localExit is not null) return localExit.Value;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow/status"),
                     mode,
@@ -92,10 +94,12 @@ internal static partial class IssueCommands
 
             async Task<int> GetAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
+                var localExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.WorkflowProfile));
+                if (localExit is not null) return localExit.Value;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
 
                 var profilePath = ProjectIssuesPath(
                     resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow-profile");
@@ -113,13 +117,7 @@ internal static partial class IssueCommands
         if (dataNode is null)
             return 1;
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            api.Output.WriteLine(dataNode.ToJsonString(MohistCliApi.JsonOutputOptions));
-            return 0;
-        }
-
-        return await api.RenderTableAsync(dataNode, MohistCliApi.TableShape.WorkflowProfile);
+        return await api.WriteSelectedDataAsync(dataNode, mode, nameof(MohistCliApi.TableShape.WorkflowProfile));
     }
 
     private static Command BuildWorkflowConfigClear(MohistCliApi api)
@@ -163,11 +161,12 @@ internal static partial class IssueCommands
                     return 1;
                 }
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
-
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
+                var localExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.WorkflowVariables));
+                if (localExit is not null) return localExit.Value;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
 
                 var issuePath = ProjectIssuesPath(
                     resolvedProjectId,
