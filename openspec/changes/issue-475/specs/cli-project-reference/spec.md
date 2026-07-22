@@ -36,9 +36,19 @@ For a Project-scoped command, the CLI SHALL resolve the Project from an explicit
 - **AND** exactly one locally selected Project exists
 - **THEN** the command SHALL target that locally selected Project
 
-### Requirement: Unresolved and ambiguous references fail locally with recovery guidance
+### Requirement: Project selection persists a directory context
 
-The CLI SHALL fail before issuing a domain request when no Project can be resolved or a selected source cannot identify exactly one Project. The diagnostic SHALL identify the failed reference source and include one executable next action that selects or explicitly supplies a Project.
+After `mo project use <name-or-id>` resolves a Project, the CLI SHALL write that canonical Project id to both the user-home selected-Project record and `<current-directory>/.mohist/cli-state.json`. The nearest directory record is the current-directory Project context used by Project-scoped commands.
+
+#### Scenario: Selecting a Project binds the current directory
+
+- **WHEN** an operator runs `mo project use <name-or-id>` from directory D and the Project resolves successfully
+- **THEN** the CLI SHALL write the canonical Project id to D's `.mohist/cli-state.json`
+- **AND** SHALL update the user-home selected-Project record
+
+### Requirement: Unresolved and invalid context fails locally with recovery guidance
+
+The CLI SHALL fail before issuing a domain request when no Project can be resolved or a current-directory context record is malformed, blank, or conflicts with the required single-id shape. The diagnostic SHALL identify the failed reference source and include one executable next action that selects or explicitly supplies a Project.
 
 #### Scenario: No Project can be resolved
 
@@ -47,10 +57,10 @@ The CLI SHALL fail before issuing a domain request when no Project can be resolv
 - **AND** SHALL exit with code `1`
 - **AND** SHALL NOT issue a domain request
 
-#### Scenario: A name resolves ambiguously
+#### Scenario: A directory context record is invalid
 
-- **WHEN** a Project reference or local Project source identifies more than one Project
-- **THEN** the CLI SHALL write a diagnostic to stderr identifying the ambiguity and one executable disambiguating action
+- **WHEN** the nearest current-directory context record does not contain exactly one non-blank `activeProjectId`
+- **THEN** the CLI SHALL write a diagnostic to stderr identifying the invalid context and one executable corrective action
 - **AND** SHALL exit with code `1`
 - **AND** SHALL NOT issue the requested domain command
 

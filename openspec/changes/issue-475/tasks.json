@@ -26,13 +26,14 @@
       "id": "T-002",
       "title": "Migrate Project-scoped commands to one resolver",
       "spec": "specs/cli-project-reference/spec.md#project-references-resolve-in-a-deterministic-local-order",
-      "description": "Implement ProjectReferenceResolver and migrate every Project-scoped command to the sole --project <name-or-id> option. Resolve explicit input, nearest current-directory context, and the locally selected Project in order, with shared actionable local failures for missing or ambiguous context.",
+      "description": "Implement ProjectReferenceResolver and migrate every Project-scoped command to the sole --project <name-or-id> option. Resolve explicit input, nearest current-directory context, and the locally selected Project in order; make mo project use write both context records; and report missing or invalid context locally.",
       "acceptanceCriteria": [
         "Every Project-scoped command advertises only --project <name-or-id>; --project-id is rejected as a local usage error with exit code 2 and no request.",
-        "Explicit Project input wins over current-directory context, which wins over user-home selected Project state; malformed or conflicting context is not guessed.",
-        "Missing or ambiguous Project selection writes one actionable stderr diagnostic, exits 1, and never invokes the requested domain endpoint.",
+        "Successful mo project use writes the canonical Project id to both <current-directory>/.mohist/cli-state.json and the user-home selected-Project record.",
+        "Explicit Project input wins over current-directory context, which wins over user-home selected Project state; a malformed nearest context record is not guessed.",
+        "Missing or invalid Project context writes one actionable stderr diagnostic, exits 1, and never invokes the requested domain endpoint.",
         "Help and local validation work without a Project, Server, or Runner.",
-        "CLI tests cover option-tree completeness, all resolution precedence branches, no-request local failures, and help behavior using FakeFileSystem and RecordingHttpHandler; npm test -w packages/cli passes."
+        "CLI tests cover option-tree completeness, Project-use persistence to both locations, all resolution precedence branches, no-request local failures, and help behavior using FakeFileSystem and RecordingHttpHandler; npm test -w packages/cli passes."
       ],
       "priority": 2,
       "mode": "AFK",
@@ -40,7 +41,7 @@
       "output": "A single ProjectReferenceResolver and migrated Project-scoped command registrations in packages/cli/Mohist.Cli.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Use the existing cli-state record for the selected Project and the nearest directory context; do not list Projects from the Server before a domain command."
+      "notes": "Project names are globally unique in the Server model. Use the existing cli-state shape for both records; do not add a client-side Project catalog or list Projects before a domain command."
     },
     {
       "id": "T-003",

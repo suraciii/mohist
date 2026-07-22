@@ -29,7 +29,7 @@ Stakeholders are agents and scripts that require bounded, parseable output; inte
 Add a small set of CLI-owned types behind command registration:
 
 - `CliInvocation`: stdout, stderr, stdin, interactivity state, environment, cancellation token, and the normalized exit result.
-- `ProjectReferenceResolver`: produces `Resolved`, `Missing`, or `Ambiguous` before a domain handler runs.
+- `ProjectReferenceResolver`: produces `Resolved`, `Missing`, or `InvalidContext` before a domain handler runs.
 - `CliResponseReader`: performs a request once, unwraps the Server envelope, and returns either a success `JsonNode` or a structured `CliFailure`.
 - `CliResultWriter`: owns human result rendering, JSON/NDJSON writing, diagnostics, and the four exit-code classes.
 
@@ -43,7 +43,7 @@ Alternative considered: add a generic middleware pipeline around every `System.C
 
 Replace the tuple returned by `ProjectRefOption()` with one `--project` option and a `ProjectReferenceResolver`. It checks, in order: the explicit option; the nearest current-directory Project context; then the existing locally selected Project state. The resolver returns a tagged result rather than writing errors itself, allowing the common writer to produce the one required actionable diagnostic.
 
-The current-directory reader uses `IFileSystem.CurrentDirectory` and walks toward the filesystem root for the nearest `.mohist/cli-state.json` containing `activeProjectId`; the user-home state at `~/.mohist/cli-state.json` remains the final selected-Project fallback. Invalid, conflicting, or multiply-applicable context data is reported as ambiguous rather than guessed. `mo project use` continues to set the user-home selection; workspace tooling may write the same small context record when it establishes a directory-bound Project.
+The current-directory reader uses `IFileSystem.CurrentDirectory` and walks toward the filesystem root for the nearest `.mohist/cli-state.json` containing exactly one non-blank `activeProjectId`; the user-home state at `~/.mohist/cli-state.json` remains the final selected-Project fallback. `mo project use` is the sole writer for this CLI-owned context: after the Server resolves its argument to a canonical id, it writes the same small record to both the current directory and user-home locations. An invalid nearest record fails locally rather than falling through silently. Project names are globally unique in the Server model, so an explicit name is passed to the existing endpoint resolver and cannot be locally ambiguous.
 
 Alternative considered: resolve names by listing Projects from the Server before every command. This violates offline local validation and introduces a request before commands that only need help or field discovery. The explicit reference remains opaque until the existing endpoint resolves it; only local source selection is performed before a domain request.
 
@@ -82,7 +82,7 @@ Alternative considered: replace the command tree with a generated DSL or reflect
 
 - [Client-side projection still transfers full Server payloads] -> Keep field descriptors and projection in the CLI for this change; measure payload pressure before proposing an API-level `fields` protocol.
 - [Migrating many command partials can leave one legacy path behind] -> Add command-tree structural guards and migrate by command family with stdout, stderr, exit-code, and no-request-on-local-error specs.
-- [Current-directory context can select the wrong workspace if markers are stale] -> Use the nearest marker only, validate its single `activeProjectId`, prefer explicit `--project`, and report malformed/conflicting context rather than fall through silently.
+- [Current-directory context can select the wrong workspace if markers are stale] -> `mo project use` writes the marker, resolution uses the nearest marker only, explicit `--project` wins, and malformed markers fail locally rather than falling through silently.
 - [Server failures are not uniformly detailed today] -> Preserve existing `code` and `details`, synthesize only stable transport/HTTP codes when absent, and add structured details only where a command needs them to satisfy its diagnostic contract.
 - [A write may succeed after the client loses the response] -> Treat every post-send transport exception as outcome unknown, return exit `1`, and never retry automatically.
 - [Redirecting legacy progress text can affect human scripts] -> This is an intentional contract change; stage command-family migration with documented stdout/stderr assertions and retain no compatibility alias.
@@ -91,7 +91,7 @@ Alternative considered: replace the command tree with a generated DSL or reflect
 
 1. Add `CliInvocation`, `ProjectReferenceResolver`, `CliResponseReader`, `CliResultWriter`, `CliHintResolver`, terminal-state abstraction, and transport-attempt abstraction with unit coverage for all outcome classes.
 2. Add `ResourceDescriptor` and `JsonSelection`; migrate representative single, collection, stream, and mutation commands first to lock field discovery, projection, NDJSON, and stdout/stderr behavior.
-3. Migrate every Project-scoped and resource-returning leaf command family. Remove `ProjectIdOption`, dual-option reads, output-mode registration, raw envelope rendering, and local send-and-print duplicates as each family moves.
+3. Migrate every Project-scoped and resource-returning leaf command family. Make `mo project use` write both user-home and current-directory records; remove `ProjectIdOption`, dual-option reads, output-mode registration, raw envelope rendering, and local send-and-print duplicates as each family moves.
 4. Route all parse failures and cancellation through the root contract. Move prompt text to stderr and gate every prompt through terminal interactivity and `MOHIST_PROMPT_DISABLED` before any stdin read or state modification.
 5. Add structural and behavior tests, run the CLI test suite, and release the breaking CLI surface in one version. Update bundled skill guidance and user-facing command references in the same release.
 
@@ -99,5 +99,4 @@ Rollback is a package-version rollback. No database migration, persisted-model m
 
 ## Open Questions
 
-- The directory context record uses the existing `.mohist/cli-state.json` shape in this design. Confirm whether workspace creation/bootstrap already has the correct owner to write it, or whether a separate explicit directory-selection command is required.
-- Confirm the exact descriptor field sets for each resource leaf during implementation. The mechanism is fixed here; individual field names must remain close to the current DTOs and command purpose rather than become a universal resource schema.
+None. Each resource descriptor's field list is chosen with the command migration from its existing response DTO and command purpose; it does not require a shared resource schema.
