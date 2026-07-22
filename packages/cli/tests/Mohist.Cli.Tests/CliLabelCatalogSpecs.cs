@@ -63,7 +63,7 @@ public class CliLabelCatalogSpecs
     }
 
     [Fact]
-    public async Task LabelList_Json_ContainsFullData()
+    public async Task LabelList_SelectedJson_ContainsRequestedData()
     {
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         SetCatalogListResponse(handler,
@@ -71,18 +71,16 @@ public class CliLabelCatalogSpecs
             new { key = "module", description = "Classifies subsystem", origin = "User", supportedValues = new[] { "auth", "ui" } });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "list"], output, error, fs, executor);
+            http, ["label", "list", "--json", "key,description,supportedValues"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString().Trim();
         Assert.Contains("\"key\"", text);
         Assert.Contains("\"description\"", text);
-        Assert.Contains("\"origin\"", text);
         Assert.Contains("\"supportedValues\"", text);
         Assert.Contains("\"refactor\"", text);
         Assert.Contains("\"module\"", text);
-        Assert.Contains("\"System\"", text);
-        Assert.Contains("\"User\"", text);
+        Assert.DoesNotContain("\"origin\"", text);
     }
 
     [Fact]

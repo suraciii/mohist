@@ -41,11 +41,11 @@ public class CliRepositoryCommandSpecs
     public static IEnumerable<object[]> MutationOutputCases()
     {
         yield return [new[] { "repo", "update", "origin", "--base-branch", "release", }, false];
-        yield return [new[] { "repo", "update", "origin", "--base-branch", "release", "--json", "id" }, true];
+        yield return [new[] { "repo", "update", "origin", "--base-branch", "release", "--json", "name,isDefault" }, true];
         yield return [new[] { "repo", "set-default", "origin", }, false];
-        yield return [new[] { "repo", "set-default", "origin", "--json", "id" }, true];
+        yield return [new[] { "repo", "set-default", "origin", "--json", "name,isDefault" }, true];
         yield return [new[] { "repo", "delete", "origin", }, false];
-        yield return [new[] { "repo", "delete", "origin", "--json", "id" }, true];
+        yield return [new[] { "repo", "delete", "origin", "--json", "name,isDefault" }, true];
     }
 
     private static (RecordingHttpHandler handler, HttpClient http, StringWriter output, StringWriter error, FakeFileSystem fs, FakeCommandExecutor executor)
@@ -625,7 +625,7 @@ public class CliRepositoryCommandSpecs
     }
 
     [Fact]
-    public async Task RepoList_JsonMode_PrintsRawServerPayload()
+    public async Task RepoList_SelectedJson_ProjectsRequestedFields()
     {
         var (_, http, output, error, fs, executor) = SetupEnv(req =>
         {
@@ -645,7 +645,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "list", "--json", "id"],
+            ["repo", "list", "--json", "name,gitUrl,baseBranch,isDefault"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -688,7 +688,7 @@ public class CliRepositoryCommandSpecs
     }
 
     [Fact]
-    public async Task RepoAdd_JsonMode_SendsPostAndEmitsRawServerPayload()
+    public async Task RepoAdd_SelectedJson_SendsPostAndEmitsRepositoryCollection()
     {
         var (handler, http, output, error, fs, executor) = SetupEnv(req =>
         {
@@ -697,7 +697,13 @@ public class CliRepositoryCommandSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new { name = "origin", gitUrl = "git@example.com:repo.git" },
+                    data = new
+                    {
+                        repositories = new[]
+                        {
+                            new { name = "origin", gitUrl = "git@example.com:repo.git", baseBranch = "main", isDefault = true },
+                        },
+                    },
                 });
             }
             return null!;
@@ -705,13 +711,15 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--json", "id"],
+            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--json", "name,gitUrl"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Single(handler.Requests, r => r.Method == HttpMethod.Post);
         var stdout = output.ToString();
-        Assert.Contains("\"name\": \"origin\"", stdout, StringComparison.Ordinal);
+        var repositories = JsonNode.Parse(stdout) as JsonArray;
+        Assert.NotNull(repositories);
+        Assert.Equal("origin", repositories![0]!["name"]?.GetValue<string>());
         Assert.DoesNotContain("\"success\"", stdout, StringComparison.Ordinal);
     }
 
@@ -740,7 +748,10 @@ public class CliRepositoryCommandSpecs
         var stdout = output.ToString();
         if (jsonOutput)
         {
-            Assert.Contains("\"repositories\"", stdout, StringComparison.Ordinal);
+            var repositories = JsonNode.Parse(stdout) as JsonArray;
+            Assert.NotNull(repositories);
+            Assert.Equal(2, repositories!.Count);
+            Assert.Equal("origin", repositories[1]!["name"]?.GetValue<string>());
             Assert.DoesNotContain("\"success\"", stdout, StringComparison.Ordinal);
         }
         else
@@ -752,18 +763,17 @@ public class CliRepositoryCommandSpecs
     }
 
     [Fact]
-    public async Task RepoAdd_InvalidOutput_FailsWithoutDispatch()
+    public async Task RepoAdd_LegacyOutputOption_FailsWithoutDispatch()
     {
         var (handler, http, output, error, fs, executor) = SetupEnv();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "-o", "yaml"],
+            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--output", "json"],
             output, error, fs, executor);
 
-        Assert.NotEqual(0, exitCode);
-        Assert.Contains("table", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("json", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 }

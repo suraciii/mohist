@@ -26,7 +26,7 @@ public class IssueCliFeedbackTests
 
         Assert.Contains("--stage", help);
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project", help);
+        Assert.DoesNotContain("--project-id", help);
         Assert.Contains("--json", help);
     }
 
@@ -177,7 +177,7 @@ public class IssueCliFeedbackTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "list", "42", "--project", "mohist-local", "--json", "id"],
+            ["issue", "feedback", "list", "42", "--project", "mohist-local", "--json", "id,issueNumber,stage,status"],
             output,
             error,
             new FakeFileSystem(),
@@ -250,7 +250,7 @@ public class IssueCliFeedbackTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "show", "42", "--feedback", "fb_123", "--project", "mohist-local", "--json", "id"],
+            ["issue", "feedback", "show", "42", "--feedback", "fb_123", "--project", "mohist-local", "--json", "id,issueNumber,workflowRunId,stage,status,body"],
             output,
             error,
             new FakeFileSystem(),

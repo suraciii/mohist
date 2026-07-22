@@ -79,7 +79,7 @@ public class CliOpencodeModelsCommandSpecs
     }
 
     [Fact]
-    public async Task OpencodeModels_Json_PreservesRawPayloadIncludingModelVariants()
+    public async Task OpencodeModels_SelectedJson_EmitsModelResources()
     {
         var variants = new
         {
@@ -100,20 +100,11 @@ public class CliOpencodeModelsCommandSpecs
         var request = handler.Requests.Single();
         Assert.Equal($"/api/projects/{ActiveProjectId}/opencode/models", request.RequestUri?.PathAndQuery);
 
-        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonObject;
+        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonArray;
         Assert.NotNull(parsed);
-        var models = parsed!["models"] as JsonArray;
-        Assert.NotNull(models);
-        Assert.Equal(new[] { "anthropic/claude-sonnet", "openai/gpt-5" }, models!.Select(m => m!.GetValue<string>()).ToArray());
-
-        var modelVariants = parsed["modelVariants"] as JsonObject;
-        Assert.NotNull(modelVariants);
-        var anthropicVariants = modelVariants!["anthropic_claude_sonnet"] as JsonArray;
-        Assert.NotNull(anthropicVariants);
-        Assert.Equal(new[] { "default", "thinking" }, anthropicVariants!.Select(v => v!.GetValue<string>()).ToArray());
-        var openaiVariants = modelVariants["openai_gpt_5"] as JsonArray;
-        Assert.NotNull(openaiVariants);
-        Assert.Equal(new[] { "default" }, openaiVariants!.Select(v => v!.GetValue<string>()).ToArray());
+        Assert.Equal(
+            new[] { "anthropic/claude-sonnet", "openai/gpt-5" },
+            parsed!.Select(model => model!["id"]!.GetValue<string>()).ToArray());
     }
 
     [Fact]

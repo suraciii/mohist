@@ -115,7 +115,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "--json", "id"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42", "--json", "issueNumber,profileId"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -151,17 +151,16 @@ public class CliIssueWorkflowConfigSpecs
     }
 
     [Fact]
-    public async Task ConfigGet_InvalidOutputMode_PrintsErrorAndExitsOne()
+    public async Task ConfigGet_LegacyOutputOption_IsRejectedLocally()
     {
         var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "-o", "yaml"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42", "--output", "json"], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("table", error.ToString());
-        Assert.Contains("json", error.ToString());
+        Assert.Contains("--output", error.ToString());
     }
 
     [Fact]

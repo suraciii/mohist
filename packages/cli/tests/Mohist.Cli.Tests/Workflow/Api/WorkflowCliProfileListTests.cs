@@ -104,7 +104,9 @@ public class WorkflowCliProfileListTests
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, stderr) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
+        var (exitCode, stdout, stderr) = await InvokeProfileAsync(
+            http, "project", "workflow", "profile", "list", "--project", DefaultProjectId,
+            "--json", "id,name,description,isDefault");
 
         Assert.True(exitCode == 0, $"exit={exitCode} stdout:\n{stdout}\n\nstderr:\n{stderr}");
         Assert.Equal(string.Empty, stderr);
@@ -139,7 +141,9 @@ public class WorkflowCliProfileListTests
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
+        var (exitCode, stdout, _) = await InvokeProfileAsync(
+            http, "project", "workflow", "profile", "list", "--project", DefaultProjectId,
+            "--json", "description");
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var parsed = JsonNode.Parse(stdout) as JsonArray;
@@ -164,7 +168,9 @@ public class WorkflowCliProfileListTests
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
+        var (exitCode, stdout, _) = await InvokeProfileAsync(
+            http, "project", "workflow", "profile", "list", "--project", DefaultProjectId,
+            "--json", "id,isDefault");
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var parsed = JsonNode.Parse(stdout) as JsonArray;
@@ -190,7 +196,9 @@ public class WorkflowCliProfileListTests
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
+        var (exitCode, stdout, _) = await InvokeProfileAsync(
+            http, "project", "workflow", "profile", "list", "--project", DefaultProjectId,
+            "--json", "id,name,description,isDefault");
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var trimmed = stdout.Trim();
@@ -246,22 +254,21 @@ public class WorkflowCliProfileListTests
     }
 
     [Fact]
-    public async Task ProfileList_UnexpectedResponseShape_PassesRawDataThrough()
+    public async Task ProfileList_SelectedJson_RejectsUnexpectedResponseShape()
     {
-        // --output json does raw passthrough of the API response data field;
-        // shape validation is not performed for consistency with other commands.
         const string json = """
             { "success": true, "data": { "not": "an array" } }
             """;
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
+        var (exitCode, stdout, stderr) = await InvokeProfileAsync(
+            http, "project", "workflow", "profile", "list", "--project", DefaultProjectId,
+            "--json", "id");
 
-        Assert.Equal(0, exitCode);
-        var parsed = JsonNode.Parse(stdout.Trim()) as JsonObject;
-        Assert.NotNull(parsed);
-        Assert.Equal("an array", parsed!["not"]!.GetValue<string>());
+        Assert.Equal(1, exitCode);
+        Assert.Empty(stdout);
+        Assert.Contains("invalid-response", stderr);
     }
 
     [Fact]

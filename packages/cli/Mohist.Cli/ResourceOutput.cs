@@ -26,6 +26,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.IssueList or
             MohistCliApi.TableShape.RepoList or
             MohistCliApi.TableShape.FeedbackList or
+            MohistCliApi.TableShape.LabelList or
             MohistCliApi.TableShape.AgentList or
             MohistCliApi.TableShape.EpicList or
             MohistCliApi.TableShape.Sessions or
@@ -48,25 +49,45 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.ProjectList => ["id", "name", "repository", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.ProjectShow => ["id", "name", "repository", "workflowProfile", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.RepoList => ["name", "gitUrl", "baseBranch", "isDefault", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.LabelList => ["key", "description", "supportedValues", "source"],
+            MohistCliApi.TableShape.FeedbackList or MohistCliApi.TableShape.FeedbackShow =>
+                ["id", "issueNumber", "workflowRunId", "stage", "status", "body", "createdAt", "resolution", "updatedAt"],
+            MohistCliApi.TableShape.CommentShow => ["id", "issueNumber", "author", "body", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.LabelList => ["key", "description", "supportedValues"],
             MohistCliApi.TableShape.AgentList => ["id", "name", "description", "status", "archived", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.AgentShow => ["id", "name", "description", "instructions", "agentConfig", "skills", "maxConcurrentRuns", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.AgentSessionList or MohistCliApi.TableShape.Sessions => ["id", "state", "status", "agentId", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.AgentSessionShow or MohistCliApi.TableShape.AgentSessionTranscript => ["id", "state", "status", "transcript", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.IssueTemplateList => ["name", "description", "source"],
-            MohistCliApi.TableShape.IssueTemplateShow => ["name", "description", "body", "source"],
-            MohistCliApi.TableShape.ProjectTemplateList => ["id", "name", "description", "yaml", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.ProjectTemplateShow => ["id", "name", "description", "yaml", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.WorkflowRunDetail => ["id", "state", "status", "stage", "issue", "stages", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.Sessions => ["id", "sessionName", "status", "createdAt", "model"],
+            MohistCliApi.TableShape.SessionMetadata => ["id", "sessionName", "status", "model", "stage", "createdAt", "usage", "metadata"],
+            MohistCliApi.TableShape.SessionTranscriptSummary => ["turns", "partCount", "firstActivityAt", "lastActivityAt"],
+            MohistCliApi.TableShape.AgentSessionList =>
+                ["sessionId", "agentId", "agentName", "status", "createdAt", "lastActivityAt", "resolvedModel", "failureReason", "failureCategory"],
+            MohistCliApi.TableShape.AgentSessionShow =>
+                ["sessionId", "agentId", "agentName", "status", "createdAt", "lastActivityAt", "resolvedModel", "failureReason", "failureCategory", "toolCallCount", "toolErrorCount", "contextRefs", "usage"],
+            MohistCliApi.TableShape.AgentSessionTranscript => ["turns", "partCount", "firstActivityAt", "lastActivityAt"],
+            MohistCliApi.TableShape.AgentSessionLaunch => ["sessionId", "agentId", "agentName", "status"],
+            MohistCliApi.TableShape.AgentSessionFollowup => ["status"],
+            MohistCliApi.TableShape.AgentSessionCancel => ["state", "status", "reason"],
+            MohistCliApi.TableShape.SessionRecovery =>
+                ["id", "status", "contextWindowSize", "contextWindowUsed", "contextUsagePercent", "contextWindowUsedBefore", "operation", "wasCompacted"],
+            MohistCliApi.TableShape.IssueTemplateList => ["id", "name", "description", "source"],
+            MohistCliApi.TableShape.IssueTemplateShow => ["id", "name", "description", "body", "source"],
+            MohistCliApi.TableShape.ProjectTemplateList => ["projectId", "templateId", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.ProjectTemplateShow => ["projectId", "templateId", "definition", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.ProjectWorkflowProfile => ["defaultTemplateId", "variables", "prompts"],
+            MohistCliApi.TableShape.WorkflowRunDetail => ["status", "issueRef"],
+            MohistCliApi.TableShape.WorkflowApproval => ["workflowRunId", "approved"],
             MohistCliApi.TableShape.WorkflowRunEvents => ["id", "type", "source", "subject", "time", "data"],
             MohistCliApi.TableShape.WorkflowVariables => ["vars", "stages"],
-            MohistCliApi.TableShape.WorkflowProfile => ["id", "displayName", "description", "enabled", "defaultTemplate", "variables", "prompts"],
-            MohistCliApi.TableShape.WorkflowProfileList => ["id", "displayName", "description", "enabled"],
+            MohistCliApi.TableShape.WorkflowProfile =>
+                ["issueNumber", "projectId", "sourceTemplateId", "hasCustomTemplate", "yaml", "workflowRunId", "profileId", "updateMode", "templateSource", "variables", "updatedAt"],
+            MohistCliApi.TableShape.WorkflowProfileList => ["id", "name", "displayName", "description", "isDefault"],
             MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "name", "target", "priority", "enabled", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.DeadLetterList or MohistCliApi.TableShape.DeadLetterRedelivery => ["id", "eventId", "handler", "attempts", "status", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.OpencodeModels => ["id", "name", "provider"],
-            MohistCliApi.TableShape.RunnerShow => ["id", "kind", "hostname", "scope", "capabilities", "coderModels", "capacity", "status", "connectionState", "lastHeartbeatAt"],
-            MohistCliApi.TableShape.SystemInfo => ["running", "source", "install", "update", "services", "paths"],
+            MohistCliApi.TableShape.OpencodeModels => ["id"],
+            MohistCliApi.TableShape.RunnerList =>
+                ["id", "kind", "hostname", "scope", "status", "registeredAt", "lastHeartbeatAt", "connectionState", "capabilities", "coderModels", "coderModelCount", "capacity", "activeWork", "activeWorks"],
+            MohistCliApi.TableShape.RunnerShow =>
+                ["id", "kind", "hostname", "scope", "status", "registeredAt", "lastHeartbeatAt", "connectionState", "capabilities", "coderModels", "coderModelCount", "capacity", "buildGitHash", "activeWorks"],
+            MohistCliApi.TableShape.SystemInfo => ["running", "source", "install", "update", "services", "paths", "degraded", "cliVersion"],
             _ => ["id", "number", "name", "title", "description", "status", "state", "stage", "priority", "labels", "createdAt", "updatedAt"],
         };
 

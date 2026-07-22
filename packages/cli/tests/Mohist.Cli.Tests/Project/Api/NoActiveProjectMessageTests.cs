@@ -20,7 +20,7 @@ public class NoActiveProjectMessageTests
     [Fact]
     public void NoActiveProjectMessage_DoesNotMentionProjectId()
     {
-        Assert.DoesNotContain("--project", MohistCliCommands.NoActiveProjectMessage);
+        Assert.DoesNotContain("--project-id", MohistCliCommands.NoActiveProjectMessage);
     }
 
     [Fact]

@@ -604,7 +604,15 @@ internal sealed class MohistCliApi
 
         var models = data["models"] as JsonArray ?? new JsonArray();
         if (mode.StartsWith("json:", StringComparison.Ordinal))
-            return await WriteSelectedDataAsync(models, mode, nameof(TableShape.OpencodeModels));
+        {
+            var resources = new JsonArray();
+            foreach (var item in models)
+            {
+                if (item is JsonValue value && value.TryGetValue<string>(out var id))
+                    resources.Add(new JsonObject { ["id"] = id });
+            }
+            return await WriteSelectedDataAsync(resources, mode, nameof(TableShape.OpencodeModels));
+        }
         foreach (var item in models)
         {
             var id = item?.GetValue<string>();
@@ -667,21 +675,27 @@ internal sealed class MohistCliApi
 
         _err.WriteLine("Server is not running. Start with: mo server start");
 
+        var payload = new JsonObject
+        {
+            ["running"] = null,
+            ["source"] = null,
+            ["install"] = null,
+            ["update"] = null,
+            ["services"] = null,
+            ["paths"] = null,
+            ["cliVersion"] = cliVersion,
+            ["degraded"] = true,
+        };
+
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+        {
+            await WriteSelectedDataAsync(payload, mode, nameof(TableShape.SystemInfo));
+            return;
+        }
+
         if (string.Equals(mode, "json", StringComparison.Ordinal))
         {
-            var payload = new JsonObject
-            {
-                ["running"] = null,
-                ["source"] = null,
-                ["install"] = null,
-                ["update"] = null,
-                ["services"] = null,
-                ["paths"] = null,
-                ["cliVersion"] = cliVersion,
-                ["degraded"] = true,
-            };
             _out.WriteLine(payload.ToJsonString(JsonOptions));
-            await Task.CompletedTask;
             return;
         }
 
@@ -689,7 +703,6 @@ internal sealed class MohistCliApi
         _out.WriteLine();
         _out.WriteLine("CLI (local)");
         WriteKeyValue("  version", cliVersion ?? "<unknown>");
-        await Task.CompletedTask;
     }
 
     internal void RenderSystemInfo(JsonObject data)
@@ -931,6 +944,12 @@ internal sealed class MohistCliApi
             return await PrintResponseAsync(response);
 
         var data = await ReadSuccessDataAsync(response) ?? successDataFallback?.DeepClone();
+        if (string.Equals(tableShape, nameof(TableShape.RepoList), StringComparison.Ordinal)
+            && data is JsonObject project
+            && project["repositories"] is JsonArray repositories)
+        {
+            data = repositories;
+        }
         if (mode.StartsWith("json:", StringComparison.Ordinal))
         {
             var descriptor = ResourceOutputCatalog.For(tableShape);
@@ -1039,6 +1058,7 @@ internal sealed class MohistCliApi
         ProjectWorkflowProfile,
         IssueArchiveCompleted,
         WorkflowRunDetail,
+        WorkflowApproval,
         WorkflowRunVariables,
         WorkflowRunEvents,
         DeadLetterList,
@@ -1341,12 +1361,13 @@ internal sealed class MohistCliApi
     {
         if (node is null)
         {
+            var statusSuccess = response.IsSuccessStatusCode;
             return new Envelope(
                 HasBody: false,
-                Success: response.IsSuccessStatusCode,
+                Success: statusSuccess,
                 Data: null,
                 Error: response.ReasonPhrase ?? "Request failed",
-                Code: $"http-{(int)response.StatusCode}",
+                Code: statusSuccess ? null : $"http-{(int)response.StatusCode}",
                 Details: null);
         }
 

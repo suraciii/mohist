@@ -8,6 +8,37 @@ namespace Mohist.Cli.Tests;
 public sealed class CliResourceOutputSpecs
 {
     [Fact]
+    public async Task Info_BareJsonDiscoversFieldsWithoutCollectingOrRequesting()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["info", "--json"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            [
+                "cli",
+                "server",
+                "runner",
+                "project",
+                "dataDir",
+                "platformNotice",
+                "skills",
+                "gitRemote",
+                "opencodeRuntime",
+                "envVars",
+                "osRuntime",
+                "capacity",
+                "diskUsage",
+            ],
+            JsonNode.Parse(output.ToString())!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+        Assert.Empty(error.ToString());
+        Assert.Empty(handler.Requests);
+        Assert.Empty(executor.Invocations);
+    }
+
+    [Fact]
     public async Task IssueList_BareJsonDiscoversFieldsWithoutProjectOrRequest()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
@@ -100,11 +131,11 @@ public sealed class CliResourceOutputSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "7", "--json", "id"], output, error, fs, executor);
+            http, ["issue", "show", "7", "--output", "json"], output, error, fs, executor);
 
         Assert.Equal(2, exit);
         Assert.Empty(output.ToString());
-        Assert.Contains("--json", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 

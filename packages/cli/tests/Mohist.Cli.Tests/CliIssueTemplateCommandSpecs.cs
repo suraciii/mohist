@@ -174,12 +174,12 @@ public class CliIssueTemplateCommandSpecs
     }
 
     [Fact]
-    public async Task TemplateList_Json_PassesThroughServerEnvelope()
+    public async Task TemplateList_SelectedJson_ProjectsTemplateIds()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "list"], output, error, fs, executor);
+            http, ["issue", "template", "list", "--json", "id"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var json = JsonNode.Parse(output.ToString()) as JsonArray;
@@ -416,12 +416,12 @@ public class CliIssueTemplateCommandSpecs
     }
 
     [Fact]
-    public async Task TemplateGet_Json_PassesThroughServerEnvelope()
+    public async Task TemplateGet_SelectedJson_ProjectsRequestedFields()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "feature"], output, error, fs, executor);
+            http, ["issue", "template", "get", "feature", "--json", "id,name,body"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var json = JsonNode.Parse(output.ToString()) as JsonObject;
@@ -458,16 +458,15 @@ public class CliIssueTemplateCommandSpecs
     }
 
     [Fact]
-    public async Task TemplateList_InvalidOutputMode_ReturnsExitCodeOne()
+    public async Task TemplateList_LegacyOutputOption_ReturnsUsageError()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "list", "-o", "yaml"], output, error, fs, executor);
+            http, ["issue", "template", "list", "--output", "json"], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("table", error.ToString(), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("json", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--output", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 }

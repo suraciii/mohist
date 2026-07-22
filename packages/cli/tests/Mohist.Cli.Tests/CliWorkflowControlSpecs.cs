@@ -380,7 +380,7 @@ public class CliWorkflowControlSpecs
     }
 
     [Fact]
-    public async Task Approve_OutputJson_EmitsRawJsonPayload()
+    public async Task Approve_SelectedJson_ProjectsApprovalResult()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
@@ -394,7 +394,7 @@ public class CliWorkflowControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "approve", WrId, "--json", "id"], output, error, fs, executor);
+            http, ["workflow", "approve", WrId, "--json", "workflowRunId,approved"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();

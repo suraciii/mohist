@@ -103,7 +103,7 @@ public class CliProjectWorkflowCommandSpecs
     }
 
     [Fact]
-    public async Task TemplateList_JsonMode_EmitsRawPayload()
+    public async Task TemplateList_SelectedJson_ProjectsRequestedFields()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
@@ -119,7 +119,7 @@ public class CliProjectWorkflowCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "template", "list", "--json", "id"], output, error, fs, executor);
+            http, ["project", "workflow", "template", "list", "--json", "projectId,templateId"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -207,7 +207,7 @@ public class CliProjectWorkflowCommandSpecs
     }
 
     [Fact]
-    public async Task TemplateCreate_JsonMode_EmitsRawPayload()
+    public async Task TemplateCreate_SelectedJson_ProjectsRequestedFields()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
@@ -223,7 +223,7 @@ public class CliProjectWorkflowCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "template", "create", "--yaml", "name: test", "--json", "id"], output, error, fs, executor);
+            http, ["project", "workflow", "template", "create", "--yaml", "name: test", "--json", "projectId,templateId"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -431,30 +431,29 @@ public class CliProjectWorkflowCommandSpecs
         });
 
         var byName = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "template", "list", "--project", "proj_abc", "--json", "id"], output, error, fs, executor);
+            http, ["project", "workflow", "template", "list", "--project", "proj_abc", "--json", "templateId"], output, error, fs, executor);
         Assert.Equal(0, byName);
         Assert.Contains(handler.Requests.Where(r => r.Method == HttpMethod.Get),
             r => r.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates");
 
         var byId = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "template", "list", "--project", "proj_abc", "--json", "id"], output, error, fs, executor);
+            http, ["project", "workflow", "template", "list", "--project", "proj_abc", "--json", "templateId"], output, error, fs, executor);
         Assert.Equal(0, byId);
         Assert.Contains(handler.Requests.Where(r => r.Method == HttpMethod.Get),
             r => r.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates");
     }
 
     [Fact]
-    public async Task TemplateCreate_InvalidOutputMode_PrintsErrorAndExitsOne()
+    public async Task TemplateCreate_LegacyOutputOption_IsRejectedLocally()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "template", "create", "--yaml", "x", "-o", "yaml"], output, error, fs, executor);
+            http, ["project", "workflow", "template", "create", "--yaml", "x", "--output", "json"], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("table", error.ToString());
-        Assert.Contains("json", error.ToString());
+        Assert.Contains("--output", error.ToString());
     }
 
     // ──────────────────────────────────────────────
@@ -549,7 +548,7 @@ public class CliProjectWorkflowCommandSpecs
     }
 
     [Fact]
-    public async Task ConfigGet_JsonMode_EmitsRawPayload()
+    public async Task ConfigGet_SelectedJson_ProjectsRequestedFields()
     {
         var getCount = 0;
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
@@ -583,7 +582,7 @@ public class CliProjectWorkflowCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "config", "get", "--json", "id"], output, error, fs, executor);
+            http, ["project", "workflow", "config", "get", "--json", "defaultTemplateId,variables,prompts"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();

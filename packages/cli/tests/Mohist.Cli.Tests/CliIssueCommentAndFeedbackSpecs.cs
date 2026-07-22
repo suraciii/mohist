@@ -122,7 +122,7 @@ public class CliIssueCommentAndFeedbackSpecs
     }
 
     [Fact]
-    public async Task IssueCommentAdd_JsonOutput_PrintsJsonEnvelope()
+    public async Task IssueCommentAdd_SelectedJson_ProjectsRequestedFields()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
@@ -139,7 +139,7 @@ public class CliIssueCommentAndFeedbackSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "comment", "add", "42", "--author", "Ada", "--body", "ok", "--json", "id"],
+            ["issue", "comment", "add", "42", "--author", "Ada", "--body", "ok", "--json", "id,author,body"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);

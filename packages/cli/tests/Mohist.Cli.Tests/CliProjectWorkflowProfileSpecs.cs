@@ -175,7 +175,7 @@ public class CliProjectWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["project", "workflow", "profile", "list", "--described", "--project", "proj_a", "--project", "proj_b"],
+            ["project", "workflow", "profile", "list", "--described", "--project", "proj_a", "--project-id", "proj_b"],
             output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
@@ -243,7 +243,7 @@ public class CliProjectWorkflowProfileSpecs
     }
 
     [Fact]
-    public async Task ProfileList_JsonFlagIsNotACompatibilityAlias()
+    public async Task ProfileList_BareJson_DiscoversFieldsWithoutCallingApi()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
@@ -252,9 +252,12 @@ public class CliProjectWorkflowProfileSpecs
             ["project", "workflow", "profile", "list", "--json"],
             output, error, fs, executor);
 
-        Assert.NotEqual(0, exitCode);
+        Assert.Equal(0, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("Unrecognized command or argument '--json'", error.ToString());
+        Assert.Equal(
+            "[\"id\",\"name\",\"displayName\",\"description\",\"isDefault\"]",
+            output.ToString().Trim());
+        Assert.Empty(error.ToString());
     }
 
     [Fact]
@@ -290,7 +293,7 @@ public class CliProjectWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["project", "workflow", "profile", "list", "--project", "proj_a", "--project", "proj_b"],
+            ["project", "workflow", "profile", "list", "--project", "proj_a", "--project-id", "proj_b"],
             output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
@@ -585,7 +588,7 @@ public class CliProjectWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["project", "workflow", "profile", "enable", "mohist/local", "--project", "proj_a", "--project", "proj_b"],
+            ["project", "workflow", "profile", "enable", "mohist/local", "--project", "proj_a", "--project-id", "proj_b"],
             output, error, fs, executor);
 
         Assert.Equal(2, exitCode);

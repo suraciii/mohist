@@ -133,16 +133,16 @@ public class CliAgentSessionRecoverySpecs
     [Theory]
     [InlineData("compact")]
     [InlineData("reset")]
-    public async Task Recovery_InvalidOutput_FailsWithoutCallingApi(string operation)
+    public async Task Recovery_LegacyOutputOption_FailsWithoutCallingApi(string operation)
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called when output mode is invalid"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", operation, StableSessionId, "-o", "yaml"], output, error, fileSystem, executor);
+            http, ["agent", "session", operation, StableSessionId, "--output", "json"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 

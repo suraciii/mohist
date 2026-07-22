@@ -19,12 +19,12 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public void ProjectList_Help_OutputOptionDefaultsToJson()
+    public void ProjectList_Help_DescribesJsonFieldSelection()
     {
         var help = RenderHelp(["project", "list", "--help"]);
 
-        var outputLine = help.Split('\n').FirstOrDefault(line => line.Contains("--output")) ?? "";
-        Assert.Contains("json", outputLine);
+        var jsonLine = help.Split('\n').FirstOrDefault(line => line.Contains("--json")) ?? "";
+        Assert.Contains("selected fields", jsonLine, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -36,12 +36,12 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public void ProjectShow_Help_OutputOptionDefaultsToJson()
+    public void ProjectShow_Help_DescribesJsonFieldSelection()
     {
         var help = RenderHelp(["project", "show", "--help"]);
 
-        var outputLine = help.Split('\n').FirstOrDefault(line => line.Contains("--output")) ?? "";
-        Assert.Contains("json", outputLine);
+        var jsonLine = help.Split('\n').FirstOrDefault(line => line.Contains("--json")) ?? "";
+        Assert.Contains("selected fields", jsonLine, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public async Task ProjectList_OutputJson_MatchesNoFlagJsonOutput()
+    public async Task ProjectList_SelectedJson_IsIndependentFromHumanOutput()
     {
         const string json = """
             {
@@ -163,7 +163,9 @@ public class ProjectCliOutputModeTests
         Assert.Equal(defaultExit, explicitExit);
         Assert.Equal("", defaultError.ToString());
         Assert.Equal("", explicitError.ToString());
-        Assert.Equal(defaultOutput.ToString(), explicitOutput.ToString());
+        Assert.NotEqual(defaultOutput.ToString(), explicitOutput.ToString());
+        Assert.Contains("\"id\": \"proj_1\"", explicitOutput.ToString());
+        Assert.DoesNotContain("mohist-local", explicitOutput.ToString());
         Assert.Equal("/api/projects", defaultHttp.Requests.Single().RequestUri!.PathAndQuery);
         Assert.Equal("/api/projects", explicitHttp.Requests.Single().RequestUri!.PathAndQuery);
     }
@@ -212,7 +214,7 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public async Task ProjectList_UnknownOutputMode_FailsBeforeHttpCall()
+    public async Task ProjectList_LegacyOutputOption_FailsBeforeHttpCall()
     {
         var http = new RecordingHttpHandler();
         var output = new StringWriter();
@@ -227,12 +229,10 @@ public class ProjectCliOutputModeTests
             new NoopCommandExecutor(),
             getUserHome: () => "/mohist-tests/user");
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
-        Assert.Contains("table", err);
-        Assert.Contains("json", err);
-        Assert.Contains("yaml", err);
+        Assert.Contains("--output", err);
     }
 
     [Fact]
@@ -278,7 +278,7 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public async Task ProjectShow_UnknownOutputMode_FailsBeforeHttpCall()
+    public async Task ProjectShow_LegacyOutputOption_FailsBeforeHttpCall()
     {
         var http = new RecordingHttpHandler();
         var output = new StringWriter();
@@ -293,12 +293,10 @@ public class ProjectCliOutputModeTests
             new NoopCommandExecutor(),
             getUserHome: () => "/mohist-tests/user");
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
-        Assert.Contains("table", err);
-        Assert.Contains("json", err);
-        Assert.Contains("yaml", err);
+        Assert.Contains("--output", err);
     }
 
     private static string StatePath()

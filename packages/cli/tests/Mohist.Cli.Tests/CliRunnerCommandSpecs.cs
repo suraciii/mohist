@@ -621,7 +621,7 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerShow_JsonOutput_EmitsFullJsonPayload()
+    public async Task RunnerShow_SelectedJson_ProjectsRequestedFields()
     {
         var works = new[]
         {
@@ -636,7 +636,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-busy", "--json", "id"], output, error, fileSystem, executor, env);
+            http, ["runner", "show", "r-busy", "--json", "id,activeWorks"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -817,7 +817,7 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerStatus_Json_EmitsRawRunnerPayload()
+    public async Task RunnerStatus_SelectedJson_EmitsRunnerCollection()
     {
         var runners = new[]
         {
@@ -832,17 +832,15 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "status", "--json", "id"], output, error, fileSystem, executor, env);
+            http, ["runner", "status", "--json", "id,capacity"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal($"/api/projects/{ActiveProjectId}/runners", request.RequestUri?.PathAndQuery);
-        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonObject;
+        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonArray;
         Assert.NotNull(parsed);
-        var parsedRunners = parsed!["runners"] as JsonArray;
-        Assert.NotNull(parsedRunners);
-        Assert.Equal(2, parsedRunners!.Count);
-        var first = parsedRunners[0]!.AsObject();
+        Assert.Equal(2, parsed!.Count);
+        var first = parsed[0]!.AsObject();
         Assert.Equal("r-idle", first["id"]?.GetValue<string>());
         var capacity = first["capacity"]!.AsObject();
         Assert.Equal(0, capacity["usedSlots"]?.GetValue<int>());
@@ -870,7 +868,7 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerStatus_EmptyListJson_EmitsRawPayloadWithEmptyRunnersArray()
+    public async Task RunnerStatus_EmptyListSelectedJson_EmitsEmptyArray()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -883,11 +881,9 @@ public class CliRunnerCommandSpecs
             http, ["runner", "status", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
-        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonObject;
+        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonArray;
         Assert.NotNull(parsed);
-        var parsedRunners = parsed!["runners"] as JsonArray;
-        Assert.NotNull(parsedRunners);
-        Assert.Empty(parsedRunners!);
+        Assert.Empty(parsed!);
     }
 
     [Fact]

@@ -16,7 +16,7 @@ public class ProjectCliRepositoryTests
         var help = RenderHelp(["repo", "list", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project", help);
+        Assert.DoesNotContain("--project-id", help);
         Assert.Contains("--json", help);
     }
 
@@ -26,7 +26,7 @@ public class ProjectCliRepositoryTests
         var help = RenderHelp(["repo", "add", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project", help);
+        Assert.DoesNotContain("--project-id", help);
         Assert.Contains("--git-url", help);
         Assert.Contains("--set-default", help);
         Assert.DoesNotContain("--default", help);
@@ -38,7 +38,7 @@ public class ProjectCliRepositoryTests
         var help = RenderHelp(["repo", "update", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project", help);
+        Assert.DoesNotContain("--project-id", help);
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class ProjectCliRepositoryTests
         var help = RenderHelp(["repo", "set-default", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project", help);
+        Assert.DoesNotContain("--project-id", help);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class ProjectCliRepositoryTests
         var help = RenderHelp(["repo", "delete", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project", help);
+        Assert.DoesNotContain("--project-id", help);
     }
 
     [Fact]

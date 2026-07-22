@@ -170,7 +170,10 @@ internal static class ProjectWorkflowCommands
                     path = $"/api/workflow-templates/system?project={MohistCliCommands.Escape(plainResolvedProjectId)}";
                 }
 
-                return await api.PrintWithOutputAsync(path, mode);
+                return await api.PrintWithOutputAsync(
+                    path,
+                    mode,
+                    nameof(MohistCliApi.TableShape.WorkflowProfileList));
             }
         });
         return cmd;

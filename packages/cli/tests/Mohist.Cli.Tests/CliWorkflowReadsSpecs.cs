@@ -184,7 +184,7 @@ public class CliWorkflowReadsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "get", WrId, "--json", "id"], output, error, fs, executor);
+            http, ["workflow", "get", WrId, "--json", "status,issueRef"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Single(r => r.Method == HttpMethod.Get);
@@ -251,7 +251,7 @@ public class CliWorkflowReadsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "get", WrId, "-o", "yaml"], output, error, fs, executor);
+            http, ["workflow", "get", WrId, "--yaml"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Single(r => r.Method == HttpMethod.Get);
@@ -271,7 +271,7 @@ public class CliWorkflowReadsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "get", WrId, "-o", "yaml"], output, error, fs, executor);
+            http, ["workflow", "get", WrId, "--yaml"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         Assert.DoesNotContain(handler.Requests, r =>
@@ -288,7 +288,8 @@ public class CliWorkflowReadsSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("table, json, yaml", stdout);
+        Assert.Contains("--yaml", stdout);
+        Assert.Contains("--json", stdout);
         Assert.Empty(handler.Requests);
     }
 
@@ -306,7 +307,7 @@ public class CliWorkflowReadsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "get", WrId, "-o", "yaml"], output, error, fs, executor);
+            http, ["workflow", "get", WrId, "--yaml"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         var stderr = error.ToString();
@@ -343,7 +344,7 @@ public class CliWorkflowReadsSpecs
         });
 
         RunUnderBothNames(handler, http, output, error, fs, executor,
-            new[] { WrId, "--json", "id" },
+            new[] { WrId, "--json", "status,issueRef" },
             out var exit, out var stdout, out _);
 
         Assert.Equal(0, exit);
@@ -381,7 +382,7 @@ public class CliWorkflowReadsSpecs
         });
 
         RunUnderBothNames(handler, http, output, error, fs, executor,
-            new[] { WrId, "-o", "yaml" },
+            new[] { WrId, "--yaml" },
             out var exit, out var stdout, out _);
 
         Assert.Equal(0, exit);
@@ -405,7 +406,8 @@ public class CliWorkflowReadsSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("table, json, yaml", stdout);
+        Assert.Contains("--yaml", stdout);
+        Assert.Contains("--json", stdout);
         Assert.Empty(handler.Requests);
     }
 
@@ -463,7 +465,7 @@ public class CliWorkflowReadsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "variables", WrId, "--json", "id"], output, error, fs, executor);
+            http, ["workflow", "variables", WrId], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Single(r => r.Method == HttpMethod.Get);
@@ -481,7 +483,7 @@ public class CliWorkflowReadsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "variables", WrId, "--stage", "plan", "--json", "id"], output, error, fs, executor);
+            http, ["workflow", "variables", WrId, "--stage", "plan"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Single(r => r.Method == HttpMethod.Get);
@@ -499,7 +501,7 @@ public class CliWorkflowReadsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "variables", WrId, "--key", "some.nested.key", "--json", "id"], output, error, fs, executor);
+            http, ["workflow", "variables", WrId, "--key", "some.nested.key"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Single(r => r.Method == HttpMethod.Get);
@@ -519,7 +521,7 @@ public class CliWorkflowReadsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "variables", WrId, "--key", "some.nested.key", "--stage", "plan", "--json", "id"], output, error, fs, executor);
+            http, ["workflow", "variables", WrId, "--key", "some.nested.key", "--stage", "plan"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Single(r => r.Method == HttpMethod.Get);

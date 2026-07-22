@@ -5,7 +5,13 @@ namespace Mohist.Cli;
 
 internal static class EventCommands
 {
-    internal static CancellationToken TailCancellationOverride { get; set; }
+    private static readonly AsyncLocal<CancellationToken> TailCancellation = new();
+
+    internal static CancellationToken TailCancellationOverride
+    {
+        get => TailCancellation.Value;
+        set => TailCancellation.Value = value;
+    }
 
     public static Command Build(MohistCliApi api, OperatorCredentialProvider credentials)
     {

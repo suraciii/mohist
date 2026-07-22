@@ -120,7 +120,13 @@ public class CliSystemInfoCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["server", "info", "--json", "id"], output, error, fileSystem, executor, env);
+            http,
+            ["server", "info", "--json", "running,source,install,update,services,paths"],
+            output,
+            error,
+            fileSystem,
+            executor,
+            env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -169,7 +175,13 @@ public class CliSystemInfoCommandSpecs
             throw new HttpRequestException("connection refused"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["server", "info", "--json", "id"], output, error, fileSystem, executor, env);
+            http,
+            ["server", "info", "--json", "degraded,cliVersion"],
+            output,
+            error,
+            fileSystem,
+            executor,
+            env);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("Server is not running", error.ToString());

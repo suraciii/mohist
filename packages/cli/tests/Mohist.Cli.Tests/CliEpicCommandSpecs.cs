@@ -280,7 +280,7 @@ public class CliEpicCommandSpecs
     }
 
     [Fact]
-    public async Task EpicList_JsonOutput_EmitsEnvelopeVerbatim()
+    public async Task EpicList_SelectedJson_ProjectsRequestedFields()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -290,7 +290,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "--json", "id"], output, error, fileSystem, executor);
+            http, ["epic", "list", "--json", "id,title"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("\"id\": \"epic_8\"", output.ToString(), StringComparison.Ordinal);
@@ -306,10 +306,10 @@ public class CliEpicCommandSpecs
             throw new InvalidOperationException("API must not be called when output mode is invalid"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "-o", "yaml"], output, error, fileSystem, executor);
+            http, ["epic", "list", "--output", "json"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -449,7 +449,7 @@ public class CliEpicCommandSpecs
     }
 
     [Fact]
-    public async Task EpicStart_JsonOutput_EmitsIdleAndRunningStatusesVerbatim()
+    public async Task EpicList_SelectedJson_PreservesIdleAndRunningStatuses()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -463,7 +463,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "--json", "id"], output, error, fileSystem, executor);
+            http, ["epic", "list", "--json", "status"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
