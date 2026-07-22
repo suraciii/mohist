@@ -8,7 +8,7 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 - **THEN** the status API and `mo otel status` SHALL report `off`
 - **AND** the status read SHALL NOT require the collector, exporter or storage-maintenance work to be running
 - **AND** current working set and GC heap pressure SHALL remain available from the immediate bounded process sample
-- **AND** CPU utilization MAY be unavailable only during the first-sample warm-up before an elapsed-time delta exists
+- **AND** CPU utilization SHALL be `null` during the first-sample warm-up before an elapsed-time delta exists
 - **AND** storage usage and growth SHALL be unavailable because the OTel storage probe is not running
 
 #### Scenario: Initial process publication does not wait for storage
@@ -54,6 +54,18 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 - **THEN** the status API and `mo otel status` SHALL report `degraded`
 - **AND** SHALL expose the latest degradation reason
 
+#### Scenario: Rejection or loss protection expires
+
+- **WHEN** rejection or dropped telemetry activates protection degradation and no later rejection or drop occurs for five minutes of injected time
+- **THEN** the protection degradation cause SHALL clear on the next observation, sample or status read
+- **AND** status SHALL recover to `healthy` only when no unrelated degradation cause remains
+
+#### Scenario: Repeated rejection extends protection degradation
+
+- **WHEN** another rejection or drop occurs before the five-minute protection interval expires
+- **THEN** the protection degradation SHALL remain active for five minutes from that latest outcome
+- **AND** the repeated outcome SHALL NOT emit another transition log while status remains `degraded`
+
 #### Scenario: A write recovers without clearing another cause
 
 - **WHEN** an OTel write fails and a later production write succeeds while another degradation cause remains active
@@ -68,7 +80,7 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 
 ### Requirement: Status exposes storage, ingestion and process pressure
 
-Each status snapshot SHALL expose the observability storage budget, current usage and growth rate with its measurement window; telemetry received, saved, rejected and dropped since the current Server process started; the latest degradation reason when one exists; and current process CPU, working set and GC heap pressure. `mo otel status` SHALL render these values and the state returned by the API without requiring direct access to `otel.db`.
+Each status snapshot SHALL expose `status`, `collector_online` and `since`; a `storage` object containing `usage_bytes`, `budget_bytes`, `growth_bytes_per_second` and `growth_window_seconds`; a `telemetry` object containing `received_spans`, `saved_spans`, `rejected_spans` and `dropped_spans`; a `process` object containing `cpu_utilization`, `working_set_bytes` and `gc_heap_bytes`; `latest_degradation`; and `routes`. Sampled values that are not available SHALL be present as JSON `null`, not fabricated zeros. Telemetry counters SHALL cover the current Server process lifetime and count Span attempts: received means parsed, saved means committed including duplicate upserts, rejected means intentionally refused with a non-retryable partial-success response, and dropped means malformed or otherwise lost without requesting a retry. A retryable rolled-back write SHALL count as received but not saved, rejected or dropped. `latest_degradation` SHALL be `null` when no degradation has been recorded and otherwise SHALL contain `code`, `message` and `at`, with bounded text values. `mo otel status` SHALL render the same categories and state without requiring direct access to `otel.db`. The legacy `trace_count` and `span_count` fields MUST NOT be present.
 
 #### Scenario: An operator reads healthy status
 
@@ -84,7 +96,7 @@ Each status snapshot SHALL expose the observability storage budget, current usag
 
 ### Requirement: Status exposes a bounded ranked-route summary
 
-Status SHALL expose at most 10 stable-route summaries from the five-minute local window at one-second resolution. The single boundary bucket MAY contribute for less than one additional second so a request is not discarded early. Each entry SHALL contain the stable route name, request count, latency information, database calls per request and downstream calls per request. Entries SHALL be ordered by combined database-plus-downstream calls per request descending, average latency descending, and stable route name ordinal ascending; neither route identity nor response size SHALL grow with raw URL or request cardinality. This top-ranked view is the issue's "anomalous route" diagnostic and SHALL NOT imply a learned anomaly threshold.
+Status SHALL expose at most 10 stable-route summaries from the five-minute local window at one-second resolution. A request SHALL NOT leave the window before it is five minutes old and SHALL NOT remain in the window for five minutes plus one second or longer. Each entry SHALL contain `route`, `request_count`, `average_duration_ms`, `max_duration_ms`, `database_calls_per_request` and `downstream_calls_per_request`. Entries SHALL be ordered by combined database-plus-downstream calls per request descending, average latency descending, and stable route name ordinal ascending; neither route identity nor response size SHALL grow with raw URL or request cardinality. This top-ranked view is the issue's "anomalous route" diagnostic and SHALL NOT imply a learned anomaly threshold.
 
 #### Scenario: Recent routes have different amplification
 

@@ -20,9 +20,66 @@ Mohist SHALL emit runtime observability signals through a standard .NET `Meter` 
 - **THEN** the completed route observation SHALL remain unchanged by that later work
 - **AND** the background execution SHALL NOT retain the request's ambient work scope
 
+### Requirement: Runtime metric catalog is fixed
+
+Mohist SHALL publish the following instruments through a `Meter` named `Mohist.Server.Runtime`:
+
+| Instrument | Kind | Unit | Attribute keys |
+|---|---|---|---|
+| `mohist.server.http.request.count` | Counter | `{request}` | `http.route`, `http.request.method`, `http.response.status_code` |
+| `mohist.server.http.request.duration` | Histogram | `ms` | `http.route`, `http.request.method`, `http.response.status_code` |
+| `mohist.server.http.request.database_calls` | Histogram | `{call}` | `http.route`, `http.request.method`, `http.response.status_code` |
+| `mohist.server.http.request.downstream_calls` | Histogram | `{call}` | `http.route`, `http.request.method`, `http.response.status_code` |
+| `mohist.server.path.candidates` | Histogram | `{item}` | `mohist.path` |
+| `mohist.server.path.processed` | Histogram | `{item}` | `mohist.path` |
+| `mohist.server.path.transcript_records` | Histogram | `{record}` | `mohist.path` |
+| `mohist.otel.spans.received` | Counter | `{span}` | none |
+| `mohist.otel.spans.saved` | Counter | `{span}` | none |
+| `mohist.otel.spans.rejected` | Counter | `{span}` | none |
+| `mohist.otel.spans.dropped` | Counter | `{span}` | none |
+| `mohist.otel.storage.usage` | ObservableGauge | `By` | none |
+| `mohist.otel.storage.budget` | ObservableGauge | `By` | none |
+| `mohist.otel.storage.growth` | ObservableGauge | `By/s` | none |
+| `mohist.process.cpu.utilization` | ObservableGauge | `1` | none |
+| `mohist.process.memory.working_set` | ObservableGauge | `By` | none |
+| `mohist.process.runtime.dotnet.gc.heap` | ObservableGauge | `By` | none |
+
+The instrument name, kind, unit and complete attribute-key set SHALL be treated as one compatibility contract. Mohist MUST NOT add undeclared attributes to these instruments.
+
+Telemetry outcomes SHALL count Span attempts. `received` SHALL count each Span attempt that is successfully parsed at the ingest boundary. `saved` SHALL count each parsed Span whose write commits, including a duplicate upsert that commits successfully. `rejected` SHALL count each parsed Span intentionally refused by admission or storage protection with a non-retryable OTLP partial-success response. `dropped` SHALL count each malformed or otherwise lost Span for which the response does not request a retry. A parsed Span in a rolled-back write that returns a retryable failure SHALL increment `received`, SHALL NOT increment `saved`, `rejected` or `dropped`, and SHALL activate storage-write degradation. The four counters MUST NOT be required to satisfy a conservation equation.
+
+#### Scenario: The metric catalog changes unintentionally
+
+- **WHEN** an instrument name, kind, unit or attribute-key set differs from the declared catalog
+- **THEN** the metric contract verification SHALL fail
+
+#### Scenario: A successful duplicate upsert is saved
+
+- **WHEN** a parsed Span duplicates an existing record and its upsert commits successfully
+- **THEN** `received` and `saved` SHALL each increment for that Span attempt
+- **AND** `rejected` and `dropped` SHALL NOT increment for that attempt
+
+#### Scenario: Malformed telemetry is dropped without being received
+
+- **WHEN** a Span attempt cannot be parsed and the response does not request a retry
+- **THEN** `dropped` SHALL increment for that attempt
+- **AND** `received`, `saved` and `rejected` SHALL NOT increment for that attempt
+
+#### Scenario: Protection rejects parsed telemetry
+
+- **WHEN** a protection component intentionally refuses a parsed Span with a non-retryable partial-success response
+- **THEN** `received` and `rejected` SHALL each increment for that attempt
+- **AND** `saved` and `dropped` SHALL NOT increment for that attempt
+
+#### Scenario: A retryable write rolls back
+
+- **WHEN** a write containing a parsed Span rolls back and the response requests a retry
+- **THEN** `received` SHALL increment and storage-write degradation SHALL activate
+- **AND** `saved`, `rejected` and `dropped` SHALL NOT increment for that attempt
+
 ### Requirement: Metric identity has stable low cardinality
 
-Metric instrument names and the exact label-key set accepted by each instrument SHALL be stable, explicitly test-locked contracts. Route dimensions SHALL use the matched route template or another stable bounded route name, never a concrete request URL. Project identifiers, issue numbers, WorkflowRun identifiers, AgentSession identifiers, raw URLs, trace identifiers, span identifiers and other per-instance identities MUST NOT appear as metric labels. A request for which no stable route name is available SHALL use one bounded fallback identity rather than its raw path.
+Metric instrument names and the exact label-key set accepted by each instrument SHALL be stable, explicitly test-locked contracts. Route dimensions SHALL use the matched route template or another stable bounded route name, never a concrete request URL. HTTP methods SHALL normalize to `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS` or `OTHER`; response status values SHALL be `100` through `599`, with `0` for an unavailable or invalid status. Agent-path values SHALL be only `agent.status` or `agent.activity`. Project identifiers, issue numbers, WorkflowRun identifiers, AgentSession identifiers, raw URLs, trace identifiers, span identifiers and other per-instance identities MUST NOT appear as metric labels. A request for which no stable route name is available SHALL use the single fallback value `unmatched` rather than its raw path.
 
 #### Scenario: Requests differ only by resource identity
 
@@ -36,20 +93,21 @@ Metric instrument names and the exact label-key set accepted by each instrument 
 - **THEN** its metric SHALL use a bounded fallback route identity
 - **AND** the raw URL or path SHALL NOT become a label value
 
-#### Scenario: The metric contract changes unintentionally
-
-- **WHEN** an implementation adds or renames an instrument or adds a label key outside the declared metric catalog
-- **THEN** the metric contract test SHALL fail
-
 ### Requirement: Local ranked route diagnostics are bounded and ephemeral
 
-The local runtime summary SHALL retain observations from a five-minute window at one-second resolution and SHALL be bounded independently of request volume, route count and telemetry history. The single boundary bucket MAY retain observations for less than one additional second so an observation is never discarded before it is five minutes old. The summary SHALL produce at most 10 route entries ranked without an anomaly threshold: first by `database calls per request + downstream calls per request` descending (one call of either kind has equal weight), then by average latency descending, then by stable route name using ordinal ascending order. Each entry SHALL contain the stable route name, request count, latency information, database calls per request and downstream calls per request. The retained summary SHALL reset when the Server process restarts and MUST NOT be written to the business database or treated as a Workflow or Session fact.
+The local runtime summary SHALL retain observations from a five-minute window in 301 rotating one-second buckets and SHALL be bounded independently of request volume, route count and telemetry history. Each bucket SHALL retain at most 256 distinct stable route names plus one `other` aggregate; observations for additional route names in that bucket SHALL fold into `other` without being discarded. An observation SHALL NOT be discarded before it is five minutes old and SHALL NOT be retained for five minutes plus one second or longer. The summary SHALL produce at most 10 route entries ranked without an anomaly threshold: first by `database calls per request + downstream calls per request` descending (one call of either kind has equal weight), then by average latency descending, then by stable route name using ordinal ascending order. Each entry SHALL contain the stable route name, request count, average and maximum latency, database calls per request and downstream calls per request. The retained summary SHALL reset when the Server process restarts and MUST NOT be written to the business database or treated as a Workflow or Session fact.
 
 #### Scenario: More than ten routes are active
 
 - **WHEN** more than 10 stable routes have observations within the current five-minute window
 - **THEN** the local diagnostic result SHALL contain no more than 10 route entries
 - **AND** its retained memory SHALL remain within a fixed bound
+
+#### Scenario: A bucket exceeds its stable-route bound
+
+- **WHEN** one one-second bucket receives observations for more than 256 distinct stable route names
+- **THEN** the bucket SHALL retain at most 256 named-route aggregates and one `other` aggregate
+- **AND** every overflow observation SHALL contribute to `other`
 
 #### Scenario: Routes tie on amplification and latency
 
