@@ -8,11 +8,11 @@
       "spec": "specs/runtime-observability-metrics/spec.md#runtime-signals-are-available-through-a-standard-meter-and-a-local-summary",
       "description": "Create RuntimeObservability, the complete Meter catalog, process-local snapshot/degradation state, and typed ingestion publication contract. Switch current ingestion to real received/saved/dropped/write-failed outcomes and prove reserved rejection through a fake protection publisher, without adding status HTTP/CLI, sampling, request accounting or rejection policy.",
       "acceptanceCriteria": [
-        "RuntimeObservability is one thread-safe process-local authority for Meter, counters, degradation sources, latest reason and immutable snapshot; it has no business persistence or decision dependency.",
+        "RuntimeObservability is one thread-safe process-local authority for Meter, counters, degradation sources, latest reason and immutable snapshot; it has no business persistence or decision dependency, and public fact methods are source-owned rather than a generic source setter.",
         "Exact Mohist.Server.Runtime names/kinds/units/attributes/bounded values are created in one catalog and locked by MeterListener tests; identity labels are forbidden.",
-        "Current ingestion publishes one IngestOutcome per parsed attempt with duplicate/pre-parse/malformed/retryable-rollback semantics from D1.",
+        "Current ingestion publishes one IngestOutcome per parsed attempt with duplicate/pre-parse/malformed/retryable-rollback semantics from D1 and a typed write result; the production failed-write then successful-write path clears only storage_write while another active source remains active.",
         "A fake protection publisher drives non-zero rejected through production RecordIngest; #437/#471 remain owners of real rejection policy/producer.",
-        "Degradation sources cannot clear each other; protection expiry uses fake time; latest message truncates at 256 characters and survives recovery; structured transition fields/log cardinality are locked.",
+        "Process, storage, collector, ingest-write and protection publishers cannot clear each other's sources; protection expiry uses fake time; latest message truncates at 256 characters and survives recovery; structured transition fields/log cardinality are locked.",
         "No metrics exporter targets the built-in receiver and no test needs external backend, real time, filesystem, network or process. Focused tests and npm test pass."
       ],
       "priority": 1,
@@ -53,10 +53,10 @@
       "spec": "specs/otel-runtime-status/spec.md#status-exposes-storage-ingestion-and-process-pressure",
       "description": "Install the sole serialized sampler: read process resources in every state, invoke T-002's production storage probe only while enabled, and then follow injected 10-second ticks. Add CPU, working set, GC heap and storage growth gauges/status without claiming host-filesystem cancellation.",
       "acceptanceCriteria": [
-        "OtelDiagnosticsSampler is the only hosted diagnostic probe owner; no OtelStatusInitializer exists, and exactly one enabled-state immediate storage probe occurs after this task.",
-        "One serial loop coalesces ticks, never overlaps storage probes, starts no new work on shutdown and awaits the current fixed-operation call; no filesystem elapsed/cancellation guarantee or abandoned Task.Run worker exists.",
-        "Immediate working-set/GC-heap availability, CPU normalization with first-sample warm-up null, 60-second seven-slot growth ring and 1-GiB design budget match D5.",
-        "Storage success followed by failure invalidates cached storage values, omits those gauges and returns null while storage_read activates; off performs no storage call and emits no Meter measurement.",
+        "OtelDiagnosticsSampler is the only hosted diagnostic probe owner; no OtelStatusInitializer exists. Its initial start publishes only a process success/failure result before Server availability, and it invokes no storage probe until the host ApplicationStarted signal.",
+        "After ApplicationStarted, one serial loop performs exactly one enabled-state immediate storage probe, coalesces ticks, never overlaps probes, starts no new work on shutdown and awaits the current fixed-operation call; no filesystem elapsed/cancellation guarantee or abandoned Task.Run worker exists.",
+        "Immediate working-set/GC-heap availability or explicit process failure, CPU normalization with first-sample warm-up null, 60-second seven-slot growth ring and 1-GiB design budget match D5; a storage failure cannot prevent the process publication or Server availability.",
+        "Production storage probe success followed by failure invalidates cached storage values, omits those gauges and returns null while storage_read activates; a later production probe success restores the values and clears only storage_read while an unrelated source remains active. Off performs no storage call and emits no Meter measurement.",
         "Process-reader failure invalidates all process values and activates process_read; enabled becomes degraded, off remains off with the failure reason, and recovery clears the source while restarting CPU warm-up.",
         "Controllable operation signals, fake process data and existing probe seams test behavior without real time/storage. Focused tests and npm test pass."
       ],
@@ -76,7 +76,7 @@
       "spec": "specs/runtime-observability-metrics/spec.md#runtime-signals-are-available-through-a-standard-meter-and-a-local-summary",
       "description": "Deliver RequestWorkScope snapshots/atomic close/detach suppression and the HTTP, EF, Orleans and HttpClient accounting boundaries as one independently tested request-metrics module. Keep scopes active for canonical and compatibility agent reads while OTel is off, but suppress Meter publication then and clear scope across incoming Orleans turns.",
       "acceptanceCriteria": [
-        "Middleware creates/clears scope when OTel enabled or an agent canonical/compatibility route runs; CompleteRequest and Meter publication occur only while enabled.",
+        "Middleware creates/clears scope when OTel is enabled and the matched endpoint is neither /otel/v1 nor /otel/api, or when an agent canonical/compatibility route runs; CompleteRequest and Meter publication occur only while enabled.",
         "Snapshot() is immutable/readable before middleware completion without closing scope; CloseAndSnapshot atomically closes at response completion, with increments before close included and increments after close ignored.",
         "Business EF commands, caller-side Orleans sends and innermost physical HTTP sends/retries count once; all production/custom test DbContextFactory roots install one interceptor.",
         "Incoming Orleans filter saves/clears/restores scope; real in-process chain proves no grain-to-grain or grain-DB leakage.",
@@ -123,8 +123,8 @@
       "description": "Require a partially started host to stop and dispose before alternate construction while preserving enabled intent and degraded status. Abort fallback if either shutdown step fails.",
       "acceptanceCriteria": [
         "After classified bind failure StopAsync is awaited and DisposeAsync attempted in finally; alternate starts only if both succeed, otherwise failure is logged/propagated.",
-        "Alternate omits only OTLP listener, preserves Enabled and reports collector_bind_failed; successful fallback leaves one host/silo/sampler and healthy core API.",
-        "Injected lifecycle tests cover success, stop failure/no rebuild and dispose failure/no rebuild without real sockets/processes.",
+        "Alternate omits only OTLP listener, preserves Enabled and reports collector_bind_failed; successful fallback leaves one surviving host/silo/sampler and healthy core API. The failed primary may publish process state but cannot enter the post-ApplicationStarted diagnostics loop.",
+        "Injected lifecycle tests cover success, stop failure/no rebuild and dispose failure/no rebuild without real sockets/processes; the successful fallback test counts both host graphs and proves exactly one post-start sampler loop and one enabled immediate storage probe in total.",
         "Normal startup remains correct. Focused tests and npm test pass."
       ],
       "priority": 4,
@@ -144,11 +144,11 @@
       "spec": "specs/agent-path-amplification/spec.md#agent-status-exposes-the-work-used-to-build-its-response",
       "description": "Add amplification to canonical project-scoped agent responses and restore literal /api/agent/status|activity as project-selector compatibility aliases delegating to the same handlers. Use T-004's final snapshot so values stay truthful while OTel is off and publish path metrics only while enabled.",
       "acceptanceCriteria": [
-        "Canonical routes and compatibility aliases return identical scoped behavior; aliases resolve projectId query then X-Mohist-Project, return 400 when absent, and never aggregate globally.",
+        "Canonical routes and compatibility aliases return identical scoped behavior; aliases trim selectors, use the first nonblank projectId query then the first nonblank X-Mohist-Project header, return 400 when neither is nonblank, and never aggregate globally. A nonblank query wins a conflicting header.",
         "All responses contain actual non-negative candidates, processed, transcriptRecords, databaseCalls and downstreamCalls for empty/off/enabled cases; off emits/retains nothing.",
         "Status and activity candidate/processed/transcript materialization semantics match D8; final Snapshot() occurs after all awaited work before serialization.",
         "Enabled path labels are only agent.status/activity; no identity labels, persistence or business decision changes.",
-        "Tests replace legacy 404 expectations with alias project-resolution/parity/400 cases and cover filtering, reconciliation, transcript reads, 200 limit, history-heavy and off/enabled behavior without #467/#468. Focused tests and npm test pass."
+        "Tests replace legacy 404 expectations with alias project-resolution/parity/400 cases, including blank-query header fallback, whitespace-only rejection and conflicting-selector query precedence; they also cover filtering, reconciliation, transcript reads, 200 limit, history-heavy and off/enabled behavior without #467/#468. Focused tests and npm test pass."
       ],
       "priority": 3,
       "mode": "AFK",

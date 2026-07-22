@@ -1,6 +1,6 @@
 ### Requirement: Agent status exposes the work used to build its response
 
-Both `GET /api/projects/{projectRef}/agent/status` and the issue's literal compatibility path `GET /api/agent/status` SHALL return the same project-scoped status behavior and bounded amplification summary. The compatibility path SHALL resolve its project from `projectId` query first, then `X-Mohist-Project`; it SHALL return 400 `No active project` when neither is present and SHALL NOT aggregate projects. The summary SHALL expose candidate count, actually processed count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope. The existing canonical fields and route semantics SHALL remain available. Response-local counting SHALL remain active when OTel collection is `off`; only Meter emission and cross-request route aggregation SHALL be disabled in that state.
+Both `GET /api/projects/{projectRef}/agent/status` and the issue's literal compatibility path `GET /api/agent/status` SHALL return the same project-scoped status behavior and bounded amplification summary. The compatibility path SHALL use the shared selector rule below and SHALL NOT aggregate projects. The summary SHALL expose candidate count, actually processed count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope. The existing canonical fields and route semantics SHALL remain available. Response-local counting SHALL remain active when OTel collection is `off`; only Meter emission and cross-request route aggregation SHALL be disabled in that state.
 
 #### Scenario: Agent status considers more candidates than it returns
 
@@ -16,13 +16,13 @@ Both `GET /api/projects/{projectRef}/agent/status` and the issue's literal compa
 
 #### Scenario: Unscoped status compatibility path resolves one project
 
-- **WHEN** a caller requests `/api/agent/status` with `projectId` query or `X-Mohist-Project`
+- **WHEN** a caller requests `/api/agent/status` with a nonblank `projectId` query or `X-Mohist-Project`
 - **THEN** the response SHALL equal the canonical status response for that resolved project, including amplification
-- **AND** a request with no project selector SHALL return 400 rather than aggregate globally
+- **AND** a request with no nonblank project selector SHALL return 400 rather than aggregate globally
 
 ### Requirement: Agent activity exposes transcript and fan-out work
 
-Both `GET /api/projects/{projectRef}/agent/activity` and the issue's literal compatibility path `GET /api/agent/activity` SHALL return the same project-scoped activity behavior and bounded amplification summary. The compatibility path SHALL resolve its project from `projectId` query first, then `X-Mohist-Project`; it SHALL return 400 `No active project` when neither is present and SHALL NOT aggregate projects. The summary SHALL expose candidate session count, actually processed session count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope. The existing activity summary, cards, waiting items, limit behavior and project-scoped route semantics SHALL remain available. Response-local counting SHALL remain active when OTel collection is `off`; only Meter emission and cross-request route aggregation SHALL be disabled in that state.
+Both `GET /api/projects/{projectRef}/agent/activity` and the issue's literal compatibility path `GET /api/agent/activity` SHALL return the same project-scoped activity behavior and bounded amplification summary. The compatibility path SHALL use the shared selector rule below and SHALL NOT aggregate projects. The summary SHALL expose candidate session count, actually processed session count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope. The existing activity summary, cards, waiting items, limit behavior and project-scoped route semantics SHALL remain available. Response-local counting SHALL remain active when OTel collection is `off`; only Meter emission and cross-request route aggregation SHALL be disabled in that state.
 
 #### Scenario: Activity assembly reads transcript and workflow data
 
@@ -38,9 +38,28 @@ Both `GET /api/projects/{projectRef}/agent/activity` and the issue's literal com
 
 #### Scenario: Unscoped activity compatibility path resolves one project
 
-- **WHEN** a caller requests `/api/agent/activity` with `projectId` query or `X-Mohist-Project`
+- **WHEN** a caller requests `/api/agent/activity` with a nonblank `projectId` query or `X-Mohist-Project`
 - **THEN** the response SHALL equal the canonical activity response for that resolved project, including amplification and limit behavior
-- **AND** a request with no project selector SHALL return 400 rather than aggregate globally
+- **AND** a request with no nonblank project selector SHALL return 400 rather than aggregate globally
+
+### Requirement: Compatibility aliases select one project consistently
+
+Both literal compatibility aliases SHALL use one shared project-selector rule. The resolver SHALL trim query and header values, select the first nonblank `projectId` query value, and otherwise select the first nonblank `X-Mohist-Project` header value. Blank or whitespace-only values SHALL be treated as absent. If neither input supplies a nonblank selector, the alias SHALL return 400 `No active project`; if both do, the query selector SHALL win, even when it conflicts with the header. This rule applies identically to status and activity aliases.
+
+#### Scenario: Blank query falls back to a usable header
+
+- **WHEN** a caller supplies an empty or whitespace-only `projectId` query and a nonblank `X-Mohist-Project` header
+- **THEN** the alias SHALL resolve the header project and return the same response as its canonical route
+
+#### Scenario: Blank selectors do not choose a project
+
+- **WHEN** a caller supplies only empty or whitespace-only query and header selectors
+- **THEN** the alias SHALL return 400 `No active project`
+
+#### Scenario: A nonblank query wins a conflicting header
+
+- **WHEN** a caller supplies different nonblank query and header project selectors
+- **THEN** the alias SHALL resolve the query project for status and activity
 
 ### Requirement: Agent amplification reporting remains bounded
 

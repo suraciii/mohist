@@ -11,6 +11,13 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 - **AND** CPU utilization MAY be unavailable only during the first-sample warm-up before an elapsed-time delta exists
 - **AND** storage usage and growth SHALL be unavailable because the OTel storage probe is not running
 
+#### Scenario: Initial process publication does not wait for storage
+
+- **WHEN** the Server first becomes reachable in either collection state
+- **THEN** its current process values or their explicit unavailable result SHALL already have been published
+- **AND** a storage probe SHALL begin only after the Server has finished starting when collection is enabled
+- **AND** a storage open or metadata failure SHALL NOT prevent the Server or its status read surface from becoming reachable
+
 #### Scenario: Collection and storage are operating normally
 
 - **WHEN** observability is enabled, collection and storage are usable, and no telemetry is being rejected or dropped
@@ -21,6 +28,12 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 - **WHEN** observability is enabled and the OTel database cannot be read
 - **THEN** the status API and `mo otel status` SHALL report `degraded`
 - **AND** SHALL expose a reason identifying the read failure instead of substituting zero values that appear healthy
+
+#### Scenario: Storage read recovers without clearing another cause
+
+- **WHEN** a storage probe fails and a later storage probe succeeds while another degradation cause remains active
+- **THEN** current storage values SHALL be published and only the storage-read cause SHALL clear
+- **AND** status SHALL remain `degraded` until the unrelated cause recovers
 
 #### Scenario: Process resources cannot be sampled
 
@@ -40,6 +53,18 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 - **WHEN** an OTel write fails or an ingestion/storage protection component publishes a rejected or dropped outcome
 - **THEN** the status API and `mo otel status` SHALL report `degraded`
 - **AND** SHALL expose the latest degradation reason
+
+#### Scenario: A write recovers without clearing another cause
+
+- **WHEN** an OTel write fails and a later production write succeeds while another degradation cause remains active
+- **THEN** only the storage-write cause SHALL clear
+- **AND** status SHALL remain `degraded` until the unrelated cause recovers
+
+#### Scenario: Collector bind uses the alternate Server without duplicate storage probing
+
+- **WHEN** the configured collector port cannot bind and the alternate Server starts successfully
+- **THEN** collection SHALL remain enabled and status SHALL report the collector-bind degradation
+- **AND** storage probing SHALL start only from the successfully started Server rather than from both attempted Servers
 
 ### Requirement: Status exposes storage, ingestion and process pressure
 

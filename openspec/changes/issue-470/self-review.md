@@ -1,144 +1,116 @@
 # Self-Review - Issue 470
 
-Reviewed `proposal.md`, all three capability specs, `design.md`, and
-`tasks.json` against issue #470, the live Server/CLI implementation, the
-observability design baseline, and the repository testing constraints.
+Reviewed the current `proposal.md`, `design.md`, `tasks.json`, and all three
+capability specs against the live issue #470 details, the current Server/CLI
+implementation, and the repository testing constraints.
 
 ## Verdict
 
-The plan is not ready to build. The capability coverage is broad and the task
-graph is structurally valid, but several contracts either contradict the issue
-or cannot produce trustworthy values under the planned default configuration.
-The technical design also leaves two bounded-cost guarantees without a viable
-implementation/test boundary.
+The plan is not ready to build. Issue coverage, bounded-state design, route
+ranking, agent aliases, off-state measurement gating, and the seven-task graph
+are coherent. Two sampler lifecycle gaps can still violate startup and fallback
+behavior, and four implementation/task contracts remain ambiguous or
+contradictory.
 
 ## Findings
 
-### F1 - Agent endpoint contract contradicts the issue (high)
+### F1 - Initial process availability is coupled to a potentially blocking storage probe (high)
 
-Issue #470 names `/api/agent/status` and `/api/agent/activity` in its acceptance
-criteria. The plan instead specifies only
-`/api/projects/{projectRef}/agent/status` and
-`/api/projects/{projectRef}/agent/activity`
-(`specs/agent-path-amplification/spec.md:3,19`) and explicitly requires the
-unscoped routes to remain absent (`tasks.json:90`). Current code confirms that
-the project-scoped routes are the active product surface
-(`packages/server/src/Mohist.Server/Api/AgentRoutes.cs:15-39`) and that
-`/api/agent/status` is intentionally pinned to 404
-(`packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/RuntimeEntrySpecs.cs:359-365`).
+The off-state spec requires working-set and GC-heap values whenever the Server
+is reachable (`specs/otel-runtime-status/spec.md:5-12`). D5 puts the immediate
+process sample and synchronous storage probe in the same serialized sampler
+iteration (`design.md:130-139`). It does not define whether startup waits for
+that iteration.
 
-The artifacts therefore silently reinterpret a literal issue acceptance
-criterion. Before build, the issue or all plan artifacts must agree on one
-route contract; an implementer cannot satisfy both.
+If startup does not wait, the status route can become reachable before the
+required process values or a `process_read_failed` reason exists. If startup
+does wait, enabled startup can be held indefinitely by a host filesystem
+metadata call, despite OTel degradation being independent of core health. The
+plan must separate a failure-contained initial process publication from
+asynchronous storage probing and state exactly which step completes before the
+Server becomes reachable. Process and storage exceptions must be isolated so a
+storage failure cannot prevent process publication.
 
-### F2 - Default-off recording makes agent amplification values untrustworthy (high)
+### F2 - Bind fallback can execute the "single" immediate storage probe twice (high)
 
-The design activates request recording only when `Mohist:Otel:Enabled` is true
-(`design.md:54,96`), and T-003 repeats that gate (`tasks.json:61`). The collector
-option currently defaults to false (`packages/server/src/Mohist.Server/Otel/OtelOptions.cs:51-57`),
-and the plan deliberately keeps that default until #472 (`design.md:13`,
-`tasks.json:30`). T-004 nevertheless requires every agent response to contain
-actual `databaseCalls` and `downstreamCalls` (`tasks.json:87-94`) without
-conditioning those values on observability being enabled.
+T-003 requires exactly one enabled-state immediate storage probe
+(`tasks.json:56`). The current startup attempts `app.StartAsync()` and only then
+classifies the OTLP Kestrel bind failure
+(`packages/server/src/Mohist.Server/Program.cs:77-92`). Hosted services can
+therefore start and probe on the failed primary host before T-006 stops it and
+constructs an alternate host, whose sampler probes again.
 
-Under the planned default, the agent endpoints still execute database and grain
-work but have no active request scope, so their fixed amplification object can
-only report false zeros or depend on an undefined fallback. Request-local work
-accounting for these product responses must be available independently of
-Meter/route recording, or the public contract must explicitly define disabled
-semantics.
+The plan must defer storage probing until the host has successfully reached the
+application-started boundary, or explicitly redefine and bound probe ownership
+across failed host attempts. T-006's fallback test must assert total sampler and
+probe starts across both host graphs, not only that one live sampler remains
+after fallback.
 
-### F3 - The bounded storage probe has no implementable cancellation boundary (high)
+### F3 - RuntimeObservability cannot safely publish process samples (high)
 
-Design D5 promises one in-flight sample, a fixed per-probe cancellation budget,
-and shutdown that cancels and awaits the active sample (`design.md:131-138`).
-T-001 requires single-flight/coalescing but does not name or test the fixed
-probe budget (`tasks.json:17`). More importantly, the current OTel database
-open/bootstrap/schema path is synchronous and accepts no cancellation token
-(`packages/server/src/Mohist.Server/Otel/OtelDb.cs:207-244`, with synchronous
-commands continuing below line 247). A timer can stop awaiting that work, but
-cannot thereby stop it; doing so would either leave an orphan probe or violate
-the one-in-flight and clean-shutdown guarantees.
+D1 says the singleton's public fact methods are `CompleteRequest`,
+`RecordAgentPath`, `RecordIngest`, `PublishStorage`, generic `SetDegradation`, and
+`GetSnapshot` (`design.md:40-50`). There is no process publication method, yet
+T-003 must atomically publish process values, invalidate them on failure,
+activate `process_read`, and clear only that source on recovery
+(`tasks.json:58-61`).
 
-The design must identify a genuinely interruptible/bounded production probe
-and its timeout behavior, or weaken the guarantee consistently in design,
-tasks, and tests. A fake that honors cancellation is insufficient evidence for
-the real adapter.
+Generic public `SetDegradation(source, reason?)` can toggle a reason but cannot
+publish the process sample, and it allows any caller to mutate another
+producer's source, weakening D6's source-isolation invariant. Define a
+process-owned success/failure publication contract that updates values and
+`process_read` atomically. The protection and storage publishers should likewise
+use narrow source-owned operations; generic source mutation should remain
+internal.
 
-### F4 - Route selection and ordering are underspecified (high)
+### F4 - T-004 gives contradictory scope-creation criteria (medium)
 
-Proposal/spec language calls the result "anomalous routes"
-(`proposal.md:8`; `specs/runtime-observability-metrics/spec.md:40`) but defines
-no anomaly threshold or qualification rule. D4 instead ranks every observed
-route and takes 10 (`design.md:114-123`), which can return normal routes. The
-plan must either define anomaly qualification or consistently call this a
-ranked top-route summary.
+T-004 says middleware creates a scope whenever OTel is enabled
+(`tasks.json:79`), but later says OTel endpoints create no scope
+(`tasks.json:84`). D3 contains the intended exception for `/otel/v1` and
+`/otel/api` (`design.md:96`). The first acceptance criterion must include that
+exception; otherwise an implementation cannot satisfy both task assertions
+literally, and the feedback-loop test has no single expected behavior.
 
-The selected ordering is also incomplete. D4 and T-003 sort by combined
-database/downstream calls per request, then average duration
-(`design.md:114`; `tasks.json:66`), while T-003 demands deterministic tie tests
-(`tasks.json:68`). Equal values have no final key and therefore inherit map or
-observation order. The contract also only implies, rather than states, equal
-weight for one database and one downstream call. A final stable tie-breaker and
-the ranking formula must be explicit before tests can lock behavior.
+### F5 - Production storage recovery is not acceptance-locked (medium)
 
-### F5 - Rejected telemetry has no current end-to-end producer (medium)
+D5 requires a successful probe after failure to clear only `storage_read` and a
+successful write after failure to clear only `storage_write`
+(`design.md:139`). T-003 covers storage success followed by failure but not
+failure followed by recovery (`tasks.json:59`). T-001 covers write-failure
+publication and generic source isolation but does not require the real ingest
+success path to clear `storage_write` (`tasks.json:10-16`).
 
-The issue and status spec require rejected telemetry to be visible and to make
-status degraded (`specs/otel-runtime-status/spec.md:3,22-26,38-42`). D1 defines
-the counter, but reserves `Rejected` for a future non-retryable partial-success
-path (`design.md:52`). Migration step 3 and T-001 explicitly defer that producer
-to #437/#471 (`design.md:242`; `tasks.json:16,30`).
+Generic state-machine tests do not prove that production probe/write adapters
+call the correct recovery operation. Add acceptance tests for read
+failure-to-success and write failure-to-success, including the case where an
+unrelated source remains active and must not be cleared.
 
-After issue #470 alone, the real receiver can publish saved/dropped/write-failed
-outcomes but cannot exercise a rejected outcome through its ingestion boundary.
-The plan must clarify whether this issue promises only a tested publication
-contract for dependent issues or an end-to-end rejection behavior; the current
-spec/task combination says both.
+### F6 - Compatibility alias precedence is undefined for a blank query value (medium)
 
-### F6 - Bind-fallback shutdown ordering is inconsistent (medium)
+The agent specs say `projectId` query takes precedence over
+`X-Mohist-Project`, then require 400 when neither is present
+(`specs/agent-path-amplification/spec.md:3,25`). They do not define whether
+`?projectId=` is absent and falls back to a valid header, or is the selected
+blank value and returns 400. Existing route code uses both styles of nullable
+and whitespace handling, so an implementer cannot infer one repository-wide
+rule.
 
-D6 says the failed app is disposed before constructing the alternate host
-(`design.md:156`). T-002 correctly strengthens this to stopped and disposed
-(`tasks.json:38`). Current `Program.cs` does neither before building a second
-host (`packages/server/src/Mohist.Server/Program.cs:86-92`), even though both
-hosts configure Orleans (`Program.cs:102-130`). On partial `StartAsync` failure,
-disposal alone is not an explicit guarantee that all started hosted services
-have completed `StopAsync` before a replacement silo starts.
-
-Design and task must state the same exception-safe sequence: stop the partially
-started host, dispose it, and only then construct/start the alternate host,
-including what happens if stop itself fails.
-
-### F7 - Request-scope and autonomous-task verification gaps remain (medium)
-
-The design claims caller-side, non-transitive Orleans accounting through an
-ambient `AsyncLocal` (`design.md:96-104`), but T-003 asks only for generic
-adapter/parallel tests (`tasks.json:61-68`). In the co-hosted silo, that boundary
-must be verified through an actual in-process Orleans call chain; otherwise
-execution-context flow can attribute grain-to-grain work transitively and
-inflate counts contrary to D3.
-
-T-004 also needs an immutable request-scope snapshot before middleware
-completion (`design.md:211-217`). T-003 mentions that output only in notes
-(`tasks.json:79`), not in acceptance criteria, so the dependency contract is not
-machine-verifiable. Finally, T-001 still spans the Meter catalog, ingestion
-outcome redesign, sampler, degradation state machine, status API, CLI, startup
-wiring, and cross-package tests (`tasks.json:9-30`). That concentration leaves
-all later work blocked on one large multi-failure-domain task. The graph should
-either split this vertical further at a usable boundary or make the internal
-delivery/checkpoints explicit enough for reliable autonomous execution.
+Specify blank/whitespace query and header semantics and add alias tests for an
+empty query with a valid header, whitespace-only selectors, and query/header
+conflict. Both aliases must use the same rule.
 
 ## Coverage And Structure
 
-- The proposal lists three capabilities and each has a corresponding spec.
-- The specs contain 14 requirements and 31 correctly formed `#### Scenario:`
-  blocks; every requirement has scenarios.
-- `tasks.json` is valid JSON with `passes=false` on all four tasks. Its DAG is
-  valid: `T-001 -> {T-002, T-003} -> T-004`, and dependencies point to lower
+- The proposal's three capabilities each have a corresponding spec.
+- The specs contain 14 requirements and 38 correctly formed scenarios.
+- `tasks.json` is valid JSON; all seven tasks have `passes=false`, all spec
+  anchors resolve, and the dependency graph is acyclic with increasing
   priorities.
-- The plan does cover low-cardinality label tests, bounded route memory, status
-  no-scan behavior, transition-only logging, self-feedback exclusion, fake
-  time, and `/api/health` independence. Those strengths do not resolve F1-F7.
+- The plan consistently covers tri-state status, low-cardinality labels,
+  bounded route memory and response size, deterministic route ranking,
+  transition-only logs, status no-scan behavior, feedback exclusion, truthful
+  off-state agent counters, safe failed-host disposal, and core-health
+  independence. Those strengths do not resolve F1-F6.
 
 <promise>FAIL</promise>
