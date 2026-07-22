@@ -12,3 +12,10 @@
 - Removed grain terminal-close special handling and ReadTerminalStateAsync status derivation. Legacy constants remain only for old persisted/test data compilation and are not written by runner paths.
 - ContextExhaustionClassifier now runs on turn.failed payloads; old terminal-event fixtures are expected to be migrated with the activity contract.
 - Full legacy server spec suite still contains assertions for removed terminal lifecycle behavior and needs migration to the T-001 contract before it can be green.
+
+## T-002
+
+- RebindRuntimeSession now takes full AgentRuntimeBinding expected/replacement values, requires idle activity, validates reset/runtime-change/missing-recovery reasons, and clears only context-window usage while preserving cumulative usage.
+- Reset, CompleteReset, and runtime-changing attach use the shared replacement transition; reset markers are persisted as session.context_reset transcript evidence with reason/observedAt only and no physical session IDs.
+- Removed RuntimeSessionLineage, RuntimeSessionLineageEntry, PreviousAgentRuntimeSessionId, and lineage DTO projection. Orleans JSON deserialization ignores the removed legacy field.
+- Updated unit and focused grain coverage for full-binding CAS, stale/active rejection, context clearing, attach replacement, legacy state deserialization, and context-reset payload shape. The remaining full spec failures are the pre-existing T-001 terminal/status contract assertions.

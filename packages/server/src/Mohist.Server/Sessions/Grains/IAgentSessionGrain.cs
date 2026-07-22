@@ -71,7 +71,8 @@ public sealed record AttachPhysicalSessionCommand(
     [property: Id(4)] int? ProcessPid = null,
     [property: Id(5)] string? Runtime = null,
     [property: Id(6)] string? ExpectedRuntime = null,
-    [property: Id(7)] string? ExpectedAgentSessionId = null);
+    [property: Id(7)] string? ExpectedAgentSessionId = null,
+    [property: Id(8)] string? ExpectedRunnerId = null);
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionRuntimeEventsCommand(

@@ -283,7 +283,6 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         Assert.Equal(requests[0].OperationId, requests[1].OperationId);
 
         var state = await LoadSessionStateAsync(currentSession.Id);
-        Assert.Equal(operation == "compact" ? 1 : 2, state.Status.RuntimeSessionLineage?.Count);
         Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state.Status.AgentRuntimeSessionId);
     }
 
@@ -332,7 +331,6 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         Assert.Equal(requests[0].OperationId, requests[1].OperationId);
 
         var state = await LoadSessionStateAsync(currentSession.Id);
-        Assert.Equal(operation == "compact" ? 1 : 2, state.Status.RuntimeSessionLineage?.Count);
         Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state.Status.AgentRuntimeSessionId);
     }
 

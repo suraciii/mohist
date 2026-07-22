@@ -310,9 +310,9 @@ public static class RunnerRoutes
             {
                 var session = await sessions.GetGrain(sessionId).AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
                     req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid,
-                    Runtime: req.Runtime ?? "opencode",
-                    ExpectedRuntime: req.ExpectedRuntime,
-                    ExpectedAgentSessionId: req.ExpectedRuntimeSessionId));
+                     Runtime: req.Runtime ?? "opencode",
+                      ExpectedRuntime: req.ExpectedRuntime,
+                      ExpectedAgentSessionId: req.ExpectedRuntimeSessionId));
                 return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
             }
             catch (InvalidOperationException ex)
@@ -407,7 +407,7 @@ public static class RunnerRoutes
                 // session to that backend rather than a hardcoded literal.
                 var session = await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
                     req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid,
-                    Runtime: existing.Runtime ?? AgentConfigSchema.OpenCodeRuntime));
+                     Runtime: existing.Runtime ?? AgentConfigSchema.OpenCodeRuntime));
                 if (!string.IsNullOrWhiteSpace(req.AgentJobId)
                     && !string.IsNullOrWhiteSpace(req.WorkId))
                 {
@@ -743,7 +743,8 @@ public record AgentSessionAttachRequest(
     string? AgentJobId = null,
     string? Runtime = null,
     string? ExpectedRuntime = null,
-    string? ExpectedRuntimeSessionId = null);
+    string? ExpectedRuntimeSessionId = null,
+    string? ExpectedRunnerId = null);
 public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents, string? RuntimeSessionId = null);
 public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);
 public record WorkDispatchResponse(

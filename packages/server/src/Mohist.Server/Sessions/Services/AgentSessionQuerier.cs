@@ -533,7 +533,6 @@ public class AgentSessionQuerier : IScopedService
             summary.ToolErrorCount,
             BuildGenericSessionSummaryContextRefs(record),
             AgentSessionDtoMapper.ToUsageDto(usage),
-            AgentSessionDtoMapper.BuildLineageDto(session),
             AgentSessionJsonHelper.StatusName(session, Now()) != "active");
     }
 
@@ -600,7 +599,6 @@ public class AgentSessionQuerier : IScopedService
                 PayloadJson: e.PayloadJson)));
         var toolCount = eventSummary.ToolCallCount ?? 0;
         var usage = AgentSessionJsonHelper.Usage(domainSession);
-        var lineage = AgentSessionDtoMapper.BuildLineageDto(domainSession);
 
         return new AgentSessionMetadataDto(
             domainSession.Id,
@@ -615,8 +613,7 @@ public class AgentSessionQuerier : IScopedService
             null,
             AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
             AgentSessionDtoMapper.ToUsageDto(usage),
-            new AgentSessionMetadataCounts(partCount, toolCount),
-            lineage);
+            new AgentSessionMetadataCounts(partCount, toolCount));
     }
 
     private async Task<AgentSessionRecord?> FindCurrentSessionAsync(

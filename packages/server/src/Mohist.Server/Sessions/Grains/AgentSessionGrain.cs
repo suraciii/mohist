@@ -147,6 +147,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
 
         var now = Now();
+        var wasBound = !string.IsNullOrWhiteSpace(session.Status.AgentRuntimeSessionId);
         var events = session.AttachPhysicalSession(
             command.AgentSessionId,
             command.Model,
@@ -156,7 +157,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             now,
             command.Runtime,
             command.ExpectedRuntime,
-            command.ExpectedAgentSessionId);
+            command.ExpectedAgentSessionId,
+            command.ExpectedRunnerId);
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);
@@ -165,7 +167,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return await ToInfoAsync(session);
         }
 
-        await CommitAsync(session, events);
+        var transcriptEntries = wasBound && events.Any(e => e.Value is AgentSessionRuntimeBound)
+            ? BuildContextResetTranscriptEntries(session, "runtime-change", now)
+            : [];
+        await PersistRecoveryAsync(session, events, transcriptEntries);
         _connections.RegisterSession(session.Runtime.RunnerId, SessionId);
         return await ToInfoAsync(session);
     }
@@ -211,21 +216,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
-        session.EnsureExpectedRuntimeSession(command.ExpectedRuntimeSessionId);
-
         var now = Now();
         var usage = AgentSessionJsonHelper.Usage(session);
         var usedBefore = usage.ContextWindowUsed;
         var size = usage.ContextWindowSize;
 
         var events = session.RebindRuntimeSession(
-            command.ReplacementRuntimeSessionId,
-            usedBefore,
-            size,
-            now,
-            command.ReplacementRuntime);
+            new AgentRuntimeBinding(session.Runtime.RunnerId, session.Runtime.Runtime, command.ExpectedRuntimeSessionId),
+            new AgentRuntimeBinding(session.Runtime.RunnerId, command.ReplacementRuntime, command.ReplacementRuntimeSessionId),
+            "reset",
+            now);
 
-        await PersistRecoveryAsync(session, events, []);
+        await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "reset", now));
 
         return BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
     }
@@ -351,21 +353,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             throw new InvalidOperationException($"Reset replacement runtime for AgentSession {session.Id} does not match its reservation.");
 
         EnsureSessionIdleForRecovery(session);
-        session.EnsureExpectedRuntimeSession(reservation.ExpectedRuntimeSessionId);
-
         var now = Now();
         var usage = AgentSessionJsonHelper.Usage(session);
         var usedBefore = usage.ContextWindowUsed;
         var size = usage.ContextWindowSize;
         var events = session.RebindRuntimeSession(
-            command.ReplacementRuntimeSessionId,
-            usedBefore,
-            size,
-            now,
-            command.ReplacementRuntime);
+            new AgentRuntimeBinding(session.Runtime.RunnerId, session.Runtime.Runtime, reservation.ExpectedRuntimeSessionId),
+            new AgentRuntimeBinding(session.Runtime.RunnerId, command.ReplacementRuntime, command.ReplacementRuntimeSessionId),
+            "reset",
+            now);
         var result = BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
         session.Status = session.Status with { PendingReset = reservation with { Outcome = ToRecoveryOutcome(result) } };
-        await PersistRecoveryAsync(session, events, [], reservation.OperationId);
+        await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "reset", now), reservation.OperationId);
         return result;
     }
 
@@ -543,6 +542,27 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             throw new InvalidOperationException(
                 $"AgentSession {session.Id} is currently active; Compact and Reset require an idle session.");
     }
+
+    private IReadOnlyList<RuntimeEventEnvelope> BuildContextResetTranscriptEntries(
+        AgentSession session,
+        string reason,
+        DateTime now) =>
+    [
+        new()
+        {
+            Id = -(_realtimeSequence + 1),
+            SessionId = session.Id,
+            AgentSessionId = null,
+            Sequence = ++_realtimeSequence,
+            Type = RuntimeEventTypes.SessionContextReset,
+            PayloadJson = JSON.Serialize(new Dictionary<string, object?>
+            {
+                ["reason"] = reason,
+                ["observedAt"] = now.ToString("o"),
+            }),
+            CreatedAt = now,
+        }
+    ];
 
     private IReadOnlyList<RuntimeEventEnvelope> BuildCompactionTranscriptEntries(
         AgentSession session,

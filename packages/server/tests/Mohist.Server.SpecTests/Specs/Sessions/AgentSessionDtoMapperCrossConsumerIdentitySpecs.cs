@@ -81,35 +81,10 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         var metadata = await querier.GetSessionMetadataAsync(projectId, issueNumber, sessionName);
 
         Assert.NotNull(metadata);
-        var lineage = metadata!.RuntimeSessionLineage;
-        Assert.NotNull(lineage);
-        Assert.Collection(
-            lineage!,
-            entry =>
-            {
-                Assert.Equal("runtime-original", entry.AgentRuntimeSessionId);
-                Assert.Equal("opencode", entry.Runtime);
-                Assert.Equal(CreatedAt.ToString("o"), entry.BoundAt);
-            },
-            entry =>
-            {
-                Assert.Equal("runtime-current", entry.AgentRuntimeSessionId);
-                Assert.Equal("opencode", entry.Runtime);
-                Assert.Equal(CreatedAt.AddMinutes(15).ToString("o"), entry.BoundAt);
-            });
-
         var wire = JsonSerializer.SerializeToElement(metadata, JSON.Options);
         Assert.Equal("runtime-current", wire.GetProperty("runtimeSessionId").GetString());
         Assert.Equal("opencode", wire.GetProperty("runtime").GetString());
-        var wireLineage = wire.GetProperty("runtimeSessionLineage");
-        Assert.All(wireLineage.EnumerateArray(), entry =>
-        {
-            Assert.True(entry.TryGetProperty("runtimeSessionId", out _));
-            Assert.Equal("opencode", entry.GetProperty("runtime").GetString());
-            Assert.False(entry.TryGetProperty("agentRuntimeSessionId", out _));
-        });
-
-        Assert.Equal(AgentSessionDtoMapper.BuildLineageDto(session), lineage);
+        Assert.False(wire.TryGetProperty("runtimeSessionLineage", out _));
     }
 
     [Fact]
@@ -168,7 +143,6 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
                     CostCurrency: "USD",
                     ContextWindowUsed: 60_000,
                     ContextWindowSize: 100_000),
-                RuntimeSessionLineage: [],
                 ContextUsageHistory:
                 [
                     new ContextUsageHistoryEntry(CreatedAt.AddMinutes(1), 0.42),
@@ -259,11 +233,6 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
                 BoundAt: CreatedAt.AddMinutes(15),
                 LastDataAt: CreatedAt.AddMinutes(20),
                 UsageSummary: new AgentUsageSummary(),
-                RuntimeSessionLineage:
-                [
-                    new RuntimeSessionLineageEntry("runtime-original", CreatedAt, "opencode"),
-                    new RuntimeSessionLineageEntry("runtime-current", CreatedAt.AddMinutes(15), "opencode"),
-                ],
                 ContextUsageHistory: []),
             Metadata = new AgentSessionMetadata(labels),
         };

@@ -167,18 +167,16 @@ public class AgentSessionDomainTests
     }
 
     [Fact]
-    public void AttachPhysicalSession_DifferentPhysicalSession_RequiresReset()
+    public void AttachPhysicalSession_DifferentPhysicalSession_UsesBindingReplacement()
     {
         var session = CreateSession();
         var firstBoundAt = new DateTime(2026, 6, 17, 1, 0, 0, DateTimeKind.Utc);
         session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, firstBoundAt);
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, firstBoundAt.AddMinutes(1)));
+        session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, firstBoundAt.AddMinutes(1));
 
-        Assert.Contains("use Reset", exception.Message, StringComparison.Ordinal);
-        Assert.Equal("runtime-session-1", session.Status.AgentRuntimeSessionId);
-        Assert.Equal("model-a", session.Settings.Model);
+        Assert.Equal("runtime-session-2", session.Status.AgentRuntimeSessionId);
+        Assert.Equal("model-b", session.Settings.Model);
     }
 
     [Fact]
@@ -342,60 +340,4 @@ public class AgentSessionDomainTests
         Assert.Empty(session.Status.ContextUsageHistory!);
     }
 
-    [Fact]
-    public void AttachPhysicalSession_FirstBinding_SeedsLineageWithSingleEntry()
-    {
-        var session = CreateSession();
-        var boundAt = new DateTime(2026, 6, 21, 1, 2, 3, DateTimeKind.Utc);
-
-        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
-
-        var lineage = session.Status.RuntimeSessionLineage;
-        Assert.NotNull(lineage);
-        var entry = Assert.Single(lineage!);
-        Assert.Equal("runtime-session-1", entry.AgentRuntimeSessionId);
-        Assert.Equal(boundAt, entry.BoundAt);
-    }
-
-    [Fact]
-    public void AttachPhysicalSession_SamePhysicalSession_DoesNotGrowLineage()
-    {
-        var session = CreateSession();
-        var boundAt = new DateTime(2026, 6, 21, 1, 2, 3, DateTimeKind.Utc);
-        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
-
-        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
-
-        Assert.Single(session.Status.RuntimeSessionLineage!);
-    }
-
-    [Fact]
-    public void AttachPhysicalSession_RebindToNewPhysicalSession_RequiresReset()
-    {
-        var session = CreateSession();
-        var firstBoundAt = new DateTime(2026, 6, 21, 1, 0, 0, DateTimeKind.Utc);
-        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, firstBoundAt);
-
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, firstBoundAt.AddMinutes(2)));
-
-        var lineage = session.Status.RuntimeSessionLineage!;
-        Assert.Single(lineage);
-        Assert.Equal("runtime-session-1", lineage[0].AgentRuntimeSessionId);
-        Assert.Contains("use Reset", exception.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void AttachPhysicalSession_NewlyCreatedSession_RuntimeBoundEventHasNullPrevious()
-    {
-        var session = CreateSession();
-        var boundAt = new DateTime(2026, 6, 21, 0, 0, 0, DateTimeKind.Utc);
-
-        var events = session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
-
-        var boundEvent = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
-        var bound = Assert.IsType<AgentSessionRuntimeBound>(boundEvent.Value);
-        Assert.Equal("runtime-session-1", bound.AgentRuntimeSessionId);
-        Assert.Null(bound.PreviousAgentRuntimeSessionId);
-    }
 }

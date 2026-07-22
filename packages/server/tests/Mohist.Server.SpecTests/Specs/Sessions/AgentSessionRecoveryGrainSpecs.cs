@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -29,9 +30,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal(sessionId, state.Id);
         Assert.Equal("runtime-before-compact", state.Status.AgentRuntimeSessionId);
         Assert.Equal("opencode", state.Runtime.Runtime);
-        var lineage = Assert.Single(state.Status.RuntimeSessionLineage!);
-        Assert.Equal("runtime-before-compact", lineage.AgentRuntimeSessionId);
-        Assert.Equal("opencode", lineage.Runtime);
         Assert.Equal(sessionId, result.Id);
 
         var recoveryEvents = _fixture.StateStore.Events.Skip(eventCountBefore).ToArray();
@@ -40,7 +38,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     }
 
     [Fact]
-    public async Task Reset_CurrentExpectedBinding_AppliesReplacementAndAppendsLineage()
+    public async Task Reset_CurrentExpectedBinding_AppliesReplacementAndWritesContextReset()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-reset");
         var eventCountBefore = _fixture.StateStore.Events.Count;
@@ -53,16 +51,18 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal(sessionId, state.Id);
         Assert.Equal("runtime-after-reset", state.Status.AgentRuntimeSessionId);
         Assert.Equal("opencode", state.Runtime.Runtime);
-        Assert.Collection(
-            state.Status.RuntimeSessionLineage!,
-            entry => Assert.Equal("runtime-before-reset", entry.AgentRuntimeSessionId),
-            entry => Assert.Equal("runtime-after-reset", entry.AgentRuntimeSessionId));
         Assert.Equal(sessionId, result.Id);
 
         var recoveryEvent = Assert.Single(_fixture.StateStore.Events.Skip(eventCountBefore));
         var runtimeBound = Assert.IsType<AgentSessionRuntimeBound>(recoveryEvent.Value);
         Assert.Equal("runtime-after-reset", runtimeBound.AgentRuntimeSessionId);
-        Assert.Equal("runtime-before-reset", runtimeBound.PreviousAgentRuntimeSessionId);
+        var resetTranscript = Assert.Single(_fixture.TranscriptStore.Flushes);
+        Assert.Equal("session.context_reset", resetTranscript.Parts.Single().Type);
+        using var payload = JsonDocument.Parse(resetTranscript.Parts.Single().PayloadJson);
+        Assert.Equal("reset", payload.RootElement.GetProperty("reason").GetString());
+        Assert.True(payload.RootElement.GetProperty("observedAt").GetString() is not null);
+        Assert.DoesNotContain("runtime-before-reset", resetTranscript.Parts.Single().PayloadJson);
+        Assert.DoesNotContain("runtime-after-reset", resetTranscript.Parts.Single().PayloadJson);
         Assert.DoesNotContain(
             _fixture.StateStore.Events.Skip(eventCountBefore),
             candidate => candidate.Value is AgentSessionContextCompacted);
@@ -94,10 +94,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
 
         var state = Assert.IsType<AgentSession>(_fixture.StateStore.State);
         Assert.Equal("runtime-current", state.Status.AgentRuntimeSessionId);
-        Assert.Collection(
-            state.Status.RuntimeSessionLineage!,
-            entry => Assert.Equal("runtime-original", entry.AgentRuntimeSessionId),
-            entry => Assert.Equal("runtime-current", entry.AgentRuntimeSessionId));
     }
 
     [Fact]
@@ -267,6 +263,9 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-active"));
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, "{\"activity\":\"active\"}") },
+            "runtime-active"));
         var saveCountBefore = _fixture.StateStore.SaveCount;
         var eventCountBefore = _fixture.StateStore.Events.Count;
 
@@ -282,7 +281,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal(saveCountBefore, _fixture.StateStore.SaveCount);
         Assert.Equal(eventCountBefore, _fixture.StateStore.Events.Count);
         Assert.Equal("runtime-active", _fixture.StateStore.State!.Status.AgentRuntimeSessionId);
-        Assert.Equal("runtime-active", Assert.Single(_fixture.StateStore.State.Status.RuntimeSessionLineage!).AgentRuntimeSessionId);
     }
 
     [Fact]

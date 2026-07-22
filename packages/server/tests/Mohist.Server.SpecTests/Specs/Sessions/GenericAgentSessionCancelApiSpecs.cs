@@ -89,12 +89,11 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     [Theory]
     [InlineData("workflow")]
     [InlineData("agent-launch")]
-    public async Task Cancel_ActiveTurn_PreservesSessionTranscriptAndLineageForBothSources(string sourceKind)
+    public async Task Cancel_ActiveTurn_PreservesSessionTranscriptForBothSources(string sourceKind)
     {
         var (project, sessionId) = await CreateCanonicalSessionForCancelAsync(sourceKind);
         var before = await ReadSessionEvidenceAsync(sessionId);
         Assert.Equal(sourceKind, before.SourceKind);
-        Assert.NotEmpty(before.Lineage);
         Assert.NotEmpty(before.TranscriptParts);
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
@@ -134,7 +133,6 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
             Assert.Equal(before.SessionId, after.SessionId);
             Assert.Equal(before.SourceKind, after.SourceKind);
             Assert.Equal(before.RuntimeSessionId, after.RuntimeSessionId);
-            Assert.True(before.Lineage.SequenceEqual(after.Lineage, StringComparer.Ordinal));
             Assert.True(before.TranscriptTurns.SequenceEqual(after.TranscriptTurns, StringComparer.Ordinal));
             Assert.True(before.TranscriptParts.SequenceEqual(after.TranscriptParts, StringComparer.Ordinal));
         }
