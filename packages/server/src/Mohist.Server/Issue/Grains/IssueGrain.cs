@@ -1246,7 +1246,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     }
 
     private static void EnsurePromptsReferencesResolve(
-        Workflow.Domain.Definition.WorkflowDefinition definition,
+        Mohist.Workflow.Definition.WorkflowDefinition definition,
         IReadOnlySet<string> availablePromptKeys)
     {
         var referencedKeys = PromptReferenceScanner.Scan(definition);

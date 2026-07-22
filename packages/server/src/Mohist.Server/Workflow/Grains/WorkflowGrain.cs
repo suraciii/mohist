@@ -9,7 +9,7 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Artifacts;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
@@ -351,7 +351,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         var with = WorkflowDispatchHelpers.ParseWith(task.With);
         var expect = WorkflowDispatchHelpers.ParseWith(task.Expect);
         var events = _run.AddRuntimeTask(
-            new TaskDefinition(task.Id, task.Title, task.Uses, with, expect, Recovery: task.Recovery),
+            new TaskDefinition(task.Id, task.Title, task.Uses ?? string.Empty, with, expect, Recovery: task.Recovery),
             Now(),
             task.Stage,
             task.InvalidateChecks);
@@ -451,7 +451,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             if (string.IsNullOrWhiteSpace(t.Title))
                 throw new InvalidOperationException("Task title is required");
 
-            tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, WorkflowDispatchHelpers.ParseWith(t.With), WorkflowDispatchHelpers.ParseWith(t.Expect)));
+            tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses ?? string.Empty, WorkflowDispatchHelpers.ParseWith(t.With), WorkflowDispatchHelpers.ParseWith(t.Expect)));
         }
 
         var events = _run.AddRuntimeTasks(tasksToInsert, Now());

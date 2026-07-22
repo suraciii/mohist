@@ -53,7 +53,7 @@ internal sealed class WorkflowStageInitializer
                 issueNumber);
             var initEvents = run.InitializeStage(
                 stageDef.Tasks,
-                stageDef.Checks,
+                stageDef.Checks.ToList(),
                 _owner.Now(),
                 advance: true);
             materialized.AddRange(initEvents);

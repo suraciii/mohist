@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 

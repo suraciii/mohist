@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Workflow.Services.Prompts;
 
@@ -8,19 +9,7 @@ public sealed class PromptTemplateEngine : ISingletonService
 {
     public const int MaxPasses = 5;
     private const string EscapeSentinel = "\u0000LITERAL_DOLLAR_BRACE\u0000";
-    private static readonly HashSet<string> AllowedRoots = new(StringComparer.Ordinal)
-    {
-        "workflow",
-        "stage",
-        "work",
-        "issue",
-        "repository",
-        "workspace",
-        "vars",
-        "tasks",
-        "prompts",
-        "failure",
-    };
+    private static readonly HashSet<string> AllowedRoots = new(TemplateRoots.All, StringComparer.Ordinal);
 
     private static readonly Regex TokenRegex = new(
         @"\$\{\{\s*(?<path>[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}",

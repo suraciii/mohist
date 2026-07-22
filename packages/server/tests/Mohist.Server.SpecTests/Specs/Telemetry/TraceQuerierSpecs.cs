@@ -366,6 +366,7 @@ public class TraceQuerierSpecs : IDisposable
         var execution = Task.Run(() => _querier.ExecuteBoundedQuery(query));
         await _readerStarted.Task;
         _timeProvider.Advance(TimeSpan.FromSeconds(TraceQuerier.QueryExecutionBudgetSeconds));
+        await _queryInterrupted.Task;
 
         var exception = await Record.ExceptionAsync(() => execution);
 

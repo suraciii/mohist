@@ -1,5 +1,5 @@
 {
-  "Mohist.Server.ArchTests/ArchitectureRules.cs": 26461,
+  "Mohist.Server.ArchTests/ArchitectureRules.cs": 30000,
   "Mohist.Server.SpecTests/Specs/Agent/Api/AgentJobRoutesSpecs.cs": 25068,
   "Mohist.Server.SpecTests/Specs/Agent/Grain/AgentJobTerminalDeliverySpecs.cs": 30862,
   "Mohist.Server.SpecTests/Specs/AgentOps/AgentUsageReporterSpecs.cs": 33354,
@@ -15,7 +15,7 @@
   "Mohist.Server.SpecTests/Specs/Issue/Api/IssueWorkflowProfileApiConsistencySpecs.cs": 42710,
   "Mohist.Server.SpecTests/Specs/Issue/Grain/IssueCompositeAdvancementGrainSpecs.cs": 24490,
   "Mohist.Server.SpecTests/Specs/Issue/IssueTemplate/IssueTemplateRegistrySpecs.cs": 25560,
-  "Mohist.Server.SpecTests/Specs/Issue/Profile/IssueWorkflowProfileApiSpecs.cs": 25270,
+  "Mohist.Server.SpecTests/Specs/Issue/Profile/IssueWorkflowProfileApiSpecs.cs": 25314,
   "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistLocalWorkflowProfileSpecs.cs": 62249,
   "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs": 39006,
   "Mohist.Server.SpecTests/Specs/Issue/Querier/IssueMetricsQualitySpecs.cs": 51363,

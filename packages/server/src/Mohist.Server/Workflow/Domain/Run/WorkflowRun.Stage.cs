@@ -1,4 +1,4 @@
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -24,8 +24,8 @@ public static partial class WorkflowRunExtensions
             current.Checks = checks
                 .Select(c => new StageCheck
                 {
-                    Name = c.Name,
-                    Title = c.Title,
+                    Name = c.Id,
+                    Title = c.Title ?? c.Id,
                     Uses = c.Uses,
                     WithInput = c.With,
                     Status = StageCheckStatus.Pending

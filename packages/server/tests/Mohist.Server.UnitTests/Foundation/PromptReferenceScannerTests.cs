@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Foundation;
@@ -38,7 +38,7 @@ public class PromptReferenceScannerTests
           - stage: build
             tasks: []
             checks:
-              - name: review
+              - id: review
                 title: Review
                 uses: mohist/ai-review
                 with:

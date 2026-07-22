@@ -134,7 +134,7 @@ stages:
           github.pr.url: output.prUrl
 
     checks:
-      - name: plan-artifacts
+      - id: plan-artifacts
         title: Plan artifacts complete
         uses: mohist/openspec-artifacts
         with:
@@ -274,7 +274,7 @@ stages:
               retrySelf: true
 
     checks:
-      - name: github-pr-status
+      - id: github-pr-status
         title: GitHub PR status
         uses: mohist/github-pr-status
         with:
@@ -374,7 +374,7 @@ stages:
               retrySelf: true
 
     checks:
-      - name: merge-verified
+      - id: merge-verified
         title: Merge verified
         uses: mohist/github-pr-status
         with:

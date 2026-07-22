@@ -1,4 +1,4 @@
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 
@@ -16,7 +16,7 @@ internal static class RuntimeTaskFollowUps
             var definition = new TaskDefinition(
                 task.Id,
                 task.Title,
-                task.Uses,
+                task.Uses ?? string.Empty,
                 WorkflowDispatchHelpers.ParseWith(task.With),
                 WorkflowDispatchHelpers.ParseWith(task.Expect),
                 task.Artifacts,

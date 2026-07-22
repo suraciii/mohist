@@ -4,7 +4,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 
@@ -39,7 +39,7 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
 
         Assert.Equal("build", build.Stage);
         Assert.Equal(new[] { "compile", "test" }, build.Tasks.Select(t => t.Id).ToArray());
-        Assert.Equal(new[] { "build-ok" }, build.Checks.Select(c => c.Name).ToArray());
+        Assert.Equal(new[] { "build-ok" }, build.Checks.Select(c => c.Id).ToArray());
         Assert.Equal("sequential", build.LockBehavior);
         Assert.Equal(new[] { "ci-pool" }, build.Resources);
     }

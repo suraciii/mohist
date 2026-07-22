@@ -1,0 +1,131 @@
+{
+  "project": "mohist-local",
+  "description": "Establish the authoritative Workflow Definition validator, wire it into the server save path, add an offline mo workflow validate command, and lock built-in and documented examples as CI golden cases.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Standalone validator library: model, Parse, structural and type rules",
+      "spec": "specs/workflow-definition-validation/spec.md#single-authoritative-parse-entry-and-shared-semantic-model",
+      "description": "Create the Mohist.Workflow.Definition project with no Orleans/ASP.NET dependency, holding the tightened semantic model (uses required, title optional, checks identify by id), the ValidationError type (YAML path + domain message + source), and the two-phase Parse(yaml) -> Definition | Error[] entry that collects all errors in one pass. Enforce the structural and type rules: closed top level (approval/stages only, stages non-empty, reject metadata/variables/defaults/artifacts), identifier uniqueness and required fields, check id, stage resource locking, recovery well-formedness, auxiliary declarations, type errors without silent defaults, unknown-field rejection at any level, and open with shape (absent or JSON object, no key interpretation). Factor the rule checks so they run on a Definition model and expose them both as Parse(yaml) (YAML->model conversion plus all checks) and as a model-level Validate(Definition) reused by the server load path (T-003). Add a dedicated host-free unit test project covering the full structural/type rule table.",
+      "acceptanceCriteria": [
+        "Mohist.Workflow.Definition is a standalone project added to Mohist.sln; an arch test asserts it references no Orleans and no ASP.NET package, so the CLI can reference it without pulling host dependencies",
+        "Parse(yaml) returns a Definition on success and a non-empty, path-sorted ValidationError list on failure; it does not throw on the first Definition-language problem and collects multiple errors from one document",
+        "The semantic checks are exposed both as Parse(yaml) and as Validate(Definition) on an existing model, sharing one rule implementation; Validate(Definition) returns the same ValidationError type used by Parse",
+        "Every ValidationError carries a YAML path (object keys plus [i] array indices) and a domain-language message, and never exposes a stack trace, C# type name, or source path",
+        "Unknown keys at any level are errors and are not silently dropped; the parsed model contains no removed top-level field (metadata/variables/defaults/artifacts)",
+        "Type mismatches (e.g. budget: abc, requiresApproval: \"yes\", budget: -1) are reported rather than coerced to a default",
+        "The tightened model holds: uses is required on tasks and checks, title is optional and accepted when absent, and checks identify by id while name is rejected as an unknown field",
+        "Stage, task, and check identifier uniqueness/required rules pass: duplicate stage/task/check identifiers and missing uses are rejected; stage identifiers (the stage field) are unique across the Definition, task ids unique within their list, check ids unique within their stage",
+        "lockBehavior is accepted only as sequential and only with non-empty resources, and resources without lockBehavior is rejected",
+        "Recovery rules hold: budget non-negative integer, ordered handlers, at most one default handler that is last, when of the form field=value, and each handler declares tasks or retrySelf",
+        "Auxiliary declarations validate: setVars values are output.* paths, expect.markers[].oneOf non-empty with failIf a member of oneOf, and artifacts/expect file paths non-empty",
+        "with is accepted absent or as a JSON object; an unknown with key is not an error, while with: \"plain string\" is rejected; no with key/required/type rule from any Action contract is replicated",
+        "A dedicated host-free unit test project covers every structural/type rule above, including multi-error collection and the with-open-structure regression",
+        "npm run build and npm test pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Mohist.Workflow.Definition project (tightened model, ValidationError, two-phase Parse with structural/type rules), a host-free unit test project, and the project wired into Mohist.sln",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Realizes specs/workflow-definition-validation requirements: single authoritative parse entry, full single-pass error collection, unknown fields rejected, type errors without silent defaults, top-level structure closed, identifiers unique and required, checks identify by id, stage resource locking, recovery well-formed, auxiliary declarations valid, and the shape portion of with-is-open. Do NOT implement template-expression validation here (T-002 owns roots/position/tasks.<id>); do NOT wire the server save path (T-003). Template expressions inside with are not yet inspected in this task."
+    },
+    {
+      "id": "T-002",
+      "title": "Template-language static validation and single-owner root table",
+      "spec": "specs/workflow-definition-validation/spec.md#template-references-use-public-roots-and-declared-tasks",
+      "description": "Layer template static validation into Parse. Move the public root table into Mohist.Workflow.Definition as the single owner and rewrite the server PromptTemplateEngine.AllowedRoots to reference that constant. Extract every ${{ }} expression from string-typed values including recursively inside with and expect, check each root against the public table, enforce position rules (failure.* only in recovery-handler tasks, work.approvalFeedback.* only in approval-feedback tasks) via a walk context flag, and reject tasks.<id> self/forward references by strictly-earlier execution position without asserting runtime output presence. Keep with keys opaque while validating the expressions inside them. Add these template checks to the same rule implementation exposed by Validate(Definition) so the server load path (T-003) validates templates on a deserialized model. Add library unit tests for the template rule matrix.",
+      "acceptanceCriteria": [
+        "The ten public roots live in one constant in Mohist.Workflow.Definition; the server PromptTemplateEngine references that constant and no longer declares its own copy",
+        "An expression whose root is not in the public table (e.g. ${{ project.id }}) is reported with its location",
+        "failure.* is accepted only inside recovery-handler tasks and rejected elsewhere; work.approvalFeedback.* is accepted only inside approval-feedback tasks and rejected elsewhere",
+        "tasks.<id> resolves only to a task declared at a strictly-earlier execution position; self references and forward references are rejected, while a reference to an earlier task in the same or a prior stage is accepted",
+        "Static validation does not assert that a referenced task will succeed or that a referenced output field exists at runtime; a forward-safe tasks.<id>.outputs.x reference is accepted",
+        "Template expressions nested inside with and expect string values are validated, while the with keys themselves remain non-errors and their required/types are not interpreted",
+        "Template errors are collected alongside structural errors in the same single pass and carry YAML paths",
+        "The existing server template preview behavior is unchanged (PromptTemplateEngine still resolves the same ten roots after referencing the shared constant)",
+        "Library unit tests cover the template matrix: off-table root, undeclared task, self reference, forward reference, cross-stage earlier reference, failure scoping, approvalFeedback scoping, and expression-inside-with validation",
+        "npm run build and npm test pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Template static validation inside Parse, the shared public root table, the PromptTemplateEngine single-owner rewrite, and library template-rule unit tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Realizes specs/workflow-definition-validation requirements: template references use public roots and declared tasks, template position rules enforced, and the recursive-template portion of with-is-open. Execution-position ordering is a static, save-time judgment only; do not model runtime reachability. The server touch is limited to making PromptTemplateEngine reference the library root constant."
+    },
+    {
+      "id": "T-003",
+      "title": "Server consumes the validator, migrates built-ins, separates error sources",
+      "spec": "specs/workflow-definition-validation/spec.md#profile-save-entry-rejects-invalid-definitions-and-separates-error-sources",
+      "description": "Wire the Profile save managers and the built-in WorkflowProfileCatalog to Parse for YAML input. Persist custom Profiles as JSON over the library model (System.Text.Json) and switch the runtime load path from WorkflowYamlSerializer.FromProfileJson plus the try/catch->null swallow to deserializing JSON to the library model and running Validate(Definition), so an invalid or tampered stored Profile surfaces a clear Definition error instead of disappearing. Register Orleans surrogates for the library records (migrating the existing CheckDefinitionSurrogate from Name to Id). Migrate both built-in .workflow.yaml files to the tightened shape (checks use id not name, uses present). Run the one-shot stored-Definition migration: mechanically map check name->id, re-Parse, write back as JSON; stop with a diagnostic for records that still fail (e.g. a task missing uses). Keep the transitional inline-agent with guard on the save path as an Action-catalog proxy until #446, its errors labeled source=action. Label Definition errors source=definition and return BadRequest with the full path-sorted error list on invalid save.",
+      "acceptanceCriteria": [
+        "ProjectWorkflowProfileManager, IssueWorkflowProfileManager, and WorkflowProfileCatalog.LoadProfile call Parse for YAML input and no longer use the superseded WorkflowYamlSerializer unknown-field/type paths",
+        "Custom Profiles are persisted as JSON over the library model (System.Text.Json); the runtime load path deserializes to the library model and runs Validate(Definition), replacing the DeserializeProfile try/catch->null swallow so an invalid stored Profile produces a clear Definition error rather than null",
+        "A regression test proves an invalid/tampered stored Profile surfaces a Definition error at load instead of silently becoming null",
+        "The one-shot stored-Definition migration converts each persisted custom Profile (check name->id mechanically, then re-Parse and write back as JSON); records that still fail stop migration with a diagnostic naming the Profile and the failing YAML path, and no record is silently accepted or silently dropped",
+        "Orleans surrogates are registered for the library record types, with CheckDefinitionSurrogate migrated from Name to Id; grains pass and persist the library model and a round-trip test verifies serialization",
+        "Both built-in .workflow.yaml files use id on checks and declare uses on every task/check, and load successfully through Parse",
+        "Saving an invalid Profile returns BadRequest carrying the complete, path-sorted Definition error list, not only the first error",
+        "Every Definition error carries source=definition; the transitional inline-agent with-guard errors carry source=action; the two are distinguishable on the save response, and no Definition rule is re-implemented on the save path",
+        "The transitional inline-agent with guards remain on the save path (rejecting with.agent/kind/type and legacy with.expect for inline agents) and are exercised by tests, with a note that #446 owns their real home",
+        "Server spec/unit coverage updates the existing profile, catalog, project-template, issue-profile, stage-load, persistence-round-trip, and serializer-replacement scenarios for the validator-backed save and load behavior",
+        "npm run build and npm test pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Validator-backed server save/catalog paths, JSON persistence over the library model with Validate(Definition) load (no silent null), one-shot stored-Definition migration, registered Orleans surrogates (CheckDefinition Name->Id), migrated built-in .workflow.yaml assets, error-source labeling on the save API, and updated server specs",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Realizes specs/workflow-definition-validation requirements: profile save entry rejects invalid Definitions and separates error sources, and load validates a deserialized model through the same rules. Custom Profiles are stored as JSON (SerializeProfile/DeserializeProfile today), not YAML text; load therefore reuses the rules via Validate(Definition) rather than Parse(yaml), per design D8. The transitional with guards are Action-contract territory (source=action) kept temporarily until #446; do not migrate them into the Definition validator. Stored data is carried across by the one-shot migration (design D11); the load no-silent-null behavior is a regression-tested invariant."
+    },
+    {
+      "id": "T-004",
+      "title": "Offline mo workflow validate --file <path|-> command",
+      "spec": "specs/workflow-validate-command/spec.md#local-only-validation-command",
+      "description": "Add a validate subcommand to the existing workflow command group in packages/cli. Reference Mohist.Workflow.Definition and call Parse directly with no HTTP and no Project resolution. Add a 2-source --file reader: --file <path> reads a file, --file - reads from stdin. On a valid Definition print a clear success message and exit 0; on an invalid Definition print each error's path and message and exit non-zero. Report only Definition-language errors and never claim to validate action existence or with contracts.",
+      "acceptanceCriteria": [
+        "mo workflow validate --file <path> reads and validates the file without contacting any server or resolving a Project",
+        "mo workflow validate --file - reads the Definition from standard input and validates it offline",
+        "A valid Definition prints a clear valid message and exits with code 0",
+        "An invalid Definition prints every Definition error using the same YAML paths and messages as the server save path and exits with a non-zero code",
+        "The command reports only Definition-language errors; a Definition referencing an action not installed locally does not produce an action-existence or with-contract error",
+        "The command references Mohist.Workflow.Definition directly and makes no HTTP call (verifiable without a running server)",
+        "CLI tests cover file input, stdin input, valid success, invalid multi-error failure with matching paths/messages, and the no-action-validation boundary",
+        "npm run build and npm test pass"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "mo workflow validate --file <path|-> leaf command, 2-source --file reader, and CLI tests",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Realizes all four specs/workflow-validate-command requirements. Reuse the established file/stdin read patterns (BodyInputResolver/ExpandAtFileAsync) as a guide but keep --file as a single option where - means stdin. Do not migrate the rest of the mo command tree."
+    },
+    {
+      "id": "T-005",
+      "title": "CI golden cases and docs/design gap closure",
+      "spec": "specs/workflow-validation-golden-cases/spec.md#built-in-definitions-pass-validation-in-ci",
+      "description": "Add golden-case tests (in the server test project, run under npm test) that Parse every built-in .workflow.yaml and the complete fenced example extracted from docs/workflow-definition.md, asserting success. Add a negative test that injects an unknown field into a golden-case Definition and asserts Parse fails with the expected path/message. Validate only the complete example block and exclude the smaller partial syntax snippets scattered through the docs. Update the docs/workflow-definition.md implementation-gap section and the design/workflow/definition.md Status to remove the gaps this change resolves.",
+      "acceptanceCriteria": [
+        "A test runs Parse over every built-in .workflow.yaml and fails the build if any is invalid",
+        "A test runs Parse over the complete example extracted from docs/workflow-definition.md and fails the build if it is invalid",
+        "A negative test injects an unknown field into a golden-case Definition and asserts Parse fails with the same unknown-field path/message it produces elsewhere",
+        "The docs-example extraction selects only the complete example block; partial syntax snippets and scattered fragments are never passed to Parse and produce no false positives",
+        "Golden-case tests run as part of npm test (dotnet test Mohist.sln)",
+        "docs/workflow-definition.md implementation-gap section and design/workflow/definition.md Status no longer list check-name, unknown-field/type validation, local validate command, or save-time pre-validation as open gaps",
+        "npm run build and npm test pass"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Golden-case and negative tests in the server test project, the docs-example extractor with skeleton/fragment exclusion, and updated docs/design gap sections",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Realizes all four specs/workflow-validation-golden-cases requirements. Depends on T-003 so the built-ins are already migrated to the tightened shape. Prefer reading the docs example directly from docs/workflow-definition.md at test time so the syntax and the golden case cannot drift; confirm the extractor picks only the complete fenced example (see design Open Questions)."
+    }
+  ]
+}

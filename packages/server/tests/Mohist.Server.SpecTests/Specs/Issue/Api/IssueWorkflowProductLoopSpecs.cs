@@ -417,7 +417,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
                   prompt: ${{ prompts.self-review }}
                   options: ${{ vars.agent }}
             checks:
-              - name: health
+              - id: health
                 title: Health
                 uses: core/script
                 with:
@@ -440,7 +440,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
                           items: tasks
                           base: ${{ prompts.build }}
             checks:
-              - name: health
+              - id: health
                 title: Health
                 uses: core/script
                 with:
@@ -456,7 +456,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
                   prompt: ${{ prompts.review }}
                   options: ${{ vars.agent }}
             checks:
-              - name: health
+              - id: health
                 title: Health
                 uses: core/script
                 with:

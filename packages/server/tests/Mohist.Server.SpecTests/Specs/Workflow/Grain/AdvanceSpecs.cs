@@ -1,5 +1,5 @@
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 using Mohist.Server.SpecTests.Support;

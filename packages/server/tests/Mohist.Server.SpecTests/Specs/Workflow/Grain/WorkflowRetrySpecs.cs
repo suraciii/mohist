@@ -1,7 +1,7 @@
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using System.Text.Json;
@@ -198,7 +198,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     {
         var recovery = new RecoveryDefinition(
             2,
-            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: false)]);
+            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: true)]);
         await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
             checks: []));
@@ -221,7 +221,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     {
         var recovery = new RecoveryDefinition(
             2,
-            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: false)]);
+            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: true)]);
         await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
             checks: []));
@@ -244,7 +244,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     {
         var recovery = new RecoveryDefinition(
             2,
-            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: false)]);
+            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: true)]);
         await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
             checks: []));

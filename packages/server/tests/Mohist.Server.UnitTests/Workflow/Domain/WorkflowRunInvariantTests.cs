@@ -1,5 +1,5 @@
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 

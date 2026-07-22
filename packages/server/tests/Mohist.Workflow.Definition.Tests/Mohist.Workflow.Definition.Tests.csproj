@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Mohist.Workflow.Definition.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" VersionOverride="17.14.0" />
+    <PackageReference Include="xunit" VersionOverride="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" VersionOverride="2.8.2" />
+    <PackageReference Include="EnvironmentAbstractions" />
+    <PackageReference Include="EnvironmentAbstractions.TestHelpers" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Mohist.Workflow.Definition\Mohist.Workflow.Definition.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\src\Mohist.Server\Workflow\Services\Profiles\*.workflow.yaml">
+      <LogicalName>GoldenCases.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\docs\workflow-definition.md">
+      <LogicalName>GoldenCases.workflow-definition.md</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

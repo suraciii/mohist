@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain.Artifacts;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Workflow.Services.Artifacts;
 

@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 

@@ -4,7 +4,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Infrastructure.Data.Workflow;
 
 namespace Mohist.Server.Workflow.Services;
@@ -36,7 +36,7 @@ public class IssueWorkflowProfileManager : IScopedService
         var row = await FindProfileAsync(db, projectId, issueNumber);
         if (row is null) return null;
         if (!string.IsNullOrWhiteSpace(row.Template))
-            return DeserializeProfile(row.Template)?.Definition;
+            return WorkflowProfilePersistence.Deserialize(row.Template).Definition;
         // SourceTemplateId case - caller should resolve via ProjectWorkflowProfileManager.GetTemplateAsync
         return null;
     }
@@ -53,7 +53,7 @@ public class IssueWorkflowProfileManager : IScopedService
                 row.IssueNumber,
                 row.SourceTemplateId,
                 !string.IsNullOrWhiteSpace(row.Template),
-                 string.IsNullOrWhiteSpace(row.Template) ? null : DeserializeProfile(row.Template),
+                  string.IsNullOrWhiteSpace(row.Template) ? null : WorkflowProfilePersistence.Deserialize(row.Template),
                 VariableBundle.FromJson(row.Variables),
                 row.UpdatedAt);
     }
@@ -85,7 +85,7 @@ public class IssueWorkflowProfileManager : IScopedService
         WorkflowProfile? parsedProfile = null;
         if (!string.IsNullOrWhiteSpace(request.Template))
         {
-            parsedProfile = WorkflowYamlSerializer.FromProfileYaml(request.Template, CustomProfileId(projectId, issueNumber));
+            parsedProfile = WorkflowProfileYamlParser.Parse(request.Template, CustomProfileId(projectId, issueNumber));
         }
 
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -96,7 +96,7 @@ public class IssueWorkflowProfileManager : IScopedService
         {
             row = CreateProfile(projectId, issueNumber);
             row.SourceTemplateId = request.ProjectTemplateId;
-            row.Template = parsedProfile is null ? null : SerializeProfile(parsedProfile);
+            row.Template = parsedProfile is null ? null : WorkflowProfilePersistence.Serialize(parsedProfile);
             row.Variables = VariableBundle.Empty.ToJson();
             row.UpdatedAt = DateTimeOffset.UtcNow;
             db.IssueWorkflowProfiles.Add(row);
@@ -104,7 +104,7 @@ public class IssueWorkflowProfileManager : IScopedService
         else
         {
             row.SourceTemplateId = request.ProjectTemplateId;
-            row.Template = parsedProfile is null ? null : SerializeProfile(parsedProfile);
+            row.Template = parsedProfile is null ? null : WorkflowProfilePersistence.Serialize(parsedProfile);
             row.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -175,9 +175,6 @@ public class IssueWorkflowProfileManager : IScopedService
     // Helpers
     // =======================================================================
 
-    private static string SerializeProfile(WorkflowProfile profile) =>
-        JsonSerializer.Serialize(profile, WorkflowYamlSerializer.JsonOptions);
-
     private static string CustomProfileId(string projectId, int issueNumber) =>
         $"issue-custom:{projectId}#{issueNumber}";
 
@@ -220,26 +217,13 @@ public class IssueWorkflowProfileManager : IScopedService
         };
     }
 
-    private static WorkflowProfile? DeserializeProfile(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return null;
-        try
-        {
-            return WorkflowYamlSerializer.FromProfileJson(json);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static IssueWorkflowProfileState ToState(IssueWorkflowProfile row) =>
         new(
             row.ProjectId,
             row.IssueNumber,
             row.SourceTemplateId,
             !string.IsNullOrWhiteSpace(row.Template),
-            string.IsNullOrWhiteSpace(row.Template) ? null : DeserializeProfile(row.Template),
+            string.IsNullOrWhiteSpace(row.Template) ? null : WorkflowProfilePersistence.Deserialize(row.Template),
             VariableBundle.FromJson(row.Variables),
             row.UpdatedAt);
 }

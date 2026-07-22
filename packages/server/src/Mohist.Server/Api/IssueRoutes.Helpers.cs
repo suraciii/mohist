@@ -7,7 +7,7 @@ using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using YamlDotNet.Core;
@@ -114,6 +114,13 @@ public static partial class IssueRoutes
         catch (YamlException ex)
         {
             return ApiResults.Fail("YAML syntax error: " + ex.Message, 400, "yaml_syntax");
+        }
+        catch (WorkflowDefinitionValidationException ex)
+        {
+            return ApiResults.BadRequest(
+                "Workflow profile is invalid: " + string.Join("; ", ex.Errors.Select(error => $"{error.Path}: {error.Message}")),
+                "workflow_shape",
+                ex.Errors);
         }
         catch (InvalidOperationException ex)
         {

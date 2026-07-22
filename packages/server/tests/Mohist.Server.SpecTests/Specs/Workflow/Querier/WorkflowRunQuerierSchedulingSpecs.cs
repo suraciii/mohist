@@ -440,12 +440,12 @@ public class WorkflowRunQuerierSchedulingSpecs
         return JSON.Serialize(run);
     }
 
-    private static Mohist.Server.Workflow.Domain.Definition.WorkflowDefinition BuildMinimalDefinition()
+    private static Mohist.Workflow.Definition.WorkflowDefinition BuildMinimalDefinition()
     {
-        return new Mohist.Server.Workflow.Domain.Definition.WorkflowDefinition(
-            [new Mohist.Server.Workflow.Domain.Definition.StageDefinition(
+        return new Mohist.Workflow.Definition.WorkflowDefinition(
+            [new Mohist.Workflow.Definition.StageDefinition(
                 "build",
-                [new Mohist.Server.Workflow.Domain.Definition.TaskDefinition("task-1", "Build task", "spec/task")],
+                [new Mohist.Workflow.Definition.TaskDefinition("task-1", "Build task", "spec/task")],
                 [])]);
     }
 
