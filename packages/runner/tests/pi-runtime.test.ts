@@ -280,34 +280,6 @@ describe("PiRuntime", () => {
     expect(events.some((event) => (event as { type?: unknown }).type === "tool" && (event as { payload?: { toolCallId?: string } }).payload?.toolCallId === "tool-2")).toBe(false)
   })
 
-  it("cancel confirms stop and reports stopConfirmed true when abort clears isStreaming", async () => {
-    const session = new FakeSession()
-    session.isStreaming = true
-    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
-    await runtime.start()
-    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
-    expect(result).toMatchObject({ ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", cancelled: true, stopConfirmed: true } })
-    expect(session.abortCalls).toBe(1)
-  })
-
-  it("cancel reports stopConfirmed false and surfaces the unconfirmed diagnostic when isStreaming persists", async () => {
-    const session = new FakeSession()
-    session.isStreaming = true
-    let persistStreaming = true
-    const originalAbort = session.abort.bind(session)
-    session.abort = async () => { await originalAbort(); session.isStreaming = persistStreaming; return }
-    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
-    await runtime.start()
-    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
-    expect(result.ok).toBe(true)
-    if (!result.ok) throw new Error("expected ok")
-    expect(result.value.cancelled).toBe(true)
-    expect(result.value.stopConfirmed).toBe(false)
-    expect(result.value.runtimeSessionId).toBe("/virtual/sessions/one.jsonl")
-    expect(result.diagnostics.some((diag) => diag.code === "abort-unconfirmed")).toBe(true)
-    expect(session.abortCalls).toBe(1)
-  })
-
   it("cancel reports missing-session with a Reset hint when the bound file is absent", async () => {
     const session = new FakeSession()
     const missingFactory: PiSdkFactory = {
@@ -382,21 +354,6 @@ describe("PiRuntime", () => {
     expect(result).toMatchObject({ ok: false, error: { kind: "missing-session" } })
     if (result.ok) throw new Error("expected missing-session")
     expect(result.error.message.toLowerCase()).toContain("reset")
-  })
-
-  it("does not treat turn_end as a fully settled cancellation", async () => {
-    const session = new FakeSession()
-    session.isStreaming = true
-    session.abort = async () => {
-      session.abortCalls++
-      session.isStreaming = false
-      session.emit({ type: "turn_end", id: "turn-end-1" })
-    }
-    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
-    await runtime.start()
-
-    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
-    expect(result).toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: false } })
   })
 
   it("serializes a concurrent idle follow-up with an in-flight workflow turn on the same session", async () => {

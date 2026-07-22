@@ -44,6 +44,7 @@ export interface PiRuntimeDeps {
 }
 
 const defaultClock: PiClock = { now: () => Date.now(), setTimeout: (callback, delay) => setTimeout(callback, delay), clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) }
+const CANCEL_CONFIRMATION_TIMEOUT_MS = 5_000
 
 export class PiRuntime {
   private readonly deps: PiRuntimeDeps
@@ -275,14 +276,10 @@ export class PiRuntime {
     const diagnostics: PiDiagnostic[] = []
     const wasStreaming = session.value.isStreaming
     let stopConfirmed = !wasStreaming
-    let stopEventObserved = false
-    const unsubscribe = session.value.subscribe((event) => {
-      if (isPiStopEvent(event)) stopEventObserved = true
-    })
+    const confirmation = wasStreaming ? watchPiStop(session.value, this.deps.clock ?? defaultClock) : null
     try {
       await session.value.abort()
-      await Promise.resolve()
-      stopConfirmed = !session.value.isStreaming && (!wasStreaming || stopEventObserved)
+      if (confirmation) stopConfirmed = await confirmation.wait
       if (!stopConfirmed) {
         stopConfirmed = false
         diagnostics.push(diagnostic("abort-unconfirmed", this.mask("Pi did not confirm that the turn stopped through its event sequence")))
@@ -291,7 +288,7 @@ export class PiRuntime {
       stopConfirmed = false
       diagnostics.push(diagnostic("abort-unconfirmed", this.mask(message(cause))))
     } finally {
-      unsubscribe()
+      confirmation?.dispose()
     }
     const facts: PiCancelFacts = { runtimeSessionId: path, workDir: request.target.workDir, cancelled: true, stopConfirmed }
     return { ok: true, value: facts, diagnostics }
@@ -462,12 +459,14 @@ export class PiRuntime {
     let session: PiSdkSession
     try {
       const cached = this.sessions.get(path)
-      if (cached && this.state.services.validateSessionFile) {
-        await this.state.services.validateSessionFile(path)
+      if (cached) {
+        if (!cached.isStreaming && this.state.services.validateSessionFile) {
+          await this.state.services.validateSessionFile(path, cached.sessionId)
+        }
         return { ok: true, value: cached }
       }
       const opened = await this.state.services.openSession(path, workDir)
-      session = cached ?? opened
+      session = opened
       this.sessions.set(path, session)
       return { ok: true, value: session }
     } catch (cause) {
@@ -521,4 +520,28 @@ function lastMessageFailed(messages: readonly { role?: string; stopReason?: stri
 function lastMessageError(messages: readonly { role?: string; errorMessage?: string }[]): string | undefined { return [...messages].reverse().find((entry) => entry.role === "assistant")?.errorMessage }
 function isRetryFailure(event: unknown, policy: PiProviderErrorPolicy): boolean { if (!event || typeof event !== "object" || (event as { type?: unknown }).type !== "auto_retry_start") return false; const value = event as { errorMessage?: unknown; attempt?: unknown }; const text = typeof value.errorMessage === "string" ? value.errorMessage : ""; return isProviderFailure(text, policy) || (typeof value.attempt === "number" && value.attempt >= policy.consecutiveRetryThreshold) }
 function isPiStopEvent(event: unknown): boolean { return Boolean(event && typeof event === "object" && (event as { type?: unknown }).type === "agent_settled") }
+function watchPiStop(session: PiSdkSession, clock: PiClock): { readonly wait: Promise<boolean>; readonly dispose: () => void } {
+  let resolveWait: (confirmed: boolean) => void = () => {}
+  const wait = new Promise<boolean>((resolve) => { resolveWait = resolve })
+  let settled = false
+  let timeout: unknown | null = null
+  let unsubscribe: (() => void) | null = null
+  const complete = (confirmed: boolean) => {
+    if (settled) return
+    settled = true
+    if (timeout !== null) clock.clearTimeout(timeout)
+    unsubscribe?.()
+    resolveWait(confirmed)
+  }
+  const removeListener = session.subscribe((event) => {
+    if (isPiStopEvent(event)) complete(true)
+  })
+  unsubscribe = removeListener
+  if (settled) {
+    removeListener()
+    return { wait, dispose: () => complete(false) }
+  }
+  timeout = clock.setTimeout(() => complete(false), CANCEL_CONFIRMATION_TIMEOUT_MS)
+  return { wait, dispose: () => complete(false) }
+}
 async function abortAndDiagnose(session: PiSdkSession, diagnostics: PiDiagnostic[], mask: (text: string) => string): Promise<void> { try { await session.abort(); await Promise.resolve(); if (session.isStreaming) diagnostics.push(diagnostic("abort-unconfirmed", mask("Pi did not confirm that the turn stopped"))) } catch (cause) { diagnostics.push(diagnostic("abort-unconfirmed", mask(message(cause)))) } }

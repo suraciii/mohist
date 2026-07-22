@@ -5,6 +5,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent"
+import { resolve } from "node:path"
 import type { PiDiagnostic } from "./types.js"
 
 export interface PiSdkMessage {
@@ -74,13 +75,33 @@ export interface PiSdkServices {
   catalog(): Promise<readonly { readonly provider: string; readonly id: string; readonly thinkingLevels?: readonly string[] }[]>
   createSession(cwd: string): Promise<PiSdkSession>
   openSession(path: string, cwd: string): Promise<PiSdkSession>
-  validateSessionFile?(path: string): Promise<void>
+  validateSessionFile?(path: string, expectedSessionId?: string): Promise<void>
   model(provider: string, id: string): unknown
   close(): Promise<void>
 }
 
 export interface PiSdkFactory {
   create(options: PiSdkFactoryOptions): Promise<PiSdkServices>
+}
+
+export function validatePiSessionContents(content: string, expectedSessionId?: string): { readonly entryCount: number; readonly sessionId: string } {
+  const entries = content
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line, index) => parseEntry(line, index + 1))
+  const [header, ...sessionEntries] = entries
+  if (!header || header.type !== "session") throw new Error("Pi session file must begin with a session header")
+  const sessionId = requiredString(header, "id", "session header")
+  if (expectedSessionId !== undefined && sessionId !== expectedSessionId) throw new Error("Pi session file has an unexpected session id")
+  requiredTimestamp(header, "timestamp", "session header")
+  requiredString(header, "cwd", "session header")
+  if ("version" in header && (!Number.isInteger(header.version) || (header.version as number) < 1)) {
+    throw new Error("Pi session header has an invalid version")
+  }
+
+  const entryIds = new Set<string>()
+  for (const entry of sessionEntries) validateSessionEntry(entry, entryIds)
+  return { entryCount: sessionEntries.length, sessionId }
 }
 
 export const realPiSdkFactory: PiSdkFactory = {
@@ -112,12 +133,17 @@ export const realPiSdkFactory: PiSdkFactory = {
         const session = (await createAgentSession({ cwd: sessionCwd, agentDir, modelRuntime, settingsManager, resourceLoader, sessionManager: manager, noTools: "builtin" })).session
         return wrapAgentSession(session)
       },
-      async validateSessionFile(path) {
+      async validateSessionFile(path, expectedSessionId) {
         const { readFile } = await import("node:fs/promises")
         const content = await readFile(path, "utf8")
-        for (const line of content.split("\n")) {
-          if (line.trim().length > 0) JSON.parse(line)
-        }
+        const validation = validatePiSessionContents(content, expectedSessionId)
+        const manager = SessionManager.open(path)
+        if (
+          manager.getSessionFile() !== resolve(path)
+          || manager.getSessionId() !== validation.sessionId
+          || (expectedSessionId !== undefined && manager.getSessionId() !== expectedSessionId)
+          || manager.getEntries().length !== validation.entryCount
+        ) throw new Error("Pi session file could not be restored by SessionManager")
       },
       async close() {},
     }
@@ -126,6 +152,83 @@ export const realPiSdkFactory: PiSdkFactory = {
 
 export function sdkFailure(cause: unknown): PiDiagnostic {
   return { severity: "error", code: "pi-sdk-failure", message: cause instanceof Error ? cause.message : "Pi SDK operation failed" }
+}
+
+function parseEntry(line: string, lineNumber: number): Record<string, unknown> {
+  let entry: unknown
+  try { entry = JSON.parse(line) } catch { throw new Error(`Pi session file contains invalid JSON at line ${lineNumber}`) }
+  if (!isRecord(entry)) throw new Error(`Pi session file contains a non-object entry at line ${lineNumber}`)
+  return entry
+}
+
+function validateSessionEntry(entry: Record<string, unknown>, entryIds: Set<string>): void {
+  const type = requiredString(entry, "type", "session entry")
+  const id = requiredString(entry, "id", "session entry")
+  if (entryIds.has(id)) throw new Error(`Pi session file contains duplicate entry id ${id}`)
+  const parentId = entry.parentId
+  if (parentId !== null && typeof parentId !== "string") throw new Error(`Pi session entry ${id} has an invalid parentId`)
+  if (typeof parentId === "string" && !entryIds.has(parentId)) throw new Error(`Pi session entry ${id} has an unknown parentId`)
+  requiredTimestamp(entry, "timestamp", `session entry ${id}`)
+
+  switch (type) {
+    case "message":
+      if (!isRecord(entry.message) || typeof entry.message.role !== "string") throw new Error(`Pi session message ${id} is invalid`)
+      break
+    case "thinking_level_change":
+      requiredString(entry, "thinkingLevel", `session entry ${id}`)
+      break
+    case "model_change":
+      requiredString(entry, "provider", `session entry ${id}`)
+      requiredString(entry, "modelId", `session entry ${id}`)
+      break
+    case "compaction":
+      requiredString(entry, "summary", `session entry ${id}`)
+      requireKnownEntry(entry, "firstKeptEntryId", entryIds, id)
+      if (typeof entry.tokensBefore !== "number") throw new Error(`Pi session compaction ${id} has invalid tokensBefore`)
+      break
+    case "branch_summary":
+      requireKnownEntry(entry, "fromId", entryIds, id)
+      requiredString(entry, "summary", `session entry ${id}`)
+      break
+    case "custom":
+      requiredString(entry, "customType", `session entry ${id}`)
+      break
+    case "custom_message":
+      requiredString(entry, "customType", `session entry ${id}`)
+      if (typeof entry.content !== "string" && !Array.isArray(entry.content)) throw new Error(`Pi session custom message ${id} has invalid content`)
+      if (typeof entry.display !== "boolean") throw new Error(`Pi session custom message ${id} has invalid display`)
+      break
+    case "label":
+      requireKnownEntry(entry, "targetId", entryIds, id)
+      if ("label" in entry && entry.label !== undefined && typeof entry.label !== "string") throw new Error(`Pi session label ${id} is invalid`)
+      break
+    case "session_info":
+      if ("name" in entry && entry.name !== undefined && typeof entry.name !== "string") throw new Error(`Pi session info ${id} is invalid`)
+      break
+    default:
+      throw new Error(`Pi session entry ${id} has an unsupported type ${type}`)
+  }
+  entryIds.add(id)
+}
+
+function requireKnownEntry(entry: Record<string, unknown>, field: string, entryIds: Set<string>, entryId: string): void {
+  const targetId = requiredString(entry, field, `session entry ${entryId}`)
+  if (!entryIds.has(targetId)) throw new Error(`Pi session entry ${entryId} has an unknown ${field}`)
+}
+
+function requiredTimestamp(entry: Record<string, unknown>, field: string, context: string): void {
+  const value = requiredString(entry, field, context)
+  if (Number.isNaN(Date.parse(value))) throw new Error(`${context} has an invalid ${field}`)
+}
+
+function requiredString(entry: Record<string, unknown>, field: string, context: string): string {
+  const value = entry[field]
+  if (typeof value !== "string" || value.length === 0) throw new Error(`${context} has an invalid ${field}`)
+  return value
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
 /**
