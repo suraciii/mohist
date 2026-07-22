@@ -373,7 +373,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
         NotifyCommands.HealthProbeOverride = new StubProbe(success: true);
         var stdin = new StringReader("n\n");
 
-        var (exitCode, stdout, _) = await RunAsync(
+        var (exitCode, stdout, stderr) = await RunAsync(
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
@@ -381,7 +381,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             stdin);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("Overwrite them?", stdout);
+        Assert.Contains("Overwrite them?", stderr);
         Assert.Equal(existingScalar, fileSystem.ReadAllText(_configPath));
     }
 

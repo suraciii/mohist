@@ -23,6 +23,8 @@ internal sealed class MohistCliApi
     private readonly ICommandExecutor _commandExecutor;
     private readonly TextReader _standardInput;
     private readonly Func<string> _getUserHome;
+    private readonly CliResponseReader _responseReader;
+    internal CliInvocation Invocation { get; }
 
     internal TextWriter Output => _out;
     internal TextWriter Error => _err;
@@ -30,6 +32,7 @@ internal sealed class MohistCliApi
     internal ICommandExecutor CommandExecutor => _commandExecutor;
     internal TextReader StandardInput => _standardInput;
     internal HttpClient Http => _http;
+    internal CliResponseReader ResponseReader => _responseReader;
 
     public MohistCliApi(
         HttpClient http,
@@ -38,7 +41,11 @@ internal sealed class MohistCliApi
         IFileSystem fileSystem,
         ICommandExecutor commandExecutor,
         TextReader? standardInput = null,
-        Func<string>? getUserHome = null)
+        Func<string>? getUserHome = null,
+        CliResponseReader? responseReader = null,
+        ICliTerminal? terminal = null,
+        ICliEnvironment? cliEnvironment = null,
+        CancellationToken cancellationToken = default)
     {
         _http = http;
         _out = output;
@@ -49,6 +56,14 @@ internal sealed class MohistCliApi
         _getUserHome = getUserHome ?? (fileSystem is RealFileSystem
             ? () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             : () => "/mohist-tests/user");
+        _responseReader = responseReader ?? new CliResponseReader(http);
+        Invocation = new CliInvocation(
+            output,
+            error,
+            _standardInput,
+            terminal ?? CliTerminal.From(_standardInput),
+            cliEnvironment ?? SystemCliEnvironment.Instance,
+            cancellationToken);
     }
 
     public async Task<int> PrintGetAsync(string path)
@@ -1123,7 +1138,10 @@ internal sealed class MohistCliApi
         var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
         var data = node["data"];
         var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-        var code = node["code"]?.GetValue<string>();
+        var rawCode = node["code"]?.GetValue<string>();
+        var code = success || !string.IsNullOrWhiteSpace(rawCode)
+            ? rawCode
+            : $"http-{(int)response.StatusCode}";
         return new Envelope(HasBody: true, Success: success, Data: data, Error: error, Code: code);
     }
 

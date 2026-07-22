@@ -127,12 +127,16 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null)
+    internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null)
     {
         environment ??= SystemEnvironmentVariableProvider.Instance;
         getUserHome ??= fileSystem is RealFileSystem
             ? null
             : () => "/mohist-tests/user";
+        var terminal = terminalOverride ?? new CliTerminal(standardInput is null || standardInput == Console.In
+            ? !Console.IsInputRedirected
+            : standardInput != TextReader.Null);
+        var cliEnvironment = new EnvironmentVariableAdapter(environment);
         var api = new MohistCliApi(
             http,
             output,
@@ -140,9 +144,13 @@ internal static class MohistCliCommands
             fileSystem,
             commandExecutor,
             standardInput,
-            getUserHome);
+            getUserHome,
+            terminal: terminal,
+            cliEnvironment: cliEnvironment,
+            cancellationToken: cancellationToken);
         var services = new ServiceCollection();
         services.AddSingleton(api);
+        services.AddSingleton(api.ResponseReader);
         services.AddSingleton(output);
         services.AddSingleton(error);
         services.AddSingleton<IFileSystem>(fileSystem);
@@ -179,7 +187,43 @@ internal static class MohistCliCommands
         var root = Build(api, provider);
         var config = new InvocationConfiguration { Output = output, Error = error };
         var parseConfig = new ParserConfiguration { ResponseFileTokenReplacer = null };
-        return CommandLineParser.Parse(root, args, parseConfig).InvokeAsync(config);
+        var parseResult = CommandLineParser.Parse(root, args, parseConfig);
+        if (parseResult.Errors.Count > 0)
+        {
+            var invocation = new CliInvocation(
+                output,
+                error,
+                standardInput ?? Console.In,
+                terminal,
+                cliEnvironment,
+                cancellationToken);
+            foreach (var parseError in parseResult.Errors)
+                await error.WriteLineAsync(parseError.Message).ConfigureAwait(false);
+
+            var nearestCommand = parseResult.CommandResult.Command;
+            var helpConfig = new InvocationConfiguration { Output = error, Error = error };
+            await nearestCommand.Parse(["--help"]).InvokeAsync(helpConfig).ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.UsageFailure);
+        }
+
+        try
+        {
+            return await parseResult.InvokeAsync(config, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await error.WriteLineAsync("Operation cancelled.").ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.Cancelled);
+        }
+    }
+
+    private sealed class EnvironmentVariableAdapter : ICliEnvironment
+    {
+        private readonly IEnvironmentVariableProvider _provider;
+
+        public EnvironmentVariableAdapter(IEnvironmentVariableProvider provider) => _provider = provider;
+
+        public string? Get(string name) => _provider.GetEnvironmentVariable(name);
     }
 
     private static IServiceInstaller BuildDefaultInstaller(TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor)

@@ -76,7 +76,7 @@ public class CliEpicCommandSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["epic", "create", "--description", "desc"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.True(
             error.ToString().Contains("title", StringComparison.OrdinalIgnoreCase)
             || output.ToString().Contains("title", StringComparison.OrdinalIgnoreCase),
