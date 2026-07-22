@@ -17,4 +17,13 @@
     <ProjectReference Include="..\..\src\Mohist.Workflow.Definition\Mohist.Workflow.Definition.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\src\Mohist.Server\Workflow\Services\Profiles\*.workflow.yaml">
+      <LogicalName>GoldenCases.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\docs\workflow-definition.md">
+      <LogicalName>GoldenCases.workflow-definition.md</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>

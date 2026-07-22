@@ -268,3 +268,35 @@ T-004 (Offline mo workflow validate --file <path|-> command)
 - Valid input prints `Workflow Definition is valid.` and returns zero; invalid input prints every `ValidationError` as `<path>: <message>` and returns one.
 - The command never resolves a Project, invokes HTTP, checks action existence, or interprets `with` contracts. `CliWorkflowValidateSpecs` covers file input, stdin input, multi-error path/message output, the open `with` boundary, and zero recorded requests.
 - Focused CLI validation tests pass (4), full CLI tests pass (1403), and `npm run build` plus `npm test` pass.
+
+T-005 (CI golden cases and docs/design gap closure)
+
+## Codebase Patterns
+
+- Golden-case tests live in `Mohist.Workflow.Definition.Tests`, which is already part of
+  `Mohist.sln` and therefore runs under `npm test`.
+- Test fixtures that originate in the repository are embedded resources. This keeps the
+  tests hermetic and avoids reading the checkout or build output at test runtime.
+
+## Implementation Discoveries
+
+- The built-in workflow resources are included from the server source with stable logical
+  names, while `docs/workflow-definition.md` is embedded as one markdown resource.
+- The complete documentation example is the first `yaml` fence after the `## 完整示例`
+  heading. Earlier fences are intentionally syntax fragments and are never sent to
+  `WorkflowDefinitionParser.Parse`.
+- The docs example and both built-ins parse successfully after T-003's model migration.
+  The negative golden case uses `unknownGoldenField` and asserts the canonical
+  `unknown field 'unknownGoldenField'` message at the root path.
+
+## Acceptance Criteria Mapping
+
+- `GoldenCaseTests.EveryBuiltInWorkflowDefinition_ParsesSuccessfully` discovers and parses
+  every embedded `*.workflow.yaml` built-in.
+- `GoldenCaseTests.CompleteDocumentationExample_ParsesSuccessfully` parses only the complete
+  fenced example; `DocumentationExampleExtractor_SelectsOnlyTheCompleteExampleFence` proves
+  the partial fences are excluded.
+- `GoldenCaseTests.UnknownFieldInjectedIntoGoldenCase_UsesCanonicalValidationError` locks the
+  unknown-field path, message, and `definition` source.
+- `docs/workflow-definition.md` and `design/workflow/definition.md` no longer report the
+  resolved Definition-validation, local-command, check-id, or save pre-validation gaps.

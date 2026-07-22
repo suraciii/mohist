@@ -292,6 +292,6 @@ stages:
 
 ## 实装差距
 
-- check 当前用 `name` 声明标识；目标是 `id`。
-- 未知 Definition 字段、错误字段类型和本地校验命令尚未按本篇目标统一实现。
-- `with` 已在任务派发时按 Action 契约最终校验；保存 Profile 时的提前校验尚未提供。
+Definition 的结构、字段类型和模板表达式在保存时由权威校验器统一检查，并通过
+`mo workflow validate --file` 提供纯本地校验。内置 Profile 与本篇完整示例由 CI 持续验证。
+`with` 的 key、required 和值类型仍由所选 Action 契约裁决；这不是 Definition 校验器的职责。
