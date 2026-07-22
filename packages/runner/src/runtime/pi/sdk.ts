@@ -15,15 +15,35 @@ export interface PiSdkMessage {
   readonly usage?: Record<string, unknown>
 }
 
+/**
+ * Reception callback for an idle `prompt()` call (issue #451 / design D5).
+ *
+ * Mirrors `preflightResult` on the Pi SDK's `PromptOptions`. The SDK
+ * invokes it with `true` once the prompt has passed preflight validation
+ * (model selected, credentials present, no streaming conflict) and is
+ * about to start the underlying agent loop, and with `false` when the
+ * preflight rejects the prompt (missing model, missing credentials,
+ * streaming without `streamingBehavior`). The runner resolves an idle
+ * Follow-up on `true` and fails it on `false` — no automatic retry
+ * (`design/runtimes/pi.md` D5).
+ */
+export type PiPromptPreflightResult = (success: boolean) => void
+
+export interface PiPromptOptions {
+  readonly expandPromptTemplates?: boolean
+  readonly preflight?: PiPromptPreflightResult
+}
+
 export interface PiSdkSession {
   readonly sessionFile?: string
   readonly sessionId?: string
   readonly messages: readonly PiSdkMessage[]
   readonly isStreaming: boolean
   subscribe(listener: (event: unknown) => void): () => void
-  prompt(text: string, options?: { expandPromptTemplates?: boolean }): Promise<void>
+  prompt(text: string, options?: PiPromptOptions): Promise<void>
   steer(text: string): Promise<void>
   abort(): Promise<void>
+  compact(): Promise<void>
   setModel(model: unknown): Promise<void>
   setThinkingLevel(level: string): void
   dispose(): void

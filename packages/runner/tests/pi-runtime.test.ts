@@ -10,6 +10,7 @@ class FakeSession implements PiSdkSession {
   promptCalls: string[] = []
   steerCalls: string[] = []
   abortCalls = 0
+  compactCalls = 0
   modelCalls: unknown[] = []
   thinkingCalls: string[] = []
   private listeners = new Set<(event: unknown) => void>()
@@ -19,6 +20,7 @@ class FakeSession implements PiSdkSession {
   prompt(text: string): Promise<void> { this.promptCalls.push(text); this.isStreaming = true; return new Promise<void>((resolve) => { this.promptCompletion = () => { this.isStreaming = false; resolve() } }) }
   steer(text: string): Promise<void> { this.steerCalls.push(text); return Promise.resolve() }
   abort(): Promise<void> { this.abortCalls++; this.isStreaming = false; return Promise.resolve() }
+  compact(): Promise<void> { this.compactCalls++; return Promise.resolve() }
   setModel(model: unknown): Promise<void> { this.modelCalls.push(model); return Promise.resolve() }
   setThinkingLevel(level: string): void { this.thinkingCalls.push(level) }
   dispose(): void {}
