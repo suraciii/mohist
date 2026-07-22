@@ -1,6 +1,6 @@
 ### Requirement: Agent status exposes the work used to build its response
 
-The issue's abbreviated `/api/agent/status` name SHALL refer to the canonical `GET /api/projects/{projectRef}/agent/status` product surface; this change MUST NOT restore the removed unscoped route. The canonical response SHALL include a bounded amplification summary. The summary SHALL expose candidate count, actually processed count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope, so a caller can directly compare the work performed with the result produced. The existing agent status fields and project-scoped route semantics SHALL remain available. Response-local counting SHALL remain active when OTel collection is `off`; only Meter emission and cross-request route aggregation SHALL be disabled in that state.
+Both `GET /api/projects/{projectRef}/agent/status` and the issue's literal compatibility path `GET /api/agent/status` SHALL return the same project-scoped status behavior and bounded amplification summary. The compatibility path SHALL resolve its project from `projectId` query first, then `X-Mohist-Project`; it SHALL return 400 `No active project` when neither is present and SHALL NOT aggregate projects. The summary SHALL expose candidate count, actually processed count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope. The existing canonical fields and route semantics SHALL remain available. Response-local counting SHALL remain active when OTel collection is `off`; only Meter emission and cross-request route aggregation SHALL be disabled in that state.
 
 #### Scenario: Agent status considers more candidates than it returns
 
@@ -14,9 +14,15 @@ The issue's abbreviated `/api/agent/status` name SHALL refer to the canonical `G
 - **THEN** the amplification summary SHALL still be present with explicit non-negative counts, including zero transcript records when the path reads no transcript data
 - **AND** zero processed results SHALL NOT cause a missing, infinite or misleading amplification value
 
+#### Scenario: Unscoped status compatibility path resolves one project
+
+- **WHEN** a caller requests `/api/agent/status` with `projectId` query or `X-Mohist-Project`
+- **THEN** the response SHALL equal the canonical status response for that resolved project, including amplification
+- **AND** a request with no project selector SHALL return 400 rather than aggregate globally
+
 ### Requirement: Agent activity exposes transcript and fan-out work
 
-The issue's abbreviated `/api/agent/activity` name SHALL refer to the canonical `GET /api/projects/{projectRef}/agent/activity` product surface; this change MUST NOT restore the removed unscoped route. The canonical response SHALL include a bounded amplification summary. The summary SHALL expose candidate session count, actually processed session count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope. These counts SHALL make visible when a small activity response requires disproportionate transcript, database or cross-component work. The existing activity summary, cards, waiting items, limit behavior and project-scoped route semantics SHALL remain available. Response-local counting SHALL remain active when OTel collection is `off`; only Meter emission and cross-request route aggregation SHALL be disabled in that state.
+Both `GET /api/projects/{projectRef}/agent/activity` and the issue's literal compatibility path `GET /api/agent/activity` SHALL return the same project-scoped activity behavior and bounded amplification summary. The compatibility path SHALL resolve its project from `projectId` query first, then `X-Mohist-Project`; it SHALL return 400 `No active project` when neither is present and SHALL NOT aggregate projects. The summary SHALL expose candidate session count, actually processed session count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope. The existing activity summary, cards, waiting items, limit behavior and project-scoped route semantics SHALL remain available. Response-local counting SHALL remain active when OTel collection is `off`; only Meter emission and cross-request route aggregation SHALL be disabled in that state.
 
 #### Scenario: Activity assembly reads transcript and workflow data
 
@@ -29,6 +35,12 @@ The issue's abbreviated `/api/agent/activity` name SHALL refer to the canonical 
 - **WHEN** an activity request loads a bounded candidate set and reconciliation removes candidates that must not become cards
 - **THEN** the amplification summary SHALL distinguish the candidate count from the actually processed count
 - **AND** the existing response limit SHALL continue to bound returned activity cards
+
+#### Scenario: Unscoped activity compatibility path resolves one project
+
+- **WHEN** a caller requests `/api/agent/activity` with `projectId` query or `X-Mohist-Project`
+- **THEN** the response SHALL equal the canonical activity response for that resolved project, including amplification and limit behavior
+- **AND** a request with no project selector SHALL return 400 rather than aggregate globally
 
 ### Requirement: Agent amplification reporting remains bounded
 

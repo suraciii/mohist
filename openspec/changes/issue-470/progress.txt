@@ -1,13 +1,15 @@
 Issue 470 plan repair progress
 
-- [completed] F1/F2: canonical project-scoped agent routes are explicit; response-local work accounting remains active while OTel is off and publication remains gated.
+- [completed] F1/F2: literal unscoped paths are restored as explicit project-selector aliases; response-local work accounting remains active while OTel is off and publication remains gated.
 - [completed] F3: cancellation/wall-clock claims are removed; the serialized probe has fixed operation count, a one-second SQLite busy timeout, no abandoned worker, and explicit host-filesystem limitations.
 - [completed] F4: every observed route qualifies for a threshold-free ranked view; formula and ordinal route-name tie-breaker are normative.
 - [completed] F5: #470 delivers and tests the rejection publication/status contract with a fake protection publisher; #437/#471 own the real policy and producer.
 - [completed] F6: fallback attempts stop and disposal, constructs an alternate only if both succeed, and treats either shutdown failure as terminal.
 - [completed] F7: incoming Orleans calls suppress ambient scope, Snapshot() is an accepted dependency, test composition roots are covered, and the oversized baseline is split into publication core (T-001), status (T-002), and sampling (T-003).
 - [completed] Follow-up feasibility check: readiness uses PRAGMA schema_version rather than SELECT 1 so the probe touches database metadata/read locking without history scans.
-- [in progress] Validate proposal/spec/design/task consistency, JSON anchors/DAG, and ensure self-review.md remains unchanged.
+- [completed] Final audit follow-up: production probe tests use IOtelReadinessConnectionFactory + FakeFileSystem seams; continuous sampler replaces the one-shot initializer; request accounting and route aggregation are separate tasks.
+- [completed] Validated proposal/spec/design/task consistency, 7-task JSON anchors/DAG, 14 requirements/35 scenarios, and confirmed self-review.md remains unchanged.
 
 Commits:
 - afdff7b3e records the existing failing self-review unchanged.
+- 4a03b9d95 contains the first complete F1-F7 repair batch; subsequent refinements close probe testability, startup ownership, literal aliases, and task sizing before the final progress commit.
