@@ -115,9 +115,9 @@
 - [workflow/definition.md](workflow/definition.md) — Workflow Definition DSL（**WIP**）：语义模型（Expect 一等建模）、唯一权威校验器（规则目录、三处入口含 `mo` 本地校验）与实现侧语义索引；语法权威在 [`docs/workflow-definition.md`](../docs/workflow-definition.md)。
 - [workflow/actions.md](workflow/actions.md) — Action 插件模型(**WIP**):manifest 契约、输入单通道、结构化 output、能力注入、catalog 校验、失败恢复编排。
 - [workflow/builtin-workflows.md](workflow/builtin-workflows.md) — 内置 workflow（local / github-pr）的设计要点；yaml 定义是真源。
-- [workflow/profile.md](workflow/profile.md) — Workflow Profile（**WIP**）：Project-scoped collection、默认选择、Issue override、Run 的 Profile ID 绑定与实时 Definition 解析。
+- [workflow/profile.md](workflow/profile.md) — Workflow Profile（**WIP**）：Project-scoped collection、默认选择、Issue override 与 Run snapshot。
 - [workflow/variables.md](workflow/variables.md) — Workflow Variables（**WIP**）：Project / Issue / Run 资源、合并、动态生效与 `setVars` 语义。
-- [workflow/task-dispatch.md](workflow/task-dispatch.md) — 原始 task declaration、attempt context snapshot，以及 Runner 展开 Action Input / `expect` 的唯一边界。
+- [workflow/task-dispatch.md](workflow/task-dispatch.md) — task `with` / `expect` 模板求值时机的单一权威：Server dispatch 携带原始声明与 attempt 不可变快照，Runner 在调用 Action 前的执行入口统一渲染。
 - [workflow/recovery.md](workflow/recovery.md) — 失败恢复：recovery 声明、when 匹配、runner 构造恢复任务。
 - [workflow/issue-coordination.md](workflow/issue-coordination.md) — Issue、WorkflowRun、Runner、Session 的跨聚合交互。
 

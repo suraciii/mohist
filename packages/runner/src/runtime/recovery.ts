@@ -1,4 +1,4 @@
-import type { AddTaskInput, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { AddTaskInput, JsonObject, JsonValue, DispatchWorkItem, WorkItemResult } from "../core/types.js"
 import { isObject } from "../core/json.js"
 import { getPath } from "../core/json-path.js"
 
@@ -26,7 +26,7 @@ export class UnresolvedFailureReferenceError extends Error {
 }
 
 export function tryRecovery(
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   result: WorkItemResult,
   variables?: JsonObject | null,
 ): WorkItemResult | null {
@@ -337,7 +337,7 @@ function describeFailureValue(value: JsonValue | undefined): string {
   return fields.length === 0 ? "has no fields" : `fields [${fields.join(", ")}]`
 }
 
-function failureResult(work: RenderedWorkItem, message: string): WorkItemResult {
+function failureResult(work: DispatchWorkItem, message: string): WorkItemResult {
   const label = work.title?.trim() || work.uses || work.workId
   const failureMessage = `${label}: ${message}`
   return {

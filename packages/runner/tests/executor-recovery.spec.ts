@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
-import type { RenderedWorkItem } from "../src/core/types.js"
+import type { DispatchWorkItem } from "../src/core/types.js"
 import { tryRecovery } from "../src/runtime/recovery.js"
 
-function work(recovery: RenderedWorkItem["recovery"]): RenderedWorkItem {
+function work(recovery: DispatchWorkItem["recovery"]): DispatchWorkItem {
   return {
     workflowRunId: "wf-recovery",
     workId: "integrate:rebase.2",

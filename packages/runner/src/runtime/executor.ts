@@ -1,5 +1,5 @@
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionError, ActionResult, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionError, ActionResult, JsonObject, JsonValue, DispatchWorkItem, WorkItemResult } from "../core/types.js"
 import { isObject, stringInput } from "../core/json.js"
 import { errorMessage } from "../core/errors.js"
 import { stringAt } from "../core/json-path.js"
@@ -70,11 +70,11 @@ export class WorkExecutor {
     this.agentSessionRuntimeEventOutbox = outbox
   }
 
-  async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
+  async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     return this.executeWithLog(work, signal, null).then((exec) => exec.result)
   }
 
-  async executeWithLog(work: RenderedWorkItem, signal: AbortSignal, collector: TaskLogCollector | null): Promise<WorkExecution> {
+  async executeWithLog(work: DispatchWorkItem, signal: AbortSignal, collector: TaskLogCollector | null): Promise<WorkExecution> {
     const ownedCollector = collector ?? new TaskLogCollector({ now: this.now })
     const logger = new TaskLogger({ collector: ownedCollector, masker: createCredentialMaskerFromEnvironment() })
     let resolvedWorkspace: ResolvedWorkspace
@@ -94,7 +94,7 @@ export class WorkExecutor {
     return { result, collector: ownedCollector }
   }
 
-  private async prepareWorkspace(work: RenderedWorkItem, signal: AbortSignal, log: TaskLogger): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
+  private async prepareWorkspace(work: DispatchWorkItem, signal: AbortSignal, log: TaskLogger): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
     try {
       const info = await this.workspaceManager.prepare(work, signal, log)
       return { kind: "ok", workspace: infoToResolved(info) }
@@ -103,7 +103,7 @@ export class WorkExecutor {
     }
   }
 
-  private async executeOne(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
+  private async executeOne(work: DispatchWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
     if (work.ownerKind === "agent-job") {
       if (!this.agentJobExecutor) {
         return failure(work, "AgentJob dispatch received without an AgentJobExecutor wired on the WorkExecutor")
@@ -127,7 +127,8 @@ export class WorkExecutor {
     try {
       const variables = await this.variables(work, resolvedWorkspace, signal)
       const deferred = deferredInputFields(definition.manifest)
-      const actionWith = injectEngineInputs(definition.manifest, work.with, variables)
+      const clonedWith = work.with ? structuredClone(work.with) : null
+      const actionWith = injectEngineInputs(definition.manifest, clonedWith, variables)
       const unresolved = [
         ...wholeStringUnresolvedReferences(removeDeferredFields(actionWith, deferred), variables),
         ...wholeStringUnresolvedReferences(work.expect, variables),
@@ -194,7 +195,7 @@ export class WorkExecutor {
       if (endCheck.kind === "violation") {
         return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
       }
-      const worktreeHostBuilder = (cleanupWork: RenderedWorkItem, cleanupSignal: AbortSignal, cleanupWorkDir: string) =>
+      const worktreeHostBuilder = (cleanupWork: DispatchWorkItem, cleanupSignal: AbortSignal, cleanupWorkDir: string) =>
         this.buildActionHost(cleanupWork, cleanupWorkDir, cleanupSignal, log, caps)
       const worktreeResult = await enforceCleanWorktree(
         work,
@@ -233,7 +234,7 @@ export class WorkExecutor {
   }
 
   private buildActionHost(
-    work: RenderedWorkItem,
+    work: DispatchWorkItem,
     workDir: string,
     signal: AbortSignal,
     log: TaskLogger,
@@ -266,7 +267,7 @@ export class WorkExecutor {
     return host
   }
 
-  private buildAgentTurnCapability(work: RenderedWorkItem, workDir: string, signal: AbortSignal) {
+  private buildAgentTurnCapability(work: DispatchWorkItem, workDir: string, signal: AbortSignal) {
     const self = this
     return {
       async turn(request: AgentTurnRequest): Promise<ActionResult> {
@@ -414,7 +415,7 @@ export class WorkExecutor {
     }
   }
 
-  private buildIssueFieldsCapability(work: RenderedWorkItem, workDir: string, signal: AbortSignal) {
+  private buildIssueFieldsCapability(work: DispatchWorkItem, workDir: string, signal: AbortSignal) {
     const issueNumber = typeof work.issueNumber === "number" && work.issueNumber > 0 ? work.issueNumber : null
     const projectId = work.projectId ?? null
     return {
@@ -429,7 +430,7 @@ export class WorkExecutor {
     }
   }
 
-  private buildCheckpointCapability(work: RenderedWorkItem) {
+  private buildCheckpointCapability(work: DispatchWorkItem) {
     return {
       async token(scope: string): Promise<string> {
         return `cp_${createHash("sha256").update(`${work.workflowRunId}\0${scope}`).digest("hex").slice(0, 32)}`
@@ -437,7 +438,7 @@ export class WorkExecutor {
     }
   }
 
-  private async executeChecks(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
+  private async executeChecks(work: DispatchWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
     const variables = await this.variables(work, resolvedWorkspace, signal)
     const rawChecks: unknown[] = Array.isArray(work.with?.checks) ? work.with.checks : []
     const checks = rawChecks.filter(isCheck)
@@ -445,7 +446,7 @@ export class WorkExecutor {
     const builder = this.buildCheckHost.bind(this)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
-      buildHost: (checkWork: RenderedWorkItem, checkSignal: AbortSignal, checkWorkDir: string, caps: ActionCapabilitySet) =>
+      buildHost: (checkWork: DispatchWorkItem, checkSignal: AbortSignal, checkWorkDir: string, caps: ActionCapabilitySet) =>
         this.buildActionHost(checkWork, checkWorkDir, checkSignal, log, caps),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
@@ -457,7 +458,7 @@ export class WorkExecutor {
     return {}
   }
 
-  private async variables(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<JsonObject> {
+  private async variables(work: DispatchWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<JsonObject> {
     const workspace = resolvedWorkspaceToVariables(resolvedWorkspace)
     const userVariables = work.variables ?? {}
     const userRunner = userVariables.runner
@@ -468,7 +469,7 @@ export class WorkExecutor {
     return { ...userVariables, runner: mergedRunner, workspace }
   }
 
-  private workspaceFromVariables(work: RenderedWorkItem): ResolvedWorkspace {
+  private workspaceFromVariables(work: DispatchWorkItem): ResolvedWorkspace {
     const variables = work.variables ?? {}
     const ws = variables["workspace"]
     if (!isObject(ws)) {
@@ -493,7 +494,7 @@ export class WorkExecutor {
     return workDir
   }
 
-  private captureDeclaredOutputs(work: RenderedWorkItem, result: WorkItemResult, actionResult: ActionResult): WorkItemResult {
+  private captureDeclaredOutputs(work: DispatchWorkItem, result: WorkItemResult, actionResult: ActionResult): WorkItemResult {
     if (result.status !== "completed") return result
     const capturedOutputs = captureOutputs(work.outputs, actionResult)
     return capturedOutputs ? { ...result, capturedOutputs } : result
@@ -513,7 +514,7 @@ export function stripRunnerPrivateFacts(result: ActionResult): {
 }
 
 function projectTaskOutput(
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   result: ActionResult,
   completion: CompletionEvaluation | null,
   caps: ActionCapabilitySet,
@@ -573,7 +574,7 @@ function defaultRuntimeEventRecordId(): string {
   return `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-function workspaceSetupFailure(work: RenderedWorkItem, error: unknown): WorkItemResult {
+function workspaceSetupFailure(work: DispatchWorkItem, error: unknown): WorkItemResult {
   const message = error instanceof Error ? error.message : String(error)
   const detail = error instanceof WorkspaceNetworkTimeoutError
     ? `workspace preparation timed out: ${message}`
@@ -586,7 +587,7 @@ function workspaceSetupFailure(work: RenderedWorkItem, error: unknown): WorkItem
   }
 }
 
-function failure(work: RenderedWorkItem, message: string): WorkItemResult {
+function failure(work: DispatchWorkItem, message: string): WorkItemResult {
   return { status: failureStatus(work), message, error: { code: "runner-failed", message } }
 }
 
@@ -599,7 +600,7 @@ function removeDeferredFields(withInput: JsonObject | null | undefined, deferred
   return immediate
 }
 
-function failureStatus(work: RenderedWorkItem): "fail" | "failed" {
+function failureStatus(work: DispatchWorkItem): "fail" | "failed" {
   return CHECK_WORK_TYPES.has(work.workType) ? "fail" : "failed"
 }
 
@@ -607,7 +608,7 @@ function removedActionMessage(uses: string, tombstone: { name: string; guidance:
   return `Workflow task uses the removed Action '${uses}'. ${tombstone.guidance}`
 }
 
-function validationFailureResult(work: RenderedWorkItem, error: ActionError): WorkItemResult {
+function validationFailureResult(work: DispatchWorkItem, error: ActionError): WorkItemResult {
   return {
     status: failureStatus(work),
     message: error.message,
@@ -632,7 +633,7 @@ function resolveWorkspacePath(workspaceRoot: string, requested: string) {
   return resolved
 }
 
-function formatUnresolvedError(work: RenderedWorkItem, unresolved: string[]): string {
+function formatUnresolvedError(work: DispatchWorkItem, unresolved: string[]): string {
   const label = work.title?.trim() || work.uses || work.workId
   const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(", ")
   return "Task " + work.workId + " (" + label + ") references undefined variable(s): " + refs + ". " +

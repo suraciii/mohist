@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ActionRegistry, createDefaultRegistry } from "../src/actions/registry.js"
-import type { ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../src/core/types.js"
+import type { ActionResult, JsonObject, DispatchWorkItem, WorkItemResult } from "../src/core/types.js"
 import type { ActionHost } from "../src/actions/host.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { TaskLogCollector } from "../src/runtime/task-log.js"
@@ -54,7 +54,7 @@ function buildExecutor(registry: ActionRegistry, workspaceManager: WorkspaceMana
   )
 }
 
-function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
+function buildWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
   return {
     workflowRunId: "wf-336",
     workId: "work-336",
@@ -67,7 +67,7 @@ function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem 
   }
 }
 
-async function runWith(registry: ActionRegistry, work: RenderedWorkItem = buildWork(), workspaceManager?: WorkspaceManager): Promise<{ result: WorkItemResult; collector: TaskLogCollector }> {
+async function runWith(registry: ActionRegistry, work: DispatchWorkItem = buildWork(), workspaceManager?: WorkspaceManager): Promise<{ result: WorkItemResult; collector: TaskLogCollector }> {
   const executor = buildExecutor(registry, workspaceManager)
   const collector = new TaskLogCollector()
   const execution = await executor.executeWithLog(work, new AbortController().signal, collector)

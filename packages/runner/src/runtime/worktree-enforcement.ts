@@ -1,6 +1,6 @@
 import { rm, stat } from "node:fs/promises"
 import { isAbsolute, resolve } from "node:path"
-import type { ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionResult, JsonObject, DispatchWorkItem, WorkItemResult } from "../core/types.js"
 import type { ActionHost } from "../actions/host.js"
 import type { ActionCapabilitySet } from "../actions/manifest.js"
 import { isActionFailure } from "../actions/action-result.js"
@@ -48,7 +48,7 @@ export type CleanupAgentAction = (host: ActionHost, withInput: JsonObject) => Pr
 type LockHolderProbe = (workDir: string, lockPath: string, signal: AbortSignal) => Promise<{ held: boolean; detail?: string }>
 
 export type ContextParts = {
-  buildHost: (work: RenderedWorkItem, signal: AbortSignal, workDir: string) => ActionHost
+  buildHost: (work: DispatchWorkItem, signal: AbortSignal, workDir: string) => ActionHost
 }
 
 let cleanupAgentActionOverride: CleanupAgentAction | null = null
@@ -247,7 +247,7 @@ export function formatDirtyWorktreeSummary(evidence: DirtyWorktreeEvidence): str
   return parts.join("; ")
 }
 
-export function worktreeProbeFailure(work: RenderedWorkItem, error: WorktreeProbeError): WorkItemResult {
+export function worktreeProbeFailure(work: DispatchWorkItem, error: WorktreeProbeError): WorkItemResult {
   const label = work.title?.trim() || work.uses || work.workId
   const message = `git worktree probe failed for ${label}: ${error.message}`.slice(0, 4000)
   return {
@@ -272,7 +272,7 @@ export function mergeCleanupCount(result: WorkItemResult, attempts: number): Wor
  * immediately with structured evidence.
  */
 export async function enforceCleanWorktree(
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   workDir: string,
   result: WorkItemResult,
   renderedWith: JsonObject | null,
@@ -328,7 +328,7 @@ export async function enforceCleanWorktree(
 }
 
 export async function runAgentCleanupAttempt(
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   workDir: string,
   renderedWith: JsonObject | null,
   variables: JsonObject,

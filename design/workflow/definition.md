@@ -183,5 +183,5 @@ Definition 校验器不检查 `with` 内部 key：键名由各 Action 契约管�
 - task 或 live-read Prompt 字符串内的表达式解析不出值时，现行路径仍可能保留原文；目标
   是统一失败。
 - 独立类库、`mo workflow validate --file`、docs 示例进 CI 均未实现。
-- Runner 已按 Action manifest 在 dispatch 时校验 `uses` / `with`；catalog 上报与 Profile
-  保存期 Action 校验仍未实现，且不属于 Definition 校验器。
+- Runner 已按 Action manifest 在执行入口校验 `uses` / `with`；catalog 上报与 Profile
+  保存期常量输入校验仍未实现，且不属于 Definition 校验器。

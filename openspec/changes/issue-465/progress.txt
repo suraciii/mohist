@@ -1,0 +1,13 @@
+## Codebase Patterns
+
+- `WorkflowItemTranslator` is the Server dispatch boundary. It resolves Effective Stage Variables and loads prompt bodies into the dispatch snapshot, while task `with` and task-level `expect` are serialized directly from the persisted declaration.
+- Runner `ServerConnection` parses the existing JSON-string envelope into `DispatchWorkItem`; no second raw input field is exposed to Actions.
+- `WorkExecutor` and check execution clone dispatch input before engine injection, reject unresolved immediate whole-value references, render non-deferred fields, then validate and invoke the Action. Deferred fields remain cloned pass-through values.
+- `tryRecovery` already copies `work.with` and `work.expect`; after the representation rename those fields are the raw declarations, which is the input T-002 will make explicit.
+- `RenderedWorkItem` and the Server-only `TaskWithExpander` dispatch expansion path were removed. The design docs now describe Runner-side rendering as the single execution boundary.
+
+## T-001
+
+- The existing worktree contained the main T-001 implementation across Server, Runner, tests, and synchronized design documentation. Preserved those edits and added explicit Server raw task/check wire assertions plus Runner check rendering and declaration immutability coverage.
+- The Server translator fixture's effective variable source is not the project profile row used by the simple seed helper, so the raw dispatch test asserts the carried `vars` snapshot field and literal declarations without coupling to an unrelated fixture-layer detail.
+- Verification passed: `npm run typecheck -w packages/runner`; `npm test -w packages/runner` (116 files, 1348 tests); focused `WorkflowItemTranslatorSpecs` (33 tests); focused check test (6 tests).

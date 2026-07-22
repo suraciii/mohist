@@ -135,7 +135,10 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
         var (rerunBuildTask, _) = await PollWorkAnyAsync();
         Assert.NotNull(rerunBuildTask.With);
         using var withDoc = JsonDocument.Parse(rerunBuildTask.With!);
-        Assert.Equal(42, withDoc.RootElement.GetProperty("answer").GetInt32());
+        Assert.Equal("${{ vars.answer }}", withDoc.RootElement.GetProperty("answer").GetString());
+        Assert.NotNull(rerunBuildTask.Variables);
+        using var varsDoc = JsonDocument.Parse(rerunBuildTask.Variables!);
+        Assert.Equal(42, varsDoc.RootElement.GetProperty("vars").GetProperty("answer").GetInt32());
     }
 
     [Fact]

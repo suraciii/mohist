@@ -83,7 +83,8 @@ async function runOneCheck(
     const definition = resolved.definition
     try {
       const deferred = deferredInputFields(definition.manifest)
-      const actionWith = injectEngineInputs(definition.manifest, check.with ?? null, variables)
+      const clonedWith = check.with ? structuredClone(check.with) : null
+      const actionWith = injectEngineInputs(definition.manifest, clonedWith, variables)
       const unresolved = wholeStringUnresolvedReferences(removeDeferredFields(actionWith, deferred), variables)
     if (unresolved.length > 0) {
       return { name: check.name, status: "fail", message: deps.formatUnresolved(unresolved) }

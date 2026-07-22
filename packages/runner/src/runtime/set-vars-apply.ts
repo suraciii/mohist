@@ -1,4 +1,4 @@
-import type { JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { JsonObject, DispatchWorkItem, WorkItemResult } from "../core/types.js"
 import { extractSetVars } from "./set-vars.js"
 
 export interface SetVarsPatcher {
@@ -7,7 +7,7 @@ export interface SetVarsPatcher {
 
 export async function applySetVarsForWork(
   patcher: SetVarsPatcher,
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   result: WorkItemResult,
   signal: AbortSignal,
   effectVars: JsonObject = {},
