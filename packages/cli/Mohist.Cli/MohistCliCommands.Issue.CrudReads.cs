@@ -4,6 +4,14 @@ namespace Mohist.Cli;
 
 internal static partial class IssueCommands
 {
+    private static readonly ResourceDescriptor IssueListDescriptor = new(
+        ResourceCardinality.Collection,
+        ["number", "title", "status", "stage", "priority", "labels"]);
+
+    private static readonly ResourceDescriptor IssueDescriptor = new(
+        ResourceCardinality.Single,
+        ["number", "title", "status", "stage", "priority", "labels", "body", "repository", "workflowRun"]);
+
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List issues");
@@ -16,7 +24,7 @@ internal static partial class IssueCommands
         var parentOpt = new Option<int?>("--parent") { Description = "Filter by parent issue number" };
         var allOpt = new Option<bool>("--all") { Description = "Show all issues" };
         var archivedOpt = new Option<bool>("--archived") { Description = "Show archived issues" };
-        var outputOpt = MohistCliCommands.OutputOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(stageOpt);
@@ -26,7 +34,7 @@ internal static partial class IssueCommands
         cmd.Options.Add(parentOpt);
         cmd.Options.Add(allOpt);
         cmd.Options.Add(archivedOpt);
-        cmd.Options.Add(outputOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
@@ -38,11 +46,15 @@ internal static partial class IssueCommands
             var parent = ctx.GetValue(parentOpt);
             var all = ctx.GetValue(allOpt);
             var archived = ctx.GetValue(archivedOpt);
-            var output = ctx.GetValue(outputOpt);
+            var json = ctx.GetValue(jsonOpt);
+            var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             return ListAsync();
 
             async Task<int> ListAsync()
             {
+                var selection = JsonSelection.Parse(IssueListDescriptor, jsonProvided, json);
+                if (selection.Kind == JsonSelectionKind.Discovery || selection.Kind == JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(IssueListDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
                 if (labels is { Length: > 0 })
@@ -62,12 +74,11 @@ internal static partial class IssueCommands
                     Parent: parent,
                     Archived: archived ? true : null,
                     All: all ? true : null);
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
-                return await api.PrintWithOutputAsync(
+                return await api.PrintResourceAsync(
                     ProjectIssuesPath(resolvedProjectId, "/issues") + query,
-                    mode,
-                    nameof(MohistCliApi.TableShape.IssueList));
+                    IssueListDescriptor,
+                    selection,
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueList));
             }
         });
         return cmd;
@@ -78,29 +89,32 @@ internal static partial class IssueCommands
         var cmd = new Command("show", "Show issue details");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
+            var json = ctx.GetValue(jsonOpt);
+            var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             return GetAsync();
 
             async Task<int> GetAsync()
             {
+                var selection = JsonSelection.Parse(IssueDescriptor, jsonProvided, json);
+                if (selection.Kind == JsonSelectionKind.Discovery || selection.Kind == JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
-                return await api.PrintWithOutputAsync(
+                return await api.PrintResourceAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}"),
-                    mode,
-                    nameof(MohistCliApi.TableShape.IssueShow));
+                    IssueDescriptor,
+                    selection,
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
             }
         });
         return cmd;

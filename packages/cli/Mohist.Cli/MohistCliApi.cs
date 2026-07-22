@@ -15,6 +15,10 @@ internal sealed class MohistCliApi
         WriteIndented = true,
     };
     internal static JsonSerializerOptions JsonOutputOptions => JsonOptions;
+    internal static JsonSerializerOptions JsonCompactOutputOptions { get; } = new(JsonOptions)
+    {
+        WriteIndented = false,
+    };
 
     private readonly HttpClient _http;
     private readonly TextWriter _out;
@@ -74,6 +78,52 @@ internal sealed class MohistCliApi
     {
         using var response = await SendAsync(HttpMethod.Get, path, body: null);
         return response is null ? 1 : await PrintResponseAsync(response);
+    }
+
+    internal int WriteJsonSelectionResult(ResourceDescriptor descriptor, JsonSelection selection)
+    {
+        if (selection.Kind == JsonSelectionKind.Discovery)
+        {
+            _out.WriteLine(JsonSerializer.Serialize(selection.Fields));
+            return 0;
+        }
+
+        if (selection.Kind == JsonSelectionKind.Invalid)
+        {
+            _err.WriteLine(
+                $"Invalid --json field '{selection.InvalidField}'. Run this command with bare --json to list accepted fields.");
+            return 2;
+        }
+
+        return 0;
+    }
+
+    internal async Task<int> PrintResourceAsync(
+        string path,
+        ResourceDescriptor descriptor,
+        JsonSelection selection,
+        Func<JsonNode?, Task<int>> humanRenderer)
+    {
+        var response = await ResponseReader.ReadAsync(HttpMethod.Get, path, cancellationToken: Invocation.CancellationToken)
+            .ConfigureAwait(false);
+        if (!response.IsSuccess)
+            return await new CliResultWriter(Invocation).WriteFailureAsync(response.Failure!).ConfigureAwait(false);
+
+        try
+        {
+            if (selection.Kind == JsonSelectionKind.Selected)
+            {
+                var projected = selection.Project(response.Data, descriptor.Cardinality);
+                return await new CliResultWriter(Invocation).WriteSuccessAsync(projected).ConfigureAwait(false);
+            }
+
+            return await humanRenderer(response.Data).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await new CliResultWriter(Invocation).WriteFailureAsync(
+                new CliFailure("invalid-response", ex.Message, null)).ConfigureAwait(false);
+        }
     }
 
     public async Task<int> PrintProjectListAsync()

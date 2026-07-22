@@ -20,17 +20,26 @@ internal static class EventCommands
 
     private static Command BuildTail(MohistCliApi api)
     {
-        var cmd = new Command("tail", "Follow the project's live event stream; emit one compact envelope per line. With --match, only matching envelopes are emitted.");
+        var descriptor = new ResourceDescriptor(
+            ResourceCardinality.Stream,
+            ["type", "source", "id", "time", "specversion", "subject", "extensions", "data"]);
+        var cmd = new Command("tail", "Follow the project's live event stream; emit one JSON object per line. With --match, only matching events are emitted.");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var matchOpt = new Option<string?>("--match") { Description = "Match expression (CEL subset) forwarded to the server; the server is the single compile authority" };
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(matchOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(async ctx =>
         {
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var match = ctx.GetValue(matchOpt);
+            var json = ctx.GetValue(jsonOpt);
+            var selection = JsonSelection.Parse(descriptor, ctx.GetResult(jsonOpt) is not null, json);
+            if (selection.Kind == JsonSelectionKind.Discovery || selection.Kind == JsonSelectionKind.Invalid)
+                return api.WriteJsonSelectionResult(descriptor, selection);
 
             var (resolved, resolveExit) = await api.ResolveProject(project).ConfigureAwait(false);
             if (resolveExit != 0)
@@ -40,13 +49,21 @@ internal static class EventCommands
             if (!string.IsNullOrWhiteSpace(match))
                 path += $"?match={Uri.EscapeDataString(match!)}";
 
-            return await RunTailAsync(api, path).ConfigureAwait(false);
+            return await RunTailAsync(api, path, selection, descriptor).ConfigureAwait(false);
         });
         return cmd;
     }
 
-    internal static async Task<int> RunTailAsync(MohistCliApi api, string path)
+    internal static async Task<int> RunTailAsync(MohistCliApi api, string path, JsonSelection? selection = null, ResourceDescriptor? descriptor = null)
     {
+        if (selection is { Kind: JsonSelectionKind.Selected } && descriptor is not null)
+        {
+            var token = TailCancellationOverride != default
+                ? TailCancellationOverride
+                : api.Invocation.CancellationToken;
+            return await NdjsonStream.ReadSelectedAsync(api.Http, path, api.Output, api.Error, selection, token)
+                .ConfigureAwait(false);
+        }
         if (TailCancellationOverride != default)
             return await NdjsonStream.ReadAsync(api.Http, path, api.Output, api.Error, TailCancellationOverride)
                 .ConfigureAwait(false);

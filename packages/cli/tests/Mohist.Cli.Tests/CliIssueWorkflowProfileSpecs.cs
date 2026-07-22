@@ -96,7 +96,7 @@ public class CliIssueWorkflowProfileSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "42", "--output", "table"], output, error, fs, executor);
+            http, ["issue", "show", "42"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Last(r => r.Method == HttpMethod.Get);
@@ -132,7 +132,7 @@ public class CliIssueWorkflowProfileSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "42", "--output", "table"], output, error, fs, executor);
+            http, ["issue", "show", "42"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -186,7 +186,7 @@ public class CliIssueWorkflowProfileSpecs
         Assert.Equal(0, createExit);
 
         var showExit = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "42", "--output", "table"], output, error, fs, executor);
+            http, ["issue", "show", "42"], output, error, fs, executor);
         Assert.Equal(0, showExit);
 
         var stdout = output.ToString();
@@ -329,7 +329,7 @@ public class CliIssueWorkflowProfileSpecs
         Assert.Equal(0, updateExit);
 
         var showExit = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "42", "--output", "table"], output, error, fs, new FakeCommandExecutor());
+            http, ["issue", "show", "42"], output, error, fs, new FakeCommandExecutor());
         Assert.Equal(0, showExit);
 
         var stdout = output.ToString();

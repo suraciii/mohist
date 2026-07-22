@@ -73,6 +73,13 @@ internal static class MohistCliCommands
             DefaultValueFactory = _ => defaultValue,
         };
 
+    internal static Option<string?> JsonSelectionOption() =>
+        new("--json")
+        {
+            Description = "Return selected fields, or list available fields when no value is supplied",
+            Arity = ArgumentArity.ZeroOrOne,
+        };
+
     internal const string NoActiveProjectMessage =
         "Run 'mo project use <name-or-id>' or pass --project <name-or-id>";
 

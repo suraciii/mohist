@@ -79,7 +79,7 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "list", "--output", "table"], output, error, fileSystem, executor);
+            http, ["issue", "list"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("repository", output.ToString(), StringComparison.Ordinal);
@@ -108,13 +108,13 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "list", "--output", "json"], output, error, fileSystem, executor);
+            http, ["issue", "list", "--json", "number,title,status,stage"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Single(handler.Requests);
         var stdout = output.ToString();
-        Assert.Contains("\"approvalState\"", stdout, StringComparison.Ordinal);
-        Assert.Contains("\"workflowStageProgress\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"status\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"stage\"", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("\"body\"", stdout, StringComparison.Ordinal);
     }
 
@@ -137,7 +137,7 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "7", "--output", "table"], output, error, fileSystem, executor);
+            http, ["issue", "show", "7"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("repository: web", output.ToString(), StringComparison.Ordinal);

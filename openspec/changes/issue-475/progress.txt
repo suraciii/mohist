@@ -23,3 +23,10 @@
 - `mo project use` writes the canonical `activeProjectId` record to both the user-home state path and the current-directory state path.
 - The legacy `--project-id` surface is hidden from help and rejected before invocation with usage exit `2`, so no domain request is sent.
 - The repository's npm workspaces include only `packages/web` and `packages/runner`; CLI verification uses `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj`.
+
+## T-003
+
+- `ResourceDescriptor` declares cardinality and ordered top-level fields; `JsonSelection` distinguishes absent, bare discovery, selected, and invalid input without reflection or server-side field queries.
+- `issue list` and `issue show` now use `--json [<fields>]`; discovery and invalid selections complete locally before Project resolution, while selected output projects decoded response data without the Server envelope.
+- `events tail` keeps NDJSON and projects each stream object locally with a compact serializer so one JSON object remains exactly one line.
+- Resource selection diagnostics use exit `2`, stay on stderr, and point callers to bare `--json` for the accepted ordered field list. CLI coverage includes single, collection, stream, discovery, invalid, stream separation, and legacy-option rejection cases.
