@@ -104,7 +104,7 @@ export type AgentDetailEventMap = {
     contextUsagePercent?: number
     healthStatus?: string
   }
-  'model.resolved': SessionRuntimeBase & { model: string }
+  'model.resolved': SessionRuntimeBase & { resolvedModel: string }
   'compaction': SessionRuntimeBase & {
     strategy?: string
     contextWindowUsedBefore?: number | null

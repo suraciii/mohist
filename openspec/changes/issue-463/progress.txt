@@ -11,3 +11,10 @@
 - Completed follow-ups close the latest round; failed follow-ups close it and append a failed error part. Both clear thinking/streaming and invalidate session queries without changing global session status.
 - Both events refetch workflow-run session lists and invalidate agent activity.
 - Verification passed: web typecheck, focused tests, full 5,100-test suite, FSD boundaries, and test-boundary checks.
+
+## T-002
+
+- Pi SDK `model_change` entries use flat `provider` and `modelId` fields. The projector now emits `model.resolved` with `resolvedModel`, while accepting string or structured model payloads defensively and preserving status events for thinking/turn/agent lifecycle facts.
+- Server live-state application and transcript summary projection both read only `resolvedModel`; model-only `model.resolved` payloads are intentionally ignored.
+- Web `model.resolved` live-event typing now exposes only `resolvedModel`.
+- Verification passed: runner typecheck, runner projector tests, runner test-boundary/typecheck checks, server summary unit tests, server runtime-event specs, and web typecheck/contract test.
