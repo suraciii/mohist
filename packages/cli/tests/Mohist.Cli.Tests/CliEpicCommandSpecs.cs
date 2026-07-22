@@ -273,7 +273,7 @@ public class CliEpicCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "--project-id", "proj_by_id", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "list", "--project", "proj_by_id", "-o", "table"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/proj_by_id/epics/", handler.Requests.Single().RequestUri?.PathAndQuery);

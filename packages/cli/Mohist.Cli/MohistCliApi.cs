@@ -24,6 +24,7 @@ internal sealed class MohistCliApi
     private readonly TextReader _standardInput;
     private readonly Func<string> _getUserHome;
     private readonly CliResponseReader _responseReader;
+    private readonly ProjectReferenceResolver _projectReferenceResolver;
     internal CliInvocation Invocation { get; }
 
     internal TextWriter Output => _out;
@@ -33,6 +34,8 @@ internal sealed class MohistCliApi
     internal TextReader StandardInput => _standardInput;
     internal HttpClient Http => _http;
     internal CliResponseReader ResponseReader => _responseReader;
+    internal Func<string> GetUserHome => _getUserHome;
+    internal string CurrentProjectStatePath => ProjectReferenceResolver.StatePath(_fileSystem.CurrentDirectory);
 
     public MohistCliApi(
         HttpClient http,
@@ -57,6 +60,7 @@ internal sealed class MohistCliApi
             ? () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             : () => "/mohist-tests/user");
         _responseReader = responseReader ?? new CliResponseReader(http);
+        _projectReferenceResolver = new ProjectReferenceResolver(_fileSystem, _getUserHome);
         Invocation = new CliInvocation(
             output,
             error,
@@ -736,12 +740,39 @@ internal sealed class MohistCliApi
         return (((OutputModeResult.Valid)validation).Mode, 0);
     }
 
+    public async Task<(string ProjectId, int Exit)> ResolveProject(string? project)
+    {
+        var result = await _projectReferenceResolver
+            .ResolveAsync(project)
+            .ConfigureAwait(false);
+        return result switch
+        {
+            ProjectReferenceResolver.Result.Resolved resolved => (resolved.ProjectReference, 0),
+            ProjectReferenceResolver.Result.Invalid invalid => (ReportProjectResolutionFailure(
+                $"Invalid {invalid.Source}. Run 'mo project use <name-or-id>' or pass --project <name-or-id>."), 1),
+            _ => (ReportProjectResolutionFailure(
+                MohistCliCommands.NoActiveProjectMessage), 1),
+        };
+    }
+
     public async Task<(string ProjectId, int Exit)> ResolveProject(string? project, string? projectId)
     {
-        var resolved = await ResolveProjectIdAsync(project, projectId);
-        if (resolved is null)
+        if (!string.IsNullOrWhiteSpace(project) && !string.IsNullOrWhiteSpace(projectId)
+            && !string.Equals(project, projectId, StringComparison.Ordinal))
+        {
+            _err.WriteLine(
+                $"--project and --project-id resolve to different values ('{project}' vs '{projectId}'). " +
+                "Pass only one of the two options, or pass matching values.");
             return ("", 1);
-        return (resolved, 0);
+        }
+
+        return await ResolveProject(project ?? projectId).ConfigureAwait(false);
+    }
+
+    private string ReportProjectResolutionFailure(string message)
+    {
+        _err.WriteLine(message);
+        return "";
     }
 
     public async Task<int> PrintWithOutputAsync(
@@ -927,7 +958,9 @@ internal sealed class MohistCliApi
             {
                 ["activeProjectId"] = id,
             };
-            await _fileSystem.WriteAllTextAsync(ProjectStatePath, state.ToJsonString(JsonOptions));
+            var serializedState = state.ToJsonString(JsonOptions);
+            await _fileSystem.WriteAllTextAsync(ProjectStatePath, serializedState);
+            await _fileSystem.WriteAllTextAsync(CurrentProjectStatePath, serializedState);
             _out.WriteLine($"Active project: {name ?? id} ({id})");
             return 0;
         }

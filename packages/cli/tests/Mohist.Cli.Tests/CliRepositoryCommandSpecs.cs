@@ -12,15 +12,15 @@ public class CliRepositoryCommandSpecs
     public static IEnumerable<object[]> RepoProjectScopeCases()
     {
         yield return [new[] { "repo", "list", "--project", "proj_by_name" }, HttpMethod.Get, "/api/projects/proj_by_name/repositories"];
-        yield return [new[] { "repo", "list", "--project-id", "proj_by_id" }, HttpMethod.Get, "/api/projects/proj_by_id/repositories"];
+        yield return [new[] { "repo", "list", "--project", "proj_by_id" }, HttpMethod.Get, "/api/projects/proj_by_id/repositories"];
         yield return [new[] { "repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--project", "proj_by_name" }, HttpMethod.Post, "/api/projects/proj_by_name/repositories"];
-        yield return [new[] { "repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--project-id", "proj_by_id" }, HttpMethod.Post, "/api/projects/proj_by_id/repositories"];
+        yield return [new[] { "repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--project", "proj_by_id" }, HttpMethod.Post, "/api/projects/proj_by_id/repositories"];
         yield return [new[] { "repo", "update", "origin", "--base-branch", "develop", "--project", "proj_by_name" }, HttpMethod.Patch, "/api/projects/proj_by_name/repositories/origin"];
-        yield return [new[] { "repo", "update", "origin", "--base-branch", "develop", "--project-id", "proj_by_id" }, HttpMethod.Patch, "/api/projects/proj_by_id/repositories/origin"];
+        yield return [new[] { "repo", "update", "origin", "--base-branch", "develop", "--project", "proj_by_id" }, HttpMethod.Patch, "/api/projects/proj_by_id/repositories/origin"];
         yield return [new[] { "repo", "set-default", "origin", "--project", "proj_by_name" }, HttpMethod.Patch, "/api/projects/proj_by_name/repositories/origin"];
-        yield return [new[] { "repo", "set-default", "origin", "--project-id", "proj_by_id" }, HttpMethod.Patch, "/api/projects/proj_by_id/repositories/origin"];
+        yield return [new[] { "repo", "set-default", "origin", "--project", "proj_by_id" }, HttpMethod.Patch, "/api/projects/proj_by_id/repositories/origin"];
         yield return [new[] { "repo", "delete", "origin", "--project", "proj_by_name" }, HttpMethod.Delete, "/api/projects/proj_by_name/repositories/origin"];
-        yield return [new[] { "repo", "delete", "origin", "--project-id", "proj_by_id" }, HttpMethod.Delete, "/api/projects/proj_by_id/repositories/origin"];
+        yield return [new[] { "repo", "delete", "origin", "--project", "proj_by_id" }, HttpMethod.Delete, "/api/projects/proj_by_id/repositories/origin"];
     }
 
     public static IEnumerable<object[]> SingleFieldUpdateCases()
@@ -515,7 +515,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "list", "--project-id", "proj_by_id"],
+            ["repo", "list", "--project", "proj_by_id"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);

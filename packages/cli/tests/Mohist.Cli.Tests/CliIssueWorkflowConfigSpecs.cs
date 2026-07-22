@@ -144,7 +144,7 @@ public class CliIssueWorkflowConfigSpecs
             r => r.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile");
 
         var byId = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "--project-id", "proj_abc"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42", "--project", "proj_abc"], output, error, fs, executor);
         Assert.Equal(0, byId);
         Assert.Contains(handler.Requests.Where(r => r.Method == HttpMethod.Get),
             r => r.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile");

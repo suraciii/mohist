@@ -26,7 +26,7 @@ public class IssueCliFeedbackTests
 
         Assert.Contains("--stage", help);
         Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
+        Assert.DoesNotContain("--project-id", help);
         Assert.Contains("--output", help);
     }
 
@@ -79,7 +79,7 @@ public class IssueCliFeedbackTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "list", "42", "--project-id", "proj_f6c141d63b6243bfbb481737b2243b87"],
+            ["issue", "feedback", "list", "42", "--project", "proj_f6c141d63b6243bfbb481737b2243b87"],
             output,
             error,
             new FakeFileSystem(),

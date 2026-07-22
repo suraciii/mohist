@@ -210,8 +210,9 @@ public class ResolveProjectIdTests
             new NoopCommandExecutor(),
             getUserHome: () => "/mohist-tests/user");
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal("/api/projects/other-project/issues/83", http.Requests.Single().RequestUri!.PathAndQuery);
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--project-id is not supported", error.ToString());
+        Assert.Empty(http.Requests);
     }
 
     private static MohistCliApi CreateApi(RecordingHttpHandler http, StringWriter output, StringWriter error, IFileSystem files) =>

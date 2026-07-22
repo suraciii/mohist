@@ -51,13 +51,18 @@ internal static class MohistCliCommands
     internal static Option<bool> FollowOption() =>
         new("--follow", "-f") { Description = "Follow log output" };
 
-    internal static Option<string?> ProjectIdOption() =>
-        new("--project-id") { Description = ProjectRefOptionDescription };
+    internal static Option<string?> ProjectIdOption()
+    {
+        var option = new Option<string?>("--project-id") { Description = "Legacy project option" };
+        option.Hidden = true;
+        return option;
+    }
 
     internal static (Option<string?> Project, Option<string?> ProjectId) ProjectRefOption()
     {
         var project = new Option<string?>("--project") { Description = ProjectRefOptionDescription };
-        var projectId = new Option<string?>("--project-id") { Description = ProjectRefOptionDescription };
+        var projectId = ProjectIdOption();
+        projectId.Hidden = true;
         return (project, projectId);
     }
 
@@ -71,8 +76,7 @@ internal static class MohistCliCommands
     internal const string NoActiveProjectMessage =
         "Run 'mo project use <name-or-id>' or pass --project <name-or-id>";
 
-    private const string ProjectRefOptionDescription =
-        "Project name or id (canonical: --project; --project-id is a backwards-compatible alias)";
+    private const string ProjectRefOptionDescription = "Project name or id";
 
     internal static Option<string[]?> LabelOption() =>
         new("--label", "-l")
@@ -188,6 +192,12 @@ internal static class MohistCliCommands
         var config = new InvocationConfiguration { Output = output, Error = error };
         var parseConfig = new ParserConfiguration { ResponseFileTokenReplacer = null };
         var parseResult = CommandLineParser.Parse(root, args, parseConfig);
+        if (args.Any(arg => string.Equals(arg, "--project-id", StringComparison.Ordinal)
+            || arg.StartsWith("--project-id=", StringComparison.Ordinal)))
+        {
+            await error.WriteLineAsync("--project-id is not supported; use --project <name-or-id>.").ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.UsageFailure);
+        }
         if (parseResult.Errors.Count > 0)
         {
             var invocation = new CliInvocation(

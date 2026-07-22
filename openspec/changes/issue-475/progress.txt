@@ -15,3 +15,11 @@
 - Production `CliProgram.Main` now uses `MohistCliCommands.RunAsync`, so cancellation, parse errors, terminal state, and environment handling share one root path.
 - `CliResponseReader` reads response content without assuming a seekable stream and maps malformed HTTP payloads to an operation failure instead of leaking a JSON exception.
 - `MohistCliApi` carries the shared invocation seams; notification overwrite prompts use the injected terminal and environment state and write confirmation diagnostics to stderr.
+
+## T-002
+
+- Project references now use `ProjectReferenceResolver`: explicit `--project`, nearest current-directory `.mohist/cli-state.json`, then the user-home selected Project record.
+- A malformed nearest context is terminal and produces one local diagnostic; it never falls through to the home selection.
+- `mo project use` writes the canonical `activeProjectId` record to both the user-home state path and the current-directory state path.
+- The legacy `--project-id` surface is hidden from help and rejected before invocation with usage exit `2`, so no domain request is sent.
+- The repository's npm workspaces include only `packages/web` and `packages/runner`; CLI verification uses `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj`.

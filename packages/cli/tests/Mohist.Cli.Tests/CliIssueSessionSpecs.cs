@@ -580,7 +580,7 @@ public class CliIssueSessionSpecs
             return Task.FromResult(RecordingHttpHandler.Json(payload));
         });
 
-        var args = new List<string> { "issue", "session", verb, "42", "plan", "--project-id", "proj_by_id", "-o", "json" };
+        var args = new List<string> { "issue", "session", verb, "42", "plan", "--project", "proj_by_id", "-o", "json" };
         args.AddRange(extraArgs);
         var exitCode = await MohistCliCommands.RunAsync(
             http, [.. args], output, error, fileSystem, executor);

@@ -531,7 +531,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "delete", "module", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["label", "delete", "module", "--project", "proj_other"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -553,7 +553,7 @@ public class CliLabelCatalogSpecs
         });
 
         var canonicalExit = await MohistCliCommands.RunAsync(
-            http, ["label", "delete", "module", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["label", "delete", "module", "--project", "proj_other"], output, error, fs, executor);
         var canonicalStdout = output.ToString();
         var canonicalStderr = error.ToString();
         var canonicalRequests = handler.Requests.ToList();
@@ -562,7 +562,7 @@ public class CliLabelCatalogSpecs
         error.GetStringBuilder().Clear();
 
         var aliasExit = await MohistCliCommands.RunAsync(
-            http, ["label", "remove", "module", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["label", "remove", "module", "--project", "proj_other"], output, error, fs, executor);
         var aliasStdout = output.ToString();
         var aliasStderr = error.ToString();
         var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();
@@ -592,7 +592,7 @@ public class CliLabelCatalogSpecs
         });
 
         var canonicalExit = await MohistCliCommands.RunAsync(
-            http, ["label", "delete", "module", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["label", "delete", "module", "--project", "proj_other"], output, error, fs, executor);
         var canonicalStdout = output.ToString();
         var canonicalStderr = error.ToString();
         var canonicalRequests = handler.Requests.ToList();
@@ -601,7 +601,7 @@ public class CliLabelCatalogSpecs
         error.GetStringBuilder().Clear();
 
         var aliasExit = await MohistCliCommands.RunAsync(
-            http, ["label", "rm", "module", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["label", "rm", "module", "--project", "proj_other"], output, error, fs, executor);
         var aliasStdout = output.ToString();
         var aliasStderr = error.ToString();
         var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();

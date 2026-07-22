@@ -7,33 +7,31 @@ namespace Mohist.Cli.Tests.Project.Api;
 public class CliOptionFactoryTests
 {
     [Fact]
-    public void ProjectRefOption_ReturnsTwoStringOptionsInCanonicalOrder()
+    public void ProjectRefOption_ReturnsCanonicalProjectAndHiddenLegacyOption()
     {
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
 
         Assert.Equal("--project", project.Name);
         Assert.Equal("--project-id", projectId.Name);
+        Assert.True(projectId.Hidden);
     }
 
     [Fact]
-    public void ProjectRefOption_SharesDescriptionDocumentingCanonicalAndAlias()
+    public void ProjectRefOption_DescribesProjectReference()
     {
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
 
-        Assert.Equal(project.Description, projectId.Description);
         Assert.NotNull(project.Description);
-        Assert.Contains("--project", project.Description);
-        Assert.Contains("--project-id", project.Description);
-        Assert.Contains("backwards-compatible alias", project.Description);
+        Assert.Contains("Project name or id", project.Description);
+        Assert.DoesNotContain("--project-id", project.Description);
     }
 
     [Fact]
-    public void ProjectIdOption_ReusesProjectRefDescriptionForBackwardsCompatibility()
+    public void ProjectIdOption_IsNotAdvertisedByTheCanonicalFactory()
     {
-        var (projectRef, _) = MohistCliCommands.ProjectRefOption();
         var projectId = MohistCliCommands.ProjectIdOption();
 
-        Assert.Equal(projectRef.Description, projectId.Description);
+        Assert.True(projectId.Hidden);
     }
 
     [Fact]

@@ -67,7 +67,7 @@ public class CliIssueRerunFromStageSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "rerun-from-stage", "42", "--stage", "build", "--project-id", "proj_xyz"],
+            ["issue", "rerun-from-stage", "42", "--stage", "build", "--project", "proj_xyz"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -181,7 +181,7 @@ public class CliIssueRerunFromStageSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "rerun", "42", "--project-id", "proj_xyz"],
+            ["issue", "rerun", "42", "--project", "proj_xyz"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -201,7 +201,7 @@ public class CliIssueRerunFromStageSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "rerun", "42", "--from-stage", "build", "--project-id", "proj_xyz"],
+            ["issue", "rerun", "42", "--from-stage", "build", "--project", "proj_xyz"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);

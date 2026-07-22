@@ -437,7 +437,7 @@ public class CliProjectWorkflowCommandSpecs
             r => r.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates");
 
         var byId = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "template", "list", "--project-id", "proj_abc", "-o", "json"], output, error, fs, executor);
+            http, ["project", "workflow", "template", "list", "--project", "proj_abc", "-o", "json"], output, error, fs, executor);
         Assert.Equal(0, byId);
         Assert.Contains(handler.Requests.Where(r => r.Method == HttpMethod.Get),
             r => r.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates");

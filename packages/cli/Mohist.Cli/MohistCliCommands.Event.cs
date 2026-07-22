@@ -32,12 +32,9 @@ internal static class EventCommands
             var projectId = ctx.GetValue(projectIdOpt);
             var match = ctx.GetValue(matchOpt);
 
-            var resolved = await api.ResolveProjectIdAsync(project, projectId).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(resolved))
-            {
-                api.Error.WriteLine(MohistCliCommands.NoActiveProjectMessage);
-                return 1;
-            }
+            var (resolved, resolveExit) = await api.ResolveProject(project).ConfigureAwait(false);
+            if (resolveExit != 0)
+                return resolveExit;
 
             var path = $"/api/projects/{Uri.EscapeDataString(resolved)}/events/tail";
             if (!string.IsNullOrWhiteSpace(match))

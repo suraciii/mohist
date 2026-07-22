@@ -686,7 +686,7 @@ public class ProjectApiSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             cliHttp,
-            ["repo", "delete", "server", "--project-id", created.Id],
+            ["repo", "delete", "server", "--project", created.Id],
             output,
             error,
             new FakeFileSystem(),

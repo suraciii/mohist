@@ -438,7 +438,7 @@ public class CliAgentSessionCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt", "Hi", "--project-id", "proj_other"],
+            http, ["agent", "session", "launch", "reviewer", "--prompt", "Hi", "--project", "proj_other"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);

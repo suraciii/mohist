@@ -13,7 +13,7 @@ public sealed class CliRoutingCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
         handler.SetResponder((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { id = "rule_c", position = 1 } }, HttpStatusCode.Created)));
 
-        var exit = await MohistCliCommands.RunAsync(http, ["routing", "rule", "create", "--name", "C", "--match", "event.type == \"x\"", "--agent", "agent_a", "--response-prompt", "hello", "--before", "rule_a", "--project-id", "proj_test"], output, error, fs, executor);
+        var exit = await MohistCliCommands.RunAsync(http, ["routing", "rule", "create", "--name", "C", "--match", "event.type == \"x\"", "--agent", "agent_a", "--response-prompt", "hello", "--before", "rule_a", "--project", "proj_test"], output, error, fs, executor);
 
         Assert.True(exit == 0, $"exit={exit}, error={error}");
         var request = Assert.Single(handler.Requests);
@@ -36,7 +36,7 @@ public sealed class CliRoutingCommandSpecs
                 new JsonObject { ["position"] = 2, ["name"] = "B", ["agentId"] = "b", ["status"] = "active", ["continue"] = true }),
         })));
 
-        var exit = await MohistCliCommands.RunAsync(http, ["routing", "rule", "list", "--project-id", "proj_test", "--output", "table"], output, error, fs, executor);
+        var exit = await MohistCliCommands.RunAsync(http, ["routing", "rule", "list", "--project", "proj_test", "--output", "table"], output, error, fs, executor);
 
         Assert.True(exit == 0, $"exit={exit}, error={error}");
         var text = output.ToString();
@@ -68,7 +68,7 @@ public sealed class CliRoutingCommandSpecs
             data = new { events = new[] { new { eventId = "event_1", outcomes = new[] { new { ruleName = "approval", decision = "would-trigger", agentName = "reviewer" } } } } },
         })));
 
-        var exit = await MohistCliCommands.RunAsync(http, ["routing", "test", "--project-id", "proj_test"], output, error, fs, executor);
+        var exit = await MohistCliCommands.RunAsync(http, ["routing", "test", "--project", "proj_test"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         Assert.Equal("/api/projects/proj_test/routing/test", Assert.Single(handler.Requests).RequestUri?.PathAndQuery);

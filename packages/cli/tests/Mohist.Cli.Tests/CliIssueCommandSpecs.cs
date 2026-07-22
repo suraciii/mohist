@@ -317,7 +317,7 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "archive", "--all-completed", "--project-id", "proj_by_id"],
+            http, ["issue", "archive", "--all-completed", "--project", "proj_by_id"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
