@@ -162,6 +162,9 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.WorkflowRunEvents:
                 RenderWorkflowRunEvents(data);
                 break;
+            case MohistCliApi.TableShape.RunList:
+                RenderRunList(data);
+                break;
             case MohistCliApi.TableShape.DeadLetterList:
                 RenderDeadLetterList(data);
                 break;
@@ -181,6 +184,40 @@ internal sealed partial class TableRenderer
             return;
         foreach (var row in cells)
             _out.WriteLine(string.Join("  ", row.Select((c, i) => c.PadRight(widths[i]))).TrimEnd());
+    }
+
+    // Renders the `mo run list` collection. Full detail is available through
+    // `mo run view <runId>`.
+    private void RenderRunList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No workflow runs");
+            return;
+        }
+
+        var headers = new[] { "run id", "status", "stage", "issue" };
+        var widths = new[] { IdSoftCap, 12, 16, 8 };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            if (row is not JsonObject obj) continue;
+            var id = StringOf(obj, "id");
+            var status = StringOf(obj, "status");
+            var stage = StringOf(obj, "stage");
+            var issueNumber = NumberOf(obj, "issueNumber");
+            cells.Add(new[]
+            {
+                Truncate(id, IdSoftCap),
+                Truncate(status, 12),
+                Truncate(stage, 16),
+                Truncate(string.IsNullOrEmpty(issueNumber) ? "" : $"#{issueNumber}", 8),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
     }
 
     private void RenderRunnerList(JsonNode? data, bool colorEnabled)

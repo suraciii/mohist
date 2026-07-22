@@ -57,8 +57,8 @@ Inline Agent 理解需求、规划怎么实现。这是**最重要的阶段**—
 Workflow 进入审批点，等待 approve / reject 决策：
 
 ```bash
-mo issue approve <number>   # 通过 plan，进入 Build
-mo issue reject <number>    # 打回，重新 plan
+mo run approve --issue <number>   # 通过 plan，进入 Build
+mo run reject --issue <number> --message "说明需要修改的内容"  # 打回，重新 plan
 ```
 
 审批者不限定是谁，见 [核心概念 · Approval](concepts.md#approval审批)。人工处理时，重点看 proposal.md 和 tasks.json；这是发现方向错误成本最低的位置。
@@ -95,8 +95,8 @@ Inline Agent 复审 Build 的产出，相当于内部 code review。
 Workflow 进入审批点，等待 approve / reject 决策。
 
 ```bash
-mo issue approve <number>   # 进入 Integrate
-mo issue reject <number>    # 回到 Build 重做
+mo run approve --issue <number>   # 进入 Integrate
+mo run reject --issue <number> --message "说明需要修改的内容"  # 回到 Build 重做
 ```
 
 人工处理时读 `review.md`。Inline Agent 的 review 通常会暴露 Build 阶段没注意到的问题。
@@ -148,7 +148,7 @@ Draft ──────▶ Plan ──────▶ Build ──────�
                                                                   Archived
 ```
 
-任意阶段失败 → blocked → retry / resume / rerun / force-stop。
+任意阶段失败 → blocked → `mo run retry` / `mo run resume` / `mo run rerun`。
 
 ## 健康度（Health）
 

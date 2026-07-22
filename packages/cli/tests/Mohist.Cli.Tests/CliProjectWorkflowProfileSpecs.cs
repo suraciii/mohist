@@ -347,20 +347,6 @@ public class CliProjectWorkflowProfileSpecs
     }
 
     [Fact]
-    public async Task Workflow_NoLongerExposesProfileListSubcommand()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            ["workflow", "list"],
-            output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-    }
-
-    [Fact]
     public async Task ProfileEnable_PostsProfileIdToEnableEndpoint()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>

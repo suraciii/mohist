@@ -54,7 +54,7 @@ mo issue start 42    # 启动父 issue = 复合推进
 
 你也可以不启动父 issue，逐个手动 `mo issue start` 子 issue——复合推进是便捷方式，不是唯一入口。
 
-审批、retry、rerun、force-stop 等所有 workflow 操作都发生在**子 issue** 上，父 issue 没有 workflow，也没有审批点。
+审批、retry、rerun、pause/stop 等所有 workflow 操作都发生在**子 issue** 上，父 issue 没有 workflow，也没有审批点。
 
 ## 状态与进度
 

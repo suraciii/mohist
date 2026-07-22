@@ -1,0 +1,108 @@
+{
+  "project": "mohist-local",
+  "description": "Consolidate WorkflowRun control into mo run: target resolution, control verbs, reads, feedback, issue start Run ID return, and removal of old issue/workflow control paths.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create mo run command tree with target resolver and seven control verbs",
+      "spec": "specs/run-control/spec.md",
+      "description": "Create the RunCommands partial class (MohistCliCommands.Run.cs), register it at root in MohistCliCommands.cs, and implement the shared ResolveRunTargetAsync helper that validates Run-ID / --issue mutual exclusion locally (exit 2, no HTTP) and resolves --issue to the issue's bound workflowRunId via a one-shot GET. Implement the seven control verbs (approve, reject, retry, rerun with --from-stage, pause, resume, stop) targeting existing /api/workflow-runs/{id} endpoints. Add --yes confirmation for the irreversible stop verb using CliInvocation.PromptsEnabled. Include full test coverage in CliRunControlSpecs.cs.",
+      "acceptanceCriteria": [
+        "mo run --help lists approve, reject, retry, rerun, pause, resume, stop and does NOT list rerun-from-stage",
+        "mo run approve wr_abc POSTs to /api/workflow-runs/wr_abc/approve with empty body and exits 0 on success",
+        "mo run approve --issue 42 resolves the issue's workflowRunId and POSTs to the run-scoped endpoint",
+        "mo run approve wr_abc --issue 42 exits 2 with a usage error and issues no HTTP request",
+        "mo run approve (no target) exits 2 with a usage error and issues no HTTP request",
+        "mo run approve --issue 99 where issue 99 has no workflowRunId exits non-zero with a message naming issue 99",
+        "mo run reject without --message exits 1 locally with no HTTP request; with --message forwards {message} in the body",
+        "mo run rerun --from-stage build POSTs to /rerun-from-stage with {stage:build}; blank --from-stage exits 1 locally",
+        "mo run stop without --yes in non-interactive mode exits 1 with no HTTP request; with --yes proceeds",
+        "mo run pause does not require --yes and POSTs to /pause",
+        "Server errors surface the message and stable code on stderr with non-zero exit",
+        "mo run approve wr_abc --json workflowRunId,approved outputs a JSON object with only those fields and no success/data wrapper",
+        "All tests in CliRunControlSpecs.cs pass with dotnet test"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Run.cs, packages/cli/tests/Mohist.Cli.Tests/CliRunControlSpecs.cs, root registration update in MohistCliCommands.cs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Build on the shared CLI contracts from issue #475 (--project resolution, --json field selection, exit codes). The target resolver is the foundational shared helper — all subsequent run tasks depend on it. Do not add --dry-run (design Open Questions resolved: not needed)."
+    },
+    {
+      "id": "T-002",
+      "title": "Add mo run reads: list, view, and watch",
+      "spec": "specs/run-reads/spec.md",
+      "description": "Add run read commands to the RunCommands partial class (MohistCliCommands.Run.Reads.cs). Implement run list by deriving from the issues list (GET /api/projects/{projectId}/issues, filter to non-null workflowRunId, project to {id, status, stage, issueNumber}). Implement run view to GET /api/workflow-runs/{id} with --yaml and --json support, reusing the target resolver from T-001. Implement run watch as a polling loop (GET run detail, print NDJSON status changes, sleep injectable interval, exit on terminal status or interrupt). Include test coverage in CliRunReadsSpecs.cs with fake timers for watch.",
+      "acceptanceCriteria": [
+        "mo run list outputs WorkflowRuns with id, status, stage, and issueNumber; empty result exits 0",
+        "mo run list --json id,status,currentStage outputs a JSON array with only requested fields",
+        "mo run view wr_abc GETs /api/workflow-runs/wr_abc and renders status, stages, and approval state",
+        "mo run view --issue 42 resolves to the bound run and GETs its detail",
+        "mo run view wr_abc --yaml fetches /yaml and prints the rendered YAML; --yaml and --json together exit 2 with no HTTP",
+        "mo run view wr_abc --issue 42 exits 2 with no HTTP (mutual exclusion)",
+        "mo run watch wr_abc polls run detail, prints status changes as NDJSON, and exits 0 on terminal status",
+        "mo run watch --issue 42 resolves and watches the bound run",
+        "Watch tests use injected TimeProvider (no wall-clock assertions) and pass with dotnet test"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Run.Reads.cs, packages/cli/tests/Mohist.Cli.Tests/CliRunReadsSpecs.cs",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "run list derives from issues list — no new server endpoint (design D3). run watch uses polling, not SSE — the events endpoint returns a bounded array, not a stream (design D4)."
+    },
+    {
+      "id": "T-003",
+      "title": "Add mo run feedback: list and view",
+      "spec": "specs/run-feedback/spec.md",
+      "description": "Add run feedback commands to the RunCommands partial class (MohistCliCommands.Run.Feedback.cs). Implement run feedback list (retrieve approval feedback records for the targeted Run, with optional --stage filter) and run feedback view (read a single record via --feedback <id> or --latest). Resolve the target via the shared resolver from T-001; for Run ID targeting, read the run detail to get issueRef, then construct the issue-scoped feedback path. For --issue targeting, use the resolved issue directly. Include test coverage in CliRunFeedbackSpecs.cs.",
+      "acceptanceCriteria": [
+        "mo run feedback list wr_abc retrieves feedback records for the targeted Run",
+        "mo run feedback list --issue 42 resolves the issue and retrieves its feedback records",
+        "mo run feedback list wr_abc --stage plan filters to plan-stage feedback only",
+        "mo run feedback view wr_abc --feedback fb_001 retrieves and displays record fb_001",
+        "mo run feedback view wr_abc --latest retrieves the most recent record; --latest --stage check filters by stage",
+        "mo run feedback view wr_abc without --feedback or --latest exits 1 locally with no HTTP request",
+        "mo run feedback list --issue 99 where issue 99 has no workflowRunId exits non-zero with a clear message",
+        "All tests in CliRunFeedbackSpecs.cs pass with dotnet test"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Run.Feedback.cs, packages/cli/tests/Mohist.Cli.Tests/CliRunFeedbackSpecs.cs",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Feedback records live at issue scope (GET /api/projects/{projectId}/issues/{number}/feedback). For Run ID targeting, read issueRef from the run detail to construct the feedback path (design D9)."
+    },
+    {
+      "id": "T-004",
+      "title": "Surface workflowRunId from issue start and remove old control paths",
+      "spec": "specs/issue-start-binding/spec.md",
+      "description": "Add workflowRunId to the IssueDescriptor fields so issue start output and --json workflowRunId work. Remove all WorkflowRun control verb registrations from IssueCommands (approve, reject, retry, rerun, rerun-from-stage, force-stop, resume, stop) and delete Issue.Feedback.cs. Clean up Issue.Lifecycle.cs to remove dead BuildReject/BuildRerun/BuildRerunFromStage/BuildStop methods. Delete the entire WorkflowCommands class (Workflow.cs, Workflow.Reads.cs) and remove its root registration. Update CliRootCommandShapeTests to drop workflow and add run. Rewrite or delete obsolete test files (CliWorkflowControlSpecs, CliIssueRejectAndStopSpecs, CliIssueRerunFromStageSpecs, CliIssueCommentAndFeedbackSpecs feedback tests). Update docs/cli-reference.md and docs/issues.md examples from mo issue approve/retry/stop to mo run.",
+      "acceptanceCriteria": [
+        "mo issue start 42 output contains the workflowRunId in default table output",
+        "mo issue start 42 --json workflowRunId returns a JSON object with the workflowRunId field",
+        "mo issue start 42 on an already-started issue returns the bound run ID",
+        "mo issue approve 42 fails to resolve, exits non-zero, issues no HTTP request",
+        "All removed issue verbs (approve, reject, retry, rerun, rerun-from-stage, force-stop, resume, stop) fail to resolve with no HTTP",
+        "mo issue feedback list 42 fails to resolve",
+        "mo workflow approve wr_abc fails to resolve; mo workflow --help does not list execution subcommands",
+        "mo --help lists run but does not list workflow as a command group",
+        "CliRootCommandShapeTests passes after updating survivingResourceGroups (remove workflow, add run)",
+        "No test file references removed command paths (mo issue approve, mo workflow retry, etc.)",
+        "docs/cli-reference.md examples use mo run instead of mo issue approve/retry/stop",
+        "dotnet build succeeds with TreatWarningsAsErrors and all tests pass"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated MohistCliCommands.Issue.cs, MohistCliCommands.Issue.Lifecycle.cs, MohistCliCommands.Issue.CrudReads.cs, MohistCliCommands.cs; deleted MohistCliCommands.Workflow.cs, MohistCliCommands.Workflow.Reads.cs, MohistCliCommands.Issue.Feedback.cs; updated tests and docs",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "This is the switchover task — old paths are removed only after new run commands (T-001 through T-003) are in place. Server-side issue-scoped endpoints are NOT removed (web UI still uses them). Retain issue workflow status/timeline/config, issue events/logs/diff/commits, and issue session/sessions (design D8). The IssueDescriptor currently lists workflowRun (wrong field name) — change to workflowRunId (design D6)."
+    }
+  ]
+}

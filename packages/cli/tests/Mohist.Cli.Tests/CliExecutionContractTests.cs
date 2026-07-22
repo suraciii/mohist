@@ -13,7 +13,7 @@ public sealed class CliExecutionContractTests
         var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["workflow", "does-not-exist"], output, error, fileSystem, executor);
+            http, ["run", "does-not-exist"], output, error, fileSystem, executor);
 
         Assert.Equal(2, exit);
         Assert.Contains("does-not-exist", error.ToString());
@@ -28,7 +28,7 @@ public sealed class CliExecutionContractTests
         var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["workflow", "get", "wr_1", "--not-an-option"], output, error, fileSystem, executor);
+            http, ["run", "view", "wr_1", "--not-an-option"], output, error, fileSystem, executor);
 
         Assert.Equal(2, exit);
         Assert.Contains("--not-an-option", error.ToString());
@@ -88,7 +88,7 @@ public sealed class CliExecutionContractTests
             new CliTerminal(false),
             new TestEnvironment());
         var writer = new CliResultWriter(invocation, new CliHintResolver(
-            new Dictionary<string, string> { ["conflict"] = "mo issue resume 7" }));
+            new Dictionary<string, string> { ["conflict"] = "mo run resume wr_7" }));
 
         Assert.Equal(0, await writer.WriteSuccessAsync(new JsonObject { ["id"] = "x" }));
         Assert.Equal(1, await writer.WriteFailureAsync(new CliFailure("conflict", "Rejected", null)));
@@ -96,7 +96,7 @@ public sealed class CliExecutionContractTests
         Assert.Contains("\"id\"", output.ToString());
         Assert.DoesNotContain("Rejected", output.ToString());
         Assert.Contains("code=conflict", error.ToString());
-        Assert.Contains("hint: mo issue resume 7", error.ToString());
+        Assert.Contains("hint: mo run resume wr_7", error.ToString());
     }
 
     [Fact]

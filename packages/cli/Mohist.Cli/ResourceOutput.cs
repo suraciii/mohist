@@ -40,7 +40,8 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.IssueTemplateList or
             MohistCliApi.TableShape.RoutingRuleList or
             MohistCliApi.TableShape.DeadLetterList or
-            MohistCliApi.TableShape.OpencodeModels => ResourceCardinality.Collection,
+            MohistCliApi.TableShape.OpencodeModels or
+            MohistCliApi.TableShape.RunList => ResourceCardinality.Collection,
             _ => ResourceCardinality.Single,
         };
 
@@ -75,6 +76,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.ProjectWorkflowProfile => ["defaultTemplateId", "variables", "prompts"],
             MohistCliApi.TableShape.WorkflowRunDetail => ["status", "issueRef"],
             MohistCliApi.TableShape.WorkflowApproval => ["workflowRunId", "approved"],
+            MohistCliApi.TableShape.RunList => ["id", "status", "stage", "currentStage", "issueNumber"],
             MohistCliApi.TableShape.WorkflowRunEvents => ["id", "type", "source", "subject", "time", "data"],
             MohistCliApi.TableShape.WorkflowVariables => ["vars", "stages"],
             MohistCliApi.TableShape.WorkflowProfile =>

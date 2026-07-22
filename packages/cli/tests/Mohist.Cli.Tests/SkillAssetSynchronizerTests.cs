@@ -120,7 +120,7 @@ public class SkillAssetSynchronizerTests
             "description: dispatcher\n" +
             "---\n" +
             "# mohist\n" +
-            "issue lifecycle: mo issue start approve reject retry rerun stop force-stop resume rebase close\n" +
+            "issue lifecycle: mo issue start rebase close; run control: mo run approve reject retry rerun pause resume stop\n" +
             "epic autopilot: mo epic start pause resume\n";
 
         var epicSource =

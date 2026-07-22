@@ -86,11 +86,11 @@ public class CliRootCommandShapeTests
         string[] survivingResourceGroups =
         [
             "project",
+            "run",
             "issue",
             "epic",
             "agent",
             "label",
-            "workflow",
             "runner",
             "server",
             "system",

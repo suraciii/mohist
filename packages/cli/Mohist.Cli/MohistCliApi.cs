@@ -29,6 +29,7 @@ internal sealed class MohistCliApi
     private readonly Func<string> _getUserHome;
     private readonly CliResponseReader _responseReader;
     private readonly ProjectReferenceResolver _projectReferenceResolver;
+    private readonly TimeProvider _timeProvider;
     internal CliInvocation Invocation { get; }
 
     internal TextWriter Output => _out;
@@ -39,6 +40,7 @@ internal sealed class MohistCliApi
     internal HttpClient Http => _http;
     internal CliResponseReader ResponseReader => _responseReader;
     internal Func<string> GetUserHome => _getUserHome;
+    internal TimeProvider TimeProvider => _timeProvider;
     internal string CurrentProjectStatePath => ProjectReferenceResolver.StatePath(_fileSystem.CurrentDirectory);
 
     public MohistCliApi(
@@ -52,6 +54,7 @@ internal sealed class MohistCliApi
         CliResponseReader? responseReader = null,
         ICliTerminal? terminal = null,
         ICliEnvironment? cliEnvironment = null,
+        TimeProvider? timeProvider = null,
         CancellationToken cancellationToken = default)
     {
         _http = http;
@@ -65,6 +68,7 @@ internal sealed class MohistCliApi
             : () => "/mohist-tests/user");
         _responseReader = responseReader ?? new CliResponseReader(http);
         _projectReferenceResolver = new ProjectReferenceResolver(_fileSystem, _getUserHome);
+        _timeProvider = timeProvider ?? TimeProvider.System;
         Invocation = new CliInvocation(
             output,
             error,
@@ -1061,6 +1065,7 @@ internal sealed class MohistCliApi
         WorkflowApproval,
         WorkflowRunVariables,
         WorkflowRunEvents,
+        RunList,
         DeadLetterList,
         DeadLetterRedelivery,
     }

@@ -132,8 +132,8 @@ Plan 完成后，issue 会停在 **awaiting approval** 状态，表示 workflow 
 读一遍，觉得合理就点 **Approve**。觉得有问题就 **Reject**（Inline Agent 会重新 plan）。这一步处理的是 workflow 的审批点；动作可以来自 Web UI、CLI、Mohist Agent 或其它自动化。
 
 ```bash
-mo issue approve 1     # 批准
-mo issue reject 1      # 打回
+mo run approve --issue 1                         # 批准
+mo run reject --issue 1 --message "需要修改的内容"  # 打回
 ```
 
 ## 10. 观察 Build / Check / Integrate

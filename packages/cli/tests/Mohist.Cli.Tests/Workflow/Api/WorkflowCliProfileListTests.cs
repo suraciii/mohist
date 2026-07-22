@@ -15,26 +15,6 @@ public class WorkflowCliProfileListTests
     private const string DefaultProjectId = "proj_abc";
 
     [Fact]
-    public async Task WorkflowHelp_NoLongerExposesListSubcommand()
-    {
-        var help = await RenderHelp(["workflow", "--help"]);
-
-        // The top-level `mo workflow` group now owns WorkflowRun reads/controls
-        // (issue-381 T-005). The bare `list` subcommand (which used to render
-        // WorkflowProfiles) was relocated to `mo project workflow profile list`
-        // by T-003 — there must not be a `list <run-id>` subcommand on
-        // `mo workflow` anymore. `list-sessions` is the only `list*` command
-        // and it has its own subcommand line, so we assert against the
-        // canonical command shape (`list <args>`) rather than the substring.
-        var subcommandLines = help
-            .Split('\n')
-            .Where(line => line.StartsWith("  ", StringComparison.Ordinal))
-            .ToList();
-        Assert.DoesNotContain(subcommandLines, line => line.TrimStart().StartsWith("list ", StringComparison.Ordinal));
-        Assert.DoesNotContain("Workflow profile management", help);
-    }
-
-    [Fact]
     public async Task ProfileListHelp_DocumentsOutputOption()
     {
         var help = await RenderHelp(["project", "workflow", "profile", "list", "--help"]);

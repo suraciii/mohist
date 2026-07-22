@@ -153,7 +153,7 @@ Profile collection 属于 Workflow；Project 默认选择和 Issue 显式选择�
 
 ## WorkflowRun
 
-`mo run` 查看和控制一次 WorkflowRun。Issue 号可以便捷寻址当前 Run，但不会因此复制 `mo issue approve`、`mo issue retry` 等控制命令。
+`mo run` 查看和控制一次 WorkflowRun。Issue 号可以便捷寻址当前 Run，但不会因此复制 Issue 下的控制命令。
 
 需要一条 Run 的命令接受以下两种目标之一：
 
