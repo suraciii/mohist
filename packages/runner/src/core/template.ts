@@ -30,7 +30,32 @@ const LITERAL_FIELD_PATHS = new Set<string>([
 
 export function renderTemplate(input: JsonObject | null | undefined, variables: JsonObject) {
   if (!input) return null
+  if (typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("renderTemplate expects a JSON object, received " + (Array.isArray(input) ? "array" : typeof input))
+  }
   return renderObject(input, variables, "")
+}
+
+/**
+ * Render every top-level field of `input` except those in `skip`, which are
+ * passed through untouched. Each rendered value is produced by `renderValue`,
+ * which dispatches by JSON kind (string → `renderString`, object/array →
+ * recurse). Callers MUST NOT pass a non-object value to `renderTemplate`;
+ * doing so would iterate the value's own entries (e.g. a string's character
+ * indices) and silently corrupt it into `{"0":"a","1":"b",…}`.
+ */
+export function renderWithSkippedFields(
+  input: JsonObject | null | undefined,
+  variables: JsonObject,
+  skip: ReadonlySet<string>,
+): JsonObject | null {
+  if (!input) return null
+  if (skip.size === 0) return renderObject(input, variables, "")
+  const rendered: JsonObject = {}
+  for (const [key, value] of Object.entries(input)) {
+    rendered[key] = skip.has(key) ? value : renderValue(value, variables, appendPath("", key))
+  }
+  return rendered
 }
 
 function renderValue(value: JsonValue, variables: JsonObject, currentPath: string): JsonValue {
