@@ -98,6 +98,27 @@ public class MohistConfigurationExtensionsTests
     }
 
     [Fact]
+    public void ConfigurePhysicalConfigSource_ScopesProviderToConfigFile()
+    {
+        var source = new JsonConfigurationSource();
+        var files = new InMemoryFileProvider();
+        string? providerRoot = null;
+
+        MohistConfigurationExtensions.ConfigurePhysicalConfigSource(
+            source,
+            ConfigPath,
+            rootPath =>
+            {
+                providerRoot = rootPath;
+                return files;
+            });
+
+        Assert.Equal("/mohist-tests", providerRoot);
+        Assert.Equal("config.jsonc", source.Path);
+        Assert.Same(files, source.FileProvider);
+    }
+
+    [Fact]
     public void AddMohistConfigFile_JsoncWithCommentsAndTrailingCommas_LoadsEveryConfiguredKey()
     {
         var files = new InMemoryFileProvider().AddText(ConfigPath, """
