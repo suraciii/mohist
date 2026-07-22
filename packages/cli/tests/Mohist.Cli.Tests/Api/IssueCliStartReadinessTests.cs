@@ -141,7 +141,7 @@ public class IssueCliStartReadinessTests
             new NoopCommandExecutor());
 
         Assert.Equal(0, exitCode);
-        var text = output.ToString();
+        var text = error.ToString();
         Assert.Contains("mo issue update 83 --ready", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("mo issue start 83", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("before starting", text, StringComparison.OrdinalIgnoreCase);
@@ -171,11 +171,11 @@ public class IssueCliStartReadinessTests
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
-        var dataIndex = text.IndexOf("\"number\"", StringComparison.Ordinal);
-        var guidanceIndex = text.IndexOf("mo issue update", StringComparison.OrdinalIgnoreCase);
+        var guidance = error.ToString();
+        var dataIndex = text.IndexOf("number:", StringComparison.Ordinal);
+        var guidanceIndex = guidance.IndexOf("mo issue update", StringComparison.OrdinalIgnoreCase);
         Assert.True(dataIndex >= 0, "expected issue data in output");
-        Assert.True(guidanceIndex >= 0, "expected guidance in output");
-        Assert.True(guidanceIndex > dataIndex, "expected guidance to be printed after the issue data");
+        Assert.True(guidanceIndex >= 0, "expected guidance in diagnostics");
     }
 
     [Fact]
@@ -201,7 +201,7 @@ public class IssueCliStartReadinessTests
             new NoopCommandExecutor());
 
         Assert.Equal(0, exitCode);
-        var text = output.ToString();
+        var text = error.ToString();
         Assert.Contains("mo issue start 84", text);
         Assert.DoesNotContain("mo issue update", text);
     }
@@ -233,7 +233,7 @@ public class IssueCliStartReadinessTests
             new NoopCommandExecutor());
 
         Assert.Equal(0, exitCode);
-        var text = output.ToString();
+        var text = error.ToString();
         Assert.Contains("Waiting for #42", text);
         Assert.DoesNotContain("mo issue start 85", text);
     }

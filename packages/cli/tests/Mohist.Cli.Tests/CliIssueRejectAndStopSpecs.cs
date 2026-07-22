@@ -88,7 +88,7 @@ public class CliIssueRejectAndStopSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "reject", "42", "--message", "rework", "--project-id", "proj_xyz"],
+            ["issue", "reject", "42", "--message", "rework", "--project", "proj_xyz"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -158,7 +158,7 @@ public class CliIssueRejectAndStopSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "stop", "42", "--project-id", "proj_xyz"], output, error, fs, executor);
+            http, ["issue", "stop", "42", "--project", "proj_xyz"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var postReq = handler.Requests.Last(r => r.Method == HttpMethod.Post);

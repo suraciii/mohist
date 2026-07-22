@@ -477,7 +477,15 @@ internal static class NotifyCommands
         ArgumentNullException.ThrowIfNull(api);
         ArgumentNullException.ThrowIfNull(standardInput);
 
-        await api.Output.WriteLineAsync(
+        if (!api.Invocation.PromptsEnabled)
+        {
+            await api.Error.WriteLineAsync(
+                "confirmation is required; pass explicit notification configuration or use an interactive terminal")
+                .ConfigureAwait(false);
+            return OverwritePromptResult.EofResult;
+        }
+
+        await api.Error.WriteLineAsync(
             "Existing Mohist:Notifications:Hermes values were found in the config file. " +
             "Overwrite them? [y/N]: ")
             .ConfigureAwait(false);

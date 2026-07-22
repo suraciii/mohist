@@ -7,61 +7,59 @@ namespace Mohist.Cli.Tests.Project.Api;
 public class CliOptionFactoryTests
 {
     [Fact]
-    public void ProjectRefOption_ReturnsTwoStringOptionsInCanonicalOrder()
+    public void ProjectRefOption_ReturnsCanonicalProjectAndDoesNotAdvertiseLegacyOption()
     {
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
 
         Assert.Equal("--project", project.Name);
         Assert.Equal("--project-id", projectId.Name);
+        Assert.True(projectId.Hidden);
     }
 
     [Fact]
-    public void ProjectRefOption_SharesDescriptionDocumentingCanonicalAndAlias()
+    public void ProjectRefOption_DescribesProjectReference()
     {
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
 
-        Assert.Equal(project.Description, projectId.Description);
         Assert.NotNull(project.Description);
-        Assert.Contains("--project", project.Description);
-        Assert.Contains("--project-id", project.Description);
-        Assert.Contains("backwards-compatible alias", project.Description);
+        Assert.Contains("Project name or id", project.Description);
+        Assert.DoesNotContain("--project", project.Description);
     }
 
     [Fact]
-    public void ProjectIdOption_ReusesProjectRefDescriptionForBackwardsCompatibility()
+    public void ProjectIdOption_IsNotAdvertisedByTheCanonicalFactory()
     {
-        var (projectRef, _) = MohistCliCommands.ProjectRefOption();
         var projectId = MohistCliCommands.ProjectIdOption();
 
-        Assert.Equal(projectRef.Description, projectId.Description);
+        Assert.True(projectId.Hidden);
     }
 
     [Fact]
-    public void OutputOption_DefaultsToJson()
+    public void OutputOption_DefaultsToHumanOutput()
     {
         var output = MohistCliCommands.OutputOption();
 
         Assert.NotNull(output.DefaultValueFactory);
         var defaultValue = output.DefaultValueFactory(default!);
 
-        Assert.Equal("json", defaultValue);
+        Assert.Equal("table", defaultValue);
     }
 
     [Fact]
-    public void OutputOption_DescriptionDocumentsTableAndJson()
+    public void OutputOption_DescriptionDocumentsFieldSelectionAndDiscovery()
     {
         var output = MohistCliCommands.OutputOption();
 
         Assert.NotNull(output.Description);
-        Assert.Contains("table", output.Description);
-        Assert.Contains("json", output.Description);
+        Assert.Contains("selected fields", output.Description);
+        Assert.Contains("list available fields", output.Description);
     }
 
     [Fact]
-    public void OutputOption_IsNamedOutput()
+    public void OutputOption_IsNamedJson()
     {
         var output = MohistCliCommands.OutputOption();
 
-        Assert.Equal("--output", output.Name);
+        Assert.Equal("--json", output.Name);
     }
 }

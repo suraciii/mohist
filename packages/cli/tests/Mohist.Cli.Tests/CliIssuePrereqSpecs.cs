@@ -169,7 +169,7 @@ public class CliIssuePrereqSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "prereq", "add", "201", "200", "--project-id", "proj_xyz"],
+            ["issue", "prereq", "add", "201", "200", "--project", "proj_xyz"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -195,7 +195,7 @@ public class CliIssuePrereqSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "prereq", "remove", "201", "200", "--project-id", "proj_xyz"],
+            ["issue", "prereq", "remove", "201", "200", "--project", "proj_xyz"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);

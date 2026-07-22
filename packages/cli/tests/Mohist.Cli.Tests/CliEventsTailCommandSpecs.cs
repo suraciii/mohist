@@ -205,7 +205,7 @@ public sealed class CliEventsTailCommandSpecs : IDisposable
         await releaseSignal.Task;
         var exitCode = await runTask;
 
-        Assert.Equal(0, exitCode);
+        Assert.Equal(130, exitCode);
         Assert.True(observedToken.IsCancellationRequested);
         Assert.Empty(output.ToString());
         cts.Dispose();

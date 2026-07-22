@@ -15,6 +15,10 @@ internal sealed class MohistCliApi
         WriteIndented = true,
     };
     internal static JsonSerializerOptions JsonOutputOptions => JsonOptions;
+    internal static JsonSerializerOptions JsonCompactOutputOptions { get; } = new(JsonOptions)
+    {
+        WriteIndented = false,
+    };
 
     private readonly HttpClient _http;
     private readonly TextWriter _out;
@@ -23,6 +27,9 @@ internal sealed class MohistCliApi
     private readonly ICommandExecutor _commandExecutor;
     private readonly TextReader _standardInput;
     private readonly Func<string> _getUserHome;
+    private readonly CliResponseReader _responseReader;
+    private readonly ProjectReferenceResolver _projectReferenceResolver;
+    internal CliInvocation Invocation { get; }
 
     internal TextWriter Output => _out;
     internal TextWriter Error => _err;
@@ -30,6 +37,9 @@ internal sealed class MohistCliApi
     internal ICommandExecutor CommandExecutor => _commandExecutor;
     internal TextReader StandardInput => _standardInput;
     internal HttpClient Http => _http;
+    internal CliResponseReader ResponseReader => _responseReader;
+    internal Func<string> GetUserHome => _getUserHome;
+    internal string CurrentProjectStatePath => ProjectReferenceResolver.StatePath(_fileSystem.CurrentDirectory);
 
     public MohistCliApi(
         HttpClient http,
@@ -38,7 +48,11 @@ internal sealed class MohistCliApi
         IFileSystem fileSystem,
         ICommandExecutor commandExecutor,
         TextReader? standardInput = null,
-        Func<string>? getUserHome = null)
+        Func<string>? getUserHome = null,
+        CliResponseReader? responseReader = null,
+        ICliTerminal? terminal = null,
+        ICliEnvironment? cliEnvironment = null,
+        CancellationToken cancellationToken = default)
     {
         _http = http;
         _out = output;
@@ -49,12 +63,104 @@ internal sealed class MohistCliApi
         _getUserHome = getUserHome ?? (fileSystem is RealFileSystem
             ? () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             : () => "/mohist-tests/user");
+        _responseReader = responseReader ?? new CliResponseReader(http);
+        _projectReferenceResolver = new ProjectReferenceResolver(_fileSystem, _getUserHome);
+        Invocation = new CliInvocation(
+            output,
+            error,
+            _standardInput,
+            terminal ?? CliTerminal.From(_standardInput),
+            cliEnvironment ?? SystemCliEnvironment.Instance,
+            cancellationToken);
     }
 
     public async Task<int> PrintGetAsync(string path)
     {
         using var response = await SendAsync(HttpMethod.Get, path, body: null);
         return response is null ? 1 : await PrintResponseAsync(response);
+    }
+
+    internal int WriteJsonSelectionResult(ResourceDescriptor descriptor, JsonSelection selection)
+    {
+        if (selection.Kind == JsonSelectionKind.Discovery)
+        {
+            _out.WriteLine(JsonSerializer.Serialize(selection.Fields));
+            return 0;
+        }
+
+        if (selection.Kind == JsonSelectionKind.Invalid)
+        {
+            _err.WriteLine(
+                $"Invalid --json field '{selection.InvalidField}'. Run this command with bare --json to list accepted fields.");
+            return 2;
+        }
+
+        return 0;
+    }
+
+    internal async Task<int> PrintResourceAsync(
+        string path,
+        ResourceDescriptor descriptor,
+        JsonSelection selection,
+        Func<JsonNode?, Task<int>> humanRenderer)
+    {
+        var response = await ResponseReader.ReadAsync(HttpMethod.Get, path, cancellationToken: Invocation.CancellationToken)
+            .ConfigureAwait(false);
+        if (!response.IsSuccess)
+            return await new CliResultWriter(Invocation).WriteFailureAsync(response.Failure!).ConfigureAwait(false);
+
+        try
+        {
+            if (selection.Kind == JsonSelectionKind.Selected)
+            {
+                var projected = selection.Project(response.Data, descriptor.Cardinality);
+                return await new CliResultWriter(Invocation).WriteSuccessAsync(projected).ConfigureAwait(false);
+            }
+
+            return await humanRenderer(response.Data).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await new CliResultWriter(Invocation).WriteFailureAsync(
+                new CliFailure("invalid-response", ex.Message, null)).ConfigureAwait(false);
+        }
+    }
+
+    internal async Task<int> PrintMutationResourceAsync(
+        HttpMethod method,
+        string path,
+        object? body,
+        ResourceDescriptor descriptor,
+        JsonSelection selection,
+        Func<JsonNode?, Task<int>> humanRenderer,
+        JsonNode? successDataFallback = null)
+    {
+        var response = await ResponseReader.ReadAsync(
+                method,
+                path,
+                body,
+                mutating: true,
+                cancellationToken: Invocation.CancellationToken)
+            .ConfigureAwait(false);
+        if (!response.IsSuccess)
+            return await new CliResultWriter(Invocation).WriteFailureAsync(response.Failure!).ConfigureAwait(false);
+
+        try
+        {
+            var data = response.Data ?? successDataFallback;
+            if (selection.Kind == JsonSelectionKind.Selected)
+            {
+                var projected = selection.Project(data, descriptor.Cardinality);
+                return await new CliResultWriter(Invocation).WriteSuccessAsync(projected).ConfigureAwait(false);
+            }
+
+            return await humanRenderer(data).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await new CliResultWriter(Invocation).WriteFailureAsync(
+                new CliFailure("invalid-response", ex.Message, null)).ConfigureAwait(false);
+        }
     }
 
     public async Task<int> PrintProjectListAsync()
@@ -75,7 +181,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return FailureExitCode(response);
         }
 
@@ -123,6 +229,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintPutWithOutputAsync(string path, object body, string mode, string? tableShape = null)
     {
+        var localExit = HandleLocalJsonSelection(mode, tableShape);
+        if (localExit is not null)
+            return localExit.Value;
         using var response = await SendAsync(HttpMethod.Put, path, body);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
@@ -191,7 +300,7 @@ internal sealed class MohistCliApi
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return (FailureExitCode(ex.StatusCode), null);
         }
         catch (HttpRequestException)
@@ -229,6 +338,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintRunnerListAsync(string projectId, RunnerScopeFilter scope, string mode, bool colorEnabled)
     {
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.RunnerList));
+        if (localExit is not null)
+            return localExit.Value;
         if (string.IsNullOrWhiteSpace(projectId))
         {
             _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
@@ -247,7 +359,7 @@ internal sealed class MohistCliApi
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return FailureExitCode(ex.StatusCode);
         }
 
@@ -271,11 +383,8 @@ internal sealed class MohistCliApi
             filtered.Add(obj.DeepClone());
         }
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            _out.WriteLine(filtered.ToJsonString(JsonOptions));
-            return 0;
-        }
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+            return await WriteSelectedDataAsync(filtered, mode, nameof(TableShape.RunnerList));
 
         if (filtered.Count == 0)
         {
@@ -292,6 +401,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintRunnerShowAsync(string projectId, string runnerIdEncoded, string mode)
     {
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.RunnerShow));
+        if (localExit is not null)
+            return localExit.Value;
         if (string.IsNullOrWhiteSpace(projectId))
         {
             _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
@@ -307,7 +419,7 @@ internal sealed class MohistCliApi
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             _err.WriteLine($"Runner '{runnerIdEncoded}' not found");
-            return 4;
+            return 1;
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync();
@@ -316,7 +428,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return FailureExitCode(response);
         }
 
@@ -327,11 +439,8 @@ internal sealed class MohistCliApi
             return 1;
         }
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            _out.WriteLine(runner.ToJsonString(JsonOptions));
-            return 0;
-        }
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+            return await WriteSelectedDataAsync(runner, mode, nameof(TableShape.RunnerShow));
 
         RenderRunnerShow(runner);
         return 0;
@@ -339,6 +448,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintRunnerStatusAsync(string projectId, string mode)
     {
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.RunnerList));
+        if (localExit is not null)
+            return localExit.Value;
         if (string.IsNullOrWhiteSpace(projectId))
         {
             _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
@@ -357,7 +469,7 @@ internal sealed class MohistCliApi
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return FailureExitCode(ex.StatusCode);
         }
 
@@ -369,11 +481,8 @@ internal sealed class MohistCliApi
 
         var runners = data["runners"] as JsonArray ?? new JsonArray();
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            _out.WriteLine(data.ToJsonString(JsonOptions));
-            return 0;
-        }
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+            return await WriteSelectedDataAsync(runners, mode, nameof(TableShape.RunnerList));
 
         if (runners.Count == 0)
         {
@@ -462,6 +571,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintOpencodeModelsAsync(string projectId, string mode)
     {
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.OpencodeModels));
+        if (localExit is not null)
+            return localExit.Value;
         if (string.IsNullOrWhiteSpace(projectId))
         {
             _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
@@ -480,7 +592,7 @@ internal sealed class MohistCliApi
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return FailureExitCode(ex.StatusCode);
         }
 
@@ -490,13 +602,17 @@ internal sealed class MohistCliApi
             return 1;
         }
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            _out.WriteLine(data.ToJsonString(JsonOptions));
-            return 0;
-        }
-
         var models = data["models"] as JsonArray ?? new JsonArray();
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+        {
+            var resources = new JsonArray();
+            foreach (var item in models)
+            {
+                if (item is JsonValue value && value.TryGetValue<string>(out var id))
+                    resources.Add(new JsonObject { ["id"] = id });
+            }
+            return await WriteSelectedDataAsync(resources, mode, nameof(TableShape.OpencodeModels));
+        }
         foreach (var item in models)
         {
             var id = item?.GetValue<string>();
@@ -508,6 +624,9 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintSystemInfoAsync(string mode)
     {
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.SystemInfo));
+        if (localExit is not null)
+            return localExit.Value;
         HttpResponseMessage response;
         try
         {
@@ -531,17 +650,14 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return FailureExitCode(response);
         }
 
         var data = envelope.Data;
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            _out.WriteLine(data is null ? "null" : data.ToJsonString(JsonOptions));
-            return 0;
-        }
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+            return await WriteSelectedDataAsync(data, mode, nameof(TableShape.SystemInfo));
 
         if (data is JsonObject obj)
         {
@@ -559,21 +675,27 @@ internal sealed class MohistCliApi
 
         _err.WriteLine("Server is not running. Start with: mo server start");
 
+        var payload = new JsonObject
+        {
+            ["running"] = null,
+            ["source"] = null,
+            ["install"] = null,
+            ["update"] = null,
+            ["services"] = null,
+            ["paths"] = null,
+            ["cliVersion"] = cliVersion,
+            ["degraded"] = true,
+        };
+
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+        {
+            await WriteSelectedDataAsync(payload, mode, nameof(TableShape.SystemInfo));
+            return;
+        }
+
         if (string.Equals(mode, "json", StringComparison.Ordinal))
         {
-            var payload = new JsonObject
-            {
-                ["running"] = null,
-                ["source"] = null,
-                ["install"] = null,
-                ["update"] = null,
-                ["services"] = null,
-                ["paths"] = null,
-                ["cliVersion"] = cliVersion,
-                ["degraded"] = true,
-            };
             _out.WriteLine(payload.ToJsonString(JsonOptions));
-            await Task.CompletedTask;
             return;
         }
 
@@ -581,7 +703,6 @@ internal sealed class MohistCliApi
         _out.WriteLine();
         _out.WriteLine("CLI (local)");
         WriteKeyValue("  version", cliVersion ?? "<unknown>");
-        await Task.CompletedTask;
     }
 
     internal void RenderSystemInfo(JsonObject data)
@@ -700,14 +821,20 @@ internal sealed class MohistCliApi
 
     public static OutputModeResult ValidateOutputMode(string? mode)
     {
-        if (string.IsNullOrWhiteSpace(mode) || string.Equals(mode, "json", StringComparison.Ordinal))
-            return new OutputModeResult.Valid("json");
-
-        if (string.Equals(mode, "table", StringComparison.Ordinal))
+        if (string.Equals(mode, "table", StringComparison.Ordinal)
+            && !MohistCliCommands.OutputOptionState.Explicit)
             return new OutputModeResult.Valid("table");
 
-        return new OutputModeResult.Invalid(
-            $"--output must be 'table' or 'json' (got '{mode}')");
+        if (string.Equals(mode, "table", StringComparison.Ordinal))
+            return new OutputModeResult.Valid("discover");
+
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+            return new OutputModeResult.Valid("discover");
+
+        if (!string.IsNullOrWhiteSpace(mode))
+            return new OutputModeResult.Valid($"json:{mode}");
+
+        return new OutputModeResult.Valid("table");
     }
 
     public (string Mode, int Exit) ResolveOutputMode(string? output)
@@ -721,12 +848,39 @@ internal sealed class MohistCliApi
         return (((OutputModeResult.Valid)validation).Mode, 0);
     }
 
+    public async Task<(string ProjectId, int Exit)> ResolveProject(string? project)
+    {
+        var result = await _projectReferenceResolver
+            .ResolveAsync(project)
+            .ConfigureAwait(false);
+        return result switch
+        {
+            ProjectReferenceResolver.Result.Resolved resolved => (resolved.ProjectReference, 0),
+            ProjectReferenceResolver.Result.Invalid invalid => (ReportProjectResolutionFailure(
+                $"Invalid {invalid.Source}. Run 'mo project use <name-or-id>' or pass --project <name-or-id>."), 1),
+            _ => (ReportProjectResolutionFailure(
+                MohistCliCommands.NoActiveProjectMessage), 1),
+        };
+    }
+
     public async Task<(string ProjectId, int Exit)> ResolveProject(string? project, string? projectId)
     {
-        var resolved = await ResolveProjectIdAsync(project, projectId);
-        if (resolved is null)
+        if (!string.IsNullOrWhiteSpace(project) && !string.IsNullOrWhiteSpace(projectId)
+            && !string.Equals(project, projectId, StringComparison.Ordinal))
+        {
+            _err.WriteLine(
+                $"--project and --project-id resolve to different values ('{project}' vs '{projectId}'). " +
+                "Pass only one of the two options, or pass matching values.");
             return ("", 1);
-        return (resolved, 0);
+        }
+
+        return await ResolveProject(project ?? projectId).ConfigureAwait(false);
+    }
+
+    private string ReportProjectResolutionFailure(string message)
+    {
+        _err.WriteLine(message);
+        return "";
     }
 
     public async Task<int> PrintWithOutputAsync(
@@ -735,6 +889,9 @@ internal sealed class MohistCliApi
         string? tableShape = null,
         IReadOnlyDictionary<string, string>? headers = null)
     {
+        var localExit = HandleLocalJsonSelection(mode, tableShape);
+        if (localExit is not null)
+            return localExit.Value;
         using var response = await SendAsync(HttpMethod.Get, path, body: null, headers: headers);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
@@ -747,18 +904,27 @@ internal sealed class MohistCliApi
         bool rawJson = false,
         IReadOnlyDictionary<string, string>? headers = null)
     {
+        var localExit = HandleLocalJsonSelection(mode, tableShape);
+        if (localExit is not null)
+            return localExit.Value;
         using var response = await SendAsync(HttpMethod.Post, path, body, headers: headers);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape, rawJson: rawJson);
     }
 
     public async Task<int> PrintPatchWithOutputAsync(string path, object body, string mode, string? tableShape = null)
     {
+        var localExit = HandleLocalJsonSelection(mode, tableShape);
+        if (localExit is not null)
+            return localExit.Value;
         using var response = await SendAsync(HttpMethod.Patch, path, body);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
 
     public async Task<int> PrintDeleteWithOutputAsync(string path, string mode, string? tableShape = null, JsonNode? successDataFallback = null)
     {
+        var localExit = HandleLocalJsonSelection(mode, tableShape);
+        if (localExit is not null)
+            return localExit.Value;
         using var response = await SendAsync(HttpMethod.Delete, path, body: null);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape, successDataFallback);
     }
@@ -778,8 +944,72 @@ internal sealed class MohistCliApi
             return await PrintResponseAsync(response);
 
         var data = await ReadSuccessDataAsync(response) ?? successDataFallback?.DeepClone();
+        if (string.Equals(tableShape, nameof(TableShape.RepoList), StringComparison.Ordinal)
+            && data is JsonObject project
+            && project["repositories"] is JsonArray repositories)
+        {
+            data = repositories;
+        }
+        if (mode.StartsWith("json:", StringComparison.Ordinal))
+        {
+            var descriptor = ResourceOutputCatalog.For(tableShape);
+            var selection = JsonSelection.Parse(descriptor, true, mode[5..]);
+            if (selection.Kind == JsonSelectionKind.Invalid)
+                return WriteJsonSelectionResult(descriptor, selection);
+            try
+            {
+                return await new CliResultWriter(Invocation).WriteSuccessAsync(
+                    selection.Project(data, descriptor.Cardinality)).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return await new CliResultWriter(Invocation).WriteFailureAsync(
+                    new CliFailure("invalid-response", ex.Message, null)).ConfigureAwait(false);
+            }
+        }
         var shape = ParseTableShape(tableShape);
         return await RenderTableAsync(data, shape);
+    }
+
+    internal int? HandleLocalJsonSelection(string mode, string? tableShape)
+    {
+        if (mode == "table")
+            return null;
+
+        var descriptor = ResourceOutputCatalog.For(tableShape);
+        if (mode == "discover")
+            return WriteJsonSelectionResult(descriptor, new JsonSelection(JsonSelectionKind.Discovery, descriptor.Fields, null));
+
+        if (!mode.StartsWith("json:", StringComparison.Ordinal))
+            return null;
+
+        var selection = JsonSelection.Parse(descriptor, true, mode[5..]);
+        return selection.Kind == JsonSelectionKind.Invalid
+            ? WriteJsonSelectionResult(descriptor, selection)
+            : null;
+    }
+
+    internal async Task<int> WriteSelectedDataAsync(JsonNode? data, string mode, string? tableShape)
+    {
+        if (mode == "discover")
+            return WriteJsonSelectionResult(ResourceOutputCatalog.For(tableShape), new JsonSelection(JsonSelectionKind.Discovery, ResourceOutputCatalog.For(tableShape).Fields, null));
+        if (!mode.StartsWith("json:", StringComparison.Ordinal))
+            return await RenderTableAsync(data, ParseTableShape(tableShape)).ConfigureAwait(false);
+
+        var descriptor = ResourceOutputCatalog.For(tableShape);
+        var selection = JsonSelection.Parse(descriptor, true, mode[5..]);
+        if (selection.Kind == JsonSelectionKind.Invalid)
+            return WriteJsonSelectionResult(descriptor, selection);
+        try
+        {
+            return await new CliResultWriter(Invocation).WriteSuccessAsync(
+                selection.Project(data, descriptor.Cardinality)).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await new CliResultWriter(Invocation).WriteFailureAsync(
+                new CliFailure("invalid-response", ex.Message, null)).ConfigureAwait(false);
+        }
     }
 
     public enum TableShape
@@ -803,7 +1033,11 @@ internal sealed class MohistCliApi
         LabelList,
         IssueTemplateList,
         IssueTemplateShow,
+        WorkflowProfileList,
         RunnerList,
+        RunnerShow,
+        OpencodeModels,
+        SystemInfo,
         WorkflowProfile,
         WorkflowVariables,
         WorkflowProfilePrompt,
@@ -824,6 +1058,7 @@ internal sealed class MohistCliApi
         ProjectWorkflowProfile,
         IssueArchiveCompleted,
         WorkflowRunDetail,
+        WorkflowApproval,
         WorkflowRunVariables,
         WorkflowRunEvents,
         DeadLetterList,
@@ -853,7 +1088,7 @@ internal sealed class MohistCliApi
         return await ReadSuccessDataAsync(response!);
     }
 
-    public async Task<int> PrintWorkflowProfilesDescribedAsync(string? projectId = null)
+    public async Task<int> PrintWorkflowProfilesDescribedAsync(string? projectId = null, string mode = "table")
     {
         var path = projectId is not null
             ? $"/api/workflow-profiles?project={Uri.EscapeDataString(projectId)}"
@@ -861,12 +1096,14 @@ internal sealed class MohistCliApi
         try
         {
             var data = await GetDataAsync(path);
+            if (mode.StartsWith("json:", StringComparison.Ordinal))
+                return await WriteSelectedDataAsync(data, mode, nameof(TableShape.WorkflowProfileList));
             RenderWorkflowProfilesDescribed(data);
             return 0;
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return FailureExitCode(ex.StatusCode);
         }
         catch (HttpRequestException)
@@ -912,13 +1149,15 @@ internal sealed class MohistCliApi
             {
                 ["activeProjectId"] = id,
             };
-            await _fileSystem.WriteAllTextAsync(ProjectStatePath, state.ToJsonString(JsonOptions));
+            var serializedState = state.ToJsonString(JsonOptions);
+            await _fileSystem.WriteAllTextAsync(ProjectStatePath, serializedState);
+            await _fileSystem.WriteAllTextAsync(CurrentProjectStatePath, serializedState);
             _out.WriteLine($"Active project: {name ?? id} ({id})");
             return 0;
         }
         catch (ApiResponseException ex)
         {
-            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            WriteApiFailure(ex);
             return FailureExitCode(ex.StatusCode);
         }
         catch (HttpRequestException)
@@ -1015,7 +1254,7 @@ internal sealed class MohistCliApi
         if (envelope.Success)
             return envelope.Data;
 
-        throw new ApiResponseException(response.StatusCode, envelope.Error, envelope.Code);
+        throw new ApiResponseException(response.StatusCode, envelope.Error, envelope.Code, envelope.Details);
     }
 
     private async Task<int> PrintResponseAsync(HttpResponseMessage response, JsonNode? successDataFallback = null)
@@ -1032,7 +1271,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return FailureExitCode(response);
         }
 
@@ -1055,7 +1294,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return FailureExitCode(response);
         }
 
@@ -1080,7 +1319,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return new PostResult(FailureExitCode(response), null, envelope.Error, envelope.Code);
         }
 
@@ -1089,16 +1328,25 @@ internal sealed class MohistCliApi
         return new PostResult(0, data, null, null);
     }
 
+    private void WriteApiFailure(ApiResponseException failure)
+    {
+        var details = failure.Details is null ? string.Empty : $" details={failure.Details.ToJsonString()}";
+        var code = string.IsNullOrWhiteSpace(failure.Code) ? $"http-{(int)failure.StatusCode}" : failure.Code;
+        _err.WriteLine($"{failure.Message} (code={code}){details}");
+    }
+
     private sealed class ApiResponseException : Exception
     {
-        public ApiResponseException(HttpStatusCode statusCode, string message, string? code = null) : base(message)
+        public ApiResponseException(HttpStatusCode statusCode, string message, string? code = null, JsonNode? details = null) : base(message)
         {
             StatusCode = statusCode;
             Code = code;
+            Details = details;
         }
 
         public HttpStatusCode StatusCode { get; }
         public string? Code { get; }
+        public JsonNode? Details { get; }
     }
 
     internal sealed record Envelope(
@@ -1106,32 +1354,43 @@ internal sealed class MohistCliApi
         bool Success,
         JsonNode? Data,
         string Error,
-        string? Code);
+        string? Code,
+        JsonNode? Details);
 
     internal static Envelope ExtractEnvelope(JsonNode? node, HttpResponseMessage response)
     {
         if (node is null)
         {
+            var statusSuccess = response.IsSuccessStatusCode;
             return new Envelope(
                 HasBody: false,
-                Success: response.IsSuccessStatusCode,
+                Success: statusSuccess,
                 Data: null,
                 Error: response.ReasonPhrase ?? "Request failed",
-                Code: null);
+                Code: statusSuccess ? null : $"http-{(int)response.StatusCode}",
+                Details: null);
         }
 
         var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
         var data = node["data"];
         var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-        var code = node["code"]?.GetValue<string>();
-        return new Envelope(HasBody: true, Success: success, Data: data, Error: error, Code: code);
+        var rawCode = node["code"]?.GetValue<string>();
+        var code = success || !string.IsNullOrWhiteSpace(rawCode)
+            ? rawCode
+            : $"http-{(int)response.StatusCode}";
+        return new Envelope(HasBody: true, Success: success, Data: data, Error: error, Code: code, Details: node["details"]);
     }
 
     internal static int FailureExitCode(HttpResponseMessage response) =>
         FailureExitCode(response.StatusCode);
 
-    internal static int FailureExitCode(HttpStatusCode statusCode) =>
-        statusCode == HttpStatusCode.NotFound ? 4 : 1;
+    internal static int FailureExitCode(HttpStatusCode statusCode) => 1;
+
+    private void WriteEnvelopeFailure(Envelope envelope)
+    {
+        var details = envelope.Details is null ? string.Empty : $" details={envelope.Details.ToJsonString()}";
+        _err.WriteLine($"{envelope.Error} (code={envelope.Code}){details}");
+    }
 
     internal async Task<HttpResponseMessage?> SendAsync(
         HttpMethod method,

@@ -34,7 +34,8 @@ public class ProjectCliTests
         Assert.Equal(0, exitCode);
         Assert.Equal(HttpMethod.Post, http.Requests.Single().Method);
         Assert.Equal("/api/projects/spec-smoke/use", http.Requests.Single().RequestUri!.PathAndQuery);
-        Assert.Contains("\"activeProjectId\": \"proj_123\"", files.SingleFileContents);
+        Assert.Equal(2, files.Files.Count);
+        Assert.All(files.Files.Values, contents => Assert.Contains("\"activeProjectId\": \"proj_123\"", contents));
         Assert.Contains("Active project: spec-smoke (proj_123)", output.ToString());
         Assert.Equal("", error.ToString());
     }
@@ -110,7 +111,7 @@ public class ProjectCliTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "table"],
+            ["project", "list",],
             output,
             error,
             files,

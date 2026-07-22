@@ -17,35 +17,35 @@ public class MohistCliApiPreludeTests
         Path.Combine(CliTestFactory.UserHome, ".mohist", "cli-state.json");
 
     [Fact]
-    public void ResolveOutputMode_Unset_ReturnsJsonAndExitZero()
+    public void ResolveOutputMode_Unset_ReturnsTableAndExitZero()
     {
         var (api, _, _) = CreateApi();
 
         var (mode, exit) = api.ResolveOutputMode(null);
 
-        Assert.Equal("json", mode);
+        Assert.Equal("table", mode);
         Assert.Equal(0, exit);
     }
 
     [Fact]
-    public void ResolveOutputMode_Blank_ReturnsJsonAndExitZero()
+    public void ResolveOutputMode_Blank_ReturnsTableAndExitZero()
     {
         var (api, _, _) = CreateApi();
 
         var (mode, exit) = api.ResolveOutputMode("   ");
 
-        Assert.Equal("json", mode);
+        Assert.Equal("table", mode);
         Assert.Equal(0, exit);
     }
 
     [Fact]
-    public void ResolveOutputMode_Json_ReturnsJsonAndExitZero()
+    public void ResolveOutputMode_Json_ReturnsDiscoveryAndExitZero()
     {
         var (api, _, _) = CreateApi();
 
         var (mode, exit) = api.ResolveOutputMode("json");
 
-        Assert.Equal("json", mode);
+        Assert.Equal("discover", mode);
         Assert.Equal(0, exit);
     }
 
@@ -61,27 +61,27 @@ public class MohistCliApiPreludeTests
     }
 
     [Fact]
-    public void ResolveOutputMode_InvalidXml_WritesErrorAndExitsOne()
+    public void ResolveOutputMode_Xml_ReturnsSelectedFieldMode()
     {
         var (api, _, error) = CreateApi();
 
         var (mode, exit) = api.ResolveOutputMode("xml");
 
-        Assert.Equal("json", mode);
-        Assert.Equal(1, exit);
-        Assert.Contains("--output must be 'table' or 'json' (got 'xml')", error.ToString());
+        Assert.Equal("json:xml", mode);
+        Assert.Equal(0, exit);
+        Assert.Empty(error.ToString());
     }
 
     [Fact]
-    public void ResolveOutputMode_InvalidCsv_WritesErrorAndExitsOne()
+    public void ResolveOutputMode_Csv_ReturnsSelectedFieldMode()
     {
         var (api, _, error) = CreateApi();
 
         var (mode, exit) = api.ResolveOutputMode("csv");
 
-        Assert.Equal("json", mode);
-        Assert.Equal(1, exit);
-        Assert.Contains("--output must be 'table' or 'json' (got 'csv')", error.ToString());
+        Assert.Equal("json:csv", mode);
+        Assert.Equal(0, exit);
+        Assert.Empty(error.ToString());
     }
 
     [Fact]

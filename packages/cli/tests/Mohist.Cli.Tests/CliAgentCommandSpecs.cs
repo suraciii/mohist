@@ -137,7 +137,7 @@ public class CliAgentCommandSpecs
         })));
         var output = new StringWriter();
 
-        var exitCode = await RunAsync(handler, ["agent", "show", "reviewer", "--output", "table"], output: output, fileSystem: FileSystemWithProject());
+        var exitCode = await RunAsync(handler, ["agent", "show", "reviewer",], output: output, fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/proj_123/agents?all=true", handler.Requests[0].RequestUri?.PathAndQuery);
@@ -327,7 +327,7 @@ public class CliAgentCommandSpecs
             "proj_123");
 
         var canonicalExit = await MohistCliCommands.RunAsync(
-            http, ["agent", "archive", "reviewer", "--project-id", "proj_123"], output, error, fs, executor);
+            http, ["agent", "archive", "reviewer", "--project", "proj_123"], output, error, fs, executor);
         var canonicalStdout = output.ToString();
         var canonicalStderr = error.ToString();
         var canonicalRequests = handler.Requests.ToList();
@@ -336,7 +336,7 @@ public class CliAgentCommandSpecs
         error.GetStringBuilder().Clear();
 
         var aliasExit = await MohistCliCommands.RunAsync(
-            http, ["agent", "delete", "reviewer", "--project-id", "proj_123"], output, error, fs, executor);
+            http, ["agent", "delete", "reviewer", "--project", "proj_123"], output, error, fs, executor);
         var aliasStdout = output.ToString();
         var aliasStderr = error.ToString();
         var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();
@@ -364,7 +364,7 @@ public class CliAgentCommandSpecs
             "proj_default");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "delete", "agent_123", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["agent", "delete", "agent_123", "--project", "proj_other"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/proj_other/agents/agent_123", handler.Requests[0].RequestUri?.PathAndQuery);

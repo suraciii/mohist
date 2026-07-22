@@ -79,7 +79,7 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "list", "--output", "table"], output, error, fileSystem, executor);
+            http, ["issue", "list"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("repository", output.ToString(), StringComparison.Ordinal);
@@ -108,13 +108,13 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "list", "--output", "json"], output, error, fileSystem, executor);
+            http, ["issue", "list", "--json", "number,title,status,stage"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Single(handler.Requests);
         var stdout = output.ToString();
-        Assert.Contains("\"approvalState\"", stdout, StringComparison.Ordinal);
-        Assert.Contains("\"workflowStageProgress\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"status\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"stage\"", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("\"body\"", stdout, StringComparison.Ordinal);
     }
 
@@ -137,7 +137,7 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "7", "--output", "table"], output, error, fileSystem, executor);
+            http, ["issue", "show", "7"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("repository: web", output.ToString(), StringComparison.Ordinal);
@@ -225,11 +225,10 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "archive", "--all-completed", "-o", "json"], output, error, fileSystem, executor);
+            http, ["issue", "archive", "--all-completed", "--json", "archived,skipped,message"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("\"success\": true", stdout, StringComparison.Ordinal);
         Assert.Contains("\"archived\": 3", stdout, StringComparison.Ordinal);
         Assert.Contains("\"message\": \"Archived 3 completed issues, skipped 0\"", stdout, StringComparison.Ordinal);
     }
@@ -299,10 +298,10 @@ public class CliIssueCommandSpecs
             throw new InvalidOperationException("API must not be called when output mode is invalid"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "archive", "--all-completed", "-o", "yaml"], output, error, fileSystem, executor);
+            http, ["issue", "archive", "--all-completed", "--output", "yaml"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, exitCode);
+        Assert.Contains("Unrecognized command or argument", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -317,7 +316,7 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "archive", "--all-completed", "--project-id", "proj_by_id"],
+            http, ["issue", "archive", "--all-completed", "--project", "proj_by_id"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);

@@ -16,7 +16,7 @@ public class IssueCliRemainingProjectRefTests
         var help = RenderHelp(["issue", "create", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
+        Assert.DoesNotContain("--project-id", help);
     }
 
     [Fact]
@@ -25,7 +25,7 @@ public class IssueCliRemainingProjectRefTests
         var help = RenderHelp(["issue", "update", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
+        Assert.DoesNotContain("--project-id", help);
     }
 
     [Theory]
@@ -51,7 +51,7 @@ public class IssueCliRemainingProjectRefTests
         var help = RenderHelp(["issue", subcommand, "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
+        Assert.DoesNotContain("--project-id", help);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class IssueCliRemainingProjectRefTests
         var help = RenderHelp(["issue", "workflow", "timeline", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
+        Assert.DoesNotContain("--project-id", help);
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public class IssueCliRemainingProjectRefTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "close", "83", "--project-id", "proj_f6c141d63b6243bfbb481737b2243b87"],
+            ["issue", "close", "83", "--project", "proj_f6c141d63b6243bfbb481737b2243b87"],
             output,
             error,
             new FakeFileSystem(),
@@ -257,13 +257,10 @@ public class IssueCliRemainingProjectRefTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
-        Assert.Contains("mohist-local", err);
-        Assert.Contains("proj_other", err);
-        Assert.Contains("--project", err);
-        Assert.Contains("--project-id", err);
+        Assert.Contains("--project-id is not supported", err);
     }
 
     [Fact]

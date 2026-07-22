@@ -92,7 +92,7 @@ public class CliIssueSessionSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "sessions", "42", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "sessions", "42",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -131,7 +131,7 @@ public class CliIssueSessionSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "show", "42", "plan", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "session", "show", "42", "plan",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -147,7 +147,7 @@ public class CliIssueSessionSpecs
     }
 
     [Fact]
-    public async Task SessionShow_Json_EmitsRawPayload()
+    public async Task SessionShow_SelectedJson_ProjectsRequestedFields()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -157,7 +157,7 @@ public class CliIssueSessionSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "show", "42", "plan", "-o", "json"], output, error, fileSystem, executor);
+            http, ["issue", "session", "show", "42", "plan", "--json", "id,sessionName,status"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -175,9 +175,9 @@ public class CliIssueSessionSpecs
                 HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "show", "42", "missing", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "session", "show", "42", "missing",], output, error, fileSystem, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("Session missing not found", error.ToString(), StringComparison.Ordinal);
     }
 
@@ -201,7 +201,7 @@ public class CliIssueSessionSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "transcript", "42", "plan", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "session", "transcript", "42", "plan",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -264,7 +264,7 @@ public class CliIssueSessionSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "transcript", "42", "plan", "-o", "json"], output, error, fileSystem, executor);
+            http, ["issue", "session", "transcript", "42", "plan", "--json", "turns,partCount"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -282,9 +282,9 @@ public class CliIssueSessionSpecs
                 HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "transcript", "42", "missing", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "session", "transcript", "42", "missing",], output, error, fileSystem, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("Session missing not found", error.ToString(), StringComparison.Ordinal);
     }
 
@@ -309,7 +309,7 @@ public class CliIssueSessionSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "compact", "42", "plan", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "session", "compact", "42", "plan",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -354,7 +354,7 @@ public class CliIssueSessionSpecs
     }
 
     [Fact]
-    public async Task SessionCompact_Json_EmitsRawRecoveryPayload()
+    public async Task SessionCompact_SelectedJson_ProjectsRecoveryFields()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -370,7 +370,7 @@ public class CliIssueSessionSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "compact", "42", "plan", "-o", "json"], output, error, fileSystem, executor);
+            http, ["issue", "session", "compact", "42", "plan", "--json", "id,wasCompacted"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -389,9 +389,9 @@ public class CliIssueSessionSpecs
                 HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "compact", "42", "missing", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "session", "compact", "42", "missing",], output, error, fileSystem, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("Session missing not found", error.ToString(), StringComparison.Ordinal);
     }
 
@@ -405,7 +405,7 @@ public class CliIssueSessionSpecs
                 HttpStatusCode.Conflict)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "compact", "42", "plan", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "session", "compact", "42", "plan",], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         var stderr = error.ToString();
@@ -437,7 +437,7 @@ public class CliIssueSessionSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "reset", "42", "plan", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "session", "reset", "42", "plan",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -494,7 +494,7 @@ public class CliIssueSessionSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "reset", "42", "plan", "-o", "json"], output, error, fileSystem, executor);
+            http, ["issue", "session", "reset", "42", "plan", "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -512,9 +512,9 @@ public class CliIssueSessionSpecs
                 HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "reset", "42", "missing", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "session", "reset", "42", "missing",], output, error, fileSystem, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("Session missing not found", error.ToString(), StringComparison.Ordinal);
     }
 
@@ -528,7 +528,7 @@ public class CliIssueSessionSpecs
                 HttpStatusCode.Conflict)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "reset", "42", "plan", "-o", "table"], output, error, fileSystem, executor);
+            http, ["issue", "session", "reset", "42", "plan",], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         var stderr = error.ToString();
@@ -580,7 +580,7 @@ public class CliIssueSessionSpecs
             return Task.FromResult(RecordingHttpHandler.Json(payload));
         });
 
-        var args = new List<string> { "issue", "session", verb, "42", "plan", "--project-id", "proj_by_id", "-o", "json" };
+        var args = new List<string> { "issue", "session", verb, "42", "plan", "--project", "proj_by_id" };
         args.AddRange(extraArgs);
         var exitCode = await MohistCliCommands.RunAsync(
             http, [.. args], output, error, fileSystem, executor);
@@ -607,7 +607,7 @@ public class CliIssueSessionSpecs
             return Task.FromResult(RecordingHttpHandler.Json(payload));
         });
 
-        var args = new List<string> { "issue", "session", verb, "42", "plan", "--project", "proj_override", "-o", "json" };
+        var args = new List<string> { "issue", "session", verb, "42", "plan", "--project", "proj_override" };
         args.AddRange(extraArgs);
         var exitCode = await MohistCliCommands.RunAsync(
             http, [.. args], output, error, fileSystem, executor);
@@ -623,16 +623,16 @@ public class CliIssueSessionSpecs
     [InlineData("reset")]
     [InlineData("followup")]
     [InlineData("cancel")]
-    public async Task SessionSubcommand_InvalidOutput_FailsWithoutCallingApi(string verb)
+    public async Task SessionSubcommand_LegacyOutputOption_FailsWithoutCallingApi(string verb)
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called when output mode is invalid"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", verb, "42", "plan", "-o", "yaml"], output, error, fileSystem, executor);
+            http, ["issue", "session", verb, "42", "plan", "--output", "json"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -703,7 +703,7 @@ public class CliIssueSessionSpecs
     }
 
     [Fact]
-    public async Task SessionFollowup_Json_PrintsRawPayload()
+    public async Task SessionFollowup_SelectedJson_ProjectsStatus()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -713,12 +713,12 @@ public class CliIssueSessionSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "followup", "42", "plan", "--text", "Hi", "-o", "json"],
+            http, ["issue", "session", "followup", "42", "plan", "--text", "Hi", "--json", "status"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("\"success\": true", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("\"status\": \"sent\"", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("\"success\"", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -796,7 +796,7 @@ public class CliIssueSessionSpecs
             http, ["issue", "session", "followup", "42", "missing", "--text", "Hi"],
             output, error, fileSystem, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("Session missing not found", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("session_not_found", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(output.ToString());

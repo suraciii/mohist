@@ -21,33 +21,35 @@ internal static partial class IssueCommands
             Description = "Prerequisite issue number",
         };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(numberArg);
         cmd.Arguments.Add(prereqNumberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var prereqNumber = ctx.GetValue(prereqNumberArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
+            var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             return AddAsync();
 
             async Task<int> AddAsync()
             {
+                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/prerequisites");
-                return await api.PrintPostWithOutputAsync(
+                return await api.PrintMutationResourceAsync(
+                    HttpMethod.Post,
                     path,
                     new { prerequisiteNumber = prereqNumber },
-                    mode,
-                    nameof(MohistCliApi.TableShape.IssueShow));
+                    IssueDescriptor,
+                    selection,
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
             }
         });
         return cmd;
@@ -62,34 +64,37 @@ internal static partial class IssueCommands
             Description = "Prerequisite issue number",
         };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(numberArg);
         cmd.Arguments.Add(prereqNumberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var prereqNumber = ctx.GetValue(prereqNumberArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
+            var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             return RemoveAsync();
 
             async Task<int> RemoveAsync()
             {
+                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
                     $"/issues/{MohistCliCommands.Escape(number!)}/prerequisites/{prereqNumber}");
-                return await api.PrintDeleteWithOutputAsync(
+                return await api.PrintMutationResourceAsync(
+                    HttpMethod.Delete,
                     path,
-                    mode,
-                    nameof(MohistCliApi.TableShape.IssueShow));
+                    null,
+                    IssueDescriptor,
+                    selection,
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
             }
         });
         return cmd;

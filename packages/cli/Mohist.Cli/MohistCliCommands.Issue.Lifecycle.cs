@@ -4,28 +4,41 @@ namespace Mohist.Cli;
 
 internal static partial class IssueCommands
 {
+    private static readonly ResourceDescriptor ArchiveCompletedDescriptor = new(
+        ResourceCardinality.Single,
+        ["archived", "skipped", "skippedNumbers", "message"]);
+
     private static Command BuildAction(string name, string description, MohistCliApi api)
     {
         var cmd = new Command(name, $"{description} an issue");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
+            var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             return ActAsync();
 
             async Task<int> ActAsync()
             {
+                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                return await api.PrintPostAsync(
+                return await api.PrintMutationResourceAsync(
+                    HttpMethod.Post,
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/{name}"),
-                    new { });
+                    new { },
+                    IssueDescriptor,
+                    selection,
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
             }
         });
         return cmd;
@@ -40,19 +53,19 @@ internal static partial class IssueCommands
             Description = "Reject reason / change request message (required)",
         };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(messageOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var message = ctx.GetValue(messageOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
+            var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             return RejectAsync();
 
             async Task<int> RejectAsync()
@@ -62,16 +75,18 @@ internal static partial class IssueCommands
                     api.Error.WriteLine("--message is required and must not be empty");
                     return 1;
                 }
+                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/reject");
-                return await api.PrintPostWithOutputAsync(
+                return await api.PrintMutationResourceAsync(
+                    HttpMethod.Post,
                     path,
                     new { message },
-                    mode,
-                    nameof(MohistCliApi.TableShape.IssueShow));
+                    IssueDescriptor,
+                    selection,
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
             }
         });
         return cmd;
@@ -161,31 +176,33 @@ internal static partial class IssueCommands
             "Stop the workflow run permanently (terminal — cannot be resumed; use 'force-stop' if you want a pause you can resume)");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
+            var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             return StopAsync();
 
             async Task<int> StopAsync()
             {
+                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/stop");
-                return await api.PrintPostWithOutputAsync(
+                return await api.PrintMutationResourceAsync(
+                    HttpMethod.Post,
                     path,
                     new { },
-                    mode,
-                    nameof(MohistCliApi.TableShape.IssueShow));
+                    IssueDescriptor,
+                    selection,
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
             }
         });
         return cmd;
@@ -232,26 +249,24 @@ internal static partial class IssueCommands
         };
         var allCompletedOpt = new Option<bool>("--all-completed") { Description = "Archive all completed issues" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(allCompletedOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var allCompleted = ctx.GetValue(allCompletedOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var number = ctx.GetValue(numberArg);
-            var output = ctx.GetValue(outputOpt);
+            var json = ctx.GetValue(jsonOpt);
+            var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             return ArchiveAsync();
 
             async Task<int> ArchiveAsync()
             {
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
-
                 if (allCompleted && number is not null)
                 {
                     api.Error.WriteLine("<number> and --all-completed are mutually exclusive");
@@ -264,22 +279,35 @@ internal static partial class IssueCommands
                     return 1;
                 }
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
-
                 if (allCompleted)
                 {
-                    return await api.PrintPostWithOutputAsync(
+                    var selection = JsonSelection.Parse(ArchiveCompletedDescriptor, jsonProvided, json);
+                    if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                        return api.WriteJsonSelectionResult(ArchiveCompletedDescriptor, selection);
+
+                    var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                    if (resolveExit != 0) return resolveExit;
+                    return await api.PrintMutationResourceAsync(
+                        HttpMethod.Post,
                         ProjectIssuesPath(resolvedProjectId, "/issues/archive-completed"),
                         new { },
-                        mode,
-                        nameof(MohistCliApi.TableShape.IssueArchiveCompleted),
-                        rawJson: true);
+                        ArchiveCompletedDescriptor,
+                        selection,
+                        data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueArchiveCompleted));
                 }
 
-                return await api.PrintPostAsync(
-                    ProjectIssuesPath(resolvedProjectId, $"/issues/{Uri.EscapeDataString(number!)}/archive"),
-                    new { });
+                var issueSelection = JsonSelection.Parse(IssueDescriptor, jsonProvided, json);
+                if (issueSelection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(IssueDescriptor, issueSelection);
+                var (resolvedIssueProjectId, issueResolveExit) = await api.ResolveProject(project, projectId);
+                if (issueResolveExit != 0) return issueResolveExit;
+                return await api.PrintMutationResourceAsync(
+                    HttpMethod.Post,
+                    ProjectIssuesPath(resolvedIssueProjectId, $"/issues/{Uri.EscapeDataString(number!)}/archive"),
+                    new { },
+                    IssueDescriptor,
+                    issueSelection,
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
             }
         });
         return cmd;

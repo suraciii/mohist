@@ -301,8 +301,9 @@ internal sealed partial class TableRenderer
         var value = node?[key];
         if (value is null || value is JsonObject || value is JsonArray)
             return "";
-        var s = value.GetValue<string>();
-        return s ?? "";
+        if (value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var text))
+            return text ?? "";
+        return value.ToString();
     }
 
     private static bool BoolOf(JsonNode? node, string key)

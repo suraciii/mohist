@@ -241,13 +241,10 @@ public class CliRootCommandShapeTests
     [Fact]
     public async Task MoInfo_JsonFlag_EmitsSingleJsonObject()
     {
-        // `--json` produces a single machine-readable JSON object with
-        // the documented top-level keys. Spec calls this out as the
-        // second alternate invocation.
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["info", "--json"], output, error, fs, executor);
+            http, ["info", "--json", "cli,server,runner,project,dataDir"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -259,6 +256,7 @@ public class CliRootCommandShapeTests
         Assert.Contains("runner", keys);
         Assert.Contains("project", keys);
         Assert.Contains("dataDir", keys);
+        Assert.Equal(5, keys.Count);
     }
 
 }

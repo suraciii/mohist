@@ -122,6 +122,11 @@ internal static class ProjectWorkflowCommands
 
             async Task<int> ListAsync()
             {
+                var (mode, exit) = api.ResolveOutputMode(output);
+                if (exit != 0) return exit;
+                var localExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.WorkflowProfileList));
+                if (localExit is not null) return localExit.Value;
+
                 var hasProject = !string.IsNullOrWhiteSpace(project);
                 var hasProjectId = !string.IsNullOrWhiteSpace(projectId);
 
@@ -138,15 +143,11 @@ internal static class ProjectWorkflowCommands
                     if (resolveExit != 0)
                     {
                         api.Error.WriteLine("No project specified or active; showing all workflow profiles (degraded).");
-                        return await api.PrintWorkflowProfilesDescribedAsync();
-                    }
-
-                    return await api.PrintWorkflowProfilesDescribedAsync(resolvedProjectId);
+                    return await api.PrintWorkflowProfilesDescribedAsync(null, mode);
                 }
 
-                var (mode, exit) = api.ResolveOutputMode(output);
-
-                if (exit != 0) return exit;
+                    return await api.PrintWorkflowProfilesDescribedAsync(resolvedProjectId, mode);
+                }
 
                 if (hasProject && hasProjectId && !string.Equals(project, projectId, StringComparison.Ordinal))
                 {
@@ -169,7 +170,10 @@ internal static class ProjectWorkflowCommands
                     path = $"/api/workflow-templates/system?project={MohistCliCommands.Escape(plainResolvedProjectId)}";
                 }
 
-                return await api.PrintWithOutputAsync(path, mode);
+                return await api.PrintWithOutputAsync(
+                    path,
+                    mode,
+                    nameof(MohistCliApi.TableShape.WorkflowProfileList));
             }
         });
         return cmd;
@@ -203,13 +207,7 @@ internal static class ProjectWorkflowCommands
             return 1;
         dataNode["prompts"] = promptsData.DeepClone();
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            api.Output.WriteLine(dataNode.ToJsonString(MohistCliApi.JsonOutputOptions));
-            return 0;
-        }
-
-        return await api.RenderTableAsync(dataNode, MohistCliApi.TableShape.ProjectWorkflowProfile);
+        return await api.WriteSelectedDataAsync(dataNode, mode, nameof(MohistCliApi.TableShape.ProjectWorkflowProfile));
     }
 
     private static Command BuildConfigGet(MohistCliApi api)
@@ -229,13 +227,13 @@ internal static class ProjectWorkflowCommands
 
             async Task<int> GetAsync()
             {
+                var (mode, exit) = api.ResolveOutputMode(output);
+                if (exit != 0) return exit;
+                var localExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.ProjectWorkflowProfile));
+                if (localExit is not null) return localExit.Value;
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
 
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = api.ResolveOutputMode(output);
-
-                if (exit != 0) return exit;
-
 
                 var profilePath = ProjectWorkflowProfilePath(resolvedProjectId);
                 var promptsPath = ProjectWorkflowProfilePath(resolvedProjectId, "/prompts");

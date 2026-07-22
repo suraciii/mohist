@@ -28,6 +28,9 @@ public class CliProjectUseCommandSpecs
     private static string ProjectStatePath() =>
         Path.Combine(CliTestFactory.UserHome, ".mohist", "cli-state.json");
 
+    private static string CurrentProjectStatePath() =>
+        Path.Combine("/", ".mohist", "cli-state.json");
+
     [Fact]
     public async Task Root_Help_NoLongerListsUseSubcommand()
     {
@@ -103,6 +106,8 @@ public class CliProjectUseCommandSpecs
         var saved = fs.ReadAllText(statePath);
         Assert.Contains("proj_active", saved);
         Assert.Contains("activeProjectId", saved);
+        Assert.True(fs.Exists(CurrentProjectStatePath()));
+        Assert.Equal(saved, fs.ReadAllText(CurrentProjectStatePath()));
     }
 
     [Fact]
@@ -158,7 +163,7 @@ public class CliProjectUseCommandSpecs
         // Server rejected the request (`Project not found`) → the handler
         // throws ApiResponseException with 404 → FailureExitCode returns 4
         // (see MohistCliApi.FailureExitCode for NotFound → 4).
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("/api/projects/does-not-exist/use", request.RequestUri?.PathAndQuery);
