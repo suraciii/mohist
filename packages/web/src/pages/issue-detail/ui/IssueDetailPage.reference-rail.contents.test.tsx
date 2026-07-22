@@ -51,6 +51,7 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
     expect(referenceRail.contains(configurationToggle)).toBe(true)
     expect(within(configurationToggle).getByText('Configuration')).toBeTruthy()
     expect(within(configurationToggle).queryByText('CONF…')).toBeNull()
+    expect(referenceRail.querySelectorAll('select')).toHaveLength(0)
   })
 
   it('does not place lifecycle or workflow actions in the reference rail (they live in the issue decision surface)', async () => {

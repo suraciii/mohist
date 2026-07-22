@@ -236,3 +236,10 @@
 
 - The current worktree was clean before verification and `npm run verify` completed successfully: build succeeded, .NET tests passed (5,623 total), Web CI passed (383 files / 5,097 tests), and Runner CI passed (110 files / 1,275 tests).
 - Verification produced no Git-visible changes, so no implementation repair was required after the test-budget fix.
+
+## Review Repair
+
+- The review found that `WorkflowProfileControl.tsx` still rendered a native workflow-profile `<select>` inside the issue-detail reference rail, violating the page-wide shared-select requirement.
+- Replaced it with the shared `Select`/`SelectTrigger`/`SelectContent`/`SelectItem` components while preserving the existing test id, accessible label target, selected profile display, disabled lock state, title, and async update handler.
+- Updated `WorkflowProfileControl.test.tsx` for portaled shared-select interaction and added a reference-rail regression assertion that no native `<select>` is rendered on the issue-detail page.
+- Verification: focused workflow-profile and reference-rail/integration tests passed (69 tests); Web typecheck passed; `npm run test:ci -w packages/web` passed (383 files / 5,097 tests, FSD and test-boundary checks included); `npm run build:web` passed.

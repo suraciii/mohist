@@ -7,6 +7,7 @@ import {
   useUpdateIssueWorkflowProfile,
 } from '../../../entities/issue'
 import type { Issue } from '../../../entities/issue'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 
 interface WorkflowProfileControlProps {
   issue: Issue
@@ -126,23 +127,33 @@ export function WorkflowProfileControl({
         <label className="sr-only" htmlFor={`issue-workflow-profile-select-${issue.number}`}>
           Workflow profile
         </label>
-        <select
-          id={`issue-workflow-profile-select-${issue.number}`}
-          data-testid="issue-workflow-profile-select"
+        <Select
           value={selectValue}
+          onValueChange={(value) => {
+            if (value !== null) void handleChange(value)
+          }}
           disabled={started || updateMutation.isPending}
-          onChange={(e) => handleChange(e.target.value)}
-          title={lockedReason ?? 'Change the workflow profile'}
-          className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {profileOptions.length === 0 && <option value={SYSTEM_DEFAULT_ID}>{SYSTEM_DEFAULT_ID} (default)</option>}
-          {profileOptions.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.displayName}
-              {p.isDefault ? ' (default)' : ''}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            id={`issue-workflow-profile-select-${issue.number}`}
+            data-testid="issue-workflow-profile-select"
+            title={lockedReason ?? 'Change the workflow profile'}
+            className="h-9 w-full"
+          >
+            <SelectValue>
+              {profileOptions.find((profile) => profile.id === selectValue)?.displayName ?? SYSTEM_DEFAULT_ID}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {profileOptions.length === 0 && <SelectItem value={SYSTEM_DEFAULT_ID}>{SYSTEM_DEFAULT_ID} (default)</SelectItem>}
+            {profileOptions.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.displayName}
+                {p.isDefault ? ' (default)' : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       {started && lockedReason && (
         <p
