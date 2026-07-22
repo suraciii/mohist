@@ -1,21 +1,15 @@
 # Review Findings
 
-## P1. Issue-level backend override is not applied to Mohist Agent launches
+## P1. Manual launches with issue context ignore the issue backend override
 
-The issue acceptance criterion requires an issue-level override to change the backend used by that launch. The implementation only adds `runtime` to the generic manual launch request, and the Web launch page does not send that field (`packages/web/src/pages/agent-session-composer/ui/AgentSessionComposerPage.tsx:232-249`). More importantly, the event-driven Mohist Agent path resolves only the Agent definition: `RoutingDispatchHandler` calls `AgentLauncher.ResolveRuntime(agent.AgentConfig, launchOverride: null)` (`packages/server/src/Mohist.Server/Events/Subscriptions/RoutingDispatchHandler.cs:120-142`). The issue's `vars.agent.runtime` value edited by `IssueModelSelector` is used by the Workflow model-selection path, but is never read by this routed Mohist Agent launch.
+The issue acceptance criterion requires an issue-level override to change the backend used by that launch. `IssueModelSelector` persists the selected backend in the issue's `vars.agent.runtime`, and the event-driven path now reads it in `RoutingDispatchHandler`. However, the Web manual Mohist Agent launch path only builds `{ agentRef, prompt, context }` (`packages/web/src/pages/agent-session-composer/ui/AgentSessionComposerPage.tsx:232-249`), and its input/client types contain no `runtime` field (`packages/web/src/entities/agent/api/agent-sessions.ts:59-69`). The API's optional `AgentSessionLaunchRequest.Runtime` is therefore never supplied by the UI, even when the launch includes `context.issueNumber`.
 
-As a result, changing the backend at issue level cannot affect the corresponding Mohist AgentJob; it always uses the Agent-configured backend. Add an issue-owned override to the routed launch input and resolve it before the durable `RoutedAgentLaunchPlan` snapshot, with a test proving override precedence end to end.
+Launching an Agent from an issue in the Web UI consequently uses the Agent's configured backend instead of the issue's selected override. Load the issue runtime for manual launches with issue context, or expose and send the resolved issue override in the launch request, then add a browser/component or API spec covering that flow.
 
-## P1. Empty runtime values are accepted and silently coerced to OpenCode
+## P2. Issue runtime overrides are not validated before they enter launch resolution
 
-`AgentConfigSchema.ValidateRuntime(JsonElement)` returns success for an empty or whitespace string (`packages/server/src/Mohist.Server/Infrastructure/AgentConfigSchema.cs:89-100`). `AgentLauncher.ResolveRuntime` then defaults that value to `opencode` (`packages/server/src/Mohist.Server/Agent/Services/AgentLauncher.cs:303-315`). This violates the contract that any value other than `opencode` or `pi` is rejected rather than silently coerced. The added test codifies the wrong behavior in `AgentLauncherResolveRuntimeTests.cs:65-71`.
+`ResolveIssueRuntimeOverrideAsync` returns any non-empty string found in `IssueReadModel.AgentConfig.runtime` (`packages/server/src/Mohist.Server/Events/Subscriptions/RoutingDispatchHandler.cs:167-186`). `AgentLauncher.ResolveRuntime` silently ignores unsupported override values and falls back to the Agent configuration (`packages/server/src/Mohist.Server/Agent/Services/AgentLauncher.cs:295-315`). The shared `AgentConfigSchema` validation protects Agent CRUD and issue `agentConfig` writes, but issue workflow-variable patches used by `IssueModelSelector` go through `IssueWorkflowProfileManager.SetVariablesAsync` without this validation (`packages/server/src/Mohist.Server/Workflow/Services/IssueWorkflowProfileManager.cs:125-145`).
 
-Reject empty and whitespace runtime strings at the API/schema boundary, and add regression coverage for both Agent CRUD and issue configuration writes.
-
-## P2. Some Pi AgentJob failures are still labeled as OpenCode
-
-`failureResult` always constructs diagnostic output through `buildAgentJobOutput(..., "opencode", ...)` (`packages/runner/src/runtime/agent-job-executor.ts:418-429`). The Pi path calls this helper for Pi session-creation failures (`agent-job-executor.ts:181-188`), so a failed Pi AgentJob can produce terminal output with `kind: "opencode"`, contrary to the runtime-labeling requirement and the plan's D4 decision. Pass the selected runtime through failure construction and assert the Pi label on a Pi failure with diagnostics.
-
-Verification performed: runner typecheck and 1,354 runner tests passed; web typecheck and 5,109 web tests passed; .NET solution build and 1,299 server unit tests passed. The server spec test process exceeded the 120-second command timeout before reporting a result.
+An API caller can therefore persist `vars.agent.runtime: "unknown"`, receive no validation error, and get a launch on a different backend than the issue requested. Validate the issue runtime field at the workflow-variable boundary and return an actionable error rather than silently coercing it.
 
 <promise>FAIL</promise>
