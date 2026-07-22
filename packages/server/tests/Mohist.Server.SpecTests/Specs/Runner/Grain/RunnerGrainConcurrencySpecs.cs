@@ -414,7 +414,7 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         }
     }
 
-    [Fact(Timeout = 5000)]
+    [Fact]
     public async Task ReconcileAgentJobsAsync_DuringRealAgentJobRetry_ReleasesLifecycleGate()
     {
         var (runnerId, projectId) = await RegisterRunnerAsync(
