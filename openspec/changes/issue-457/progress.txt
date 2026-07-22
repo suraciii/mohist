@@ -209,3 +209,20 @@
 - The narrow-viewport loading branch still gets the same desktop+rail skeleton (the skeleton's `lg:col-span-2` / `lg:grid-cols-3` collapse via Tailwind's responsive prefix); no narrow-viewport-specific skeleton variant was added (the design says "a small IssueDetailPageSkeleton that mirrors page structure").
 - Section-level skeletons (commits, diff) still use their own `Loading changes...` / `Loading artifact list...` copy; the page-level fix is the issue-detail-page-skeleton shell per design D7. The sub-section degradation is documented as out of scope.
 - `ErrorState` is a generic shared component (default title + message). Per-call sites can override, but no call site other than `IssueDetailPage` consumes it yet; downstream widgets may adopt it later.
+
+## T-007 Implementation Notes
+
+### Decisions confirmed against spec
+
+- Replaced the shared Button's `disabled:opacity-50` treatment with `disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground`. The disabled pseudo-class keeps the neutral background and foreground authoritative over every Button variant while enabled variants remain unchanged.
+- Added shared Button coverage for enabled, primary-disabled, destructive-disabled, and outline-disabled states. Added issue-detail comment coverage for the empty-comment submit and in-flight delete buttons, which inherit the shared primitive styling without per-call-site overrides.
+
+### Verification
+
+- Focused regression run (`button.test.tsx` and `IssueCommentsSection.test.tsx`) — 2 files / 15 tests passed.
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 382 files / 5097 tests passed.
+
+### Out of scope (noted, not done)
+
+- No changes were made to the decision surface; its disabled behavior remains owned by the sibling decision-surface work.
