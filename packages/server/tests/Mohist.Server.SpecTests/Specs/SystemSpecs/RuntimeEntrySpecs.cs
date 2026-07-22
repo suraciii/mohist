@@ -321,7 +321,7 @@ public class RuntimeEntrySpecs
             .Options;
         await using var db = new MohistDbContext(options);
         var templateId = "spec/workflow";
-        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(new WorkflowDefinition(templateId,
+        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(new WorkflowDefinition(
             [
                 new StageDefinition("build",
                     [new TaskDefinition("task-1", "Task 1", "spec/task")],

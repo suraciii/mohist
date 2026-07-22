@@ -214,7 +214,7 @@ public class WorkflowRunDetailApiSpecs
 
     private async Task SeedWorkflowTemplateAsync(string projectId)
     {
-        var definition = new WorkflowDefinition("spec/workflow",
+        var definition = new WorkflowDefinition(
         [
             new StageDefinition("plan", [new("draft", "Draft", "spec/task")], []),
             new StageDefinition("build", [new("compile", "Compile", "spec/task")], []),
@@ -225,13 +225,14 @@ public class WorkflowRunDetailApiSpecs
             .Options;
 
         await using var db = new MohistDbContext(options);
-        var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, definition.Id);
+        const string templateId = "spec/workflow";
+        var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
         if (existingTemplate is null)
         {
             db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = projectId,
-                TemplateId = definition.Id,
+                TemplateId = templateId,
                 Template = WorkflowGrainTestHelpers.SerializeProfile(definition),
             });
         }
@@ -247,12 +248,12 @@ public class WorkflowRunDetailApiSpecs
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
-                DefaultTemplateId = definition.Id,
+                DefaultTemplateId = templateId,
             });
         }
         else
         {
-            profile.DefaultTemplateId = definition.Id;
+            profile.DefaultTemplateId = templateId;
             profile.UpdatedAt = TestTime.UtcNow;
         }
         await db.SaveChangesAsync();

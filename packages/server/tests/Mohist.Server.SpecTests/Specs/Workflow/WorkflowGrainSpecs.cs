@@ -327,7 +327,7 @@ public abstract class WorkflowGrainSpecs
         bool requiresApproval = false,
         string stage = "build")
     {
-        return new WorkflowDefinition("spec/workflow",
+        return new WorkflowDefinition(
         [
             new StageDefinition(stage,
                 tasks ?? [new("task-1", "Task 1", "spec/task")],
@@ -347,8 +347,8 @@ public abstract class WorkflowGrainSpecs
             .Options;
 
         await using var db = new MohistDbContext(options);
-        var templateId = definition.Id;
-        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(definition);
+        var templateId = workflowId;
+        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(definition, templateId);
 
         var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
         if (existingTemplate is null)
@@ -424,7 +424,7 @@ public abstract class WorkflowGrainSpecs
 
     protected static WorkflowDefinition TwoStages()
     {
-        return new WorkflowDefinition("spec/workflow",
+        return new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
@@ -437,7 +437,7 @@ public abstract class WorkflowGrainSpecs
 
     protected static WorkflowDefinition ApprovalStage()
     {
-        return new WorkflowDefinition("spec/workflow",
+        return new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],

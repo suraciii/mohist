@@ -1049,18 +1049,18 @@ public class MohistLocalWorkflowProfileSpecs
     }
 
     [Fact]
-    public void WorkflowYamlSerializer_RoundTripsDescriptionField()
+    public void WorkflowYamlSerializer_DoesNotSerializeProfileDescription()
     {
         var definition = MohistWorkflow.Definition;
         var yaml = WorkflowYamlSerializer.ToYaml(definition);
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
 
-        Assert.Null(reparsed.Description);
         Assert.DoesNotContain("description:", yaml);
+        Assert.Equal(definition.Stages.Count, reparsed.Stages.Count);
     }
 
     [Fact]
-    public void WorkflowYamlParser_ProfileWithoutDescriptionYieldsNullDescription()
+    public void WorkflowYamlParser_ProfileWithoutDescriptionStillParsesDefinition()
     {
         var definition = MohistWorkflow.ParseYaml("""
         stages:
@@ -1069,7 +1069,7 @@ public class MohistLocalWorkflowProfileSpecs
             checks: []
         """);
 
-        Assert.Null(definition.Description);
+        Assert.NotEmpty(definition.Stages);
     }
 
     [Fact]
@@ -1105,18 +1105,16 @@ public class MohistLocalWorkflowProfileSpecs
         // through ResolveDescription; the SystemRoutes detail endpoint
         // applies the same string (now sourced from SystemTemplateInfo).
         const string fallback = "No description provided";
-        var yamlWithoutDescription = MohistWorkflow.ParseYaml("""
+        var profileWithoutDescription = WorkflowYamlSerializer.FromProfileYaml("""
             stages:
               - stage: build
                 tasks: []
                 checks: []
-            """);
+            """, "custom");
 
-        Assert.Null(yamlWithoutDescription.Description);
-
-        var fallbackDescription = string.IsNullOrWhiteSpace(yamlWithoutDescription.Description)
+        var fallbackDescription = string.IsNullOrWhiteSpace(profileWithoutDescription.Description)
             ? fallback
-            : yamlWithoutDescription.Description!;
+            : profileWithoutDescription.Description;
 
         Assert.Equal(fallback, fallbackDescription);
     }

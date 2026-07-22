@@ -10,7 +10,7 @@ public class TaskLifecycleTests
 {
     private static WorkflowRun BuildRun()
     {
-        var run = WorkflowRun.Create("wr_1", new WorkflowDefinition("spec/workflow", [
+        var run = WorkflowRun.Create("wr_1", new WorkflowDefinition( [
             new StageDefinition("build", [new("compile", "Compile", "spec/task")], [new("build-ok", "Build OK", "spec/check")])
         ]), DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);

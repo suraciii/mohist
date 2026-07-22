@@ -67,7 +67,6 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
     private async Task<WorkflowRun> SeedRunAsync(string projectId, string runId)
     {
         var definition = new WorkflowDefinition(
-            "spec/workflow",
             [new StageDefinition("build", [new("task-1", "Task 1", "spec/task")], [])]);
         var run = WorkflowRunExtensions.Create(
             runId,

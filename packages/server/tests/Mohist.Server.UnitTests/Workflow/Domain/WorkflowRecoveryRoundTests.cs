@@ -24,7 +24,6 @@ public sealed class WorkflowRecoveryRoundTests
     {
         var task = new TaskDefinition("review", "Review", "test/review", Recovery: Recovery);
         var run = WorkflowRun.Create("wf-recovery", new WorkflowDefinition(
-            "workflow",
             [new StageDefinition("check", [task], [])]), Now);
         run.Start(Now);
         run.InitializeStage([task], [], Now);

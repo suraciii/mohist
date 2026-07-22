@@ -170,7 +170,7 @@ public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
         var templateId = "spec/workflow";
-        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(new WorkflowDefinition(templateId,
+        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(new WorkflowDefinition(
             [
                 new StageDefinition("build",
                     [new TaskDefinition("task-1", "Task 1", "spec/task")],

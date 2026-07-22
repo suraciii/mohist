@@ -12,6 +12,4 @@ public sealed record ResolvedTemplate(WorkflowProfile? Profile)
     public static ResolvedTemplate FromProfile(WorkflowProfile? profile) =>
         profile is null ? None : new(profile);
 
-    public static ResolvedTemplate FromDefinition(string id, WorkflowDefinition definition) =>
-        FromProfile(new WorkflowProfile(id, id, string.Empty, definition));
 }

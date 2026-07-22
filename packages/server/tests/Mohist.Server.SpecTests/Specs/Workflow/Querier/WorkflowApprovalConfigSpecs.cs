@@ -40,7 +40,7 @@ public class WorkflowApprovalConfigSpecs : WorkflowProfileManagerTestFactory
                 Uses: "spec/task",
                 With: null)]);
         var approval = new ApprovalConfig(Feedback: feedbackConfig);
-        var def = new WorkflowDefinition("approval-template",
+        var def = new WorkflowDefinition(
             new List<StageDefinition>
             {
                 new("plan",

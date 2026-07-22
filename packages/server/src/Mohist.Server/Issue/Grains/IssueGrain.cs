@@ -36,7 +36,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueWorkflowProfileManager _issueProfileManager;
-    private readonly WorkflowRunProfileManager _runProfileManager;
     private readonly AttachmentService _attachmentService;
     private readonly IConfiguration _configuration;
     private readonly IEnvironmentVariableProvider _environment;
@@ -52,7 +51,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
         IssueWorkflowProfileManager issueProfileManager,
-        WorkflowRunProfileManager runProfileManager,
         AttachmentService attachmentService,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
@@ -67,7 +65,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
         _issueProfileManager = issueProfileManager;
-        _runProfileManager = runProfileManager;
         _attachmentService = attachmentService;
         _configuration = configuration;
         _environment = environment;
@@ -315,14 +312,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             existingVariables);
         var mergedVariables = VariableBundle.Patch(existingVariables, issueBundle);
         await _issueProfileManager.SetVariablesAsync(issue.ProjectId, issue.Number, mergedVariables);
-
-        // Issue-474 T-002: ensure the WorkflowRun's initialization default
-        // (`vars.archive = ""`) is recorded before the run becomes
-        // dispatchable. The marker resolves below Project/Issue/stage
-        // values; an explicit `setVars` (or Run API write) clears it and
-        // follows the standard Run top-level precedence. Idempotent across
-        // repeated start attempts.
-        await _runProfileManager.EnsureArchiveDefaultAsync(wrId);
 
         return (repositoryContext, workspace, new IssueWorkStartedContext(
             issue.ProjectId,

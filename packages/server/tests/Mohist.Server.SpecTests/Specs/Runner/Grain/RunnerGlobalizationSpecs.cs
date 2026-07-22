@@ -71,7 +71,7 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
         var workflowB = $"wf-b-{Guid.NewGuid():N}";
         var workflowC = $"wf-c-{Guid.NewGuid():N}";
 
-        var def = new WorkflowDefinition("spec/workflow",
+        var def = new WorkflowDefinition(
         [
             new StageDefinition("build",
                 [new TaskDefinition("task-1", "Task 1", "spec/task")],

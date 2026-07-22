@@ -46,7 +46,7 @@ public static class WorkflowProfileCatalog
         return SystemProfileIds.FirstOrDefault(isEnabled);
     }
 
-    public static WorkflowDefinition ParseYaml(string yaml) => WorkflowYamlSerializer.FromYaml(yaml, LocalId);
+    public static WorkflowDefinition ParseYaml(string yaml) => WorkflowYamlSerializer.FromYaml(yaml);
 
     public static WorkflowDefinition? GetDefinition(string profileId)
     {

@@ -9,7 +9,7 @@ namespace Mohist.Server.UnitTests.Workflow.Domain;
 public class RerunFromStageTests
 {
     private static WorkflowDefinition ThreeStageDefinition() =>
-        new("spec/workflow", [
+        new([
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
                 [new("plan-ok", "Plan OK", "spec/check")]),

@@ -45,11 +45,15 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         await grain.EnsureStartedAsync(context with { EpicNumber = 2 });
 
         var run = await store.LoadAsync(workflowRunId);
+        var defaults = await scope.ServiceProvider
+            .GetRequiredService<WorkflowRunProfileManager>()
+            .GetDefaultVariablesAsync(workflowRunId);
         Assert.NotNull(run);
         Assert.Equal(WorkflowRunStatus.Pending, run!.Status);
         Assert.Equal(projectId, run.Metadata.Annotations!["projectId"]);
         Assert.Equal("1", run.Metadata.Annotations["issueNumber"]);
         Assert.Equal("2", run.Metadata.Annotations["epicNumber"]);
+        Assert.Equal(string.Empty, defaults.DefaultVars!.Value.GetProperty("archive").GetString());
         Assert.Single(await events.ListAsync(workflowRunId), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStarted);
     }
@@ -117,6 +121,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         new(
             store,
             services.GetRequiredService<WorkflowProfileManager>(),
+            services.GetRequiredService<WorkflowRunProfileManager>(),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance)
         {
@@ -128,19 +133,20 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         await using var scope = _fixture.Services.CreateAsyncScope();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
-        var definition = new WorkflowDefinition("spec/workflow", [
+        var definition = new WorkflowDefinition( [
             new StageDefinition("plan", [new("draft", "Draft", "spec/task")], []),
         ]);
+        const string templateId = "spec/workflow";
         db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
         {
             ProjectId = projectId,
-            TemplateId = definition.Id,
-            Template = WorkflowGrainTestHelpers.SerializeProfile(definition),
+            TemplateId = templateId,
+            Template = WorkflowGrainTestHelpers.SerializeProfile(definition, templateId),
         });
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
             ProjectId = projectId,
-            DefaultTemplateId = definition.Id,
+            DefaultTemplateId = templateId,
         });
         await db.SaveChangesAsync();
     }

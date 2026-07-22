@@ -71,13 +71,13 @@ public static class WorkflowYamlSerializer
         return new WorkflowProfile(id, name, description, FromJson(definition));
     }
 
-    public static WorkflowDefinition FromYaml(string yaml, string id = "workflow")
+    public static WorkflowDefinition FromYaml(string yaml)
     {
         var document = Normalize(CreateDeserializer().Deserialize<Dictionary<object, object?>>(yaml)) as Dictionary<string, object?>
             ?? throw new InvalidOperationException("Workflow YAML is empty");
 
         RejectRemovedFields(document);
-        return FromDocument(document, id);
+        return FromDocument(document);
     }
 
     public static WorkflowProfile FromProfileYaml(string yaml, string fallbackId)
@@ -91,16 +91,16 @@ public static class WorkflowYamlSerializer
         document.Remove("name");
         document.Remove("description");
         RejectRemovedFields(document);
-        return new WorkflowProfile(id, name, description, FromDocument(document, id));
+        return new WorkflowProfile(id, name, description, FromDocument(document));
     }
 
-    private static WorkflowDefinition FromDocument(Dictionary<string, object?> document, string id)
+    private static WorkflowDefinition FromDocument(Dictionary<string, object?> document)
     {
         var stages = List(document, "stages").Select(ToStage).ToList();
         if (stages.Count == 0)
             throw new InvalidOperationException("Workflow YAML requires at least one stage");
 
-        return new WorkflowDefinition(stages, ToApproval(OptionalMap(document, "approval"))) { Id = id };
+        return new WorkflowDefinition(stages, ToApproval(OptionalMap(document, "approval")));
     }
 
     public static string ToYaml(WorkflowDefinition definition)

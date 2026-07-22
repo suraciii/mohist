@@ -82,7 +82,6 @@ public class WorkflowYamlSerializerTests
     public void WorkflowYamlSerializer_RoundTripsPersistedProfile()
     {
         var definition = new WorkflowDefinition(
-            "spec/workflow",
             [new StageDefinition("build", [], [])]);
         var json = JsonSerializer.Serialize(
             new WorkflowProfile("spec/workflow", "Spec", string.Empty, definition),

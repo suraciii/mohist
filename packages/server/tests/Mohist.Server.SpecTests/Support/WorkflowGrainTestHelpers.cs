@@ -193,7 +193,7 @@ public static class WorkflowGrainTestHelpers
         bool requiresApproval = false,
         string stage = "build")
     {
-        return new WorkflowDefinition("spec/workflow",
+        return new WorkflowDefinition(
         [
             new StageDefinition(stage,
                 tasks ?? [new("task-1", "Task 1", "spec/task")],
@@ -205,9 +205,9 @@ public static class WorkflowGrainTestHelpers
     public static Dictionary<string, JsonElement?> With(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json)!;
 
-    public static string SerializeProfile(WorkflowDefinition definition) =>
+    public static string SerializeProfile(WorkflowDefinition definition, string profileId = "spec/workflow") =>
         JsonSerializer.Serialize(
-            new WorkflowProfile(definition.Id, definition.Id, string.Empty, definition),
+            new WorkflowProfile(profileId, profileId, string.Empty, definition),
             WorkflowYamlSerializer.JsonOptions);
 
     public static async Task SeedWorkflowTemplateAsync(string connectionString, string workflowId, WorkflowDefinition definition, string? projectId = null)
@@ -218,8 +218,8 @@ public static class WorkflowGrainTestHelpers
             .Options;
 
         await using var db = new MohistDbContext(options);
-        var templateId = definition.Id;
-        var templateJson = SerializeProfile(definition);
+        var templateId = workflowId;
+        var templateJson = SerializeProfile(definition, templateId);
 
         var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
         if (existingTemplate is null)
@@ -281,7 +281,7 @@ public static class WorkflowGrainTestHelpers
 
     public static WorkflowDefinition TwoStages()
     {
-        return new WorkflowDefinition("spec/workflow",
+        return new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
@@ -294,7 +294,7 @@ public static class WorkflowGrainTestHelpers
 
     public static WorkflowDefinition ApprovalStage()
     {
-        return new WorkflowDefinition("spec/workflow",
+        return new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],

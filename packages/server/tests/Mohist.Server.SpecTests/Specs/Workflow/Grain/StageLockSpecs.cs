@@ -298,7 +298,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
 
     private static WorkflowDefinition IntegrateWorkflow(string resource = "project-integration")
     {
-        return new WorkflowDefinition("spec/integrate-lock",
+        return new WorkflowDefinition(
         [
             new StageDefinition("build",
                 [new("build-task", "Build task", "spec/task")],

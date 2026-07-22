@@ -188,7 +188,6 @@ public class IssueWorkflowReadPathSpecs
             services.GetRequiredService<WorkflowProfileManager>(),
             services.GetRequiredService<ProjectWorkflowProfileManager>(),
             services.GetRequiredService<IssueWorkflowProfileManager>(),
-            services.GetRequiredService<WorkflowRunProfileManager>(),
             services.GetRequiredService<AttachmentService>(),
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),

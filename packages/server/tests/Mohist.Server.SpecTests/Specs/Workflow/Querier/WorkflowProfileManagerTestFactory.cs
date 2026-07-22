@@ -40,7 +40,7 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
         var stages = new List<StageDefinition>();
         for (var i = 0; i < stageCount; i++)
             stages.Add(new StageDefinition($"stage-{i}", [], []));
-        var def = new WorkflowDefinition(id, stages);
+        var def = new WorkflowDefinition( stages);
         return JsonSerializer.Serialize(
             new WorkflowProfile(id, id, string.Empty, def),
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
@@ -62,7 +62,7 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
                 Resources: stage == "build" ? new List<string> { "ci-pool" } : null));
         }
 
-        var def = new WorkflowDefinition(id, stages);
+        var def = new WorkflowDefinition( stages);
         return JsonSerializer.Serialize(
             new WorkflowProfile(id, id, string.Empty, def),
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
