@@ -460,7 +460,7 @@ export class PiRuntime {
     try {
       const cached = this.sessions.get(path)
       if (cached) {
-        if (!cached.isStreaming && this.state.services.validateSessionFile) {
+        if (this.state.services.validateSessionFile) {
           await this.state.services.validateSessionFile(path, cached.sessionId)
         }
         return { ok: true, value: cached }

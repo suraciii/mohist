@@ -34,9 +34,9 @@ function factory(session: FakeSession, validateSessionFile: () => Promise<void>)
 }
 
 describe("PiRuntime cached session validation", () => {
-  it("uses the live cached session during its first streaming turn without requiring a persisted file", async () => {
+  it("validates the persisted binding before using a cached streaming session", async () => {
     const session = new FakeSession()
-    const validateSessionFile = vi.fn(async () => { throw new Error("file has not been persisted") })
+    const validateSessionFile = vi.fn(async () => {})
     const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session, validateSessionFile) })
     await runtime.start()
     await runtime.createSession({ target: { runtime: "pi", runtimeSessionId: null, workDir: "/workspace" } })
@@ -44,7 +44,7 @@ describe("PiRuntime cached session validation", () => {
 
     await expect(runtime.followup({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "continue" })).resolves.toMatchObject({ ok: true })
 
-    expect(validateSessionFile).not.toHaveBeenCalled()
+    expect(validateSessionFile).toHaveBeenCalledWith(session.sessionFile, session.sessionId)
     expect(session.steerCalls).toEqual(["continue"])
   })
 
