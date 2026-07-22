@@ -25,7 +25,7 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
 
     public OtlpRoutesWebApplicationFactory Factory { get; private set; } = null!;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         var connectionString = $"Data Source=otel-int-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(connectionString);
@@ -69,7 +69,7 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         Factory?.Dispose();
         _portAllocator?.Dispose();

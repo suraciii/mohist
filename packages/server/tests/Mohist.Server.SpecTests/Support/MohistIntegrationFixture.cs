@@ -65,7 +65,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
         _otelEnabled = otelEnabled;
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         var dbName = $"mohist-{Guid.NewGuid():N}";
         ConnectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
@@ -89,7 +89,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
         await _factory.EnsureSchemaAsync();
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         Client?.Dispose();
         _factory?.Dispose();

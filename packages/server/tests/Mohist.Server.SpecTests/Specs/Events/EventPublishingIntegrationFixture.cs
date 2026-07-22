@@ -48,7 +48,7 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
     public RecordingTranscriptEventPublisher RecordingTranscriptPublisher => _factory.RecordingTranscriptPublisher;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         // Hold a connection open to the shared-cache in-memory database so
         // it survives between the Orleans AdoNet storage's reads/writes
@@ -58,7 +58,7 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
         await _factory.EnsureSchemaAsync();
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _factory.Dispose();
         if (_keeper is not null)

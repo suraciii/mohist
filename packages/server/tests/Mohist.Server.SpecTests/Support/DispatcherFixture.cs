@@ -490,7 +490,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         DeadLetterStore = new CapturingDeadLetterStore(EventStore);
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         var dbName = $"mohist-dispatcher-{Guid.NewGuid():N}";
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
@@ -612,11 +612,11 @@ public sealed class DispatcherFixture : IAsyncLifetime
         }
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         Cluster?.Dispose();
         _keeper?.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     private void ConfigureDispatcherSilo(ISiloBuilder siloBuilder, string connectionString)

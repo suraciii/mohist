@@ -17,7 +17,7 @@ public class BacklogFixture : IAsyncLifetime
 
     private TestSqliteDatabase _database = null!;
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         _database = TestSqliteDatabase.CreateMigrated();
 
@@ -25,14 +25,14 @@ public class BacklogFixture : IAsyncLifetime
         builder.Options.InitialSilosCount = 1;
         ConfigureCluster(builder, _database.ConnectionString);
         Cluster = builder.Build();
-        return Cluster.DeployAsync();
+        return new ValueTask(Cluster.DeployAsync());
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         Cluster?.Dispose();
         _database?.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     public static void ConfigureCluster(InProcessTestClusterBuilder builder, string connectionString)
