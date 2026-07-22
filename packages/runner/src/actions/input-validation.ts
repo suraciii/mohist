@@ -69,9 +69,16 @@ export function validateActionInput(
     if (!Object.prototype.hasOwnProperty.call(raw, fieldName)) continue
     const value = raw[fieldName]
     if (value === null) {
-      return invalidInput(
-        `Action '${manifest.name}' input '${fieldName}' must be ${formatKinds(declaration.types)}, received null`,
-      )
+      if (declaration.required === true) {
+        return invalidInput(
+          `Action '${manifest.name}' input '${fieldName}' must be ${formatKinds(declaration.types)}, received null`,
+        )
+      }
+      // Optional field explicitly null (e.g. a profile variable seeded to
+      // null and rendered through `${{ vars.x }}`) is treated as "absent".
+      // The action's own input reader decides how to interpret the missing
+      // value; see archiveHint handling in openspec.ts for the reference.
+      continue
     }
     if (!declaration.types.some((kind) => matchesKind(kind, value))) {
       return invalidInput(
