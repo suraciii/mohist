@@ -15,13 +15,10 @@ internal sealed record ResourceDescriptor(
 
 internal static class ResourceOutputCatalog
 {
-    private static readonly IReadOnlyList<string> CommonFields =
-        ["id", "number", "name", "title", "description", "status", "state", "stage", "priority", "labels", "createdAt", "updatedAt"];
-
     public static ResourceDescriptor For(string? tableShape)
     {
         if (!Enum.TryParse<MohistCliApi.TableShape>(tableShape, ignoreCase: false, out var shape))
-            return new(ResourceCardinality.Single, CommonFields);
+            return new(ResourceCardinality.Single, ["id", "name", "description", "status", "createdAt", "updatedAt"]);
 
         var cardinality = shape switch
         {
@@ -32,6 +29,8 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.AgentList or
             MohistCliApi.TableShape.EpicList or
             MohistCliApi.TableShape.Sessions or
+            MohistCliApi.TableShape.AgentSessionList or
+            MohistCliApi.TableShape.WorkflowProfileList or
             MohistCliApi.TableShape.RunnerList or
             MohistCliApi.TableShape.WorkflowRunEvents or
             MohistCliApi.TableShape.WorkflowRunVariables or
@@ -44,17 +43,31 @@ internal static class ResourceOutputCatalog
             _ => ResourceCardinality.Single,
         };
 
-        var fields = shape switch
+        IReadOnlyList<string> fields = shape switch
         {
+            MohistCliApi.TableShape.ProjectList => ["id", "name", "repository", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.ProjectShow => ["id", "name", "repository", "workflowProfile", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.RepoList => ["name", "gitUrl", "baseBranch", "isDefault", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.LabelList => ["key", "description", "supportedValues", "source"],
+            MohistCliApi.TableShape.AgentList => ["id", "name", "description", "status", "archived", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.AgentShow => ["id", "name", "description", "instructions", "agentConfig", "skills", "maxConcurrentRuns", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.AgentSessionList or MohistCliApi.TableShape.Sessions => ["id", "state", "status", "agentId", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.AgentSessionShow or MohistCliApi.TableShape.AgentSessionTranscript => ["id", "state", "status", "transcript", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.IssueTemplateList => ["name", "description", "source"],
+            MohistCliApi.TableShape.IssueTemplateShow => ["name", "description", "body", "source"],
+            MohistCliApi.TableShape.ProjectTemplateList => ["id", "name", "description", "yaml", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.ProjectTemplateShow => ["id", "name", "description", "yaml", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.WorkflowRunDetail => ["id", "state", "status", "stage", "issue", "stages", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.WorkflowRunEvents => ["id", "type", "source", "subject", "time", "data"],
             MohistCliApi.TableShape.WorkflowVariables => ["vars", "stages"],
             MohistCliApi.TableShape.WorkflowProfile => ["id", "displayName", "description", "enabled", "defaultTemplate", "variables", "prompts"],
+            MohistCliApi.TableShape.WorkflowProfileList => ["id", "displayName", "description", "enabled"],
             MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "name", "target", "priority", "enabled", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.DeadLetterList or MohistCliApi.TableShape.DeadLetterRedelivery => ["id", "eventId", "handler", "attempts", "status", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.OpencodeModels => ["id", "name", "provider"],
             MohistCliApi.TableShape.RunnerShow => ["id", "kind", "hostname", "scope", "capabilities", "coderModels", "capacity", "status", "connectionState", "lastHeartbeatAt"],
             MohistCliApi.TableShape.SystemInfo => ["running", "source", "install", "update", "services", "paths"],
-            _ => CommonFields,
+            _ => ["id", "number", "name", "title", "description", "status", "state", "stage", "priority", "labels", "createdAt", "updatedAt"],
         };
 
         return new(cardinality, fields);

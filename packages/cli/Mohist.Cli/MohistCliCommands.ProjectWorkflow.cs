@@ -122,6 +122,11 @@ internal static class ProjectWorkflowCommands
 
             async Task<int> ListAsync()
             {
+                var (mode, exit) = api.ResolveOutputMode(output);
+                if (exit != 0) return exit;
+                var localExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.WorkflowProfileList));
+                if (localExit is not null) return localExit.Value;
+
                 var hasProject = !string.IsNullOrWhiteSpace(project);
                 var hasProjectId = !string.IsNullOrWhiteSpace(projectId);
 
@@ -138,15 +143,11 @@ internal static class ProjectWorkflowCommands
                     if (resolveExit != 0)
                     {
                         api.Error.WriteLine("No project specified or active; showing all workflow profiles (degraded).");
-                        return await api.PrintWorkflowProfilesDescribedAsync();
-                    }
-
-                    return await api.PrintWorkflowProfilesDescribedAsync(resolvedProjectId);
+                    return await api.PrintWorkflowProfilesDescribedAsync(null, mode);
                 }
 
-                var (mode, exit) = api.ResolveOutputMode(output);
-
-                if (exit != 0) return exit;
+                    return await api.PrintWorkflowProfilesDescribedAsync(resolvedProjectId, mode);
+                }
 
                 if (hasProject && hasProjectId && !string.Equals(project, projectId, StringComparison.Ordinal))
                 {

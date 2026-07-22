@@ -19,9 +19,9 @@ internal static class SkillsCommands
         var api = provider.GetRequiredService<MohistCliApi>();
 
         skills.Subcommands.Add(BuildInstall(provider));
-        skills.Subcommands.Add(BuildList(assets, api.Output));
-        skills.Subcommands.Add(BuildGet(assets, api.Output, api.Error));
-        skills.Subcommands.Add(BuildPath(assets, api.Output, api.Error));
+        skills.Subcommands.Add(BuildList(assets, api));
+        skills.Subcommands.Add(BuildGet(assets, api));
+        skills.Subcommands.Add(BuildPath(assets, api));
         skills.Subcommands.Add(BuildSync(provider));
 
         return skills;
@@ -71,23 +71,24 @@ internal static class SkillsCommands
         return sync;
     }
 
-    private static Command BuildList(SkillAssetService assets, TextWriter output)
+    private static Command BuildList(SkillAssetService assets, MohistCliApi api)
     {
         var list = new Command("list", "List Mohist built-in coder agent skills");
-        var jsonOption = new Option<bool>("--json") { Description = "Output JSON" };
+        var jsonOption = MohistCliCommands.JsonSelectionOption();
+        var descriptor = new ResourceDescriptor(ResourceCardinality.Collection, ["name", "description"]);
         list.Options.Add(jsonOption);
         list.SetAction(async ctx =>
         {
-            var json = ctx.GetValue(jsonOption);
+            var selection = JsonSelection.Parse(descriptor, ctx.GetResult(jsonOption) is not null, ctx.GetValue(jsonOption));
             var skills = assets.ListVisibleSkills();
-            if (json)
-            {
-                await output.WriteLineAsync(JsonSerializer.Serialize(skills, JsonOptions));
-                return 0;
-            }
+            if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                return api.WriteJsonSelectionResult(descriptor, selection);
+            if (selection.Kind == JsonSelectionKind.Selected)
+                return await new CliResultWriter(api.Invocation).WriteSuccessAsync(
+                    selection.Project(JsonSerializer.SerializeToNode(skills, JsonOptions), descriptor.Cardinality));
 
             foreach (var skill in skills)
-                await output.WriteLineAsync($"{skill.Name}\t{skill.Description}");
+                await api.Output.WriteLineAsync($"{skill.Name}\t{skill.Description}");
 
             return 0;
         });
@@ -95,12 +96,12 @@ internal static class SkillsCommands
         return list;
     }
 
-    private static Command BuildGet(SkillAssetService assets, TextWriter output, TextWriter error)
+    private static Command BuildGet(SkillAssetService assets, MohistCliApi api)
     {
         var get = new Command("get", "Print packaged Mohist coder agent skill guidance");
         var nameArgument = new Argument<string?>("name") { Arity = ArgumentArity.ZeroOrOne, Description = "Built-in skill name" };
         var fullOption = new Option<bool>("--full") { Description = "Append packaged references and templates" };
-        var jsonOption = new Option<bool>("--json") { Description = "Output JSON" };
+        var jsonOption = MohistCliCommands.JsonSelectionOption();
         var allOption = new Option<bool>("--all") { Description = "Print all visible built-in skills" };
 
         get.Arguments.Add(nameArgument);
@@ -111,8 +112,13 @@ internal static class SkillsCommands
         {
             var name = ctx.GetValue(nameArgument);
             var full = ctx.GetValue(fullOption);
-            var json = ctx.GetValue(jsonOption);
             var all = ctx.GetValue(allOption);
+            var descriptor = new ResourceDescriptor(
+                all ? ResourceCardinality.Collection : ResourceCardinality.Single,
+                ["name", "description", "content"]);
+            var selection = JsonSelection.Parse(descriptor, ctx.GetResult(jsonOption) is not null, ctx.GetValue(jsonOption));
+            if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                return api.WriteJsonSelectionResult(descriptor, selection);
 
             if (all)
             {
@@ -122,11 +128,11 @@ internal static class SkillsCommands
                     var result = assets.GetSkill(metadata.Name, full);
                     if (!result.Found || result.Skill is null)
                     {
-                        await error.WriteLineAsync(result.Error ?? $"Unable to resolve built-in skill '{metadata.Name}'.");
+                        await api.Error.WriteLineAsync(result.Error ?? $"Unable to resolve built-in skill '{metadata.Name}'.");
                         return 1;
                     }
 
-                    if (json)
+                    if (selection.Kind == JsonSelectionKind.Selected)
                     {
                         skills.Add(new
                         {
@@ -137,73 +143,76 @@ internal static class SkillsCommands
                         continue;
                     }
 
-                    await WriteAllSkillTextAsync(output, result.Skill, full, includeSeparator: skills.Count > 0);
+                    await WriteAllSkillTextAsync(api.Output, result.Skill, full, includeSeparator: skills.Count > 0);
                     skills.Add(result.Skill.Name);
                 }
 
-                if (json)
-                    await output.WriteLineAsync(JsonSerializer.Serialize(skills, JsonOptions));
+                if (selection.Kind == JsonSelectionKind.Selected)
+                    return await new CliResultWriter(api.Invocation).WriteSuccessAsync(
+                        selection.Project(JsonSerializer.SerializeToNode(skills, JsonOptions), descriptor.Cardinality));
 
                 return 0;
             }
 
             if (string.IsNullOrWhiteSpace(name))
             {
-                await error.WriteLineAsync("A built-in skill name is required unless --all is specified.");
+                await api.Error.WriteLineAsync("A built-in skill name is required unless --all is specified.");
                 return 1;
             }
 
             var skillResult = assets.GetSkill(name, full);
             if (!skillResult.Found || skillResult.Skill is null)
             {
-                await error.WriteLineAsync(skillResult.Error ?? $"Unable to resolve built-in skill '{name}'.");
+                await api.Error.WriteLineAsync(skillResult.Error ?? $"Unable to resolve built-in skill '{name}'.");
                 return 1;
             }
 
-            if (json)
+            if (selection.Kind == JsonSelectionKind.Selected)
             {
-                await output.WriteLineAsync(JsonSerializer.Serialize(new
+                return await new CliResultWriter(api.Invocation).WriteSuccessAsync(selection.Project(JsonSerializer.SerializeToNode(new
                 {
                     name = skillResult.Skill.Name,
                     description = skillResult.Skill.Description,
                     content = BuildSkillOutput(skillResult.Skill, full),
-                }, JsonOptions));
-                return 0;
+                }, JsonOptions), descriptor.Cardinality));
             }
 
-            await output.WriteAsync(BuildSkillOutput(skillResult.Skill, full));
+            await api.Output.WriteAsync(BuildSkillOutput(skillResult.Skill, full));
             return 0;
         });
 
         return get;
     }
 
-    private static Command BuildPath(SkillAssetService assets, TextWriter output, TextWriter error)
+    private static Command BuildPath(SkillAssetService assets, MohistCliApi api)
     {
         var path = new Command("path", "Print the packaged path for a Mohist built-in skill");
         var nameArgument = new Argument<string>("name") { Description = "Built-in skill name" };
-        var jsonOption = new Option<bool>("--json") { Description = "Output JSON" };
+        var jsonOption = MohistCliCommands.JsonSelectionOption();
+        var descriptor = new ResourceDescriptor(ResourceCardinality.Single, ["name", "path"]);
 
         path.Arguments.Add(nameArgument);
         path.Options.Add(jsonOption);
         path.SetAction(async ctx =>
         {
             var name = ctx.GetValue(nameArgument)!;
-            var json = ctx.GetValue(jsonOption);
+            var selection = JsonSelection.Parse(descriptor, ctx.GetResult(jsonOption) is not null, ctx.GetValue(jsonOption));
+            if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                return api.WriteJsonSelectionResult(descriptor, selection);
             var result = assets.GetSkill(name, includeSupplementaryFiles: false);
             if (!result.Found || result.Skill is null)
             {
-                await error.WriteLineAsync(result.Error ?? $"Unable to resolve built-in skill '{name}'.");
+                await api.Error.WriteLineAsync(result.Error ?? $"Unable to resolve built-in skill '{name}'.");
                 return 1;
             }
 
-            if (json)
+            if (selection.Kind == JsonSelectionKind.Selected)
             {
-                await output.WriteLineAsync(JsonSerializer.Serialize(new { name = result.Skill.Name, path = result.Skill.DirectoryPath }, JsonOptions));
-                return 0;
+                return await new CliResultWriter(api.Invocation).WriteSuccessAsync(
+                    selection.Project(JsonSerializer.SerializeToNode(new { name = result.Skill.Name, path = result.Skill.DirectoryPath }, JsonOptions), descriptor.Cardinality));
             }
 
-            await output.WriteLineAsync(result.Skill.DirectoryPath);
+            await api.Output.WriteLineAsync(result.Skill.DirectoryPath);
             return 0;
         });
 

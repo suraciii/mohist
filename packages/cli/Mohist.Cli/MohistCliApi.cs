@@ -1014,6 +1014,7 @@ internal sealed class MohistCliApi
         LabelList,
         IssueTemplateList,
         IssueTemplateShow,
+        WorkflowProfileList,
         RunnerList,
         RunnerShow,
         OpencodeModels,
@@ -1067,7 +1068,7 @@ internal sealed class MohistCliApi
         return await ReadSuccessDataAsync(response!);
     }
 
-    public async Task<int> PrintWorkflowProfilesDescribedAsync(string? projectId = null)
+    public async Task<int> PrintWorkflowProfilesDescribedAsync(string? projectId = null, string mode = "table")
     {
         var path = projectId is not null
             ? $"/api/workflow-profiles?project={Uri.EscapeDataString(projectId)}"
@@ -1075,6 +1076,8 @@ internal sealed class MohistCliApi
         try
         {
             var data = await GetDataAsync(path);
+            if (mode.StartsWith("json:", StringComparison.Ordinal))
+                return await WriteSelectedDataAsync(data, mode, nameof(TableShape.WorkflowProfileList));
             RenderWorkflowProfilesDescribed(data);
             return 0;
         }
