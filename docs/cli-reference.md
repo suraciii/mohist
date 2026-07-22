@@ -141,8 +141,10 @@ Profile 会影响活动 Run。完整生效时机以 [Workflow Profile](workflow-
 
 Profile collection 属于 Workflow；Project 默认选择和 Issue 显式选择是对 Profile 的引用，
 不属于 Profile 自身。Project 使用 `mo project workflow set-default <profile>`，Issue 在
-`create` 或 `edit` 时使用 `--workflow-profile <profile>`。`mo workflow` 不复制这两种选择
-动作。
+`create` 或 `edit` 时使用 `--workflow-profile <profile>`；`issue edit
+--inherit-workflow-profile` 清除显式选择并重新继承 Project 默认值，且与
+`--workflow-profile` 互斥。`mo workflow` 不复制这些选择动作，也不用可能与合法 Profile ID
+冲突的 `default` / `none` sentinel。
 
 `workflow` 与 `run` 的分工沿用 GitHub CLI 中 workflow definition 与 run execution 的心智模型，但使用 Mohist 自己的 WorkflowProfile 和 WorkflowRun 语义。
 
