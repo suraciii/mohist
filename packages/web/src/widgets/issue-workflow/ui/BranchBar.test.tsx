@@ -86,7 +86,7 @@ describe('BranchBar', () => {
 
     const rebase = screen.getByRole('button', { name: /rebase onto master/i })
     expect(rebase).not.toBeDisabled()
-    expect(rebase).toHaveClass('border-amber-300', 'text-amber-800', 'hover:bg-amber-50')
+    expect(rebase).toHaveClass('border-warning-border', 'text-warning', 'hover:bg-warning-subtle')
     expect(rebase).not.toHaveClass('border-border', 'bg-muted', 'text-muted-foreground')
     expect(screen.getByText(/80 behind/i)).toBeTruthy()
   })
@@ -101,7 +101,7 @@ describe('BranchBar', () => {
     expect(rebase).toBeDisabled()
     expect(rebase).toHaveAttribute('aria-describedby', reason.id)
     expect(rebase).toHaveClass('border-border', 'bg-muted', 'text-muted-foreground', 'hover:bg-muted')
-    expect(rebase).not.toHaveClass('border-amber-300', 'text-amber-800', 'hover:bg-amber-50')
+    expect(rebase).not.toHaveClass('border-warning-border', 'text-warning', 'hover:bg-warning-subtle')
   })
 
   it('does not claim ahead/behind status until the runner returns numeric counts', () => {

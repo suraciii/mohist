@@ -29,3 +29,52 @@
 
 - Other Chinese strings still exist in the repo (e.g., `packages/web/src/widgets/coder-session/ui/SessionTimeline.tsx`) but the AC for T-001 scopes to the three listed files only. These belong to other issues or follow-up.
 - Did not touch BranchBar palette classes (amber/blue/gray/red/green) — that is T-002's scope (theme tokens), not T-001 (copy).
+
+## T-002 Implementation Notes
+
+### Surprises / things worth knowing
+
+- The BranchBar behind-state rebase button passed three token classes via `enabledClassName` (the `RebaseAction` component takes them as a string). Existing tests asserted those classes directly (`'border-amber-300', 'text-amber-800', 'hover:bg-amber-50'`); updated to the warning-family token strings (`'border-warning-border', 'text-warning', 'hover:bg-warning-subtle'`). Same swap for the negative assertion in the loading-state test.
+- TaskLogPanel's light-surface chrome has six distinct surface tokens (panel, header label, truncation badge, search icon, search input, download button, source chips × 2 variants). All eight light-surface palette references swapped cleanly to `bg-card / border-border / text-muted-foreground / text-foreground / bg-background / border-input / bg-warning-subtle / text-warning / focus:border-info / focus:ring-info / placeholder:text-muted-foreground / hover:bg-muted`.
+- The dark console interior (`bg-slate-900 text-slate-100` + `text-slate-500` timestamps + `text-sky-300` source brackets + `text-violet-200/300` + `bg-violet-400/10` + `text-red-300` + `text-slate-400` empty/error states) is preserved exactly. The acceptance criterion explicitly carves this out, and the new `TaskLogPanel.theme.test.tsx` locks it with three assertions (scroll container classes, source-bracket span, timestamp spans).
+- TaskLogPanel has no colocated test file; added a new `TaskLogPanel.theme.test.tsx` next to the existing `*.viewing.test.tsx`, `*.merge.test.tsx`, `*.milestones.test.tsx`, `*.liveAppend.test.tsx` suite. Four tests: chrome-tokenized surfaces; dark console preserved (with `querySelector('span.text-sky-300')` and `querySelectorAll('span.text-slate-500')` to lock the line colors); disabled chip uses muted tokens; loading boundary still renders inside the dark console.
+- The disabled-chip click test had to be wrapped in `act(async () => { chip.click() })` — the first run failed with "An update to TaskLogPanel inside a test was not wrapped in act(...)" because clicking toggles `disabledSources` state.
+- The panel header label color moved from `text-slate-500` to `text-muted-foreground` (the label is OUTSIDE the dark console, in the light-surface chrome header row).
+- WorkflowRunStatusPill.tsx is intentionally untouched — confirmed not rendered on the issue detail page; out of scope per design D3.
+
+### Decisions confirmed against spec
+
+- Mapped per design D3:
+  - amber (behind / rebase-available / Done retention copy) → `bg-warning-subtle` + `border-warning-border` + `text-warning`.
+  - blue (rebasing / in-progress) → `bg-info-subtle` + `border-info-border` + `text-info`.
+  - gray (upstream unknown; disabled rebase) → `bg-muted` + `border-border` + `text-muted-foreground`.
+  - red (errors / conflicts) → `bg-danger-subtle` + `text-danger`.
+  - green (up to date) → `text-success`.
+- TaskLogPanel chrome mapped per design D3:
+  - Outer panel: `bg-white border-slate-200` → `bg-card border-border`.
+  - Header label: `text-slate-500` → `text-muted-foreground`.
+  - Truncation badge: `bg-amber-100 text-amber-800` → `bg-warning-subtle text-warning`.
+  - Search input: `bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:ring-sky-500` → `bg-background border-input text-foreground placeholder:text-muted-foreground focus:border-info focus:ring-info`.
+  - Search icon: `text-slate-400` → `text-muted-foreground`.
+  - Download button: `bg-white border-slate-300 text-slate-700 hover:bg-slate-50` → `bg-background border-input text-foreground hover:bg-muted`.
+  - Source chip (enabled): `bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200` → `bg-background border-input text-foreground hover:bg-muted`.
+  - Source chip (disabled): `bg-white border-slate-200 text-slate-400` → `bg-muted border-border text-muted-foreground`.
+- Deliberately left alone (preserved dark console):
+  - `bg-slate-900 text-slate-100` on the scroll container.
+  - `text-slate-400` for loading/error/empty/no-match boundary text (rendered inside the scroll container).
+  - `text-slate-500` timestamps, `text-sky-300` source brackets, `text-violet-200/300` + `border-violet-400/40` + `bg-violet-400/10` milestones, `text-red-300` failed milestone detail.
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 378 files / 5071 tests passed (+1 file / +4 tests over T-001 baseline).
+- Focused run of BranchBar + all TaskLogPanel tests — 6 files / 72 tests passed (11 BranchBar tests, 4 new TaskLogPanel.theme tests, 57 existing TaskLogPanel tests).
+- `rg "border-(amber|blue|gray|red|green|violet|sky)\d|text-(amber|blue|gray|red|green|violet|sky)\d|bg-(amber|blue|gray|red|green|violet|sky)\d|hover:bg-(amber|gray)\d|focus:(border|ring)-(sky|amber)\d|bg-white|border-slate-\d|text-slate-\d" BranchBar.tsx` — zero matches.
+- `rg "border-(amber|sky|gray|red|blue|green)\d|text-(amber|sky|gray|red|blue|green)\d|bg-(amber|sky|gray|red|blue|green|white)\d|hover:bg-(sky|gray)\d|focus:(border|ring)-sky\d|bg-white|placeholder-slate" TaskLogPanel.tsx` — zero matches in the chrome (only matches are inside `renderScrollBody` lines, which is the preserved dark console interior).
+- `git diff --stat` confirms WorkflowRunStatusPill.tsx is not modified.
+
+### Out of scope (noted, not done)
+
+- The deliberate dark log-console interior (bg-slate-900, text-slate-500/sky-300/violet-200/300/red-300) is preserved by design — tokenizing it would break legibility on the terminal surface.
+- Other on-page literal palette blocks (PrDeliveryIndicator, ReviewSummary, WorkflowSessionsPanel status icons, CompositeParentOverview, ReviewReportModal, ArtifactContentViewer, ArtifactTextContent, composite-parent violet badge, NotFoundState's gray/blue) remain untouched — documented out of scope per design D3 scope reconciliation; tracked as follow-up.
+- The `_taskLogPanelTestUtils.tsx` mock was not changed; the new test file uses the same `renderWithTaskLogProviders`, `fakeConnections`, `makeLine`, `makePage`, `projects`, `newQueryClient` fixtures as the existing TaskLogPanel test suite.
