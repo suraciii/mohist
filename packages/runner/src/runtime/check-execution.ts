@@ -1,5 +1,5 @@
 import type { ActionError, JsonObject, JsonValue, WorkItemResult } from "../core/types.js"
-import { renderWithSkippedFields, wholeStringUnresolvedReferences } from "../core/template.js"
+import { renderWithSkippedFields, unresolvedReferences } from "../core/template.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import { validateActionInput, deferredInputFields, injectEngineInputs } from "../actions/input-validation.js"
 import { malformedToUnexpectedError, normalizeActionResult } from "../actions/result-validation.js"
@@ -85,7 +85,7 @@ async function runOneCheck(
       const deferred = deferredInputFields(definition.manifest)
       const clonedWith = check.with ? structuredClone(check.with) : null
       const actionWith = injectEngineInputs(definition.manifest, clonedWith, variables)
-      const unresolved = wholeStringUnresolvedReferences(removeDeferredFields(actionWith, deferred), variables)
+      const unresolved = unresolvedReferences(removeDeferredFields(actionWith, deferred), variables)
     if (unresolved.length > 0) {
       return { name: check.name, status: "fail", message: deps.formatUnresolved(unresolved) }
     }

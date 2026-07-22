@@ -3,9 +3,9 @@ import type { ActionError, ActionResult, JsonObject, JsonValue, DispatchWorkItem
 import { isObject, stringInput } from "../core/json.js"
 import { errorMessage } from "../core/errors.js"
 import { stringAt } from "../core/json-path.js"
-import { renderTemplate, renderWithSkippedFields, wholeStringUnresolvedReferences } from "../core/template.js"
+import { renderTemplate, renderWithSkippedFields, unresolvedReferences } from "../core/template.js"
 import { ensureDir } from "../system/process.js"
-import { runnerVariables, WorkspaceManager, WorkspaceNetworkTimeoutError } from "./workspace.js"
+import { WorkspaceManager, WorkspaceNetworkTimeoutError } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AgentSessionRuntimeEventOutbox } from "../server/runtime-event-outbox.js"
@@ -130,8 +130,8 @@ export class WorkExecutor {
       const clonedWith = work.with ? structuredClone(work.with) : null
       const actionWith = injectEngineInputs(definition.manifest, clonedWith, variables)
       const unresolved = [
-        ...wholeStringUnresolvedReferences(removeDeferredFields(actionWith, deferred), variables),
-        ...wholeStringUnresolvedReferences(work.expect, variables),
+        ...unresolvedReferences(removeDeferredFields(actionWith, deferred), variables),
+        ...unresolvedReferences(work.expect, variables),
       ]
       if (unresolved.length > 0) {
         return failure(work, formatUnresolvedError(work, unresolved))
@@ -460,25 +460,25 @@ export class WorkExecutor {
 
   private async variables(work: DispatchWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<JsonObject> {
     const workspace = resolvedWorkspaceToVariables(resolvedWorkspace)
-    const userVariables = work.variables ?? {}
-    const userRunner = userVariables.runner
-    const mergedRunner: JsonObject = { ...runnerVariables() }
-    if (isObject(userRunner)) {
-      Object.assign(mergedRunner, userRunner)
+    const source = work.variables ?? {}
+    const roots = ["workflow", "stage", "work", "issue", "repository", "workspace", "vars", "tasks", "prompts"]
+    const variables: JsonObject = {}
+    for (const root of roots) {
+      if (root !== "workspace" && source[root] !== undefined) variables[root] = source[root]
     }
-    return { ...userVariables, runner: mergedRunner, workspace }
+    variables.workspace = workspace
+    return variables
   }
 
   private workspaceFromVariables(work: DispatchWorkItem): ResolvedWorkspace {
     const variables = work.variables ?? {}
     const ws = variables["workspace"]
     if (!isObject(ws)) {
-      return { path: "", branch: null, changeDir: null }
+      return { path: "", branch: null }
     }
     return {
       path: stringField(ws, "path") ?? "",
       branch: stringField(ws, "branch"),
-      changeDir: stringField(ws, "changeDir"),
     }
   }
 
@@ -560,14 +560,14 @@ export interface WorkExecution {
   collector: TaskLogCollector
 }
 
-type ResolvedWorkspace = { path: string, branch: string | null, changeDir: string | null }
+type ResolvedWorkspace = { path: string, branch: string | null }
 
-function infoToResolved(info: { path: string, branch?: string | null, changeDir?: string | null }): ResolvedWorkspace {
-  return { path: info.path, branch: info.branch ?? null, changeDir: info.changeDir ?? null }
+function infoToResolved(info: { path: string, branch?: string | null }): ResolvedWorkspace {
+  return { path: info.path, branch: info.branch ?? null }
 }
 
 function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject {
-  return { path: workspace.path, branch: workspace.branch, changeDir: workspace.changeDir }
+  return { path: workspace.path, branch: workspace.branch }
 }
 
 function defaultRuntimeEventRecordId(): string {

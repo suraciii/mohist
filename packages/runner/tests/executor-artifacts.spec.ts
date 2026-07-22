@@ -325,8 +325,8 @@ describe("WorkExecutor artifact capture", () => {
     await mkdir(join(workDir, changeDir), { recursive: true })
     await writeFile(reviewAbsolute, "looks good", "utf8")
 
-    const work = buildWork({ files: [{ path: "${{ openspecChangeDir }}/review.md" }] })
-    work.variables = { ...(work.variables ?? {}), openspecChangeDir: changeDir }
+    const work = buildWork({ files: [{ path: "${{ vars.changeDir }}/review.md" }] })
+    work.variables = { ...(work.variables ?? {}), vars: { changeDir } }
 
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
@@ -357,8 +357,8 @@ describe("WorkExecutor artifact capture", () => {
     await writeFile(join(specsAbsolute, "a.md"), "alpha", "utf8")
     await writeFile(join(specsAbsolute, "sub", "b.md"), "beta", "utf8")
 
-    const work = buildWork({ files: [{ path: "${{ openspecChangeDir }}/specs" }] })
-    work.variables = { ...(work.variables ?? {}), openspecChangeDir: changeDir }
+    const work = buildWork({ files: [{ path: "${{ vars.changeDir }}/specs" }] })
+    work.variables = { ...(work.variables ?? {}), vars: { changeDir } }
 
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(

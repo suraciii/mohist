@@ -9,3 +9,11 @@
 - Removed runtime context and top-level variable-key hoisting from the server variable bundle and dispatch payload.
 - Dispatch now uses `issue.projectId`, conditionally populated repository/workspace roots, and `work.approvalFeedback` with only `id`, `stage`, `createdAt`, and `summary`.
 - Failure recovery payloads now include a structured `error` object with `code` and `message`; the pre-rendered feedback command helper was removed.
+
+## T-002
+
+- Runner template rendering now fails for unresolved whole or embedded references, including missing `tasks.*` outputs, rejects embedded objects/arrays, preserves complete JSON values, and detects repeated expansion states plus the depth limit.
+- Executor preflight uses `unresolvedReferences`; variable assembly copies only the documented dispatch roots except `failure` (which remains recovery-only), then overrides workspace with `{ path, branch }`.
+- Workspace preparation and identity use `workflowRunId` from the dispatch work item and no longer read `openspecChangeDir` or `mohist.runId`; `WorkspaceInfo` and resolved template workspace facts no longer include `changeDir`.
+- Updated runner behavior vectors and executor/artifact/workspace fixtures to use namespaced variables and strict failure semantics. `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass.
+- The initial full runner regression run had one unrelated concurrent task-log routing failure; the subsequent full run passed 116 files and 1,353 tests.

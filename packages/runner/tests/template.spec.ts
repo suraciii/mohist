@@ -49,40 +49,16 @@ describe("renderTemplate", () => {
     expect(() => renderTemplate({ prompt: "${{ unknown.var }}" }, {})).toThrow("Template variable 'unknown.var' was not found")
   })
 
-  it("UnresolvedEmbeddedReference_LeavesLiteral", () => {
-    // A task description can embed the literal text "${{ prompts.xxx }}" (a documentation example
-    // the agent should read, not a template reference). The embedded form
-    // must NOT fail the dispatch — the unresolved reference is preserved
-    // verbatim so the agent sees the example.
-    const rendered = renderTemplate(
-      {
-        prompt:
-          "Read the proposal and implement it. The runner's ${{ prompts.xxx }} " +
-          "resolution should remain byte-identical. Now ${{ openspecChangeDir }} please.",
-      },
-      { openspecChangeDir: "openspec/changes/issue-49" },
-    )
-
-    expect(rendered?.prompt).toBe(
-      "Read the proposal and implement it. The runner's ${{ prompts.xxx }} " +
-      "resolution should remain byte-identical. Now openspec/changes/issue-49 please.",
-    )
+  it("UnresolvedEmbeddedReference_Throws", () => {
+    expect(() => renderTemplate({ prompt: "see ${{ prompts.xxx }} for details" }, {})).toThrow("prompts.xxx")
   })
 
-  it("UnresolvedEmbeddedReference_MixedWithResolved_ResolvesResolvables", () => {
-    const rendered = renderTemplate(
-      { prompt: "Start ${{ known }} then ${{ unknown }} end" },
-      { known: "X" },
-    )
-    expect(rendered?.prompt).toBe("Start X then ${{ unknown }} end")
+  it("UnresolvedEmbeddedReference_MixedWithResolved_Throws", () => {
+    expect(() => renderTemplate({ prompt: "Start ${{ known }} then ${{ unknown }} end" }, { known: "X" })).toThrow("unknown")
   })
 
-  it("UnresolvedEmbeddedReference_OnlyUnresolvable_NoProgress", () => {
-    const rendered = renderTemplate(
-      { prompt: "${{ a }} and ${{ b }}" },
-      {},
-    )
-    expect(rendered?.prompt).toBe("${{ a }} and ${{ b }}")
+  it("UnresolvedEmbeddedReference_OnlyUnresolvable_Throws", () => {
+    expect(() => renderTemplate({ prompt: "${{ a }} and ${{ b }}" }, {})).toThrow("a")
   })
 
   it("LiteralFieldPath_SkipsRendering", () => {
@@ -194,6 +170,20 @@ describe("renderWithSkippedFields", () => {
     )
 
     expect(rendered?.options).toEqual({ model: "opencode" })
+  })
+
+  it("rejects object and array values in string interpolation", () => {
+    expect(() => renderWithSkippedFields({ text: "model=${{ vars.agent }}" }, { vars: { agent: { model: "opencode" } } }, new Set())).toThrow(/object or array/)
+    expect(() => renderWithSkippedFields({ text: "items=${{ vars.items }}" }, { vars: { items: ["a"] } }, new Set())).toThrow(/object or array/)
+  })
+
+  it("expands nested references and rejects cycles and excessive depth", () => {
+    expect(renderTemplate({ value: "${{ vars.alias }}" }, { vars: { alias: "${{ vars.real }}", real: "done" } })?.value).toBe("done")
+    expect(() => renderTemplate({ value: "prefix ${{ vars.a }}" }, { vars: { a: "${{ vars.b }}", b: "${{ vars.a }}" } })).toThrow(/cycle/)
+
+    const vars: Record<string, string> = { value: "done" }
+    for (let index = 0; index < 6; index += 1) vars[`v${index}`] = `\${{ vars.${index === 5 ? "value" : `v${index + 1}`} }}`
+    expect(() => renderTemplate({ value: "${{ vars.v0 }}" }, { vars })).toThrow(/maximum depth/)
   })
 
   it("returns null for null/undefined input", () => {
@@ -335,30 +325,16 @@ describe("task output variables", () => {
     expect(rendered.files[0].path).toBe("openspec/changes/issue-97/review.md")
   })
 
-  it("MissingTaskOutputReferenceResolvesToEmptyString", () => {
-    const rendered = renderTemplate(
-      { path: "${{ tasks.proposal.outputs.missing }}/specs" },
-      { tasks: { proposal: { outputs: {} } } },
-    ) as { path: string }
-
-    expect(rendered.path).toBe("/specs")
+  it("MissingTaskOutputReferenceFailsWhenEmbedded", () => {
+    expect(() => renderTemplate({ path: "${{ tasks.proposal.outputs.missing }}/specs" }, { tasks: { proposal: { outputs: {} } } })).toThrow("tasks.proposal.outputs.missing")
   })
 
-  it("MissingTaskOutputReferenceAsWholeStringResolvesToEmptyString", () => {
-    const rendered = renderTemplate(
-      { path: "${{ tasks.proposal.outputs.missing }}" },
-      {},
-    ) as { path: string }
-
-    expect(rendered.path).toBe("")
+  it("MissingTaskOutputReferenceFailsAsWholeString", () => {
+    expect(() => renderTemplate({ path: "${{ tasks.proposal.outputs.missing }}" }, {})).toThrow("tasks.proposal.outputs.missing")
   })
 
-  it("MissingTaskOutputReferenceIsNotReportedAsUnresolved", () => {
-    const unresolved = wholeStringUnresolvedReferences(
-      { path: "${{ tasks.proposal.outputs.missing }}/specs" },
-      {},
-    )
-    expect(unresolved).toEqual([])
+  it("MissingTaskOutputReferenceIsReportedAsUnresolved", () => {
+    expect(unresolvedReferences({ path: "${{ tasks.proposal.outputs.missing }}/specs" }, {})).toEqual(["tasks.proposal.outputs.missing"])
   })
 
   it("NonTaskUnresolvedReferenceStillFailsAsBefore", () => {

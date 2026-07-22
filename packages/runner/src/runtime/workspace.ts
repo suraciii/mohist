@@ -81,7 +81,6 @@ export class WorkspaceNetworkTimeoutError extends Error {
 export interface WorkspaceInfo {
   path: string
   branch?: string | null
-  changeDir?: string | null
 }
 
 export class WorkspaceManager {
@@ -104,9 +103,8 @@ export class WorkspaceManager {
     }
 
     const runId = work.workflowRunId
-    const expected = workspaceIdentity(work, variables, runId)
+    const expected = workspaceIdentity(runId)
     const runBranch = expected.runBranch
-    const changeDir = stringAt(variables, ["openspecChangeDir"])
     const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
     const workspaceExistedBeforePreparation = pathExists(workspacePath)
     if (!workspaceExistedBeforePreparation) {
@@ -132,7 +130,7 @@ export class WorkspaceManager {
         runBranch: expected.runBranch,
       })
     }
-    return { path: workspacePath, branch: runBranch, changeDir: changeDir ? join(workspacePath, changeDir) : null }
+    return { path: workspacePath, branch: runBranch }
   }
 
   async verify(work: DispatchWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
@@ -144,10 +142,8 @@ export class WorkspaceManager {
     if (!gitUrl || !baseBranch || issueNumber === undefined) {
       throw new WorkspaceIdentityMismatchError("Issue workspace identity is incomplete")
     }
-    const expected = workspaceIdentity(work, variables, runId)
+    const expected = workspaceIdentity(runId)
     const runBranch = expected.runBranch
-    const changeDir = stringAt(variables, ["openspecChangeDir"])
-
     const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
     await withManagedWorkspacePath(this.runnerRoot, workspacePath, true, async (managedWorkspacePath) => {
       await validateWorkspaceIdentity(managedWorkspacePath, expected, gitUrl, signal, log)
@@ -179,7 +175,6 @@ export class WorkspaceManager {
     return {
       path: workspacePath,
       branch: runBranch,
-      changeDir: changeDir ? join(workspacePath, changeDir) : null,
     }
   }
 
@@ -335,9 +330,7 @@ export interface IssueWorkspaceMarker {
   runBranch: string
 }
 
-function workspaceIdentity(work: DispatchWorkItem, variables: JsonObject, workflowRunId: string): IssueWorkspaceMarker {
-  const variableRunId = stringAt(variables, ["mohist", "runId"])
-  if (variableRunId && variableRunId !== workflowRunId) throw new WorkspaceIdentityMismatchError("Dispatch workflowRunId does not match the authoritative run identity")
+function workspaceIdentity(workflowRunId: string): IssueWorkspaceMarker {
   return {
     workflowRunId,
     runBranch: runBranchName(workflowRunId),
