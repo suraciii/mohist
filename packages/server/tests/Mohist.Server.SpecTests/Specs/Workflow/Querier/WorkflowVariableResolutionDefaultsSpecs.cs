@@ -174,6 +174,41 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     }
 
     [Fact]
+    public async Task WorkflowRunProfile_EnforcesOptimisticConcurrencyOnOverlappingWrites()
+    {
+        // Issue-474 review: WorkflowRunProfileRow carries an ETag concurrency
+        // token so a stale-snapshot write cannot clobber the latest row. Two
+        // contexts both read ETag=1; the first save bumps the row to ETag=2;
+        // the second save's WHERE ETag=1 then matches no row and raises
+        // DbUpdateConcurrencyException. The ETag is bumped on both sides to
+        // mirror what every real writer (WorkflowRunProfileManager) does, so
+        // this isolates the concurrency check rather than the increment.
+        var runId = "wr_etag_race01";
+        var dbFactory = new TestDbContextFactory(Database.Options);
+        var manager = new WorkflowRunProfileManager(dbFactory);
+        await manager.EnsureArchiveDefaultAsync(runId);
+
+        await using var readerA = new MohistDbContext(Database.Options);
+        await using var readerB = new MohistDbContext(Database.Options);
+        var rowA = await readerA.WorkflowRunProfiles.FirstAsync(x => x.WorkflowRunId == runId);
+        var rowB = await readerB.WorkflowRunProfiles.FirstAsync(x => x.WorkflowRunId == runId);
+
+        rowA.Variables = JsonSerializer.Serialize(new { archive = "/a/wins" });
+        BumpETagInContext(readerA, rowA);
+        await readerA.SaveChangesAsync();
+
+        rowB.Variables = JsonSerializer.Serialize(new { archive = "/b/overwrites" });
+        BumpETagInContext(readerB, rowB);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => readerB.SaveChangesAsync());
+    }
+
+    private static void BumpETagInContext(MohistDbContext db, WorkflowRunProfileRow row)
+    {
+        var etag = db.Entry(row).Property<long>("ETag");
+        etag.CurrentValue = etag.OriginalValue + 1;
+    }
+
+    [Fact]
     public async Task ResolveEffectiveVariables_MarkedDefaultResolvesBelowExplicitProjectIssueAndStage()
     {
         var runId = "wr_default_below01";

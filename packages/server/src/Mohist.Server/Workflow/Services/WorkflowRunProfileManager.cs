@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
@@ -61,18 +62,18 @@ public class WorkflowRunProfileManager : IScopedService
     /// </summary>
     public async Task EnsureArchiveDefaultAsync(string workflowRunId)
     {
-        var existing = await LoadRowAsync(workflowRunId);
-        var explicitVars = existing is null
+        var snapshot = await LoadRowAsync(workflowRunId);
+        var explicitVars = snapshot is null
             ? VariableBundle.Empty
-            : VariableBundle.FromJson(existing.Variables);
+            : VariableBundle.FromJson(snapshot.Variables);
         if (HasArchiveKey(explicitVars.Vars))
         {
             return;
         }
 
-        var defaults = existing is null
+        var defaults = snapshot is null
             ? VariableBundle.Empty
-            : VariableBundle.FromJson(existing.DefaultVariables);
+            : VariableBundle.FromJson(snapshot.DefaultVariables);
         if (HasArchiveKey(defaults.DefaultVars))
         {
             return;
@@ -80,29 +81,36 @@ public class WorkflowRunProfileManager : IScopedService
 
         var seed = new VariableBundle(
             DefaultVars: BuildArchiveDefaultElement());
-        var mergedDefaults = VariableBundle.Patch(defaults, seed);
+        var mergedDefaultsJson = VariableBundle.Patch(defaults, seed).ToJson();
 
-        if (existing is null)
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        // Tracked read so ETag becomes the OriginalValue EF writes into the
+        // UPDATE WHERE clause. Combined with only assigning DefaultVariables,
+        // an interleaved explicit Variables write is neither clobbered (this
+        // column is untouched) nor silently lost (its own save bumps ETag and
+        // makes this one raise DbUpdateConcurrencyException).
+        var row = await db.WorkflowRunProfiles
+            .FirstOrDefaultAsync(x => x.WorkflowRunId == workflowRunId);
+
+        if (row is null)
         {
-            await using var db = await _dbFactory.CreateDbContextAsync();
-            db.WorkflowRunProfiles.Add(new WorkflowRunProfileRow
+            var inserted = new WorkflowRunProfileRow
             {
                 WorkflowRunId = workflowRunId,
                 Variables = explicitVars.ToJson(),
-                DefaultVariables = mergedDefaults.ToJson(),
+                DefaultVariables = mergedDefaultsJson,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            db.WorkflowRunProfiles.Add(inserted);
+            db.Entry(inserted).Property<long>("ETag").CurrentValue = 1;
             await db.SaveChangesAsync();
             return;
         }
 
-        existing.DefaultVariables = mergedDefaults.ToJson();
-        existing.UpdatedAt = DateTimeOffset.UtcNow;
-        await using (var db = await _dbFactory.CreateDbContextAsync())
-        {
-            db.WorkflowRunProfiles.Update(existing);
-            await db.SaveChangesAsync();
-        }
+        row.DefaultVariables = mergedDefaultsJson;
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        BumpETag(db.Entry(row));
+        await db.SaveChangesAsync();
     }
 
     public async Task<VariableBundle> PatchVariablesAsync(string workflowRunId, VariableBundle patch)
@@ -146,12 +154,14 @@ public class WorkflowRunProfileManager : IScopedService
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             db.WorkflowRunProfiles.Add(row);
+            db.Entry(row).Property<long>("ETag").CurrentValue = 1;
         }
         else
         {
             row.Variables = bundle.ToJson();
             row.DefaultVariables = effectiveDefaults.ToJson();
             row.UpdatedAt = DateTimeOffset.UtcNow;
+            BumpETag(db.Entry(row));
         }
 
         await db.SaveChangesAsync();
@@ -161,6 +171,12 @@ public class WorkflowRunProfileManager : IScopedService
             bundle.Stages,
             effectiveDefaults.DefaultVars,
             effectiveDefaults.DefaultStages);
+    }
+
+    private static void BumpETag(EntityEntry<WorkflowRunProfileRow> entry)
+    {
+        var etag = entry.Property<long>("ETag");
+        etag.CurrentValue = etag.OriginalValue + 1;
     }
 
     private async Task<WorkflowRunProfileRow?> LoadRowAsync(string workflowRunId)
