@@ -1,11 +1,11 @@
 ### Requirement: Resource leaf commands declare discoverable JSON fields
 
-Every leaf command that returns a resource or collection of resources SHALL declare the fields it can return through `--json [<fields>]`. Bare `--json` SHALL list that command's declared field names and exit successfully without resolving a Project or contacting a Mohist service, Server, or Runner.
+Every leaf command that returns a resource or collection of resources SHALL declare the fields it can return through `--json [<fields>]`. Bare `--json` SHALL write one JSON array of the command's declared field-name strings to stdout, in that descriptor's declared order, and exit successfully without resolving a Project or contacting a Mohist service, Server, or Runner.
 
 #### Scenario: Field discovery is requested
 
 - **WHEN** an operator invokes a resource leaf command with bare `--json`
-- **THEN** the command SHALL write its declared field names to stdout and exit with code `0`
+- **THEN** the command SHALL write one JSON array containing its declared field-name strings in descriptor order to stdout and exit with code `0`
 - **AND** SHALL NOT make a remote request or require a Project selection
 
 ### Requirement: Field selection produces a projection

@@ -51,10 +51,10 @@
       "description": "Add declarative ResourceDescriptor and JsonSelection support, then migrate all resource read and continuous stream leaves. Each read exposes local field discovery and selected-field projection, while streams retain NDJSON and all machine results remain free of the Server envelope.",
       "acceptanceCriteria": [
         "Every resource read and continuous stream leaf has exactly one descriptor declaring its accepted top-level fields and result cardinality.",
-        "Bare --json lists declared fields with exit 0 and no Project resolution or remote call; invalid, duplicate, or blank selections exit 2 with an actionable stderr diagnostic and no remote call.",
+        "Bare --json writes exactly one JSON array of declared field-name strings in descriptor order, exits 0, and performs no Project resolution or remote call; invalid, duplicate, or blank selections exit 2 with an actionable stderr diagnostic and no remote call.",
         "Selected fields produce one object for a single read, one array of projected objects for a collection, and one JSON object per line for streams, without a general success envelope.",
         "Legacy --output and boolean JSON-output behavior no longer resolve on migrated read and stream leaves.",
-        "CLI tests cover single, collection, and stream cardinality, JSON projection, offline field discovery, invalid selection, stderr separation, and legacy option rejection; npm test -w packages/cli passes."
+        "CLI tests cover single, collection, and stream cardinality, JSON projection, exact ordered field-discovery arrays, invalid selection, stderr separation, and legacy option rejection; npm test -w packages/cli passes."
       ],
       "priority": 3,
       "mode": "AFK",
