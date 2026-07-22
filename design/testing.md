@@ -95,6 +95,12 @@ Web tests run with `isolate: false`: test files share a worker module registry a
 
 Extract shared setup. One product ability = one test file. Migration splits: delete old file once equivalent coverage exists.
 
+### Repository CI time budget
+
+The GitHub CI gate is expected to complete within five minutes. Each job has a
+five-minute timeout; reaching it is an abnormal condition to diagnose, not a
+normal way to finish a test run.
+
 The lowest useful layer owns the behavior matrix. API/integration specs assert route, binding, status code, JSON shape, parameter parsing, and one success path per endpoint; state and calculation permutations belong to the querier/grain/domain specs below. Never repeat the lower layer's scenario matrix through HTTP — one behavior change must touch one test file, not two layers.
 
 ### 5. 成本只随相关数据增长

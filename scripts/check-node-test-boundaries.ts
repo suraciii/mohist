@@ -2128,7 +2128,11 @@ function main() {
     return
   }
 
-  const { scope, budgetBaseRef } = options
+  const { scope, budgetBaseRef: argumentBudgetBaseRef } = options
+  const budgetBaseRef = argumentBudgetBaseRef ?? process.env.NODE_TEST_BUDGET_BASE_REF ?? null
+  if (budgetBaseRef !== null && budgetBaseRef.length === 0) {
+    throw new Error('NODE_TEST_BUDGET_BASE_REF must not be empty')
+  }
 
   const { files, violations } = scope === 'runner'
     ? checkRunnerTestBoundaries()
