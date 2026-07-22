@@ -53,13 +53,14 @@ Action Input 展开后的值是本次执行的唯一配置事实。`mohist/openc
 
 ## Action 输入
 
-| 字段 | 必填 | 含义 |
-|---|---:|---|
-| `prompt` | 是 | 本次交给 OpenCode 的提示词 |
-| `session` | 否 | WorkflowRun 内的逻辑 Session 名称；省略时使用当前 Work ID |
-| `options` | 否 | 本次选择 OpenCode 模型的对象 |
-| `options.model` | 否 | OpenCode 模型，使用 `provider/model` 标识 |
-| `options.variant` | 否 | 该模型的 OpenCode `variant` |
+| 字段 | 必填 | 默认 | 含义 |
+|---|---:|---|---|
+| `prompt` | 是 | — | 本次交给 OpenCode 的提示词 |
+| `session` | 否 | — | WorkflowRun 内的逻辑 Session 名称；省略时使用当前 Work ID |
+| `options` | 否 | — | 本次选择 OpenCode 模型的对象 |
+| `options.model` | 否 | — | OpenCode 模型，使用 `provider/model` 标识 |
+| `options.variant` | 否 | — | 该模型的 OpenCode `variant` |
+| `timeout` | 否 | `3600000` | 回合期限，以毫秒为单位；到达后中断当前回合 |
 
 工具、插件、权限、默认执行方式和自动压缩继续使用 OpenCode 自己的配置，不复制成
 Mohist 字段。Action Input 不需要 `agent`、`kind` 或 `type`；使用哪个执行后端已经
@@ -155,6 +156,26 @@ Reset。只有当前物理 Session 已不存在，或用户明确要求清空上
 
 Mohist 展示的模型列表用于帮助配置。最终模型是否合法、默认模型是什么，仍由
 OpenCode 判断。
+
+## 错误码
+
+`mohist/opencode` 的业务失败用以下稳定错误码标识，供 recovery `when: error.code=...`
+匹配；错误文案面向人，不用于匹配：
+
+平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、
+未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
+
+| 错误码 | 含义 |
+|---|---|
+| `runtime-unavailable` | OpenCode 执行能力尚未就绪或不可用 |
+| `session-workspace-mismatch` | Session 绑定的工作目录与本次执行不一致 |
+| `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
+| `runtime-session-missing` | 绑定的 OpenCode Session 已不存在，需要 Reset |
+| `unavailable-runtime` | OpenCode 报告不可用 |
+| `incompatible-runtime` | OpenCode 版本或数据与 Mohist 不兼容 |
+| `permission-required` | 需要权限才能继续 |
+| `interrupted` | 回合被 Runner 外部信号中断 |
+| `turn-failed` | 回合执行失败（含 provider 额度、余额或计费耗尽） |
 
 ## 实装差距
 
