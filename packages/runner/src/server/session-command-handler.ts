@@ -13,6 +13,7 @@ export interface SessionCommandRequest {
   command: SessionCommand
   expectedRuntimeSessionId?: string | null
   operationId: string
+  projectId?: string | null
 }
 
 export interface SessionCommandResult {
@@ -133,6 +134,7 @@ export function isValidSessionCommandRequest(value: unknown): value is SessionCo
     && (request.expectedRuntimeSessionId === undefined || request.expectedRuntimeSessionId === null || typeof request.expectedRuntimeSessionId === "string")
     && typeof request.operationId === "string"
     && request.operationId.length > 0
+    && (request.projectId === undefined || request.projectId === null || typeof request.projectId === "string")
     && isValidCommandBinding(request)
 }
 
@@ -157,6 +159,7 @@ function sameRequest(left: SessionCommandRequest, right: SessionCommandRequest):
   && left.command === right.command
   && left.expectedRuntimeSessionId === right.expectedRuntimeSessionId
   && left.operationId === right.operationId
+  && left.projectId === right.projectId
 }
 
 function unavailable(): SessionCommandResult {

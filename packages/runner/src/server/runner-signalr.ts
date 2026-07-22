@@ -39,8 +39,9 @@ import {
   type SessionCommandResult,
 } from "./session-command-handler.js"
 import { registerWorkflowRunStatusHandler } from "./workflow-run-status-handler.js"
-import type { AgentSessionRuntimeEventOutbox } from "./runtime-event-outbox.js"
+import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "./runtime-event-outbox.js"
 import type { SessionCommandJournalStore } from "../runtime/session-command-journal.js"
+import type { PiTurnObserver } from "../runtime/pi/index.js"
 import {
   callSessionCommand,
   resolveCommandRuntime,
@@ -233,9 +234,34 @@ export class RunnerSignalRClient {
     if (!runtimeSessionId || !workDir) {
       return { ok: false, error: "unavailable" }
     }
+    const observer = this.buildSessionCommandObserver(request)
     return await callSessionCommand(handle, request.command, {
       runtimeSessionId,
       workDir,
-    }, null)
+    }, observer)
+  }
+
+  private buildSessionCommandObserver(request: SessionCommandRequest): PiTurnObserver | null {
+    const outbox = this.agentSessionRuntimeEventOutbox
+    if (!outbox || !outbox.ready() || !request.projectId) return null
+    return {
+      onEvent: (event) => {
+        const record: RuntimeEventRecord = {
+          id: `session-command-event:${request.operationId}:${event.id}`,
+          producerFamily: "generic-followup",
+          target: { kind: "generic", projectId: request.projectId!, sessionId: request.sessionId },
+          runtimeSessionId: request.runtimeSessionId!,
+          work: null,
+          event: {
+            type: event.type,
+            payload: { ...event.payload, source: "session-command", command: request.command, operationId: request.operationId, runtimeSessionId: request.runtimeSessionId },
+          },
+          acknowledgementPolicy: "successful-response",
+        }
+        outbox.enqueueProducedFact(record).catch((error) => {
+          console.error("failed to persist session command runtime event:", error)
+        })
+      },
+    }
   }
 }

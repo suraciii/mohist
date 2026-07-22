@@ -435,7 +435,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             Command: command,
             ExpectedRuntimeSessionId: command == SessionCommandKind.Reset ? reservation?.ExpectedRuntimeSessionId : null,
             OperationId: reservation?.OperationId
-                ?? throw new InvalidOperationException("Session command requires a persisted operation id."));
+                ?? throw new InvalidOperationException("Session command requires a persisted operation id."),
+            ProjectId: session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId));
 
     private static IReadOnlyList<AgentSessionFollowupLease> GetPendingFollowups(AgentSession session)
     {

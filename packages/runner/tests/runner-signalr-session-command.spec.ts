@@ -65,7 +65,7 @@ function lastBuilder(): FakeBuilder {
   return builder
 }
 
-function newClient(opts: { openCodeRuntime: unknown; piRuntime: unknown; journal?: unknown }) {
+function newClient(opts: { openCodeRuntime: unknown; piRuntime: unknown; journal?: unknown; outbox?: unknown }) {
   builders.length = 0
   return new RunnerSignalRClient(
     "http://localhost:3456",
@@ -76,6 +76,7 @@ function newClient(opts: { openCodeRuntime: unknown; piRuntime: unknown; journal
       openCodeRuntime: opts.openCodeRuntime as never,
       piRuntime: opts.piRuntime as never,
       ...(opts.journal !== undefined ? { sessionCommandJournal: opts.journal as never } : {}),
+      ...(opts.outbox !== undefined ? { agentSessionRuntimeEventOutbox: opts.outbox as never } : {}),
     },
   )
 }
@@ -118,6 +119,7 @@ function makeCompactRequest(runtime: string): SessionCommandRequest {
     workDir: "/work/project",
     command: "compact",
     operationId: "operation-compact-1",
+    projectId: "project-1",
   }
 }
 
@@ -131,6 +133,7 @@ function makeResetRequest(runtime: string, expectedBinding = "runtime-1"): Sessi
     command: "reset",
     expectedRuntimeSessionId: expectedBinding,
     operationId: "operation-reset-1",
+    projectId: "project-1",
   }
 }
 
@@ -160,6 +163,31 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(pi.compactCalls[0].target.runtime).toBe("pi")
     expect(pi.compactCalls[0].target.runtimeSessionId).toBe("runtime-1")
     expect(opencode.cancelCalls).toHaveLength(0)
+  })
+
+  it("PiBinding_Compact_PersistsProjectedEventsThroughTheOutbox", async () => {
+    const events: unknown[] = []
+    const outbox = {
+      ready: () => true,
+      enqueueProducedFact: async (record: unknown) => { events.push(record) },
+    }
+    const opencode = makeFakeRuntime()
+    const pi = makeFakePiRuntime()
+    pi.runtime.compact = async (_request, observer) => {
+      observer?.onEvent?.({ id: "compact-event-1", type: "compaction_event", runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/work/project", payload: { phase: "completed" } })
+      return { ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/work/project" }, diagnostics: [] }
+    }
+    newClient({ openCodeRuntime: opencode.runtime, piRuntime: pi.runtime, journal: makeMemoryJournal(), outbox })
+    const handler = lastBuilder().handlers.get("SessionCommand")
+    if (!handler) throw new Error("SessionCommand handler not registered")
+
+    await handler(makeCompactRequest("pi"))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      target: { kind: "generic", projectId: "project-1", sessionId: "session-1" },
+      event: { type: "compaction_event", payload: { source: "session-command", command: "compact" } },
+    })
   })
 
   it("PiBinding_Reset_DispatchesToPiRuntime_AndReturnsReplacementId", async () => {
