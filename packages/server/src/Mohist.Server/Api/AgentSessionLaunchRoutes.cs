@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Domain;
@@ -7,6 +6,7 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
 
@@ -48,6 +48,7 @@ public static class AgentSessionLaunchRoutes
             AgentSessionLaunchRequest req,
             AgentQuerier agentQuerier,
             IssueQuerier issueQuerier,
+            IssueWorkflowProfileManager issueWorkflowProfileManager,
             EpicQuerier epicQuerier,
             IAgentLauncher launcher,
             CancellationToken ct) =>
@@ -87,8 +88,8 @@ public static class AgentSessionLaunchRoutes
             var runtimeOverride = req.Runtime;
             if (runtimeOverride is null && req.Context?.IssueNumber is int issueNumber)
             {
-                var issue = await issueQuerier.GetAsync(project.Id, issueNumber);
-                runtimeOverride = ReadIssueRuntimeOverride(issue?.AgentConfig);
+                runtimeOverride = await issueWorkflowProfileManager
+                    .GetAgentRuntimeOverrideAsync(project.Id, issueNumber);
             }
 
             var runtimeError = ValidateRuntimeOverride(runtimeOverride);
@@ -165,22 +166,6 @@ public static class AgentSessionLaunchRoutes
         return null;
     }
 
-    private static string? ReadIssueRuntimeOverride(
-        IReadOnlyDictionary<string, object?>? agentConfig)
-    {
-        if (agentConfig is null
-            || !agentConfig.TryGetValue("runtime", out var value))
-        {
-            return null;
-        }
-
-        return value switch
-        {
-            string rawValue => rawValue,
-            JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
-            _ => null,
-        };
-    }
 }
 
 /// <summary>

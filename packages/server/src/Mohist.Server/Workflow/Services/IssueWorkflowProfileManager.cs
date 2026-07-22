@@ -123,6 +123,22 @@ public class IssueWorkflowProfileManager : IScopedService
         return row is null ? VariableBundle.Empty : VariableBundle.FromJson(row.Variables);
     }
 
+    public async Task<string?> GetAgentRuntimeOverrideAsync(string projectId, int issueNumber)
+    {
+        var variables = await GetVariablesAsync(projectId, issueNumber);
+        if (variables.Vars is not { ValueKind: JsonValueKind.Object } vars
+            || !vars.TryGetProperty("agent", out var agent)
+            || agent.ValueKind != JsonValueKind.Object
+            || !agent.TryGetProperty("runtime", out var runtime)
+            || runtime.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var value = runtime.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
     public async Task<VariableBundle> SetVariablesAsync(string projectId, int issueNumber, VariableBundle bundle)
     {
         ValidateAgentRuntimes(bundle);

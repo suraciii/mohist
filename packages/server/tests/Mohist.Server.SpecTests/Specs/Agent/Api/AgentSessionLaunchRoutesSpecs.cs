@@ -324,6 +324,36 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
     }
 
     [Fact]
+    public async Task Launch_WithProjectRuntimeAndNoIssueOverride_UsesAgentConfigRuntime()
+    {
+        var projectId = await CreateProjectAsync("launch-project-runtime-not-issue-override");
+        var agent = await CreateAgentAsync(projectId, "project-runtime-agent", runtime: "opencode");
+        var issueNumber = await CreateIssueAsync(projectId, "No issue runtime override");
+
+        using var projectPatch = await _fixture.Client.PatchAsJsonAsync(
+            $"/api/projects/{projectId}/workflow-profile/variables",
+            new { vars = new { agent = new { runtime = "pi" } } });
+        Assert.Equal(HttpStatusCode.OK, projectPatch.StatusCode);
+
+        using var launch = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+            new
+            {
+                prompt = "keep the agent backend",
+                context = new { issueNumber },
+            });
+
+        Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
+        var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var info = await session.GetAsync();
+
+        Assert.NotNull(info);
+        Assert.Equal("opencode", info!.Runtime);
+    }
+
+    [Fact]
     public async Task IssueWorkflowVariables_RejectInvalidAgentRuntime()
     {
         var projectId = await CreateProjectAsync("issue-runtime-invalid");

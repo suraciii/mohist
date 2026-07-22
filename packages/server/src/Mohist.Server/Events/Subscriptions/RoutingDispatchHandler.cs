@@ -5,8 +5,8 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Events.Matching;
-using Mohist.Server.Issue.Services;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Events.Subscriptions;
 
@@ -173,21 +173,8 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         if (issueNumber is not > 0)
             return null;
 
-        var issue = await services.GetRequiredService<IssueQuerier>()
-            .GetAsync(projectId, issueNumber.Value);
-        if (issue?.AgentConfig is null
-            || !issue.AgentConfig.TryGetValue("runtime", out var value))
-        {
-            return null;
-        }
-
-        var runtime = value switch
-        {
-            string raw => raw,
-            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => element.GetString(),
-            _ => null,
-        };
-        return runtime;
+        return await services.GetRequiredService<IssueWorkflowProfileManager>()
+            .GetAgentRuntimeOverrideAsync(projectId, issueNumber.Value);
     }
 
     internal static (int? IssueNumber, int? EpicNumber) PreflightLineage(
