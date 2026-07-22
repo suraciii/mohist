@@ -14,6 +14,10 @@
   -->
   <PropertyGroup Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('Tests'))">
     <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+    <!-- MTP: dotnet test 与 dotnet run 都走 Microsoft.Testing.Platform，不再经 VSTest -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <OutputType>Exe</OutputType>
+    <GenerateTestingPlatformEntryPoint>true</GenerateTestingPlatformEntryPoint>
   </PropertyGroup>
 
   <ItemGroup>
