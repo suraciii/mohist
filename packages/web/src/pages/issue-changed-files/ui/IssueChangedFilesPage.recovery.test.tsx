@@ -190,6 +190,11 @@ describe('IssueChangedFilesPage', () => {
       const surface = await screen.findByTestId('issue-files-recovery-surface')
       expect(screen.getByTestId('issue-files-recovery-retry')).toBeTruthy()
       expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
+      await waitFor(() => {
+        expect(state.issueRequestCount).toBe(1)
+        expect(state.diffRequestCount).toBe(1)
+        expect(state.commitsRequestCount).toBe(1)
+      })
       fireEvent.click(screen.getByTestId('issue-files-recovery-retry'))
       await waitFor(() => {
         expect(state.issueRequestCount).toBe(2)

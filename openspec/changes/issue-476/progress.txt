@@ -198,5 +198,13 @@
   surface available with the same actions when the failure persists`) was
   observed to flake once under the full `npm test` path. After 25+ reruns of
   that file in isolation and 10 full `npm test` reruns, all pass. The flake
-  is non-reproducible and does not regress issue-476, so evidence is left
-  intact per repair policy.
+  was then reproduced under full verification. The recovery surface could
+  render after the diff request failed while the initial issue request was
+  still in flight; React Query deduplicated the Retry refetch against that
+  request, leaving the count at 1. The test now waits for all three initial
+  request counts to reach 1 before clicking Retry, preserving the exact
+  retry-count assertions.
+- The focused recovery file passed 5 consecutive runs. Final `npm test`
+  passed 1358 CLI, 1290 server unit, 30 architecture, 3008 server spec,
+  5156 Web, and 1370 Runner tests. The issue-476 CLI-focused selection passed
+  110 tests.
