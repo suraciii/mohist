@@ -15,16 +15,16 @@ public class ProjectCliOutputModeTests
     {
         var help = RenderHelp(["project", "list", "--help"]);
 
-        Assert.Contains("--output", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
-    public void ProjectList_Help_OutputOptionDefaultsToJson()
+    public void ProjectList_Help_DescribesJsonFieldSelection()
     {
         var help = RenderHelp(["project", "list", "--help"]);
 
-        var outputLine = help.Split('\n').FirstOrDefault(line => line.Contains("--output")) ?? "";
-        Assert.Contains("json", outputLine);
+        var jsonLine = help.Split('\n').FirstOrDefault(line => line.Contains("--json")) ?? "";
+        Assert.Contains("selected fields", jsonLine, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -32,16 +32,16 @@ public class ProjectCliOutputModeTests
     {
         var help = RenderHelp(["project", "show", "--help"]);
 
-        Assert.Contains("--output", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
-    public void ProjectShow_Help_OutputOptionDefaultsToJson()
+    public void ProjectShow_Help_DescribesJsonFieldSelection()
     {
         var help = RenderHelp(["project", "show", "--help"]);
 
-        var outputLine = help.Split('\n').FirstOrDefault(line => line.Contains("--output")) ?? "";
-        Assert.Contains("json", outputLine);
+        var jsonLine = help.Split('\n').FirstOrDefault(line => line.Contains("--json")) ?? "";
+        Assert.Contains("selected fields", jsonLine, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public class ProjectCliOutputModeTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "table"],
+            ["project", "list",],
             output,
             error,
             new FakeFileSystem(),
@@ -106,7 +106,7 @@ public class ProjectCliOutputModeTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "table"],
+            ["project", "list",],
             output,
             error,
             fileSystem,
@@ -123,7 +123,7 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public async Task ProjectList_OutputJson_MatchesNoFlagJsonOutput()
+    public async Task ProjectList_SelectedJson_IsIndependentFromHumanOutput()
     {
         const string json = """
             {
@@ -153,7 +153,7 @@ public class ProjectCliOutputModeTests
         var explicitError = new StringWriter();
         var explicitExit = await MohistCliCommands.RunAsync(
             new HttpClient(explicitHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "json"],
+            ["project", "list", "--json", "id"],
             explicitOutput,
             explicitError,
             new FakeFileSystem(),
@@ -163,7 +163,9 @@ public class ProjectCliOutputModeTests
         Assert.Equal(defaultExit, explicitExit);
         Assert.Equal("", defaultError.ToString());
         Assert.Equal("", explicitError.ToString());
-        Assert.Equal(defaultOutput.ToString(), explicitOutput.ToString());
+        Assert.NotEqual(defaultOutput.ToString(), explicitOutput.ToString());
+        Assert.Contains("\"id\": \"proj_1\"", explicitOutput.ToString());
+        Assert.DoesNotContain("mohist-local", explicitOutput.ToString());
         Assert.Equal("/api/projects", defaultHttp.Requests.Single().RequestUri!.PathAndQuery);
         Assert.Equal("/api/projects", explicitHttp.Requests.Single().RequestUri!.PathAndQuery);
     }
@@ -184,7 +186,7 @@ public class ProjectCliOutputModeTests
         jsonHttp.EnqueueJson(HttpStatusCode.OK, json);
         await MohistCliCommands.RunAsync(
             new HttpClient(jsonHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "json"],
+            ["project", "list", "--json", "id"],
             new StringWriter(),
             new StringWriter(),
             new FakeFileSystem(),
@@ -195,7 +197,7 @@ public class ProjectCliOutputModeTests
         tableHttp.EnqueueJson(HttpStatusCode.OK, json);
         await MohistCliCommands.RunAsync(
             new HttpClient(tableHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "table"],
+            ["project", "list",],
             new StringWriter(),
             new StringWriter(),
             new FakeFileSystem(),
@@ -212,7 +214,7 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public async Task ProjectList_UnknownOutputMode_FailsBeforeHttpCall()
+    public async Task ProjectList_LegacyOutputOption_FailsBeforeHttpCall()
     {
         var http = new RecordingHttpHandler();
         var output = new StringWriter();
@@ -227,12 +229,10 @@ public class ProjectCliOutputModeTests
             new NoopCommandExecutor(),
             getUserHome: () => "/mohist-tests/user");
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
-        Assert.Contains("table", err);
-        Assert.Contains("json", err);
-        Assert.Contains("yaml", err);
+        Assert.Contains("--output", err);
     }
 
     [Fact]
@@ -259,7 +259,7 @@ public class ProjectCliOutputModeTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "show", "mohist-local", "--output", "table"],
+            ["project", "show", "mohist-local",],
             output,
             error,
             new FakeFileSystem(),
@@ -278,7 +278,7 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public async Task ProjectShow_UnknownOutputMode_FailsBeforeHttpCall()
+    public async Task ProjectShow_LegacyOutputOption_FailsBeforeHttpCall()
     {
         var http = new RecordingHttpHandler();
         var output = new StringWriter();
@@ -293,12 +293,10 @@ public class ProjectCliOutputModeTests
             new NoopCommandExecutor(),
             getUserHome: () => "/mohist-tests/user");
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
-        Assert.Contains("table", err);
-        Assert.Contains("json", err);
-        Assert.Contains("yaml", err);
+        Assert.Contains("--output", err);
     }
 
     private static string StatePath()

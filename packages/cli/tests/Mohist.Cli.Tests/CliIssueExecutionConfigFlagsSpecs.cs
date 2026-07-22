@@ -248,7 +248,7 @@ public class CliIssueExecutionConfigFlagsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--repo", "WEB"], output, error, fs, executor);
+            http, ["issue", "update", "1", "--repo", "WEB", "--json", "number,repositoryName"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patch = handler.Requests.Single(r => r.Method == HttpMethod.Patch);

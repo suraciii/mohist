@@ -9,21 +9,21 @@ namespace Mohist.Cli.Tests.Api;
 public class IssueCliOutputModeTests
 {
     [Fact]
-    public void ValidateOutputMode_Null_ReturnsJson()
+    public void ValidateOutputMode_Null_ReturnsTable()
     {
         var result = MohistCliApi.ValidateOutputMode(null);
 
         var valid = Assert.IsType<MohistCliApi.OutputModeResult.Valid>(result);
-        Assert.Equal("json", valid.Mode);
+        Assert.Equal("table", valid.Mode);
     }
 
     [Fact]
-    public void ValidateOutputMode_Json_ReturnsJson()
+    public void ValidateOutputMode_Json_ReturnsDiscovery()
     {
         var result = MohistCliApi.ValidateOutputMode("json");
 
         var valid = Assert.IsType<MohistCliApi.OutputModeResult.Valid>(result);
-        Assert.Equal("json", valid.Mode);
+        Assert.Equal("discover", valid.Mode);
     }
 
     [Fact]
@@ -36,13 +36,12 @@ public class IssueCliOutputModeTests
     }
 
     [Fact]
-    public void ValidateOutputMode_Unknown_ReturnsFailureThatListsAcceptedValues()
+    public void ValidateOutputMode_FieldSelection_ReturnsJsonSelection()
     {
         var result = MohistCliApi.ValidateOutputMode("yaml");
 
-        var invalid = Assert.IsType<MohistCliApi.OutputModeResult.Invalid>(result);
-        Assert.Contains("table", invalid.Message);
-        Assert.Contains("json", invalid.Message);
+        var valid = Assert.IsType<MohistCliApi.OutputModeResult.Valid>(result);
+        Assert.Equal("json:yaml", valid.Mode);
     }
 
     [Fact]
@@ -135,28 +134,6 @@ public class IssueCliOutputModeTests
         Assert.Equal(HttpMethod.Get, tableReq.Method);
         Assert.Equal("/api/projects", jsonReq.RequestUri!.PathAndQuery);
         Assert.Equal("/api/projects", tableReq.RequestUri!.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task ActionDelegate_UnknownOutputMode_DoesNotMakeHttpCall()
-    {
-        var http = BuildHandler("""
-            { "success": true, "data": [] }
-            """);
-        var api = BuildApi(http);
-        var output = new StringWriter();
-        var error = new StringWriter();
-
-        var validation = MohistCliApi.ValidateOutputMode("yaml");
-        Assert.IsType<MohistCliApi.OutputModeResult.Invalid>(validation);
-
-        Assert.Empty(http.Requests);
-
-        await error.WriteLineAsync(Assert.IsType<MohistCliApi.OutputModeResult.Invalid>(validation).Message);
-
-        Assert.Empty(http.Requests);
-        Assert.Contains("table", error.ToString());
-        Assert.Contains("json", error.ToString());
     }
 
     private static RecordingHttpHandler BuildHandler(string json) =>

@@ -74,7 +74,7 @@ internal static partial class WorkflowCommands
                     WorkflowRunPath(runId!, "/approve"),
                     new { },
                     mode,
-                    nameof(MohistCliApi.TableShape.IssueShow));
+                    nameof(MohistCliApi.TableShape.WorkflowApproval));
             }
         });
         return cmd;

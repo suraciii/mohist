@@ -48,7 +48,7 @@ public class CliLabelCatalogSpecs
             new { key = "module", description = "Classifies the subsystem", origin = "User", supportedValues = new[] { "auth", "ui" } });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "list", "-o", "table"], output, error, fs, executor);
+            http, ["label", "list",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
@@ -63,7 +63,7 @@ public class CliLabelCatalogSpecs
     }
 
     [Fact]
-    public async Task LabelList_Json_ContainsFullData()
+    public async Task LabelList_SelectedJson_ContainsRequestedData()
     {
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         SetCatalogListResponse(handler,
@@ -71,18 +71,16 @@ public class CliLabelCatalogSpecs
             new { key = "module", description = "Classifies subsystem", origin = "User", supportedValues = new[] { "auth", "ui" } });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "list"], output, error, fs, executor);
+            http, ["label", "list", "--json", "key,description,supportedValues"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString().Trim();
         Assert.Contains("\"key\"", text);
         Assert.Contains("\"description\"", text);
-        Assert.Contains("\"origin\"", text);
         Assert.Contains("\"supportedValues\"", text);
         Assert.Contains("\"refactor\"", text);
         Assert.Contains("\"module\"", text);
-        Assert.Contains("\"System\"", text);
-        Assert.Contains("\"User\"", text);
+        Assert.DoesNotContain("\"origin\"", text);
     }
 
     [Fact]
@@ -93,7 +91,7 @@ public class CliLabelCatalogSpecs
             new { key = "refactor", description = "Technical refactoring that does not change observable behavior", origin = "System" });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "list", "-o", "table"], output, error, fs, executor);
+            http, ["label", "list",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
@@ -531,7 +529,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "delete", "module", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["label", "delete", "module", "--project", "proj_other"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -553,7 +551,7 @@ public class CliLabelCatalogSpecs
         });
 
         var canonicalExit = await MohistCliCommands.RunAsync(
-            http, ["label", "delete", "module", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["label", "delete", "module", "--project", "proj_other"], output, error, fs, executor);
         var canonicalStdout = output.ToString();
         var canonicalStderr = error.ToString();
         var canonicalRequests = handler.Requests.ToList();
@@ -562,7 +560,7 @@ public class CliLabelCatalogSpecs
         error.GetStringBuilder().Clear();
 
         var aliasExit = await MohistCliCommands.RunAsync(
-            http, ["label", "remove", "module", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["label", "remove", "module", "--project", "proj_other"], output, error, fs, executor);
         var aliasStdout = output.ToString();
         var aliasStderr = error.ToString();
         var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();
@@ -592,7 +590,7 @@ public class CliLabelCatalogSpecs
         });
 
         var canonicalExit = await MohistCliCommands.RunAsync(
-            http, ["label", "delete", "module", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["label", "delete", "module", "--project", "proj_other"], output, error, fs, executor);
         var canonicalStdout = output.ToString();
         var canonicalStderr = error.ToString();
         var canonicalRequests = handler.Requests.ToList();
@@ -601,7 +599,7 @@ public class CliLabelCatalogSpecs
         error.GetStringBuilder().Clear();
 
         var aliasExit = await MohistCliCommands.RunAsync(
-            http, ["label", "rm", "module", "--project-id", "proj_other"], output, error, fs, executor);
+            http, ["label", "rm", "module", "--project", "proj_other"], output, error, fs, executor);
         var aliasStdout = output.ToString();
         var aliasStderr = error.ToString();
         var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();

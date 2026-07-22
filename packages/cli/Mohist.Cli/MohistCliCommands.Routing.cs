@@ -163,8 +163,11 @@ internal static class RoutingCommands
             var resolved = resolution.ProjectId;
             var count = ctx.GetValue(last); var path = $"/api/projects/{Uri.EscapeDataString(resolved)}/routing/test" + (count.HasValue ? $"?last={count.Value}" : "");
             var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(output)); if (exit != 0) return exit;
+            var localExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.RoutingRule));
+            if (localExit is not null) return localExit.Value;
             var (status, data) = await api.GetDataOrPrintErrorAsync(path); if (status != 0 || data is null) return status == 0 ? 1 : status;
-            if (mode == "json") { api.Output.WriteLine(data.ToJsonString(MohistCliApi.JsonOutputOptions)); return 0; }
+            if (mode.StartsWith("json:", StringComparison.Ordinal))
+                return await api.WriteSelectedDataAsync(data, mode, nameof(MohistCliApi.TableShape.RoutingRule));
             RenderTrace(api.Output, data); return 0;
         });
         return command;

@@ -26,8 +26,8 @@ public class IssueCliFeedbackTests
 
         Assert.Contains("--stage", help);
         Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
-        Assert.Contains("--output", help);
+        Assert.DoesNotContain("--project-id", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class IssueCliFeedbackTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "list", "42", "--project-id", "proj_f6c141d63b6243bfbb481737b2243b87"],
+            ["issue", "feedback", "list", "42", "--project", "proj_f6c141d63b6243bfbb481737b2243b87"],
             output,
             error,
             new FakeFileSystem(),
@@ -134,7 +134,7 @@ public class IssueCliFeedbackTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "list", "42", "--project", "mohist-local", "--output", "table"],
+            ["issue", "feedback", "list", "42", "--project", "mohist-local",],
             output,
             error,
             new FakeFileSystem(),
@@ -177,7 +177,7 @@ public class IssueCliFeedbackTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "list", "42", "--project", "mohist-local", "--output", "json"],
+            ["issue", "feedback", "list", "42", "--project", "mohist-local", "--json", "id,issueNumber,stage,status"],
             output,
             error,
             new FakeFileSystem(),
@@ -250,7 +250,7 @@ public class IssueCliFeedbackTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "show", "42", "--feedback", "fb_123", "--project", "mohist-local", "--output", "json"],
+            ["issue", "feedback", "show", "42", "--feedback", "fb_123", "--project", "mohist-local", "--json", "id,issueNumber,workflowRunId,stage,status,body"],
             output,
             error,
             new FakeFileSystem(),
@@ -295,7 +295,7 @@ public class IssueCliFeedbackTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "show", "42", "--latest", "--project", "mohist-local", "--output", "json"],
+            ["issue", "feedback", "show", "42", "--latest", "--project", "mohist-local", "--json", "id"],
             output,
             error,
             new FakeFileSystem(),
@@ -340,7 +340,7 @@ public class IssueCliFeedbackTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "show", "42", "--latest", "--stage", "plan", "--project", "mohist-local", "--output", "json"],
+            ["issue", "feedback", "show", "42", "--latest", "--stage", "plan", "--project", "mohist-local", "--json", "id"],
             output,
             error,
             new FakeFileSystem(),
@@ -457,7 +457,7 @@ public class IssueCliFeedbackTests
         jsonHttp.EnqueueJson(HttpStatusCode.OK, json);
         await MohistCliCommands.RunAsync(
             new HttpClient(jsonHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "list", "42", "--project", "mohist-local", "--output", "json"],
+            ["issue", "feedback", "list", "42", "--project", "mohist-local", "--json", "id"],
             new StringWriter(),
             new StringWriter(),
             new FakeFileSystem(),
@@ -467,7 +467,7 @@ public class IssueCliFeedbackTests
         tableHttp.EnqueueJson(HttpStatusCode.OK, json);
         await MohistCliCommands.RunAsync(
             new HttpClient(tableHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "feedback", "list", "42", "--project", "mohist-local", "--output", "table"],
+            ["issue", "feedback", "list", "42", "--project", "mohist-local",],
             new StringWriter(),
             new StringWriter(),
             new FakeFileSystem(),

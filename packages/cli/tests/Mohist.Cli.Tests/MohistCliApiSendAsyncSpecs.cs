@@ -258,7 +258,7 @@ public class MohistCliApiSendAsyncSpecs
 
         var exit = await api.PrintPostAsync("/api/anything", new { });
 
-        Assert.Equal(4, exit);
+        Assert.Equal(1, exit);
         Assert.Contains("Missing", api.Error.ToString());
         Assert.Contains("not_found", api.Error.ToString());
     }

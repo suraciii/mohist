@@ -1,0 +1,42 @@
+## Codebase Patterns
+
+- `MohistCliApi` is the existing command-facing boundary. It owns HTTP request construction and legacy renderers, while `MohistCliCommands.RunAsync` builds the testable command tree with injected streams and fakes.
+- `System.CommandLine` parse errors are available from `ParseResult.Errors`; help for the nearest parsed command can be rendered through a second `--help` invocation using the error writer.
+- CLI tests use `RecordingHttpHandler`, `FakeFileSystem`, `StringWriter`, and injected `TextReader`; no real server or filesystem is required.
+
+## T-001
+
+- Added `CliInvocation`, `CliResultWriter`, `CliResponseReader`, `CliHintResolver`, `CliTransportAttempt`, terminal/environment seams, and stable exit-code mapping in `CliExecutionContract.cs`.
+- Response failures preserve non-blank Server codes, synthesize `http-<status>` for code-less HTTP failures, retain details, and classify mutating transport exceptions as outcome unknown.
+- Root parsing now returns usage exit `2` with nearest-command help on stderr and maps cancellation to `130`.
+- Confirmation prompts in notification setup are emitted on stderr and are suppressed when stdin is redirected or `MOHIST_PROMPT_DISABLED=1`.
+- Existing suite currently has one expected legacy failure because `NotifySetup_ExistingHermesScalar_PromptsBeforeOverwrite` asserts confirmation text on stdout; the new contract requires confirmation exclusively on stderr.
+- Fixed root pre-parse false positives for option values by relying on System.CommandLine's parsed command result; all 1,382 CLI tests now pass.
+- Production `CliProgram.Main` now uses `MohistCliCommands.RunAsync`, so cancellation, parse errors, terminal state, and environment handling share one root path.
+- `CliResponseReader` reads response content without assuming a seekable stream and maps malformed HTTP payloads to an operation failure instead of leaking a JSON exception.
+- `MohistCliApi` carries the shared invocation seams; notification overwrite prompts use the injected terminal and environment state and write confirmation diagnostics to stderr.
+
+## T-002
+
+- Project references now use `ProjectReferenceResolver`: explicit `--project`, nearest current-directory `.mohist/cli-state.json`, then the user-home selected Project record.
+- A malformed nearest context is terminal and produces one local diagnostic; it never falls through to the home selection.
+- `mo project use` writes the canonical `activeProjectId` record to both the user-home state path and the current-directory state path.
+- The legacy `--project-id` surface is hidden from help and rejected before invocation with usage exit `2`, so no domain request is sent.
+- The repository's npm workspaces include only `packages/web` and `packages/runner`; CLI verification uses `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj`.
+
+## T-003
+
+- `ResourceDescriptor` declares cardinality and ordered top-level fields; `JsonSelection` distinguishes absent, bare discovery, selected, and invalid input without reflection or server-side field queries.
+- `issue list` and `issue show` now use `--json [<fields>]`; discovery and invalid selections complete locally before Project resolution, while selected output projects decoded response data without the Server envelope.
+- `events tail` keeps NDJSON and projects each stream object locally with a compact serializer so one JSON object remains exactly one line.
+- Resource selection diagnostics use exit `2`, stay on stderr, and point callers to bare `--json` for the accepted ordered field list. CLI coverage includes single, collection, stream, discovery, invalid, stream separation, and legacy-option rejection cases.
+
+## T-004
+
+- Added `PrintMutationResourceAsync`, which uses `CliResponseReader` with `mutating: true`, projects selected fields through the same `ResourceDescriptor` contract as reads, and sends failures to the shared result writer.
+- Migrated Issue create/update, Issue action/reject/stop, and the complete Epic mutation family to `--json [<fields>]` descriptors. Added POST/PATCH/DELETE, domain-failure, discovery, and projection coverage.
+- Existing Epic tests still exercise the intentionally removed legacy `--output` surface and need migration to the new `--json` contract before the full suite can pass.
+- Focused resource-output tests pass (12); the full suite currently has 16 failures, mostly old Epic/Archive/Feedback expectations for `--output` or envelope output, plus one Issue update human-rendering expectation. No commit was made because the complete task acceptance criteria are not yet satisfied.
+- Reproduced the 16 failures from the CLI test suite. They were stale tests invoking removed mutation output options, plus three contract regressions: archive-completed used a collection descriptor for a single result, Issue create guidance replaced its human result, and guidance was written to stdout.
+- Migrated the affected tests to selected-field JSON or explicit usage-2 legacy-option checks. Archive JSON selection now validates before Project resolution, Issue resources include `repositoryName`, and Issue create keeps its table result on stdout while sending guidance to stderr.
+- Verification: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passes all 1,399 tests.

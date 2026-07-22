@@ -51,28 +51,58 @@ internal static class MohistCliCommands
     internal static Option<bool> FollowOption() =>
         new("--follow", "-f") { Description = "Follow log output" };
 
-    internal static Option<string?> ProjectIdOption() =>
-        new("--project-id") { Description = ProjectRefOptionDescription };
+    internal static Option<string?> ProjectIdOption()
+    {
+        var option = new Option<string?>("--project-id") { Description = "Legacy project option" };
+        option.Hidden = true;
+        return option;
+    }
 
     internal static (Option<string?> Project, Option<string?> ProjectId) ProjectRefOption()
     {
         var project = new Option<string?>("--project") { Description = ProjectRefOptionDescription };
-        var projectId = new Option<string?>("--project-id") { Description = ProjectRefOptionDescription };
+        var projectId = ProjectIdOption();
+        projectId.Hidden = true;
         return (project, projectId);
     }
 
-    internal static Option<string> OutputOption(string defaultValue = "json", string formats = "table, json") =>
-        new("--output", "-o")
+    internal static Option<string?> OutputOption(string defaultValue = "table", string formats = "table, json") =>
+        CreateOutputOption(defaultValue);
+
+    private static Option<string?> CreateOutputOption(string defaultValue)
+    {
+        var option = new Option<string?>("--json")
         {
-            Description = $"Output format ({formats})",
+            Description = "Return selected fields, or list available fields when no value is supplied",
             DefaultValueFactory = _ => defaultValue,
+            Arity = ArgumentArity.ZeroOrOne,
+        };
+        option.Validators.Add(result => OutputOptionState.Explicit = !result.Implicit);
+        return option;
+    }
+
+    internal static Option<string?> JsonSelectionOption() =>
+        new("--json")
+        {
+            Description = "Return selected fields, or list available fields when no value is supplied",
+            Arity = ArgumentArity.ZeroOrOne,
         };
 
     internal const string NoActiveProjectMessage =
         "Run 'mo project use <name-or-id>' or pass --project <name-or-id>";
 
-    private const string ProjectRefOptionDescription =
-        "Project name or id (canonical: --project; --project-id is a backwards-compatible alias)";
+    internal static class OutputOptionState
+    {
+        private static readonly AsyncLocal<bool> ExplicitValue = new();
+
+        public static bool Explicit
+        {
+            get => ExplicitValue.Value;
+            set => ExplicitValue.Value = value;
+        }
+    }
+
+    private const string ProjectRefOptionDescription = "Project name or id";
 
     internal static Option<string[]?> LabelOption() =>
         new("--label", "-l")
@@ -127,12 +157,17 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null)
+    internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null)
     {
+        OutputOptionState.Explicit = false;
         environment ??= SystemEnvironmentVariableProvider.Instance;
         getUserHome ??= fileSystem is RealFileSystem
             ? null
             : () => "/mohist-tests/user";
+        var terminal = terminalOverride ?? new CliTerminal(standardInput is null || standardInput == Console.In
+            ? !Console.IsInputRedirected
+            : standardInput != TextReader.Null);
+        var cliEnvironment = new EnvironmentVariableAdapter(environment);
         var api = new MohistCliApi(
             http,
             output,
@@ -140,9 +175,13 @@ internal static class MohistCliCommands
             fileSystem,
             commandExecutor,
             standardInput,
-            getUserHome);
+            getUserHome,
+            terminal: terminal,
+            cliEnvironment: cliEnvironment,
+            cancellationToken: cancellationToken);
         var services = new ServiceCollection();
         services.AddSingleton(api);
+        services.AddSingleton(api.ResponseReader);
         services.AddSingleton(output);
         services.AddSingleton(error);
         services.AddSingleton<IFileSystem>(fileSystem);
@@ -179,7 +218,49 @@ internal static class MohistCliCommands
         var root = Build(api, provider);
         var config = new InvocationConfiguration { Output = output, Error = error };
         var parseConfig = new ParserConfiguration { ResponseFileTokenReplacer = null };
-        return CommandLineParser.Parse(root, args, parseConfig).InvokeAsync(config);
+        var parseResult = CommandLineParser.Parse(root, args, parseConfig);
+        if (args.Any(arg => string.Equals(arg, "--project-id", StringComparison.Ordinal)
+            || arg.StartsWith("--project-id=", StringComparison.Ordinal)))
+        {
+            await error.WriteLineAsync("--project-id is not supported; use --project <name-or-id>.").ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.UsageFailure);
+        }
+        if (parseResult.Errors.Count > 0)
+        {
+            var invocation = new CliInvocation(
+                output,
+                error,
+                standardInput ?? Console.In,
+                terminal,
+                cliEnvironment,
+                cancellationToken);
+            foreach (var parseError in parseResult.Errors)
+                await error.WriteLineAsync(parseError.Message).ConfigureAwait(false);
+
+            var nearestCommand = parseResult.CommandResult.Command;
+            var helpConfig = new InvocationConfiguration { Output = error, Error = error };
+            await nearestCommand.Parse(["--help"]).InvokeAsync(helpConfig).ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.UsageFailure);
+        }
+
+        try
+        {
+            return await parseResult.InvokeAsync(config, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await error.WriteLineAsync("Operation cancelled.").ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.Cancelled);
+        }
+    }
+
+    private sealed class EnvironmentVariableAdapter : ICliEnvironment
+    {
+        private readonly IEnvironmentVariableProvider _provider;
+
+        public EnvironmentVariableAdapter(IEnvironmentVariableProvider provider) => _provider = provider;
+
+        public string? Get(string name) => _provider.GetEnvironmentVariable(name);
     }
 
     private static IServiceInstaller BuildDefaultInstaller(TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor)

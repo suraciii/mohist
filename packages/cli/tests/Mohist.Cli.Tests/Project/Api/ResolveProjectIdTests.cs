@@ -74,7 +74,7 @@ public class ResolveProjectIdTests
         Assert.Contains("mohist-local", error.ToString());
         Assert.Contains("proj_other", error.ToString());
         Assert.Contains("--project", error.ToString());
-        Assert.Contains("--project-id", error.ToString());
+        Assert.Contains("--project", error.ToString());
         Assert.Contains("Pass only one", error.ToString());
         Assert.Empty(http.Requests);
     }
@@ -187,7 +187,7 @@ public class ResolveProjectIdTests
     }
 
     [Fact]
-    public async Task IssueShow_ProjectIdOptionIsNotOverriddenByActiveProject()
+    public async Task IssueShow_ExplicitProjectIsNotOverriddenByActiveProject()
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
@@ -203,7 +203,7 @@ public class ResolveProjectIdTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "show", "83", "--project-id", "other-project"],
+            ["issue", "show", "83", "--project", "other-project"],
             output,
             error,
             files,
@@ -211,7 +211,10 @@ public class ResolveProjectIdTests
             getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
-        Assert.Equal("/api/projects/other-project/issues/83", http.Requests.Single().RequestUri!.PathAndQuery);
+        Assert.Empty(error.ToString());
+        Assert.Equal(
+            "/api/projects/other-project/issues/83",
+            http.Requests.Single().RequestUri!.PathAndQuery);
     }
 
     private static MohistCliApi CreateApi(RecordingHttpHandler http, StringWriter output, StringWriter error, IFileSystem files) =>

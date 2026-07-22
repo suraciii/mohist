@@ -10,7 +10,7 @@ namespace Mohist.Cli;
 // (output-format / subresource / associated-resource) recorded in
 // design/cli.md:
 //
-//   * get     — full resource; -o yaml renders the workflow template
+//   * get     — full resource; --yaml renders the workflow template
 //                definition by hitting GET .../yaml (no `mo workflow yaml`
 //                command — output format never creates a command).
 //                `show` is kept as a transitional name alias of `get` so
@@ -33,16 +33,26 @@ internal static partial class WorkflowCommands
     {
         var cmd = new Command(
             "get",
-            "Show full workflow run resource (status, stages, approval state, associated issue). Default table renders the summary view; use -o json for the full read model and -o yaml for the workflow template definition.");
+                "Show full workflow run resource (status, stages, approval state, associated issue). Use bare --json to discover fields or --json <fields> to select them.");
         cmd.Aliases.Add("show");
         var runIdArg = RunIdArg();
-        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table", formats: "table, json, yaml");
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var yamlOpt = new Option<bool>("--yaml")
+        {
+            Description = "Print the Workflow Definition YAML source",
+        };
         cmd.Arguments.Add(runIdArg);
-        cmd.Options.Add(outputOpt);
+        cmd.Options.Add(jsonOpt);
+        cmd.Options.Add(yamlOpt);
         cmd.SetAction(ctx =>
         {
             var runId = ctx.GetValue(runIdArg);
-            var output = ctx.GetValue(outputOpt);
+            var jsonProvided = ctx.GetResult(jsonOpt) is not null;
+            var selection = JsonSelection.Parse(
+                ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.WorkflowRunDetail)),
+                jsonProvided,
+                ctx.GetValue(jsonOpt));
+            var yaml = ctx.GetValue(yamlOpt);
             return GetAsync();
 
             async Task<int> GetAsync()
@@ -53,24 +63,23 @@ internal static partial class WorkflowCommands
                     return 1;
                 }
 
-                // yaml is special-cased: the full JSON read model doesn't carry
-                // the workflow template-definition YAML, and the read model is
-                // not the right shape for it. The canonical rule "output
-                // format never creates a command" (design/cli.md) is honored
-                // here by reusing the existing GET .../yaml endpoint behind
-                // the same `get -o yaml` switch instead of minting a new
-                // command.
-                if (string.Equals(output, "yaml", StringComparison.OrdinalIgnoreCase))
+                if (yaml && jsonProvided)
                 {
-                    return await PrintWorkflowRunYamlAsync(api, runId!);
+                    api.Error.WriteLine("--yaml and --json cannot be used together");
+                    return CliExitCode.For(CliExitOutcome.UsageFailure);
                 }
 
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
-                return await api.PrintWithOutputAsync(
+                if (yaml)
+                    return await PrintWorkflowRunYamlAsync(api, runId!);
+
+                var descriptor = ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.WorkflowRunDetail));
+                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(descriptor, selection);
+                return await api.PrintResourceAsync(
                     WorkflowRunPath(runId!, ""),
-                    mode,
-                    nameof(MohistCliApi.TableShape.WorkflowRunDetail));
+                    descriptor,
+                    selection,
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));
             }
         });
         return cmd;

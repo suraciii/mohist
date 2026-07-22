@@ -23,7 +23,7 @@ internal static class NdjsonStream
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return 0;
+            return CliExitCode.For(CliExitOutcome.Cancelled);
         }
         catch (HttpRequestException)
         {
@@ -69,7 +69,7 @@ internal static class NdjsonStream
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return 0;
+            return CliExitCode.For(CliExitOutcome.Cancelled);
         }
         finally
         {
@@ -136,5 +136,69 @@ internal static class NdjsonStream
         if (offset is not null)
             return $"offset {offset}";
         return string.Empty;
+    }
+
+    public static async Task<int> ReadSelectedAsync(
+        HttpClient http,
+        string path,
+        TextWriter output,
+        TextWriter error,
+        JsonSelection selection,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        HttpResponseMessage response;
+        try
+        {
+            response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return CliExitCode.For(CliExitOutcome.Cancelled);
+        }
+        catch (HttpRequestException ex)
+        {
+            await error.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            return 1;
+        }
+
+        try
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                await error.WriteLineAsync($"Tail request failed: {(int)response.StatusCode} {response.ReasonPhrase}")
+                    .ConfigureAwait(false);
+                return 1;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var reader = new StreamReader(stream);
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (line is null)
+                    break;
+                var node = JsonNode.Parse(line);
+                var projected = selection.Project(node, ResourceCardinality.Stream);
+                await output.WriteLineAsync(projected.ToJsonString(MohistCliApi.JsonCompactOutputOptions)).ConfigureAwait(false);
+                await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            return 0;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return CliExitCode.For(CliExitOutcome.Cancelled);
+        }
+        catch (JsonException ex)
+        {
+            await error.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            return 1;
+        }
+        finally
+        {
+            response.Dispose();
+        }
     }
 }

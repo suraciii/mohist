@@ -65,7 +65,7 @@ public class CliProjectWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["project", "workflow", "profile", "list", "--described", "--project-id", "proj_abc"],
+            ["project", "workflow", "profile", "list", "--described", "--project", "proj_abc"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -178,9 +178,9 @@ public class CliProjectWorkflowProfileSpecs
             ["project", "workflow", "profile", "list", "--described", "--project", "proj_a", "--project-id", "proj_b"],
             output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("--project and --project-id resolve to different values", error.ToString());
+        Assert.Contains("--project-id is not supported", error.ToString());
         Assert.DoesNotContain("degraded", error.ToString());
     }
 
@@ -232,7 +232,7 @@ public class CliProjectWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["project", "workflow", "profile", "list", "--project", "proj_abc", "-o", "json"],
+            ["project", "workflow", "profile", "list", "--project", "proj_abc", "--json", "id"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -243,7 +243,7 @@ public class CliProjectWorkflowProfileSpecs
     }
 
     [Fact]
-    public async Task ProfileList_JsonFlagIsNotACompatibilityAlias()
+    public async Task ProfileList_BareJson_DiscoversFieldsWithoutCallingApi()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
@@ -252,9 +252,12 @@ public class CliProjectWorkflowProfileSpecs
             ["project", "workflow", "profile", "list", "--json"],
             output, error, fs, executor);
 
-        Assert.NotEqual(0, exitCode);
+        Assert.Equal(0, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("Unrecognized command or argument '--json'", error.ToString());
+        Assert.Equal(
+            "[\"id\",\"name\",\"displayName\",\"description\",\"isDefault\"]",
+            output.ToString().Trim());
+        Assert.Empty(error.ToString());
     }
 
     [Fact]
@@ -293,9 +296,9 @@ public class CliProjectWorkflowProfileSpecs
             ["project", "workflow", "profile", "list", "--project", "proj_a", "--project-id", "proj_b"],
             output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("--project and --project-id resolve to different values", error.ToString());
+        Assert.Contains("--project-id is not supported", error.ToString());
     }
 
     [Fact]
@@ -318,7 +321,7 @@ public class CliProjectWorkflowProfileSpecs
             ["project", "workflow", "profile", "list", "--described", "--project", "missing-project"],
             output, error, fs, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         var getReq = Assert.Single(handler.Requests, r => r.Method == HttpMethod.Get);
         Assert.Equal("/api/workflow-profiles?project=missing-project", getReq.RequestUri?.PathAndQuery);
         Assert.Contains("Project 'missing-project' not found", error.ToString());
@@ -452,7 +455,7 @@ public class CliProjectWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["project", "workflow", "profile", "enable", "mohist/local", "--project-id", "proj_xyz"],
+            ["project", "workflow", "profile", "enable", "mohist/local", "--project", "proj_xyz"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -588,9 +591,9 @@ public class CliProjectWorkflowProfileSpecs
             ["project", "workflow", "profile", "enable", "mohist/local", "--project", "proj_a", "--project-id", "proj_b"],
             output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("--project and --project-id resolve to different values", error.ToString());
+        Assert.Contains("--project-id is not supported", error.ToString());
     }
 
     [Fact]

@@ -92,7 +92,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReqs = handler.Requests.Where(r => r.Method == HttpMethod.Get).ToList();
@@ -115,7 +115,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "-o", "json"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42", "--json", "issueNumber,profileId"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -144,24 +144,23 @@ public class CliIssueWorkflowConfigSpecs
             r => r.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile");
 
         var byId = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "--project-id", "proj_abc"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42", "--project", "proj_abc"], output, error, fs, executor);
         Assert.Equal(0, byId);
         Assert.Contains(handler.Requests.Where(r => r.Method == HttpMethod.Get),
             r => r.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile");
     }
 
     [Fact]
-    public async Task ConfigGet_InvalidOutputMode_PrintsErrorAndExitsOne()
+    public async Task ConfigGet_LegacyOutputOption_IsRejectedLocally()
     {
         var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "-o", "yaml"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42", "--output", "json"], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("table", error.ToString());
-        Assert.Contains("json", error.ToString());
+        Assert.Contains("--output", error.ToString());
     }
 
     [Fact]
@@ -202,7 +201,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42",], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("Issue 42 not found", error.ToString());
@@ -376,7 +375,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "set", "42", "--var", "foo=bar", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "set", "42", "--var", "foo=bar",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -689,7 +688,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "clear", "42", "--var", "foo", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "clear", "42", "--var", "foo",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();

@@ -70,7 +70,7 @@ public class CliOpencodeModelsCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["opencode", "models",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -79,7 +79,7 @@ public class CliOpencodeModelsCommandSpecs
     }
 
     [Fact]
-    public async Task OpencodeModels_Json_PreservesRawPayloadIncludingModelVariants()
+    public async Task OpencodeModels_SelectedJson_EmitsModelResources()
     {
         var variants = new
         {
@@ -94,26 +94,17 @@ public class CliOpencodeModelsCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["opencode", "models", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal($"/api/projects/{ActiveProjectId}/opencode/models", request.RequestUri?.PathAndQuery);
 
-        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonObject;
+        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonArray;
         Assert.NotNull(parsed);
-        var models = parsed!["models"] as JsonArray;
-        Assert.NotNull(models);
-        Assert.Equal(new[] { "anthropic/claude-sonnet", "openai/gpt-5" }, models!.Select(m => m!.GetValue<string>()).ToArray());
-
-        var modelVariants = parsed["modelVariants"] as JsonObject;
-        Assert.NotNull(modelVariants);
-        var anthropicVariants = modelVariants!["anthropic_claude_sonnet"] as JsonArray;
-        Assert.NotNull(anthropicVariants);
-        Assert.Equal(new[] { "default", "thinking" }, anthropicVariants!.Select(v => v!.GetValue<string>()).ToArray());
-        var openaiVariants = modelVariants["openai_gpt_5"] as JsonArray;
-        Assert.NotNull(openaiVariants);
-        Assert.Equal(new[] { "default" }, openaiVariants!.Select(v => v!.GetValue<string>()).ToArray());
+        Assert.Equal(
+            new[] { "anthropic/claude-sonnet", "openai/gpt-5" },
+            parsed!.Select(model => model!["id"]!.GetValue<string>()).ToArray());
     }
 
     [Fact]
@@ -140,7 +131,7 @@ public class CliOpencodeModelsCommandSpecs
             activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["opencode", "models", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("No project resolved", error.ToString(), StringComparison.Ordinal);

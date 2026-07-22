@@ -11,23 +11,23 @@ namespace Mohist.Cli.Tests.Api;
 public class IssueCliProjectRefAndOutputTests
 {
     [Fact]
-    public void IssueList_Help_ListsProjectProjectIdAndOutputOptions()
+    public void IssueList_Help_ListsProjectProjectIdAndJsonOptions()
     {
         var help = RenderHelp(["issue", "list", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
-        Assert.Contains("--output", help);
+        Assert.DoesNotContain("--project-id", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
-    public void IssueShow_Help_ListsProjectProjectIdAndOutputOptions()
+    public void IssueShow_Help_ListsProjectProjectIdAndJsonOptions()
     {
         var help = RenderHelp(["issue", "show", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
-        Assert.Contains("--output", help);
+        Assert.DoesNotContain("--project-id", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -36,8 +36,8 @@ public class IssueCliProjectRefAndOutputTests
         var help = RenderHelp(["issue", "sessions", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
-        Assert.Contains("--output", help);
+        Assert.DoesNotContain("--project-id", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -46,8 +46,8 @@ public class IssueCliProjectRefAndOutputTests
         var help = RenderHelp(["issue", "workflow", "status", "--help"]);
 
         Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
-        Assert.Contains("--output", help);
+        Assert.DoesNotContain("--project-id", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -55,8 +55,7 @@ public class IssueCliProjectRefAndOutputTests
     {
         var help = RenderHelp(["issue", "list", "--help"]);
 
-        var outputLine = help.Split('\n').FirstOrDefault(line => line.Contains("--output")) ?? "";
-        Assert.Contains("json", outputLine);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -64,8 +63,7 @@ public class IssueCliProjectRefAndOutputTests
     {
         var help = RenderHelp(["issue", "show", "--help"]);
 
-        var outputLine = help.Split('\n').FirstOrDefault(line => line.Contains("--output")) ?? "";
-        Assert.Contains("json", outputLine);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -132,7 +130,7 @@ public class IssueCliProjectRefAndOutputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "show", "83", "--project-id", "proj_f6c141d63b6243bfbb481737b2243b87"],
+            ["issue", "show", "83", "--project", "proj_f6c141d63b6243bfbb481737b2243b87"],
             output,
             error,
             new FakeFileSystem(),
@@ -225,7 +223,7 @@ public class IssueCliProjectRefAndOutputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "list", "--project", "mohist-local", "--output", "table"],
+            ["issue", "list", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -242,7 +240,7 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public async Task IssueList_OutputJson_MatchesNoFlagJsonOutput()
+    public async Task IssueList_SelectedJsonProjectsOnlyRequestedFields()
     {
         const string json = """
             {
@@ -271,16 +269,17 @@ public class IssueCliProjectRefAndOutputTests
         var explicitError = new StringWriter();
         var explicitExit = await MohistCliCommands.RunAsync(
             new HttpClient(explicitHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "list", "--project", "mohist-local", "--output", "json"],
+            ["issue", "list", "--project", "mohist-local", "--json", "number,title"],
             explicitOutput,
             explicitError,
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(defaultExit, explicitExit);
+        Assert.Equal(0, defaultExit);
+        Assert.Equal(0, explicitExit);
         Assert.Equal("", defaultError.ToString());
         Assert.Equal("", explicitError.ToString());
-        Assert.Equal(defaultOutput.ToString(), explicitOutput.ToString());
+        Assert.NotEqual(defaultOutput.ToString(), explicitOutput.ToString());
         Assert.Equal("/api/projects/mohist-local/issues", defaultHttp.Requests.Single().RequestUri!.PathAndQuery);
         Assert.Equal("/api/projects/mohist-local/issues", explicitHttp.Requests.Single().RequestUri!.PathAndQuery);
     }
@@ -301,7 +300,7 @@ public class IssueCliProjectRefAndOutputTests
         jsonHttp.EnqueueJson(HttpStatusCode.OK, json);
         await MohistCliCommands.RunAsync(
             new HttpClient(jsonHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "list", "--project", "mohist-local", "--output", "json"],
+            ["issue", "list", "--project", "mohist-local", "--json", "number,title"],
             new StringWriter(),
             new StringWriter(),
             new FakeFileSystem(),
@@ -311,7 +310,7 @@ public class IssueCliProjectRefAndOutputTests
         tableHttp.EnqueueJson(HttpStatusCode.OK, json);
         await MohistCliCommands.RunAsync(
             new HttpClient(tableHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "list", "--project", "mohist-local", "--output", "table"],
+            ["issue", "list", "--project", "mohist-local"],
             new StringWriter(),
             new StringWriter(),
             new FakeFileSystem(),
@@ -327,7 +326,7 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public async Task IssueList_UnknownOutputMode_FailsBeforeHttpCall()
+    public async Task IssueList_LegacyOutput_FailsBeforeHttpCall()
     {
         var http = new RecordingHttpHandler();
 
@@ -342,12 +341,10 @@ public class IssueCliProjectRefAndOutputTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
-        Assert.Contains("table", err);
-        Assert.Contains("json", err);
-        Assert.Contains("yaml", err);
+        Assert.Contains("--json", err);
     }
 
     [Fact]
@@ -388,13 +385,10 @@ public class IssueCliProjectRefAndOutputTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
-        Assert.Contains("mohist-local", err);
-        Assert.Contains("proj_other", err);
-        Assert.Contains("--project", err);
-        Assert.Contains("--project-id", err);
+        Assert.Contains("--project-id is not supported", err);
     }
 
     private static string RenderHelp(string[] args)
