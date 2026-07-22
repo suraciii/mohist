@@ -50,3 +50,39 @@ describe("local Git Action manifests", () => {
     expect(entry?.inputs.map((input) => input.name)).not.toContain("buildPrompt")
   })
 })
+
+describe("validateActionInput null handling", () => {
+  it("treats an explicit null on an optional field as absent (profile vars seeded to null render through)", () => {
+    const resolved = createDefaultRegistry().resolve("mohist/archive-change")
+    if (resolved.kind !== "definition") throw new Error("Missing mohist/archive-change")
+
+    const result = validateActionInput(resolved.definition.manifest, {
+      changeDir: "openspec/changes/issue-1",
+      archiveHint: null,
+    })
+
+    expect(result).toMatchObject({ kind: "ok" })
+    if (result.kind !== "ok") throw new Error("expected ok")
+    // null on optional field is dropped, not carried through as null
+    expect(result.input).not.toHaveProperty("archiveHint")
+    expect(result.input.changeDir).toBe("openspec/changes/issue-1")
+  })
+
+  it("still rejects an explicit null on a required field", () => {
+    const resolved = createDefaultRegistry().resolve("mohist/archive-change")
+    if (resolved.kind !== "definition") throw new Error("Missing mohist/archive-change")
+
+    const result = validateActionInput(resolved.definition.manifest, {
+      changeDir: null,
+      archiveHint: null,
+    })
+
+    expect(result).toMatchObject({
+      kind: "failure",
+      error: {
+        code: "invalid-input",
+        message: expect.stringContaining("'changeDir'"),
+      },
+    })
+  })
+})
