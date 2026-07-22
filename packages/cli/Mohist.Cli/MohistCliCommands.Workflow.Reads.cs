@@ -33,10 +33,10 @@ internal static partial class WorkflowCommands
     {
         var cmd = new Command(
             "get",
-            "Show full workflow run resource (status, stages, approval state, associated issue). Default table renders the summary view; use -o json for the full read model and -o yaml for the workflow template definition.");
+                "Show full workflow run resource (status, stages, approval state, associated issue). Use bare --json to discover fields or --json <fields> to select them.");
         cmd.Aliases.Add("show");
         var runIdArg = RunIdArg();
-        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table", formats: "table, json, yaml");
+        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
@@ -51,18 +51,6 @@ internal static partial class WorkflowCommands
                 {
                     api.Error.WriteLine("<run-id> is required");
                     return 1;
-                }
-
-                // yaml is special-cased: the full JSON read model doesn't carry
-                // the workflow template-definition YAML, and the read model is
-                // not the right shape for it. The canonical rule "output
-                // format never creates a command" (design/cli.md) is honored
-                // here by reusing the existing GET .../yaml endpoint behind
-                // the same `get -o yaml` switch instead of minting a new
-                // command.
-                if (string.Equals(output, "yaml", StringComparison.OrdinalIgnoreCase))
-                {
-                    return await PrintWorkflowRunYamlAsync(api, runId!);
                 }
 
                 var (mode, exit) = api.ResolveOutputMode(output);
