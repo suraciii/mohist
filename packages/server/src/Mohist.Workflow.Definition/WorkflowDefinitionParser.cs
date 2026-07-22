@@ -568,9 +568,9 @@ public static class WorkflowDefinitionParser
             }
 
             if (style is ScalarStyle.Plain
-                && long.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _))
+                && long.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var longValue))
             {
-                return JsonDocument.Parse(raw).RootElement.Clone();
+                return NumberToJsonElement(longValue);
             }
 
             if (style is ScalarStyle.Plain
@@ -578,13 +578,37 @@ public static class WorkflowDefinitionParser
                     raw,
                     System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture,
-                    out _))
+                    out var doubleValue))
             {
-                return JsonDocument.Parse(raw).RootElement.Clone();
+                return NumberToJsonElement(doubleValue);
             }
 
             var escaped = JsonEncodedText.Encode(raw);
             return JsonDocument.Parse($"\"{escaped}\"").RootElement.Clone();
+        }
+
+        private static JsonElement NumberToJsonElement(long value)
+        {
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteNumberValue(value);
+            }
+            stream.Position = 0;
+            using var doc = JsonDocument.Parse(stream);
+            return doc.RootElement.Clone();
+        }
+
+        private static JsonElement NumberToJsonElement(double value)
+        {
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteNumberValue(value);
+            }
+            stream.Position = 0;
+            using var doc = JsonDocument.Parse(stream);
+            return doc.RootElement.Clone();
         }
 
         private static JsonElement WrapObject(Dictionary<string, JsonElement?> entries)

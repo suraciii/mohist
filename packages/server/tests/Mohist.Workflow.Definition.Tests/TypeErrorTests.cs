@@ -208,6 +208,38 @@ public class TypeErrorTests
     }
 
     [Fact]
+    public void Parse_LeadingZeroNumberScalarInStringField_RejectedWithoutCrash()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: 001
+                tasks: []
+                checks: []
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e =>
+            e.Path == "stages[0].stage" && e.Message == "'stage' must be a string");
+    }
+
+    [Fact]
+    public void Parse_LeadingZeroNumberScalarInWith_DoesNotCrash()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: build
+                tasks:
+                  - id: t1
+                    uses: mohist/opencode
+                    with:
+                      count: 001
+                checks: []
+            """);
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
     public void Parse_QuotedScalarForTypedFields_Rejected()
     {
         var result = WorkflowDefinitionParser.Parse("""
