@@ -267,6 +267,38 @@ public class ArchitectureRules
             + string.Join(", ", missing));
     }
 
+    // issue-432 T-001: Mohist.Workflow.Definition is the authoritative
+    // validator library shared by the server save path, the offline CLI, and
+    // CI. The CLI references it; if it pulls Orleans or ASP.NET in transitively,
+    // the offline validator stops being offline. This arch test asserts the
+    // project itself does not declare any such PackageReference.
+    [Fact]
+    public void MohistWorkflowDefinition_ShouldNotReferenceOrleansOrAspNet()
+    {
+        var project = EmbeddedSources("ProductionProjects/")
+            .Single(source => source.Path.Equals(
+                "Mohist.Workflow.Definition.csproj",
+                StringComparison.Ordinal));
+
+        var bannedSubstrings = new[]
+        {
+            "Microsoft.Orleans",
+            "Microsoft.AspNetCore",
+            "Microsoft.EntityFrameworkCore",
+        };
+
+        var violations = bannedSubstrings
+            .Where(substring => project.Content.Contains(substring, StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.True(
+            violations.Length == 0,
+            "Mohist.Workflow.Definition must not reference any of: "
+            + string.Join(", ", bannedSubstrings)
+            + ". Found: "
+            + string.Join(", ", violations));
+    }
+
     [Fact]
     public void GrainImplementations_ShouldInheritFromGrain()
     {

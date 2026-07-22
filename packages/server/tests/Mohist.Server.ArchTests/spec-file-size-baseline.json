@@ -1,5 +1,5 @@
 {
-  "Mohist.Server.ArchTests/ArchitectureRules.cs": 26461,
+  "Mohist.Server.ArchTests/ArchitectureRules.cs": 27399,
   "Mohist.Server.SpecTests/Specs/Agent/Api/AgentJobRoutesSpecs.cs": 25068,
   "Mohist.Server.SpecTests/Specs/Agent/Grain/AgentJobTerminalDeliverySpecs.cs": 30862,
   "Mohist.Server.SpecTests/Specs/AgentOps/AgentUsageReporterSpecs.cs": 33354,

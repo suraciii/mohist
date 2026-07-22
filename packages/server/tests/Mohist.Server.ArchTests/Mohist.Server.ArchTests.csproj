@@ -46,6 +46,9 @@
     <EmbeddedResource Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj">
       <LogicalName>ProductionProjects/Mohist.Cli.csproj</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="..\..\src\Mohist.Workflow.Definition\Mohist.Workflow.Definition.csproj">
+      <LogicalName>ProductionProjects/Mohist.Workflow.Definition.csproj</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="..\..\..\..\eng\BannedSymbols.Product.txt">
       <LogicalName>BannedSymbols.Product.txt</LogicalName>
     </EmbeddedResource>

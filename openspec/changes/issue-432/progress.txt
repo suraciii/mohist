@@ -1,0 +1,97 @@
+T-001 (Standalone validator library: model, Parse, structural and type rules)
+
+## Codebase Patterns
+
+- Mohist.sln is structured with solution folders `packages` > `server` > `src`
+  and `packages` > `server` > `tests`. New server-side projects go under
+  `packages/server/src/<Name>/` and tests under `packages/server/tests/<Name>.Tests/`.
+- The solution file uses manually-assigned GUIDs in the pattern
+  `{A1B2C3D4-NNNN-NNNN-NNNN-000000NNNNNN}` for project type GUIDs and
+  `{FOLDER_GUID} = {PARENT_FOLDER_GUID}` lines in `NestedProjects`. The CLI's
+  `dotnet sln add` writes to a different file (or silently fails on this
+  monorepo's .sln layout) — adding to the .sln must be done by hand.
+- Production csproj are embedded as `ProductionProjects/<Name>.csproj` in
+  `Mohist.Server.ArchTests.csproj` so text-based arch tests can grep them.
+- Arch tests covering library-boundary invariants (e.g. "library has no
+  Orleans/ASP.NET refs") live in `ArchitectureRules.cs` next to other
+  text-inspection tests like `ProductionProjects_ShouldReferenceEnvironmentAnalyzer`.
+- Spec file size ratchet (`spec-file-size-baseline.json`) is checked by
+  `CSharpTestFiles_MustStayWithinSizeRatchet`; adding a substantive rule
+  to `ArchitectureRules.cs` requires bumping the baseline entry for the
+  affected file.
+- `EnvironmentAbstractions.BannedApiAnalyzer` is required for every
+  production csproj by `ProductionProjects_ShouldReferenceEnvironmentAnalyzer`,
+  so the new library csproj also references it.
+- The existing `WorkflowYamlSerializer` lives in `Mohist.Server` and is
+  fused to it; this task creates the standalone replacement
+  `Mohist.Workflow.Definition`. Old serializer is still in place — T-003
+  owns the consumer migration.
+
+## Implementation Discoveries
+
+- YamlDotNet's `YamlNode` is the base class; scalar values come from
+  `YamlScalarNode.Value` (string). Mapping keys are also `YamlNode`s —
+  cast to `YamlScalarNode` to read the string. Trying to read `.Value`
+  directly off `YamlNode` is a compile error.
+- The two-phase tolerant YAML walk produces duplicate error candidates at
+  the same path (walker "type/structure" + rule engine "semantic" emit
+  overlapping messages). Solution: pass a `HashSet<string> emittedPaths`
+  through the walker and rule engine; both call `AddError(errors, emittedPaths, path, message)`
+  which short-circuits on second emit. The walker emits first (owning
+  YAML-level type checks); rule engine emits only for paths the walker did
+  not already flag. This also keeps the parse path and the validate path
+  returning the same message text for the same problem.
+- `Dictionary<string, JsonElement?>` is the right shape for `With`/`Expect`
+  payload: `JsonElement` preserves the original scalar/list/object shape
+  so template validation (T-002) can recurse without re-parsing.
+  `null` JsonElement entries mean "key present with explicit null value"
+  (kept distinct from "key absent").
+- `ValidateExpect` must not early-return on missing `files` because
+  `markers` validation is also reachable; the bug surfaced as a silent
+  pass on `markers[].failIf` not in `oneOf`. Fixed by guarding each
+  branch with `expect.TryGetValue(...)` rather than returning on
+  absence.
+- The runner is `net11.0` preview; running `npm ci` is required before
+  `npm run build` because the JS workspaces aren't pre-installed in the
+  runner image.
+
+## Acceptance Criteria Mapping
+
+- Arch test (no Orleans/ASP.NET) lives in
+  `ArchitectureRules.MohistWorkflowDefinition_ShouldNotReferenceOrleansOrAspNet`.
+- 102 unit tests in `Mohist.Workflow.Definition.Tests` cover: parse entry,
+  top-level closed shape, identifier uniqueness/required, checks identify
+  by `id` (and `name` rejected), lockBehavior, recovery well-formedness,
+  auxiliary declarations (setVars/expect/artifacts), `with` open structure,
+  type errors, multi-error collection, Validate(Definition) shares rules
+  with Parse, approval feedback tasks, and ValidationError shape
+  (YAML path, no stack traces, ValidationSource enum).
+- `Parse(yaml)` and `Validate(Definition)` share one rule implementation
+  via `WorkflowDefinitionRules.Apply(definition, errors, emittedPaths?)`
+  called by both entry points.
+- Tightened model: `TaskDefinition.Uses` non-nullable, `TaskDefinition.Title`
+  optional, `CheckDefinition.Id` (was `Name`), `CheckDefinition.Uses`
+  non-nullable, `CheckDefinition.Title` optional.
+
+## Notes for T-002 / T-003
+
+- `Validate(Definition)` is exposed on `WorkflowDefinitionValidator` and
+  takes a `Mohist.Workflow.Definition.WorkflowDefinition` (not the
+  server-side `Mohist.Server.Workflow.Domain.Definition.WorkflowDefinition`).
+  T-003 must replace server-side model references and update
+  `WorkflowDefinitionSurrogates.cs` to project the library records.
+- T-002 will need to extract `${{ }}` expressions from `With` and `Expect`
+  string values (use `JsonElement.ValueKind == String` then `GetString()`)
+  and call a new `TemplatePositionContext` parameter on the rule engine
+  walk. The current `WorkflowDefinitionRules.Apply` does not yet carry
+  position context — T-002 should thread it through `ValidateTask` and
+  `ValidateRecoveryTask` rather than introduce a separate validator.
+- `ValidationSource` enum is already in place with `Definition` and
+  `Action` values; `Parse` only emits `Definition`. The save path
+  (T-003) can emit `Action` for the transitional inline-agent `with`
+  guard by attaching errors to the same `ValidationError` type.
+- `WorkflowDefinitionParser` accepts a YAML text and returns
+  `WorkflowDefinitionParseResult(Definition?, Errors)`. The result has an
+  `IsValid` convenience getter; `Definition` is non-null only when there
+  are no errors. Consumers must check `Errors` rather than relying on
+  nullness.
