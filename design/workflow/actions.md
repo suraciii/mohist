@@ -310,5 +310,4 @@ checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自�
 4. **Action 越权访问**:`openspec-tasks` 直连 `serverConnection.addTasks`,
    `ActionContext` 全量暴露 server 连接与 runtime 句柄;目标收敛为默认 host + 声明式
    能力注入。
-5. **文档缺口**:`docs/actions/` 只有 opencode 一篇,其余 Action 的产品契约只存在
-   于代码;manifest 落地后按 manifest 补齐并保持一致。
+5. **文档缺口**:已闭合——`docs/actions/` 中的契约页已按 manifest 编齐并保持一致（issue #448）。

@@ -26,15 +26,42 @@ Mohist Agent。
   Workflow Session 和 Session 操作语义。
 - [`mohist/pi`](pi.md) —— 通过 Pi 执行一个回合;与 `mohist/opencode` 同层,共享
   模型选项形状与 Session 语义,但安装与信任边界不同。
-- [Git Actions](git.md) —— workspace 准备、rebase、merge readiness 和 push 的显式输入契约。
-- [GitHub PR Actions](github-pr.md) —— PR 创建、ready、状态检查和 squash merge 的显式输入契约。
+
+**Git Actions**:工作区准备、rebase、rebase 状态、merge readiness 和 push 的显式 `with`
+输入契约。
+
+- [`mohist/workspace-prepare`](git.md#mohistworkspace-prepare)
+- [`mohist/rebase`](git.md#mohistrebase)
+- [`mohist/rebase-status`](git.md#mohistrebase-status)
+- [`mohist/merge-ready`](git.md#mohistmerge-ready)
+- [`mohist/push`](git.md#mohistpush)
+
+**GitHub PR Actions**:PR 创建、ready、checks、状态校验和 squash merge 的显式 `with`
+输入契约。
+
+- [`mohist/create-github-pr`](github-pr.md#mohistcreate-github-pr)
+- [`mohist/mark-github-pr-ready`](github-pr.md#mohistmark-github-pr-ready)
+- [`mohist/merge-github-pr`](github-pr.md#mohistmerge-github-pr)
+- [`mohist/github-pr-checks`](github-pr.md#mohistgithub-pr-checks)
+- [`mohist/github-pr-status`](github-pr.md#mohistgithub-pr-status)
+
+**Core Actions**:进程、内联脚本、文件存在性检查和标记检查。
+
+- [`core/process`](core.md#coreprocess)
+- [`core/script`](core.md#corescript)
+- [`core/artifact-exists`](core.md#coreartifact-exists)
+- [`core/marker`](core.md#coremarker)
+
+**OpenSpec Actions**:加载 `tasks.json`、核查 OpenSpec change 产物和归档 change。
+
+- [`mohist/openspec-tasks`](openspec.md#mohistopenspec-tasks)
+- [`mohist/openspec-artifacts`](openspec.md#mohistopenspec-artifacts)
+- [`mohist/archive-change`](openspec.md#mohistarchive-change)
 
 Pi 是同层的独立 Action,不是 `mohist/opencode` 的输入扩展。
 
 ## 实装差距
 
 - `mohist/pi` 尚未实装,当前只有产品契约(见 [pi.md](pi.md) 的实装差距小节)。
-- Git Actions 和 GitHub PR Actions 的输入契约见对应产品契约页。OpenSpec 和 `core/*`
-  的独立产品契约页仍待补齐。
 - Runner 派发时会按 manifest 校验未知字段、必填字段和类型;自定义 Profile 应在 `with`
   中显式绑定需要的 Variable 值。

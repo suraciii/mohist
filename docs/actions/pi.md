@@ -48,13 +48,14 @@ stages:
 
 ## Action 输入
 
-| 字段 | 必填 | 含义 |
-|---|---:|---|
-| `prompt` | 是 | 本次交给 Pi 的提示词 |
-| `session` | 否 | WorkflowRun 内的逻辑 Session 名称；省略时使用当前 Work ID |
-| `options` | 否 | 本次选择 Pi 模型的对象 |
-| `options.model` | 否 | Pi 模型，使用 `provider/model` 标识 |
-| `options.variant` | 否 | 该模型的推理档位（Pi thinking level），如 `low`、`medium`、`high` |
+| 字段 | 必填 | 默认 | 含义 |
+|---|---:|---|---|
+| `prompt` | 是 | — | 本次交给 Pi 的提示词 |
+| `session` | 否 | — | WorkflowRun 内的逻辑 Session 名称；省略时使用当前 Work ID |
+| `options` | 否 | — | 本次选择 Pi 模型的对象 |
+| `options.model` | 否 | — | Pi 模型，使用 `provider/model` 标识 |
+| `options.variant` | 否 | — | 该模型的推理档位（Pi thinking level），如 `low`、`medium`、`high` |
+| `timeout` | 否 | `3600000` | 回合期限，以毫秒为单位；到达后中断当前回合 |
 
 工具、技能、系统提示词和自动压缩继续使用 Pi 自己的配置，不复制成 Mohist 字段。
 Action Input 不需要 `agent`、`kind` 或 `type`；使用哪个执行后端已经由 `uses` 决定。
@@ -126,11 +127,12 @@ Action Output 与 `mohist/opencode` 相同：只在命中 promise marker 时返�
 `{ "promise": "..." }`，否则为 `null`。
 
 Pi 无人值守执行时不会被工具确认阻塞：Pi 不在单次工具执行前要求批准，已配置允许
-的操作直接执行。每次 Workflow Prompt 回合的期限固定为 60 分钟，从向 Pi 提交 Prompt
-前开始计时；绑定和审计输入准备不占用该预算，收尾 Prompt 是新的回合并获得新的 60 分钟。
-本 issue 不提供 Action Input 覆盖；期限到达会中断当前回合。提交结果不确定时不会自动重放 Prompt，避免
-同一任务被执行两次。Runner 主动触发的执行期限会明确报告 timeout；中断 Pi 只是收尾，
-不能用缺少 marker 覆盖 timeout，也不会替换当前 Session 绑定或自动 Reset。
+的操作直接执行。每次 Workflow Prompt 回合的期限默认固定为 60 分钟，可通过
+Action Input 的 `timeout` 字段覆盖，从向 Pi 提交 Prompt 前开始计时；绑定和审计
+输入准备不占用该预算，收尾 Prompt 是新的回合并获得新的 60 分钟。期限到达会中断
+当前回合。提交结果不确定时不会自动重放 Prompt，避免同一任务被执行两次。Runner
+主动触发的执行期限会明确报告 timeout；中断 Pi 只是收尾，不能用缺少 marker 覆盖
+timeout，也不会替换当前 Session 绑定或自动 Reset。
 
 provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohist 中断当前 Pi 回合并让
 本次 task 失败，不等待 provider 继续重试。AgentSession 与当前物理 Pi Session 的绑定
@@ -163,17 +165,16 @@ AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型�
 `mohist/pi` 的业务失败用以下稳定错误码标识，供 recovery `when: error.code=...`
 匹配；错误文案面向人，不用于匹配：
 
+平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、
+未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
+
 | 错误码 | 含义 |
 |---|---|
-| `invalid-input` | Action 输入缺失或形状非法 |
 | `runtime-unavailable` | Pi 执行能力尚未就绪或不可用 |
-| `runtime-session-missing` | 绑定的 Pi Session 已不存在，需要 Reset |
 | `session-workspace-mismatch` | Session 绑定的工作目录与本次执行不一致 |
 | `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
-| `session-reporting-failed` | Session 执行事实无法在本次回合内可靠写入 |
-| `incompatible-runtime` | Pi 版本或数据与 Mohist 不兼容 |
-| `timeout` | 回合超过执行期限被中断 |
-| `interrupted` | 回合被 Runner 外部信号中断 |
+| `runtime-session-missing` | 绑定的 Pi Session 已不存在，需要 Reset |
+| `unavailable-runtime` | Pi 报告不可用 |
 | `turn-failed` | 回合执行失败（含 provider 额度、余额或计费耗尽） |
 
 ## 实装差距
