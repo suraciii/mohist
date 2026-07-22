@@ -126,6 +126,43 @@ internal sealed class MohistCliApi
         }
     }
 
+    internal async Task<int> PrintMutationResourceAsync(
+        HttpMethod method,
+        string path,
+        object? body,
+        ResourceDescriptor descriptor,
+        JsonSelection selection,
+        Func<JsonNode?, Task<int>> humanRenderer,
+        JsonNode? successDataFallback = null)
+    {
+        var response = await ResponseReader.ReadAsync(
+                method,
+                path,
+                body,
+                mutating: true,
+                cancellationToken: Invocation.CancellationToken)
+            .ConfigureAwait(false);
+        if (!response.IsSuccess)
+            return await new CliResultWriter(Invocation).WriteFailureAsync(response.Failure!).ConfigureAwait(false);
+
+        try
+        {
+            var data = response.Data ?? successDataFallback;
+            if (selection.Kind == JsonSelectionKind.Selected)
+            {
+                var projected = selection.Project(data, descriptor.Cardinality);
+                return await new CliResultWriter(Invocation).WriteSuccessAsync(projected).ConfigureAwait(false);
+            }
+
+            return await humanRenderer(data).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await new CliResultWriter(Invocation).WriteFailureAsync(
+                new CliFailure("invalid-response", ex.Message, null)).ConfigureAwait(false);
+        }
+    }
+
     public async Task<int> PrintProjectListAsync()
     {
         using var response = await SendAsync(HttpMethod.Get, "/api/projects", body: null);

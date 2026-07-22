@@ -30,3 +30,10 @@
 - `issue list` and `issue show` now use `--json [<fields>]`; discovery and invalid selections complete locally before Project resolution, while selected output projects decoded response data without the Server envelope.
 - `events tail` keeps NDJSON and projects each stream object locally with a compact serializer so one JSON object remains exactly one line.
 - Resource selection diagnostics use exit `2`, stay on stderr, and point callers to bare `--json` for the accepted ordered field list. CLI coverage includes single, collection, stream, discovery, invalid, stream separation, and legacy-option rejection cases.
+
+## T-004
+
+- Added `PrintMutationResourceAsync`, which uses `CliResponseReader` with `mutating: true`, projects selected fields through the same `ResourceDescriptor` contract as reads, and sends failures to the shared result writer.
+- Migrated Issue create/update, Issue action/reject/stop, and the complete Epic mutation family to `--json [<fields>]` descriptors. Added POST/PATCH/DELETE, domain-failure, discovery, and projection coverage.
+- Existing Epic tests still exercise the intentionally removed legacy `--output` surface and need migration to the new `--json` contract before the full suite can pass.
+- Focused resource-output tests pass (12); the full suite currently has 16 failures, mostly old Epic/Archive/Feedback expectations for `--output` or envelope output, plus one Issue update human-rendering expectation. No commit was made because the complete task acceptance criteria are not yet satisfied.

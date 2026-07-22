@@ -25,6 +25,7 @@ internal static partial class IssueCommands
         var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON or @<file> (e.g. '{\"plan\":\"anthropic/claude-sonnet\"}')" };
         var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON or @<file> (e.g. '{\"plan\":\"max\"}')" };
         var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("creating");
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(titleArg);
         cmd.Options.Add(bodyOpt);
         cmd.Options.Add(bodyFileOpt);
@@ -43,6 +44,7 @@ internal static partial class IssueCommands
         cmd.Options.Add(stageModelVariantsOpt);
         cmd.Options.Add(readyOpt);
         cmd.Options.Add(draftOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var title = ctx.GetValue(titleArg);
@@ -63,11 +65,14 @@ internal static partial class IssueCommands
             var stageModelVariants = ctx.GetValue(stageModelVariantsOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
+            var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             var workflowProfileProvided = ctx.GetResult(workflowProfileOpt) is not null;
             return CreateAsync();
 
             async Task<int> CreateAsync()
             {
+                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
                 var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
@@ -146,10 +151,17 @@ internal static partial class IssueCommands
                 if (stageModelVariantsPayload is not null)
                     payload["stageModelVariants"] = stageModelVariantsPayload;
 
-                var result = await api.PostAndReadAsync(ProjectIssuesPath(resolvedProjectId, "/issues"), payload);
-                if (result.ExitCode == 0)
-                    PrintCreateGuidance(result.Data, api.Output);
-                return result.ExitCode;
+                return await api.PrintMutationResourceAsync(
+                    HttpMethod.Post,
+                    ProjectIssuesPath(resolvedProjectId, "/issues"),
+                    payload,
+                    IssueDescriptor,
+                    selection,
+                    data =>
+                    {
+                        PrintCreateGuidance(data, api.Output);
+                        return Task.FromResult(0);
+                    });
             }
         });
         return cmd;
@@ -221,6 +233,7 @@ internal static partial class IssueCommands
         var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON or @<file> (e.g. '{\"plan\":\"anthropic/claude-sonnet\"}')" };
         var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON or @<file> (e.g. '{\"plan\":\"max\"}')" };
         var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("updating");
+        var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(titleOpt);
         cmd.Options.Add(bodyOpt);
@@ -239,6 +252,7 @@ internal static partial class IssueCommands
         cmd.Options.Add(stageModelVariantsOpt);
         cmd.Options.Add(readyOpt);
         cmd.Options.Add(draftOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
@@ -257,6 +271,7 @@ internal static partial class IssueCommands
             var repository = ctx.GetValue(repositoryOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
+            var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             var stageModels = ctx.GetValue(stageModelsOpt);
             var stageModelVariants = ctx.GetValue(stageModelVariantsOpt);
             var titleProvided = ctx.GetResult(titleOpt) is not null;
@@ -277,6 +292,8 @@ internal static partial class IssueCommands
 
             async Task<int> UpdateAsync()
             {
+                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
                 var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
@@ -371,9 +388,13 @@ internal static partial class IssueCommands
                     payload["isDraft"] = draftState == MohistCliCommands.DraftFlagState.Draft;
                 }
 
-                return await api.PrintPatchAsync(
+                return await api.PrintMutationResourceAsync(
+                    HttpMethod.Patch,
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}"),
-                    payload);
+                    payload,
+                    IssueDescriptor,
+                    selection,
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
             }
         });
         return cmd;

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Net;
 using Mohist.Cli.Tests.Support;
 using Xunit;
 
@@ -124,5 +125,79 @@ public sealed class CliResourceOutputSpecs
         Assert.Equal(["id", "type"], JsonNode.Parse(lines[0])!.AsObject().Select(p => p.Key).ToArray());
         Assert.DoesNotContain("[", output.ToString(), StringComparison.Ordinal);
         Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task EpicCreate_SelectedFieldsProjectsPostResult()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(_ =>
+            RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { number = 12, title = "Created", status = "open", description = "hidden" },
+            }));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["epic", "create", "Created", "--project", "proj_test", "--json", "number,title"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(["number", "title"], JsonNode.Parse(output.ToString())!.AsObject().Select(p => p.Key).ToArray());
+        Assert.Empty(error.ToString());
+        Assert.Equal(HttpMethod.Post, handler.Requests.Single().Method);
+    }
+
+    [Fact]
+    public async Task EpicUpdate_DomainFailureKeepsCodeAndDetailsOnStderr()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(_ =>
+            RecordingHttpHandler.Json(new
+            {
+                success = false,
+                error = "Epic is already closed",
+                code = "epic_terminal",
+                details = new { @object = "epic:12", state = "closed", reason = "terminal" },
+            }, HttpStatusCode.Conflict));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["epic", "update", "12", "--title", "Changed", "--project", "proj_test", "--json", "number,title"], output, error, fs, executor);
+
+        Assert.Equal(1, exit);
+        Assert.Empty(output.ToString());
+        Assert.Contains("code=epic_terminal", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("epic:12", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(HttpMethod.Patch, handler.Requests.Single().Method);
+    }
+
+    [Fact]
+    public async Task EpicUnlink_SelectedFieldsProjectsDeleteResult()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(_ =>
+            RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { number = 12, title = "Unlinked", status = "open" },
+            }));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["epic", "unlink", "12", "4", "--project", "proj_test", "--json", "number,title"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(["number", "title"], JsonNode.Parse(output.ToString())!.AsObject().Select(p => p.Key).ToArray());
+        Assert.Equal(HttpMethod.Delete, handler.Requests.Single().Method);
+    }
+
+    [Fact]
+    public async Task EpicCreate_BareJsonDiscoversFieldsWithoutRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["epic", "create", "Created", "--json"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            ["number", "title", "description", "status", "state", "priority", "createdAt", "updatedAt"],
+            JsonNode.Parse(output.ToString())!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+        Assert.Empty(handler.Requests);
     }
 }
