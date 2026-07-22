@@ -1,0 +1,7 @@
+## Codebase Patterns
+
+- T-001 documents only the seven Actions selected by the workflow and leaves runner source unchanged.
+- `packages/runner/src/actions/built-ins.ts` is the authority: core Actions expose the exact manifest inputs, outputs, and business errors; OpenSpec pages mirror the same declarations.
+- Each Action section uses the D1 order: purpose, inputs, outputs, platform-code note, business errors, then one explicit YAML example.
+- Platform-reserved codes are named only in attribution notes, never as business-error table rows.
+- `mohist/openspec-tasks` has one deferred object input (`task`) and the example identifies the referenced `defaultTask` Variable.
