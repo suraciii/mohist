@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import fuzzysort from 'fuzzysort'
 import { Command as CommandRoot } from 'cmdk'
-import { useAvailableModelIds, useModelVariants, useOpencodeModel } from '../../../entities/settings'
+import { AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI, useAvailableModelIds, useModelVariants, useOpencodeModel, type AgentRuntime } from '../../../entities/settings'
 import { getIssueWorkflowVariables, issueDetailKeys, issueListKeys, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar } from '../../../entities/issue'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect, ModelVariantChips, describeModel } from '../../../shared/ui/ModelSelect'
@@ -53,6 +53,13 @@ function agentVariant(vars?: Record<string, unknown> | null): string | null {
   if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return null
   const variant = (agent as Record<string, unknown>).variant
   return typeof variant === 'string' && variant.length > 0 ? variant : null
+}
+
+function agentRuntime(vars?: Record<string, unknown> | null): AgentRuntime {
+  const agent = vars?.agent
+  if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return AGENT_RUNTIME_OPENCODE
+  const runtime = (agent as Record<string, unknown>).runtime
+  return runtime === AGENT_RUNTIME_PI ? AGENT_RUNTIME_PI : AGENT_RUNTIME_OPENCODE
 }
 
 function stageModelMap(stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null): Record<string, string> {
@@ -136,9 +143,15 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   } = dependencies
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  const { data: availableModels, isLoading, error } = useAvailableModelIds()
+  const [runtime, setRuntime] = useState<AgentRuntime>(AGENT_RUNTIME_OPENCODE)
+  const [stageRuntimes, setStageRuntimes] = useState<Record<string, AgentRuntime>>({})
+  const { data: availableModels, isLoading, error } = useAvailableModelIds(runtime)
   const { data: opencodeModelData } = useOpencodeModel()
-  const modelVariantsMap = useModelVariants()
+  const modelVariantsMap = useModelVariants(runtime)
+  const planModels = useAvailableModelIds(stageRuntimes.plan ?? runtime)
+  const buildModels = useAvailableModelIds(stageRuntimes.build ?? runtime)
+  const checkModels = useAvailableModelIds(stageRuntimes.check ?? runtime)
+  const integrateModels = useAvailableModelIds(stageRuntimes.integrate ?? runtime)
   const [searchQuery, setSearchQuery] = useState('')
   const chipRefs = useRef<Record<string, Array<HTMLButtonElement | null>>>({})
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -165,6 +178,10 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
         setLocalWorkflowVariant(agentVariant(variables.vars))
         setLocalStageModels(stageModelMap(variables.stages))
         setLocalStageVariants(stageVariantMap(variables.stages))
+        setRuntime(agentRuntime(variables.vars))
+        setStageRuntimes(Object.fromEntries(
+          ISSUE_STAGES.map((stage) => [stage, agentRuntime(variables.stages?.[stage]?.vars)]),
+        ))
       })
       .catch((err) => {
         if (cancelled) return
@@ -177,6 +194,13 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
       cancelled = true
     }
   }, [issueNumber, projectId, currentStageModels])
+
+  const stageCatalogs = {
+    plan: planModels,
+    build: buildModels,
+    check: checkModels,
+    integrate: integrateModels,
+  }
 
   const allModels: string[] = availableModels?.models ?? []
   const recentModelIds = getRecent()
@@ -240,6 +264,44 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
       }
     },
     [issueNumber, projectId, queryClient],
+  )
+
+  const handleRuntimeChange = useCallback(
+    async (nextRuntime: AgentRuntime) => {
+      try {
+        if (!projectId) throw new Error('Project is required')
+        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { runtime: nextRuntime }, projectId)
+        setRuntime(nextRuntime)
+        setLocalWorkflowModel('')
+        setLocalWorkflowVariant(null)
+      } catch (err) {
+        console.error('Failed to update issue runtime:', err)
+      }
+    },
+    [issueNumber, projectId, patchIssueWorkflowDefinitionVar],
+  )
+
+  const handleStageRuntimeChange = useCallback(
+    async (stage: string, nextRuntime: AgentRuntime) => {
+      try {
+        if (!projectId) throw new Error('Project is required')
+        await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { runtime: nextRuntime }, projectId)
+        setStageRuntimes((prev) => ({ ...prev, [stage]: nextRuntime }))
+        setLocalStageModels((prev) => {
+          const next = { ...prev }
+          delete next[stage]
+          return next
+        })
+        setLocalStageVariants((prev) => {
+          const next = { ...prev }
+          delete next[stage]
+          return next
+        })
+      } catch (err) {
+        console.error('Failed to update stage runtime:', err)
+      }
+    },
+    [issueNumber, projectId, patchIssueWorkflowStageDefinitionVar],
   )
 
   const handleSetStageModel = useCallback(
@@ -372,7 +434,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     return map
   }, [displayedModels])
 
-  const defaultModelId = opencodeModelData?.model ?? null
+  const defaultModelId = runtime === AGENT_RUNTIME_OPENCODE ? opencodeModelData?.model ?? null : null
 
   const configuredModel = localWorkflowModel ?? currentModel
 
@@ -386,8 +448,19 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     : null
 
   return (
-    <div className="space-y-1">
-      <label className="block text-sm text-muted-foreground">Coder Model</label>
+      <div className="space-y-1">
+       <label className="block text-sm text-muted-foreground">Execution backend</label>
+       <select
+         aria-label="Execution backend"
+         data-testid="issue-runtime-selector"
+         value={runtime}
+         onChange={(event) => void handleRuntimeChange(event.target.value as AgentRuntime)}
+         className="mb-2 w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+       >
+         <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
+         <option value={AGENT_RUNTIME_PI}>Pi</option>
+       </select>
+       <label className="block text-sm text-muted-foreground">Coder Model</label>
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
         <PopoverTrigger
           render={
@@ -584,20 +657,34 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
             {ISSUE_STAGES.map((stage) => {
               const stageModel = localStageModels[stage] ?? null
               const stageVariant = localStageVariants[stage] ?? null
+              const stageRuntime = stageRuntimes[stage] ?? runtime
+              const stageCatalog = stageCatalogs[stage]
+              const stageModels = stageCatalog.data?.models ?? []
+              const stageVariants = stageCatalog.data?.modelVariants ?? {}
               return (
                 <div key={stage} className="flex items-center gap-2">
                   <span className="text-xs font-medium text-muted-foreground w-16 capitalize shrink-0">{stage}</span>
                   <div className="flex-1">
+                    <select
+                      aria-label={`${stage} execution backend`}
+                      data-testid={`issue-stage-runtime-${stage}`}
+                      value={stageRuntime}
+                      onChange={(event) => void handleStageRuntimeChange(stage, event.target.value as AgentRuntime)}
+                      className="mb-1 w-full h-8 rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm"
+                    >
+                      <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
+                      <option value={AGENT_RUNTIME_PI}>Pi</option>
+                    </select>
                     <ModelSelect
                       id={`issue-stage-model-${stage}`}
                       value={stageModel}
                       placeholder="Default"
-                      models={allModels}
+                       models={stageModels}
                       onChange={(modelId) => handleSetStageModel(stage, modelId)}
                       onClear={() => handleClearStageModel(stage)}
                       allowClear={!!stageModel}
                       size="compact"
-                      modelVariants={modelVariantsMap}
+                       modelVariants={stageVariants}
                       valueVariant={stageVariant}
                       onChangeModelVariant={(modelId, variant) => handleSetStageVariant(stage, modelId, variant)}
                     />

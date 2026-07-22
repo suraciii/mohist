@@ -9,6 +9,29 @@ beforeEach(() => {
 })
 
 describe('IssueModelSelector default-model variant chips', () => {
+  it('loads the Pi catalog after selecting the Pi backend', async () => {
+    mocks.useAvailableModelIds.mockImplementation((runtime: string) => ({
+      data: {
+        models: runtime === 'pi' ? ['pi/anthropic/claude'] : ['openai/gpt-4'],
+        modelVariants: {},
+      },
+      isLoading: false,
+      error: null,
+    }))
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: { agent: { runtime: 'pi', model: 'pi/anthropic/claude' } },
+      stages: {},
+    })
+    renderSelector({ currentModel: 'pi/anthropic/claude' })
+
+    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
+    fireEvent.click(trigger)
+
+    expect(await waitFor(() => document.querySelector('[data-model-id="pi/anthropic/claude"]'))).toBeInTheDocument()
+    expect(document.querySelector('[data-model-id="openai/gpt-4"]')).not.toBeInTheDocument()
+    expect(screen.getByTestId('issue-runtime-selector')).toHaveValue('pi')
+  })
+
   it('renders no variant chips for a model that has no variants', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: { models: ['openai/gpt-4'], modelVariants: {} },
@@ -335,7 +358,7 @@ describe('IssueModelSelector default-model popover accessibility and keyboard', 
     const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
     fireEvent.click(trigger)
 
-    const combobox = await waitFor(() => screen.getByRole('combobox'))
+    const combobox = await waitFor(() => screen.getByPlaceholderText('Search models...'))
     expect(combobox).toBeTruthy()
     expect(combobox.getAttribute('aria-expanded')).toBe('true')
 

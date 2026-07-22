@@ -1,6 +1,19 @@
 import { ApiError, projectApiPath, request } from '../../../shared/api/client'
 import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail } from '../model/types'
 
+export const AGENT_RUNTIME_OPENCODE = 'opencode'
+export const AGENT_RUNTIME_PI = 'pi'
+
+export const AGENT_RUNTIMES = [AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI] as const
+
+export type AgentRuntime = typeof AGENT_RUNTIMES[number]
+
+export function isAgentRuntime(value: string | null | undefined): value is AgentRuntime {
+  return value === AGENT_RUNTIME_OPENCODE || value === AGENT_RUNTIME_PI
+}
+
+export const DEFAULT_AGENT_RUNTIME: AgentRuntime = AGENT_RUNTIME_OPENCODE
+
 export interface VariableBundle {
   vars?: Record<string, unknown> | null
   stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null
@@ -29,6 +42,11 @@ export type OpencodeModelVariants = Record<string, string[]>
 
 export function getOpencodeModels(projectId?: string | null) {
   return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(projectApiPath(projectId, '/opencode/models'))
+}
+
+export function getModels(projectId: string | null | undefined, runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME) {
+  const query = `?runtime=${encodeURIComponent(runtime)}`
+  return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(projectApiPath(projectId, `/opencode/models${query}`))
 }
 
 export function getOpencodeModelVariantsFor(modelIds: ReadonlyArray<string | null | undefined>, variantsMap?: OpencodeModelVariants | null): OpencodeModelVariants {

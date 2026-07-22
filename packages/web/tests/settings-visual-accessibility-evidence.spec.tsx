@@ -93,7 +93,7 @@ function makeQueryClient() {
   })
   queryClient.setQueryData(['repositories', project.id], project.repositories)
   queryClient.setQueryData(['opencode-runtime'], { mode: 'local', command: 'opencode', model: null, note: '' })
-  queryClient.setQueryData(['opencode-model-ids', project.id], {
+  queryClient.setQueryData(['opencode-model-ids', 'opencode', project.id], {
     models: ['openai/gpt-5.1', 'anthropic/claude-sonnet-4'],
     modelVariants: {},
   })

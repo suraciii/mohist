@@ -22,7 +22,7 @@ import {
   useParentIssueCandidates,
 } from '../../../entities/issue'
 import type { Issue, LabelMap } from '../../../entities/issue'
-import { useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
+import { AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI, useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles, type AgentRuntime } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
 import { useIssueTemplate, useIssueTemplates } from '../../../entities/issue-templates'
 import { useProject, useRepositories } from '../../../entities/project'
@@ -47,14 +47,16 @@ function ModelPresetSelect({
   onChange,
   onVariantChange,
   onClear,
+  runtime,
 }: {
   value: string | null
   variant: string | null
   onChange: (id: string) => void
   onVariantChange: (variant: string | null) => void
   onClear: () => void
+  runtime: AgentRuntime
 }) {
-  const { data: availableModels } = useAvailableModelIds()
+  const { data: availableModels } = useAvailableModelIds(runtime)
   const allModels: string[] = availableModels?.models ?? []
   const modelVariantsMap = availableModels?.modelVariants ?? {}
   const availableVariants = value ? modelVariantsMap[value] ?? [] : []
@@ -141,6 +143,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
   const [labels, setLabels] = useState<LabelMap>({})
   const [model, setModel] = useState<string | null>(null)
   const [modelVariant, setModelVariant] = useState<string | null>(null)
+  const [runtime, setRuntime] = useState<AgentRuntime>(AGENT_RUNTIME_OPENCODE)
   const [priority, setPriority] = useState<string>('p2')
   const [repositoryName, setRepositoryName] = useState<string | null>(null)
   const [parentIssueNumber, setParentIssueNumber] = useState<number | null>(null)
@@ -232,6 +235,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
         labels: Object.keys(labels).length > 0 ? labels : undefined,
         ...(model ? { model } : {}),
         ...(modelVariant ? { modelVariant } : {}),
+        agentConfig: { runtime, ...(model ? { model } : {}), ...(modelVariant ? { variant: modelVariant } : {}) },
         ...(projectId ? { projectId } : {}),
         priority,
         ...(repositoryName ? { repositoryName } : {}),
@@ -266,6 +270,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
     setLabels({})
     setModel(null)
     setModelVariant(null)
+    setRuntime(AGENT_RUNTIME_OPENCODE)
     setPriority('p2')
     setRepositoryName(null)
     setParentIssueNumber(null)
@@ -488,6 +493,24 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
           </div>
 
           <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Execution backend</label>
+            <select
+              aria-label="Execution backend"
+              data-testid="create-issue-runtime"
+              value={runtime}
+              onChange={(event) => {
+                setRuntime(event.target.value as AgentRuntime)
+                setModel(null)
+                setModelVariant(null)
+              }}
+              className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+            >
+              <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
+              <option value={AGENT_RUNTIME_PI}>Pi</option>
+            </select>
+          </div>
+
+          <div>
             <label className="block text-xs font-medium text-foreground mb-1">Coder Model</label>
             <ModelPresetSelect
               value={model}
@@ -495,6 +518,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
               onChange={setModel}
               onVariantChange={setModelVariant}
               onClear={() => setModel(null)}
+              runtime={runtime}
             />
           </div>
 

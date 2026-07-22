@@ -2,6 +2,7 @@ import { vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
+import type { AgentRuntime } from '../../../entities/settings'
 import {
   IssueModelSelector,
   type IssueModelSelectorDependencies,
@@ -10,16 +11,16 @@ import {
 export const mocks = {
   useAvailableModelIds: vi.fn(),
   useOpencodeModel: vi.fn(),
-  useModelVariants: vi.fn(() => ({})),
+  useModelVariants: vi.fn((_runtime?: AgentRuntime | string) => ({})),
   getIssueWorkflowVariables: vi.fn(),
   patchIssueWorkflowDefinitionVar: vi.fn(),
   patchIssueWorkflowStageDefinitionVar: vi.fn(),
 }
 
 const dependencies = {
-  useAvailableModelIds: () => mocks.useAvailableModelIds(),
+  useAvailableModelIds: (runtime?: AgentRuntime | string) => mocks.useAvailableModelIds(runtime),
   useOpencodeModel: () => mocks.useOpencodeModel(),
-  useModelVariants: () => mocks.useModelVariants(),
+  useModelVariants: (runtime?: AgentRuntime | string) => mocks.useModelVariants(runtime),
   getIssueWorkflowVariables: mocks.getIssueWorkflowVariables,
   patchIssueWorkflowDefinitionVar: mocks.patchIssueWorkflowDefinitionVar,
   patchIssueWorkflowStageDefinitionVar: mocks.patchIssueWorkflowStageDefinitionVar,
