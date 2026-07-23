@@ -39,10 +39,13 @@ Profile，`IssueWorkflowProfiles` 还能保存 inline Definition，`WorkflowRun`
 **Non-Goals:**
 
 - 不增加 Definition version、Run Definition snapshot、Profile 继承或 Profile 合并。
-- 不将 Variables 或 Prompts 放入 Profile，或恢复 Issue inline Definition 的写入能力。
+- 不将 Variables 或 Prompts 放入 Profile，或恢复 Issue inline Definition 的写入能力。Prompt 与
+  Variables 仍是独立资源；本项只把 Prompt 排除出 Profile 模型与 Profile 命令 flag，**不删除 Prompt
+  的现有管理面**——`project workflow config` 的 prompts 读/写/clear/preview 保留（见 Decision 6）。
 - 不改变 Runner 的 dispatch、Action manifest 校验或已有 Definition DSL。
-- 不为旧 `project workflow template`、`project workflow config` 或 `issue workflow config` 保留
-  alias、重定向或平行 API。
+- 不为旧 `project workflow template`、`project workflow config` 的 template/default 部分，或
+  `issue workflow config` 保留 alias、重定向或平行 API。`issue workflow config` 只管 template，整体删除；
+  `project workflow config` 只删除其 template/default-template 部分，Prompt 部分不在删除范围。
 
 ## Decisions
 
@@ -184,7 +187,12 @@ handler 在迁移完成后删除。Issue create/edit 的现有请求模型仅保
 CLI 将顶层 `workflow` 设为 collection 的唯一 CRUD area：`list/view/create/edit/delete`，并保留
 本地 `workflow validate --file`。`project workflow set-default <profile>` 是 Project 引用的唯一
 命令，issue create/edit 使用 selection flags。帮助、字段选择、table view、stdout/stderr 与
-non-interactive 语义复用 #475 的共享契约；旧 group、alias 和测试一并移除。
+non-interactive 语义复用 #475 的共享契约。删除范围按子命令职责精确切分，而非整组删除：
+`project workflow template`、`issue workflow config`（二者只管 template）整体删除；`project workflow
+config` 只删除其 template/default-template 子命令（`--default-template` 的 get/set/clear 与 template
+preview），**保留其 Prompt 子命令**（`--prompt` 的 get/set/clear 与 `config preview` 的 prompt
+render）——Prompt 是独立资源，其唯一 CLI 管理面在本项不被删除，也不迁入 Profile 命令。覆盖已删除
+子命令的 alias、help 与测试一并移除；保留的 Prompt 子命令测试继续作为公开契约。
 
 备选方案是把新 collection 放在 `project workflow profile` 下或保留旧命令为 alias。前者与
 CLI spec 中 `workflow` 对 WorkflowProfile 的唯一导航相悖，后者会长期保留两套契约，均不采用。
