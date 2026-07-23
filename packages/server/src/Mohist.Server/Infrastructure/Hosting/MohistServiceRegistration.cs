@@ -166,6 +166,16 @@ public static class MohistServiceRegistration
             if (!string.IsNullOrWhiteSpace(mainDbDirectory))
                 options.DbPath = Path.Combine(mainDbDirectory, OtelDb.DefaultDatabaseFileName);
         });
+        services.TryAddSingleton<RuntimeEpoch>(sp =>
+            RuntimeEpoch.Capture(sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<RuntimeObservability>(sp =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Mohist.Server.Otel.OtelOptions>>().Value;
+            return new RuntimeObservability(
+                options.Enabled,
+                sp.GetRequiredService<RuntimeEpoch>(),
+                sp.GetRequiredService<TimeProvider>());
+        });
         services.AddSingleton<OtelDb>();
         services.AddSingleton<OtelCollectorStatus>();
         services.AddSingleton<TraceIngester>();
