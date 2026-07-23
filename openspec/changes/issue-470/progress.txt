@@ -7,4 +7,5 @@ Issue 470 current plan repair
 - [completed] Revalidated proposal/spec/design/task consistency: 8-task DAG and anchors pass, 16 requirements/52 scenarios remain covered, targeted F1-F4 audit returned PASS, diff checks pass, and `self-review.md` remains unchanged at `c5c9a70267cb2eac97da8da838bb2fc755ac1c22bf87fb39fd1318407b497c1a`.
 - [completed] Current review F1: metadata readability no longer establishes ingestion health; `storage_unverified` remains owned by `storage_write` until a real production write transaction commits.
 - [completed] Current review F2: one content-type-aware response writer now fixes JSON/protobuf full success, partial success, malformed-body and retryable-failure wire contracts.
-- [in progress] Current review F3-F4: host-test responsibility split and injected request-duration timing still require plan updates.
+- [completed] Current review F3: fake lifecycle tests own runtime host/probe facts; non-starting production composition owns only immutable-plan and service-registration facts.
+- [in progress] Current review F4: injected request-duration timing still requires plan updates.

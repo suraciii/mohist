@@ -152,19 +152,20 @@
       "id": "T-007",
       "title": "Preserve degraded status through bind fallback",
       "spec": "specs/otel-runtime-status/spec.md#requirement-otel-status-has-exactly-three-states",
-      "description": "Move startup orchestration into MohistHostRunner and transfer RuntimeEpoch/collector failure into a clean alternate host. Stop/dispose before rebuilding, preserve enabled intent, and prevent failed startup from probing storage.",
+      "description": "Move startup orchestration into MohistHostRunner and transfer RuntimeEpoch/collector failure into a clean alternate host. Drive primary and alternate production construction through one immutable host plan and Build(plan) path, stop/dispose before rebuilding, preserve enabled intent, and prevent failed startup from probing storage.",
       "acceptanceCriteria": [
         "MohistHostRunner accepts IMohistHostFactory and IOtelBindFailureClassifier; IMohistHost exposes Services, StartAsync, StopAsync, DisposeAsync and WaitForShutdownAsync, with WebApplication and signal-controlled fake adapters.",
-        "Primary/alternate factories receive the same epoch; normal startup publishes collector online, while alternate RuntimeObservability is seeded collector_bind_failed before StartAsync.",
+        "Primary/alternate factories receive the same epoch; both use one production Build(plan) path, normal startup publishes collector online, and alternate RuntimeObservability is seeded collector_bind_failed before StartAsync.",
         "Classified failure awaits StopAsync and always attempts DisposeAsync; alternate builds only after both succeed. Single failure is rethrown and dual failure is AggregateException in stop/dispose order.",
         "Sampler waiting for ApplicationStarted exits on stopping cancellation, so failed-primary stop completes with zero storage probes.",
-        "Alternate omits only OTLP listener, preserves Enabled, reports degraded/collector_online=false, and keeps /api/health successful.",
-        "Runner unit tests cover generic/classified/start/stop/dispose/dual failures without ports; production factory composition verifies one surviving silo/sampler and one storage probe total; focused tests and npm test pass."
+        "Alternate host plan differs only by omitted OTLP listener intent and collector_bind_failed, preserves Enabled and common application composition, and reports degraded/collector_online=false with /api/health successful through the fake lifecycle boundary.",
+        "Fake runner tests cover generic/classified/start/stop/dispose/dual failures, at most one remaining started host, zero primary probes and one alternate immediate probe without ports; they make no claim that a production silo ran.",
+        "A non-starting production composition test compares immutable plans and service descriptors for shared Orleans/API markers and exactly one sampler registration per plan; it never builds/starts a host, resolves physical adapters, opens sockets or asserts runtime probe/silo facts; focused tests and npm test pass."
       ],
       "priority": 5,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "MohistHostRunner and lifecycle interfaces/adapters, shared startup context, exception-safe fallback and deterministic host/factory tests.",
+      "output": "MohistHostRunner and lifecycle interfaces/adapters, immutable production host plan, one shared Build(plan) path, exception-safe fallback and responsibility-split host/factory tests.",
       "dependsOn": [
         "T-005"
       ],
