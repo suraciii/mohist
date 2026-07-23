@@ -1,0 +1,57 @@
+# `mohist/agent` Action
+
+`mohist/agent` 让一个 Workflow task 引用 Project 内预定义的 Mohist Agent 来执行：
+task 获得该 Agent 的指令与执行配置快照，按 Inline Agent 同一套机制运行。
+
+它是**定义引用，不是工作委托**：不启动 AgentJob，工作的成功失败仍由 TaskRun
+裁定，AgentSession 仍是 Workflow 来源。Agent、AgentJob 和 AgentSession 的总体
+关系见 [Agent 与 AgentSession](../agents.md)。
+
+## 基本用法
+
+```yaml
+- id: review
+  uses: mohist/agent
+  with:
+    name: reviewer
+    prompt: ${{ prompts.review }}
+```
+
+`name` 指向的 Agent 提供身份指令、执行后端（OpenCode 或 Pi）与模型配置；
+`prompt` 是本次任务输入。适合同一个「角色」被多个 task、多个 Profile 复用，
+或要和路由规则、`@` 提及共用同一个 Agent 身份的场景；一次性任务继续用
+[`mohist/opencode`](opencode.md) 或 [`mohist/pi`](pi.md) 内联。
+
+## Action 输入
+
+| 字段 | 必填 | 默认 | 含义 |
+|---|---:|---|---|
+| `name` | 是 | — | Mohist Agent 的名称或 id，解析规则与 `mo` 命令面的 `--agent` 相同 |
+| `prompt` | 是 | — | 本次交给该 Agent 的任务输入，支持模板表达式 |
+| `session` | 否 | — | WorkflowRun 内的逻辑 Session 名称；省略时使用当前 Work ID |
+| `timeout` | 否 | 与后端 Action 相同 | 本次执行的期限 |
+
+执行后端与模型由 Agent 配置决定，task 不覆盖。`expect`、`artifacts`、`setVars`
+与 recovery 等 task 级构造的行为与其它 Action 相同。
+
+## 解析与快照
+
+- `name` 在**每次 dispatch 时**解析为当时定义的 snapshot：指令、执行后端与
+  模型配置随该 attempt 固定。
+- 编辑 Agent 不影响已 dispatch 的 attempt；retry 重新解析——修复定义后 retry
+  立即生效。
+- Profile 保存与 `mo workflow validate` 只校验输入形状（`name`、`prompt` 必填），
+  不校验 Agent 是否存在——Profile 的生命周期不被 Agent 的增删卡住。
+
+## 失败语义
+
+| 错误码 | 含义 |
+|---|---|
+| `agent_not_found` | dispatch 时 `name` 不存在或 Agent 已归档 |
+
+执行期错误（后端不可用、超时等）与所选执行后端的 Action 相同，recovery 的
+`when` 匹配同样适用。
+
+## 实装差距
+
+全部未实装；`mohist/agent` 当前不是可用的 `uses` 值。

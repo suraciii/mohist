@@ -11,6 +11,9 @@
 **Inline Agent**：Workflow task 直接选择 Runtime Action 并提供输入的使用方式。它不是
 持久化资源，没有 Agent ID。
 
+**Agent 定义引用**：Workflow task 用 `uses: mohist/agent` 引用 Mohist Agent 定义的
+使用方式。定义快照随 dispatch 解析；不创建 AgentJob，没有 Agent 身份。
+
 **Mohist Agent**：Project 范围内可复用、具有稳定身份的预定义 Agent 资源。
 
 **AgentJob**：Mohist Agent 的一次工作执行。它拥有本次工作的调度状态、结果与恢复，

@@ -1,7 +1,3 @@
----
-status: wip-not-implemented
----
-
 # Agent 事件路由
 
 本文的 Agent 均指有稳定 ID、名称和 Instructions 的 **Mohist Agent（Named Agent）**，
@@ -88,7 +84,9 @@ event.type == "com.mohist.issue.completed" && event.issue in ["42", "43"]
 ## 场景：让 Agent 监管一个 issue
 
 这是驱动本功能的核心场景：你启动一个 Agent 监管 issue 的推进，workflow 失败或
-等审批时它替你出手。
+等审批时它替你出手。这个场景有内置预设：`mo agent setup-supervisor` 一条命令
+装好下表全部内容（Agent、规则、提示词），见 [Agent 监管](agent-supervision.md)。
+下面是它的组成原理，理解之后你可以自由改造。
 
 配一个 Agent（写身份指令），加三条规则：
 
@@ -137,14 +135,3 @@ event.type == "com.mohist.issue.completed" && event.issue in ["42", "43"]
 | **你** | 把响应提示词写好、写安全；用表的顺序和「继续」表达独占、兜底或并行 |
 | **系统** | 准确匹配事件、启动 Agent、记录事件与响应之间的关系 |
 | **系统不负责** | 判断提示词对错；给 Agent 提供特殊审批通道。Agent 走的是和 owner、脚本一样的正规通道（详见[工作流详解](the-workflow.md)） |
-
-## 实装差距
-
-当前已实装一个较早的订阅模型：按事件类型（支持通配）过滤、多条订阅按优先级
-仲裁出一个响应者，`mo agent subscription` 可配。本文描述的目标形态与它的差距：
-
-- 事件还未全面携带业务谱系属性（issue 编号、epic 等），「只盯一个 issue」暂时
-  只能在响应提示词里让 Agent 自行判断并退出；
-- 匹配表达式、有序路由表、「继续」标记、干跑工具均未实装。
-
-以上由事件路由 epic 推进；落地后本文从「产品方案（WIP）」板块毕业。

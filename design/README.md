@@ -105,7 +105,11 @@
 ## Agent 与执行
 
 - [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、AgentSession 与 Runtime Session 的分层、生命周期所有权、activity 和 transcript DSL。
-- [event-routing.md](event-routing.md) — Agent 事件路由（**WIP**）：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
+- [event-routing.md](event-routing.md) — Agent 事件路由：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
+- [agent-supervision.md](agent-supervision.md) — Agent 监管预设（**WIP**）：一条命令安装监管 Agent 与审批/失败两条路由规则；升级靠通知全开 + `[supervisor]` comment 纪律，不引入 escalate 命令与系统级频控。
+- [agent-mentions.md](agent-mentions.md) — 评论提及（**WIP**）：在 issue comment 里 `@` Agent 名直接启动它；第三条触发路径，零配置，mention 即路由决策。
+- [event-response.md](event-response.md) — Agent 事件响应（**WIP**）：响应契约（至多一次、基于当前状态、无串行化、失败可见、防自响应）与可归属（comment author、审批 decidedBy）。
+- [issue-watch.md](issue-watch.md) — Issue 关注（**WIP**）：issue 级 autopilot 开关；watching/muted 声明、固定事件集、与路由表的分工。
 
 ## Runtime 集成
 
