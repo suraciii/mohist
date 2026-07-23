@@ -303,12 +303,12 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     }
 
     [Fact]
-    public void GithubPrWorkflowDefinition_CheckStage_HasAiReviewPushMarkPrReadyVerifyPrChecksAndGithubPrStatusCheck()
+    public void GithubPrWorkflowDefinition_CheckStage_SynchronizesAfterReviewBeforePublishingAndVerifying()
     {
         var check = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "check");
 
         var orderedIds = check.Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "workspace-prepare", "ai-review", "push", "mark-pr-ready", "verify-pr-checks" }, orderedIds);
+        Assert.Equal(new[] { "workspace-prepare", "ai-review", "rebase", "push", "mark-pr-ready", "verify-pr-checks" }, orderedIds);
 
         var aiReview = check.Tasks.Single(t => t.Id == "ai-review");
         Assert.Equal("mohist/opencode", aiReview.Uses);
@@ -328,6 +328,19 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("mohist/opencode", fixReviewFindings.Uses);
         Assert.Equal("${{ prompts.auto-fix }}", fixReviewFindings.With!["prompt"]!.Value.GetString());
 
+        var rebase = check.Tasks.Single(t => t.Id == "rebase");
+        Assert.Equal("${{ repository.baseBranch }}", ReadStringWith(rebase, "baseBranch"));
+        Assert.Equal("origin", ReadStringWith(rebase, "remote"));
+        Assert.False(ReadBoolWith(rebase, "squash"));
+        var rebaseRecovery = rebase.Recovery;
+        Assert.NotNull(rebaseRecovery);
+        var conflictHandler = Assert.Single(rebaseRecovery!.Handlers);
+        Assert.Equal("error.code=conflict", conflictHandler.When);
+        Assert.False(conflictHandler.RetrySelf);
+        var resolveConflicts = Assert.Single(conflictHandler.Tasks);
+        Assert.Equal("recover:resolve-rebase-conflicts", resolveConflicts.Id);
+        Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", resolveConflicts.With!["prompt"]!.Value.GetString());
+
         var push = check.Tasks.Single(t => t.Id == "push");
         Assert.Equal("mohist/push", push.Uses);
         Assert.Equal("HEAD", ReadStringWith(push, "source"));
@@ -346,10 +359,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("error.code=pr-checks-failed", checksHandler.When);
         Assert.True(checksHandler.RetrySelf);
         Assert.Equal(new[] { "recover:fix-pr-checks", "recover:push" }, checksHandler.Tasks.Select(t => t.Id).ToArray());
-        var checkFix = checksHandler.Tasks.Single(t => t.Id == "recover:fix-pr-checks");
-        Assert.Equal("${{ prompts.fix-pr-checks }}", checkFix.With!["prompt"]!.Value.GetString());
-        Assert.Equal("check", checkFix.With!["session"]!.Value.GetString());
-
         Assert.Single(check.Checks);
         var status = check.Checks.Single();
         Assert.Equal("github-pr-status", status.Id);
@@ -357,10 +366,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("${{ vars.github.pr.number }}", ReadStringWith(status, "prNumber"));
         Assert.Null(ReadStringWith(status, "expect"));
 
-        var names = check.Checks.Select(c => c.Id).ToArray();
-        Assert.DoesNotContain(names, n => n == "health");
-        Assert.DoesNotContain(names, n => n == "review-passed");
-        Assert.DoesNotContain(names, n => n == "merge-ready");
+        Assert.DoesNotContain(handler.Tasks, task => task.Id == "rebase");
     }
 
     [Fact]

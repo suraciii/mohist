@@ -1,0 +1,10 @@
+## Codebase Patterns
+
+- Built-in GitHub PR workflow profile specs are in `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs`.
+- Integrate's `merge-pr` base-moved recovery already defines the required rebase conflict handler: `mohist/rebase` uses `repository.baseBranch`, `origin`, and `squash: false`; its conflict resolver has no `retrySelf` so an in-progress resolved rebase is preserved.
+- `npm ci` was required before the focused server profile test could build because the web build dependency `tsc` was initially absent.
+
+## T-001
+
+- Added the same rebase and conflict-resolution shape directly after successful `ai-review` in the check stage, with `session: check`.
+- Kept review-failure recovery limited to `recover:fix-review-findings`; integrate recovery remains unchanged.
