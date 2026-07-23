@@ -13,8 +13,10 @@ public static class DatabaseInitializer
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
         await db.Database.MigrateAsync(cancellationToken);
         await ProjectRepositoryDataUpgrader.UpgradeAsync(db, cancellationToken);
         await WorkflowProfileDataUpgrader.UpgradeAsync(db, cancellationToken);
+        await WorkflowProfileDataMigrator.MigrateAsync(db, timeProvider, cancellationToken);
     }
 }

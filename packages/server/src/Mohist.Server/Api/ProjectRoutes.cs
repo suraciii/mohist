@@ -5,6 +5,7 @@ using Mohist.Server.Project.Services;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using System.Text.Json;
 using RepositoryPolicy = Mohist.Server.Project.Domain.RepositoryPolicy;
@@ -98,6 +99,99 @@ public static class ProjectRoutes
         {
             var project = context.GetResolvedProject();
             return ApiResults.Ok(project);
+        });
+
+        byRef.MapGet("/workflow-profiles", async (HttpContext context, IWorkflowProfileProvider provider) =>
+        {
+            var project = context.GetResolvedProject();
+            return ApiResults.Ok(await provider.ListAsync(project.Id));
+        });
+
+        byRef.MapPost("/workflow-profiles", async (
+            HttpContext context,
+            WorkflowProfileSaveRequest request,
+            IWorkflowProfileProvider provider) =>
+        {
+            var project = context.GetResolvedProject();
+            try
+            {
+                var result = await provider.CreateAsync(project.Id, request.ToEntry(project.Id));
+                return result.ValidationResult.IsValid
+                    ? Results.Json(new { success = true, data = result.Profile, validation = result.ValidationResult }, statusCode: 201)
+                    : ApiResults.BadRequest("WorkflowProfile validation failed", "workflow_profile_validation", result.ValidationResult);
+            }
+            catch (WorkflowProfileReadOnlyException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "workflow_profile_read_only");
+            }
+            catch (WorkflowDefinitionValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "workflow_profile_definition_validation", ex.Errors);
+            }
+        });
+
+        byRef.MapGet("/workflow-profiles/{*profileId}", async (
+            HttpContext context,
+            string profileId,
+            IWorkflowProfileProvider provider) =>
+        {
+            var project = context.GetResolvedProject();
+            var id = Uri.UnescapeDataString(profileId);
+            var profile = await provider.GetAsync(project.Id, id);
+            return profile is null
+                ? ApiResults.NotFound($"WorkflowProfile '{id}' was not found")
+                : ApiResults.Ok(profile);
+        });
+
+        byRef.MapPut("/workflow-profiles/{*profileId}", async (
+            HttpContext context,
+            string profileId,
+            WorkflowProfileSaveRequest request,
+            IWorkflowProfileProvider provider) =>
+        {
+            var project = context.GetResolvedProject();
+            var id = Uri.UnescapeDataString(profileId);
+            try
+            {
+                var result = await provider.UpdateAsync(project.Id, request.ToEntry(project.Id, id));
+                return result.ValidationResult.IsValid
+                    ? ApiResults.Ok(new { success = true, data = result.Profile, validation = result.ValidationResult })
+                    : ApiResults.BadRequest("WorkflowProfile validation failed", "workflow_profile_validation", result.ValidationResult);
+            }
+            catch (WorkflowProfileReadOnlyException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "workflow_profile_read_only");
+            }
+            catch (WorkflowProfileNotFoundException ex)
+            {
+                return ApiResults.NotFound(ex.Message);
+            }
+            catch (WorkflowDefinitionValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "workflow_profile_definition_validation", ex.Errors);
+            }
+        });
+
+        byRef.MapDelete("/workflow-profiles/{*profileId}", async (
+            HttpContext context,
+            string profileId,
+            IGrainFactory grains) =>
+        {
+            var project = context.GetResolvedProject();
+            var id = Uri.UnescapeDataString(profileId);
+            var result = await grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
+                .DeleteProfileAsync(
+                    new WorkflowProfileCommandPayload.DeleteProfile(project.Id, id),
+                    $"api-delete:{Guid.NewGuid():N}",
+                    null);
+            return result.Code switch
+            {
+                WorkflowProfileReferenceResultCode.Applied or WorkflowProfileReferenceResultCode.AlreadyApplied =>
+                    ApiResults.Ok(new { deleted = true, profileId = id }),
+                WorkflowProfileReferenceResultCode.ProfileReadOnly => ApiResults.Conflict(result.Message ?? "WorkflowProfile is read-only", "workflow_profile_read_only"),
+                WorkflowProfileReferenceResultCode.BlockedByReferences => ApiResults.Conflict(result.Message ?? "WorkflowProfile is still referenced", "workflow_profile_referenced"),
+                _ => ApiResults.NotFound(result.Message ?? $"WorkflowProfile '{id}' was not found"),
+            };
         });
 
         byRef.MapPost("/use", async (HttpContext context) =>
@@ -727,3 +821,20 @@ public record UpdateProjectTemplateRequest(string Yaml);
 public record SetDefaultTemplateRequest(string TemplateId);
 
 public sealed record ToggleWorkflowProfileRequest(string ProfileId);
+
+public sealed record WorkflowProfileSaveRequest(
+    string ProfileId,
+    string? Name,
+    string? Description,
+    string DefinitionSource)
+{
+    public WorkflowProfileCollectionEntry ToEntry(string projectId, string? profileId = null) =>
+        new(
+            projectId,
+            profileId ?? ProfileId,
+            Name ?? profileId ?? ProfileId,
+            Description ?? string.Empty,
+            WorkflowProfileSourceProvenance.Verbatim,
+            false,
+            DefinitionSource);
+}

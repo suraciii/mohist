@@ -37,6 +37,7 @@ public class MohistDbContext : DbContext
     public DbSet<ProjectRow> Projects { get; set; } = null!;
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
+    public DbSet<WorkflowProfileRecordRow> WorkflowProfileRecords { get; set; } = null!;
     public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
     public DbSet<AgentSessionTranscriptTurnRow> AgentSessionTranscriptTurns { get; set; } = null!;
@@ -314,6 +315,18 @@ public class MohistDbContext : DbContext
             // list filtering.
             entity.Property(e => e.RepositoryName)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.repositoryRef'), json_extract(State, '$.RepositoryRef'))", stored: true);
+            // issue-477 T-001: explicit Issue WorkflowProfile selection is
+            // surfaced from State JSON so the public reference stays one
+            // place. The coordinator copy + this projection are the only
+            // writes; the FK backstop is on WorkflowProfileIdKey.
+            entity.Property(e => e.WorkflowProfileIdKey).HasMaxLength(256);
+            entity.HasIndex(e => new { e.ProjectId, e.WorkflowProfileIdKey })
+                .HasDatabaseName("IX_Issues_ProjectId_WorkflowProfileIdKey");
+            entity.HasOne<WorkflowProfileRecordRow>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ProjectId, e.WorkflowProfileIdKey })
+                .HasPrincipalKey(e => new { e.ProjectId, e.ProfileId })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
             entity.HasIndex(e => new { e.ProjectId, e.EpicNumber, e.Number });
             entity.HasIndex(e => new { e.ProjectId, e.ParentIssueNumber, e.Number });
@@ -626,6 +639,18 @@ public class MohistDbContext : DbContext
             // the round-robin scan is index-only.
             entity.HasIndex(e => new { e.Status, e.AssignedWorkerId, e.ReadySince })
                 .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");
+            // issue-477 T-001: Run's nullable custom-Profile backing key.
+            // The terminalization transaction clears this column while
+            // keeping the public Profile ID in State. Built-in bindings
+            // leave it null.
+            entity.Property(e => e.WorkflowProfileIdKey).HasMaxLength(256);
+            entity.HasIndex(e => new { e.MetadataProjectId, e.WorkflowProfileIdKey })
+                .HasDatabaseName("IX_WorkflowRuns_MetadataProjectId_WorkflowProfileIdKey");
+            entity.HasOne<WorkflowProfileRecordRow>()
+                .WithMany()
+                .HasForeignKey(e => new { e.MetadataProjectId, e.WorkflowProfileIdKey })
+                .HasPrincipalKey(e => new { e.ProjectId, e.ProfileId })
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<WorkflowVariablesRow>(entity =>
@@ -654,6 +679,8 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.ProjectId);
             entity.Property(e => e.ProjectId).HasMaxLength(256);
             entity.Property(e => e.DefaultTemplateId).HasMaxLength(256);
+            entity.Property(e => e.DefaultWorkflowProfileId).HasMaxLength(256);
+            entity.Property(e => e.DefaultWorkflowProfileIdKey).HasMaxLength(256);
             entity.Property(e => e.Variables).IsRequired();
             entity.Property(e => e.DisableDefaultIssueTemplate).IsRequired().HasDefaultValue(false);
             entity.Property(e => e.Prompts)
@@ -671,6 +698,11 @@ public class MohistDbContext : DbContext
                 .IsRequired()
                 .HasDefaultValue(new List<string>());
             entity.Property(e => e.DisabledWorkflowProfileIds).Metadata.SetValueComparer(ListStringComparer);
+            entity.HasOne<WorkflowProfileRecordRow>()
+                .WithMany()
+                .HasForeignKey(e => new { e.ProjectId, e.DefaultWorkflowProfileIdKey })
+                .HasPrincipalKey(e => new { e.ProjectId, e.ProfileId })
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ProjectWorkflowTemplateRow>(entity =>
@@ -680,6 +712,19 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ProjectId).HasMaxLength(256);
             entity.Property(e => e.TemplateId).HasMaxLength(256);
             entity.Property(e => e.Template).IsRequired();
+            entity.HasIndex(e => e.ProjectId);
+        });
+
+        modelBuilder.Entity<WorkflowProfileRecordRow>(entity =>
+        {
+            entity.ToTable("WorkflowProfileRecords");
+            entity.HasKey(e => new { e.ProjectId, e.ProfileId });
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ProfileId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.Description).IsRequired();
+            entity.Property(e => e.DefinitionSource).IsRequired();
+            entity.Property(e => e.SourceProvenance).HasMaxLength(32).IsRequired();
             entity.HasIndex(e => e.ProjectId);
         });
 

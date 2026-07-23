@@ -1,0 +1,14 @@
+## Codebase Patterns
+
+- WorkflowProfile collection records are custom-only rows keyed by `(ProjectId, ProfileId)`; built-ins remain catalog assets and are merged by `IWorkflowProfileProvider`.
+- Reference rows keep one public Profile ID in their owning state and a nullable custom backing key for the restrictive composite FK. Built-in references leave the backing key null.
+- `WorkflowProfileDeletionBlockerQuery` is diagnostic; the FK is the final delete/selection race backstop. Terminal Run transitions clear only the backing key and retain public state/history.
+- Server spec databases use the existing shared in-memory SQLite model schema. Collection specs use a fixed `FakeTimeProvider`; production writes accept the application `TimeProvider`.
+
+## T-001 Notes
+
+- The workspace contained an uncommitted T-001 implementation before this run. It was repaired in place rather than discarded.
+- Project default writes must accept built-in IDs; built-ins are read-only for Profile create/edit/delete, not for selection.
+- The EF snapshot and migration must include the auto-created `(ProjectId, DefaultWorkflowProfileIdKey)` index as well as all three restrictive composite foreign keys, otherwise integration hosts fail with `PendingModelChangesWarning`.
+- The legacy migrator is invoked during startup, so materialized custom records must be skipped on repeat runs. Reserved IDs map to `legacy-reserved/{base64url-utf8(source)}` and public Issue/Run state references are rewritten along with backing keys.
+- Focused verification: `WorkflowProfileCollectionSpecs` passed 21/21; `ProjectEventsModelDebug.DebugPendingModelChanges` passed 1/1; server and test projects build with `-p:SkipWebBuild=true`. The normal build remains blocked in this checkout because web dependencies are absent (`tsc: not found`).
