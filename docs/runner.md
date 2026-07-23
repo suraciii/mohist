@@ -20,7 +20,7 @@ Mohist 的架构原则：**控制平面和执行平面分离**。
 ```bash
 npm run dev:runner
 # 或
-mo runner start
+mo service start runner
 ```
 
 Runner 启动后会：
@@ -35,7 +35,7 @@ Runner 启动后会：
 ## 检查 Runner 状态
 
 ```bash
-mo project status
+mo server status
 # 输出包含 runner 状态
 ```
 
@@ -55,7 +55,7 @@ Runner 有最大并发限制（默认 8）。意思是：
 调 capacity：
 
 - Web UI Settings → Runtime
-- 或 runner 启动参数（看 `mo runner start --help`）
+- 或 runner 启动参数（看 `mo service start runner --help`）
 
 **别盲目调高**：
 
@@ -107,7 +107,7 @@ WorkflowRun ID 决定，不包含 Issue 标题或仓库名。
 ### Runner 日志
 
 ```bash
-mo runner logs                  # runner 受管服务的运维日志
+mo service logs runner          # runner 受管服务的运维日志（service-manager）
 # 或直接看 runner 进程的 stdout
 ```
 
@@ -131,7 +131,7 @@ mo issue sessions <number>   # AgentSession 记录
 
 ## Runner 配置
 
-Runner 行为可通过环境变量或 config 文件调（看 `mo runner start --help`）：
+Runner 行为可通过环境变量或 config 文件调（看 `mo service start runner --help`）：
 
 - 并发 capacity
 - Server URL

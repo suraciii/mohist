@@ -1,0 +1,28 @@
+## Why
+
+The `mo` CLI today reaches three different objects — a Server-registered Runner resource, the currently connected Mohist Server application, and a local OS-managed process — through overlapping `start`/`status`/`logs` verbs that live under the same `runner` and `server` command groups, while overall Server status is parked under `project`. That conflation lets a `status` or `logs` call hit the wrong object: `server status` drives a systemd unit, `runner logs` tails a service-manager journal, and `project status` reports Server-wide health. Separating the three into `runner` (remote resource), `server` (connected application), and `service` (local process) makes each command's object unambiguous and makes its log source and failure semantics honest.
+
+## What Changes
+
+- `runner` becomes read-only over Server-registered execution resources: `list`, `view` (renamed from `show`), and `status` report presence, capacity, and heartbeat from the Server only. **BREAKING**: `runner start`/`stop`/`restart`/`service-status`/`logs`/`uninstall` are removed from the command tree (moved to `service`); no built-in alias is retained.
+- `server` becomes read-only over the currently connected Mohist Server application: `status` (overall Server status, subsuming today's `project status` `/api/status?all=true`), `health`, `info`, and `logs` (the Server's own application log tail). **BREAKING**: the local lifecycle subcommands `server start`/`stop`/`restart`/`status`/`logs`/`uninstall` are removed (moved to `service`); `server status` and `server logs` change meaning — `status` now reports the connected application rather than the local unit, and `logs` now reads application logs rather than service-manager logs.
+- New `service <start|stop|restart|status|logs|uninstall> <server|runner>` unifies all local managed-process lifecycle. The `target` argument must be `server` or `runner` and the command acts solely on the OS-level managed service (systemd unit / scheduled task).
+- `server logs` returns application logs; `service logs server` returns service-manager logs. The two are not interchangeable — their help, output, and errors never claim equivalence, and no `--source` flag merges the two connection, permission, and failure semantics.
+- Stopping the local Runner service does not fabricate Runner resource state: `runner view`/`status` keep reporting Server-known facts regardless of local service state.
+- `service` does not parse Project; `runner` reads follow the shared `--project` contract established in #475.
+- `install` and `update` remain root-level tasks; no install/update verbs are duplicated under `runner`, `server`, or `service`.
+- The application-log reading currently exposed as `system logs` (`/api/logs/tail`) becomes redundant with the new `server logs`; that duplicate entry is consolidated rather than left as a second path to the same source.
+
+## Capabilities
+
+- `runner-resource-commands`: Read-only runner commands (`list`, `view`, `status`) that report only Server-registered Runner resources — presence, capacity, heartbeat — over the shared `--project` contract, never invoking the local service manager; local Runner service state is never surfaced as Runner resource state.
+- `server-commands`: Read-only Server commands (`status`, `health`, `info`, `logs`) that report only facts about the currently connected Mohist Server application; `server status` is the overall Server status read replacing `project status`; `server logs` is the application log tail; no local service-manager calls.
+- `service-lifecycle`: Unified local managed-process lifecycle `service <start|stop|restart|status|logs|uninstall> <server|runner>` acting solely on the OS-level managed service; target restricted to `server`/`runner`; `service logs` reads service-manager logs; does not parse Project and does not mutate remote Runner/Server domain state.
+
+## Impact
+
+- **CLI** (`packages/cli/Mohist.Cli`): split `MohistCliCommands.Server.cs` — `ServerCommands` keeps only remote reads (`health`, `info`, new `status`, application `logs`) and drops the `IServiceInstaller`-backed lifecycle verbs; `RunnerCommands` keeps only `list`/`view`/`status` and drops its `IServiceInstaller` verbs (rename `show` → `view`); add a new `ServiceCommands` group with `start`/`stop`/`restart`/`status`/`logs`/`uninstall` taking a `<server|runner>` target argument, reusing `IServiceInstaller` and the existing `ServiceCommandOptions`/`ServiceInstallOptions`; remove the `project status` subcommand from `MohistCliCommands.Project.cs`; register `service` at the root in `MohistCliCommands.cs`. Reconcile `system logs` with the new `server logs`.
+- **Shared contract** (`IServiceInstaller.cs`): the installer surface itself is reused unchanged for local lifecycle; only its CLI entry points move.
+- **Tests** (`packages/cli/tests/Mohist.Cli.Tests`): update `CliRunnerCommandSpecs.cs`, `CliProjectStatusCommandSpecs.cs`, and `CliSystemLogsCommandSpecs.cs`; add specs for the `service` target argument (accepts `server`/`runner`, rejects others), `server logs` vs `service logs` source separation, local-Runner-stopped-still-reports-remote-resource, and removal of the old `runner`/`server` lifecycle paths and `project status`.
+- **Docs** (`docs/cli-reference.md`, `docs/runner.md`, `docs/concepts.md`, `docs/troubleshooting.md`, `docs/issues.md`): replace `mo project status`/`mo system logs`/`mo runner start|logs` examples with `mo server status`, `mo server logs`, and `mo service <verb> <target>`; the `cli-reference.md` gap entry for runner/server/service is already the target spec and is closed by this change.
+- No Server API, Runner, Web, database schema, or external dependency change; `install`/`update` behavior is unchanged.

@@ -48,7 +48,7 @@ public class CliRunnerCommandSpecs
     private static object Capacity(int used, int total) => new { usedSlots = used, totalSlots = total };
 
     [Fact]
-    public async Task RunnerHelp_ListsListSubcommand()
+    public async Task RunnerHelp_ListsOnlyReadSubcommands()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
@@ -59,11 +59,10 @@ public class CliRunnerCommandSpecs
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("list", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("\n  install ", stdout, StringComparison.Ordinal);
-        Assert.Contains("start", stdout, StringComparison.Ordinal);
-        Assert.Contains("stop", stdout, StringComparison.Ordinal);
+        Assert.Contains("view", stdout, StringComparison.Ordinal);
         Assert.Contains("status", stdout, StringComparison.Ordinal);
-        Assert.Contains("logs", stdout, StringComparison.Ordinal);
+        foreach (var removed in new[] { "start", "stop", "restart", "service-status", "logs", "uninstall", "show" })
+            Assert.DoesNotContain($"\n  {removed} ", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -364,7 +363,7 @@ public class CliRunnerCommandSpecs
             http, ["runner", "list"], output, error, fileSystem, executor, env);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Contains("Server is not running. Start with: mo server start", error.ToString());
+        Assert.Contains(MohistCliApi.ServerUnavailableMessage, error.ToString());
     }
 
     [Fact]
@@ -495,7 +494,7 @@ public class CliRunnerCommandSpecs
         };
 
     [Fact]
-    public async Task RunnerShow_BusyRunner_PrintsIdentityCapabilitiesActiveWorksAndHealth()
+    public async Task RunnerView_BusyRunner_PrintsIdentityCapabilitiesActiveWorksAndHealth()
     {
         var works = new[]
         {
@@ -512,7 +511,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-busy",], output, error, fileSystem, executor, env);
+            http, ["runner", "view", "r-busy",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -543,7 +542,7 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerShow_IdleRunner_PrintsDetailWithExplicitNoActiveWorksSection()
+    public async Task RunnerView_IdleRunner_PrintsDetailWithExplicitNoActiveWorksSection()
     {
         var detail = RunnerDetail("r-idle", "idle", Array.Empty<object>());
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
@@ -554,7 +553,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-idle",], output, error, fileSystem, executor, env);
+            http, ["runner", "view", "r-idle",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -568,7 +567,7 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerShow_UnknownRunner_ReturnsNotFoundAndNonZeroExit()
+    public async Task RunnerView_UnknownRunner_ReturnsNotFoundAndNonZeroExit()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(
@@ -576,7 +575,7 @@ public class CliRunnerCommandSpecs
                 HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-ghost"], output, error, fileSystem, executor, env);
+            http, ["runner", "view", "r-ghost"], output, error, fileSystem, executor, env);
 
         Assert.Equal(1, exitCode);
         var request = handler.Requests.Single();
@@ -588,7 +587,7 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerShow_ProjectOverride_QueriesThatProject()
+    public async Task RunnerView_ProjectOverride_QueriesThatProject()
     {
         var detail = RunnerDetail("r-x", "idle", Array.Empty<object>());
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
@@ -599,7 +598,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-x", "--project", "proj_other"], output, error, fileSystem, executor, env);
+            http, ["runner", "view", "r-x", "--project", "proj_other"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -607,13 +606,13 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerShow_NoActiveProject_FailsWithStandardError()
+    public async Task RunnerView_NoActiveProject_FailsWithStandardError()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called without an active project"), activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-1"], output, error, fileSystem, executor, env);
+            http, ["runner", "view", "r-1"], output, error, fileSystem, executor, env);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("mo project use", error.ToString());
@@ -621,7 +620,7 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerShow_SelectedJson_ProjectsRequestedFields()
+    public async Task RunnerView_SelectedJson_ProjectsRequestedFields()
     {
         var works = new[]
         {
@@ -636,7 +635,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-busy", "--json", "id,activeWorks"], output, error, fileSystem, executor, env);
+            http, ["runner", "view", "r-busy", "--json", "id,activeWorks"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -651,7 +650,7 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerShow_HelpText_ListsShowAndExistingSubcommands()
+    public async Task RunnerView_HelpText_ListsViewAndReadSubcommands()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
@@ -661,18 +660,15 @@ public class CliRunnerCommandSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("show", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("\n  install ", stdout, StringComparison.Ordinal);
-        Assert.Contains("start", stdout, StringComparison.Ordinal);
-        Assert.Contains("stop", stdout, StringComparison.Ordinal);
+        Assert.Contains("view", stdout, StringComparison.Ordinal);
         Assert.Contains("status", stdout, StringComparison.Ordinal);
-        Assert.Contains("logs", stdout, StringComparison.Ordinal);
-        Assert.Contains("uninstall", stdout, StringComparison.Ordinal);
         Assert.Contains("list", stdout, StringComparison.Ordinal);
+        foreach (var removed in new[] { "start", "stop", "restart", "service-status", "logs", "uninstall", "show" })
+            Assert.DoesNotContain($"\n  {removed} ", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task RunnerShow_WorkWithoutIssue_RendersWorkWithoutIssueLink()
+    public async Task RunnerView_WorkWithoutIssue_RendersWorkWithoutIssueLink()
     {
         var works = new[]
         {
@@ -687,7 +683,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-x",], output, error, fileSystem, executor, env);
+            http, ["runner", "view", "r-x",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -701,7 +697,7 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerShow_TableOutput_ReadsMaxSlotsFromCapacityTotalSlots()
+    public async Task RunnerView_TableOutput_ReadsMaxSlotsFromCapacityTotalSlots()
     {
         var detail = RunnerDetail(
             "r-capacity",
@@ -716,7 +712,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-capacity",], output, error, fileSystem, executor, env);
+            http, ["runner", "view", "r-capacity",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         Assert.Equal($"/api/projects/{ActiveProjectId}/runners/r-capacity", handler.Requests.Single().RequestUri?.PathAndQuery);
@@ -958,39 +954,39 @@ public class CliRunnerCommandSpecs
             http, ["runner", "status"], output, error, fileSystem, executor, env);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Contains("Server is not running. Start with: mo server start", error.ToString());
+        Assert.Contains(MohistCliApi.ServerUnavailableMessage, error.ToString());
     }
 
-    [Fact]
-    public async Task RunnerServiceStatus_DryRun_InvokesSameInstallerStatusAction()
+    [Theory]
+    [InlineData("start")]
+    [InlineData("stop")]
+    [InlineData("restart")]
+    [InlineData("service-status")]
+    [InlineData("logs")]
+    [InlineData("uninstall")]
+    public async Task RemovedRunnerLifecycleCommand_FailsWithoutInstallerOrHttp(string verb)
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
-            throw new InvalidOperationException("service-status must not call the HTTP API"));
+            throw new InvalidOperationException("removed runner lifecycle command must not call the HTTP API"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "service-status", "--dry-run"], output, error, fileSystem, executor, env);
+            http, ["runner", verb], output, error, fileSystem, executor, env, installer: new FakeServiceInstaller());
 
-        Assert.Equal(0, exitCode);
+        Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
-        var stdout = output.ToString();
-        Assert.Contains("Dry run: systemctl", stdout, StringComparison.Ordinal);
-        Assert.Contains("status", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task RunnerServiceStatus_Help_ListsServiceStatusWithSameOptions()
+    public async Task RunnerShow_NoLongerResolvesAndIssuesNoHttpRequest()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
-            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+            throw new InvalidOperationException("runner show must not call the HTTP API"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "service-status", "--help"], output, error, fileSystem, executor, env);
+            http, ["runner", "show", "r-1"], output, error, fileSystem, executor, env);
 
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        Assert.Contains("Show runner managed service lifecycle status", stdout, StringComparison.Ordinal);
-        Assert.Contains("--dry-run", stdout, StringComparison.Ordinal);
-        Assert.Contains("--unit-dir", stdout, StringComparison.Ordinal);
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -1009,25 +1005,4 @@ public class CliRunnerCommandSpecs
         Assert.Contains("busy", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public async Task RunnerHelp_ListsBothStatusAndServiceStatusVerbsDistinctly()
-    {
-        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
-            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "--help"], output, error, fileSystem, executor, env);
-
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        Assert.Contains("service-status", stdout, StringComparison.Ordinal);
-        Assert.Contains("status", stdout, StringComparison.Ordinal);
-        Assert.Contains("Show online runner summary", stdout, StringComparison.Ordinal);
-        Assert.Contains("Show runner managed service lifecycle status", stdout, StringComparison.Ordinal);
-        var statusIdx = stdout.IndexOf("status", StringComparison.Ordinal);
-        var serviceStatusIdx = stdout.IndexOf("service-status", StringComparison.Ordinal);
-        Assert.True(statusIdx >= 0);
-        Assert.True(serviceStatusIdx >= 0);
-        Assert.NotEqual(statusIdx, serviceStatusIdx);
-    }
 }

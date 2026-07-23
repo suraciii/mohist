@@ -18,7 +18,7 @@
 ```bash
 mo project create my-app --path /path/to/repo   # --path 的仓库注册为 default 仓库
 mo project use my-app
-mo project status   # 查看当前 project
+mo server status   # 查看整体 Server 状态（含 Runner / 容量）
 ```
 
 **多个 Project 的场景**：你有 side project A、side project B，分别建 Project，按需切换。

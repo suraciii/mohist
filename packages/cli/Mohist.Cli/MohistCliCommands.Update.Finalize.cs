@@ -63,7 +63,7 @@ internal partial class SourceCodeUpdater
             _err.WriteLine($"Mohist is not fully usable. Unavailable capability: {context.UnavailableCapability}.");
             if (string.Equals(context.UnavailableCapability, "Runner unavailable", StringComparison.Ordinal))
             {
-                _err.WriteLine("Start the runner manually with: mo runner start");
+                _err.WriteLine("Start the runner manually with: mo service start runner");
             }
         }
         else if (context.Warnings.Count > 0)

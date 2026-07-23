@@ -749,7 +749,7 @@ public class CliAgentSessionCommandSpecs
             output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Contains("Server is not running. Start with: mo server start", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains(MohistCliApi.ServerUnavailableMessage, error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

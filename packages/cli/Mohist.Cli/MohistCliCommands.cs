@@ -12,9 +12,9 @@ internal static class MohistCliCommands
         var root = new RootCommand("Mohist CLI");
 
         root.Subcommands.Add(InfoCommands.Build(provider));
-        root.Subcommands.Add(SystemCommands.Build(api));
         root.Subcommands.Add(ServerCommands.Build(api, provider));
         root.Subcommands.Add(RunnerCommands.Build(api, provider));
+        root.Subcommands.Add(ServiceCommands.Build(provider));
         root.Subcommands.Add(InstallCommands.Build(provider));
         root.Subcommands.Add(UpdateCommands.Build(provider));
         root.Subcommands.Add(SkillsCommands.Build(provider));

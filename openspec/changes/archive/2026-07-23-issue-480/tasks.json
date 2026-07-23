@@ -1,0 +1,89 @@
+{
+  "project": "mohist-local",
+  "description": "Separate the mo CLI into runner (remote resource), server (connected application), and service (local managed process) command groups, removing the overlapping lifecycle verbs and relocating misplaced status/logs reads.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add the `service` command group for local managed-process lifecycle",
+      "spec": "specs/service-lifecycle/spec.md#unified-local-managed-process-lifecycle-command",
+      "description": "Add a new `ServiceCommands` group registered at the root, exposing `service <start|stop|restart|status|logs|uninstall>` with a positional `<target>` bound to a `ServiceTarget { Server, Runner }` enum (parse-time exit-2 validation). Each verb dispatches `(verb, target)` to the existing per-target `IServiceInstaller` method via a table, reusing `ServiceCommandOptions` unchanged. Verbs support `--dry-run` and `--unit-dir`; `logs` additionally supports `--lines`/`-n` and `--follow`/`-f`. `service logs` help must identify service-manager logs and point to `mo server logs` for application logs. The old `runner`/`server` lifecycle verbs stay in place for now (additive).",
+      "acceptanceCriteria": [
+        "`mo service --help` lists exactly start, stop, restart, status, logs, uninstall and advertises no `--project`/`--project-id` option",
+        "`mo service start server --dry-run` prints the service-manager command it would run via a FakeServiceInstaller and performs no state change",
+        "`mo service status database` exits non-zero (usage error) and invokes no installer action, indicating target must be server or runner",
+        "`mo service logs server --help` advertises --lines/--follow and references `mo server logs` for application logs",
+        "`mo service stop runner` issues no HTTP request to the Server (no remote mutation)",
+        "New CliServiceCommandSpecs cover target validation, dry-run, no-Project, no-HTTP, and logs options; `dotnet build Mohist.sln` is clean (TreatWarningsAsErrors) and `dotnet test` for packages/cli/tests/Mohist.Cli.Tests passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli ServiceCommands (+ ServiceTarget enum) registered in MohistCliCommands.cs, with CliServiceCommandSpecs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep IServiceInstaller, SystemdServiceInstaller, WindowsScheduledTaskInstaller, ServiceCommandOptions unchanged (design D1). Enum target gives free parse-error validation (design D2)."
+    },
+    {
+      "id": "T-002",
+      "title": "Slim `runner` to read-only Server-registered resource commands",
+      "spec": "specs/runner-resource-commands/spec.md#runner-command-surface-is-read-only-over-server-registered-resources",
+      "description": "Remove the local lifecycle subcommands (start, stop, restart, service-status, logs, uninstall) from `RunnerCommands`, leaving only `list`, `view` (renamed from `show`), and `status`, which read Server-registered Runner resources over the shared `--project` contract. `view` queries the single-runner endpoint; `show` is removed with no alias. Runner reads keep reporting Server-known facts regardless of local service state.",
+      "acceptanceCriteria": [
+        "`mo runner --help` lists only list, view, status (no start/stop/restart/service-status/logs/uninstall)",
+        "`mo runner view <id>` issues GET /api/projects/<project>/runners/<id> and renders detail",
+        "`mo runner show <id>` no longer resolves (exit non-zero, no HTTP request, no alias)",
+        "`mo runner start` exits non-zero and invokes no installer action",
+        "Existing runner list/status behavior is preserved (scope filter, --json field selection, no-active-project guidance, color handling)",
+        "CliRunnerCommandSpecs updated to the list/view/status surface; `dotnet build Mohist.sln` clean and `dotnet test` for packages/cli/tests/Mohist.Cli.Tests passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Reshaped RunnerCommands in MohistCliCommands.Server.cs (list/view/status only) with updated CliRunnerCommandSpecs",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Rename show->view aligns with the cli-reference view/edit unification (design D5). Remote resource facts are independent of local service state (runner-resource-commands spec)."
+    },
+    {
+      "id": "T-003",
+      "title": "Reshape `server` to read-only application facts and relocate status/logs",
+      "spec": "specs/server-commands/spec.md#server-command-surface-is-read-only-over-the-connected-application",
+      "description": "Remove the local lifecycle subcommands (start, stop, restart, status-as-unit, logs-as-service-manager, uninstall) from `ServerCommands`. Add `server status` issuing GET /api/status?all=true (formerly `project status`), and repurpose `server logs` to read application logs via GET /api/logs/tail. Keep `health` and `info`. Remove the `project status` subcommand from ProjectCommands. Reuse the existing API paths with no endpoint change.",
+      "acceptanceCriteria": [
+        "`mo server --help` lists only status, health, info, logs",
+        "`mo server status` issues GET /api/status?all=true and renders the overall Server status",
+        "`mo project status` no longer resolves (exit non-zero, no HTTP request)",
+        "`mo server logs` issues GET /api/logs/tail and its help identifies application logs and points to `mo service logs server` for service-manager logs",
+        "`mo server start`, `mo server restart`, and `mo server uninstall` exit non-zero and invoke no installer action",
+        "CliProjectStatusCommandSpecs migrated to the server status path; `dotnet build Mohist.sln` clean and `dotnet test` for packages/cli/tests/Mohist.Cli.Tests passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Reshaped ServerCommands (status/health/info/logs) in MohistCliCommands.Server.cs, project status removed from MohistCliCommands.Project.cs, with migrated specs",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "server status/logs reuse the exact API paths project status and system logs used (design D3) — no Server route or response-shape change."
+    },
+    {
+      "id": "T-004",
+      "title": "Retire the `system` group, align dead-verb guidance strings, and update docs",
+      "spec": "specs/server-commands/spec.md#application-logs-have-a-single-entry-point",
+      "description": "Remove the now-empty `SystemCommands` group and its root registration in MohistCliCommands.cs so application logs have a single entry at `server logs`. Update dead-verb guidance strings to the new paths: `MohistCliApi.ServerUnavailableMessage` and the system-info degraded message and `NdjsonStream` -> `mo service start server`; `Update.Finalize` -> `mo service start runner`. Update user-facing doc examples to the runner/server/service surface and confirm install/update remain root-level only.",
+      "acceptanceCriteria": [
+        "`mo system logs` and `mo system --help` no longer resolve (exit non-zero, no HTTP request)",
+        "Server-unreachable stderr across remote reads references `mo service start server` via the single ServerUnavailableMessage constant",
+        "`mo runner install` and `mo service install server` exit non-zero (install remains only at `mo install <server|runner>`)",
+        "CliSystemLogsCommandSpecs removed or migrated and any tests asserting old dead-verb literals are updated; `dotnet build Mohist.sln` clean and `dotnet test` for packages/cli/tests/Mohist.Cli.Tests passes",
+        "docs/runner.md, docs/concepts.md, docs/troubleshooting.md, and docs/issues.md use mo server status / mo server logs / mo service <verb> <target>; docs/cli-reference.md reflects the closed runner/server/service gap"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "SystemCommands removed, cross-cutting guidance strings updated, docs examples migrated, with migrated/removed specs",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Centralize the start-with message in ServerUnavailableMessage (design D6). Removing system is safe only after server logs owns application logs (T-003) and runner/server lifecycle verbs are gone (T-001/T-002)."
+    }
+  ]
+}

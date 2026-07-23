@@ -552,7 +552,7 @@ public sealed class SystemUpdateService : ISingletonService
             outcome: "failed",
             unavailableCapability: "Runner",
             logStage: "Failed",
-            logMessage: "Runner restore failed after update failure. Workflows are unavailable. Start the runner manually with: mo runner start");
+            logMessage: "Runner restore failed after update failure. Workflows are unavailable. Start the runner manually with: mo service start runner");
     }
 
     private (string Error, string Code)? ValidateStart(SystemInfoResponse info)

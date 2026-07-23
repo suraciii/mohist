@@ -726,7 +726,7 @@ internal sealed class MohistCliApi
     {
         var cliVersion = TryGetCliVersion();
 
-        _err.WriteLine("Server is not running. Start with: mo server start");
+        _err.WriteLine(ServerUnavailableMessage);
 
         var payload = new JsonObject
         {
@@ -860,7 +860,7 @@ internal sealed class MohistCliApi
         return value.GetValue<string>() ?? "";
     }
 
-    internal const string ServerUnavailableMessage = "Server is not running. Start with: mo server start";
+    internal const string ServerUnavailableMessage = "Server is not running. Start with: mo service start server";
     internal const string RunnerStartHint = "npx mohist runner";
 
     public abstract record OutputModeResult

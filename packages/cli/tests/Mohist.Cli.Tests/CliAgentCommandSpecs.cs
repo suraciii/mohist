@@ -405,7 +405,7 @@ public class CliAgentCommandSpecs
         var exitCode = await RunAsync(handler, ["agent", "list"], error: error, fileSystem: FileSystemWithProject());
 
         Assert.NotEqual(0, exitCode);
-        Assert.Contains("Server is not running. Start with: mo server start", error.ToString());
+        Assert.Contains(MohistCliApi.ServerUnavailableMessage, error.ToString());
     }
 
     private static Task<int> RunAsync(

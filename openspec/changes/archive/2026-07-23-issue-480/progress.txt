@@ -1,0 +1,225 @@
+# T-001 progress notes
+
+Branch: `mohist/run-wr_582017ee3dca416f8104a8678fd1b632`
+Task: Add the `service` command group for local managed-process lifecycle
+
+## Codebase Patterns
+
+- Each command group lives in `packages/cli/Mohist.Cli/MohistCliCommands.<Area>.cs` and is `internal static` with a `Build(MohistCliApi, IServiceProvider)`.
+- Root registration happens in `MohistCliCommands.cs:Build`. Subcommand order matters only for help rendering.
+- Shared option factories in `MohistCliCommands.cs`: `DryRunOption`, `UnitDirOption`, `LinesOption`, `FollowOption`, `OutputOption`, `ProjectRefOption` (returns `(Option<string?> Project, Option<string?> ProjectId)`).
+- `IServiceInstaller` signature is fixed per-target (`StartServerAsync`, `StopRunnerAsync`, etc.). Reuse unchanged (design D1).
+- `ServiceCommandOptions(DryRun, UnitDir, Lines, Follow)` is reused unchanged.
+- Tests use `MohistCliCommands.RunAsync(...)` with a `FakeServiceInstaller` injected via the `installer` parameter (set up through `Support/CliTestFactory.CreateInternal` and direct construction). The standard helper excludes the installer from its return tuple; specs that need it construct the dependencies manually.
+- Exit-code convention: usage/parse failure exits non-zero (typically `CliExitCode.For(CliExitOutcome.UsageFailure)`).
+- `--help` invocations are routed through `System.CommandLine`, so a `Command("logs", "description")` produces a help block including the description.
+
+## Plan
+
+- New file: `MohistCliCommands.Service.cs`
+  - `internal enum ServiceTarget { Server, Runner }`
+  - `internal static class ServiceCommands`
+    - `Build` constructs the root `service` Command and adds the six verbs. The verb/target→handler dispatch is a static dictionary `Dictionary<(string Verb, ServiceTarget Target), Func<IServiceInstaller, ServiceCommandOptions, Task<int>>>` that wraps each `IServiceInstaller` method. (D1 — reuse the per-target methods.)
+    - Each verb Command adds `--dry-run` and `--unit-dir`; `logs` additionally adds `--lines`/`-n` and `--follow`/`-f`.
+    - `<target>` is a positional `Argument<ServiceTarget>` — System.CommandLine parses with `Enum.Parse` → unknown values produce a parse error (exit 2). (D2 — free parse-time validation.)
+  - The `logs` description explicitly points to `mo server logs` for application logs.
+  - No `--project` / `--project-id` on any verb (spec: `service` does not parse Project).
+- Register in `MohistCliCommands.cs:Build` after `RunnerCommands.Build` (placement is cosmetic).
+- Tests: `tests/Mohist.Cli.Tests/CliServiceCommandSpecs.cs`
+  - `--help` lists six verbs and no `--project`.
+  - Invalid target (e.g. `database`) → parse error, no installer call.
+  - `service start server --dry-run` via `FakeServiceInstaller` (using the real `SystemdServiceInstaller` is not necessary — `FakeServiceInstaller` is the existing test path that records calls; the production dry-run text is exercised by `SystemdServiceInstaller` tests already).
+  - `service stop runner` issues no HTTP.
+  - `service logs --help` advertises `--lines`/`--follow` and references `mo server logs`.
+  - All verbs' help lists exactly start, stop, restart, status, logs, uninstall (no `install`/`update`).
+- Old `runner`/`server` lifecycle verbs stay in place (additive per task description; later tasks remove them).
+
+## Acceptance-criteria-to-test mapping
+
+- "mo service --help lists exactly start, stop, restart, status, logs, uninstall and advertises no --project/--project-id option" → `ServiceHelp_ListsLifecycleVerbsOnly_NoProjectOption`.
+- "mo service start server --dry-run prints the service-manager command via FakeServiceInstaller and performs no state change" → `ServiceStart_DryRun_RecordsOnlyStartCallOnFakeInstaller` (records `StartServerAsync` call with `DryRun=true`).
+- "mo service status database exits non-zero (usage error) and invokes no installer action" → `ServiceStatus_InvalidTarget_ExitsNonZeroWithoutInstallerCall`.
+- "mo service logs server --help advertises --lines/--follow and references mo server logs" → `ServiceLogs_Help_AdvertisesLinesFollowAndServerLogsReference`.
+- "mo service stop runner issues no HTTP request to the Server" → `ServiceStop_Runner_IssuesNoHttp`.
+- "New CliServiceCommandSpecs … dotnet build clean and dotnet test for Mohist.Cli.Tests passes" → run both.
+
+## Completion notes
+
+Implementation complete. Files added/touched:
+- `packages/cli/Mohist.Cli/MohistCliCommands.Service.cs` (new)
+- `packages/cli/Mohist.Cli/MohistCliCommands.cs` (root registration added)
+- `packages/cli/tests/Mohist.Cli.Tests/CliServiceCommandSpecs.cs` (new — 13 tests)
+
+### Final test counts
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors (TreatWarningsAsErrors enforced).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj` → 1401 passed, 0 failed (full suite including the 13 new `CliServiceCommandSpecs`).
+
+### Acceptance-criteria verification
+
+| AC | Test | Result |
+|---|---|---|
+| `mo service --help` lists the six verbs, no `--project`/`--project-id` | `ServiceHelp_ListsExactlyTheSixLifecycleVerbs` + `ServiceHelp_AdvertisesNoProjectOption` | ✅ |
+| `mo service start server --dry-run` records only `StartServerAsync` and prints preview | `ServiceStartServer_DryRun_RecordsOnlyStartServerCall` + `ServiceStartServer_DryRun_PreviewsServiceManagerCommand` | ✅ |
+| `mo service status database` exits non-zero, no installer action | `ServiceStatus_InvalidTarget_ExitsNonZeroWithoutInstallerCall` (asserts `installer.Calls` empty, `handler.Requests` empty, exit != 0) | ✅ (exit 2 — usage failure) |
+| `mo service logs server --help` advertises `--lines`/`--follow` and references `mo server logs` | `ServiceLogsHelp_AdvertisesLinesAndFollow` + `ServiceLogsHelp_ReferencesServerLogsForApplicationLogs` | ✅ |
+| `mo service stop runner` issues no HTTP | `ServiceStop_AnyTarget_IssuesNoHttp` | ✅ |
+
+### Gotchas / decisions during the build
+
+- `Argument<ServiceTarget>` parses **case-insensitively** (`Enum.Parse` default). The dispatches use `service-server/Service-Runner` style; users can type `Server` or `server`. Pinned by `ServiceTarget_AcceptsCaseInsensitive`.
+- `Argument<ServiceTarget>` name in `--help` shows as `<Runner|Server>` (System.CommandLine's auto-derived enum help). No third value can ever sneak in via typos; the post-error help reprint step lists the allowed values too.
+- The `--help` description block for the service group fits in two lines and stays terse on purpose — the verbs' own descriptions carry the operational detail (especially `logs`, which calls out non-interchangeability with `mo server logs`).
+- `BuildSimple(verb, description, installer)` collapses what was originally three near-identical builders (`BuildLifecycle`, `BuildStatus`, `BuildLogs`-without-options) since they share the same option set (`<target>`/`--dry-run`/`--unit-dir`) and dispatch shape. `BuildLogs` is the only special case (adds `--lines`/`--follow`).
+- Did **not** add `--project`/`--project-id` to any verb (spec explicitly forbids it). Verified via `ServiceHelp_AdvertisesNoProjectOption` and `Service_Help_DoesNotMentionRunnerOrServerLifecycleDetails`.
+- Old `runner`/`server` lifecycle verbs left in place (additive per the task description; T-002/T-003 will retire them).
+- Refused to widen the diff to also tackle the cross-cutting D6 string changes (`MohistCliApi.ServerUnavailableMessage`, etc.) — those belong to T-004 per the task graph. Running them here would silently surface `mo service start server` text before the `service` group is reachable from all routes, breaking the dependency chain.
+
+### Open items for downstream tasks
+
+- T-002 (`runner` slim) can remove `runner start|stop|restart|status|service-status|logs|uninstall`; the new `service` group already covers equivalent semantics.
+- T-003 (`server` reshape) can remove `server start|stop|restart|status|logs|uninstall`; the new `service` group + `server logs` already covers the rest.
+- T-004 (`system` retire, D6 string guidance) is unblocked once T-002 and T-003 land.
+
+# T-003 progress notes
+
+Branch: `mohist/run-wr_582017ee3dca416f8104a8678fd1b632`
+Task: Reshape `server` to read-only application facts and relocate status/logs
+
+## Plan
+
+- `MohistCliCommands.Server.cs::ServerCommands` — drop lifecycle verbs:
+  - Removed: `start` (`StartServerAsync`), `stop`, `restart`, `status` (local unit), `uninstall`, and the service-manager `logs` (`LogsServerAsync`).
+  - Kept: `health` (`PrintGetAsync("/api/health")`), `info` (`PrintSystemInfoAsync`).
+  - Added: `status` (`PrintGetAsync("/api/status?all=true")` — formerly `project status`).
+  - Repurposed: `logs` (`PrintGetAsync("/api/logs/tail")` — application logs, not service-manager).
+  - The new group description names the read-only contract and points at `mo service <verb> server` for lifecycle.
+  - The `logs` description identifies it as application logs and points to `mo service logs server` for service-manager logs (mirror of `service logs` description from T-001).
+  - The unused `IServiceProvider provider` parameter was renamed to `_` (TreatWarningsAsErrors enforces no unused params).
+- `MohistCliCommands.Project.cs::ProjectCommands` — drop `BuildStatus` and the `status` subcommand registration.
+- Tests:
+  - `CliProjectStatusCommandSpecs.cs` deleted; the project-status tests are no longer meaningful.
+  - `CliServerStatusCommandSpecs.cs` created with 14 tests covering all the ACs plus spec scenarios (server health/info still work; `mo server start|stop|restart|uninstall` parse-error and no installer call; `mo server logs` no longer hits the service-manager installer; `mo project status` no longer resolves; `mo project --help` no longer advertises `status`).
+  - `CliInstallUpdateSingleEntryTests.cs::ServerHelp_DoesNotAdvertiseInstallOrUpdate` and `SurvivingServerSubcommands_StillResolve` updated to the new four-verb server surface.
+
+## Acceptance-criteria-to-test mapping
+
+| AC | Test | Result |
+|---|---|---|
+| `mo server --help` lists only status, health, info, logs | `ServerHelp_ListsOnlyReadSubcommands` | ✅ |
+| `mo server status` issues GET /api/status?all=true and renders the overall Server status | `ServerStatus_HitsStatusEndpointAndRendersResponse` | ✅ |
+| `mo project status` no longer resolves (exit non-zero, no HTTP) | `LegacyProjectStatus_NoLongerResolvesAndExitsNonZero` | ✅ |
+| `mo server logs` issues GET /api/logs/tail and its help identifies application logs and points to `mo service logs server` | `ServerLogs_HitsApplicationLogsEndpoint` + `ServerLogs_HelpIdentifiesApplicationLogsAndPointsToServiceLogs` | ✅ |
+| `mo server start`, `mo server restart`, `mo server uninstall` exit non-zero and invoke no installer action | `LegacyServerStart_FailsToResolveAndInvokesNoInstallerAction` + `LegacyServerRestart_…` + `LegacyServerUninstall_…` (plus `LegacyServerStop_…` and `LegacyServerLogsAsServiceManager_…` as regression guards) | ✅ |
+| CliProjectStatusCommandSpecs migrated to the server status path; `dotnet build Mohist.sln` clean and `dotnet test` for Mohist.Cli.Tests passes | full suite below | ✅ |
+
+## Final test counts
+
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors (TreatWarningsAsErrors enforced).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj` → 1409 passed, 0 failed (was 1401; +14 new `CliServerStatusCommandSpecs`, -6 removed `CliProjectStatusCommandSpecs`).
+
+## Gotchas / decisions during the build
+
+- Reused the exact API paths `project status` and `system logs` used — no Server route or response-shape change (design D3). The CLI simply relocates the same calls into the `server` group.
+- Repurposing `server logs` from a service-manager read (via `LogsServerAsync`) to an application read (via `PrintGetAsync("/api/logs/tail")`) creates a temporary overlap with `system logs` (still registered, still working). T-004 will retire `system` entirely once T-002 lands; leaving both alive for now is intentional and matches the additive phase.
+- Did **not** touch the cross-cutting D6 string changes (`MohistCliApi.ServerUnavailableMessage` still says "mo server start"). T-004 owns that work; the spec scenario for "Server unreachable emits start-service guidance" cannot fully pass until then.
+- `mo server status` and the runner-level `mo runner status` are both reachable in T-003. The runner `status` is an HTTP read of `/api/projects/<project>/runners`; the server `status` is an HTTP read of `/api/status?all=true`. They have distinct intent (per-resource vs cross-project) and live in distinct command groups, so the AC's "read-only application facts" still holds.
+- Renamed `Build`'s second parameter to `_` because TreatWarningsAsErrors flags unused parameters. Cleaner than `_ = provider` since the runner group (which still uses the parameter) lives in the same file and the call site already passes the same `provider` to both.
+- CliInstallUpdateSingleEntryTests's two regression guards (`ServerHelp_DoesNotAdvertiseInstallOrUpdate` and `SurvivingServerSubcommands_StillResolve`) had to change because they iterated over the old eight-verb server surface; the new four-verb surface is asserted instead. `install`/`update` removal invariants are still pinned.
+- CliSystemLogsCommandSpecs and CliRunnerCommandSpecs untouched — T-003 only touches the server half. The "mo server start" literal still in their `RunnerList_ServerDown_…` assertions survives this task and gets updated in T-004.
+
+## Open items for downstream tasks
+
+- T-002 will slim `RunnerCommands` and rename `show` → `view` (per the AC list); the runner's `RunnerShow_*` tests will need to retarget the new verb.
+- T-004 will retire `SystemCommands` (now redundant with `server logs`), update `MohistCliApi.ServerUnavailableMessage` to `mo service start server`, update `NdjsonStream.cs:30` and `MohistCliApi.cs:729` and `Update.Finalize.cs:66` likewise, and update the remaining tests asserting "mo server start" / "mo runner start" literals to the new guidance strings.
+
+# T-004 progress notes
+
+Branch: `mohist/run-wr_582017ee3dca416f8104a8678fd1b632`
+Task: Retire the `system` group, align dead-verb guidance strings, and update docs
+
+## Plan
+
+- `MohistCliCommands.System.cs` — deleted (the file was the only member of the now-empty `system` group).
+- `MohistCliCommands.cs:Build` — remove the `SystemCommands.Build(api)` root registration. Order of remaining registrations is cosmetic.
+- `MohistCliApi.cs:863` — `ServerUnavailableMessage` constant updated from `"Server is not running. Start with: mo server start"` to `"Server is not running. Start with: mo service start server"`. This is the single source of truth for server-unreachable stderr text (D6).
+- `MohistCliApi.cs:729` (`RenderSystemInfoDegradedAsync`) — replaces the inline duplicate string with the `ServerUnavailableMessage` constant; centralization removes a second copy that drifted from the source of truth.
+- `NdjsonStream.cs:30` — replaces the inline duplicate string with `MohistCliApi.ServerUnavailableMessage`. Now any future change to the guidance shows up everywhere consistently.
+- `MohistCliCommands.Update.Finalize.cs:66` — `"mo runner start"` → `"mo service start runner"` (the runner-start hint the update flow prints when `Runner unavailable` was reported).
+- `tests/Mohist.Cli.Tests/CliSystemLogsCommandSpecs.cs` — deleted. The system-logs read has fully migrated to `mo server logs` (`CliServerStatusCommandSpecs.ServerLogs_*` covers it).
+- `tests/Mohist.Cli.Tests/CliSystemGroupRetiredSpecs.cs` (new) — three regression guards:
+  1. `mo system logs` exits non-zero, no HTTP request (matches the spec's "Application logs have a single entry point").
+  2. `mo system` exits non-zero, no HTTP request (the structural pin; see gotcha below).
+  3. `mo logs` (root) stays retired (regression guard from #387).
+- `tests/Mohist.Cli.Tests/CliSystemInfoCommandSpecs.cs` — removed `System_Help_NoLongerListsInfo` (asserted `system --help` output — meaningless now that the system group is gone). Kept `LegacySystemInfo_NoLongerResolvesAndExitsNonZero` as a small belt for the unknown-command exit code.
+- `tests/Mohist.Cli.Tests/CliRootCommandShapeTests.cs` — `Root_Help_ListsResourceGroupsAndInfoOnly_NoBareVerbs` swaps `system` for `service` in the required-resource-groups list and adds `Assert.DoesNotContain("\n  system ", stdout)`; `Root_Help_StillAdvertisesAllResourceGroupsBeyondMigratedOnes` swaps `system` for `service` in the surviving list.
+- `tests/Mohist.Cli.Tests/CliServiceCommandSpecs.cs` — two new ACs: `ServiceInstall_FailsToResolveAndTriggersNoInstallerAction` (pins `mo service install server` → exit non-zero, no installer, no HTTP) and `ServiceHelp_DoesNotAdvertiseInstall` (`service --help` lists no install/update).
+- Tests asserting the old dead-verb literal (`"mo server start"` / `"mo runner start"`) — converted to the constant `MohistCliApi.ServerUnavailableMessage` where the assertion is on the whole guidance string; otherwise updated the substring to `"mo service start server"` / `"mo service start runner"`. Files touched:
+  - `CliRunnerCommandSpecs.cs` (×2)
+  - `CliAgentCommandSpecs.cs`
+  - `CliAgentSessionCommandSpecs.cs`
+  - `CliOtelCommandSpecs.cs`
+  - `CliProjectUseCommandSpecs.cs`
+  - `CliIssueTemplateCommandSpecs.cs`
+  - `CliSystemInfoCommandSpecs.cs`
+  - `Workflow/Api/WorkflowCliProfileListTests.cs`
+  - `Update/UpdateRecoverySpecs.cs`
+  - `Update/UpdateVerifyRuntimeSpecs.cs`
+- Docs migrated to the runner/server/service surface:
+  - `docs/runner.md` — `mo runner start` → `mo service start runner`; `mo project status` → `mo server status`; `mo runner logs` → `mo service logs runner` (service-manager journal); references to `mo runner start --help` → `mo service start runner --help`.
+  - `docs/concepts.md` — `mo project status` example replaced with `mo server status`.
+  - `docs/troubleshooting.md` — `mo project status` references → `mo server status`; `mo system logs` → `mo server logs`.
+  - `docs/issues.md` — `mo project status` reference in issue-start prerequisites → `mo server status`.
+  - `docs/cli-reference.md` — adds a new "已闭合" sub-section under "实装差距" that documents the closed `runner` / `server` / `service` split; the original gap bullet is removed.
+
+## Acceptance-criteria-to-test mapping
+
+| AC | Coverage | Result |
+|---|---|---|
+| `mo system logs` and `mo system --help` no longer resolve | `CliSystemGroupRetiredSpecs.SystemLogs_NoLongerResolvesAndIssuesNoHttpRequest` + `CliSystemGroupRetiredSpecs.System_NoLongerResolves` + `CliRootCommandShapeTests.Root_Help_ListsResourceGroupsAndInfoOnly_NoBareVerbs` (negative `\n  system `) + `CliServerStatusCommandSpecs` already covers the relocated `mo server logs` read | ✅ |
+| Server-unreachable stderr references `mo service start server` via `ServerUnavailableMessage` | `MohistCliApiSendAsyncSpecs` (all paths use the constant) + `CliRunnerCommandSpecs` (×2) + `CliAgentCommandSpecs` + `CliAgentSessionCommandSpecs` + `CliOtelCommandSpecs` + `CliProjectUseCommandSpecs` + `CliSystemInfoCommandSpecs` now reference the constant or the new substring | ✅ |
+| `mo runner install` and `mo service install server` exit non-zero | `CliInstallUpdateSingleEntryTests.LegacyRunnerInstall_FailsToResolveAndTriggersNoInstallerCall` + `CliServiceCommandSpecs.ServiceInstall_FailsToResolveAndTriggersNoInstallerAction` | ✅ |
+| `CliSystemLogsCommandSpecs` removed/migrated and dead-verb literals updated; build clean + `dotnet test Mohist.Cli.Tests` passes | `CliSystemLogsCommandSpecs.cs` deleted; literals updated across 10 files; build clean (0 warnings, 0 errors, TreatWarningsAsErrors); 1406 passed, 0 failed | ✅ |
+| `docs/runner.md`, `docs/concepts.md`, `docs/troubleshooting.md`, `docs/issues.md` use the new verbs; `docs/cli-reference.md` reflects the closed gap | all five docs updated (commit diff) | ✅ |
+
+## Final test counts
+
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors (TreatWarningsAsErrors).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj` → 1406 passed, 0 failed (was 1409 after T-003; −7 from removing `CliSystemLogsCommandSpecs`, +2 in `CliServiceCommandSpecs`, +3 in `CliSystemGroupRetiredSpecs`, +1 net change in `CliRootCommandShapeTests`, −2 in `CliSystemInfoCommandSpecs` (one removed); net +2, with 6 carried into the new specs).
+
+  Wait — let me recount: T-003 left the suite at 1409. After T-004:
+  - removed: 7 tests from `CliSystemLogsCommandSpecs`
+  - removed: 1 test from `CliSystemInfoCommandSpecs` (`System_Help_NoLongerListsInfo`)
+  - added: 3 tests in `CliSystemGroupRetiredSpecs`
+  - added: 2 tests in `CliServiceCommandSpecs` (`ServiceInstall_FailsToResolveAndTriggersNoInstallerAction` + `ServiceHelp_DoesNotAdvertiseInstall`)
+
+  Net: 1409 − 7 − 1 + 3 + 2 = 1406 ✅
+
+## Gotchas / decisions during the build
+
+- **Pre-existing test failures in `Mohist.Server.SpecTests`** (1-2 tests in `InboxApiSpecs.WorkflowRunStoreEvent_PersistsRowAndDispatcherProjectsItToInbox`) are **unrelated** to this change. Confirmed by re-running the suite on a `git stash`'d working tree (the same failure pattern appears). The test is timing-sensitive around Orleans dispatcher projection; the CLI command-tree changes cannot reach it. Not in scope for this task.
+- **`mo system --help` exits 0** even when the command doesn't resolve, because System.CommandLine handles `--help` specially and falls back to nearest-command help with exit code 0 (rather than the parse-error exit 2 path). My first draft of `SystemHelp_NoLongerResolves` asserted non-zero and failed. Fixed by asserting the bare `mo system` form (no `--help`) — that one does exit non-zero (parse error). The structural pin on the help side is `CliRootCommandShapeTests.Root_Help_ListsResourceGroupsAndInfoOnly_NoBareVerbs` (no `  system ` row) and the parse-error pin is the bare-form test. Together they cover both halves of the spec scenario.
+- **Helper tests in `Mohist.Cli.Tests` already migrated** the literal `"mo server start"` substrings to the constant `MohistCliApi.ServerUnavailableMessage` (e.g. `MohistCliApiSendAsyncSpecs` had been doing this from the start). Where the assertion was a focused substring (e.g. `CliSystemInfoCommandSpecs`, `CliIssueTemplateCommandSpecs`), the substring was updated to the new literal `"mo service start server"`. Keeping the constant-based style would have been equally valid; the focused substrings are tighter and survive future wording tweaks to the constant.
+- **Centralizing the message** — moved both `MohistCliApi.cs:729` and `NdjsonStream.cs:30` to reference the constant directly. The previous inline duplicates would have silently drifted again on any future wording change; the constant is now the only place the text is written.
+- **`Update.Finalize.cs`** was updated in-place (`"mo runner start"` → `"mo service start runner"`). It's the only Update-flow string to touch; `UpdateRecoverySpecs` and `UpdateVerifyRuntimeSpecs` had their literals updated in lockstep.
+- **`docs/cli-reference.md`** — rather than editing the existing "实装差距" bullets that are still open (workflow/run/session/etc.), I added a new "已闭合" sub-section explicitly listing the closed `runner`/`server`/`service` split. This keeps the doc structurally honest about which gaps remain and which just closed.
+- **Root `--help`**: removed `system` from the required-resource-groups and surviving-resource-groups lists in `CliRootCommandShapeTests`. Added `service` to both lists (it was the new group from T-001 that wasn't previously asserted there).
+
+## Items intentionally left to other tasks
+
+- `runner start|stop|restart|service-status|logs|uninstall` and the `runner show → view` rename (T-002) — still in the tree. The task graph has T-002 as a dependency of T-004; my work doesn't reach into those, but the ACs that depend on those (e.g. `mo runner --help` listing only `list`/`view`/`status`) belong to T-002 and weren't promoted to T-004. The runner lifecycle verbs still emit their old `mo server start` / `mo runner start` literals nowhere — only the cross-cutting guidance strings (`ServerUnavailableMessage`, `RenderSystemInfoDegradedAsync`, `NdjsonStream`, `Update.Finalize`) were touched.
+- `mo project status` removal — done in T-003; T-004 only updated docs to point at `mo server status`.
+
+# Verification re-check after T-004
+
+Re-ran `npm test` (i.e. `dotnet test Mohist.sln`) on the committed T-004 head to diagnose the verify-check failure. Confirmed the failing test is `Mohist.Server.SpecTests.Specs.Api.InboxApiSpecs.WorkflowRunStoreEvent_PersistsRowAndDispatcherProjectsItToInbox` (Orleans dispatcher projection), and the failure is pre-existing and unrelated to issue-480:
+
+- `git diff origin/master HEAD --name-only` shows only `packages/cli/**` files changed by issue-480; no server source or test file was touched.
+- Re-running the failing test in isolation on the T-004 head: passes 3/3 in ~3-4s each. The same single-test run on `origin/master` (detached HEAD) also passes 3/3 in ~3-4s.
+- Re-running the full `Mohist.Server.SpecTests` suite on `origin/master` reproduces the same `WorkflowRunStoreEvent_PersistsRowAndDispatcherProjectsItToInbox` failure (and intermittently an additional `AgentJobTerminalDeliverySpecs.ReportResultAsync_RunnerCategoryPrecedence_ErrorCodeUsedWhenOutputCategoryMissing`). The issue-480 commits do not change the failure shape — same pattern, same test, same time budget.
+
+Per `design/testing.md` (no flake-masking; no wall-clock looseness) and the task's repair policy (stay within the issue-480 scope), the fix lives in the server domain (Orleans dispatcher saturation under parallel test load) and is out of scope here. Evidence (failure log under `Mohist.Server.SpecTests/bin/Debug/net11.0/TestResults/`) is left intact.
+
+Focused checks covering the changed area:
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors (TreatWarningsAsErrors).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-build` → 1406 passed, 0 failed.
+- Worktree is clean; no verification-only files were created.

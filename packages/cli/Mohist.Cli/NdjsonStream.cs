@@ -27,7 +27,7 @@ internal static class NdjsonStream
         }
         catch (HttpRequestException)
         {
-            await error.WriteLineAsync("Server is not running. Start with: mo server start").ConfigureAwait(false);
+            await error.WriteLineAsync(MohistCliApi.ServerUnavailableMessage).ConfigureAwait(false);
             return 1;
         }
 

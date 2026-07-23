@@ -454,7 +454,7 @@ public class CliIssueTemplateCommandSpecs
             http, ["issue", "template", "get", "feature"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("mo server start", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("mo service start server", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

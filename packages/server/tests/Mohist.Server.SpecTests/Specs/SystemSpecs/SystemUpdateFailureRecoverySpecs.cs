@@ -76,7 +76,7 @@ public class SystemUpdateFailureRecoverySpecs
         Assert.Equal("Failed", latest.Stage);
         Assert.Equal("failed", latest.Outcome);
         Assert.Equal("Runner", latest.UnavailableCapability);
-        Assert.Contains(latest.Logs, log => log.Stage == "Failed" && log.Message.Contains("mo runner start"));
+        Assert.Contains(latest.Logs, log => log.Stage == "Failed" && log.Message.Contains("mo service start runner"));
 
         Assert.Collection(commands.Requests,
             command => Assert.Equal("dotnet", command.FileName),
@@ -162,7 +162,7 @@ public class SystemUpdateFailureRecoverySpecs
         Assert.Equal("failed", latest.Outcome);
         Assert.Equal("Runner", latest.UnavailableCapability);
         Assert.Contains(latest.Logs, log => log.Stage == "Building" && log.Message == "build threw");
-        Assert.Contains(latest.Logs, log => log.Stage == "Failed" && log.Message.Contains("mo runner start"));
+        Assert.Contains(latest.Logs, log => log.Stage == "Failed" && log.Message.Contains("mo service start runner"));
 
         var restoringIndex = store.SavedStates.FindIndex(state => state.Stage == "Restoring runner");
         var finalFailedIndex = store.SavedStates.FindLastIndex(state => state.Status == "failed" && state.Stage == "Failed");

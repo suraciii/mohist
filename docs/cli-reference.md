@@ -351,12 +351,14 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
   一级的相关 usage。
 - 当前 Agent launch 只返回 Session，CLI 也没有 AgentJob read surface；目标同时暴露 Job
   与 Session 的稳定身份和各自事实。
-- 当前 `runner`、`server` 同时包含远程资源或应用行为与本机受管服务行为；目标把本机进程
-  操作移到 `service`，并把当前 `project status` 移到 `server status`。
 - 当前持久 Activity feed、实时 Event tail 和 dead-letter 操作共用 `events` 导航；目标把
   Activity read model 与 Event delivery operations 分开。
 - 当前 `opencode` 和根级 `config` 是实现或配置容器导向的入口；目标把模型目录放到 Agent
   配置辅助命令，并删除没有明确资源所有者的泛化 config 命令。
 - 其它用户指南在迁移期间仍可能展示当前可运行的旧路径；完成命令迁移后再一次性更新示例。
+
+### 已闭合
+
+- `runner` / `server` / `service` 三层职责：`runner` 只表示 Server 已注册的远程执行资源（`list`/`view`/`status`），`server` 只表示当前连接的 Mohist Server 应用（`status`/`health`/`info`/`logs`，其中 `logs` 是应用日志）；本机受管进程统一为 `mo service <verb> server|runner`。`project status` 已迁移到 `server status`；`system logs` 已合并到 `server logs`，`system` 命令组整体退役。
 
 对应源码：`packages/cli/`。

@@ -152,6 +152,6 @@ public class UpdateRecoverySpecs
 
         Assert.Equal(1, exitCode);
         Assert.Contains("Runner unavailable", f.Stderr.ToString());
-        Assert.Contains("mo runner start", f.Stderr.ToString());
+        Assert.Contains("mo service start runner", f.Stderr.ToString());
     }
 }

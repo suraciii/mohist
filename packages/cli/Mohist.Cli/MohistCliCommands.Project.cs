@@ -14,18 +14,10 @@ internal static class ProjectCommands
         project.Subcommands.Add(BuildShow(api));
         project.Subcommands.Add(BuildUse(api));
         project.Subcommands.Add(BuildDelete(api));
-        project.Subcommands.Add(BuildStatus(api));
         project.Subcommands.Add(ProjectWorkflowCommands.Build(api));
         project.Subcommands.Add(VariableCommands.BuildVariableGroup(api, VariableScopeKind.Project));
 
         return project;
-    }
-
-    private static Command BuildStatus(MohistCliApi api)
-    {
-        var cmd = new Command("status", "Show server status across all projects");
-        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/status?all=true"));
-        return cmd;
     }
 
     private static Command BuildList(MohistCliApi api)
