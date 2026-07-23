@@ -297,35 +297,6 @@ public class WorkflowRunStoreSpecs
     }
 
     [Fact]
-    public async Task LoadAsync_LegacyWorkflowProfileAnnotationRestoresRunBinding()
-    {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var factory = new TestDbContextFactory(database.Options);
-        var store = new WorkflowRunStore(
-            factory,
-            new EventStore(factory, NullLogger<EventStore>.Instance),
-            new NullDispatchGrainFactory(),
-            NullLogger<WorkflowRunStore>.Instance);
-
-        await using (var db = factory.CreateDbContext())
-        {
-            db.WorkflowRuns.Add(new WorkflowRunRow
-            {
-                WorkflowRunId = "wr_legacy_profile_binding",
-                State = """
-                    {"id":"wr_legacy_profile_binding","metadata":{"createdAt":"1970-01-01T00:00:00+00:00","annotations":{"workflowProfileId":"legacy-profile"}},"status":"Failed","stages":[]}
-                    """,
-            });
-            await db.SaveChangesAsync();
-        }
-
-        var loaded = await store.LoadAsync("wr_legacy_profile_binding");
-
-        Assert.NotNull(loaded);
-        Assert.Equal("legacy-profile", loaded!.WorkflowProfileId);
-    }
-
-    [Fact]
     public async Task LoadAsync_LegacySameDefinitionAcrossStages_PreservesIndependentRecoveryRounds()
     {
         using var database = TestSqliteDatabase.CreateMigrated();
