@@ -126,6 +126,22 @@ public sealed class WorkflowRecoveryRoundTests
     }
 
     [Fact]
+    public void LegacyWorkflowProfileAnnotationIsRestoredToCanonicalRunBinding()
+    {
+        const string legacy = """
+            {"metadata":{"annotations":{"workflowProfileId":"legacy-profile"}}}
+            """;
+
+        var normalized = WorkflowRunStore.MigrateLegacyWorkflowRunJson(legacy);
+
+        using var json = JsonDocument.Parse(normalized);
+        Assert.Equal("legacy-profile", json.RootElement.GetProperty("workflowProfileId").GetString());
+        Assert.Equal("legacy-profile", json.RootElement.GetProperty("metadata")
+            .GetProperty("annotations").GetProperty("workflowProfileId").GetString());
+        Assert.Equal(normalized, WorkflowRunStore.MigrateLegacyWorkflowRunJson(normalized));
+    }
+
+    [Fact]
     public void ExplicitNullAndZeroRecoveryStateAreNotMigrated()
     {
         const string json = """

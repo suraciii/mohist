@@ -182,17 +182,19 @@ public class WorkflowRunStore : IWorkflowRunStore
             return json;
 
         var legacyRecovery = BuildLegacyRecoveryPlan(root);
+        var legacyProfileId = ReadLegacyAnnotationProfileId(root);
         var changed = root.TryGetProperty("claim", out _)
             || (root.TryGetProperty("assignment", out var assignment) && assignment.ValueKind == JsonValueKind.Object && assignment.TryGetProperty("runnerId", out _))
             || ContainsLegacyTaskRunnerId(root)
-            || legacyRecovery.Count > 0;
+            || legacyRecovery.Count > 0
+            || (!root.TryGetProperty("workflowProfileId", out _) && !string.IsNullOrWhiteSpace(legacyProfileId));
         if (!changed)
             return json;
 
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer))
         {
-            WriteRunObject(root, writer, legacyRecovery);
+            WriteRunObject(root, writer, legacyRecovery, legacyProfileId);
         }
 
         return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
@@ -294,7 +296,8 @@ public class WorkflowRunStore : IWorkflowRunStore
     private static void WriteRunObject(
         JsonElement root,
         Utf8JsonWriter writer,
-        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery)
+        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery,
+        string? legacyProfileId)
     {
         writer.WriteStartObject();
         foreach (var property in root.EnumerateObject())
@@ -330,7 +333,26 @@ public class WorkflowRunStore : IWorkflowRunStore
 
             property.WriteTo(writer);
         }
+        if (!root.TryGetProperty("workflowProfileId", out _) && !string.IsNullOrWhiteSpace(legacyProfileId))
+        {
+            writer.WriteString("workflowProfileId", legacyProfileId);
+        }
         writer.WriteEndObject();
+    }
+
+    private static string? ReadLegacyAnnotationProfileId(JsonElement root)
+    {
+        if (!root.TryGetProperty("metadata", out var metadata)
+            || metadata.ValueKind != JsonValueKind.Object
+            || !metadata.TryGetProperty("annotations", out var annotations)
+            || annotations.ValueKind != JsonValueKind.Object
+            || !annotations.TryGetProperty("workflowProfileId", out var value)
+            || value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return value.GetString();
     }
 
     private static void WriteAssignmentObject(JsonElement assignment, Utf8JsonWriter writer)
