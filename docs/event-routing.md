@@ -84,7 +84,7 @@ event.type == "com.mohist.issue.completed" && event.issue in ["42", "43"]
 ## 场景：让 Agent 监管一个 issue
 
 这是驱动本功能的核心场景：你启动一个 Agent 监管 issue 的推进，workflow 失败或
-等审批时它替你出手。这个场景有内置预设：`mo agent setup-supervisor` 一条命令
+等审批时它替你出手。这个场景有内置预设：`mo agent install supervisor` 一条命令
 装好下表全部内容（Agent、规则、提示词），见 [Agent 监管](agent-supervision.md)。
 下面是它的组成原理，理解之后你可以自由改造。
 

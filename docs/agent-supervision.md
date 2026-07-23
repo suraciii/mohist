@@ -17,8 +17,8 @@ Mohist 是一条生产线：issue 进入 workflow 后，阶段之间要审批，
 # 只让一个 issue 进入 autopilot
 mo issue watch add 42 --agent supervisor
 
-# 或者全项目监管（安装 supervisor Agent + 项目级路由规则）
-mo agent setup-supervisor
+# 或者全项目监管（安装 supervisor 预设：Agent + 项目级路由规则）
+mo agent install supervisor
 ```
 
 Agent 需要在 issue 工作区里能发现 `mohist` skill（mo 命令面指南）。缺失时执行：
@@ -90,4 +90,4 @@ workflow 终态失败（系统的自动恢复已耗尽）时，Agent 先读自�
 
 ## 实装差距
 
-`setup-supervisor` 命令与预设内容、`mo issue watch` 关注与静音、「Agent 响应失败」通知、审批决议的操作者记录均尚未实装，实施 issue 待创建。当前可以手工达到近似效果：用 `mo agent create` 创建 Agent，再用 `mo routing rule create` 建立审批与失败两条规则，提示词写法见 [Agent 事件路由](event-routing.md) 的监管场景。路由表、Agent 启动、审批/失败事件和通知这些底座均已实装。
+`mo agent install supervisor` 预设、`mo issue watch` 关注与静音、「Agent 响应失败」通知、审批决议的操作者记录均尚未实装，实施 issue 待创建。当前可以手工达到近似效果：用 `mo agent create` 创建 Agent，再用 `mo routing rule create` 建立审批与失败两条规则，提示词写法见 [Agent 事件路由](event-routing.md) 的监管场景。路由表、Agent 启动、审批/失败事件和通知这些底座均已实装。
