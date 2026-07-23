@@ -20,8 +20,15 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 
 #### Scenario: Collection and storage are operating normally
 
-- **WHEN** observability is enabled, collection and storage are usable, and no telemetry is being rejected or dropped
+- **WHEN** observability is enabled, collection is online, a production ingestion write transaction has committed, current storage metadata and process samples are available, and no telemetry is being rejected or dropped
 - **THEN** the status API and `mo otel status` SHALL report `healthy`
+
+#### Scenario: Storage write readiness has not been established
+
+- **WHEN** observability is enabled and its metadata probe succeeds before any production ingestion write transaction has committed
+- **THEN** status SHALL remain `degraded` with `storage_unverified`
+- **AND** metadata readability SHALL NOT be treated as proof that ingestion can commit
+- **AND** an empty, wholly rejected, wholly dropped or malformed request that does not enter the write transaction SHALL NOT clear `storage_unverified`
 
 #### Scenario: Storage cannot be read
 

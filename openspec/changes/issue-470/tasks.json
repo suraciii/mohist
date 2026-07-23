@@ -33,7 +33,7 @@
         "TraceIngester creates one immutable PreparedIngestBatch before opening the transaction; every identifiable Span attempt is classified as parsed-for-write, malformed dropped, protection rejected or another non-retryable drop.",
         "IIngestProtectionDecision defaults to accepting all attempts in production; tests inject deterministic reject decisions and #437/#471 remain owners of real policy.",
         "Exactly one IngestOutcome is recorded per batch, with counters counting Span attempts; duplicate commit, malformed drop, fake rejection and retryable rollback match the spec and never double-publish a write result.",
-        "Committed writes clear only storage_write; rollback publishes saved=0 and storage_write failure without adding dropped counts, including while another source remains active.",
+        "Only a production ingestion transaction that commits clears storage_write/storage_unverified; not-attempted empty, rejected, dropped or parse-failed requests do not establish write readiness, and rollback publishes saved=0 plus storage_write failure without adding dropped counts.",
         "Accepted commit retains HTTP 200 empty success; fake rejection/drop returns HTTP 200 OTLP partial_success with rejected count/message; retryable rollback returns HTTP 503; invalid whole-body parsing retains 400.",
         "JSON and protobuf paths map the same outcome categories without a production rejection policy.",
         "Focused ingester/OTLP/status-publication tests and repository npm test pass using in-memory SQLite and fake decisions."
@@ -56,12 +56,12 @@
       "acceptanceCriteria": [
         "GET /otel/api/status maps complete snake-case snapshots; JsonIgnoreCondition.Never preserves nullable sampled fields/latest_degradation, since uses RuntimeEpoch, collector_online projection is truthful, budget remains visible off, and legacy counts are absent.",
         "TraceQuerier performs no status assembly or Trace/Span COUNT(*); historical telemetry/reasons do not change dependency calls, inspected records or response bounds.",
-        "OtelDb.OpenReadinessConnection uses Default Timeout=1 without EnsureInitialized/_initGate; the probe runs one PRAGMA schema_version and reads nullable database/WAL/SHM lengths once each with no host-storage tests.",
+        "OtelDb.OpenReadinessConnection uses Default Timeout=1 without EnsureInitialized/_initGate; the metadata-only probe runs one PRAGMA schema_version and reads nullable database/WAL/SHM lengths once each with no host-storage tests or synthetic writes.",
         "StartAsync publishes one process result before availability and no storage; the fakeable sample includes CPU time, working set, heap and processor count. The loop races ApplicationStarted with stopping cancellation and stop-before-started performs zero storage calls.",
         "After ApplicationStarted an enabled host performs one immediate storage probe; each injected 10-second tick samples process in both states and storage only enabled, with isolated exceptions, coalesced ticks and no overlap.",
         "Process failure atomically nulls CPU/working-set/heap and resets CPU baseline; storage failure nulls usage/growth/window and clears growth samples. Recovery clears only its source and starts fresh warm-up while unrelated degradation remains.",
         "CPU clamping/first-sample null, seven-slot/60-second growth/actual window, fixed budget, off no-measurement and observable-gauge omission match specs.",
-        "After successful normal primary StartAsync, Program publishes CollectorResult.Online; enabled production reaches healthy after its first successful storage probe.",
+        "After successful normal primary StartAsync, Program publishes CollectorResult.Online; a successful metadata probe alone leaves enabled production degraded with storage_unverified, and only the first committed production ingestion write permits healthy.",
         "mo otel status renders all sections and handles old/invalid/unreachable payloads; raw-null, off, healthy, independent failures/recovery, startup/stopping, no-scan/history and /api/health tests pass, followed by npm test."
       ],
       "priority": 3,
