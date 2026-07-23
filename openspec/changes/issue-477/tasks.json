@@ -52,13 +52,14 @@
       "id": "T-003",
       "title": "Bind WorkflowRuns and resolve future Stages live",
       "spec": "specs/workflow-profile-live-resolution/spec.md#WorkflowRun-Profile-identity-binding",
-      "description": "Bind each newly started WorkflowRun through the Project-scoped Profile reference coordinator to the selected explicit Issue Profile or inherited Project default Profile ID, then resolve the current Definition from that same ID only when an uninitialized Stage starts. Remove the legacy template cascade from runtime resolution while retaining initialized Stage state, accepted attempts, and historical results as immutable workflow facts.",
+      "description": "Bind each newly started WorkflowRun through the Project-scoped Profile reference coordinator to the selected explicit Issue Profile or inherited Project default Profile ID. At startup, create the Run's complete Stage lifecycle from the selected Definition's Stage names and declaration order; then resolve the current Definition from that same ID only when one of those existing uninitialized Stages starts. Remove the legacy template cascade from runtime resolution while retaining initialized Stage state, accepted attempts, historical results, and Stage topology as immutable workflow facts.",
       "acceptanceCriteria": [
         "Run startup persists the selected Profile ID without a Definition snapshot and revalidates collection membership before writing the binding through the reference coordinator.",
         "Changing a Project default or Issue selection affects only subsequently started Runs and never changes an active Run's bound Profile ID.",
-        "An edit to the bound Profile changes only later uninitialized Stages; initialized tasks, checks, lock behavior, accepted attempts, and recorded results remain unchanged.",
+        "An edit to the bound Profile changes only later uninitialized existing Stages; initialized tasks, checks, lock behavior, accepted attempts, recorded results, and the startup Stage names and order remain unchanged.",
+        "A Stage added to the current bound Definition is not scheduled by an active Run, and a reordering of existing Stages does not change that Run's startup order.",
         "A removed or invalid future Stage in the current bound Definition fails through the existing visible WorkflowRun failure path without fallback to a prior Definition or another Profile.",
-        "WorkflowRun server specs cover inherited and explicit startup binding, selection changes during active Runs, live later-Stage resolution, immutable initialized facts, terminalization clearing only a custom Profile backing key while retaining history, migration of existing terminal Runs with null backing keys, and the missing-future-stage error path with deterministic fakes."
+        "WorkflowRun server specs cover inherited and explicit startup binding, selection changes during active Runs, live later-Stage resolution, immutable initialized facts, Profile edits that add, reorder, or remove future Stages, terminalization clearing only a custom Profile backing key while retaining history, migration of existing terminal Runs with null backing keys, and the missing-future-stage error path with deterministic fakes."
       ],
       "priority": 3,
       "mode": "AFK",

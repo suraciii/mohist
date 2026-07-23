@@ -100,14 +100,17 @@ Project default 与 WorkflowRun binding 通过 `WorkflowProfileReferenceCoordina
 ### 3. Run 按绑定 ID 实时解析，Stage 仍在初始化时物化
 
 将 `WorkflowProfileManager` 的 template cascade 收敛为 `IWorkflowProfileProvider` 的按 Run
-绑定读取：Run 创建先读取 selected Profile 的结构以创建 Stage 生命周期；每次尚未初始化的
-Stage 进入初始化路径时，按 Run 的 `(ProjectId, WorkflowProfileId)` 获取当前 Definition，再按
-Stage name 构建任务、checks 和 lock behavior。不能从 Issue 或 Project 重新选择 Profile。
+绑定读取：Run 创建先读取 selected Profile 的结构，以该时刻的 Stage name 和 declaration order
+创建完整的 Stage lifecycle。这个 Stage topology 是 Run 的不可变事实；它不保存 Definition
+snapshot，但后续 Profile edit 不会新增、移除或重排 Run 的 Stage lifecycle。每次尚未初始化的
+既有 Stage 进入初始化路径时，按 Run 的 `(ProjectId, WorkflowProfileId)` 获取当前 Definition，再按
+该 Stage name 构建任务、checks 和 lock behavior。不能从 Issue 或 Project 重新选择 Profile。
 
 Stage 初始化完成后，产生的 StageRun/TaskRun/attempt 和结果继续作为 WorkflowRun 持久状态，
-后续 Profile 编辑不得回写它们。Definition 中移除已初始化 Stage 或缺少未来待初始化 Stage 时，
-初始化以明确领域错误失败并让 Run 走现有失败可见路径，不以历史 Definition 或静默回退掩盖
-问题。
+后续 Profile 编辑不得回写它们。编辑在当前 Definition 新增的 Stage 不会被这个 Run 调度；重排
+既有 Stage 不改变 Run 的启动顺序。Definition 中移除已初始化 Stage 不追溯影响其历史；缺少未来
+待初始化 Stage 时，该 Stage 初始化以明确领域错误失败并让 Run 走现有失败可见路径，不以历史
+Definition 或静默回退掩盖问题。
 
 选择 ID binding 加按 Stage live resolution，是唯一同时满足活动 Run 可更新后续阶段和历史事实
 不被追溯的模型。备选的完整 snapshot 会隔离编辑但阻断新 Definition；按 task 读取 Definition
@@ -210,7 +213,9 @@ CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--
   提交竞争收敛为 blocker 或 `workflow-profile-not-found` conflict，绝不留下悬空引用；builtin immutable，
   故无 delete race。
 - [编辑绑定 Profile 可使未来 Stage 与先前 Stage 的 Definition 不同] -> 这是明确产品语义；
-  `workflow edit` help 提示其可能影响活动 Run，Run 保留 Profile ID 和已初始化事实以便审计。
+  Run 在启动时固定 Stage name 和顺序，后续编辑只改变尚未初始化的既有 Stage 内容，新增和重排
+  不改变该 Run，移除未来 Stage 会使其在初始化时可见失败。`workflow edit` help 提示其可能影响
+  活动 Run，Run 保留 Profile ID 和已初始化事实以便审计。
 - [旧 Issue inline Definition 无法无歧义映射为共享 Profile] -> 迁移时为每个仍有 inline
   Definition 的 Issue 生成稳定、Project 内唯一的自定义 Profile，并将 Issue 指向它；不将
   Definition 留在 Issue 表。

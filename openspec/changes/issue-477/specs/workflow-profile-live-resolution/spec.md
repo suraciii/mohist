@@ -6,11 +6,23 @@ When a WorkflowRun starts, `WorkflowProfileReferenceCoordinator` SHALL resolve t
 - **THEN** the WorkflowRun SHALL bind to the Profile ID `delivery/review` without storing a Definition snapshot
 
 ### Requirement: Live Definition resolution for future Stages
-When an active WorkflowRun initializes a Stage that has not yet been initialized, it SHALL resolve that Stage from the current Definition of the Run's bound Profile ID. An edit to the bound Profile's Definition SHALL therefore apply to later uninitialized Stages of that active Run.
+When a WorkflowRun starts, it SHALL create its complete Stage lifecycle from the selected Profile Definition's Stage names and declaration order. That Stage topology SHALL remain fixed for the Run. When an active WorkflowRun initializes one of those Stages that has not yet been initialized, it SHALL resolve that Stage from the current Definition of the Run's bound Profile ID. An edit to the bound Profile's Definition SHALL therefore apply to later uninitialized Stages of that active Run without changing their membership or order.
 
 #### Scenario: Edit the bound Profile before a later Stage initializes
 - **WHEN** an active WorkflowRun is bound to `delivery/review`, that Profile is edited, and the Run later initializes an uninitialized Stage
 - **THEN** the Stage SHALL be initialized from the edited current Definition of `delivery/review`
+
+#### Scenario: Add a Stage after a Run starts
+- **WHEN** an active WorkflowRun started with the ordered Stages `plan`, `implement`, and its bound Profile is edited to add `review`
+- **THEN** the active Run SHALL continue with only `plan` then `implement`, and SHALL not schedule `review`
+
+#### Scenario: Reorder Stages after a Run starts
+- **WHEN** an active WorkflowRun started with the ordered Stages `plan`, `implement`, and its bound Profile is edited to order them `implement`, `plan`
+- **THEN** the active Run SHALL retain the startup order `plan` then `implement`
+
+#### Scenario: Remove a future Stage after a Run starts
+- **WHEN** an active WorkflowRun started with the ordered Stages `plan`, `implement`, `review`, `plan` has initialized, and its bound Profile is edited to remove `implement`
+- **THEN** initialization of the existing future `implement` Stage SHALL fail through the visible WorkflowRun failure path without falling back to an earlier Definition or another Profile
 
 ### Requirement: Initialized Stage and attempt immutability
 Once a Stage has been initialized, later Profile Definition edits MUST NOT change that Stage's initialized tasks, checks, or lock behavior. A Profile edit MUST NOT alter accepted attempts or historical WorkflowRun results.
