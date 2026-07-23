@@ -120,6 +120,15 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                 pending.CapturedRevision,
                 ex.Message);
         }
+        catch (WorkflowProfileNotFoundException ex)
+        {
+            await ClearFenceAsync(commandId);
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.WorkflowProfileNotFound,
+                payload.RepositoryName,
+                pending.CapturedRevision,
+                ex.Message);
+        }
         catch (Exception)
         {
             await ClearFenceAsync(commandId);
