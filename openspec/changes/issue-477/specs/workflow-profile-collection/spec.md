@@ -50,7 +50,7 @@ Creating or editing a custom Profile SHALL validate its Definition with the auth
 - **THEN** the Profile SHALL not be saved and the failure SHALL identify the Action-contract validation source
 
 ### Requirement: Protected Profile deletion
-`mo workflow delete` SHALL refuse to delete a custom Profile that is referenced by the Project default, by any Issue in that Project, or by any active WorkflowRun. The refusal MUST identify each blocking reference relationship. An unreferenced custom Profile SHALL be deletable.
+`mo workflow delete` SHALL refuse to delete a custom Profile that is referenced by the Project default, by any Issue in that Project, or by any active WorkflowRun. The refusal MUST identify each blocking reference relationship. An unreferenced custom Profile SHALL be deletable. Profile deletion and every operation that writes a Project default, an Issue selection, or a WorkflowRun binding SHALL be serialized for that Project, so they cannot leave a reference to a deleted Profile.
 
 #### Scenario: Delete a Profile used as the Project default
 - **WHEN** a user attempts to delete the Profile selected as a Project's default
@@ -63,3 +63,11 @@ Creating or editing a custom Profile SHALL validate its Definition with the auth
 #### Scenario: Delete an unreferenced custom Profile
 - **WHEN** a user deletes a custom Profile with no Project default, Issue, or active WorkflowRun reference
 - **THEN** the Profile SHALL be removed from that Project's collection
+
+#### Scenario: Reference write precedes deletion
+- **WHEN** an Issue selection or WorkflowRun binding to a custom Profile is accepted before a deletion request for that Profile is processed
+- **THEN** deletion SHALL fail and identify the newly committed reference as a blocker
+
+#### Scenario: Deletion precedes a reference write
+- **WHEN** deletion of an unreferenced custom Profile is accepted before an Issue selection, Project default, or WorkflowRun binding request for that Profile is processed
+- **THEN** the later reference write SHALL fail with the retryable `workflow-profile-not-found` conflict and SHALL not create a dangling reference

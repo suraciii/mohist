@@ -100,19 +100,29 @@ Stage 初始化完成后，产生的 StageRun/TaskRun/attempt 和结果继续作
 不被追溯的模型。备选的完整 snapshot 会隔离编辑但阻断新 Definition；按 task 读取 Definition
 会让同一已初始化 Stage 内的任务发生不可预测变化，两者均不采用。
 
-### 4. 删除由 Profile 写入方集中检查所有阻塞引用
+### 4. Profile 引用与删除由 Project coordinator 串行化
 
-删除自定义 Profile 前，collection provider 在删除操作中查询并汇总：Project default、该
-Project 的 Issue explicit selection、以及非终态 WorkflowRun binding。存在任一引用即拒绝，
-错误返回全部阻塞关系及可辨识的 Issue number / WorkflowRun ID；不只返回第一项。内置 Profile
-在引用查询前即因 read-only 拒绝。
+新增 Project-scoped `WorkflowProfileReferenceCoordinator` durable application process manager。
+`delete profile`、Project default 更新、Issue explicit selection 设置/清除，以及 WorkflowRun
+创建都只能通过它进入；直接调用 Profile、Project、Issue 或 Run 的 reference-writing 接口由
+ArchTest 禁止。Coordinator 按 Project key 串行处理命令并持久化不确定投递的 command fence；
+参与者以 command ID 和 expected revision 幂等接受重投。它不保存 Profile、Project、Issue 或
+Run 的业务事实，也不在一个事务内写多个聚合。
 
-这是跨聚合检查而非跨聚合写入：删除命令只删除 Profile 自己的记录，Project、Issue 和 Run
-不被同时修改。由于查询到删除之间可能存在并发引用写入，Project/Issue 选择和 Run 创建也
-必须在其写入路径重新验证 collection 存在性；数据库外键不指向内置项，不能单独承担该规则。
+对 reference write，Coordinator 在队列位置读取当前 Issue/Project selection，验证 Profile 属于
+collection，再调用唯一引用拥有者提交该引用；Run 创建在同一队列位置选择并写入 Run binding。
+对删除，Coordinator 在队列位置由 collection provider 汇总 Project default、该 Project 的 Issue
+explicit selection、以及非终态 WorkflowRun binding；存在任一引用即拒绝，错误返回全部阻塞关系
+及可辨识的 Issue number / WorkflowRun ID；不只返回第一项。内置 Profile 在引用查询前即因
+read-only 拒绝。删除命令只删除 Profile 自己的记录，Project、Issue 和 Run 不被同时修改。
 
-备选方案是删除时自动清除 default/Issue 引用或终止 Run；这会隐式修改多个聚合且可能改变正在
-执行的工作，故不采用。
+因此顺序是确定的：先提交 reference write 时，随后删除观察到该引用并拒绝；先删除时，随后
+reference write 在重新验证时收到可重试的 `workflow-profile-not-found` conflict，不提交引用。
+客户端以同一 command ID 重试不重复写入；以新命令重试前必须刷新 collection 并选择可用
+Profile。数据库外键不指向内置项，不能单独承担该规则。
+
+备选方案是仅在各所有者写入前重验存在性；它不能覆盖检查与提交之间的并发删除。删除时自动
+清除 default/Issue 引用或终止 Run 则会隐式修改多个聚合且可能改变正在执行的工作，均不采用。
 
 ### 5. 保存复用两段权威校验，诊断保留来源
 
@@ -149,8 +159,9 @@ CLI spec 中 `workflow` 对 WorkflowProfile 的唯一导航相悖，后者会长
 
 Server spec tests 覆盖同 Project collection、跨 Project 隔离、builtin read-only、两类保存错误
 来源、Project 创建时 `mohist/local` default、全部删除阻塞关系、default/Issue 的存在性校验，
-以及 Run 的 ID binding 与 Stage live resolution。WorkflowRun spec 必须证明 Profile/selection
-更新不会改变已初始化 Stage、attempt 或历史。
+以及 Run 的 ID binding 与 Stage live resolution。用可控 participant/fence fake 安排 deletion 与
+reference write 的两个交错顺序，证明前者不会留下悬空引用且后者得到指定的 blocker 或 retryable
+conflict。WorkflowRun spec 必须证明 Profile/selection 更新不会改变已初始化 Stage、attempt 或历史。
 
 CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--json` 和 Issue flags 的
 本地互斥、请求 body、JSON fields、错误和帮助；不复制 server validator 测试。迁移后删除或
@@ -159,8 +170,9 @@ CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--
 
 ## Risks / Trade-offs
 
-- [删除检查与并发选择/Run 创建之间存在竞态] -> 删除、选择和 Run 创建分别在自己的写入路径
-  重验 collection 存在性；失败返回可重试的领域错误，绝不留下悬空引用。
+- [删除检查与并发选择/Run 创建之间存在竞态] -> `WorkflowProfileReferenceCoordinator` 按 Project
+  串行化删除和全部 reference write；队列后的写入重新验证并返回 `workflow-profile-not-found`
+  conflict，绝不留下悬空引用。
 - [编辑绑定 Profile 可使未来 Stage 与先前 Stage 的 Definition 不同] -> 这是明确产品语义；
   `workflow edit` help 提示其可能影响活动 Run，Run 保留 Profile ID 和已初始化事实以便审计。
 - [旧 Issue inline Definition 无法无歧义映射为共享 Profile] -> 迁移时为每个仍有 inline
@@ -184,8 +196,8 @@ CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--
 3. 对所有现存 Run，根据迁移前有效级联解析一次并写入 Profile ID；若来源为 inline
    Definition，复用步骤 2 创建的 Profile。终态 Run 同样只保留 ID 和既有历史持久状态，
    不补写 Definition snapshot；后续允许删除仅被终态 Run 引用的 Profile。
-4. 切换 Server provider、Run 创建/Stage 初始化、collection API 和引用保护到新模型，随后
-   删除旧 cascade 和 inline write path。
+4. 切换 Server provider、`WorkflowProfileReferenceCoordinator`、Run 创建/Stage 初始化、collection
+   API 和引用保护到新模型，随后删除旧 cascade 和 inline write path。
 5. 切换 CLI 到 `mo workflow`、`project workflow set-default` 与 Issue selection flags，并同时
    更新 docs/help/spec tests；发布后移除旧 routes、commands、DTO 和测试。
 
