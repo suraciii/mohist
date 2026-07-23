@@ -16,6 +16,7 @@ public interface IWorkflowRunStore
     Task SaveAsync(WorkflowRun run, CancellationToken ct = default);
     Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default);
     Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default);
+    Task DeleteAsync(string workflowRunId, CancellationToken ct = default);
 }
 
 public class WorkflowRunStore : IWorkflowRunStore
@@ -116,6 +117,15 @@ public class WorkflowRunStore : IWorkflowRunStore
         if (run is not null)
             WorkflowRunLineage.RestoreStoredEpicNumber(run, entity.EpicNumber);
         return run;
+    }
+
+    public async Task DeleteAsync(string workflowRunId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
+        if (row is null) return;
+        db.WorkflowRuns.Remove(row);
+        await db.SaveChangesAsync(ct);
     }
 
     private static async Task StageRunAsync(

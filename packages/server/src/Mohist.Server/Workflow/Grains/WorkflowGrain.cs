@@ -638,14 +638,23 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private async Task PersistProfileBindingAsync(string projectId, string profileId)
     {
         await _runStore.SaveAsync(_run!);
-        var result = await GrainFactory
-            .GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId)
-            .BindWorkflowRunAsync(
-                new WorkflowProfileCommandPayload.BindWorkflowRun(projectId, GrainKey, profileId),
-                $"workflow-run:{GrainKey}:profile:{profileId}",
-                expectedRevision: null);
-        if (!result.IsApplied)
-            throw new InvalidOperationException(result.Message ?? $"Unable to bind WorkflowRun '{GrainKey}' to Profile '{profileId}'");
+        try
+        {
+            var result = await GrainFactory
+                .GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId)
+                .BindWorkflowRunAsync(
+                    new WorkflowProfileCommandPayload.BindWorkflowRun(projectId, GrainKey, profileId),
+                    $"workflow-run:{GrainKey}:profile:{profileId}",
+                    expectedRevision: null);
+            if (!result.IsApplied)
+                throw new InvalidOperationException(result.Message ?? $"Unable to bind WorkflowRun '{GrainKey}' to Profile '{profileId}'");
+        }
+        catch
+        {
+            await _runStore.DeleteAsync(GrainKey);
+            _run = null;
+            throw;
+        }
     }
 
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)
