@@ -49,7 +49,8 @@ internal sealed class WorkflowStageLockCoordinator
 
     private async Task<string?> GetSequentialLockResourceAsync(string stage)
     {
-        var stageDef = await _owner.ProfileManager.LoadStageSpecsAsync(_owner.GrainKey, stage);
+        var stageDef = await _owner.ProfileManager.LoadStageSpecsAsync(
+            _owner.GrainKey, stage, _owner.GetProjectId(), _owner.GetIssueNumber(), _owner.GetWorkflowProfileId());
         if (stageDef.LockBehavior is null) return null;
         if (!string.Equals(stageDef.LockBehavior, "sequential", StringComparison.OrdinalIgnoreCase))
             return null;

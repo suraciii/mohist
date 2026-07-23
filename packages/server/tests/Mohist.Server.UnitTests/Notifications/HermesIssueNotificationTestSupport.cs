@@ -247,6 +247,12 @@ public abstract class HermesIssueNotificationTestSupport
             return Task.FromResult(run);
         }
 
+        public Task DeleteAsync(string workflowRunId, CancellationToken ct = default)
+        {
+            Items.Remove(workflowRunId);
+            return Task.CompletedTask;
+        }
+
     }
 
     protected sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>

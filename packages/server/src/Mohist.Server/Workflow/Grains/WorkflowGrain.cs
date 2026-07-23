@@ -38,6 +38,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     internal string GrainKeyForTest { get; set; } = string.Empty;
 
+    internal Func<string, string, Task<WorkflowProfileReferenceResult>>? BindProfileForTest { get; set; }
+
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
@@ -58,6 +60,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     WorkflowRun? IWorkflowGrainContext.RunOrNull => _run;
     string IWorkflowGrainContext.GrainKey => GrainKey;
+    string? IWorkflowGrainContext.GetWorkflowProfileId() => _run?.WorkflowProfileId;
     WorkflowProfileManager IWorkflowGrainContext.ProfileManager => _profileManager;
     IGrainFactory IWorkflowGrainContext.Grains => GrainFactory;
     ILogger IWorkflowGrainContext.Log => _log;
@@ -192,8 +195,10 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             && int.TryParse(rawNumber, out var parsedNumber)
             ? parsedNumber
             : (int?)null;
-        var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueNumber);
+        var structure = await _profileManager.LoadStartupStructureAsync(GrainKey, projectId, issueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
+        if (!string.IsNullOrWhiteSpace(structure.Id))
+            await PersistProfileBindingAsync(projectId!, structure.Id);
         await _runProfileManager.EnsureArchiveDefaultAsync(GrainKey);
         _run.Workspace = input?.Workspace;
     }
@@ -204,8 +209,10 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             Name: null,
             CreatedAt: Now(),
             Annotations: WorkflowRunLineage.AnnotationsFor(context.ProjectId, context.IssueNumber, context.EpicNumber));
-        var structure = await _profileManager.LoadStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
+        var structure = await _profileManager.LoadStartupStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
+        if (!string.IsNullOrWhiteSpace(structure.Id))
+            await PersistProfileBindingAsync(context.ProjectId, structure.Id);
         await _runProfileManager.EnsureArchiveDefaultAsync(GrainKey);
         _run.Workspace = await _profileManager.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
     }
@@ -570,7 +577,22 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         if (_run is not null)
         {
-            var resolved = await _stageInitializer.InitializeFreshStagesAsync(events);
+            IReadOnlyList<WorkflowEvent> resolved;
+            try
+            {
+                resolved = await _stageInitializer.InitializeFreshStagesAsync(events);
+            }
+            catch (InvalidOperationException ex) when (
+                ex.Message.Contains("no current definition", StringComparison.Ordinal)
+                || ex.Message.Contains("no definition for stage", StringComparison.Ordinal))
+            {
+                resolved = _run.FailDefinitionResolution(ex.Message);
+                _runDirty = true;
+                await SaveRunAsync(resolved);
+                foreach (var e in resolved)
+                    await On(e, reason);
+                throw;
+            }
             _runDirty = true;
             await SaveRunAsync(resolved);
             events = resolved;
@@ -614,6 +636,26 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             && number > 0
             ? number
             : null;
+
+    private async Task PersistProfileBindingAsync(string projectId, string profileId)
+    {
+        await _runStore.SaveAsync(_run!);
+        var result = BindProfileForTest is not null
+            ? await BindProfileForTest(projectId, profileId)
+            : await GrainFactory
+                .GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId)
+                .BindWorkflowRunAsync(
+                    new WorkflowProfileCommandPayload.BindWorkflowRun(projectId, GrainKey, profileId),
+                    $"workflow-run:{GrainKey}:profile:{profileId}",
+                    expectedRevision: null);
+        if (!result.IsApplied)
+        {
+            await _runStore.DeleteAsync(GrainKey);
+            _run = null;
+            _runDirty = false;
+            throw new InvalidOperationException(result.Message ?? $"Unable to bind WorkflowRun '{GrainKey}' to Profile '{profileId}'");
+        }
+    }
 
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)
     {

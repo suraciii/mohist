@@ -88,51 +88,6 @@ public static partial class IssueRoutes
         return grain is null ? null : (await grain.GetWorkflowStatusAsync())?.WorkflowRunId;
     }
 
-    internal static async Task<IResult> UpdateIssueWorkflowTemplateAsync(
-        string projectId,
-        int number,
-        IssueTemplateRequest req,
-        IssueWorkflowProfileManager issueProfileManager,
-        IssueQuerier issuesQuery,
-        ProjectQuerier projectsQuery)
-    {
-        var yaml = req.Yaml ?? req.Template;
-        if (!string.IsNullOrWhiteSpace(req.ProjectTemplateId) && !string.IsNullOrWhiteSpace(yaml))
-            return ApiResults.BadRequest("Specify either projectTemplateId or yaml, not both");
-        if (string.IsNullOrWhiteSpace(req.ProjectTemplateId) && string.IsNullOrWhiteSpace(yaml))
-            return ApiResults.BadRequest("Specify either projectTemplateId or yaml");
-
-        var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
-        if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
-
-        ActionValidationStatus actionValidation = ActionValidationStatus.Skipped;
-        try
-        {
-            var result = await issueProfileManager.UpdateTemplateAsync(projectId, number, new IssueTemplateUpdateRequest(
-                ProjectTemplateId: req.ProjectTemplateId,
-                Template: yaml));
-            actionValidation = result.ActionValidation;
-        }
-        catch (YamlException ex)
-        {
-            return ApiResults.Fail("YAML syntax error: " + ex.Message, 400, "yaml_syntax");
-        }
-        catch (WorkflowDefinitionValidationException ex)
-        {
-            return ApiResults.BadRequest(
-                "Workflow profile is invalid: " + string.Join("; ", ex.Errors.Select(error => $"{error.Path}: {error.Message}")),
-                "workflow_shape",
-                ex.Errors);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return ApiResults.Fail("Workflow definition error: " + ex.Message, 400, "workflow_shape");
-        }
-
-        var response = await BuildIssueWorkflowProfileResponseAsync(projectId, number, issueProfileManager, issuesQuery, projectsQuery);
-        return Results.Json(new { success = true, data = response, actionValidation = ProjectRoutes.ToActionValidationNotice(actionValidation) });
-    }
-
     internal static JsonElement? BuildRebaseTaskWith(string baseBranch)
     {
         var with = new Dictionary<string, object?>
@@ -168,48 +123,6 @@ public static partial class IssueRoutes
                     ],
                     RetrySelf: false),
             ]);
-    }
-
-    internal static async Task<IssueWorkflowProfileResponse?> BuildIssueWorkflowProfileResponseAsync(
-        string projectId,
-        int number,
-        IssueWorkflowProfileManager issueProfileManager,
-        IssueQuerier issuesQuery,
-        ProjectQuerier projectsQuery)
-    {
-        var info = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
-        if (info is null) return null;
-
-        var state = await issueProfileManager.GetStateAsync(projectId, number);
-        var variables = state.Variables;
-        var template = state.Template;
-        var yaml = template is null ? null : WorkflowYamlSerializer.ToYaml(template.Definition);
-        // ProfileId is the unified effective profile id projected by the
-        // read model; advanced overrides (custom YAML / project template
-        // reference) remain visible via HasCustomTemplate / TemplateSource
-        // without rewriting the displayed selection. This is the single
-        // source of truth — the same value the issue detail and list
-        // surfaces return.
-        var profileId = info.WorkflowProfileId;
-        var updateMode = template is not null ? "custom" : "reference";
-        var templateSource = state.HasCustomTemplate || template is not null
-            ? "custom"
-            : !string.IsNullOrWhiteSpace(state.SourceTemplateId)
-                ? "project"
-                : "system";
-
-        return new IssueWorkflowProfileResponse(
-            IssueNumber: number,
-            ProjectId: projectId,
-            SourceTemplateId: state.SourceTemplateId,
-            HasCustomTemplate: state.HasCustomTemplate,
-            Yaml: yaml,
-            WorkflowRunId: info.WorkflowRunId,
-            ProfileId: profileId,
-            UpdateMode: updateMode,
-            Variables: variables,
-            UpdatedAt: state.UpdatedAt?.ToString("O") ?? info.UpdatedAt,
-            TemplateSource: templateSource);
     }
 
 }

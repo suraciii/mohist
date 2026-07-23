@@ -11,7 +11,10 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 
 public static class WorkflowProfileDataUpgrader
 {
-    public static async Task UpgradeAsync(MohistDbContext db, CancellationToken cancellationToken = default)
+    public static async Task UpgradeAsync(
+        MohistDbContext db,
+        CancellationToken cancellationToken = default,
+        bool persistChanges = true)
     {
         var diagnostics = new List<string>();
         var projectRows = await db.ProjectWorkflowTemplates.ToListAsync(cancellationToken);
@@ -37,7 +40,7 @@ public static class WorkflowProfileDataUpgrader
         if (diagnostics.Count > 0)
             throw new InvalidOperationException("Workflow Profile Definition migration failed:\n" + string.Join("\n", diagnostics));
 
-        if (projectRows.Count > 0 || issueRows.Count > 0)
+        if (persistChanges && (projectRows.Count > 0 || issueRows.Count > 0))
             await db.SaveChangesAsync(cancellationToken);
     }
 

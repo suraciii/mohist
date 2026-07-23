@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain;
@@ -116,6 +117,44 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
             () => Manager.LoadStructureAsync(runId, "proj-all-disabled-structure", 1));
 
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LoadStartupStructureAsync_WhenProjectCollectionIsMissing_ThrowsBeforeRunBinding()
+    {
+        var runId = "wr_missing_profile_collection";
+        var projectId = "proj-missing-profile-collection";
+        await using (var db = new MohistDbContext(Database.Options))
+        {
+            db.Projects.Add(new ProjectRow
+            {
+                Id = projectId,
+                Name = projectId,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateProfileBackedManager().LoadStartupStructureAsync(runId, projectId, 1));
+
+        Assert.Contains(projectId, ex.Message, StringComparison.Ordinal);
+        await using var verifyDb = new MohistDbContext(Database.Options);
+        Assert.False(await verifyDb.WorkflowRuns.AnyAsync(r => r.WorkflowRunId == runId));
+    }
+
+    [Fact]
+    public async Task LoadStartupStructureAsync_WhenProjectDefaultIsMissing_ThrowsBeforeRunBinding()
+    {
+        var runId = "wr_missing_profile_default";
+        var projectId = "proj-missing-profile-default";
+        await SeedWithoutRunAsync(projectId, 1, issueTemplateJson: null);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateProfileBackedManager().LoadStartupStructureAsync(runId, projectId, 1));
+
+        Assert.Contains("no default Workflow Profile", ex.Message, StringComparison.Ordinal);
+        await using var verifyDb = new MohistDbContext(Database.Options);
+        Assert.False(await verifyDb.WorkflowRuns.AnyAsync(r => r.WorkflowRunId == runId));
     }
 
     [Fact]

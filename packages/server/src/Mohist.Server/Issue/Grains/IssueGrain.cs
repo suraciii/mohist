@@ -30,6 +30,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private bool _issueReloadRequired;
     private readonly IIssueStore _issueStore;
     private readonly IssueWorkflowProfileRegistry _profiles;
+    private readonly IWorkflowProfileProvider? _profileProvider;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueRepositoryResolver _repositoryResolver;
@@ -55,10 +56,12 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
         TimeProvider timeProvider,
-        ILogger<IssueGrain> log)
+        ILogger<IssueGrain> log,
+        IWorkflowProfileProvider? profileProvider = null)
     {
         _issueStore = issueStore;
         _profiles = profiles;
+        _profileProvider = profileProvider;
         _workflowQuerier = workflowQuerier;
         _dbFactory = dbFactory;
         _repositoryResolver = repositoryResolver;
@@ -796,7 +799,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             throw new IssueRepositoryUnknownException(repositoryRef);
         var canonicalName = match.Name;
 
-        if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
+        if (!string.IsNullOrWhiteSpace(workflowProfileId)
+            && !await ProfileExistsAsync(projectId, workflowProfileId))
         {
             throw new UnknownWorkflowProfileException(workflowProfileId);
         }
@@ -886,10 +890,10 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var hasWorkflowProfile = present.Contains(nameof(command.WorkflowProfileId));
         var hasParent = present.Contains(nameof(command.ParentIssueNumber));
 
-        if (hasWorkflowProfile && _issue.WorkflowRunId is not null)
-        {
-            throw new WorkflowProfileLockedException(_issue.Number, _issue.WorkflowRunId);
-        }
+        if (hasWorkflowProfile
+            && !string.IsNullOrWhiteSpace(command.WorkflowProfileId)
+            && !await ProfileExistsAsync(_issue.ProjectId, command.WorkflowProfileId))
+            throw new UnknownWorkflowProfileException(command.WorkflowProfileId!);
 
         if (hasAttachments && command.AttachmentIds is not null)
         {
@@ -1020,15 +1024,10 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             await _attachmentService.ValidateIssueBindAsync(_issue!.ProjectId, _issue.Number, data.AttachmentIds);
         }
 
-        // Workflow profile selection is an execution-template fact: it cannot
-        // be changed once the issue has started. Reject any attempt early so
-        // we never half-apply other fields. Variable/prompt endpoints are
-        // untouched and remain valid run-scoped runtime overrides; this only
-        // guards the issue-level selection.
-        if (hasWorkflowProfile && _issue!.WorkflowRunId is not null)
-        {
-            throw new WorkflowProfileLockedException(_issue.Number, _issue.WorkflowRunId);
-        }
+        if (hasWorkflowProfile
+            && !string.IsNullOrWhiteSpace(data.WorkflowProfileId)
+            && !await ProfileExistsAsync(_issue!.ProjectId, data.WorkflowProfileId))
+            throw new UnknownWorkflowProfileException(data.WorkflowProfileId);
 
         var parent = hasParent && data.ParentIssueNumber is not null
             ? await ResolveParentAsync(data.ParentIssueNumber, _issue!.Number, requireTargetHasNoChildren: true)
@@ -1084,6 +1083,11 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             await _attachmentService.ReplaceIssueAsync(_issue.ProjectId, _issue.Number, data.AttachmentIds!);
         }
     }
+
+    private Task<bool> ProfileExistsAsync(string projectId, string profileId) =>
+        _profileProvider is not null
+            ? _profileProvider.ContainsAsync(projectId, profileId)
+            : Task.FromResult(_profiles.Exists(profileId));
 
     public async Task<IssueWorkflowStatus?> GetWorkflowStatusAsync()
     {

@@ -45,12 +45,11 @@ internal sealed class WorkflowStageInitializer
 
             initializedStages.Add(pendingStart.Stage);
 
-            var projectId = _owner.GetProjectId();
-            var issueNumber = _owner.GetIssueNumber();
             var stageDef = await _owner.ProfileManager.LoadStageSpecsAsync(
                 _owner.GrainKey, pendingStart.Stage,
-                string.IsNullOrWhiteSpace(projectId) ? null : projectId,
-                issueNumber);
+                _owner.GetProjectId(),
+                _owner.GetIssueNumber(),
+                _owner.GetWorkflowProfileId());
             var initEvents = run.InitializeStage(
                 stageDef.Tasks,
                 stageDef.Checks.ToList(),

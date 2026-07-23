@@ -5,6 +5,7 @@ using Mohist.Server.Project.Services;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using System.Text.Json;
 using RepositoryPolicy = Mohist.Server.Project.Domain.RepositoryPolicy;
@@ -98,6 +99,123 @@ public static class ProjectRoutes
         {
             var project = context.GetResolvedProject();
             return ApiResults.Ok(project);
+        });
+
+        byRef.MapGet("/workflow-profiles", async (HttpContext context, IWorkflowProfileProvider provider) =>
+        {
+            var project = context.GetResolvedProject();
+            return ApiResults.Ok(await provider.ListAsync(project.Id));
+        });
+
+        byRef.MapPost("/workflow-profiles", async (
+            HttpContext context,
+            WorkflowProfileSaveRequest request,
+            IWorkflowProfileProvider provider) =>
+        {
+            var project = context.GetResolvedProject();
+            try
+            {
+                var result = await provider.CreateAsync(project.Id, request.ToEntry(project.Id));
+                return result.ValidationResult.IsValid
+                    ? Results.Json(new { success = true, data = result.Profile, validation = result.ValidationResult }, statusCode: 201)
+                    : ApiResults.BadRequest("WorkflowProfile validation failed", "workflow_profile_validation", result.ValidationResult);
+            }
+            catch (WorkflowProfileReadOnlyException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "workflow_profile_read_only");
+            }
+            catch (WorkflowDefinitionValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "workflow_profile_definition_validation", ex.Errors);
+            }
+        });
+
+        byRef.MapGet("/workflow-profiles/{*profileId}", async (
+            HttpContext context,
+            string profileId,
+            IWorkflowProfileProvider provider) =>
+        {
+            var project = context.GetResolvedProject();
+            var id = Uri.UnescapeDataString(profileId);
+            var profile = await provider.GetAsync(project.Id, id);
+            return profile is null
+                ? ApiResults.NotFound($"WorkflowProfile '{id}' was not found")
+                : ApiResults.Ok(profile);
+        });
+
+        byRef.MapPut("/workflow-profiles/{*profileId}", async (
+            HttpContext context,
+            string profileId,
+            WorkflowProfileSaveRequest request,
+            IWorkflowProfileProvider provider) =>
+        {
+            var project = context.GetResolvedProject();
+            var id = Uri.UnescapeDataString(profileId);
+            try
+            {
+                var result = await provider.UpdateAsync(project.Id, request.ToEntry(project.Id, id));
+                return result.ValidationResult.IsValid
+                    ? ApiResults.Ok(new { success = true, data = result.Profile, validation = result.ValidationResult })
+                    : ApiResults.BadRequest("WorkflowProfile validation failed", "workflow_profile_validation", result.ValidationResult);
+            }
+            catch (WorkflowProfileReadOnlyException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "workflow_profile_read_only");
+            }
+            catch (WorkflowProfileNotFoundException ex)
+            {
+                return ApiResults.NotFound(ex.Message);
+            }
+            catch (WorkflowDefinitionValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "workflow_profile_definition_validation", ex.Errors);
+            }
+        });
+
+        byRef.MapDelete("/workflow-profiles/{*profileId}", async (
+            HttpContext context,
+            string profileId,
+            IGrainFactory grains) =>
+        {
+            var project = context.GetResolvedProject();
+            var id = Uri.UnescapeDataString(profileId);
+            var result = await grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
+                .DeleteProfileAsync(
+                    new WorkflowProfileCommandPayload.DeleteProfile(project.Id, id),
+                    $"api-delete:{Guid.NewGuid():N}",
+                    null);
+            return result.Code switch
+            {
+                WorkflowProfileReferenceResultCode.Applied or WorkflowProfileReferenceResultCode.AlreadyApplied =>
+                    ApiResults.Ok(new { deleted = true, profileId = id }),
+                WorkflowProfileReferenceResultCode.ProfileReadOnly => ApiResults.Conflict(result.Message ?? "WorkflowProfile is read-only", "workflow_profile_read_only"),
+                WorkflowProfileReferenceResultCode.BlockedByReferences => ApiResults.Conflict(result.Message ?? "WorkflowProfile is still referenced", "workflow_profile_referenced"),
+                _ => ApiResults.NotFound(result.Message ?? $"WorkflowProfile '{id}' was not found"),
+            };
+        });
+
+        byRef.MapPut("/workflow-profile/default", async (
+            HttpContext context,
+            SetDefaultWorkflowProfileRequest request,
+            IGrainFactory grains) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.ProfileId))
+                return ApiResults.BadRequest("profileId is required", "workflow_profile_required");
+
+            var project = context.GetResolvedProject();
+            var result = await grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
+                .SetProjectDefaultAsync(
+                    new WorkflowProfileCommandPayload.SetProjectDefault(project.Id, request.ProfileId),
+                    $"api-default:{Guid.NewGuid():N}",
+                    null);
+            return result.Code switch
+            {
+                WorkflowProfileReferenceResultCode.Applied or WorkflowProfileReferenceResultCode.AlreadyApplied =>
+                    ApiResults.Ok(new { projectId = project.Id, profileId = request.ProfileId }),
+                WorkflowProfileReferenceResultCode.ProfileUnknown =>
+                    ApiResults.NotFound(result.Message ?? $"WorkflowProfile '{request.ProfileId}' was not found"),
+                _ => ApiResults.Conflict(result.Message ?? "WorkflowProfile selection rejected", "workflow_profile_selection_rejected"),
+            };
         });
 
         byRef.MapPost("/use", async (HttpContext context) =>
@@ -306,118 +424,6 @@ public static class ProjectRoutes
             }
         });
 
-        // =======================================================================
-        // Project workflow templates CRUD
-        // =======================================================================
-
-        byRef.MapGet("/workflow-templates", async (HttpContext context, ProjectWorkflowProfileManager manager) =>
-        {
-            var project = context.GetResolvedProject();
-            var templates = await manager.ListTemplatesAsync(project.Id);
-            return ApiResults.Ok(templates);
-        });
-
-        byRef.MapPost("/workflow-templates", async (HttpContext context, CreateProjectTemplateRequest req, ProjectWorkflowProfileManager manager) =>
-        {
-            if (string.IsNullOrWhiteSpace(req.Yaml))
-                return ApiResults.BadRequest("yaml is required");
-
-            var project = context.GetResolvedProject();
-            try
-            {
-                var result = await manager.CreateTemplateAsync(project.Id, req.Yaml);
-                return Results.Json(new { success = true, data = result.Template, actionValidation = ToActionValidationNotice(result.ActionValidation) }, statusCode: 201);
-            }
-            catch (WorkflowDefinitionValidationException ex)
-            {
-                return ApiResults.BadRequest(
-                    "Workflow profile is invalid: " + string.Join("; ", ex.Errors.Select(error => $"{error.Path}: {error.Message}")),
-                    "workflow_shape",
-                    ex.Errors);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message);
-            }
-        });
-
-        byRef.MapGet("/workflow-templates/{*tid}", async (HttpContext context, string tid, ProjectWorkflowProfileManager manager) =>
-        {
-            var templateId = Uri.UnescapeDataString(tid);
-            var project = context.GetResolvedProject();
-            var profile = await manager.GetTemplateProfileAsync(project.Id, templateId);
-            return profile is not null
-                ? ApiResults.Ok(new { projectId = project.Id, templateId, profile })
-                : ApiResults.NotFound("Project template not found");
-        });
-
-        byRef.MapPut("/workflow-templates/{*tid}", async (HttpContext context, string tid, UpdateProjectTemplateRequest req, ProjectWorkflowProfileManager manager) =>
-        {
-            var templateId = Uri.UnescapeDataString(tid);
-            if (string.IsNullOrWhiteSpace(req.Yaml))
-                return ApiResults.BadRequest("yaml is required");
-
-            var project = context.GetResolvedProject();
-            try
-            {
-                var result = await manager.UpdateTemplateAsync(project.Id, templateId, req.Yaml);
-                return result is not null
-                    ? Results.Json(new { success = true, data = result.Template, actionValidation = ToActionValidationNotice(result.ActionValidation) }, statusCode: 200)
-                    : ApiResults.NotFound("Project template not found");
-            }
-            catch (WorkflowDefinitionValidationException ex)
-            {
-                return ApiResults.BadRequest(
-                    "Workflow profile is invalid: " + string.Join("; ", ex.Errors.Select(error => $"{error.Path}: {error.Message}")),
-                    "workflow_shape",
-                    ex.Errors);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message);
-            }
-        });
-
-        byRef.MapDelete("/workflow-templates/{*tid}", async (HttpContext context, string tid, ProjectWorkflowProfileManager manager) =>
-        {
-            var templateId = Uri.UnescapeDataString(tid);
-            var project = context.GetResolvedProject();
-            var deleted = await manager.DeleteTemplateAsync(project.Id, templateId);
-            return deleted ? ApiResults.Ok(new { deleted = true }) : ApiResults.NotFound("Project template not found");
-        });
-
-        // =======================================================================
-        // Project workflow profile
-        // =======================================================================
-
-        byRef.MapGet("/workflow-profile", async (HttpContext context, ProjectWorkflowProfileManager manager) =>
-        {
-            var project = context.GetResolvedProject();
-            var templateId = await manager.GetDefaultTemplateAsync(project.Id);
-            var variables = await manager.GetVariablesAsync(project.Id);
-            var disabledIds = await manager.GetDisabledWorkflowProfileIdsAsync(project.Id);
-            return ApiResults.Ok(new { projectId = project.Id, defaultTemplateId = templateId, variables, disabledWorkflowProfileIds = disabledIds });
-        });
-
-        byRef.MapPut("/workflow-profile/default-template", async (HttpContext context, SetDefaultTemplateRequest req, ProjectWorkflowProfileManager manager) =>
-        {
-            if (string.IsNullOrWhiteSpace(req.TemplateId))
-                return ApiResults.BadRequest("templateId is required");
-
-            var project = context.GetResolvedProject();
-            var updated = await manager.SetDefaultTemplateAsync(project.Id, req.TemplateId);
-            return updated is not null
-                ? ApiResults.Ok(new { projectId = project.Id, defaultTemplateId = updated })
-                : ApiResults.NotFound("Project workflow profile not found");
-        });
-
-        byRef.MapDelete("/workflow-profile/default-template", async (HttpContext context, ProjectWorkflowProfileManager manager) =>
-        {
-            var project = context.GetResolvedProject();
-            await manager.SetDefaultTemplateAsync(project.Id, null);
-            return ApiResults.Ok(new { projectId = project.Id, defaultTemplateId = (string?)null });
-        });
-
         byRef.MapGet("/variables", async (HttpContext context, ProjectWorkflowProfileManager manager) =>
         {
             var project = context.GetResolvedProject();
@@ -448,113 +454,6 @@ public static class ProjectRoutes
             catch (ArgumentException ex)
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_variables");
-            }
-        });
-
-        // =======================================================================
-        // Workflow profile enable/disable
-        // =======================================================================
-
-        byRef.MapPost("/workflow-profile/disable", async (HttpContext context, ToggleWorkflowProfileRequest req, ProjectWorkflowProfileManager manager) =>
-        {
-            if (string.IsNullOrWhiteSpace(req.ProfileId))
-                return ApiResults.BadRequest("profileId is required");
-
-            var project = context.GetResolvedProject();
-            try
-            {
-                await manager.SetProfileEnabledAsync(project.Id, req.ProfileId, enabled: false);
-                return ApiResults.Ok();
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "last_enabled_workflow_profile");
-            }
-        });
-
-        byRef.MapPost("/workflow-profile/enable", async (HttpContext context, ToggleWorkflowProfileRequest req, ProjectWorkflowProfileManager manager) =>
-        {
-            if (string.IsNullOrWhiteSpace(req.ProfileId))
-                return ApiResults.BadRequest("profileId is required");
-
-            var project = context.GetResolvedProject();
-            try
-            {
-                await manager.SetProfileEnabledAsync(project.Id, req.ProfileId, enabled: true);
-                return ApiResults.Ok();
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
-            }
-        });
-
-        byRef.MapGet("/templates", async (HttpContext context, ProjectWorkflowProfileManager manager) =>
-        {
-            var project = context.GetResolvedProject();
-            var prompts = await manager.ListPromptsAsync(project.Id);
-            return ApiResults.Ok(prompts.Select(ToTemplateRoutePrompt));
-        });
-
-        byRef.MapGet("/templates/{key}", async (HttpContext context, string key, ProjectWorkflowProfileManager manager) =>
-        {
-            var project = context.GetResolvedProject();
-            var prompt = await manager.GetPromptAsync(project.Id, key);
-            return prompt is null
-                ? ApiResults.NotFound($"Prompt '{key}' not found")
-                : ApiResults.Ok(ToTemplateRoutePrompt(prompt));
-        });
-
-        byRef.MapGet("/templates/{key}/override", async (HttpContext context, string key, ProjectWorkflowProfileManager manager) =>
-        {
-            var project = context.GetResolvedProject();
-            var prompt = await manager.GetProjectPromptOverrideAsync(project.Id, key);
-            return prompt is null
-                ? ApiResults.NotFound($"Prompt override '{key}' not found")
-                : ApiResults.Ok(prompt);
-        });
-
-        byRef.MapPut("/templates/{key}/override", async (HttpContext context, string key, ProjectPromptOverrideRequest? req, ProjectWorkflowProfileManager manager) =>
-        {
-            if (req is null || string.IsNullOrWhiteSpace(req.Body))
-                return ApiResults.BadRequest("body is required");
-
-            var project = context.GetResolvedProject();
-            var prompt = await manager.SetProjectPromptOverrideAsync(project.Id, key, req.DisplayName, req.Description, req.Tags, req.Stage, req.Body);
-            return ApiResults.Ok(prompt);
-        });
-
-        byRef.MapDelete("/templates/{key}/override", async (HttpContext context, string key, ProjectWorkflowProfileManager manager) =>
-        {
-            var project = context.GetResolvedProject();
-            await manager.DeleteProjectPromptOverrideAsync(project.Id, key);
-            return ApiResults.Ok();
-        });
-
-        byRef.MapPost("/templates/{key}/preview", async (HttpContext context, string key, PromptPreviewRequest? req, ProjectWorkflowProfileManager manager) =>
-        {
-            JsonElement variables;
-            if (req?.Variables is { } raw)
-                variables = raw;
-            else
-            {
-                using var doc = JsonDocument.Parse("{}");
-                variables = doc.RootElement.Clone();
-            }
-
-            try
-            {
-                var project = context.GetResolvedProject();
-                var result = await manager.PreviewPromptAsync(project.Id, key, variables);
-                return ApiResults.Ok(result);
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.NotFound(ex.Message);
             }
         });
 
@@ -722,8 +621,21 @@ public record UpdateRepositoryRequest(
     JsonElement Path = default,
     JsonElement Remote = default,
     JsonElement ResolvedPath = default);
-public record CreateProjectTemplateRequest(string Yaml);
-public record UpdateProjectTemplateRequest(string Yaml);
-public record SetDefaultTemplateRequest(string TemplateId);
+public sealed record SetDefaultWorkflowProfileRequest(string ProfileId);
 
-public sealed record ToggleWorkflowProfileRequest(string ProfileId);
+public sealed record WorkflowProfileSaveRequest(
+    string ProfileId,
+    string? Name,
+    string? Description,
+    string DefinitionSource)
+{
+    public WorkflowProfileCollectionEntry ToEntry(string projectId, string? profileId = null) =>
+        new(
+            projectId,
+            profileId ?? ProfileId,
+            Name ?? profileId ?? ProfileId,
+            Description ?? string.Empty,
+            WorkflowProfileSourceProvenance.Verbatim,
+            false,
+            DefinitionSource);
+}

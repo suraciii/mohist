@@ -126,6 +126,11 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             NullLogger<WorkflowGrain>.Instance)
         {
             GrainKeyForTest = workflowRunId,
+            BindProfileForTest = static (_, profileId) => Task.FromResult(
+                new WorkflowProfileReferenceResult(
+                    WorkflowProfileReferenceResultCode.Applied,
+                    profileId,
+                    1)),
         };
 
     private async Task SeedWorkflowTemplateAsync(string projectId)
@@ -146,7 +151,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
             ProjectId = projectId,
-            DefaultTemplateId = templateId,
+            DefaultWorkflowProfileId = "mohist/local",
         });
         await db.SaveChangesAsync();
     }
@@ -176,5 +181,8 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
 
         public Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default) =>
             _inner.SaveAsync(run, events, ct);
+
+        public Task DeleteAsync(string workflowRunId, CancellationToken ct = default) =>
+            _inner.DeleteAsync(workflowRunId, ct);
     }
 }

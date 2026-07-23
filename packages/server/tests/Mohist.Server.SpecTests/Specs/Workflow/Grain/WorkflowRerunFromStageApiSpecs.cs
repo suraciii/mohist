@@ -15,6 +15,7 @@ using Mohist.Server.SpecTests.Support;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
@@ -339,13 +340,30 @@ public class WorkflowRerunFromStageApiSpecs
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
-                DefaultTemplateId = templateId,
+                DefaultWorkflowProfileId = templateId,
             });
         }
         else
         {
-            profile.DefaultTemplateId = templateId;
+            profile.DefaultWorkflowProfileId = templateId;
             profile.UpdatedAt = TestTime.UtcNow;
+        }
+        var collectionProfile = await db.WorkflowProfileRecords.FindAsync(projectId, templateId);
+        var definitionSource = WorkflowYamlSerializer.ToYaml(definition);
+        if (collectionProfile is null)
+        {
+            db.WorkflowProfileRecords.Add(new WorkflowProfileRecordRow
+            {
+                ProjectId = projectId,
+                ProfileId = templateId,
+                Name = templateId,
+                DefinitionSource = definitionSource,
+            });
+        }
+        else
+        {
+            collectionProfile.DefinitionSource = definitionSource;
+            collectionProfile.UpdatedAt = TestTime.UtcNow;
         }
         await db.SaveChangesAsync();
     }

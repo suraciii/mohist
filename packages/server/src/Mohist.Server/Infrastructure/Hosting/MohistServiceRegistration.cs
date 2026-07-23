@@ -148,6 +148,8 @@ public static class MohistServiceRegistration
         services.Configure<AttachmentStorageOptions>(configuration.GetSection(AttachmentStorageOptions.SectionName));
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
+        services.AddScoped<Mohist.Server.Workflow.Services.IWorkflowProfileProvider, Mohist.Server.Workflow.Services.WorkflowProfileProvider>();
+        services.AddScoped<Mohist.Server.Workflow.Services.WorkflowProfileDeletionBlockerQuery>();
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
         services.TryAddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName));

@@ -8,9 +8,9 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Services;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
@@ -132,7 +132,14 @@ public sealed class RunnerPollParentContextApiSpecs
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
-                DefaultTemplateId = templateId,
+                DefaultWorkflowProfileId = templateId,
+            });
+            db.WorkflowProfileRecords.Add(new WorkflowProfileRecordRow
+            {
+                ProjectId = projectId,
+                ProfileId = templateId,
+                Name = templateId,
+                DefinitionSource = WorkflowYamlSerializer.ToYaml(definition),
             });
             db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {

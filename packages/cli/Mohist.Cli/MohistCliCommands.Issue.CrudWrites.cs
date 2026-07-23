@@ -217,6 +217,7 @@ internal static partial class IssueCommands
     private static Command BuildUpdate(MohistCliApi api)
     {
         var cmd = new Command("update", "Update an issue");
+        cmd.Aliases.Add("edit");
         var numberArg = NumberArg();
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
         var bodyOpt = new Option<string?>("--body", "-b") { Description = "New body (mutually exclusive with --body-file and --body-stdin)" };
@@ -228,7 +229,8 @@ internal static partial class IssueCommands
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
-        var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID; pass an empty string to clear and inherit the default" };
+        var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
+        var inheritWorkflowProfileOpt = new Option<bool>("--inherit-workflow-profile") { Description = "Clear the explicit Profile and inherit the Project default" };
         var repositoryOpt = new Option<string?>("--repo") { Description = "Target repository name for an eligible reassignment" };
         var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON or @<file> (e.g. '{\"plan\":\"anthropic/claude-sonnet\"}')" };
         var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON or @<file> (e.g. '{\"plan\":\"max\"}')" };
@@ -247,6 +249,7 @@ internal static partial class IssueCommands
         cmd.Options.Add(modelOpt);
         cmd.Options.Add(modelVariantOpt);
         cmd.Options.Add(workflowProfileOpt);
+        cmd.Options.Add(inheritWorkflowProfileOpt);
         cmd.Options.Add(repositoryOpt);
         cmd.Options.Add(stageModelsOpt);
         cmd.Options.Add(stageModelVariantsOpt);
@@ -268,6 +271,7 @@ internal static partial class IssueCommands
             var model = ctx.GetValue(modelOpt);
             var modelVariant = ctx.GetValue(modelVariantOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
+            var inheritWorkflowProfile = ctx.GetValue(inheritWorkflowProfileOpt);
             var repository = ctx.GetValue(repositoryOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
@@ -283,6 +287,7 @@ internal static partial class IssueCommands
             var parentProvided = ctx.GetResult(parentOpt) is not null;
             var modelProvided = ctx.GetResult(modelOpt) is not null;
             var workflowProfileProvided = ctx.GetResult(workflowProfileOpt) is not null;
+            var inheritWorkflowProfileProvided = IsOptionProvided(ctx, inheritWorkflowProfileOpt);
             var repositoryProvided = ctx.GetResult(repositoryOpt) is not null;
             var stageModelsProvided = ctx.GetResult(stageModelsOpt) is not null;
             var stageModelVariantsProvided = ctx.GetResult(stageModelVariantsOpt) is not null;
@@ -292,6 +297,11 @@ internal static partial class IssueCommands
 
             async Task<int> UpdateAsync()
             {
+                if (workflowProfileProvided && inheritWorkflowProfileProvided)
+                {
+                    api.Error.WriteLine("--workflow-profile and --inherit-workflow-profile are mutually exclusive");
+                    return 2;
+                }
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
@@ -350,6 +360,10 @@ internal static partial class IssueCommands
                 if (workflowProfileProvided)
                 {
                     payload["workflowProfileId"] = string.IsNullOrWhiteSpace(workflowProfile) ? null : workflowProfile;
+                }
+                else if (inheritWorkflowProfile)
+                {
+                    payload["workflowProfileId"] = null;
                 }
 
                 if (stageModelsProvided)

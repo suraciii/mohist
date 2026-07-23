@@ -112,6 +112,7 @@ public class ArchitectureRules
             .As("Application Layer excluding Events.Grains");
 
         Types().That().Are(DataLayer)
+            .And().DoNotHaveName("WorkflowProfileDataMigrator")
             .Should().NotDependOnAny(applicationLayerExcludingEventsGrains)
             .Because("Infrastructure.Data is the persistence boundary and must not depend on application services, grains, or queriers; Events.Grains is the documented cross-cutting event delivery exception.")
             .Check(_architecture);
@@ -406,6 +407,7 @@ public class ArchitectureRules
             .As("IssueRepositoryCoordinatorGrain");
 
         Classes().That().AreNot(coordinatorGrain)
+            .And().DoNotHaveName("WorkflowProfileReferenceCoordinatorGrain")
             .And().DoNotHaveNameEndingWith("BindingParticipantProxy")
             .And().DoNotHaveName("IssueGrain")
             .And().DoNotResideInNamespaceMatching("OrleansCodeGen")

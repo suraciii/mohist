@@ -5,8 +5,10 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Workflow.Domain;
 using Orleans;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 using DomainIssueEvent = Mohist.Server.Issue.Domain.Events.IssueEvent;
@@ -51,7 +53,14 @@ public class IssueStore : IIssueStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         await StageIssueAsync(db, state, CancellationToken.None);
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (TranslateProfileForeignKeyViolation(ex, state) is { } mapped)
+        {
+            throw mapped;
+        }
     }
 
     public async Task SaveAsync(string key, DomainIssue state, IReadOnlyList<DomainIssueEvent> events, CancellationToken ct = default)
@@ -77,12 +86,54 @@ public class IssueStore : IIssueStore
         {
             throw;
         }
+        catch (DbUpdateException ex) when (TranslateProfileForeignKeyViolation(ex, state) is { } mapped)
+        {
+            throw mapped;
+        }
 
         PokeDispatcherBestEffort();
     }
 
     private void PokeDispatcherBestEffort() =>
         EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueStore));
+
+    /// <summary>
+    /// issue-477: when a Profile deletion commits between the Issue participant's
+    /// existence check and its <c>SaveChangesAsync</c>, the restrictive foreign key
+    /// on <c>WorkflowProfileIdKey</c> rejects the write. Translate that race into the
+    /// retryable <see cref="WorkflowProfileNotFoundException"/> so the coordinator
+    /// surfaces the specified <c>workflow-profile-not-found</c> conflict instead of
+    /// an unclassified server error. Only a genuine foreign-key violation on the
+    /// Issue's custom Profile backing key is translated; any unrelated
+    /// <c>DbUpdateException</c> (duplicate key, another FK, database error) is left
+    /// for the caller by returning null.
+    /// </summary>
+    private static Exception? TranslateProfileForeignKeyViolation(DbUpdateException ex, DomainIssue state)
+    {
+        if (state.WorkflowProfileId is null) return null;
+        if (WorkflowProfileBindingKey.For(state.WorkflowProfileId) is null) return null;
+        if (!IsProfileForeignKeyViolation(ex)) return null;
+        return new WorkflowProfileNotFoundException(state.ProjectId, state.WorkflowProfileId);
+    }
+
+    private static bool IsProfileForeignKeyViolation(DbUpdateException ex)
+    {
+        // The IssueRow's only custom-Profile foreign key is WorkflowProfileIdKey;
+        // every entity type staged by StageIssueAsync is an IssueRow. EF Core wraps
+        // the SQLite constraint as the inner SqliteException. SQLITE_CONSTRAINT_FK
+        // (extended error 787) is the foreign-key-specific code; fall back to the
+        // message so provider-specific wording still matches.
+        foreach (var entry in ex.Entries)
+        {
+            if (entry.Entity is not IssueRow) return false;
+        }
+        if (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqlite)
+        {
+            return sqlite.SqliteErrorCode == 19 && sqlite.SqliteExtendedErrorCode == 787;
+        }
+        var message = (ex.InnerException?.Message ?? ex.Message) ?? string.Empty;
+        return message.Contains("FOREIGN KEY", StringComparison.OrdinalIgnoreCase);
+    }
 
     public Task DeleteAsync(string key) => throw new NotImplementedException();
 
@@ -104,6 +155,7 @@ public class IssueStore : IIssueStore
                 Risk = state.Risk,
                 EpicNumber = state.EpicNumber,
                 ParentIssueNumber = state.ParentIssueNumber,
+                WorkflowProfileIdKey = WorkflowProfileBindingKey.For(state.WorkflowProfileId),
             });
         }
         else
@@ -112,6 +164,7 @@ public class IssueStore : IIssueStore
             row.Risk = state.Risk;
             row.EpicNumber = state.EpicNumber;
             row.ParentIssueNumber = state.ParentIssueNumber;
+            row.WorkflowProfileIdKey = WorkflowProfileBindingKey.For(state.WorkflowProfileId);
         }
     }
 

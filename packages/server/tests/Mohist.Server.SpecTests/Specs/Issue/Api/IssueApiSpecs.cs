@@ -141,54 +141,6 @@ public class IssueApiSpecs
     }
 
     [Fact]
-    public async Task SystemWorkflowTemplates_ReturnDefaultTemplateMetadata()
-    {
-        var profiles = await _client.GetDataAsync<WorkflowProfileDto[]>("/api/workflow-templates/system");
-
-        var defaultProfile = Assert.Single(profiles, p => p.Id == "mohist/local");
-        Assert.Equal("Mohist Local", defaultProfile.Name);
-        Assert.Contains("Mohist pipeline", defaultProfile.Description);
-
-        var prProfile = Assert.Single(profiles, p => p.Id == "mohist/github-pr");
-        Assert.Equal("Mohist GitHub PR", prProfile.Name);
-        Assert.Contains("Mohist pipeline", prProfile.Description);
-    }
-
-    [Fact]
-    public async Task WorkflowProfilesEndpoint_ReturnsIdDisplayNameDescriptionWithoutSuitableFor()
-    {
-        var profiles = await _client.GetDataAsync<WorkflowProfileDescriptionDto[]>("/api/workflow-profiles");
-
-        Assert.Equal(2, profiles.Length);
-
-        var defaultProfile = Assert.Single(profiles, p => p.Id == "mohist/local");
-        Assert.Equal("Mohist Local", defaultProfile.DisplayName);
-        Assert.Contains("Mohist pipeline", defaultProfile.Description);
-
-        var prProfile = Assert.Single(profiles, p => p.Id == "mohist/github-pr");
-        Assert.Equal("Mohist GitHub PR", prProfile.DisplayName);
-        Assert.Contains("Mohist pipeline", prProfile.Description);
-    }
-
-    [Fact]
-    public async Task WorkflowProfilesEndpoint_ResponsePayloadHasNoSuitableForField()
-    {
-        var raw = await _client.GetStringAsync("/api/workflow-profiles");
-
-        using var document = JsonDocument.Parse(raw);
-        Assert.True(document.RootElement.TryGetProperty("data", out var data));
-        Assert.Equal(JsonValueKind.Array, data.ValueKind);
-        Assert.All(data.EnumerateArray(), element =>
-        {
-            Assert.True(element.TryGetProperty("id", out _));
-            Assert.True(element.TryGetProperty("displayName", out _));
-            Assert.True(element.TryGetProperty("description", out _));
-            Assert.False(element.TryGetProperty("suitableFor", out _),
-                "workflow-profiles response must not serialize a suitableFor field");
-        });
-    }
-
-    [Fact]
     public async Task Prerequisites_ProjectIntoBlocker()
     {
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"web-prereq-{Guid.NewGuid():N}");

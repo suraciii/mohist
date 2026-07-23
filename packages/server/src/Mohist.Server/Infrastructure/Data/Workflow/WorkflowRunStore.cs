@@ -16,6 +16,7 @@ public interface IWorkflowRunStore
     Task SaveAsync(WorkflowRun run, CancellationToken ct = default);
     Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default);
     Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default);
+    Task DeleteAsync(string workflowRunId, CancellationToken ct = default);
 }
 
 public class WorkflowRunStore : IWorkflowRunStore
@@ -118,6 +119,15 @@ public class WorkflowRunStore : IWorkflowRunStore
         return run;
     }
 
+    public async Task DeleteAsync(string workflowRunId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
+        if (row is null) return;
+        db.WorkflowRuns.Remove(row);
+        await db.SaveChangesAsync(ct);
+    }
+
     private static async Task StageRunAsync(
         MohistDbContext db,
         WorkflowRun run,
@@ -133,6 +143,9 @@ public class WorkflowRunStore : IWorkflowRunStore
                 WorkflowRunId = run.Id,
                 State = JSON.Serialize(run),
                 EpicNumber = epicNumber,
+                WorkflowProfileIdKey = run.Status.IsTerminal()
+                    ? null
+                    : WorkflowProfileBindingKey.For(run.WorkflowProfileId),
             };
             db.WorkflowRuns.Add(newEntity);
             db.Entry(newEntity).Property<long>("ETag").CurrentValue = 1;
@@ -141,6 +154,9 @@ public class WorkflowRunStore : IWorkflowRunStore
 
         entity.EpicNumber = epicNumber;
         entity.State = JSON.Serialize(run);
+        entity.WorkflowProfileIdKey = run.Status.IsTerminal()
+            ? null
+            : WorkflowProfileBindingKey.For(run.WorkflowProfileId);
         var entry = db.Entry(entity);
         entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
     }
@@ -166,17 +182,19 @@ public class WorkflowRunStore : IWorkflowRunStore
             return json;
 
         var legacyRecovery = BuildLegacyRecoveryPlan(root);
+        var legacyProfileId = ReadLegacyAnnotationProfileId(root);
         var changed = root.TryGetProperty("claim", out _)
             || (root.TryGetProperty("assignment", out var assignment) && assignment.ValueKind == JsonValueKind.Object && assignment.TryGetProperty("runnerId", out _))
             || ContainsLegacyTaskRunnerId(root)
-            || legacyRecovery.Count > 0;
+            || legacyRecovery.Count > 0
+            || (!root.TryGetProperty("workflowProfileId", out _) && !string.IsNullOrWhiteSpace(legacyProfileId));
         if (!changed)
             return json;
 
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer))
         {
-            WriteRunObject(root, writer, legacyRecovery);
+            WriteRunObject(root, writer, legacyRecovery, legacyProfileId);
         }
 
         return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
@@ -278,7 +296,8 @@ public class WorkflowRunStore : IWorkflowRunStore
     private static void WriteRunObject(
         JsonElement root,
         Utf8JsonWriter writer,
-        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery)
+        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery,
+        string? legacyProfileId)
     {
         writer.WriteStartObject();
         foreach (var property in root.EnumerateObject())
@@ -314,7 +333,26 @@ public class WorkflowRunStore : IWorkflowRunStore
 
             property.WriteTo(writer);
         }
+        if (!root.TryGetProperty("workflowProfileId", out _) && !string.IsNullOrWhiteSpace(legacyProfileId))
+        {
+            writer.WriteString("workflowProfileId", legacyProfileId);
+        }
         writer.WriteEndObject();
+    }
+
+    private static string? ReadLegacyAnnotationProfileId(JsonElement root)
+    {
+        if (!root.TryGetProperty("metadata", out var metadata)
+            || metadata.ValueKind != JsonValueKind.Object
+            || !metadata.TryGetProperty("annotations", out var annotations)
+            || annotations.ValueKind != JsonValueKind.Object
+            || !annotations.TryGetProperty("workflowProfileId", out var value)
+            || value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return value.GetString();
     }
 
     private static void WriteAssignmentObject(JsonElement assignment, Utf8JsonWriter writer)

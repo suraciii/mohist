@@ -52,9 +52,8 @@ public static partial class IssueRoutes
             IGrainFactory grains,
             IssueQuerier issuesQuery,
             IssueRepositoryResolver repositoryResolver,
-            IssueWorkflowProfileRegistry profileRegistry,
-            IssueWorkflowProfileManager issueProfileManager,
-            ProjectWorkflowProfileManager projectProfileManager) =>
+            IWorkflowProfileProvider profileProvider,
+            IssueWorkflowProfileManager issueProfileManager) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
                 return ApiResults.BadRequest("title is required");
@@ -70,20 +69,9 @@ public static partial class IssueRoutes
             if (TryValidateAgentConfigForbiddenKeys(req.Raw, "agentConfig", out var agentConfigError) is false)
                 return ApiResults.BadRequest(agentConfigError!, "invalid_agent_config");
 
-            var requestedWorkflowProfileId = profileRegistry.CanonicalId(req.WorkflowProfileId);
-            if (!string.IsNullOrWhiteSpace(req.WorkflowProfileId) && requestedWorkflowProfileId is null)
-                return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
-
-            var disabledIds = await projectProfileManager.GetDisabledWorkflowProfileIdsAsync(project.Id);
-            var allSystemIds = profileRegistry.List().Select(p => p.Id).ToHashSet(IssueWorkflowProfiles.IdComparer);
-            var enabledCount = allSystemIds.Count(id => !disabledIds.Contains(id));
-            if (enabledCount == 0)
-                return ApiResults.BadRequest(
-                    "Cannot create issue: no workflow profile is enabled for this project. " +
-                    "Enable a workflow profile first before creating issues.",
-                    "no_enabled_workflow_profile");
-
-            if (requestedWorkflowProfileId is not null && disabledIds.Contains(requestedWorkflowProfileId))
+            var requestedWorkflowProfileId = req.WorkflowProfileId;
+            if (!string.IsNullOrWhiteSpace(requestedWorkflowProfileId)
+                && !await profileProvider.ContainsAsync(project.Id, requestedWorkflowProfileId))
                 return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
 
             var resolution = repositoryResolver.Resolve(project, req.RepositoryName);
@@ -168,6 +156,8 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest(coordinatorResult.Message ?? $"Repository '{resolution.Repository!.Name}' is not declared", "repository_not_found");
             if (coordinatorResult.Code == IssueRepositoryBindingResultCode.RepositoryStaleRevision)
                 return ApiResults.Conflict(coordinatorResult.Message ?? "Repository revision is stale", "repository_stale_revision");
+            if (coordinatorResult.Code == IssueRepositoryBindingResultCode.WorkflowProfileNotFound)
+                return ApiResults.Conflict(coordinatorResult.Message ?? "WorkflowProfile was not found", "workflow-profile-not-found");
 
             try
             {
@@ -205,8 +195,7 @@ public static partial class IssueRoutes
             IGrainFactory grains,
             IssueQuerier issuesQuery,
             IssueRepositoryResolver repositoryResolver,
-            IssueWorkflowProfileRegistry profileRegistry,
-            ProjectWorkflowProfileManager projectProfileManager,
+            IWorkflowProfileProvider profileProvider,
             IssueWorkflowProfileManager issueProfileManager) =>
         {
             var project = GetRequiredProject(ctx);
@@ -231,9 +220,8 @@ public static partial class IssueRoutes
             if (req.Contains(nameof(UpdateIssueRequest.WorkflowProfileId))
                 && !string.IsNullOrWhiteSpace(req.WorkflowProfileId))
             {
-                var requestedWorkflowProfileId = profileRegistry.CanonicalId(req.WorkflowProfileId);
-                if (requestedWorkflowProfileId is null
-                    || (await projectProfileManager.GetDisabledWorkflowProfileIdsAsync(project.Id)).Contains(requestedWorkflowProfileId))
+                var requestedWorkflowProfileId = req.WorkflowProfileId;
+                if (!await profileProvider.ContainsAsync(project.Id, requestedWorkflowProfileId))
                 {
                     return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
                 }
@@ -293,6 +281,10 @@ public static partial class IssueRoutes
                 {
                     return ApiResults.Conflict(ex.Message, "workflow_profile_locked");
                 }
+                catch (UnknownWorkflowProfileException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
+                }
                 catch (IssueDomain.IssueParentNotFoundException ex) { return ApiResults.BadRequest(ex.Message, "parent_not_found"); }
                 catch (IssueDomain.IssueParentIneligibleException ex) { return ApiResults.Conflict(ex.Message, "parent_ineligible"); }
                 catch (IssueDomain.IssueParentIsChildException ex) { return ApiResults.Conflict(ex.Message, "parent_is_sub_issue"); }
@@ -328,6 +320,10 @@ public static partial class IssueRoutes
                         return ApiResults.Conflict(
                             coordinatorResult.Message ?? "Repository revision is stale",
                             "repository_stale_revision");
+                    case IssueRepositoryBindingResultCode.WorkflowProfileNotFound:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "WorkflowProfile was not found",
+                            "workflow-profile-not-found");
                     default:
                         return ApiResults.Conflict(
                             coordinatorResult.Message ?? "Repository change rejected");
@@ -339,9 +335,62 @@ public static partial class IssueRoutes
                 return ApiResults.Ok(info);
             }
 
-            // Non-repository PATCHes remain on the direct Issue path
-            // (T-001 / T-003): the coordinator only fences the four
-            // binding-sensitive commands.
+            if (req.Contains(nameof(UpdateIssueRequest.WorkflowProfileId)))
+            {
+                var currentIssue = await issuesQuery.GetDomainAsync(project.Id, number);
+                if (currentIssue?.RepositoryRef is null)
+                    return ApiResults.BadRequest("Issue has no declared repository", "repository_not_found");
+
+                var coordinator = grains.GetGrain<IIssueRepositoryCoordinatorGrain>(project.Id);
+                IssueRepositoryBindingResult coordinatorResult;
+                try
+                {
+                    coordinatorResult = await coordinator.ChangeRepositoryAsync(
+                        new RepositoryCommandPayload.Change(
+                            ProjectId: project.Id,
+                            IssueNumber: number,
+                            RepositoryName: currentIssue.RepositoryRef,
+                            Body: req.Body,
+                            Labels: req.Labels,
+                            Priority: req.Priority,
+                            IsDraft: req.IsDraft,
+                            AttachmentIds: req.AttachmentIds,
+                            WorkflowProfileId: workflowProfileIdForUpdate,
+                            PresentFields: req.Fields,
+                            Title: req.Title,
+                            ParentIssueNumber: req.ParentIssueNumber),
+                        commandId: $"change:{project.Id}:{number}:{Guid.NewGuid():N}",
+                        expectedRevision: null);
+                }
+                catch (UnknownWorkflowProfileException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
+                }
+                catch (IssueDomain.IssueParentNotFoundException ex) { return ApiResults.BadRequest(ex.Message, "parent_not_found"); }
+                catch (IssueDomain.IssueParentIneligibleException ex) { return ApiResults.Conflict(ex.Message, "parent_ineligible"); }
+                catch (IssueDomain.IssueParentIsChildException ex) { return ApiResults.Conflict(ex.Message, "parent_is_sub_issue"); }
+                catch (IssueDomain.IssueHasChildrenCannotBecomeChildException ex) { return ApiResults.Conflict(ex.Message, "target_has_children"); }
+                catch (IssueDomain.IssueEpicMemberCannotBecomeChildException ex) { return ApiResults.Conflict(ex.Message, "issue_belongs_to_epic"); }
+                catch (AttachmentLimitException ex) { return ApiResults.Fail(ex.Message, 413, "attachment_count_limit_exceeded"); }
+                catch (AttachmentValidationException ex) { return ApiResults.BadRequest(ex.Message, "invalid_attachment"); }
+
+                switch (coordinatorResult.Code)
+                {
+                    case IssueRepositoryBindingResultCode.Applied:
+                    case IssueRepositoryBindingResultCode.AlreadyApplied:
+                        break;
+                    case IssueRepositoryBindingResultCode.WorkflowProfileNotFound:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "WorkflowProfile was not found",
+                            "workflow-profile-not-found");
+                    default:
+                        return ApiResults.Conflict(coordinatorResult.Message ?? "Issue update rejected");
+                }
+
+                await ApplyUpdateModelMetadataAsync(issueProfileManager, project.Id, number, req, req.Raw);
+                return ApiResults.Ok(await issuesQuery.GetAsync(project.Id, number));
+            }
+
             try
             {
                 await grain.UpdateFullAsync(new UpdateIssueData(

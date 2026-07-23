@@ -59,6 +59,7 @@ public static partial class WorkflowRunExtensions
             return new WorkflowRun
             {
                 Id = id,
+                WorkflowProfileId = string.IsNullOrWhiteSpace(structure.Id) ? null : structure.Id,
                 Metadata = metadata ?? new WorkflowRunMetadata(null, now),
                 Status = WorkflowRunStatus.Created,
                 CurrentStageId = stages[0].Id,

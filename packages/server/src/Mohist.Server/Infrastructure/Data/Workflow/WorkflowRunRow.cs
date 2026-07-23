@@ -51,4 +51,15 @@ public class WorkflowRunRow
 
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public int? IssueNumber { get; set; }
+
+    /// <summary>
+    /// issue-477 T-001: nullable custom-Profile backing key used by the
+    /// restrictive foreign key that protects active WorkflowRun bindings
+    /// from deletion. Populated only when the Run's bound WorkflowProfileId
+    /// resolves to a custom (non-built-in) Profile in this Project; null
+    /// when the binding is a built-in (immutable) or the Run has
+    /// terminalized (its own transaction clears this column while keeping
+    /// the public WorkflowProfileId in State).
+    /// </summary>
+    public string? WorkflowProfileIdKey { get; set; }
 }
