@@ -1,10 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 
-namespace Mohist.Server.Issue.Grains.Coordinator;
+namespace Mohist.Server.Workflow.Grains.Coordinator;
 
 /// <summary>
 /// issue-477 T-001: Project-side participant that commits the Project
@@ -17,18 +16,15 @@ namespace Mohist.Server.Issue.Grains.Coordinator;
 /// <c>WorkflowProfileReferenceCoordinator</c>'s captured expected
 /// revision to detect duplicate replays.
 /// </summary>
-public sealed class ProjectWorkflowProfileBindingParticipant : Grain, IProjectWorkflowProfileBindingParticipant
+public sealed class ProjectWorkflowProfileBindingParticipantProxy : Grain, IProjectWorkflowProfileBindingParticipant
 {
-    private readonly IGrainFactory _grains;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _timeProvider;
 
-    public ProjectWorkflowProfileBindingParticipant(
-        IGrainFactory grains,
+    public ProjectWorkflowProfileBindingParticipantProxy(
         IDbContextFactory<MohistDbContext> dbFactory,
         TimeProvider? timeProvider = null)
     {
-        _grains = grains;
         _dbFactory = dbFactory;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }

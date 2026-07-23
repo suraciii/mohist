@@ -1,6 +1,4 @@
-using Mohist.Server.Workflow.Grains;
-
-namespace Mohist.Server.Issue.Grains.Coordinator;
+namespace Mohist.Server.Workflow.Grains.Coordinator;
 
 /// <summary>
 /// issue-477 T-001: narrow Project-side participant that commits the

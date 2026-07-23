@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Issue.Grains.Coordinator;
+using Mohist.Server.Workflow.Grains.Coordinator;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
 using Orleans;

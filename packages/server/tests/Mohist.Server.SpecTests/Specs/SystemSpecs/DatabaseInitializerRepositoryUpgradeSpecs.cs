@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
@@ -17,6 +18,7 @@ public class DatabaseInitializerRepositoryUpgradeSpecs
         await using var database = TestSqliteDatabase.CreateMigrated();
         var services = new ServiceCollection()
             .AddDbContext<MohistDbContext>(options => options.UseSqlite(database.Keeper))
+            .AddSingleton<TimeProvider>(new FakeTimeProvider())
             .BuildServiceProvider();
         await using (services)
         {
