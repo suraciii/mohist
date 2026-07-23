@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
@@ -71,17 +72,42 @@ public sealed class WorkflowProfileDeletionBlockerQuery : IScopedService
     {
         var rows = await db.WorkflowRuns.AsNoTracking()
             .Where(r => r.MetadataProjectId == projectId
-                && r.WorkflowProfileIdKey != null
-                && r.WorkflowProfileIdKey == profileId
                 && r.Status != null
                 && !TerminalRunStatuses.Contains(r.Status.ToLower()))
             .OrderByDescending(r => r.CreatedAt)
-            .Select(r => new { r.WorkflowRunId, r.Status })
             .ToListAsync(ct);
 
         return rows
+            .Where(row => string.Equals(row.WorkflowProfileIdKey, profileId, StringComparison.Ordinal)
+                || string.Equals(ReadProfileId(row.State), profileId, StringComparison.Ordinal))
             .Select(row => new WorkflowProfileRunBlocker(row.WorkflowRunId, row.Status ?? "unknown"))
             .ToList();
+    }
+
+    private static string? ReadProfileId(string? state)
+    {
+        if (string.IsNullOrWhiteSpace(state)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(state);
+            return document.RootElement
+                .GetProperty("metadata")
+                .GetProperty("annotations")
+                .GetProperty("workflowProfileId")
+                .GetString();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (KeyNotFoundException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     // Mirrors WorkflowRunStatusExtensions.IsTerminal: only Stopped and

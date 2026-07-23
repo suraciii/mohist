@@ -17,6 +17,12 @@ public static class DatabaseInitializer
         await db.Database.MigrateAsync(cancellationToken);
         await ProjectRepositoryDataUpgrader.UpgradeAsync(db, cancellationToken);
         await WorkflowProfileDataUpgrader.UpgradeAsync(db, cancellationToken);
-        await WorkflowProfileDataMigrator.MigrateAsync(db, timeProvider, cancellationToken);
+        var migration = await WorkflowProfileDataMigrator.MigrateAsync(db, timeProvider, cancellationToken);
+        if (migration.Diagnostics.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "WorkflowProfile migration completed with diagnostics:\n"
+                + string.Join("\n", migration.Diagnostics));
+        }
     }
 }

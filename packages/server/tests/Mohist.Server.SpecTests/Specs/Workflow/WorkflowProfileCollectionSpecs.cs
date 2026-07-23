@@ -290,6 +290,25 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Delete_ActiveRunWithMissingBackingKey_StillReportsBlocker()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        await _provider.CreateAsync(projectId, BuildCustom("delivery/review"));
+        await SeedWorkflowRunAsync(projectId, "wr_unbound", "delivery/review", status: "inProgress");
+
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            var row = await db.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_unbound");
+            row.WorkflowProfileIdKey = null;
+            await db.SaveChangesAsync();
+        }
+
+        var blockers = await _blockerQuery.GetBlockersAsync(projectId, "delivery/review");
+
+        Assert.Contains(blockers.ActiveRuns, run => run.WorkflowRunId == "wr_unbound");
+    }
+
+    [Fact]
     public async Task Delete_MultipleActiveRuns_ReportsEveryRun()
     {
         var (projectId, _, _) = await SeedProjectAsync();
@@ -347,6 +366,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         {
             var row = await db.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_active");
             row.Status = "done";
+            row.State = row.State.Replace("\"status\":\"inProgress\"", "\"status\":\"done\"", StringComparison.Ordinal);
             row.WorkflowProfileIdKey = null;
             await db.SaveChangesAsync();
         }

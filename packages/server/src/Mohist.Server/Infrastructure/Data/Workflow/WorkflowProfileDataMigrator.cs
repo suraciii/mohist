@@ -160,12 +160,12 @@ public static class WorkflowProfileDataMigrator
                 set.Add(sourceId);
             }
 
-            var profile = ConvertProfileJson(row.Template);
+            var profile = ConvertProfileJson(
+                row.Template,
+                $"Project '{row.ProjectId}' legacy template '{sourceId}'",
+                diagnostics);
             if (profile is null)
-            {
-                diagnostics.Add($"Project '{row.ProjectId}' template '{sourceId}' could not be converted to a Profile");
                 continue;
-            }
 
             var yamlSource = WorkflowProfileCanonicalYamlRenderer.Render(profile with { Id = targetId });
             var record = new WorkflowProfileRecordRow
@@ -196,7 +196,10 @@ public static class WorkflowProfileDataMigrator
             if (string.IsNullOrWhiteSpace(issue.Template))
                 continue;
 
-            var profile = ConvertProfileJson(issue.Template);
+            var profile = ConvertProfileJson(
+                issue.Template,
+                $"Project '{issue.ProjectId}' Issue '{issue.IssueNumber}' inline Definition",
+                diagnostics);
             if (profile is null)
                 continue;
 
@@ -228,6 +231,12 @@ public static class WorkflowProfileDataMigrator
             };
             db.WorkflowProfileRecords.Add(record);
             countsMutable.InlineIssueProfilesMigrated++;
+        }
+
+        if (diagnostics.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "WorkflowProfile Definition migration failed:\n" + string.Join("\n", diagnostics));
         }
 
         foreach (var issue in issueRows.Where(i => string.IsNullOrWhiteSpace(i.Template)))
@@ -357,18 +366,27 @@ public static class WorkflowProfileDataMigrator
         return b64.TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
-    private static WorkflowProfile? ConvertProfileJson(string json)
+    private static WorkflowProfile? ConvertProfileJson(
+        string? json,
+        string identity,
+        ICollection<string> diagnostics)
     {
         if (string.IsNullOrWhiteSpace(json))
+        {
+            diagnostics.Add($"{identity} is empty");
             return null;
+        }
 
         try
         {
             var profile = WorkflowProfilePersistence.Deserialize(json);
+            if (profile is null)
+                diagnostics.Add($"{identity} converted to null");
             return profile;
         }
-        catch
+        catch (Exception ex)
         {
+            diagnostics.Add($"{identity} could not be converted: {ex.Message}");
             return null;
         }
     }

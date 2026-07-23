@@ -61,6 +61,54 @@ public class WorkflowProfileMigrationSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Migrate_InvalidLegacyTemplate_FailsWithProjectAndTemplateIdentity()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = projectId,
+                TemplateId = "legacy-invalid",
+                Template = "not-json",
+                CreatedAt = _timeProvider.GetUtcNow(),
+                UpdatedAt = _timeProvider.GetUtcNow(),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await using var migrateDb = new MohistDbContext(_database.Options);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider));
+
+        Assert.Contains($"Project '{projectId}' legacy template 'legacy-invalid'", exception.Message);
+        Assert.False(await migrateDb.WorkflowProfileRecords
+            .AnyAsync(r => r.ProjectId == projectId && r.ProfileId == "legacy-invalid"));
+    }
+
+    [Fact]
+    public async Task Migrate_InvalidInlineIssueDefinition_FailsWithIssueIdentity()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
+            {
+                ProjectId = projectId,
+                IssueNumber = 42,
+                Template = "not-json",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await using var migrateDb = new MohistDbContext(_database.Options);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider));
+
+        Assert.Contains($"Project '{projectId}' Issue '42' inline Definition", exception.Message);
+    }
+
+    [Fact]
     public async Task Migrate_ReservedIdCollisions_FailsAtomically()
     {
         // The (ProjectId, TemplateId) primary key prevents two literal

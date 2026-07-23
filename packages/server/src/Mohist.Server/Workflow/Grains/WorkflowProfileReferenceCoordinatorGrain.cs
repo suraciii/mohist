@@ -309,20 +309,29 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
                 case WorkflowProfileCommandPayloadKinds.DeleteProfile:
                 {
                     var p = (WorkflowProfileCommandPayload.DeleteProfile)payload;
-                    // The replay path is operator-driven; do not re-run
-                    // the deletion. Just clear the fence: the deletion
-                    // itself is idempotent and was performed during the
-                    // original command.
-                    _ = p;
+                    if (_provider is null)
+                        throw new InvalidOperationException("WorkflowProfileProvider is unavailable");
+                    await _provider.DeleteAsync(p.ProjectId, p.ProfileId);
                     break;
                 }
             }
+        }
+        catch (DbUpdateException) when (pending.Kind == WorkflowProfileCommandPayloadKinds.DeleteProfile)
+        {
+            // The FK rejection is a definitive result: another aggregate now
+            // owns a reference, so the original delete command is complete.
+        }
+        catch (WorkflowProfileReadOnlyException) when (pending.Kind == WorkflowProfileCommandPayloadKinds.DeleteProfile)
+        {
+            // Built-in Profiles are permanently non-deletable.
         }
         catch (Exception ex)
         {
             _log.LogInformation(
                 "WorkflowProfileReferenceCoordinator {ProjectId} replay of command {CommandId} ({Kind}) terminated with {Exception}",
                 ProjectId, pending.CommandId, pending.Kind, ex.GetType().Name);
+            if (pending.Kind == WorkflowProfileCommandPayloadKinds.DeleteProfile)
+                throw;
         }
 
         _state.State = _state.State with { Pending = null };
