@@ -8,3 +8,10 @@
 
 - Added the same rebase and conflict-resolution shape directly after successful `ai-review` in the check stage, with `session: check`.
 - Kept review-failure recovery limited to `recover:fix-review-findings`; integrate recovery remains unchanged.
+
+## T-002
+
+- The shared PR-check wait now returns `unavailable` when a readable empty rollup remains empty through the configured grace period; it no longer reaches passing classification.
+- Empty classification is defensive `pending`, while non-empty completed non-failing rollups retain the passing path and existing unavailable retry handling is unchanged.
+- Added fake-timer coverage for empty-to-passing and permanently-empty check-stage polling, plus merge-stage unavailable behavior with no merge command; both tests restore real timers.
+- Runner verification passed: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, and full `npm run test:run -w packages/runner` (1383 tests).

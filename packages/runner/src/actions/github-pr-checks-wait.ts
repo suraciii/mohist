@@ -11,7 +11,7 @@ type GhRunner = typeof runCommand
 
 const PR_CHECKS_POLL_INTERVAL_MS_DEFAULT = 15_000
 // How long to keep polling after GitHub reports no checks before concluding
-// the branch genuinely has no CI and proceeding to merge.
+// that check status is unavailable.
 // Long enough to ride out the registration window right after a push / force
 // push (GitHub hasn't turned the workflow run into a check run yet), short
 // enough that repos without CI don't wait forever.
@@ -120,18 +120,23 @@ export async function waitForGitHubPrChecks(
         const checks = parsed.checks
         if (checks.length === 0) {
           if (noChecksSince === null) noChecksSince = Date.now()
-          if (Date.now() - noChecksSince < prChecksNoChecksGraceMs) {
-            try {
-              await delayWithSignal(prChecksPollIntervalMs, signal)
-            } catch (error) {
-              return {
-                kind: "cancelled",
-                message: errorMessage(error),
-                output: `cancelled during wait: ${errorMessage(error)}`,
-              }
+          if (Date.now() - noChecksSince >= prChecksNoChecksGraceMs) {
+            return {
+              kind: "unavailable",
+              message: `no PR checks were reported during the ${prChecksNoChecksGraceMs / 1000}s bounded wait`,
+              output: checksOutput,
             }
-            continue
           }
+          try {
+            await delayWithSignal(prChecksPollIntervalMs, signal)
+          } catch (error) {
+            return {
+              kind: "cancelled",
+              message: errorMessage(error),
+              output: `cancelled during wait: ${errorMessage(error)}`,
+            }
+          }
+          continue
         } else {
           noChecksSince = null
         }
