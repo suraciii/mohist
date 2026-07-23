@@ -2,25 +2,21 @@
 
 Reviewed `proposal.md`, `design.md`, `tasks.json`, and all capability specs against the issue and the current Activity/Event implementation.
 
-## Findings
+## Prior Findings - Verified Fixed
 
-### P1 - The planned Runner snapshots contradict the Activity Project-scope contract
-
-The corrected plan makes `ActivityEvidenceAssembler` include `RunnerStatusService` snapshots and requires T-001 to prove project isolation (`design.md:34-40`, `tasks.json:T-001` acceptance criteria 1 and 4). The issue and `activity-list` spec both require `activity list` to be Project-scoped (`issue` acceptance criteria; `specs/activity-list/spec.md:24-32`).
-
-Current Runner status cannot satisfy that isolation: `RunnerRegistryGrain.ListEligibleRunnersAsync(projectId)` ignores its `projectId` argument and returns every registered runner (`packages/server/src/Mohist.Server/Runner/Grains/RunnerRegistryGrain.cs:137-140`). `RunnerStatusService` deliberately documents the same fact: runners are global execution resources, `RunnerInfo.ProjectId` does not bind them to a project, and the projected scope is always `global` (`RunnerStatusService.cs:130-134`). Therefore two Project Activity reads will receive the same Runner snapshot entries. A test that asserts full collection project isolation will fail; one that permits them will leave the API's scope semantics undocumented.
-
-**Required fix:** decide and specify the Runner visibility rule. Either exclude global Runner snapshots from the Project-scoped Activity collection until there is a durable project association, or retain them as explicitly `global` context with a scope field and state that Project scope filters only project-bound recorded/snapshot entries. Update the proposal, `activity-list` and separation specs, design, T-001/T-002 acceptance criteria, and source/test plan so the per-entry scope rule and the project-isolation assertion agree. Do not claim that all Runner snapshots are Project-isolated under the current registry implementation.
+- **P1 (Activity source):** `activity list` is no longer a projection of live AgentSession cards alone. The plan uses the persisted `ProjectEventFeedAssembler` collection for Issue, WorkflowRun, and AgentSession history, then combines the existing AgentOps/waiting and Runner snapshots without adding storage or changing source contracts. `ActivityEntryDto` defines stable identity, provenance, kind, time, source identities, and the final bounded ordering. The proposal, activity spec, design D1/D2, and T-001/T-002 now agree.
+- **P2 (Runner scope):** Runner visibility is now explicit rather than falsely Project-isolated. The plan records `scope=project` for Project Event, AgentOps, and waiting evidence, and `scope=global` for Runner snapshots. This matches `RunnerRegistryGrain.ListEligibleRunnersAsync`, which intentionally returns the global registry regardless of `projectId` (`RunnerRegistryGrain.cs:137-140`). Cross-Project tests now assert isolation only for Project-bound entries and permit shared Runner context only when it is marked global.
 
 ## Verified Correct
 
-- The Activity plan now uses `ProjectEventFeedAssembler` for persisted Issue, WorkflowRun, and AgentSession history, instead of narrowing the command to live session cards.
-- The plan makes recorded history and current snapshots distinguishable through a mandatory `provenance` field.
-- The Event tail and dead-letter migration preserves the current server-side match compiler, NDJSON/cancellation behavior, and operator credential protections.
-- The task graph is valid JSON and has a strictly ordered acyclic dependency chain.
+- **Activity semantics:** `provenance` distinguishes recorded history from snapshots, while `scope` distinguishes the resolved Project's evidence from global Runner context. Bare `--json` exposes both fields, so scripts do not need to infer either property from titles or raw event types.
+- **Event tail:** The plan keeps the existing project-scoped server match compiler, post-subscription-only NDJSON behavior, selected-field stream projection, and cancellation exit `130`.
+- **Dead-letter recovery:** The singular CLI migration retains existing list/redeliver behavior, loopback-only credential preflight, explicit operator credential lookup, server error diagnostics, and terminal-control sanitization.
+- **Command separation:** The plan rejects plural `events` and `event list`, keeps routing independent, and gives each entry separate help without a mode/source multiplexer.
+- **Plan integrity:** `tasks.json` is valid JSON with an acyclic, strictly-lower-priority chain (`T-001 -> T-002 -> T-003`). Every capability has a spec, every requirement has at least one `#### Scenario`, and task acceptance criteria include the relevant server or CLI test command.
 
 ## Verdict
 
-The Activity source contract is substantially improved, but global Runner visibility remains incompatible with the claimed Project-isolation behavior.
+The plan is internally consistent with the issue and current source boundaries, preserves the stated non-goals, and is ready to build.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
