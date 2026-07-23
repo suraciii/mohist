@@ -1,0 +1,68 @@
+{
+  "project": "mohist-local",
+  "description": "Separate persistent Activity reads, realtime Event tails, and protected dead-letter recovery into explicit singular mo CLI entry points.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Expose the Activity card collection API",
+      "spec": "specs/activity-list/spec.md#activity-list-returns-a-bounded-persistent-activity-record",
+      "description": "Add the project-scoped Activity collection endpoint that returns the existing AgentOps feed's session cards as a finite normal API collection. Keep the Web-facing /agent/activity composite response and Activity aggregation unchanged, validate the 1 through 200 limit at the API boundary, and prove the collection remains project-isolated.",
+      "acceptanceCriteria": [
+        "GET /api/projects/{projectRef}/activity returns the existing Activity feed session-card collection in the normal API envelope without summary or waiting-card companions.",
+        "The endpoint defaults to 50 records, accepts limits from 1 through 200, rejects out-of-range limits with a client error, and resolves project scope through the existing project filter.",
+        "Server specs cover project isolation, default and valid limits, invalid-limit rejection, and equivalence between the new collection response and the existing /agent/activity session cards while preserving existing Web-feed specs.",
+        "dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A read-only project Activity collection endpoint and focused server specification coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Delegate to AgentActivityFeedAssembler; do not create a new Activity persistence model or change the existing Web feed contract."
+    },
+    {
+      "id": "T-002",
+      "title": "Deliver the persistent activity list CLI",
+      "spec": "specs/activity-list/spec.md#activity-list-supports-field-selection",
+      "description": "Add the singular Activity command group and its list leaf on top of the new collection endpoint. Reuse ProjectRef and JsonSelection contracts, define the Activity-card collection descriptor, and provide a scan-oriented human table plus selected JSON output without treating Activity as an Event stream.",
+      "acceptanceCriteria": [
+        "mo activity list resolves a project through --project or the active project, calls the Activity collection endpoint with a 1 through 200 limit, and fails locally without HTTP for no active project or an invalid limit.",
+        "The command exposes bare --json discovery, rejects invalid fields locally with exit code 2, and emits a JSON array containing only selected Activity-card fields for --json <fields>.",
+        "Default output renders issue/workflow context, session identity, status, model, and last activity in a dedicated Activity table; repeated reads of unchanged data are finite normal reads rather than a subscription.",
+        "CLI specs cover route/query construction, project override, local validation, JSON discovery/selection, table rendering, and re-readable results; dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "mo activity list, its collection descriptor/table renderer, and CLI specification coverage.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Use PrintResourceAsync with a command-owned ResourceDescriptor; retain the existing /agent/activity Web response unchanged."
+    },
+    {
+      "id": "T-003",
+      "title": "Migrate Event operations to singular command entries",
+      "spec": "specs/activity-event-separation/spec.md#singular-activity-and-event-nouns-resolve-at-the-root",
+      "description": "Move tail and dead-letter commands from the plural events root to the singular event root, retaining all existing stream, matching, cancellation, credential, loopback, and sanitization behavior. Complete the command-surface separation by removing plural navigation and event list paths, preserving routing as its own entry, and updating CLI help, examples, documentation, and regression coverage.",
+      "acceptanceCriteria": [
+        "mo event tail and mo event dead-letter list/redeliver resolve and preserve their existing HTTP routes and behavior: tail remains post-subscription NDJSON with server-compiled --match and exit 130 cancellation, while dead-letter keeps limit/filter/id validation, operator credentials, loopback refusal, result reporting, and terminal-text sanitization.",
+        "mo events tail, mo events dead-letter list, and mo event list fail as unknown command paths without HTTP; root help advertises singular activity and event but not plural events.",
+        "Leaf help distinguishes persistent Activity history, realtime Event subscription origin, and dead-letter recovery side effects, exposes no shared --mode or --source switch, and Event commands do not gain routing rule CRUD or routing test behavior.",
+        "All affected CLI tests use singular Event invocations and add regressions for plural removal, event list absence, root help, and retained tail/dead-letter safety behavior; docs/cli-reference.md removes the shared-events implementation gap and plural Event examples without changing unrelated issue events or routing payload fields.",
+        "dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Singular mo event command tree, updated help/docs, and complete CLI regression coverage for Event/dead-letter separation.",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "This is intentionally breaking. Keep server /api/.../events paths plural and do not retain an events alias."
+    }
+  ]
+}
