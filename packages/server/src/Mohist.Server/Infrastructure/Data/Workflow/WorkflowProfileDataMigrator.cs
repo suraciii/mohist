@@ -292,14 +292,31 @@ public static class WorkflowProfileDataMigrator
             countsMutable.ProjectDefaultsSeeded++;
         }
 
-        // 4. Rewrite Issue WorkflowProfileIdKey from State JSON.
+        // 4. Rewrite Issue WorkflowProfileIdKey from State JSON. The selection
+        //    resolves from the canonical state field, then an inline-derived
+        //    Profile, then a legacy SourceTemplateId reference (a non-inline
+        //    Issue selection of a Project template) so that selection is not
+        //    lost on migration.
+        var sourceTemplateSelections = issueRows
+            .Where(i => string.IsNullOrWhiteSpace(i.Template)
+                && !string.IsNullOrWhiteSpace(i.SourceTemplateId))
+            .ToDictionary(
+                i => (ProjectId: i.ProjectId ?? string.Empty, IssueNumber: i.IssueNumber),
+                i => i.SourceTemplateId!,
+                EqualityComparer<(string ProjectId, int IssueNumber)>.Default);
         foreach (var issue in issueStateRows)
         {
             var selection = ReadWorkflowProfileIdFromState(issue.State);
+            var key = (ProjectId: issue.ProjectId ?? string.Empty, IssueNumber: issue.Number ?? 0);
             if (string.IsNullOrWhiteSpace(selection)
-                && inlineSelections.TryGetValue((issue.ProjectId ?? string.Empty, issue.Number ?? 0), out var inlineSelection))
+                && inlineSelections.TryGetValue(key, out var inlineSelection))
             {
                 selection = inlineSelection;
+            }
+            if (string.IsNullOrWhiteSpace(selection)
+                && sourceTemplateSelections.TryGetValue(key, out var templateSelection))
+            {
+                selection = templateSelection;
             }
             if (string.IsNullOrWhiteSpace(selection))
                 continue;
