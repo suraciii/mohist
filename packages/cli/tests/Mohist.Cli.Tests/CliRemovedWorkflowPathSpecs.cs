@@ -50,7 +50,7 @@ public class CliRemovedWorkflowPathSpecs
     }
 
     [Fact]
-    public async Task RootHelpListsRunAndOmitsWorkflow()
+    public async Task RootHelpListsRunAndWorkflow()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
@@ -58,7 +58,7 @@ public class CliRemovedWorkflowPathSpecs
 
         Assert.Equal(0, exitCode);
         Assert.Contains("\n  run ", output.ToString());
-        Assert.DoesNotContain("\n  workflow ", output.ToString());
+        Assert.Contains("\n  workflow ", output.ToString());
         Assert.Empty(handler.Requests);
     }
 }

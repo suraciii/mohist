@@ -24,7 +24,7 @@ public sealed class CliWorkflowValidateSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["run", "validate", "--file", "/workflow.yaml"],
+            ["workflow", "validate", "--file", "/workflow.yaml"],
             output,
             error,
             fileSystem,
@@ -43,7 +43,7 @@ public sealed class CliWorkflowValidateSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["run", "validate", "--file", "-"],
+            ["workflow", "validate", "--file", "-"],
             output,
             error,
             fileSystem,
@@ -71,7 +71,7 @@ public sealed class CliWorkflowValidateSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["run", "validate", "--file", "/invalid.yaml"],
+            ["workflow", "validate", "--file", "/invalid.yaml"],
             output,
             error,
             fileSystem,
@@ -94,7 +94,7 @@ public sealed class CliWorkflowValidateSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["run", "validate", "--file", "/action.yaml"],
+            ["workflow", "validate", "--file", "/action.yaml"],
             output,
             error,
             fileSystem,

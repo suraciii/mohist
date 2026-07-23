@@ -6,714 +6,109 @@ internal static class ProjectWorkflowCommands
 {
     public static Command Build(MohistCliApi api)
     {
-        var workflow = new Command("workflow", "Project workflow management");
-
-        workflow.Subcommands.Add(BuildProfile(api));
-        workflow.Subcommands.Add(BuildTemplate(api));
-        workflow.Subcommands.Add(BuildConfig(api));
-
+        var workflow = new Command("workflow", "Project Workflow references and Prompts");
+        workflow.Subcommands.Add(BuildSetDefault(api));
+        workflow.Subcommands.Add(BuildPrompt(api));
         return workflow;
     }
 
-    private static Command BuildProfile(MohistCliApi api)
+    private static Command BuildSetDefault(MohistCliApi api)
     {
-        var profile = new Command("profile", "Manage project workflow profiles");
-        profile.Subcommands.Add(BuildProfileList(api));
-        profile.Subcommands.Add(BuildProfileEnable(api));
-        profile.Subcommands.Add(BuildProfileDisable(api));
-        return profile;
-    }
-
-    private static Command BuildProfileEnable(MohistCliApi api)
-    {
-        var cmd = new Command("enable", "Enable a workflow profile (POST .../workflow-profile/enable)");
-        var profileIdArg = new Argument<string?>("profile-id")
+        var cmd = new Command("set-default", "Set the Project default Workflow Profile");
+        var profile = new Argument<string>("profile") { Description = "Profile ID in this Project" };
+        var (project, projectId) = MohistCliCommands.ProjectRefOption();
+        var output = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(profile); cmd.Options.Add(project); cmd.Options.Add(projectId); cmd.Options.Add(output);
+        cmd.SetAction(async ctx =>
         {
-            Description = "Workflow profile id",
-            Arity = ArgumentArity.ZeroOrOne,
-            DefaultValueFactory = _ => null,
-        };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        cmd.Arguments.Add(profileIdArg);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.SetAction(ctx =>
-        {
-            var profileId = ctx.GetValue(profileIdArg);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            return ToggleAsync();
-
-            async Task<int> ToggleAsync()
-            {
-                if (string.IsNullOrWhiteSpace(profileId))
-                {
-                    api.Error.WriteLine("<profile-id> is required");
-                    return 1;
-                }
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
-                return await api.PrintPostAsync(
-                    ProjectWorkflowProfilePath(resolvedProjectId, "/enable"),
-                    new { profileId });
-            }
+            var (resolved, resolveExit) = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));
+            if (resolveExit != 0) return resolveExit;
+            var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(output));
+            if (exit != 0) return exit;
+            return await api.PrintPutWithOutputAsync($"/api/projects/{MohistCliCommands.Escape(resolved)}/workflow-profile/default", new { profileId = ctx.GetValue(profile) }, mode, nameof(MohistCliApi.TableShape.ProjectWorkflowProfile));
         });
         return cmd;
     }
 
-    private static Command BuildProfileDisable(MohistCliApi api)
+    private static Command BuildPrompt(MohistCliApi api)
     {
-        var cmd = new Command("disable", "Disable a workflow profile (POST .../workflow-profile/disable); refusing to leave the project with no enabled profile surfaces the server's last_enabled_workflow_profile guard");
-        var profileIdArg = new Argument<string?>("profile-id")
-        {
-            Description = "Workflow profile id",
-            Arity = ArgumentArity.ZeroOrOne,
-            DefaultValueFactory = _ => null,
-        };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        cmd.Arguments.Add(profileIdArg);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.SetAction(ctx =>
-        {
-            var profileId = ctx.GetValue(profileIdArg);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            return ToggleAsync();
+        var prompt = new Command("prompt", "Manage Project workflow Prompts");
+        prompt.Subcommands.Add(BuildPromptGet(api));
+        prompt.Subcommands.Add(BuildPromptSet(api));
+        prompt.Subcommands.Add(BuildPromptClear(api));
+        prompt.Subcommands.Add(BuildPromptPreview(api));
+        return prompt;
+    }
 
-            async Task<int> ToggleAsync()
-            {
-                if (string.IsNullOrWhiteSpace(profileId))
-                {
-                    api.Error.WriteLine("<profile-id> is required");
-                    return 1;
-                }
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
-                return await api.PrintPostAsync(
-                    ProjectWorkflowProfilePath(resolvedProjectId, "/disable"),
-                    new { profileId });
-            }
+    private static (Option<string?> Project, Option<string?> ProjectId, Option<string?> Output) AddOptions(Command cmd)
+    {
+        var (project, projectId) = MohistCliCommands.ProjectRefOption();
+        var output = MohistCliCommands.OutputOption();
+        cmd.Options.Add(project); cmd.Options.Add(projectId); cmd.Options.Add(output);
+        return (project, projectId, output);
+    }
+
+    private static Command BuildPromptGet(MohistCliApi api)
+    {
+        var cmd = new Command("get", "Get Project Prompts");
+        var (project, projectId, output) = AddOptions(cmd);
+        cmd.SetAction(async ctx =>
+        {
+            var (resolved, exit) = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));
+            if (exit != 0) return exit;
+            var (mode, modeExit) = api.ResolveOutputMode(ctx.GetValue(output));
+            return modeExit != 0 ? modeExit : await api.PrintWithOutputAsync($"/api/projects/{MohistCliCommands.Escape(resolved)}/workflow-profile/prompts", mode, nameof(MohistCliApi.TableShape.WorkflowProfilePrompt));
         });
         return cmd;
     }
 
-    private static Command BuildProfileList(MohistCliApi api)
+    private static Command BuildPromptSet(MohistCliApi api)
     {
-        var cmd = new Command("list", "List workflow profiles");
-        cmd.Aliases.Add("ls");
-        var describedOpt = new Option<bool>("--described")
+        var cmd = new Command("set", "Set a Project Prompt");
+        var key = new Argument<string>("key");
+        var body = new Option<string>("--body") { Description = "Prompt body, or @<file>" };
+        cmd.Arguments.Add(key); cmd.Options.Add(body);
+        var (project, projectId, output) = AddOptions(cmd);
+        cmd.SetAction(async ctx =>
         {
-            Description = "Show profile descriptions",
-        };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Options.Add(describedOpt);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var described = ctx.GetValue(describedOpt);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            return ListAsync();
-
-            async Task<int> ListAsync()
-            {
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
-                var localExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.WorkflowProfileList));
-                if (localExit is not null) return localExit.Value;
-
-                var hasProject = !string.IsNullOrWhiteSpace(project);
-                var hasProjectId = !string.IsNullOrWhiteSpace(projectId);
-
-                if (described)
-                {
-                    if (hasProject && hasProjectId && !string.Equals(project, projectId, StringComparison.Ordinal))
-                    {
-                        var (_, conflictExit) = await api.ResolveProject(project, projectId);
-                        return conflictExit != 0 ? conflictExit : 1;
-                    }
-
-                    var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-                    if (resolveExit != 0)
-                    {
-                        api.Error.WriteLine("No project specified or active; showing all workflow profiles (degraded).");
-                    return await api.PrintWorkflowProfilesDescribedAsync(null, mode);
-                }
-
-                    return await api.PrintWorkflowProfilesDescribedAsync(resolvedProjectId, mode);
-                }
-
-                if (hasProject && hasProjectId && !string.Equals(project, projectId, StringComparison.Ordinal))
-                {
-                    var (_, conflictExit) = await api.ResolveProject(project, projectId);
-                    return conflictExit != 0 ? conflictExit : 1;
-                }
-
-                var plainResolvedProjectId = hasProject || hasProjectId
-                    ? (await api.ResolveProject(project, projectId)).ProjectId
-                    : await api.TryReadActiveProjectIdAsync();
-                string path;
-                if (string.IsNullOrWhiteSpace(plainResolvedProjectId))
-                {
-                    if (!string.Equals(mode, "json", StringComparison.OrdinalIgnoreCase))
-                        api.Error.WriteLine("No project specified or active; showing all workflow profiles (degraded).");
-                    path = "/api/workflow-templates/system";
-                }
-                else
-                {
-                    path = $"/api/workflow-templates/system?project={MohistCliCommands.Escape(plainResolvedProjectId)}";
-                }
-
-                return await api.PrintWithOutputAsync(
-                    path,
-                    mode,
-                    nameof(MohistCliApi.TableShape.WorkflowProfileList));
-            }
+            var expanded = await api.ExpandAtFileAsync(ctx.GetValue(body), "--body");
+            if (expanded is MohistCliApi.ExpandAtFileResult.Failure) return 1;
+            var (resolved, exit) = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));
+            if (exit != 0) return exit;
+            var (mode, modeExit) = api.ResolveOutputMode(ctx.GetValue(output));
+            if (modeExit != 0) return modeExit;
+            var value = ((MohistCliApi.ExpandAtFileResult.Success)expanded).Value;
+            return await api.PrintPutWithOutputAsync($"/api/projects/{MohistCliCommands.Escape(resolved)}/workflow-profile/prompts/{Uri.EscapeDataString(ctx.GetValue(key)!)}", new { body = value }, mode, nameof(MohistCliApi.TableShape.WorkflowProfilePrompt));
         });
         return cmd;
     }
 
-    private static Command BuildConfig(MohistCliApi api)
+    private static Command BuildPromptClear(MohistCliApi api)
     {
-        var config = new Command("config", "Manage project workflow configuration");
-        config.Subcommands.Add(BuildConfigGet(api));
-        config.Subcommands.Add(BuildConfigSet(api));
-        config.Subcommands.Add(BuildConfigClear(api));
-        config.Subcommands.Add(BuildConfigPreview(api));
-        return config;
-    }
-
-    private static string ProjectWorkflowProfilePath(string projectId, string suffix = "") =>
-        $"/api/projects/{MohistCliCommands.Escape(projectId)}/workflow-profile{suffix}";
-
-    private static async Task<int> PrintProjectWorkflowProfileAsync(MohistCliApi api, string profilePath, string promptsPath, string mode)
-    {
-        var (exitCode, dataNode) = await api.GetDataOrPrintErrorAsync(profilePath);
-        if (exitCode != 0)
-            return exitCode;
-        if (dataNode is null)
-            return 1;
-
-        var (promptsExitCode, promptsData) = await api.GetDataOrPrintErrorAsync(promptsPath);
-        if (promptsExitCode != 0)
-            return promptsExitCode;
-        if (promptsData is null)
-            return 1;
-        dataNode["prompts"] = promptsData.DeepClone();
-
-        return await api.WriteSelectedDataAsync(dataNode, mode, nameof(MohistCliApi.TableShape.ProjectWorkflowProfile));
-    }
-
-    private static Command BuildConfigGet(MohistCliApi api)
-    {
-        var cmd = new Command("get", "Show the project's full workflow profile (default template / variables / prompts)");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
+        var cmd = new Command("clear", "Clear a Project Prompt");
+        var key = new Argument<string>("key"); cmd.Arguments.Add(key);
+        var (project, projectId, output) = AddOptions(cmd);
+        cmd.SetAction(async ctx =>
         {
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            return GetAsync();
-
-            async Task<int> GetAsync()
-            {
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
-                var localExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.ProjectWorkflowProfile));
-                if (localExit is not null) return localExit.Value;
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-                if (resolveExit != 0) return resolveExit;
-
-                var profilePath = ProjectWorkflowProfilePath(resolvedProjectId);
-                var promptsPath = ProjectWorkflowProfilePath(resolvedProjectId, "/prompts");
-
-                return await PrintProjectWorkflowProfileAsync(api, profilePath, promptsPath, mode);
-            }
+            var (resolved, exit) = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));
+            if (exit != 0) return exit;
+            var (mode, modeExit) = api.ResolveOutputMode(ctx.GetValue(output));
+            return modeExit != 0 ? modeExit : await api.PrintDeleteWithOutputAsync($"/api/projects/{MohistCliCommands.Escape(resolved)}/workflow-profile/prompts/{Uri.EscapeDataString(ctx.GetValue(key)!)}", mode, nameof(MohistCliApi.TableShape.WorkflowProfilePrompt));
         });
         return cmd;
     }
 
-    private static Command BuildConfigSet(MohistCliApi api)
+    private static Command BuildPromptPreview(MohistCliApi api)
     {
-        var cmd = new Command("set", "Composite config writes (default template / prompts)");
-        var defaultTemplateOpt = new Option<string?>("--default-template")
+        var cmd = new Command("preview", "Preview a Project Prompt");
+        var key = new Argument<string>("key"); cmd.Arguments.Add(key);
+        var (project, projectId, output) = AddOptions(cmd);
+        cmd.SetAction(async ctx =>
         {
-            Description = "Set the default workflow template by ID (PUT /workflow-profile/default-template)",
-        };
-        var promptOpt = new Option<string[]?>("--prompt")
-        {
-            Description = "Set a prompt as 'key=body' or 'key=@<file>'. Repeatable; one PUT /workflow-profile/prompts/<key> per occurrence.",
-            AllowMultipleArgumentsPerToken = true,
-        };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Options.Add(defaultTemplateOpt);
-        cmd.Options.Add(promptOpt);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var defaultTemplate = ctx.GetValue(defaultTemplateOpt);
-            var prompts = ctx.GetValue(promptOpt);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            var defaultTemplateProvided = ctx.GetResult(defaultTemplateOpt) is not null;
-            var promptProvided = ctx.GetResult(promptOpt) is not null;
-            return SetAsync();
-
-            async Task<int> SetAsync()
-            {
-                var hasAnyChange = defaultTemplateProvided || promptProvided;
-                if (!hasAnyChange)
-                {
-                    api.Error.WriteLine("nothing to change — pass at least one of --default-template or --prompt");
-                    return 1;
-                }
-
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-
-                if (resolveExit != 0) return resolveExit;
-
-                var (mode, exit) = api.ResolveOutputMode(output);
-
-
-                if (exit != 0) return exit;
-
-
-                var profilePath = ProjectWorkflowProfilePath(resolvedProjectId);
-
-                var promptPayloads = new List<(string Key, string Body)>();
-
-                if (promptProvided)
-                {
-                    foreach (var entry in prompts!)
-                    {
-                        var eq = entry.IndexOf('=');
-                        if (eq <= 0)
-                        {
-                            api.Error.WriteLine($"--prompt '{entry}' must be in 'key=body' or 'key=@<file>' form");
-                            return 1;
-                        }
-                        var key = entry[..eq];
-                        if (string.IsNullOrWhiteSpace(key))
-                        {
-                            api.Error.WriteLine($"--prompt '{entry}' has an empty key");
-                            return 1;
-                        }
-                        if (key.Contains('/'))
-                        {
-                            api.Error.WriteLine($"--prompt key '{key}' must not contain '/'");
-                            return 1;
-                        }
-
-                        var rawBody = entry[(eq + 1)..];
-                        var expanded = await api.ExpandAtFileAsync(rawBody, "--prompt");
-                        if (expanded is MohistCliApi.ExpandAtFileResult.Failure)
-                            return 1;
-                        promptPayloads.Add((key, ((MohistCliApi.ExpandAtFileResult.Success)expanded).Value));
-                    }
-                }
-
-                if (defaultTemplateProvided)
-                {
-                    var putExit = await api.PrintPutWithOutputAsync(
-                        profilePath + "/default-template",
-                        new { templateId = defaultTemplate },
-                        mode,
-                        nameof(MohistCliApi.TableShape.ProjectWorkflowProfile));
-                    if (putExit != 0)
-                        return putExit;
-                }
-
-                if (promptProvided)
-                {
-                    foreach (var prompt in promptPayloads)
-                    {
-                        var promptExit = await api.PrintPutWithOutputAsync(
-                            $"{profilePath}/prompts/{Uri.EscapeDataString(prompt.Key)}",
-                            new { body = prompt.Body },
-                            mode,
-                            nameof(MohistCliApi.TableShape.WorkflowProfilePrompt));
-                        if (promptExit != 0)
-                            return promptExit;
-                    }
-                }
-
-                return 0;
-            }
-        });
-        return cmd;
-    }
-
-    private static Command BuildConfigClear(MohistCliApi api)
-    {
-        var cmd = new Command("clear", "Composite config removals (default template / prompts)");
-        var defaultTemplateOpt = new Option<bool>("--default-template")
-        {
-            Description = "Clear the default template (DELETE /workflow-profile/default-template)",
-        };
-        var promptOpt = new Option<string[]?>("--prompt")
-        {
-            Description = "Remove a prompt by key. Repeatable; one DELETE /workflow-profile/prompts/<key> per occurrence.",
-            AllowMultipleArgumentsPerToken = true,
-        };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Options.Add(defaultTemplateOpt);
-        cmd.Options.Add(promptOpt);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var prompts = ctx.GetValue(promptOpt);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            var defaultTemplateResult = ctx.GetResult(defaultTemplateOpt);
-            var defaultTemplateProvided = defaultTemplateResult is not null && !defaultTemplateResult.Implicit;
-            var promptProvided = ctx.GetResult(promptOpt) is not null;
-            return ClearAsync();
-
-            async Task<int> ClearAsync()
-            {
-                var hasAnyClear = defaultTemplateProvided || promptProvided;
-                if (!hasAnyClear)
-                {
-                    api.Error.WriteLine("nothing to clear — pass at least one of --default-template or --prompt");
-                    return 1;
-                }
-
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-
-                if (resolveExit != 0) return resolveExit;
-
-                var (mode, exit) = api.ResolveOutputMode(output);
-
-
-                if (exit != 0) return exit;
-
-
-                var profilePath = ProjectWorkflowProfilePath(resolvedProjectId);
-
-                var promptKeys = new List<string>();
-
-                if (promptProvided)
-                {
-                    foreach (var key in prompts!)
-                    {
-                        if (string.IsNullOrWhiteSpace(key))
-                        {
-                            api.Error.WriteLine($"--prompt key '{key}' must not be empty");
-                            return 1;
-                        }
-                        if (key.Contains('/'))
-                        {
-                            api.Error.WriteLine($"--prompt key '{key}' must not contain '/'");
-                            return 1;
-                        }
-                        promptKeys.Add(key);
-                    }
-                }
-
-                if (defaultTemplateProvided)
-                {
-                    var deleteExit = await api.PrintDeleteWithOutputAsync(
-                        profilePath + "/default-template",
-                        mode,
-                        nameof(MohistCliApi.TableShape.ProjectWorkflowProfile));
-                    if (deleteExit != 0)
-                        return deleteExit;
-                }
-
-                if (promptProvided)
-                {
-                    foreach (var key in promptKeys)
-                    {
-                        var promptExit = await api.PrintDeleteWithOutputAsync(
-                            $"{profilePath}/prompts/{Uri.EscapeDataString(key)}",
-                            mode,
-                            nameof(MohistCliApi.TableShape.WorkflowProfilePrompt),
-                            new System.Text.Json.Nodes.JsonObject
-                            {
-                                ["key"] = key,
-                                ["deleted"] = true,
-                            });
-                        if (promptExit != 0)
-                            return promptExit;
-                    }
-                }
-
-                return 0;
-            }
-        });
-        return cmd;
-    }
-
-    private static Command BuildConfigPreview(MohistCliApi api)
-    {
-        var cmd = new Command("preview", "Render a prompt under the project's current variables");
-        var keyArg = new Argument<string>("key") { Description = "Prompt key (e.g. plan_prompt)" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(keyArg);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var key = ctx.GetValue(keyArg);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            return PreviewAsync();
-
-            async Task<int> PreviewAsync()
-            {
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    api.Error.WriteLine("prompt key is required");
-                    return 1;
-                }
-                if (key.Contains('/'))
-                {
-                    api.Error.WriteLine($"prompt key '{key}' must not contain '/'");
-                    return 1;
-                }
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-                if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = api.ResolveOutputMode(output);
-
-                if (exit != 0) return exit;
-
-                return await api.PrintPostWithOutputAsync(
-                    ProjectWorkflowProfilePath(resolvedProjectId, $"/prompts/{Uri.EscapeDataString(key!)}/preview"),
-                    new { },
-                    mode,
-                    nameof(MohistCliApi.TableShape.WorkflowProfilePreview));
-            }
-        });
-        return cmd;
-    }
-
-    private static Command BuildTemplate(MohistCliApi api)
-    {
-        var template = new Command("template", "Manage project workflow templates");
-
-        template.Subcommands.Add(BuildTemplateList(api));
-        template.Subcommands.Add(BuildTemplateCreate(api));
-        template.Subcommands.Add(BuildTemplateShow(api));
-        template.Subcommands.Add(BuildTemplateUpdate(api));
-        template.Subcommands.Add(BuildTemplateDelete(api));
-
-        return template;
-    }
-
-    private static Command BuildTemplateList(MohistCliApi api)
-    {
-        var cmd = new Command("list", "List workflow templates");
-        cmd.Aliases.Add("ls");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            var (mode, exit) = api.ResolveOutputMode(output);
-
-            if (exit != 0) return Task.FromResult(exit);
-
-            return ListAsync();
-
-            async Task<int> ListAsync()
-            {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-                if (resolveExit != 0) return resolveExit;
-                return await api.PrintWithOutputAsync(
-                    $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/workflow-templates",
-                    mode,
-                    nameof(MohistCliApi.TableShape.ProjectTemplateList));
-            }
-        });
-        return cmd;
-    }
-
-    private static Command BuildTemplateCreate(MohistCliApi api)
-    {
-        var cmd = new Command("create", "Create a workflow template");
-        var yamlOpt = new Option<string>("--yaml") { Description = "Template YAML body (inline or @file)" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Options.Add(yamlOpt);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var yaml = ctx.GetValue(yamlOpt);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            var (mode, exit) = api.ResolveOutputMode(output);
-
-            if (exit != 0) return Task.FromResult(exit);
-
-            return CreateAsync();
-
-            async Task<int> CreateAsync()
-            {
-                var expanded = await api.ExpandAtFileAsync(yaml, "--yaml");
-                if (expanded is MohistCliApi.ExpandAtFileResult.Failure)
-                    return 1;
-                var body = ((MohistCliApi.ExpandAtFileResult.Success)expanded).Value;
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-                if (resolveExit != 0) return resolveExit;
-                return await api.PrintPostWithOutputAsync(
-                    $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/workflow-templates",
-                    new { yaml = body },
-                    mode,
-                    nameof(MohistCliApi.TableShape.ProjectTemplateShow));
-            }
-        });
-        return cmd;
-    }
-
-    private static Command BuildTemplateShow(MohistCliApi api)
-    {
-        var cmd = new Command("show", "Show a workflow template");
-        var templateIdArg = new Argument<string>("template-id") { Description = "Template ID" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(templateIdArg);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var templateId = ctx.GetValue(templateIdArg);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            var (mode, exit) = api.ResolveOutputMode(output);
-
-            if (exit != 0) return Task.FromResult(exit);
-
-            return ShowAsync();
-
-            async Task<int> ShowAsync()
-            {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-                if (resolveExit != 0) return resolveExit;
-                return await api.PrintWithOutputAsync(
-                    $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/workflow-templates/{MohistCliCommands.Escape(templateId!)}",
-                    mode,
-                    nameof(MohistCliApi.TableShape.ProjectTemplateShow));
-            }
-        });
-        return cmd;
-    }
-
-    private static Command BuildTemplateUpdate(MohistCliApi api)
-    {
-        var cmd = new Command("update", "Update a workflow template");
-        var templateIdArg = new Argument<string>("template-id") { Description = "Template ID" };
-        var yamlOpt = new Option<string>("--yaml") { Description = "Template YAML body (inline or @file)" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(templateIdArg);
-        cmd.Options.Add(yamlOpt);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var templateId = ctx.GetValue(templateIdArg);
-            var yaml = ctx.GetValue(yamlOpt);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            var (mode, exit) = api.ResolveOutputMode(output);
-
-            if (exit != 0) return Task.FromResult(exit);
-
-            return UpdateAsync();
-
-            async Task<int> UpdateAsync()
-            {
-                var expanded = await api.ExpandAtFileAsync(yaml, "--yaml");
-                if (expanded is MohistCliApi.ExpandAtFileResult.Failure)
-                    return 1;
-                var body = ((MohistCliApi.ExpandAtFileResult.Success)expanded).Value;
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-                if (resolveExit != 0) return resolveExit;
-                return await api.PrintPutWithOutputAsync(
-                    $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/workflow-templates/{MohistCliCommands.Escape(templateId!)}",
-                    new { yaml = body },
-                    mode,
-                    nameof(MohistCliApi.TableShape.ProjectTemplateShow));
-            }
-        });
-        return cmd;
-    }
-
-    private static Command BuildTemplateDelete(MohistCliApi api)
-    {
-        var cmd = new Command("delete", "Delete a workflow template");
-        cmd.Aliases.Add("remove");
-        cmd.Aliases.Add("rm");
-        var templateIdArg = new Argument<string>("template-id") { Description = "Template ID" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(templateIdArg);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var templateId = ctx.GetValue(templateIdArg);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            var (mode, exit) = api.ResolveOutputMode(output);
-
-            if (exit != 0) return Task.FromResult(exit);
-
-            return DeleteAsync();
-
-            async Task<int> DeleteAsync()
-            {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-                if (resolveExit != 0) return resolveExit;
-                return await api.PrintDeleteWithOutputAsync(
-                    $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/workflow-templates/{MohistCliCommands.Escape(templateId!)}",
-                    mode,
-                    nameof(MohistCliApi.TableShape.ProjectTemplateShow));
-            }
+            var (resolved, exit) = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));
+            if (exit != 0) return exit;
+            var (mode, modeExit) = api.ResolveOutputMode(ctx.GetValue(output));
+            return modeExit != 0 ? modeExit : await api.PrintPostWithOutputAsync($"/api/projects/{MohistCliCommands.Escape(resolved)}/workflow-profile/prompts/{Uri.EscapeDataString(ctx.GetValue(key)!)}/preview", new { }, mode, nameof(MohistCliApi.TableShape.WorkflowProfilePreview));
         });
         return cmd;
     }

@@ -52,9 +52,8 @@ public static partial class IssueRoutes
             IGrainFactory grains,
             IssueQuerier issuesQuery,
             IssueRepositoryResolver repositoryResolver,
-            IssueWorkflowProfileRegistry profileRegistry,
-            IssueWorkflowProfileManager issueProfileManager,
-            ProjectWorkflowProfileManager projectProfileManager) =>
+            IWorkflowProfileProvider profileProvider,
+            IssueWorkflowProfileManager issueProfileManager) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
                 return ApiResults.BadRequest("title is required");
@@ -70,20 +69,9 @@ public static partial class IssueRoutes
             if (TryValidateAgentConfigForbiddenKeys(req.Raw, "agentConfig", out var agentConfigError) is false)
                 return ApiResults.BadRequest(agentConfigError!, "invalid_agent_config");
 
-            var requestedWorkflowProfileId = profileRegistry.CanonicalId(req.WorkflowProfileId);
-            if (!string.IsNullOrWhiteSpace(req.WorkflowProfileId) && requestedWorkflowProfileId is null)
-                return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
-
-            var disabledIds = await projectProfileManager.GetDisabledWorkflowProfileIdsAsync(project.Id);
-            var allSystemIds = profileRegistry.List().Select(p => p.Id).ToHashSet(IssueWorkflowProfiles.IdComparer);
-            var enabledCount = allSystemIds.Count(id => !disabledIds.Contains(id));
-            if (enabledCount == 0)
-                return ApiResults.BadRequest(
-                    "Cannot create issue: no workflow profile is enabled for this project. " +
-                    "Enable a workflow profile first before creating issues.",
-                    "no_enabled_workflow_profile");
-
-            if (requestedWorkflowProfileId is not null && disabledIds.Contains(requestedWorkflowProfileId))
+            var requestedWorkflowProfileId = req.WorkflowProfileId;
+            if (!string.IsNullOrWhiteSpace(requestedWorkflowProfileId)
+                && !await profileProvider.ContainsAsync(project.Id, requestedWorkflowProfileId))
                 return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
 
             var resolution = repositoryResolver.Resolve(project, req.RepositoryName);
@@ -205,8 +193,7 @@ public static partial class IssueRoutes
             IGrainFactory grains,
             IssueQuerier issuesQuery,
             IssueRepositoryResolver repositoryResolver,
-            IssueWorkflowProfileRegistry profileRegistry,
-            ProjectWorkflowProfileManager projectProfileManager,
+            IWorkflowProfileProvider profileProvider,
             IssueWorkflowProfileManager issueProfileManager) =>
         {
             var project = GetRequiredProject(ctx);
@@ -231,9 +218,8 @@ public static partial class IssueRoutes
             if (req.Contains(nameof(UpdateIssueRequest.WorkflowProfileId))
                 && !string.IsNullOrWhiteSpace(req.WorkflowProfileId))
             {
-                var requestedWorkflowProfileId = profileRegistry.CanonicalId(req.WorkflowProfileId);
-                if (requestedWorkflowProfileId is null
-                    || (await projectProfileManager.GetDisabledWorkflowProfileIdsAsync(project.Id)).Contains(requestedWorkflowProfileId))
+                var requestedWorkflowProfileId = req.WorkflowProfileId;
+                if (!await profileProvider.ContainsAsync(project.Id, requestedWorkflowProfileId))
                 {
                     return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
                 }

@@ -12,3 +12,10 @@
 - The EF snapshot and migration must include the auto-created `(ProjectId, DefaultWorkflowProfileIdKey)` index as well as all three restrictive composite foreign keys, otherwise integration hosts fail with `PendingModelChangesWarning`.
 - The legacy migrator is invoked during startup, so materialized custom records must be skipped on repeat runs. Reserved IDs map to `legacy-reserved/{base64url-utf8(source)}` and public Issue/Run state references are rewritten along with backing keys.
 - Focused verification: `WorkflowProfileCollectionSpecs` passed 21/21; `ProjectEventsModelDebug.DebugPendingModelChanges` passed 1/1; server and test projects build with `-p:SkipWebBuild=true`. The normal build remains blocked in this checkout because web dependencies are absent (`tsc: not found`).
+
+## T-002 Notes
+
+- The Profile collection is now the only workflow management API/CLI surface: root `mo workflow` owns CRUD and local Definition validation, while Project selection uses `/workflow-profile/default` and the retained Prompt surface uses `/workflow-profile/prompts`.
+- Slash-capable Profile IDs use terminal catch-all server routes and `Uri.EscapeDataString` in CLI paths.
+- Legacy template/default-template routes and commands, Issue template configuration, and the old `run validate` location were removed. Existing tests asserting those contracts were removed or replaced with T-002 surface coverage.
+- CLI verification: full `Mohist.Cli.Tests` passed 1340/1340; CLI and server production/test projects build without warnings. The full server suite still has 20 failures from pre-T-002 tests that assert removed global/template APIs and disabled-profile behavior; `WorkflowProfileCollectionSpecs` passes via the direct xUnit class runner.
