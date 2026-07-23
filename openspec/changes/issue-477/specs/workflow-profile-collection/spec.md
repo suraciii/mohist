@@ -50,7 +50,7 @@ Creating or editing a custom Profile SHALL validate its Definition with the auth
 - **THEN** the Profile SHALL not be saved and the failure SHALL identify the Action-contract validation source
 
 ### Requirement: Protected Profile deletion
-`mo workflow delete` SHALL refuse to delete a custom Profile that is referenced by the Project default, by any Issue in that Project, or by any active WorkflowRun. The refusal MUST identify each blocking reference relationship. An unreferenced custom Profile SHALL be deletable. Profile deletion, every Project-default write, and every WorkflowRun-binding write SHALL be serialized for that Project through the Profile reference coordinator, so they cannot leave a reference to a deleted Profile. Issue explicit selection is written by the existing Issue creation/selection coordinator and is observed by the deletion check as a read projection over Issue rows, so a deletion cannot race an Issue selection into existence either; the two coordinators do not call each other and do not share a transaction.
+`mo workflow delete` SHALL refuse to delete a custom Profile that is referenced by the Project default, by any Issue in that Project including a terminal Issue, or by any active WorkflowRun. The refusal MUST identify each blocking reference relationship. An unreferenced custom Profile SHALL be deletable. Profile deletion and every Profile reference write, including Project-default writes, WorkflowRun bindings, and Issue explicit selection, SHALL be serialized for that Project through one Profile reference coordinator. Issue creation SHALL still commit its repository binding and Profile selection together in its one Issue transaction. This shared serialization SHALL prevent deletion from racing a reference check, validation, or commit.
 
 #### Scenario: Delete a Profile used as the Project default
 - **WHEN** a user attempts to delete the Profile selected as a Project's default
@@ -60,14 +60,18 @@ Creating or editing a custom Profile SHALL validate its Definition with the auth
 - **WHEN** a user attempts to delete a Profile referenced by an Issue and by an active WorkflowRun
 - **THEN** deletion SHALL fail and the error SHALL identify both the Issue and active WorkflowRun reference relationships
 
+#### Scenario: Delete a Profile referenced by a terminal Issue
+- **WHEN** a user attempts to delete a Profile explicitly selected by a terminal Issue
+- **THEN** deletion SHALL fail and the error SHALL identify that Issue reference
+
 #### Scenario: Delete an unreferenced custom Profile
 - **WHEN** a user deletes a custom Profile with no Project default, Issue, or active WorkflowRun reference
 - **THEN** the Profile SHALL be removed from that Project's collection
 
-#### Scenario: Reference write precedes deletion
-- **WHEN** a Project-default write, an Issue selection, or a WorkflowRun binding to a custom Profile is accepted before a deletion request for that Profile is processed
-- **THEN** deletion SHALL fail and identify the newly committed reference as a blocker
+#### Scenario: Reference write holds the shared serialization position before deletion
+- **WHEN** a Project-default write, an Issue selection, or a WorkflowRun binding has passed its Profile existence check and holds an earlier Profile reference coordinator queue position than a deletion request for that Profile
+- **THEN** the reference write SHALL commit before deletion runs, and deletion SHALL fail and identify the newly committed reference as a blocker
 
-#### Scenario: Deletion precedes a reference write
-- **WHEN** deletion of an unreferenced custom Profile is accepted before a Project-default, WorkflowRun-binding, or Issue explicit-selection request for that Profile is processed
-- **THEN** the later reference write SHALL fail with the retryable `workflow-profile-not-found` conflict and SHALL not create a dangling reference. A Project-default or Run-binding write is rejected by the Profile reference coordinator; an Issue selection write is rejected by the Issue participant's existence revalidation.
+#### Scenario: Deletion holds the shared serialization position before reference validation
+- **WHEN** deletion of an unreferenced custom Profile holds an earlier Profile reference coordinator queue position than a Project-default, WorkflowRun-binding, or Issue explicit-selection request for that Profile
+- **THEN** deletion SHALL commit before the later request validates; the later reference write SHALL fail with the retryable `workflow-profile-not-found` conflict and SHALL not create a dangling reference.

@@ -14,8 +14,8 @@ Profile，`IssueWorkflowProfiles` 还能保存 inline Definition，`WorkflowRun`
 
 - Workflow 保持自治；Issue 和 Project 只保存 Profile ID 引用，不复制 Definition body。
 - 单个聚合事务不能同时写 Profile、Project、Issue 和 WorkflowRun。跨聚合查询只能辅助选择，
-  目标写入方必须重新验证自身不变量。Profile 引用写入按目标聚合分属两个已有 coordinator 责任面
-  （见 Decision 4），二者不互调、不共享事务。
+ 目标写入方必须重新验证自身不变量。所有会建立或破坏 Profile 引用的命令必须经过同一个按
+  Project 串行的 coordinator（见 Decision 4），但每次命令仍只写一个目标聚合。
 - #432 的 `WorkflowDefinition` parser 是 Definition 语义的唯一权威；#446 的 Action catalog
   是 `uses` / `with` 契约的唯一权威。CLI 不实现两者的副本。
 - 活动 Run 的已初始化 Stage、已接受 attempt 与历史结果是不可变事实；未初始化 Stage 仍要
@@ -76,9 +76,10 @@ assert collection.contains(projectId, selectedProfileId)
 workflowRun.workflowProfileId = selectedProfileId
 ```
 
-Project default 更新通过 `WorkflowProfileReferenceCoordinator` 调用 collection provider
-验证存在性；Issue create/edit 在 `IssueRepositoryCoordinatorGrain` → `IIssueBindingParticipant`
-命令内调用 collection provider 验证存在性（与验证 repository 存在性同一入口）。
+Project default、Issue create/edit 与 WorkflowRun binding 都通过
+`WorkflowProfileReferenceCoordinator` 在各自队列位置调用 collection provider 验证存在性；Issue
+create/edit 随后由 `IIssueBindingParticipant` 在其单一 Issue 事务内提交（与验证 repository
+存在性同一入口）。
 `issue edit --inherit-workflow-profile` 仅清除 Issue 字段；同时传该 flag 与
 `--workflow-profile` 由 CLI 的互斥 option 在发请求前拒绝。修改 Project 或 Issue 引用绝不写入
 已有 WorkflowRun。
@@ -103,52 +104,50 @@ Stage 初始化完成后，产生的 StageRun/TaskRun/attempt 和结果继续作
 不被追溯的模型。备选的完整 snapshot 会隔离编辑但阻断新 Definition；按 task 读取 Definition
 会让同一已初始化 Stage 内的任务发生不可预测变化，两者均不采用。
 
-### 4. Profile 引用与删除由两个 coordinator 按聚合边界分别串行化
+### 4. 一个 coordinator 串行化所有 Profile 引用与删除
 
-Profile 引用写入按其目标聚合分属两个已有的 coordinator 责任面，二者不互相调用、不共享
-事务，各自遵守 `design/architecture.md` 的「每条命令最多写入一个参与者聚合」约束：
+新增 Project-scoped `WorkflowProfileReferenceCoordinator` 是所有 Profile reference-writing 命令
+及删除的唯一入口：Project default 更新、WorkflowRun 启动 binding、Issue explicit selection（含
+create / edit / `--inherit-workflow-profile` 清除）和 Profile 删除均以 Project key 排队。它取代
+`IssueRepositoryCoordinatorGrain` 对 Issue create/edit 的入口职责；后者随旧 repository-only
+协调路径删除或收敛，不得继续作为并行入口。这样 Issue 选择与删除拥有一个共享的、持久且可恢复
+的顺序，而非依赖过期查询或跨 coordinator 复验。
 
-- **Issue explicit selection（含 create / edit / `--inherit-workflow-profile` 清除）** 属于 Issue
-  聚合的字段，沿用现有 `IssueRepositoryCoordinatorGrain`。携带 `--workflow-profile` 的
-  `issue create` 仍走 `CreateIssueAsync` → `IIssueBindingParticipant.CreateAsync`；该参与者在
-  同一个 Issue 事务内同时提交 repository binding 与 Profile 引用，并在提交前用 collection
-  provider 验证 Profile 存在性——与它今天验证 repository 存在性的方式一致。未知 Profile 让
-  参与者返回可重试的 `workflow-profile-not-found` conflict，不提交 Issue。这与「Issue 创建有
-  唯一串行化入口」的既有不变量一致，不引入第二个 create owner，也不需要 coordinator 间
-  同步调用。
-- **Project default 更新、WorkflowRun 启动 binding 写入、Profile 删除** 涉及 Project 与 Run
-  聚合，且删除检查必须原子观察这两类引用——这些命令才由新增 Project-scoped
-  `WorkflowProfileReferenceCoordinator` 串行化。
+为保留既有 repository-binding 的串行化，原 `IssueRepositoryCoordinatorGrain` 的其余 Issue
+repository lifecycle 命令也必须一并迁入该 Coordinator，或将该 grain 收敛为它的同一实现；不得
+保留能与 Issue create 并发的第二条 repository-binding 入口。
 
-新 Coordinator 按 Project key 串行处理命令并持久化不确定投递的 command fence；参与者以
-command ID 和 expected revision 幂等接受重投。它不保存 Profile、Project 或 Run 的业务事实，
-也不在一个事务内写多个聚合。对 Project-default / Run-binding write，Coordinator 在队列位置
-验证 Profile 属于 collection，再调用唯一引用拥有者（`IProjectBindingParticipant` /
-`IWorkflowRunBindingParticipant`）提交该引用。对删除，Coordinator 在队列位置由
-`WorkflowProfileDeletionBlockerQuery` 汇总 Project default、该 Project 的 Issue explicit
-selection、以及非终态 WorkflowRun binding；存在任一引用即拒绝，错误返回全部阻塞关系及可辨识
-的 Issue number / WorkflowRun ID；不只返回第一项。内置 Profile 在引用查询前即因 read-only
-拒绝。删除命令只删除 Profile 自己的记录，Project、Issue 和 Run 不被同时修改。
+Coordinator 持久化不确定投递的 command fence；参与者以 command ID 和 expected revision 幂等
+接受重投。它不保存 Profile、Project、Issue 或 Run 的业务事实，也不在一个事务内写多个聚合。
+每个队列项在其位置验证 Profile 属于 collection，再只调用对应的唯一引用拥有者：
+`IProjectBindingParticipant`、`IIssueBindingParticipant` 或 `IWorkflowRunBindingParticipant`。Issue
+create 仍调用 `IIssueBindingParticipant.CreateAsync`，该参与者在同一个 Issue 事务内提交 repository
+binding 与 Profile 引用，故既有 Issue-create repository-binding 不变量不变；只是该命令由共享
+Coordinator 投递，避免第二个 create owner。
 
-删除竞态由三处共同闭合，不需要跨 coordinator 同步：Issue selection 是 Issue 行上的字段，被
-`WorkflowProfileDeletionBlockerQuery` 直接读出（与 `RepositoryDeletionBlockerQuery` 读 Issue
-行的同一模式），Project default 与 Run binding 由新 Coordinator 串行。因此顺序确定：Project
-default / Run binding write 先提交时，随后删除观察到该引用并拒绝；先删除时，随后该 Coordinator
-的 write 在重新验证时收到可重试的 `workflow-profile-not-found` conflict，不提交引用；Issue
-selection write 先提交时，删除查询读出该 Issue 行并拒绝；先删除时，Issue 参与者重新验证
-存在性失败，不提交 Issue。客户端以同一 command ID 重试不重复写入；以新命令重试前必须刷新
-collection 并选择可用 Profile。数据库外键不指向内置项，不能单独承担该规则。
+对删除，Coordinator 在队列位置由 `WorkflowProfileDeletionBlockerQuery` 汇总 Project default、该
+Project 的所有 Issue（包括终态 Issue）explicit selection，以及非终态 WorkflowRun binding；存在任一
+引用即拒绝，错误返回全部阻塞关系及可辨识的 Issue number / WorkflowRun ID；不只返回第一项。
+内置 Profile 在引用查询前即因 read-only 拒绝。删除命令只删除 Profile 自己的记录，Project、Issue
+和 Run 不被同时修改。
 
-直接调用 Profile、Project 或 Run 的 reference-writing 接口（绕过各自 coordinator）由 ArchTest
-禁止；该规则沿用现有 `BindingParticipantInterfaces_OnlyConsumedByCoordinator` 的命名约定，
-新参与者接口置于 `*.Grains.Coordinator` 命名空间即自动受其约束。
+共享队列给出可串行化的顺序：reference write 先提交时，随后删除观察到该引用并拒绝；删除先
+提交时，随后 reference write 在其队列位置重新验证并得到可重试的
+`workflow-profile-not-found` conflict，且不提交引用。该保证也覆盖 Issue 参与者的存在性校验与提交
+之间的窗口，因为删除无法插入同一 Coordinator 已取得的队列位置。客户端以同一 command ID 重试
+不重复写入；以新命令重试前必须刷新 collection 并选择可用 Profile。数据库外键不指向内置项，
+不能单独承担该规则。
 
-备选方案一：让新 Coordinator 也接管 Issue create 的 Profile 选择，使所有 reference write 走单一
-入口。它会与 `IssueRepositoryCoordinatorGrain` 争夺 Issue create 的唯一串行化身份，要么把
-repository binding 与 Profile 引用放进两个聚合的跨事务（违反单聚合事务约束），要么让两个
-coordinator 同步互调（违反「不得引入同步回调环」）。备选方案二：仅在各所有者写入前重验
-存在性，不串行化删除——它不能覆盖检查与提交之间的并发删除。备选方案三：删除时自动清除
-default/Issue 引用或终止 Run——它会隐式修改多个聚合且可能改变正在执行的工作。三者均不采用。
+直接调用 Profile、Project、Issue 或 Run 的 reference-writing 接口（绕过
+`WorkflowProfileReferenceCoordinator`）由 ArchTest 禁止；该规则沿用现有
+`BindingParticipantInterfaces_OnlyConsumedByCoordinator` 的命名约定，新参与者接口置于
+`*.Grains.Coordinator` 命名空间即自动受其约束。
+
+备选方案一：让 Issue selection 继续留在独立 coordinator，再让删除读取 Issue 投影并依赖参与者
+存在性复验；它不能覆盖 deletion check、Issue revalidation 与 Issue commit 的交错。备选方案二：
+让两个 coordinator 同步互调；它会形成 coordinator 链并违反「不得引入同步回调环」。备选方案三：
+删除时自动清除 default/Issue 引用或终止 Run；它会隐式修改多个聚合且可能改变正在执行的工作。
+三者均不采用。
 
 ### 5. 保存复用两段权威校验，诊断保留来源
 
@@ -185,11 +184,11 @@ CLI spec 中 `workflow` 对 WorkflowProfile 的唯一导航相悖，后者会长
 
 Server spec tests 覆盖同 Project collection、跨 Project 隔离、builtin read-only、两类保存错误
 来源、Project 创建时 `mohist/local` default、全部删除阻塞关系、default/Issue 的存在性校验，
-以及 Run 的 ID binding 与 Stage live resolution。用可控 participant/fence fake 安排 deletion 与
-Project-default / Run-binding write 的两个交错顺序，证明前者不会留下悬空引用且后者得到指定的
-blocker 或 retryable conflict；对 Issue selection，用 Issue 参与者 fake 证明删除先于提交时
-参与者重新验证失败、不提交 Issue。两类交错分别落在各自 coordinator 的 spec，不构造跨
-coordinator 的同步调用。WorkflowRun spec 必须证明 Profile/selection 更新不会改变已初始化 Stage、attempt 或历史。
+以及 Run 的 ID binding 与 Stage live resolution。用可控 command fence 与 participant fake 在同一
+Coordinator 中安排 Issue selection、Project-default write、Run-binding write 和 deletion 的
+check/validate/commit interleavings：写入先取得队列位置时删除必须在提交后报告 blocker；删除先
+取得队列位置时写入必须在删除后得到 retryable conflict，且参与者不得提交。测试须包含终态 Issue
+引用的 blocker。WorkflowRun spec 必须证明 Profile/selection 更新不会改变已初始化 Stage、attempt 或历史。
 
 CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--json` 和 Issue flags 的
 本地互斥、请求 body、JSON fields、错误和帮助；不复制 server validator 测试。迁移后删除或
@@ -198,11 +197,11 @@ CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--
 
 ## Risks / Trade-offs
 
-- [删除检查与并发选择/Run 创建之间存在竞态] -> 两类引用按聚合边界分别由
-  `IssueRepositoryCoordinatorGrain`（Issue selection）与 `WorkflowProfileReferenceCoordinator`
-  （Project default / Run binding / delete）串行化；`WorkflowProfileDeletionBlockerQuery` 汇总
-  三类引用，删除后的写入在各自参与者重新验证时返回 `workflow-profile-not-found` conflict，
-  绝不留下悬空引用。两个 coordinator 不互调、不共享事务。
+- [删除检查与并发选择/Run 创建之间存在竞态] -> 一个按 Project 串行的
+  `WorkflowProfileReferenceCoordinator` 接收所有 Profile 引用写入和删除；其持久 fence 建立
+  Issue selection、Project default、Run binding 与删除的共享顺序。`WorkflowProfileDeletionBlockerQuery`
+  汇总 Project default、所有 Issue 选择和活动 Run binding，删除后的写入在队列位置重新验证并返回
+  `workflow-profile-not-found` conflict，绝不留下悬空引用。
 - [编辑绑定 Profile 可使未来 Stage 与先前 Stage 的 Definition 不同] -> 这是明确产品语义；
   `workflow edit` help 提示其可能影响活动 Run，Run 保留 Profile ID 和已初始化事实以便审计。
 - [旧 Issue inline Definition 无法无歧义映射为共享 Profile] -> 迁移时为每个仍有 inline
@@ -226,10 +225,10 @@ CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--
 3. 对所有现存 Run，根据迁移前有效级联解析一次并写入 Profile ID；若来源为 inline
    Definition，复用步骤 2 创建的 Profile。终态 Run 同样只保留 ID 和既有历史持久状态，
    不补写 Definition snapshot；后续允许删除仅被终态 Run 引用的 Profile。
-4. 切换 Server provider、`WorkflowProfileReferenceCoordinator`（Project default / Run binding /
-   delete）、Issue 参与者的 Profile 选择校验、Run 创建/Stage 初始化、collection API 和引用保护
-   到新模型，随后删除旧 cascade 和 inline write path。`IssueRepositoryCoordinatorGrain` 的
-   `CreateIssueAsync` / `IIssueBindingParticipant.CreateAsync` 在同一 Issue 事务内一并提交
+4. 切换 Server provider、`WorkflowProfileReferenceCoordinator`（所有 Issue selection、Project
+   default、Run binding 与 delete）、Run 创建/Stage 初始化、collection API 和引用保护到新模型，
+   随后删除旧 cascade、inline write path 和 `IssueRepositoryCoordinatorGrain` 的并行 create/edit
+   入口。Coordinator 调用 `IIssueBindingParticipant.CreateAsync`，其同一 Issue 事务仍一并提交
    repository binding 与 Profile 引用。
 5. 切换 CLI 到 `mo workflow`、`project workflow set-default` 与 Issue selection flags，并同时
    更新 docs/help/spec tests；发布后移除旧 routes、commands、DTO 和测试。

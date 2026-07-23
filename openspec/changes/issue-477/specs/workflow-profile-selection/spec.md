@@ -14,7 +14,7 @@ Every newly created Project SHALL persist `mohist/local` as its default Workflow
 - **THEN** the command SHALL fail because the Profile is not in the current Project's collection
 
 ### Requirement: Explicit Issue Profile selection
-`mo issue create` and `mo issue edit` SHALL accept `--workflow-profile <profile>` to store an explicit Profile selection for the Issue. An explicit selection MUST refer to a Profile in the Issue's Project collection and SHALL take precedence over that Project's default when the Issue starts a WorkflowRun.
+`mo issue create` and `mo issue edit` SHALL accept `--workflow-profile <profile>` to store an explicit Profile selection for the Issue. An explicit selection MUST refer to a Profile in the Issue's Project collection and SHALL take precedence over that Project's default when the Issue starts a WorkflowRun. The Project-scoped Profile reference coordinator SHALL serialize this write with Profile deletion; Issue creation SHALL preserve its existing invariant by committing repository binding and Profile selection in the same Issue transaction.
 
 #### Scenario: Create an Issue with an explicit Profile
 - **WHEN** a user creates an Issue with `--workflow-profile mohist/github-pr`
