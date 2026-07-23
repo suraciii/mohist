@@ -31,6 +31,15 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
     protected TestSqliteDatabase Database { get; }
     protected WorkflowProfileManager Manager { get; }
 
+    protected WorkflowProfileManager CreateProfileBackedManager() =>
+        new(
+            new TestDbContextFactory(Database.Options),
+            new FilePromptLoader(),
+            new PromptTemplateEngine(),
+            WorkflowGrainTestHelpers.CreateEmptyConfigService(),
+            new WorkflowRunProfileManager(new TestDbContextFactory(Database.Options)),
+            new WorkflowProfileProvider(new TestDbContextFactory(Database.Options), NullActionCatalogSource.Instance));
+
     public void Dispose() => Database.Dispose();
 
     protected static string SerializeDefinition(
