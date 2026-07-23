@@ -100,9 +100,6 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         id: 'session-1',
         sessionName: 'plan-issue-339',
         startedAt: '2026-07-03T08:01:00.000Z',
-        // Issue 484: the session-ended ("Session idle") milestone timestamp is
-        // lastDataAt (falling back to createdAt); set it so it sorts after the
-        // model-bound milestone.
         activity: 'idle',
         lastDataAt: '2026-07-03T08:04:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
@@ -204,9 +201,6 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         id: 'session-1',
         sessionName: 'plan-issue-339',
         startedAt: '2026-07-03T08:00:01.000Z',
-        // Issue 484: a finished agent task has dropped back to `idle` activity;
-        // the milestone detail now carries the activity value rather than a
-        // legacy terminal status.
         activity: 'idle',
         lastDataAt: '2026-07-03T08:01:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
@@ -238,11 +232,6 @@ describe('TaskLogPanel agent-task milestone rows', () => {
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
-        // Issue 484: a failure that can't be resolved leaves the session in the
-        // `unknown` activity, which the milestone classifier marks `failed`.
-        // The milestone detail now carries the activity ("unknown") rather
-        // than the legacy status+failureReason text; failureReason is no longer
-        // surfaced on the milestone row.
         activity: 'unknown',
         lastDataAt: '2026-07-03T08:01:00.000Z',
         failureReason: 'agent stream blew up',
@@ -265,7 +254,6 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     )
 
     expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
-    // The milestone detail is the unconfirmable activity ("unknown").
     expect(screen.getAllByText('unknown').length).toBeGreaterThan(0)
   })
 
@@ -376,8 +364,6 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         id: 'session-1',
         sessionName: 'plan-issue-339',
         startedAt: '2026-07-03T08:04:00.000Z',
-        // Issue 484: the "Session idle" milestone is anchored on lastDataAt
-        // (falling back to createdAt). Set it so it lands after model-bound.
         activity: 'idle',
         lastDataAt: '2026-07-03T08:06:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
@@ -553,8 +539,6 @@ describe('TaskLogPanel agent-task milestone rows', () => {
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
-        // Issue 484: anchor the "Session idle" milestone on lastDataAt so the
-        // exported timestamp is deterministic; detail is the activity value.
         activity: 'idle',
         startedAt: '2026-07-03T08:00:01.000Z',
         lastDataAt: '2026-07-03T08:01:00.000Z',

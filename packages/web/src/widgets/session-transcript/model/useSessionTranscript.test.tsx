@@ -435,8 +435,6 @@ describe('useSessionTranscript', () => {
 
     // The in-flight follow-up turn is closed (completedAt stamped).
     expect(screen.getByTestId('turn-outcome')).toHaveTextContent('completed')
-    // Streaming/thinking wind down, but the session is still "running" from
-    // the transcript's perspective — it does not become terminal.
     expect(screen.getByTestId('session-status')).toHaveTextContent('running')
     expect(screen.getByTestId('streaming-state')).toHaveTextContent('idle')
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-session', 'project-1', 'session-84'] })

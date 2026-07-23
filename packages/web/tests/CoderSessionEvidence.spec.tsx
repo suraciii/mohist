@@ -598,11 +598,6 @@ describe('Coder Session evidence view — issue-session ID resolution', () => {
 
 describe('Coder Session evidence view — shared theme tokens', () => {
   it('uses the shared danger token families for the errors evidence region in light mode', async () => {
-    // issue-484: the status badge no longer has a 'failed' kind (sessions are
-    // never terminal). Failure is surfaced via the SessionErrorsEvidence region,
-    // which keeps the shared danger tokens. The badge renders the activity
-    // (unknown here, since failed no longer maps to an activity) using warning
-    // tokens.
     mocks.metadata = baseCompletedMetadata({
       activity: 'unknown',
       status: 'failed',
@@ -624,7 +619,6 @@ describe('Coder Session evidence view — shared theme tokens', () => {
     })
 
     const badge = container.querySelector('[data-testid="session-status-badge"]')
-    // activity=unknown → warning token family on the badge.
     expect(badge!.className).toContain('bg-warning-subtle')
     expect(badge!.className).toContain('text-warning')
 
@@ -634,9 +628,6 @@ describe('Coder Session evidence view — shared theme tokens', () => {
   })
 
   it('uses the shared neutral token families for the idle activity badge in light mode', async () => {
-    // issue-484: the legacy 'completed' success badge is gone. A session that
-    // finished executing returns to 'idle', whose badge uses the shared muted/
-    // neutral token family.
     mocks.metadata = baseCompletedMetadata({
       activity: 'idle',
       status: 'completed',
@@ -689,11 +680,6 @@ describe('Coder Session evidence view — shared theme tokens', () => {
   })
 
   it.each([
-    // issue-484: only idle/active/unknown status kinds remain. 'stale' and
-    // 'finalizing' were removed (sessions never enter a terminal/finalizing
-    // state); the deprecated session.closed event no longer drives a finalizing
-    // patch. The active/unknown badges share the info/warning token families;
-    // idle uses the muted/neutral family (covered by the dedicated test above).
     ['active', 'info'],
     ['unknown', 'warning'],
   ] as const)('maps activity=%s status badge to the shared %s token family', async (activity, expectedTone) => {
