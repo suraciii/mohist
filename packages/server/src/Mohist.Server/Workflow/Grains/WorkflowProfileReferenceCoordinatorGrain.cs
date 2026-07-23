@@ -102,21 +102,13 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         if (pending.Replay is not null)
             return pending.Replay;
 
-        try
-        {
-            var participant = _grains.GetGrain<IProjectWorkflowProfileBindingParticipant>(payload.ProjectId);
-            var outcome = await participant.SetDefaultAsync(payload, commandId, pending.CapturedRevision);
-            await ClearFenceAsync(commandId);
-            return new WorkflowProfileReferenceResult(
-                Code: MapProjectOutcome(outcome),
-                ProfileId: payload.ProfileId,
-                AppliedRevision: pending.CapturedRevision);
-        }
-        catch
-        {
-            await ClearFenceAsync(commandId);
-            throw;
-        }
+        var participant = _grains.GetGrain<IProjectWorkflowProfileBindingParticipant>(payload.ProjectId);
+        var outcome = await participant.SetDefaultAsync(payload, commandId, pending.CapturedRevision);
+        await ClearFenceAsync(commandId);
+        return new WorkflowProfileReferenceResult(
+            Code: MapProjectOutcome(outcome),
+            ProfileId: payload.ProfileId,
+            AppliedRevision: pending.CapturedRevision);
     }
 
     public async Task<WorkflowProfileReferenceResult> BindWorkflowRunAsync(
@@ -147,21 +139,13 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         if (pending.Replay is not null)
             return pending.Replay;
 
-        try
-        {
-            var participant = _grains.GetGrain<IWorkflowRunBindingParticipant>(payload.WorkflowRunId);
-            var outcome = await participant.BindAsync(payload, commandId, pending.CapturedRevision);
-            await ClearFenceAsync(commandId);
-            return new WorkflowProfileReferenceResult(
-                Code: MapRunOutcome(outcome),
-                ProfileId: payload.ProfileId,
-                AppliedRevision: pending.CapturedRevision);
-        }
-        catch
-        {
-            await ClearFenceAsync(commandId);
-            throw;
-        }
+        var participant = _grains.GetGrain<IWorkflowRunBindingParticipant>(payload.WorkflowRunId);
+        var outcome = await participant.BindAsync(payload, commandId, pending.CapturedRevision);
+        await ClearFenceAsync(commandId);
+        return new WorkflowProfileReferenceResult(
+            Code: MapRunOutcome(outcome),
+            ProfileId: payload.ProfileId,
+            AppliedRevision: pending.CapturedRevision);
     }
 
     public async Task<WorkflowProfileReferenceResult> DeleteProfileAsync(
@@ -330,8 +314,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             _log.LogInformation(
                 "WorkflowProfileReferenceCoordinator {ProjectId} replay of command {CommandId} ({Kind}) terminated with {Exception}",
                 ProjectId, pending.CommandId, pending.Kind, ex.GetType().Name);
-            if (pending.Kind == WorkflowProfileCommandPayloadKinds.DeleteProfile)
-                throw;
+            throw;
         }
 
         _state.State = _state.State with { Pending = null };

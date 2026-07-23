@@ -11,6 +11,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using Xunit;
@@ -99,6 +100,33 @@ public class WorkflowRunStoreSpecs
         await using var db = new MohistDbContext(database.Options);
         var row = await db.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == run.Id);
         Assert.Null(row.WorkflowProfileIdKey);
+    }
+
+    [Fact]
+    public async Task DeletionBlocker_ReadsCanonicalProfileIdFromStoreStateWhenBackingKeyIsMissing()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var run = CreateRun("wr_profile_blocker", epicNumber: null);
+        run.Status = WorkflowRunStatus.Completed;
+        run.WorkflowProfileId = "delivery/review";
+
+        await store.SaveAsync(run);
+
+        await using (var db = new MohistDbContext(database.Options))
+        {
+            var row = await db.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == run.Id);
+            row.Status = "running";
+            row.State = row.State.Replace("\"status\":\"completed\"", "\"status\":\"running\"", StringComparison.Ordinal);
+            await db.SaveChangesAsync();
+        }
+
+        var blockers = await new WorkflowProfileDeletionBlockerQuery(factory)
+            .GetBlockersAsync(ProjectId, "delivery/review");
+
+        Assert.Contains(blockers.ActiveRuns, blocker => blocker.WorkflowRunId == run.Id);
     }
 
     [Fact]
