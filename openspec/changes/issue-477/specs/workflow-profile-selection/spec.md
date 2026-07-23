@@ -1,5 +1,9 @@
 ### Requirement: Project default workflow Profile
-`mo project workflow set-default <profile>` SHALL set the current Project's default WorkflowProfile. The command MUST accept only a Profile in that Project's workflow collection, including a readable built-in Profile, and SHALL reject a Profile that is absent from the collection. A newly started WorkflowRun for an Issue without an explicit selection SHALL use the Project default selected at run start.
+Every newly created Project SHALL persist `mohist/local` as its default WorkflowProfile. `mohist/local` is a built-in Profile that MUST be present in every Project collection; if it is unavailable, Project creation SHALL fail rather than create a Project without a startable default. `mo project workflow set-default <profile>` SHALL set the current Project's default WorkflowProfile. The command MUST accept only a Profile in that Project's workflow collection, including a readable built-in Profile, and SHALL reject a Profile that is absent from the collection. A newly started WorkflowRun for an Issue without an explicit selection SHALL use the Project default selected at run start.
+
+#### Scenario: Create a Project with the built-in default
+- **WHEN** a user creates a Project and starts an Issue without an explicit Profile selection
+- **THEN** the Project SHALL persist `mohist/local` as its default and the new WorkflowRun SHALL bind to `mohist/local`
 
 #### Scenario: Set a custom Profile as the Project default
 - **WHEN** a user sets an existing custom Profile as the current Project's default and starts an Issue that has no explicit Profile selection

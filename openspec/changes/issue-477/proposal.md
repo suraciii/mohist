@@ -6,11 +6,12 @@ Workflow Profiles are currently split between a system-template catalog, project
 
 - Make WorkflowProfile a Project-scoped collection managed exclusively through `mo workflow list`, `view`, `create`, `edit`, and `delete`; Profile IDs are stable within the Project and may contain `/`.
 - Include read-only built-in `mohist/*` Profiles alongside custom Profiles. Built-ins can be viewed and selected, but cannot be edited or deleted.
+- Initialize every new Project's default Profile to the built-in `mohist/local`; migrated Projects whose legacy cascade selected the system fallback receive that same explicit default.
 - Add `workflow view <profile> --yaml` to return the raw Definition; keep it mutually exclusive with JSON field selection rather than introducing general YAML output.
 - Validate Profile saves through the authoritative Definition validator and the reported Action catalog, preserving their distinct error sources and avoiding CLI-side validation copies.
 - Let `mo project workflow set-default <profile>` select a Profile from the current Project collection, and let issue create/edit explicitly select a Profile or return to inheriting the Project default with `--inherit-workflow-profile`.
 - Bind a newly started WorkflowRun to its selected Profile ID, without storing a Definition snapshot. Later Stage initialization reads that Profile's current Definition; initialized Stages, accepted attempts, and historical results remain unchanged.
-- Refuse to delete a Profile still referenced by the Project default, an Issue, or an active WorkflowRun, identifying the blocking reference relationship.
+- Refuse to delete a Profile still referenced by the Project default, an Issue, or an active WorkflowRun, identifying the blocking reference relationship. Profile deletion and every reference write are serialized per Project so a deletion cannot race a new reference into existence.
 - **BREAKING** Replace the legacy project-template/Profile command surface with the `mo workflow` collection and `mo project workflow set-default` command surface.
 
 ## Capabilities

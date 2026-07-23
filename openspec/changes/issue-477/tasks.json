@@ -6,13 +6,14 @@
       "id": "T-001",
       "title": "Deliver the Project-scoped WorkflowProfile collection",
       "spec": "specs/workflow-profile-collection/spec.md#Project-scoped-workflow-profile-collection",
-      "description": "Replace legacy template storage and cascade inputs with the Workflow-owned Project-scoped WorkflowProfile collection. Add the persistence migration for custom Profiles and existing default, Issue, and Run references; expose collection CRUD through the server, merge readable built-ins, validate custom saves through the authoritative Definition and Action catalog services, and protect referenced or built-in Profiles from mutation.",
+      "description": "Replace legacy template storage and cascade inputs with the Workflow-owned Project-scoped WorkflowProfile collection. Add the persistence migration for custom Profiles and existing default, Issue, and Run references; initialize every new Project with the built-in mohist/local default; expose collection CRUD through the server, merge readable built-ins, validate custom saves through the authoritative Definition and Action catalog services, and protect referenced or built-in Profiles from mutation.",
       "acceptanceCriteria": [
         "Custom Profiles are scoped by Project, retain stable slash-capable IDs, and same IDs in different Projects resolve independently.",
         "The collection returns built-in mohist/* Profiles with custom Profiles, while create, edit, and delete reject invalid built-in mutations with a read-only domain error.",
         "Create and edit preserve raw Definition source and report Definition validation diagnostics separately from Action-contract diagnostics without CLI-side validation logic.",
         "Delete reports every blocking Project default, Issue explicit selection, and active WorkflowRun binding; unreferenced custom Profiles delete successfully.",
         "The data migration preserves custom templates and converts legacy default, Issue reference or inline Definition, and existing Run resolution into Profile ID references without Definition snapshots.",
+        "Every newly created Project persists mohist/local as its default Profile, and migrated Projects that previously used the system fallback receive that explicit default.",
         "Server spec tests cover tenancy isolation, built-in behavior, save-validation sources, migration results, and all deletion-reference combinations using in-memory fakes and deterministic time."
       ],
       "priority": 1,

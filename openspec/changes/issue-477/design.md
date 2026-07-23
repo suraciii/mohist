@@ -63,10 +63,11 @@ Profile 引用和删除检查提供单一语义，因此不采用。
 
 ### 2. 引用只保存 ID，并在各自所有者内校验
 
-Project 的 `DefaultWorkflowProfileId` 替换 `DefaultTemplateId`；Issue 的可选
-`WorkflowProfileId` 表示 explicit selection，`null` 表示 inherit；WorkflowRun 增加必填
-`WorkflowProfileId`，在 Run 创建时写入。Run 创建按以下规则选择并持久化，而不是在每次运行
-时重算：
+Project 的 `DefaultWorkflowProfileId` 替换 `DefaultTemplateId`，且为必填：创建 Project 时写入
+内置 `mohist/local`。内置 catalog 必须始终提供该 ID；若它无法读取，Project 创建失败，不产生
+没有可启动 Profile 的 Project。Issue 的可选 `WorkflowProfileId` 表示 explicit selection，`null`
+表示 inherit；WorkflowRun 增加必填 `WorkflowProfileId`，在 Run 创建时写入。Run 创建按以下规则
+选择并持久化，而不是在每次运行时重算：
 
 ```text
 selectedProfileId = issue.workflowProfileId ?? project.defaultWorkflowProfileId
@@ -147,9 +148,9 @@ CLI spec 中 `workflow` 对 WorkflowProfile 的唯一导航相悖，后者会长
 ### 7. 用行为边界组织测试
 
 Server spec tests 覆盖同 Project collection、跨 Project 隔离、builtin read-only、两类保存错误
-来源、全部删除阻塞关系、default/Issue 的存在性校验，以及 Run 的 ID binding 与 Stage live
-resolution。WorkflowRun spec 必须证明 Profile/selection 更新不会改变已初始化 Stage、attempt
-或历史。
+来源、Project 创建时 `mohist/local` default、全部删除阻塞关系、default/Issue 的存在性校验，
+以及 Run 的 ID binding 与 Stage live resolution。WorkflowRun spec 必须证明 Profile/selection
+更新不会改变已初始化 Stage、attempt 或历史。
 
 CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--json` 和 Issue flags 的
 本地互斥、请求 body、JSON fields、错误和帮助；不复制 server validator 测试。迁移后删除或
@@ -177,8 +178,9 @@ CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--
 1. 增加 collection、Project/Issue/Run ID 引用字段和必要索引的 EF migration；保留独立的
    Variables/Prompts 存储，不把它们迁入 Profile。
 2. 数据迁移将 `ProjectWorkflowTemplates` 逐项复制为同 ID 的 custom Profile，将 Project default
-   和 Issue template reference 改为 Profile ID。为 Issue inline Definition 创建独立 custom
-   Profile 并替换为该引用；内置 ID 保持内置引用。
+   和 Issue template reference 改为 Profile ID。缺少 legacy Project default 而原先会落到 system
+   fallback 的 Project 写入 `mohist/local`；为 Issue inline Definition 创建独立 custom Profile 并
+   替换为该引用；内置 ID 保持内置引用。
 3. 对所有现存 Run，根据迁移前有效级联解析一次并写入 Profile ID；若来源为 inline
    Definition，复用步骤 2 创建的 Profile。终态 Run 同样只保留 ID 和既有历史持久状态，
    不补写 Definition snapshot；后续允许删除仅被终态 Run 引用的 Profile。
