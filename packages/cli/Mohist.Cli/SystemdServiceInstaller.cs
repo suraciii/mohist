@@ -31,6 +31,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     public async Task<int> InstallServerAsync(ServiceInstallOptions options)
     {
         var repoRoot = ResolveRepoRoot(options.RepoRoot);
+        var environment = BuildServiceEnvironment();
         // 默认不在 unit 里写死监听地址，让 server 读 ~/.mohist/config.jsonc；
         // 仅当用户显式传 --listen-url 时才追加 --urls。
         var serverArgs = new List<string>();
@@ -44,10 +45,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
             Description: "Mohist Server",
             WorkingDirectory: repoRoot,
             ExecStart: DotnetRun(ResolveExecutable("dotnet"), repoRoot, "packages/server/src/Mohist.Server/Mohist.Server.csproj", serverArgs),
-            Environment: new Dictionary<string, string>
-            {
-                ["PATH"] = BuildServicePath(),
-            });
+            Environment: environment);
 
         return await InstallAsync(unit, options);
     }
@@ -55,11 +53,8 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     public async Task<int> InstallRunnerAsync(ServiceInstallOptions options)
     {
         var repoRoot = ResolveRepoRoot(options.RepoRoot);
-        var environment = new Dictionary<string, string>
-        {
-            ["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456",
-            ["PATH"] = BuildServicePath(),
-        };
+        var environment = BuildServiceEnvironment();
+        environment["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456";
         if (!string.IsNullOrWhiteSpace(options.RunnerRoot))
             environment["RUNNER_ROOT"] = options.RunnerRoot;
 
@@ -301,6 +296,40 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     }
 
     private static string NormalizePath(string value) => value.Replace('\\', '/');
+
+    private Dictionary<string, string> BuildServiceEnvironment()
+    {
+        var environment = new Dictionary<string, string>
+        {
+            ["PATH"] = BuildServicePath(),
+        };
+        var dotnetRoot = ResolveDotnetRoot();
+        if (!string.IsNullOrWhiteSpace(dotnetRoot))
+        {
+            environment["DOTNET_ROOT"] = dotnetRoot;
+            environment["DOTNET_ROOT_X64"] = dotnetRoot;
+        }
+
+        return environment;
+    }
+
+    private string? ResolveDotnetRoot()
+    {
+        var configured = _environment.GetEnvironmentVariable("DOTNET_ROOT_X64")
+            ?? _environment.GetEnvironmentVariable("DOTNET_ROOT");
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured;
+
+        var home = _environment.GetEnvironmentVariable("HOME")
+            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(home))
+            return null;
+
+        var userDotnetRoot = Path.Combine(home, ".dotnet");
+        return _fileSystem.Exists(Path.Combine(userDotnetRoot, "dotnet"))
+            ? userDotnetRoot
+            : null;
+    }
 
     private static string BuildServicePath()
     {
