@@ -1,4 +1,5 @@
 using Mohist.Cli;
+using EnvironmentAbstractions.TestHelpers;
 using Xunit;
 
 namespace Mohist.Cli.Tests.Update;
@@ -55,6 +56,33 @@ public class InstallSpecs
         Assert.Contains("Environment=\"PATH=", unitContent);
         Assert.Contains("/.opencode/bin", unitContent);
         Assert.Contains("Environment=\"RUNNER_ROOT=/runner\"", unitContent);
+    }
+
+    [Fact]
+    public async Task InstallRunner_IncludesUserLocalDotnetRoot()
+    {
+        var files = new FakeFileSystem();
+        files.AddFile("/home/test/.dotnet/dotnet", "");
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment["HOME"] = "/home/test";
+        var installer = new SystemdServiceInstaller(
+            TextWriter.Null,
+            TextWriter.Null,
+            files,
+            new FakeCommandExecutor(),
+            environment);
+
+        await installer.InstallRunnerAsync(new ServiceInstallOptions(
+            DryRun: true,
+            UnitDir: "/units",
+            RepoRoot: "/repo",
+            ListenUrl: null,
+            ServerUrl: null,
+            RunnerRoot: null));
+
+        var unitContent = files.Read("/units/mohist-runner.service");
+        Assert.Contains("Environment=\"DOTNET_ROOT=/home/test/.dotnet\"", unitContent);
+        Assert.Contains("Environment=\"DOTNET_ROOT_X64=/home/test/.dotnet\"", unitContent);
     }
 
     [Fact]
