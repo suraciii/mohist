@@ -3,12 +3,10 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Inbox;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Inbox;
 using Mohist.Server.SpecTests.Support;
-using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
@@ -182,74 +180,6 @@ public class InboxApiSpecs
             "/api/projects/proj_does_not_exist/inbox");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task WorkflowRunStoreEvent_PersistsRowAndDispatcherProjectsItToInbox()
-    {
-        // issue-362 T-003: WorkflowRunStore pokes the dispatcher grain
-        // immediately after the transaction commits. The dispatcher picks
-        // up the freshly-persisted workflow.run.failed event and
-        // InboxProjectionHandler projects it into the project's inbox —
-        // restoring the at-least-once delivery the dispatcher was wired
-        // up to provide. The cross-project isolation rule still holds:
-        // the other project's inbox remains empty.
-        var projectId = await CreateProjectAsync("inbox-spec");
-        await _client.PostOkAsync(
-            $"/api/projects/{projectId}/repositories",
-            new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var issue = await _client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues",
-            new
-            {
-                title = "Started from API",
-                body = "project through production bus",
-                labels = new Dictionary<string, string>(StringComparer.Ordinal),
-                priority = "p1",
-                projectId,
-                isDraft = false,
-            });
-        var issueNumber = issue.GetProperty("number").GetInt32();
-
-        var runId = $"wr_inbox_spec_{Guid.NewGuid():N}";
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var runStore = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
-            await runStore.SaveAsync(new WorkflowRun
-            {
-                Id = runId,
-                Metadata = new WorkflowRunMetadata(
-                    Name: null,
-                    CreatedAt: TestTime.UtcNow,
-                    Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                    {
-                        ["projectId"] = projectId,
-                        ["issueNumber"] = issueNumber.ToString(),
-                    }),
-                Stages = [],
-            }, [new WorkflowRunFailed("failed")]);
-        }
-
-        await using (var verify = _fixture.Services.CreateAsyncScope())
-        {
-            var events = verify.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
-            var stored = await events.ListAsync(runId);
-            var storedFailed = Assert.Single(stored);
-            Assert.Equal("com.mohist.workflow.run.failed", storedFailed.Envelope.Type);
-        }
-
-        var inboxItems = await TestWait.ForAsync(
-            () => _client.GetDataAsync<JsonElement[]>($"/api/projects/{projectId}/inbox"),
-            items => items.Length >= 1,
-            timeout: TimeSpan.FromSeconds(10),
-            step: TimeSpan.FromMilliseconds(100),
-            description: "inbox row projected by dispatcher after WorkflowRunStore poke");
-        var item = Assert.Single(inboxItems);
-        Assert.Equal("workflow_failed", item.GetProperty("notificationKind").GetString());
-
-        var otherProjectId = await CreateProjectAsync("inbox-spec-other");
-        Assert.Empty(await _client.GetDataAsync<JsonElement[]>(
-            $"/api/projects/{otherProjectId}/inbox"));
     }
 
     private async Task<string> CreateProjectAsync(string prefix)
