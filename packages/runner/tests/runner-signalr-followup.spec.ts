@@ -15,6 +15,7 @@ import {
 } from "./support/followup-handler-fixture.js"
 import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
 import type { FollowupOperationJournalStore } from "../src/runtime/followup-operation-journal.js"
+import type { FollowupOperationClaim, FollowupOperationState } from "../src/runtime/followup-operation-journal.js"
 import { makeFakePiRuntime, type FakePiRuntimeHandles } from "./support/pi-runtime-fixture.js"
 
 let runtime: FakeRuntimeHandles
@@ -286,15 +287,17 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_DuplicateOperationIdDoesNotEnqueueOrInvokeAgain", async () => {
-    const claimed = new Set<string>()
+    const states = new Map<string, FollowupOperationState>()
     const journal: FollowupOperationJournalStore = {
       load: async () => {},
-      claim: async (_sessionKey, operationId) => {
-        if (claimed.has(operationId)) return false
-        claimed.add(operationId)
-        return true
+      claim: async (_sessionKey, operationId): Promise<FollowupOperationClaim> => {
+        const state = states.get(operationId)
+        if (state) return state
+        states.set(operationId, "claimed")
+        return "new"
       },
-      release: async (_sessionKey, operationId) => { claimed.delete(operationId) },
+      markSubmitted: async (_sessionKey, operationId) => { states.set(operationId, "submitted") },
+      release: async (_sessionKey, operationId) => { states.delete(operationId) },
     }
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime, followupOperationJournal: journal })
@@ -306,6 +309,22 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
 
     expect(runtime.followupCalls).toHaveLength(1)
     expect(recording.beforeExecutionCalls).toHaveLength(1)
+  })
+
+  it("Followup_IndeterminateClaimIsNotAcknowledgedOrReplayed", async () => {
+    const journal: FollowupOperationJournalStore = {
+      load: async () => {},
+      claim: async () => "claimed",
+      markSubmitted: async () => {},
+      release: async () => {},
+    }
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime, followupOperationJournal: journal })
+
+    await expect(invokeFollowup(lastBuilder(), { ...workflowPayload("do not replay"), operationId: "indeterminate" }))
+      .resolves.toEqual({ accepted: false, error: "unavailable" })
+    expect(runtime.followupCalls).toHaveLength(0)
+    expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
   it("Followup_DropsPayloadWhenTextIsMissing", async () => {

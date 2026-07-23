@@ -166,7 +166,9 @@ async function handleFollowup(
 
   if (operationId && operationKey && deps.followupOperationJournal) {
     try {
-      if (!await deps.followupOperationJournal.claim(operationKey, operationId)) return { accepted: true }
+      const claim = await deps.followupOperationJournal.claim(operationKey, operationId)
+      if (claim === "submitted") return { accepted: true }
+      if (claim === "claimed") return unavailable()
     } catch (error) {
       console.error("followup operation journal claim failed:", error instanceof Error ? error.message : String(error))
       return unavailable()
@@ -189,7 +191,7 @@ async function handleFollowup(
   }
   const observer = buildFollowupObserver(outbox, sessionTarget, selectedTarget, payload.operationId)
   try {
-    void callFollowup(handle, followupRequest, observer).then(
+    const completion = callFollowup(handle, followupRequest, observer).then(
       (result) => {
         if (!result.ok) {
           const message = readErrorMessage(result)
@@ -213,6 +215,15 @@ async function handleFollowup(
         recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "unknown", error)
       },
     )
+    if (operationId && operationKey && deps.followupOperationJournal) {
+      try {
+        await deps.followupOperationJournal.markSubmitted(operationKey, operationId)
+      } catch (error) {
+        console.error("followup operation journal submission mark failed:", error instanceof Error ? error.message : String(error))
+        return unavailable()
+      }
+    }
+    void completion
   } catch (error) {
     console.error("followup runtime.followup threw:", error instanceof Error ? error.message : String(error))
     recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "unknown", error)
