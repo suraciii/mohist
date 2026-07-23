@@ -37,6 +37,9 @@ public sealed class RunnerRegistryCatalogSource : IActionCatalogSource, IScopedS
             return false;
         if (current.RegisteredAt is null)
             return true;
-        return candidate.RegisteredAt.Value > current.RegisteredAt.Value;
+        var timestampComparison = candidate.RegisteredAt.Value.CompareTo(current.RegisteredAt.Value);
+        return timestampComparison > 0
+            || (timestampComparison == 0
+                && string.Compare(candidate.RunnerId, current.RunnerId, StringComparison.Ordinal) > 0);
     }
 }

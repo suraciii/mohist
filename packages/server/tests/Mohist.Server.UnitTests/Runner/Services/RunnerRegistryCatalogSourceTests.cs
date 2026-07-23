@@ -108,6 +108,22 @@ public class RunnerRegistryCatalogSourceTests
     }
 
     [Fact]
+    public async Task GetCatalogAsync_EqualRegisteredAt_UsesRunnerIdTieBreak()
+    {
+        var registeredAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
+        var factory = new RegistryGrainFactory(new FakeRunnerRegistryGrain(
+            CreateRunner("runner-z", registeredAt, CreateCatalog("z")),
+            CreateRunner("runner-a", registeredAt, CreateCatalog("a"))));
+
+        var source = new RunnerRegistryCatalogSource(factory);
+
+        var resolved = await source.GetCatalogAsync();
+
+        Assert.NotNull(resolved);
+        Assert.Equal("alpha/z", resolved!.Actions[0].Name);
+    }
+
+    [Fact]
     public async Task GetCatalogAsync_OnlyRegisteredWithoutCatalog_ReturnsNull()
     {
         var later = new DateTimeOffset(2026, 7, 2, 0, 0, 0, TimeSpan.Zero);
