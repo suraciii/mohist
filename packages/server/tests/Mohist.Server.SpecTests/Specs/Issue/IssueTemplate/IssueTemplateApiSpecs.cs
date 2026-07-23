@@ -101,12 +101,7 @@ public class IssueTemplateApiSpecs
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
-        var profile = await db.ProjectWorkflowProfiles.FirstOrDefaultAsync(x => x.ProjectId == project.Id);
-        if (profile is null)
-        {
-            profile = new ProjectWorkflowProfile { ProjectId = project.Id };
-            db.ProjectWorkflowProfiles.Add(profile);
-        }
+        var profile = await db.ProjectWorkflowProfiles.SingleAsync(x => x.ProjectId == project.Id);
         profile.DisableDefaultIssueTemplate = true;
         await db.SaveChangesAsync();
 
@@ -124,11 +119,8 @@ public class IssueTemplateApiSpecs
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
-        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
-        {
-            ProjectId = project.Id,
-            DisableDefaultIssueTemplate = true,
-        });
+        var profile = await db.ProjectWorkflowProfiles.SingleAsync(x => x.ProjectId == project.Id);
+        profile.DisableDefaultIssueTemplate = true;
         db.ProjectIssueTemplates.Add(new ProjectIssueTemplateRow
         {
             ProjectId = project.Id,
@@ -171,8 +163,8 @@ public class IssueTemplateApiSpecs
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
-        var profileA = new ProjectWorkflowProfile { ProjectId = projectA.Id, DisableDefaultIssueTemplate = true };
-        db.ProjectWorkflowProfiles.Add(profileA);
+        var profileA = await db.ProjectWorkflowProfiles.SingleAsync(x => x.ProjectId == projectA.Id);
+        profileA.DisableDefaultIssueTemplate = true;
         await db.SaveChangesAsync();
 
         var listA = await _client.GetDataAsync<List<JsonElement>>($"/api/issue-templates?projectId={projectA.Id}");

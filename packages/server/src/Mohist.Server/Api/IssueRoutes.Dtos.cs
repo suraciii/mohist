@@ -292,7 +292,6 @@ public sealed record AttachmentUploadResponse(
     long Size,
     string? ExpiresAt);
 
-public record IssueTemplateRequest(string? ProjectTemplateId = null, string? Yaml = null, string? Template = null);
 
 public sealed record IssueWorkflowProfileResponse(
     int IssueNumber,

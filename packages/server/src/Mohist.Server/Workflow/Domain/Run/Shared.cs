@@ -4,7 +4,7 @@ namespace Mohist.Server.Workflow.Domain.Run;
 // ContextExhaustion is legacy: produced only by the removed session-health
 // gate. Kept so persisted runs that still carry it (e.g. issue #407) deserialize
 // and can be retried. Nothing in the system produces it anymore.
-public enum FailureReason { TaskFailed, CheckFailed, ApprovalRejected, ContextExhaustion }
+public enum FailureReason { TaskFailed, CheckFailed, ApprovalRejected, ContextExhaustion, DefinitionResolutionFailed }
 
 [GenerateSerializer]
 public sealed record ExecutionError(

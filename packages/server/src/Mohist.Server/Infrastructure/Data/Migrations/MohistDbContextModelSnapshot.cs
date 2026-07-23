@@ -12,9 +12,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
     [DbContext(typeof(MohistDbContext))]
     partial class MohistDbContextModelSnapshot : ModelSnapshot
     {
-        protected override void BuildModel(ModelBuilder modelBuilder) => BuildModelCore(modelBuilder);
+        protected override void BuildModel(ModelBuilder modelBuilder)
+        {
+            BuildModelCore(modelBuilder);
+        }
 
-        internal static void BuildModelCore(ModelBuilder modelBuilder)
+        public static void BuildModelCore(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -56,21 +59,62 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.RoutingRuleRow", b =>
                 {
-                    b.Property<string>("Id").HasMaxLength(256).HasColumnType("TEXT");
-                    b.Property<string>("ProjectId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
-                    b.Property<string>("Name").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
-                    b.Property<int>("Position").HasColumnType("INTEGER");
-                    b.Property<string>("Match").IsRequired().HasColumnType("TEXT");
-                    b.Property<string>("AgentId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
-                    b.Property<string>("ResponsePrompt").IsRequired().HasColumnType("TEXT");
-                    b.Property<bool>("Continue").HasColumnType("INTEGER");
-                    b.Property<string>("Status").IsRequired().HasMaxLength(32).HasColumnType("TEXT");
-                    b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
-                    b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("TEXT");
+                    b.Property<string>("Id")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AgentId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Continue")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Match")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResponsePrompt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
-                    b.HasIndex("ProjectId").HasDatabaseName("IX_RoutingRules_ProjectId");
-                    b.HasIndex("ProjectId", "Position").HasDatabaseName("IX_RoutingRules_ProjectId_Position");
-                    b.HasIndex("ProjectId", "Name").IsUnique().HasDatabaseName("UX_RoutingRules_ProjectId_Name");
+
+                    b.HasIndex("ProjectId")
+                        .HasDatabaseName("IX_RoutingRules_ProjectId");
+
+                    b.HasIndex("ProjectId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("UX_RoutingRules_ProjectId_Name");
+
+                    b.HasIndex("ProjectId", "Position")
+                        .HasDatabaseName("IX_RoutingRules_ProjectId_Position");
+
                     b.ToTable("RoutingRules", (string)null);
                 });
 
@@ -349,15 +393,16 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("Time")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TimelineSource")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("TimelineSource")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasDefaultValue("")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Source", "Id");
@@ -366,10 +411,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasDatabaseName("IX_EpicEvents_Source_Id_DispatchedAt")
                         .HasFilter("\"DispatchedAt\" IS NULL");
 
+                    b.HasIndex("Type", "Source", "Id");
+
                     b.HasIndex("TimelineSource", "Time", "Source", "Id")
                         .HasDatabaseName("IX_EpicEvents_TimelineSource_Time_Source_Id");
-
-                    b.HasIndex("Type", "Source", "Id");
 
                     b.ToTable("EpicEvents", (string)null);
                 });
@@ -423,9 +468,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.Property<string>("TimelineSource")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(256)
-                        .HasDefaultValue("")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
 
                     b.Property<string>("Type")
                         .IsRequired()
@@ -441,10 +487,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("TimeSortKey", "Source", "Id")
                         .HasDatabaseName("IX_IssueEvents_TimeSortKey_Source_Id");
 
+                    b.HasIndex("Type", "Source", "Id");
+
                     b.HasIndex("TimelineSource", "Time", "Source", "Id")
                         .HasDatabaseName("IX_IssueEvents_TimelineSource_Time_Source_Id");
-
-                    b.HasIndex("Type", "Source", "Id");
 
                     b.ToTable("IssueEvents", (string)null);
                 });
@@ -668,12 +714,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Body")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("Author")
                         .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -697,6 +743,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssueCounterRow", b =>
                 {
                     b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Next")
@@ -710,7 +757,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssuePrerequisiteRow", b =>
                 {
                     b.Property<string>("ProjectId")
-                        .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
@@ -786,6 +832,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.title'), json_extract(State, '$.Title'))");
 
+                    b.Property<string>("WorkflowProfileIdKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("WorkflowRunId")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -800,6 +850,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "Number")
                         .IsUnique();
+
+                    b.HasIndex("ProjectId", "WorkflowProfileIdKey")
+                        .HasDatabaseName("IX_Issues_ProjectId_WorkflowProfileIdKey");
 
                     b.HasIndex("ProjectId", "EpicNumber", "Number");
 
@@ -1345,6 +1398,14 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DefaultWorkflowProfileId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefaultWorkflowProfileIdKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("DisableDefaultIssueTemplate")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -1370,6 +1431,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("ProjectId");
+
+                    b.HasIndex("ProjectId", "DefaultWorkflowProfileIdKey");
 
                     b.ToTable("ProjectWorkflowProfiles", (string)null);
                 });
@@ -1585,6 +1648,47 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("WorkflowArtifacts", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowProfileRecordRow", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProfileId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefinitionSource")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceProvenance")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ProjectId", "ProfileId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.ToTable("WorkflowProfileRecords", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowRunProfileRow", b =>
                 {
                     b.Property<string>("WorkflowRunId")
@@ -1593,6 +1697,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.Property<string>("DefaultVariables")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
                         .HasDefaultValue("{}");
 
@@ -1659,6 +1764,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("LOWER(COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status')))", true);
 
+                    b.Property<string>("WorkflowProfileIdKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("WorkflowRunId");
 
                     b.HasIndex("AssignedWorkerId");
@@ -1670,6 +1779,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("MetadataProjectId", "IssueNumber")
                         .HasDatabaseName("IX_WorkflowRuns_ProjectId_IssueNumber");
+
+                    b.HasIndex("MetadataProjectId", "WorkflowProfileIdKey")
+                        .HasDatabaseName("IX_WorkflowRuns_MetadataProjectId_WorkflowProfileIdKey");
 
                     b.HasIndex("Status", "AssignedWorkerId")
                         .HasDatabaseName("IX_WorkflowRuns_Status");
@@ -1710,6 +1822,33 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasKey("WorkflowRunId");
 
                     b.ToTable("WorkflowVariables");
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssueRow", b =>
+                {
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Workflow.WorkflowProfileRecordRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId", "WorkflowProfileIdKey")
+                        .HasPrincipalKey("ProjectId", "ProfileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.ProjectWorkflowProfile", b =>
+                {
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Workflow.WorkflowProfileRecordRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId", "DefaultWorkflowProfileIdKey")
+                        .HasPrincipalKey("ProjectId", "ProfileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowRunRow", b =>
+                {
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Workflow.WorkflowProfileRecordRow", null)
+                        .WithMany()
+                        .HasForeignKey("MetadataProjectId", "WorkflowProfileIdKey")
+                        .HasPrincipalKey("ProjectId", "ProfileId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", b =>

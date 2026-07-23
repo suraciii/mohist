@@ -30,65 +30,6 @@ public class WorkflowSessionSpecs
     }
 
     [Fact]
-    public async Task GivenPersistedIssueWhenAllProfilesDisabled_ThenReadSurfacesAreUnresolvedAndStartFails()
-    {
-        var project = await _client.PostProjectWithRepositoryAsync<ProjectDto>(
-            "/api/projects",
-            new { name = $"all-disabled-start-{Guid.NewGuid():N}" },
-            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
-        {
-            title = "Persisted issue in all-disabled project",
-            body = "Created before the project lost every enabled workflow.",
-            labels = new Dictionary<string, string>(StringComparer.Ordinal),
-            priority = "p2",
-            isDraft = false
-        });
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            var projectProfile = await db.ProjectWorkflowProfiles
-                .FirstOrDefaultAsync(x => x.ProjectId == project.Id);
-            if (projectProfile is null)
-            {
-                projectProfile = new ProjectWorkflowProfile
-                {
-                    ProjectId = project.Id,
-                    Variables = "{}",
-                };
-                db.ProjectWorkflowProfiles.Add(projectProfile);
-            }
-
-            projectProfile.DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"];
-            await db.SaveChangesAsync();
-        }
-
-        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
-        var workflowProfile = await _client.GetDataAsync<IssueWorkflowProfileDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
-
-        Assert.Null(detail.WorkflowProfileId);
-        Assert.Null(workflowProfile.ProfileId);
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
-        Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
-
-        var retryEx = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
-        Assert.Contains("Enable a workflow first", retryEx.Message, StringComparison.OrdinalIgnoreCase);
-
-        var afterFailure = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
-        Assert.Equal("backlog", afterFailure.Status);
-        Assert.Null(afterFailure.WorkflowRunId);
-
-        await using var eventScope = _fixture.Services.CreateAsyncScope();
-        var events = await eventScope.ServiceProvider.GetRequiredService<IEventStore>()
-            .ListIssueEventsAsync(project.Id, issue.Number);
-        Assert.DoesNotContain(events, e => string.Equals(
-            e.Envelope.Type,
-            EventCatalog.ReverseDns.IssueWorkStarted,
-            StringComparison.Ordinal));
-    }
-
-    [Fact]
     public async Task GivenRunnerReportsAcpSessionEvents_WhenSessionIsQueried_ThenEventsAreSavedInSessionOrder()
     {
         var (project, issue, workflowRunId) = await CreateIssueWorkflowAsync("Runner reports ACP session events");

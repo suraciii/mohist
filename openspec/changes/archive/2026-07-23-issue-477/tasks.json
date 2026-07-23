@@ -1,0 +1,74 @@
+{
+  "project": "mohist-local",
+  "description": "Deliver Project-scoped WorkflowProfile management, selection, and live WorkflowRun definition resolution through the new mo workflow surface.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Deliver the Project-scoped WorkflowProfile collection",
+      "spec": "specs/workflow-profile-collection/spec.md#Project-scoped-workflow-profile-collection",
+      "description": "Replace legacy template storage and cascade inputs with the Workflow-owned Project-scoped WorkflowProfile collection. Add the persistence migration for custom Profiles and existing default, Issue, and Run references; preserve verbatim new source while rendering canonical YAML for legacy semantic JSON; deterministically rename legacy custom mohist/* IDs and rewrite every reference; initialize every new Project with the built-in mohist/local default; expose collection CRUD through the server, merge readable built-ins, validate custom saves through the authoritative Definition and Action catalog services, and protect referenced or built-in Profiles from mutation through the existing two-coordinator architecture and nullable custom-Profile foreign-key backing columns. Add the WorkflowProfileDeletionBlockerQuery projection over Issue/Project/Run references.",
+      "acceptanceCriteria": [
+        "Custom Profiles are scoped by Project, retain stable slash-capable IDs, and same IDs in different Projects resolve independently.",
+        "The collection returns built-in mohist/* Profiles with custom Profiles, while create, edit, and delete reject invalid built-in mutations with a read-only domain error.",
+        "Create and edit preserve verbatim submitted Definition source; migrated legacy semantic Definitions persist and return documented canonical YAML source. Both report Definition validation diagnostics separately from Action-contract diagnostics without CLI-side validation logic.",
+        "Delete reports every blocking Project default, Issue explicit selection including terminal Issues, and active WorkflowRun binding; unreferenced custom Profiles and Profiles referenced only by terminal Runs delete successfully without losing Run history.",
+        "WorkflowProfileReferenceCoordinator serializes deletion with Project-default and Run-binding writes; IssueRepositoryCoordinatorGrain continues to serialize Issue selection with repository lifecycle. Issue create still calls IIssueBindingParticipant in one Issue transaction that commits repository binding and Profile selection together. Deterministic coordinator specs cover Project-default/Run writes, and transactional nullable-backing-key foreign-key specs prove concurrent Issue selection and deletion yield either a blocking reference or a retryable workflow-profile-not-found conflict, never a dangling reference.",
+        "A WorkflowProfileDeletionBlockerQuery projection summarizes Project default, all Issue explicit selections including terminal Issues, and active WorkflowRun bindings for a Profile, mirroring RepositoryDeletionBlockerQuery's read of Issue rows; nullable custom-Profile backing-key foreign keys are the final concurrency backstop.",
+        "design/architecture.md is updated to register WorkflowProfileReferenceCoordinator as a second durable application process manager, state its ownership boundary (Project default / WorkflowRun binding / Profile deletion), record that Issue Profile selection remains on IssueRepositoryCoordinatorGrain, and specify the terminal-Issue deletion rule: a Profile referenced by any Issue (including a terminal Issue) blocks deletion, backed by nullable custom-Profile foreign keys as the concurrency backstop; the plan then conforms to that document.",
+        "The data migration renders canonical source for legacy semantic templates, preserves verbatim source for new saves, converts legacy default, Issue reference or inline Definition, and existing Run resolution into Profile ID references without Definition snapshots, and deterministically renames reserved legacy custom IDs with complete reference rewrites or an atomic migration failure on target collision.",
+        "Every newly created Project persists mohist/local as its default Profile, and migrated Projects that previously used the system fallback receive that explicit default.",
+        "Server spec tests cover tenancy isolation, built-in behavior, save-validation sources, migration results, and all deletion-reference combinations using in-memory fakes and deterministic time, including a transactional terminalization/deletion proof that clears only the terminal Run backing key and retains its public Profile ID and history."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "WorkflowProfile persistence/provider, collection API, WorkflowProfileReferenceCoordinator, WorkflowProfileDeletionBlockerQuery, nullable custom-Profile foreign-key backing columns, EF migration, legacy source and reserved-ID conversion, and server specification coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The Workflow collection provider is the sole existence and read-only authority for built-in and custom Profile IDs. WorkflowProfileReferenceCoordinator owns deletion, Project-default, and Run-binding writes; IssueRepositoryCoordinatorGrain owns Issue selection and preserves the single Issue transaction for repository binding plus Profile selection. Nullable backing-key foreign keys protect custom Profile delete races; terminal WorkflowRuns clear only their backing key in their own terminalization transaction while retaining their public Profile ID and history; built-ins are immutable."
+    },
+    {
+      "id": "T-002",
+      "title": "Migrate Profile management and selection command surfaces",
+      "spec": "specs/workflow-profile-selection/spec.md#Project-default-workflow-Profile",
+      "description": "Switch the API and CLI to the sole Profile-management surface: mo workflow list, view, create, edit, and delete, plus project workflow set-default and Issue explicit or inherited Profile selection. Keep Issue selection on IssueRepositoryCoordinatorGrain so IIssueBindingParticipant commits repository binding and Profile selection in the same Issue transaction; retain WorkflowProfileReferenceCoordinator for Project-default, Run-binding, and deletion operations. Remove legacy template routes/commands/DTOs/help/tests (project workflow template, issue workflow config, and the template/default-template parts of project workflow config); retain only workflow validate --file as the existing local Definition-validation command. The Prompt management surface (project workflow config prompt get/set/clear/preview and its /workflow-profile/prompts routes) is independent of Profile and is retained unchanged, not removed or migrated.",
+      "acceptanceCriteria": [
+        "mo workflow manages only the current Project collection, encodes slash-capable Profile IDs correctly, and no legacy template/Profile-management command or API (project workflow template, issue workflow config, project workflow config template/default-template parts) remains available.",
+        "workflow view <profile> --yaml returns verbatim source for newly saved Profiles and documented canonical source for migrated legacy Profiles, and --yaml combined with JSON field selection fails locally before an HTTP request.",
+        "project workflow set-default and Issue create/edit accept only Profiles in the current Project collection, including built-ins, and preserve an Issue's existing selection when the server rejects an unknown Profile.",
+        "issue edit --inherit-workflow-profile clears the explicit selection; combining it with --workflow-profile is rejected locally without an Issue update request or sentinel ID.",
+        "The Prompt management surface is retained, not removed or migrated into Profile commands: project workflow config prompt get/set/clear/preview and the /workflow-profile/prompts routes keep working, and their existing CLI/API contract tests remain in force.",
+        "CLI help and user documentation describe the new command ownership and warn that editing a bound Profile can affect future active-Run stages.",
+        "CLI spec tests with fake HTTP cover routes, request bodies, slash ID encoding, YAML and JSON option exclusivity, selection flags, server errors, removal of legacy template/Profile contracts, and continued coverage of the retained Prompt surface."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New workflow and project workflow CLI/API surfaces, Issue Profile-selection contract, updated docs/help, and CLI specification coverage.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Issue inheritance is represented by a nullable Profile ID; the CLI delegates all Definition and Action validation to the server. IssueRepositoryCoordinatorGrain preserves Issue creation's same-transaction repository/Profile commit through IIssueBindingParticipant; it does not move Issue lifecycle into WorkflowProfileReferenceCoordinator."
+    },
+    {
+      "id": "T-003",
+      "title": "Bind WorkflowRuns and resolve future Stages live",
+      "spec": "specs/workflow-profile-live-resolution/spec.md#WorkflowRun-Profile-identity-binding",
+      "description": "Bind each newly started WorkflowRun through the Project-scoped Profile reference coordinator to the selected explicit Issue Profile or inherited Project default Profile ID. At startup, create the Run's complete Stage lifecycle from the selected Definition's Stage names and declaration order; then resolve the current Definition from that same ID only when one of those existing uninitialized Stages starts. Remove the legacy template cascade from runtime resolution while retaining initialized Stage state, accepted attempts, historical results, and Stage topology as immutable workflow facts.",
+      "acceptanceCriteria": [
+        "Run startup persists the selected Profile ID without a Definition snapshot and revalidates collection membership before writing the binding through the reference coordinator.",
+        "Changing a Project default or Issue selection affects only subsequently started Runs and never changes an active Run's bound Profile ID.",
+        "An edit to the bound Profile changes only later uninitialized existing Stages; initialized tasks, checks, lock behavior, accepted attempts, recorded results, and the startup Stage names and order remain unchanged.",
+        "A Stage added to the current bound Definition is not scheduled by an active Run, and a reordering of existing Stages does not change that Run's startup order.",
+        "A removed or invalid future Stage in the current bound Definition fails through the existing visible WorkflowRun failure path without fallback to a prior Definition or another Profile.",
+        "WorkflowRun server specs cover inherited and explicit startup binding, selection changes during active Runs, live later-Stage resolution, immutable initialized facts, Profile edits that add, reorder, or remove future Stages, terminalization clearing only a custom Profile backing key while retaining history, migration of existing terminal Runs with null backing keys, and the missing-future-stage error path with deterministic fakes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowRun Profile-ID binding and live Stage-resolution implementation with server specification coverage.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "WorkflowRun must resolve only its persisted Profile ID and must not read Issue or Project selection again after startup."
+    }
+  ]
+}

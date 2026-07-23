@@ -5,6 +5,7 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Workflow.Domain;
 using Orleans;
 using Orleans.Runtime;
 
@@ -119,6 +120,15 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                 pending.CapturedRevision,
                 ex.Message);
         }
+        catch (WorkflowProfileNotFoundException ex)
+        {
+            await ClearFenceAsync(commandId);
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.WorkflowProfileNotFound,
+                payload.RepositoryName,
+                pending.CapturedRevision,
+                ex.Message);
+        }
         catch (Exception)
         {
             await ClearFenceAsync(commandId);
@@ -179,6 +189,15 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
             await ClearFenceAsync(commandId);
             return new IssueRepositoryBindingResult(
                 IssueRepositoryBindingResultCode.RepositoryStaleRevision,
+                payload.RepositoryName,
+                pending.CapturedRevision,
+                ex.Message);
+        }
+        catch (WorkflowProfileNotFoundException ex)
+        {
+            await ClearFenceAsync(commandId);
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.WorkflowProfileNotFound,
                 payload.RepositoryName,
                 pending.CapturedRevision,
                 ex.Message);

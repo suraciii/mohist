@@ -1,0 +1,43 @@
+## Codebase Patterns
+
+- WorkflowProfile collection records are custom-only rows keyed by `(ProjectId, ProfileId)`; built-ins remain catalog assets and are merged by `IWorkflowProfileProvider`.
+- Reference rows keep one public Profile ID in their owning state and a nullable custom backing key for the restrictive composite FK. Built-in references leave the backing key null.
+- `WorkflowProfileDeletionBlockerQuery` is diagnostic; the FK is the final delete/selection race backstop. Terminal Run transitions clear only the backing key and retain public state/history.
+- Server spec databases use the existing shared in-memory SQLite model schema. Collection specs use a fixed `FakeTimeProvider`; production writes accept the application `TimeProvider`.
+
+## T-001 Notes
+
+- The workspace contained an uncommitted T-001 implementation before this run. It was repaired in place rather than discarded.
+- Project default writes must accept built-in IDs; built-ins are read-only for Profile create/edit/delete, not for selection.
+- The EF snapshot and migration must include the auto-created `(ProjectId, DefaultWorkflowProfileIdKey)` index as well as all three restrictive composite foreign keys, otherwise integration hosts fail with `PendingModelChangesWarning`.
+- The legacy migrator is invoked during startup, so materialized custom records must be skipped on repeat runs. Reserved IDs map to `legacy-reserved/{base64url-utf8(source)}` and public Issue/Run state references are rewritten along with backing keys.
+- Focused verification: `WorkflowProfileCollectionSpecs` passed 21/21; `ProjectEventsModelDebug.DebugPendingModelChanges` passed 1/1; server and test projects build with `-p:SkipWebBuild=true`. The normal build remains blocked in this checkout because web dependencies are absent (`tsc: not found`).
+
+## T-002 Notes
+
+- The Profile collection is now the only workflow management API/CLI surface: root `mo workflow` owns CRUD and local Definition validation, while Project selection uses `/workflow-profile/default` and the retained Prompt surface uses `/workflow-profile/prompts`.
+- Slash-capable Profile IDs use terminal catch-all server routes and `Uri.EscapeDataString` in CLI paths.
+- Legacy template/default-template routes and commands, Issue template configuration, and the old `run validate` location were removed. Existing tests asserting those contracts were removed or replaced with T-002 surface coverage.
+- CLI verification: full `Mohist.Cli.Tests` passed 1340/1340; CLI and server production/test projects build without warnings. The full server suite still has 20 failures from pre-T-002 tests that assert removed global/template APIs and disabled-profile behavior; `WorkflowProfileCollectionSpecs` passes via the direct xUnit class runner.
+
+## T-003 Notes
+
+- `WorkflowRun.WorkflowProfileId` is persisted in the run state. Startup selects the Issue explicit ID or Project `DefaultWorkflowProfileId`, creates the immutable Stage topology from that Definition, saves the run, then binds the ID through `WorkflowProfileReferenceCoordinator`.
+- Active runtime Definition reads use only the persisted Run Profile ID. Stage initialization and sequential lock lookup pass that ID explicitly; no later Issue or Project selection is consulted. New or reordered Definition Stages therefore do not alter an active Run topology.
+- A missing current Definition or future Stage records `DefinitionResolutionFailed` and persists the Run as `Failed` before returning the actionable resolution error. Terminal run persistence clears only `WorkflowProfileIdKey` and retains public state/history.
+- Existing grain fixtures still seed legacy template/default columns, so startup keeps a narrow migration/test fallback only when no collection selection exists; once a Run has a bound collection Profile ID, resolution is strict and never falls back.
+- Verification: server production/test build passed; all 1320 server unit tests passed; StageInitEagerSpecs passed 6/6; StageLockSpecs passed 4/4. Full SpecTests currently has 243 failures from the pre-T-002 legacy API/template contract suite.
+
+## Verification Repair
+
+- The failed verify run was reproduced with `npm test`: it had 20 SpecTests failures and 4 ArchTests failures. The failures were not generated-file noise: removed template/system-Profile contracts were still tested, the database initializer spec omitted its required fake `TimeProvider`, the issue variables routes were removed with the template routes even though Variables remain an independent resource, and the new Workflow Profile coordinator crossed the Issue namespace boundary.
+- Removed obsolete template/system-Profile specs, restored the retained issue Variables GET/PUT/PATCH routes, injected deterministic time into the initializer spec, moved the Project Profile binding participant under Workflow and registered the second coordinator in architecture rules, and refreshed the test-size baseline.
+- Focused verification now passes: `Mohist.Server.SpecTests` 2927/2927 and `Mohist.Server.ArchTests` 32/32.
+- The complete `npm run verify` reached the same green build, CLI/unit/Definition/Arch results, and 2926/2927 SpecTests; the only remaining failure is the unrelated `AgentJobTerminalDeliverySpecs` test intermittently timing out at `Pending -> Running` under the full parallel suite. Running that class directly passes 9/9. A repeat of `npm test` reproduced the same isolated timeout, so it was left unchanged rather than weakening or broadening this issue's scope.
+
+## Re-diagnosis (interrupted)
+
+- Re-ran `npm run verify` once before re-running `npm test` 5 times; both observed one failure (`AgentJobTerminalDeliverySpecs.ReportResultAsync_RunnerCategoryPrecedence_StatusUsedWhenOutputAndCodeMissing`, 3s 001ms, "Timed out waiting for: status == Running. Last value: Pending"), then 5 subsequent `npm run verify` plus 8 `dotnet test` runs and 3 `npm test` runs all returned 2927/2927. The flake is rare enough that it must be provoked, not steady-state.
+- Root cause at the spec layer: `SpecTests/Support/TestWait.cs` `ForAsync` is bounded by an attempts count derived from `ceil(timeout / step)` rather than by wall-clock time. When the host is heavily loaded, each `probe()` + `advance()` iteration finishes well under the assumed 25 ms step, so the loop hits the attempt ceiling and fires `Assert.Fail` after only ~3 s of wall-clock even though the caller asked for a 5 s budget. The AgentJob uses polling (`WaitForStatusAsync` -> `GetStatusAsync` + `CheckTimeoutsAsync` per iteration), so a slow `TryDispatchAsync` under load can complete after the polling budget has already been burned. Adding a real `CancellationTokenSource(timeout)` would enforce the caller-supplied budget without weakening any assertion, but it widens the test-support contract and is out of scope for this issue.
+- Single-class runner reproduces the failed test as `Mohist.Server.SpecTests.Specs.Agent.Grain.AgentJobTerminalDeliverySpecs.ReportResultAsync_RunnerCategoryPrecedence_StatusUsedWhenOutputAndCodeMissing` at 3s 001ms; the in-place fix would be to expose a TaskCompletionSource or other deterministic status-transition signal on `IAgentJobGrain` so the test awaits the transition instead of polling. That is also out of scope for issue-477 and would change the AgentJob public contract.
+- No code changes made. Worktree clean. The intended task work (`T-001`, `T-002`, `T-003`, verification repair) remains as commit `2e487bf6c`. Interruption received before a final root-cause fix in this scope could be committed.

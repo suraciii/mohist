@@ -197,7 +197,18 @@ public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
             db.ProjectWorkflowProfiles.Add(new Mohist.Server.Infrastructure.Data.Workflow.ProjectWorkflowProfile
             {
                 ProjectId = projectId,
-                DefaultTemplateId = templateId,
+                DefaultWorkflowProfileId = templateId,
+            });
+        }
+        if (await db.WorkflowProfileRecords.FindAsync(projectId, templateId) is null)
+        {
+            db.WorkflowProfileRecords.Add(new Mohist.Server.Infrastructure.Data.Workflow.WorkflowProfileRecordRow
+            {
+                ProjectId = projectId,
+                ProfileId = templateId,
+                Name = templateId,
+                DefinitionSource = WorkflowYamlSerializer.ToYaml(new WorkflowDefinition(
+                    [new StageDefinition("build", [new TaskDefinition("task-1", "Task 1", "spec/task")], [])])),
             });
         }
         await db.SaveChangesAsync();

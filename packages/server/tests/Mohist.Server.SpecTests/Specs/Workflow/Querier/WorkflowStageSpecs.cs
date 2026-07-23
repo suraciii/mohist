@@ -155,4 +155,39 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
     }
 
+    [Fact]
+    public async Task LoadStageSpecsAsync_ReloadedLegacyRunKeepsBindingAfterSelectionsChange()
+    {
+        var runId = "wr_legacy_profile_live_resolution";
+        await SeedAsync(
+            projectId: "proj-legacy-profile-live-resolution",
+            issueNumber: 1,
+            runId: runId,
+            issueTemplateJson: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/local");
+
+        await ReplaceRunStateJsonAsync(runId, """
+            {
+              "id":"wr_legacy_profile_live_resolution",
+              "metadata":{"createdAt":"1970-01-01T00:00:00+00:00","annotations":{"projectId":"proj-legacy-profile-live-resolution","issueNumber":"1","workflowProfileId":"mohist/local"}},
+              "status":"Failed",
+              "stages":[]
+            }
+            """);
+
+        await using (var db = new MohistDbContext(Database.Options))
+        {
+            var issue = await db.Issues.SingleAsync(x => x.WorkflowRunId == runId);
+            issue.State = issue.State.Replace("mohist/local", "mohist/github-pr", StringComparison.Ordinal);
+            await db.SaveChangesAsync();
+        }
+
+        var integrate = await CreateProfileBackedManager().LoadStageSpecsAsync(
+            runId, "integrate", "proj-legacy-profile-live-resolution", 1);
+
+        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
+    }
+
 }
