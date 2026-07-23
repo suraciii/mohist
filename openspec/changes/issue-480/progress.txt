@@ -191,7 +191,7 @@ Task: Retire the `system` group, align dead-verb guidance strings, and update do
   - removed: 1 test from `CliSystemInfoCommandSpecs` (`System_Help_NoLongerListsInfo`)
   - added: 3 tests in `CliSystemGroupRetiredSpecs`
   - added: 2 tests in `CliServiceCommandSpecs` (`ServiceInstall_FailsToResolveAndTriggersNoInstallerAction` + `ServiceHelp_DoesNotAdvertiseInstall`)
-  
+
   Net: 1409 − 7 − 1 + 3 + 2 = 1406 ✅
 
 ## Gotchas / decisions during the build
@@ -223,4 +223,3 @@ Focused checks covering the changed area:
 - `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors (TreatWarningsAsErrors).
 - `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-build` → 1406 passed, 0 failed.
 - Worktree is clean; no verification-only files were created.
-
