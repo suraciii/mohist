@@ -77,7 +77,9 @@ vi.mock("../src/actions/registry.js", async (importOriginal) => {
   const definition = (name: string) => ({
     manifest: {
       name,
-      inputs: {},
+      inputs: {
+        workId: { types: ["string"] as const },
+      },
       outputs: [],
       errors: [{ code: "action-failed", description: "The test Action failed" }],
     },
@@ -122,7 +124,7 @@ function buildHost() {
   })
 }
 
-function workWith(overrides: Partial<{ workflowRunId: string; workId: string; uses: string; ownerKind: string; agentJobId: string }> = {}) {
+function workWith(overrides: Partial<{ workflowRunId: string; workId: string; uses: string; ownerKind: string; agentJobId: string; actionWorkId: string }> = {}) {
   const workflowRunId = overrides.workflowRunId ?? "wf-336"
   // After #410 T-001 the AgentJob path drives the AgentJobExecutor
   // and never reaches the action registry, so these specs use a
@@ -136,6 +138,7 @@ function workWith(overrides: Partial<{ workflowRunId: string; workId: string; us
     uses: overrides.uses ?? "test/log",
     ownerKind: overrides.ownerKind ?? "workflow",
     agentJobId: overrides.agentJobId ?? "aj-336",
+    ...(overrides.actionWorkId ? { with: { workId: overrides.actionWorkId } } : {}),
     variables: {
       workspace: { path: "/tmp/mohist-runner-host-task-log" },
       repository: { gitUrl: "https://example.test/repository.git", baseBranch: "main", name: "master", remoteFingerprint: "fake-fingerprint", remoteIdentityVersion: "1" },
@@ -239,15 +242,14 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     // the race between timer advancement and action microtasks.
     poll
       .mockResolvedValueOnce([
-        workWith({ workId: "work-A", agentJobId: "aj-A" }),
-        workWith({ workId: "work-B", agentJobId: "aj-B" }),
+        workWith({ workId: "work-B", agentJobId: "aj-B", actionWorkId: "work-B" }),
+        workWith({ workId: "work-A", agentJobId: "aj-A", actionWorkId: "work-A" }),
       ])
       .mockImplementation(async () => [])
     const releases = new Map<string, Deferred<void>>()
     const gate = deferred()
-    let actionInvocation = 0
-    blockingAction.mockImplementation(async (_inputs: unknown, { log }: { log?: { write: (source: string, text: string) => void } }) => {
-      const workId = actionInvocation++ === 0 ? "work-A" : "work-B"
+    blockingAction.mockImplementation(async (inputs: { workId: string }, { log }: { log?: { write: (source: string, text: string) => void } }) => {
+      const { workId } = inputs
       const release = deferred()
       releases.set(workId, release)
       log?.write("action:test", `line for ${workId}`)

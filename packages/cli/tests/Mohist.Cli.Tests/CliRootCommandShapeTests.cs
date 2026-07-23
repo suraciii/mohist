@@ -61,12 +61,15 @@ public class CliRootCommandShapeTests
         // the controlled exception exists at the root. We also assert
         // that the help output does not advertise a top-level `system`
         // subcommand carrying an `info` description, by checking the
-        // exact row of `  system ` carries the application-diagnostics
-        // description (T-002) and not the legacy `system info` framing.
-        var systemRow = stdout
-            .Split('\n')
-            .Single(line => line.TrimStart().StartsWith("system ", StringComparison.Ordinal));
-        Assert.Contains("application logs", systemRow, StringComparison.OrdinalIgnoreCase);
+        // whitespace-normalized help keeps `system` attached to the
+        // application-diagnostics description across terminal widths.
+        var normalizedHelp = string.Join(
+            ' ',
+            stdout.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains(
+            "system Application diagnostics. 'mo system logs' reports application logs",
+            normalizedHelp,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
