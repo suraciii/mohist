@@ -1,19 +1,25 @@
-### Requirement: activity list returns a bounded persistent activity record
+### Requirement: activity list returns bounded cross-domain Activity evidence
 
-`mo activity list` SHALL return a finite, read-only view of the project's persistent activity records. The command SHALL NOT open a realtime subscription and SHALL NOT perform a delivery-recovery operation; it reads persisted history that exists independently of the command's lifetime.
+`mo activity list` SHALL return a finite, read-only collection of the project's Activity evidence. It SHALL include persisted recorded facts from Issue, WorkflowRun, and AgentSession sources, and the existing durable/current Activity snapshots for AgentSession, waiting workflow work, and Runner state. Every entry SHALL expose whether it is `recorded` history or a `snapshot`; recorded entries SHALL retain a stable identity, source kind, event type, and recorded time. The command SHALL NOT open a realtime subscription and SHALL NOT perform a delivery-recovery operation.
 
 #### Scenario: Reading a project's recent activity
 
-- **WHEN** a caller runs `mo activity list` against a project that has activity records
-- **THEN** the command SHALL return a bounded set of those records as normal output
+- **WHEN** a caller runs `mo activity list` against a project with recorded Issue, WorkflowRun, or AgentSession evidence and existing Runner state
+- **THEN** the command SHALL return a bounded set of Activity entries as normal output
 - **AND** it SHALL exit `0`
 - **AND** it SHALL NOT treat the read as a streaming tail that only moves forward
 
-#### Scenario: Re-reading history after the command exits
+#### Scenario: Recorded history and Runner state are distinguishable
+
+- **WHEN** the Activity collection contains a persisted workflow event and a current Runner state entry
+- **THEN** the workflow entry SHALL identify itself as `recorded` and retain its event identity, type, and recorded time
+- **AND** the Runner entry SHALL identify itself as a `snapshot` and identify the Runner it describes
+
+#### Scenario: Re-reading Activity after the command exits
 
 - **WHEN** the caller runs `mo activity list` a second time against the same unchanged project
-- **THEN** the command SHALL return the same persisted activity records as the prior read
-- **AND** the first invocation SHALL NOT have consumed, advanced, or altered the history visible to the second
+- **THEN** the command SHALL return the same recorded history and unchanged snapshots as the prior read
+- **AND** the first invocation SHALL NOT have consumed, advanced, or altered the evidence visible to the second
 
 ### Requirement: activity list honors project scope resolution
 
@@ -34,13 +40,19 @@
 
 ### Requirement: activity list supports field selection
 
-`mo activity list` SHALL support the shared field-selection contract: `--json <fields>` SHALL output only the requested fields as a JSON array of records, field order SHALL NOT affect semantics, and `--json` supplied with no fields SHALL list the command's selectable fields and exit without reading records.
+`mo activity list` SHALL support the shared field-selection contract: `--json <fields>` SHALL output only the requested fields as a JSON array of entries, field order SHALL NOT affect semantics, and `--json` supplied with no fields SHALL list the command's selectable fields and exit without reading records. The selectable fields SHALL include `id`, `provenance`, `kind`, `time`, `title`, `description`, `eventType`, `issueNumber`, `workflowRunId`, `sessionId`, `runnerId`, and `status`.
 
 #### Scenario: Selecting a subset of fields
 
 - **WHEN** a caller runs `mo activity list --json <comma-separated-fields>`
-- **THEN** the command SHALL emit one JSON array containing only the requested fields per record
+- **THEN** the command SHALL emit one JSON array containing only the requested fields per entry
 - **AND** it SHALL NOT emit fields the caller did not request
+
+#### Scenario: Selecting provenance and source identity
+
+- **WHEN** a caller runs `mo activity list --json id,provenance,kind,eventType,runnerId`
+- **THEN** every returned entry SHALL contain those fields
+- **AND** a caller SHALL be able to distinguish recorded history from a Runner snapshot without parsing a human description
 
 #### Scenario: Field discovery
 

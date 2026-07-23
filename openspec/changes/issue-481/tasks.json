@@ -4,43 +4,44 @@
   "tasks": [
     {
       "id": "T-001",
-      "title": "Expose the Activity card collection API",
-      "spec": "specs/activity-list/spec.md#activity-list-returns-a-bounded-persistent-activity-record",
-      "description": "Add the project-scoped Activity collection endpoint that returns the existing AgentOps feed's session cards as a finite normal API collection. Keep the Web-facing /agent/activity composite response and Activity aggregation unchanged, validate the 1 through 200 limit at the API boundary, and prove the collection remains project-isolated.",
+      "title": "Expose the cross-domain Activity evidence API",
+      "spec": "specs/activity-list/spec.md#activity-list-returns-bounded-cross-domain-activity-evidence",
+      "description": "Add the project-scoped Activity evidence endpoint that merges the persisted Project Event feed with the existing AgentOps session/waiting and Runner status snapshots. Define provenance-aware Activity entries, reuse the source read models without adding persistence or event schemas, validate the final 1 through 200 collection limit, and prove project isolation.",
       "acceptanceCriteria": [
-        "GET /api/projects/{projectRef}/activity returns the existing Activity feed session-card collection in the normal API envelope without summary or waiting-card companions.",
-        "The endpoint defaults to 50 records, accepts limits from 1 through 200, rejects out-of-range limits with a client error, and resolves project scope through the existing project filter.",
-        "Server specs cover project isolation, default and valid limits, invalid-limit rejection, and equivalence between the new collection response and the existing /agent/activity session cards while preserving existing Web-feed specs.",
+        "GET /api/projects/{projectRef}/activity returns one normal API collection whose entries cover persisted Issue, WorkflowRun, and AgentSession history plus the existing AgentSession, waiting-workflow, and Runner snapshots.",
+        "Every entry has stable id, provenance, kind, time, title, and description; recorded entries preserve event type/identity/time, while snapshot entries identify the represented session, waiting work, or Runner without pretending to be replayed events.",
+        "The endpoint defaults to 100 records, accepts limits from 1 through 200, applies the limit after a stable merged ordering, rejects out-of-range limits with a client error, and resolves project scope through the existing project filter.",
+        "Server specs cover each evidence source, recorded-versus-snapshot provenance, stable ordering and final-limit enforcement, project isolation, invalid-limit rejection, and unchanged existing /events, /agent/activity, and Runner-status contracts.",
         "dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj passes."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "A read-only project Activity collection endpoint and focused server specification coverage.",
+      "output": "A read-only cross-domain Activity evidence endpoint, shared waiting projection, and focused server specification coverage.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Delegate to AgentActivityFeedAssembler; do not create a new Activity persistence model or change the existing Web feed contract."
+      "notes": "Compose ProjectEventFeedAssembler, AgentActivityFeedAssembler, and RunnerStatusService; extract the route-private waiting projection for shared use. Do not create a new Activity store or change existing source contracts."
     },
     {
       "id": "T-002",
       "title": "Deliver the persistent activity list CLI",
       "spec": "specs/activity-list/spec.md#activity-list-supports-field-selection",
-      "description": "Add the singular Activity command group and its list leaf on top of the new collection endpoint. Reuse ProjectRef and JsonSelection contracts, define the Activity-card collection descriptor, and provide a scan-oriented human table plus selected JSON output without treating Activity as an Event stream.",
+      "description": "Add the singular Activity command group and its list leaf on top of the new evidence endpoint. Reuse ProjectRef and JsonSelection contracts, define the provenance-aware Activity-entry collection descriptor, and provide a scan-oriented human table plus selected JSON output without treating Activity as an Event stream.",
       "acceptanceCriteria": [
-        "mo activity list resolves a project through --project or the active project, calls the Activity collection endpoint with a 1 through 200 limit, and fails locally without HTTP for no active project or an invalid limit.",
-        "The command exposes bare --json discovery, rejects invalid fields locally with exit code 2, and emits a JSON array containing only selected Activity-card fields for --json <fields>.",
-        "Default output renders issue/workflow context, session identity, status, model, and last activity in a dedicated Activity table; repeated reads of unchanged data are finite normal reads rather than a subscription.",
-        "CLI specs cover route/query construction, project override, local validation, JSON discovery/selection, table rendering, and re-readable results; dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj passes."
+        "mo activity list resolves a project through --project or the active project, calls the Activity evidence endpoint with a 1 through 200 limit, and fails locally without HTTP for no active project or an invalid limit.",
+        "The command exposes bare --json discovery, rejects invalid fields locally with exit code 2, and emits a JSON array containing only selected Activity-entry fields, including provenance and source identity, for --json <fields>.",
+        "Default output renders provenance, kind, time, title, and the relevant Issue, WorkflowRun, AgentSession, or Runner identity in a dedicated Activity table; repeated reads of unchanged data are finite normal reads rather than a subscription.",
+        "CLI specs cover route/query construction, project override, local validation, JSON discovery/selection, recorded-versus-snapshot output, table rendering, and re-readable results; dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj passes."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "mo activity list, its collection descriptor/table renderer, and CLI specification coverage.",
+      "output": "mo activity list, its provenance-aware collection descriptor/table renderer, and CLI specification coverage.",
       "dependsOn": [
         "T-001"
       ],
       "passes": false,
-      "notes": "Use PrintResourceAsync with a command-owned ResourceDescriptor; retain the existing /agent/activity Web response unchanged."
+      "notes": "Use PrintResourceAsync with a command-owned ResourceDescriptor; retain the existing /events, /agent/activity, and Runner APIs unchanged."
     },
     {
       "id": "T-003",
