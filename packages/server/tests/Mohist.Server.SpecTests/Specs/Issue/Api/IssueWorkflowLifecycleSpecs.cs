@@ -110,26 +110,21 @@ public class IssueWorkflowLifecycleSpecs
     }
 
     [Fact]
-    public async Task UpdateFullAsync_WhenWorkflowHasStarted_RejectsWorkflowProfileChange()
+    public async Task UpdateFullAsync_WhenWorkflowHasStarted_ChangesIssueSelectionWithoutChangingRunBinding()
     {
-        // The profile-lock guard keeps its "has started" semantics:
-        // workflowRunId != null means the issue has bound a run, and the
-        // template is locked from that point onward, including after
-        // Done/archive. Verify the guard still rejects a profile change
-        // when the reference is present, regardless of status.
         var (projectId, _, issueNumber, issueKey, wrId) = await SeedIssueInProgressAsync();
 
         var issue = _grains.GetGrain<IIssueGrain>(issueKey);
-        await issue.CompleteWorkAsync(wrId);
-
-        await Assert.ThrowsAsync<WorkflowProfileLockedException>(() =>
-            issue.UpdateFullAsync(new UpdateIssueData(
-                WorkflowProfileId: "mohist/github-pr",
-                PresentFields: new HashSet<string>(StringComparer.Ordinal) { nameof(UpdateIssueData.WorkflowProfileId) })));
+        await issue.UpdateFullAsync(new UpdateIssueData(
+            WorkflowProfileId: "mohist/github-pr",
+            PresentFields: new HashSet<string>(StringComparer.Ordinal) { nameof(UpdateIssueData.WorkflowProfileId) }));
 
         var final = await GetIssueInfoAsync(projectId, issueNumber);
-        Assert.Equal("done", final!.Status);
+        Assert.Equal("mohist/github-pr", final!.WorkflowProfileId);
         Assert.Equal(wrId, final.WorkflowRunId);
+
+        var run = await LoadWorkflowRunAsync(wrId);
+        Assert.Null(run!.WorkflowProfileId);
     }
 
     [Fact]

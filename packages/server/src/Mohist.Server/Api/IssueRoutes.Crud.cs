@@ -279,6 +279,10 @@ public static partial class IssueRoutes
                 {
                     return ApiResults.Conflict(ex.Message, "workflow_profile_locked");
                 }
+                catch (UnknownWorkflowProfileException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
+                }
                 catch (IssueDomain.IssueParentNotFoundException ex) { return ApiResults.BadRequest(ex.Message, "parent_not_found"); }
                 catch (IssueDomain.IssueParentIneligibleException ex) { return ApiResults.Conflict(ex.Message, "parent_ineligible"); }
                 catch (IssueDomain.IssueParentIsChildException ex) { return ApiResults.Conflict(ex.Message, "parent_is_sub_issue"); }
@@ -325,9 +329,52 @@ public static partial class IssueRoutes
                 return ApiResults.Ok(info);
             }
 
-            // Non-repository PATCHes remain on the direct Issue path
-            // (T-001 / T-003): the coordinator only fences the four
-            // binding-sensitive commands.
+            if (req.Contains(nameof(UpdateIssueRequest.WorkflowProfileId)))
+            {
+                var currentIssue = await issuesQuery.GetDomainAsync(project.Id, number);
+                if (currentIssue?.RepositoryRef is null)
+                    return ApiResults.BadRequest("Issue has no declared repository", "repository_not_found");
+
+                var coordinator = grains.GetGrain<IIssueRepositoryCoordinatorGrain>(project.Id);
+                IssueRepositoryBindingResult coordinatorResult;
+                try
+                {
+                    coordinatorResult = await coordinator.ChangeRepositoryAsync(
+                        new RepositoryCommandPayload.Change(
+                            ProjectId: project.Id,
+                            IssueNumber: number,
+                            RepositoryName: currentIssue.RepositoryRef,
+                            Body: req.Body,
+                            Labels: req.Labels,
+                            Priority: req.Priority,
+                            IsDraft: req.IsDraft,
+                            AttachmentIds: req.AttachmentIds,
+                            WorkflowProfileId: workflowProfileIdForUpdate,
+                            PresentFields: req.Fields,
+                            Title: req.Title,
+                            ParentIssueNumber: req.ParentIssueNumber),
+                        commandId: $"change:{project.Id}:{number}:{Guid.NewGuid():N}",
+                        expectedRevision: null);
+                }
+                catch (UnknownWorkflowProfileException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
+                }
+                catch (IssueDomain.IssueParentNotFoundException ex) { return ApiResults.BadRequest(ex.Message, "parent_not_found"); }
+                catch (IssueDomain.IssueParentIneligibleException ex) { return ApiResults.Conflict(ex.Message, "parent_ineligible"); }
+                catch (IssueDomain.IssueParentIsChildException ex) { return ApiResults.Conflict(ex.Message, "parent_is_sub_issue"); }
+                catch (IssueDomain.IssueHasChildrenCannotBecomeChildException ex) { return ApiResults.Conflict(ex.Message, "target_has_children"); }
+                catch (IssueDomain.IssueEpicMemberCannotBecomeChildException ex) { return ApiResults.Conflict(ex.Message, "issue_belongs_to_epic"); }
+                catch (AttachmentLimitException ex) { return ApiResults.Fail(ex.Message, 413, "attachment_count_limit_exceeded"); }
+                catch (AttachmentValidationException ex) { return ApiResults.BadRequest(ex.Message, "invalid_attachment"); }
+
+                if (!coordinatorResult.IsApplied)
+                    return ApiResults.Conflict(coordinatorResult.Message ?? "Issue update rejected");
+
+                await ApplyUpdateModelMetadataAsync(issueProfileManager, project.Id, number, req, req.Raw);
+                return ApiResults.Ok(await issuesQuery.GetAsync(project.Id, number));
+            }
+
             try
             {
                 await grain.UpdateFullAsync(new UpdateIssueData(
