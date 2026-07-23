@@ -4,24 +4,23 @@ Reviewed `proposal.md`, `design.md`, `tasks.json`, and all capability specs agai
 
 ## Findings
 
-### P1 - The Activity plan does not deliver the requested persistent cross-domain Activity read
+### P1 - The planned Runner snapshots contradict the Activity Project-scope contract
 
-The issue defines `mo activity list` as a Project-scoped, persistent, cross-domain record for recent user-understandable changes across Issue, WorkflowRun, AgentSession, and Runner. The plan instead makes `GET /api/projects/{projectRef}/activity` return only `AgentActivityFeedAssembler.GetActivityAsync(...).Sessions` (`design.md:31-35`; `tasks.json:T-001` acceptance criterion 1), explicitly dropping the existing feed's `summary` and `waiting` companions.
+The corrected plan makes `ActivityEvidenceAssembler` include `RunnerStatusService` snapshots and requires T-001 to prove project isolation (`design.md:34-40`, `tasks.json:T-001` acceptance criteria 1 and 4). The issue and `activity-list` spec both require `activity list` to be Project-scoped (`issue` acceptance criteria; `specs/activity-list/spec.md:24-32`).
 
-That source is not a persisted Activity history: `AgentActivityFeedAssembler` queries Project-labeled AgentSessions ordered by `CreatedDescending`, reconciles their current state, and derives their latest transcript preview at read time (`packages/server/src/Mohist.Server/AgentOps/Services/AgentActivityFeedAssembler.cs:87-109`). Its returned `ActivityCardDto` is a session card; it has Issue/workflow/session context but no Runner activity record (`packages/server/src/Mohist.Server/Sessions/AgentSessionReadModels.cs:296-315`). The only current Runner fact is capacity inside `ActivityDto.Summary`, and `Waiting` is a separate current Issue projection (`AgentRoutes.cs:34-39`); both are removed by the proposed collection endpoint.
+Current Runner status cannot satisfy that isolation: `RunnerRegistryGrain.ListEligibleRunnersAsync(projectId)` ignores its `projectId` argument and returns every registered runner (`packages/server/src/Mohist.Server/Runner/Grains/RunnerRegistryGrain.cs:137-140`). `RunnerStatusService` deliberately documents the same fact: runners are global execution resources, `RunnerInfo.ProjectId` does not bind them to a project, and the projected scope is always `global` (`RunnerStatusService.cs:130-134`). Therefore two Project Activity reads will receive the same Runner snapshot entries. A test that asserts full collection project isolation will fail; one that permits them will leave the API's scope semantics undocumented.
 
-As a result, T-001/T-002 can satisfy their own snapshot-array tests while failing the user-visible Activity contract. The specs also conceal the gap by only asserting a finite re-readable collection, not coverage of the promised Activity facts.
-
-**Required fix:** resolve the Activity source and public item contract before implementation. The plan must either identify an existing persisted cross-domain Activity record source and define how Issue, WorkflowRun, AgentSession, and Runner entries are represented and bounded, or explicitly obtain a scope/product correction that limits `activity list` to AgentSession cards. Then align the proposal, `activity-list` spec, design, and T-001/T-002 acceptance criteria; do not implement the endpoint as `ActivityDto.Sessions` while claiming it is the required Activity history.
+**Required fix:** decide and specify the Runner visibility rule. Either exclude global Runner snapshots from the Project-scoped Activity collection until there is a durable project association, or retain them as explicitly `global` context with a scope field and state that Project scope filters only project-bound recorded/snapshot entries. Update the proposal, `activity-list` and separation specs, design, T-001/T-002 acceptance criteria, and source/test plan so the per-entry scope rule and the project-isolation assertion agree. Do not claim that all Runner snapshots are Project-isolated under the current registry implementation.
 
 ## Verified Correct
 
-- The Event tail plan preserves the current server-side match compiler, post-subscription NDJSON behavior, and cancellation boundary.
-- The dead-letter migration retains the existing local credential and loopback protections rather than moving them into an anonymous Event read.
+- The Activity plan now uses `ProjectEventFeedAssembler` for persisted Issue, WorkflowRun, and AgentSession history, instead of narrowing the command to live session cards.
+- The plan makes recorded history and current snapshots distinguishable through a mandatory `provenance` field.
+- The Event tail and dead-letter migration preserves the current server-side match compiler, NDJSON/cancellation behavior, and operator credential protections.
 - The task graph is valid JSON and has a strictly ordered acyclic dependency chain.
 
 ## Verdict
 
-The Event/dead-letter migration is planned coherently, but the unresolved Activity data-model mismatch blocks implementation.
+The Activity source contract is substantially improved, but global Runner visibility remains incompatible with the claimed Project-isolation behavior.
 
 <promise>FAIL</promise>
