@@ -6,21 +6,34 @@ namespace Mohist.Cli;
 
 internal static class ServerCommands
 {
-    public static Command Build(MohistCliApi api, IServiceProvider provider)
+    public static Command Build(MohistCliApi api, IServiceProvider _)
     {
-        var server = new Command("server", "Server management");
-        var installer = provider.GetRequiredService<IServiceInstaller>();
+        var server = new Command(
+            "server",
+            "Connected Mohist Server application. Read-only — reads facts about the running Server (status, health, info, application logs) over the Server API. Local managed-service lifecycle (start, stop, restart, status, logs, uninstall) lives under 'mo service <verb> server'.");
 
+        server.Subcommands.Add(BuildStatus(api));
         server.Subcommands.Add(BuildHealth(api));
-        server.Subcommands.Add(BuildSystemd("start", installer.StartServerAsync, installer));
-        server.Subcommands.Add(BuildSystemd("stop", installer.StopServerAsync, installer));
-        server.Subcommands.Add(BuildSystemd("restart", installer.RestartServerAsync, installer));
-        server.Subcommands.Add(BuildSystemd("status", installer.StatusServerAsync, installer));
-        server.Subcommands.Add(BuildLogs(installer));
-        server.Subcommands.Add(BuildSystemd("uninstall", installer.UninstallServerAsync, installer));
         server.Subcommands.Add(BuildInfo(api));
+        server.Subcommands.Add(BuildLogs(api));
 
         return server;
+    }
+
+    private static Command BuildStatus(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "status",
+            "Show overall Server status (aggregated across all projects). Formerly exposed as 'mo project status'.");
+        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/status?all=true"));
+        return cmd;
+    }
+
+    private static Command BuildHealth(MohistCliApi api)
+    {
+        var cmd = new Command("health", "Check server health");
+        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/health"));
+        return cmd;
     }
 
     private static Command BuildInfo(MohistCliApi api)
@@ -45,48 +58,12 @@ internal static class ServerCommands
         return cmd;
     }
 
-    private static Command BuildHealth(MohistCliApi api)
+    private static Command BuildLogs(MohistCliApi api)
     {
-        var cmd = new Command("health", "Check server health");
-        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/health"));
-        return cmd;
-    }
-
-    private static Command BuildSystemd(string name, Func<ServiceCommandOptions, Task<int>> handler, IServiceInstaller installer)
-    {
-        var cmd = new Command(name, $"{name} server managed service");
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        var unitDirOpt = MohistCliCommands.UnitDirOption();
-        cmd.Options.Add(dryRunOpt);
-        cmd.Options.Add(unitDirOpt);
-        cmd.SetAction(ctx =>
-        {
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var unitDir = ctx.GetValue(unitDirOpt);
-            return handler(new ServiceCommandOptions(dryRun, unitDir, 100, false));
-        });
-        return cmd;
-    }
-
-    private static Command BuildLogs(IServiceInstaller installer)
-    {
-        var cmd = new Command("logs", "View server service logs");
-        var linesOpt = MohistCliCommands.LinesOption();
-        var followOpt = MohistCliCommands.FollowOption();
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        var unitDirOpt = MohistCliCommands.UnitDirOption();
-        cmd.Options.Add(linesOpt);
-        cmd.Options.Add(followOpt);
-        cmd.Options.Add(dryRunOpt);
-        cmd.Options.Add(unitDirOpt);
-        cmd.SetAction(ctx =>
-        {
-            var lines = ctx.GetValue(linesOpt);
-            var follow = ctx.GetValue(followOpt);
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var unitDir = ctx.GetValue(unitDirOpt);
-            return installer.LogsServerAsync(new ServiceCommandOptions(dryRun, unitDir, lines, follow));
-        });
+        var cmd = new Command(
+            "logs",
+            "Show the connected Server's application logs (the Mohist server's own log tail). These are application logs and are not interchangeable with service-manager logs; use 'mo service logs server' for service-manager logs (systemd journal or scheduled-task output).");
+        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/logs/tail"));
         return cmd;
     }
 }
@@ -95,22 +72,13 @@ internal static class RunnerCommands
 {
     public static Command Build(MohistCliApi api, IServiceProvider provider)
     {
-        var runner = new Command("runner", "Runner management");
-        var installer = provider.GetRequiredService<IServiceInstaller>();
+        var runner = new Command(
+            "runner",
+            "Server-registered Runner resources. Read-only — reads presence, capacity, heartbeat, and status from the connected Server.");
         var environment = provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance;
 
-        runner.Subcommands.Add(BuildSystemd("start", installer.StartRunnerAsync, installer));
-        runner.Subcommands.Add(BuildSystemd("stop", installer.StopRunnerAsync, installer));
-        runner.Subcommands.Add(BuildSystemd("restart", installer.RestartRunnerAsync, installer));
-        runner.Subcommands.Add(BuildSystemd(
-            "service-status",
-            "Show runner managed service lifecycle status",
-            installer.StatusRunnerAsync,
-            installer));
-        runner.Subcommands.Add(BuildLogs(installer));
-        runner.Subcommands.Add(BuildSystemd("uninstall", installer.UninstallRunnerAsync, installer));
         runner.Subcommands.Add(BuildList(api, environment));
-        runner.Subcommands.Add(BuildShow(api));
+        runner.Subcommands.Add(BuildView(api));
         runner.Subcommands.Add(BuildStatus(api));
 
         return runner;
@@ -166,9 +134,9 @@ internal static class RunnerCommands
         return cmd;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("show", "Show a single runner's full detail (read-only)");
+        var cmd = new Command("view", "Show a single runner's full detail (read-only)");
         var runnerIdArg = new Argument<string>("runner-id") { Description = "Runner identifier" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
@@ -182,9 +150,9 @@ internal static class RunnerCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
-            return ShowAsync();
+            return ViewAsync();
 
-            async Task<int> ShowAsync()
+            async Task<int> ViewAsync()
             {
                 if (string.IsNullOrWhiteSpace(runnerId))
                 {
@@ -250,53 +218,4 @@ internal static class RunnerCommands
         return null;
     }
 
-    private static Command BuildSystemd(
-        string name,
-        Func<ServiceCommandOptions, Task<int>> handler,
-        IServiceInstaller installer)
-    {
-        return BuildSystemd(name, $"{name} runner managed service", handler, installer);
-    }
-
-    private static Command BuildSystemd(
-        string name,
-        string description,
-        Func<ServiceCommandOptions, Task<int>> handler,
-        IServiceInstaller installer)
-    {
-        var cmd = new Command(name, description);
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        var unitDirOpt = MohistCliCommands.UnitDirOption();
-        cmd.Options.Add(dryRunOpt);
-        cmd.Options.Add(unitDirOpt);
-        cmd.SetAction(ctx =>
-        {
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var unitDir = ctx.GetValue(unitDirOpt);
-            return handler(new ServiceCommandOptions(dryRun, unitDir, 100, false));
-        });
-        return cmd;
-    }
-
-    private static Command BuildLogs(IServiceInstaller installer)
-    {
-        var cmd = new Command("logs", "View runner service logs");
-        var linesOpt = MohistCliCommands.LinesOption();
-        var followOpt = MohistCliCommands.FollowOption();
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        var unitDirOpt = MohistCliCommands.UnitDirOption();
-        cmd.Options.Add(linesOpt);
-        cmd.Options.Add(followOpt);
-        cmd.Options.Add(dryRunOpt);
-        cmd.Options.Add(unitDirOpt);
-        cmd.SetAction(ctx =>
-        {
-            var lines = ctx.GetValue(linesOpt);
-            var follow = ctx.GetValue(followOpt);
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var unitDir = ctx.GetValue(unitDirOpt);
-            return installer.LogsRunnerAsync(new ServiceCommandOptions(dryRun, unitDir, lines, follow));
-        });
-        return cmd;
-    }
 }

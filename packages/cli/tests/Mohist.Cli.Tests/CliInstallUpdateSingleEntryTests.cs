@@ -219,8 +219,14 @@ public class CliInstallUpdateSingleEntryTests
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        foreach (var name in new[] { "start", "stop", "restart", "status", "logs", "health", "uninstall", "info" })
+        // Issue #480 reshaped `server` to a read-only surface (status/health/info/logs);
+        // local lifecycle verbs were moved to `mo service <verb> server`.
+        foreach (var name in new[] { "status", "health", "info", "logs" })
             Assert.Contains($"\n  {name} ", stdout);
+        Assert.DoesNotContain("\n  start ", stdout);
+        Assert.DoesNotContain("\n  stop ", stdout);
+        Assert.DoesNotContain("\n  restart ", stdout);
+        Assert.DoesNotContain("\n  uninstall ", stdout);
         // Anchored on `\n  <name> ` to avoid false positives from substring
         // matches inside descriptions (e.g. "info" appearing in unrelated
         // prose).
@@ -239,8 +245,10 @@ public class CliInstallUpdateSingleEntryTests
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        foreach (var name in new[] { "start", "stop", "restart", "service-status", "logs", "uninstall", "list", "show", "status" })
+        foreach (var name in new[] { "list", "view", "status" })
             Assert.Contains($"\n  {name} ", stdout);
+        foreach (var name in new[] { "start", "stop", "restart", "service-status", "logs", "uninstall", "show" })
+            Assert.DoesNotContain($"\n  {name} ", stdout);
         Assert.DoesNotContain("\n  install ", stdout);
         Assert.DoesNotContain("\n  update ", stdout);
     }
@@ -249,10 +257,12 @@ public class CliInstallUpdateSingleEntryTests
     public async Task SurvivingServerSubcommands_StillResolve()
     {
         // Sanity check: deleting `install`/`update` from the server group
-        // must not break any other subcommand.
+        // must not break any other subcommand. After issue #480 the server
+        // group is read-only (status/health/info/logs); local lifecycle verbs
+        // live under `mo service <verb> server`.
         var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
 
-        foreach (var sub in new[] { "start", "stop", "restart", "status", "logs", "health", "uninstall", "info" })
+        foreach (var sub in new[] { "status", "health", "info", "logs" })
         {
             var exitCode = await MohistCliCommands.RunAsync(
                 http, ["server", sub], output, error, fs, executor,
@@ -265,15 +275,14 @@ public class CliInstallUpdateSingleEntryTests
     public async Task SurvivingRunnerSubcommands_StillResolve()
     {
         var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
-        var env = new EnvironmentAbstractions.TestHelpers.MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "--help"], output, error, fs, executor,
+            installer: installer);
 
-        foreach (var sub in new[] { "start", "stop", "restart", "service-status", "logs", "uninstall", "list", "status" })
-        {
-            var exitCode = await MohistCliCommands.RunAsync(
-                http, ["runner", sub], output, error, fs, executor,
-                environment: env,
-                installer: installer);
-            Assert.Equal(0, exitCode);
-        }
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        foreach (var sub in new[] { "list", "view", "status" })
+            Assert.Contains($"\n  {sub} ", stdout);
+        Assert.Empty(handler.Requests);
     }
 }

@@ -37,8 +37,8 @@ public class CliRootCommandShapeTests
         string[] requiredResourceGroups =
         [
             "project",
-            "system",
             "server",
+            "service",
             "notification",
         ];
         foreach (var name in requiredResourceGroups)
@@ -55,21 +55,7 @@ public class CliRootCommandShapeTests
         Assert.DoesNotContain("\n  logs ", stdout);
         Assert.DoesNotContain("\n  use ", stdout);
         Assert.DoesNotContain("\n  notify ", stdout);
-        // `system info` would render as `  info ` if it lived at the root
-        // (which it doesn't — it lives under `server`). The negative
-        // assertion above already pins it: no `  info ` row other than
-        // the controlled exception exists at the root. We also assert
-        // that the help output does not advertise a top-level `system`
-        // subcommand carrying an `info` description, by checking the
-        // whitespace-normalized help keeps `system` attached to the
-        // application-diagnostics description across terminal widths.
-        var normalizedHelp = string.Join(
-            ' ',
-            stdout.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        Assert.Contains(
-            "system Application diagnostics. 'mo system logs' reports application logs",
-            normalizedHelp,
-            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\n  system ", stdout);
     }
 
     [Fact]
@@ -96,7 +82,7 @@ public class CliRootCommandShapeTests
             "label",
             "runner",
             "server",
-            "system",
+            "service",
             "install",
             "update",
             "skills",

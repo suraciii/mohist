@@ -161,7 +161,7 @@ public class CliSystemInfoCommandSpecs
         Assert.Equal(0, exitCode);
         var stderr = error.ToString();
         Assert.Contains("Server is not running", stderr);
-        Assert.Contains("mo server start", stderr);
+        Assert.Contains("mo service start server", stderr);
         var stdout = output.ToString();
         Assert.Contains("Server diagnostics unavailable", stdout);
         Assert.Contains("CLI (local)", stdout);
@@ -220,27 +220,6 @@ public class CliSystemInfoCommandSpecs
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("info", stdout);
-    }
-
-    [Fact]
-    public async Task System_Help_NoLongerListsInfo()
-    {
-        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
-            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["system", "--help"], output, error, fileSystem, executor, env);
-
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        // After T-005 the `info` subcommand is relocated from `system` to
-        // `server`. `mo system --help` must no longer list `info` as a
-        // subcommand — only `logs` (the application-log tail) remains.
-        // We assert against the canonical System.CommandLine help row layout
-        // `  <name>   <description>` (anchored with leading newline + spaces
-        // to avoid false positives from `mo info` showing in the parent
-        // group description, which still mentions `mo info`).
-        Assert.DoesNotContain("\n  info ", stdout);
     }
 
     [Fact]

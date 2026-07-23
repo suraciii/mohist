@@ -226,7 +226,7 @@ public class CliProjectUseCommandSpecs
         // to the throwing responder.
         Assert.Equal(1, exitCode);
         Assert.Contains(MohistCliApi.ServerUnavailableMessage, error.ToString());
-        Assert.Contains("mo server start", error.ToString());
+        Assert.Contains("mo service start server", error.ToString());
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("/api/projects/anywhere/use", request.RequestUri?.PathAndQuery);
