@@ -200,7 +200,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             {
                 TurnId = turn.Id,
                 Sequence = 30,
-                Type = TranscriptPartTypes.SessionClosed,
+                Type = TranscriptPartTypes.SessionActivity,
                 CorrelationKey = "metadata-closed-latest-by-sequence",
                 PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = "sequence-last-failure" }),
                 LastSeenAt = baseTime.AddMinutes(30),
@@ -209,7 +209,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             {
                 TurnId = turn.Id,
                 Sequence = 15,
-                Type = TranscriptPartTypes.SessionClosed,
+                Type = TranscriptPartTypes.SessionActivity,
                 CorrelationKey = "metadata-closed-inserted-last",
                 PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = "inserted-last-failure" }),
                 LastSeenAt = baseTime.AddMinutes(15),
@@ -250,7 +250,11 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     }
 
     protected sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
-    protected sealed record AgentSessionSummaryDto(string Id, string SessionName, string Status, string? LastDataAt);
+    protected sealed record AgentSessionSummaryDto(
+        string Id,
+        string SessionName,
+        [property: JsonPropertyName("activity")] string Status,
+        [property: JsonPropertyName("lastDataAt")] string? LastDataAt);
     protected sealed record ActivityDto(ActivitySummaryDto Summary, ActivityCardDto[] Sessions, ActivityWaitingDto[] Waiting);
     protected sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, ActivitySlotUsageDto Slots);
     protected sealed record ActivitySlotUsageDto(int Active, int Max);

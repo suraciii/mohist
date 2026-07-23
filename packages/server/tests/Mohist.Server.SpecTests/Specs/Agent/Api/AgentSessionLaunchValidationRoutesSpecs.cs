@@ -309,20 +309,26 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
             await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains);
             var closePayload = Assert.Single(await LoadSessionClosedPayloadsAsync(dbFactory, sessionId));
+            // Issue 484: terminal delivery writes a session.activity
+            // (activity=idle) part. The work result status remains on
+            // the payload; exitCode is no longer mirrored onto the part.
             Assert.Equal("completed", closePayload.GetProperty("status").GetString());
-            Assert.Equal(0, closePayload.GetProperty("exitCode").GetInt32());
 
             using var summary = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}");
             Assert.Equal(HttpStatusCode.OK, summary.StatusCode);
             var summaryPayload = await summary.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal("completed", summaryPayload.GetProperty("data").GetProperty("status").GetString());
+            // Issue 484: a session never enters a terminal lifecycle
+            // state; the summary surfaces the current `activity` value
+            // (`idle` after the job completes). The job's own Completed
+            // verdict is independent.
+            Assert.Equal("idle", summaryPayload.GetProperty("data").GetProperty("activity").GetString());
 
             using var list = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/{agent.Id}/sessions");
             Assert.Equal(HttpStatusCode.OK, list.StatusCode);
             var listPayload = await list.Content.ReadFromJsonAsync<JsonElement>();
             var item = listPayload.GetProperty("data").EnumerateArray()
                 .Single(entry => entry.GetProperty("sessionId").GetString() == sessionId);
-            Assert.Equal("completed", item.GetProperty("status").GetString());
+            Assert.Equal("idle", item.GetProperty("activity").GetString());
         }
         finally
         {
@@ -352,9 +358,10 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
 
             // The fixture configures JobTimeout=8s. Wait for the grain
             // timer to fire and OnJobTimeoutAsync to run. After timeout,
-            // the AgentJob is Failed and the session has been transitioned
-            // to a terminal state via a synthesized session.closed runtime
-            // event.
+            // the AgentJob is Failed. Issue 484: the session does not
+            // enter a terminal lifecycle state; the job's terminal
+            // delivery writes a session.activity (activity=idle) event
+            // carrying the work result status/reason.
             await WaitForJobTerminalAsync(
                 jobGrain!,
                 AgentJobStatus.Failed,

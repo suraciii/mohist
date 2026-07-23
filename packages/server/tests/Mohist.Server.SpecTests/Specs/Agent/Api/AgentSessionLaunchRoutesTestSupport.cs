@@ -276,7 +276,10 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             .ToArrayAsync();
         var payloads = await db.AgentSessionTranscriptParts
             .AsNoTracking()
-            .Where(p => turnIds.Contains(p.TurnId) && p.Type == TranscriptPartTypes.SessionClosed)
+            // Issue 484: AgentJob terminal delivery now writes a
+            // session.activity (activity=idle) part instead of the
+            // deprecated session.closed part.
+            .Where(p => turnIds.Contains(p.TurnId) && p.Type == TranscriptPartTypes.SessionActivity)
             .OrderBy(p => p.Sequence)
             .Select(p => p.PayloadJson)
             .ToArrayAsync();

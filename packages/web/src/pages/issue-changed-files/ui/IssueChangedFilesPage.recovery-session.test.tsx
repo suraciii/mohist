@@ -110,6 +110,7 @@ describe('IssueChangedFilesPage related-session recovery', () => {
       {
         ...(state.sessionsData[0] as Record<string, unknown>),
         status: 'completed',
+        activity: 'idle',
         sessionName: 'terminal-session',
         createdAt: '2026-07-10T00:00:00.000Z',
       },
@@ -117,6 +118,7 @@ describe('IssueChangedFilesPage related-session recovery', () => {
         ...(state.sessionsData[0] as Record<string, unknown>),
         id: 'session-2',
         status: 'running',
+        activity: 'active',
         sessionName: 'live-session',
         createdAt: '2026-07-12T00:00:00.000Z',
       },

@@ -76,7 +76,7 @@ public static class AgentSessionSummaryBuilder
 
     private static string? ExtractFailure(List<AgentSessionTranscriptPartRow> parts)
     {
-        var closed = parts.LastOrDefault(p => p.Type == TranscriptPartTypes.SessionClosed);
+        var closed = parts.LastOrDefault(p => p.Type == TranscriptPartTypes.SessionActivity);
         if (closed is null) return null;
         try
         {
@@ -111,7 +111,7 @@ public static class AgentSessionSummaryBuilder
                 if (!string.IsNullOrWhiteSpace(title))
                     lines.Add($"tool {title}{(string.IsNullOrWhiteSpace(status) ? string.Empty : $" ({status})")}");
             }
-            else if (part.Type == TranscriptPartTypes.SessionClosed)
+            else if (part.Type == TranscriptPartTypes.SessionActivity)
             {
                 var text = AgentSessionJsonHelper.ExtractText(part.PayloadJson);
                 if (!string.IsNullOrWhiteSpace(text))

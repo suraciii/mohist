@@ -32,7 +32,7 @@ internal static class TranscriptEventSummaryProjector
                 var payload = AgentSessionJsonHelper.ParsePayload(e.PayloadJson);
                 resolvedModel = AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? resolvedModel;
             }
-            else if (e.Type == TranscriptPartTypes.SessionClosed)
+            else if (e.Type == TranscriptPartTypes.SessionActivity)
             {
                 latestClosed = IsLater(latestClosed, e) ? e : latestClosed;
             }

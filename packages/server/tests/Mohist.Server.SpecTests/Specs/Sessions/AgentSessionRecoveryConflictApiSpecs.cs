@@ -97,7 +97,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
     }
 
     [Fact]
-    public async Task ResetEndpoint_HandlerMissing_ReturnsRuntimeSessionMissingWithResetHint()
+    public async Task ResetEndpoint_HandlerMissing_ReturnsRuntimeSessionMissing()
     {
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
             "reset-handler-missing",
@@ -116,7 +116,9 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
         var details = doc.RootElement.GetProperty("details");
         Assert.Equal(currentSession.Id, details.GetProperty("sessionId").GetString());
-        Assert.Equal("reset", details.GetProperty("hint").GetString());
+        // issue-484: the recovery runtime_session_missing conflict no
+        // longer carries a reset hint in details; the explanatory message
+        // still points the caller at Reset.
         Assert.Contains("Reset", doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
         Assert.Equal(currentSession.Id, (await _fixture.Grains
             .GetGrain<IAgentSessionGrain>(currentSession.Id)
@@ -127,6 +129,17 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
     public async Task ResetEndpoint_ActiveSession_ReturnsConflict()
     {
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-active", sessionName: "build", attachAndStart: true);
+        // Under the activity model (issue-484) attaching the runtime no
+        // longer flips the session to active; a session.activity record
+        // does. Mark the session active so the idle boundary rejects Reset.
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"active\"}"),
+        }, currentSession.Id));
+        await grain.FlushForTestAsync();
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
 
@@ -164,7 +177,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
             $"{operation}-source-parity",
             attach: true,
             idle: true);
-        Assert.Equal("inactive", agentSession.Status);
+        Assert.Equal("idle", agentSession.Status);
 
         using var agentResponse = await _client.PostAsync(
             $"/api/projects/{project.Id}/agent-sessions/{agentSession.Id}/{operation}",
@@ -215,6 +228,18 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
             $"{operation}-agent-active",
             attach: true,
             idle: false);
+        // Under the activity model (issue-484) attaching the runtime no
+        // longer flips the session to active; a session.activity record
+        // does. Mark the session active so the idle boundary rejects the
+        // canonical recovery command.
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"active\"}"),
+        }, session.Id));
+        await grain.FlushForTestAsync();
 
         using var response = await _client.PostAsync(
             $"/api/projects/{project.Id}/agent-sessions/{session.Id}/{operation}",
@@ -229,7 +254,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
     [Theory]
     [InlineData("compact")]
     [InlineData("reset")]
-    public async Task CanonicalRecoveryEndpoint_MissingAgentLaunchBinding_CompactReturnsResetHintAndResetRecovers(string operation)
+    public async Task CanonicalRecoveryEndpoint_MissingAgentLaunchBinding_CompactReturnsRuntimeSessionMissingAndResetRecovers(string operation)
     {
         var (project, _) = await CreateProjectAndIssueAsync($"{operation}-agent-missing");
         var session = await CreateAgentLaunchSessionAsync(
@@ -249,7 +274,8 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
             Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
             var details = doc.RootElement.GetProperty("details");
             Assert.Equal(session.Id, details.GetProperty("sessionId").GetString());
-            Assert.Equal("reset", details.GetProperty("hint").GetString());
+            // issue-484: the runtime_session_missing conflict no longer
+            // carries a reset hint; callers use Reset to recover.
         }
         else
         {
@@ -376,7 +402,8 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
             Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
             var details = doc.RootElement.GetProperty("details");
             Assert.Equal(currentSession.Id, details.GetProperty("sessionId").GetString());
-            Assert.Equal("reset", details.GetProperty("hint").GetString());
+            // issue-484: the runtime_session_missing conflict no longer
+            // carries a reset hint; callers use Reset to recover.
         }
         else
         {
@@ -391,7 +418,15 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         using var metadataResponse = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         Assert.Equal(HttpStatusCode.OK, metadataResponse.StatusCode);
-        Assert.Equal(transcriptBefore, await _client.GetStringAsync(transcriptPath));
+        // Compact preserves the transcript verbatim. Reset (issue-484)
+        // rebinds the runtime session and emits a context-reset transcript
+        // entry, so its transcript is no longer byte-identical to the
+        // pre-recovery snapshot; we only assert it remains readable.
+        var transcriptAfter = await _client.GetStringAsync(transcriptPath);
+        if (operation == "compact")
+        {
+            Assert.Equal(transcriptBefore, transcriptAfter);
+        }
     }
 
 }

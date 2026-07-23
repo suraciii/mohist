@@ -132,6 +132,10 @@ describe('SessionPage header and states', () => {
       runtimeSessionId: 'runtime-123',
       executionId: 'exec-123',
       title: 'Test Session',
+      // issue-484: default to 'idle' — the post-execution activity (replaces the
+      // legacy 'completed' status). Tests override `activity` to model active/
+      // unknown sessions.
+      activity: 'idle',
       status: 'completed',
       statusKind: 'completed',
       model: 'claude-3-5-sonnet',
@@ -146,12 +150,14 @@ describe('SessionPage header and states', () => {
     }
   }
 
-  function makeMockDetail(overrides: Partial<{ id: string; metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean; status: string; completedAt: string | null }> = {}): CoderSessionDetail {
+  function makeMockDetail(overrides: Partial<{ id: string; metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean; status: string; completedAt: string | null; activity: string }> = {}): CoderSessionDetail {
+    const metadata = overrides.metadata ?? makeMockMetadata()
     return {
       id: 'session-123',
       runtimeSessionId: 'runtime-123',
       executionId: 'exec-123',
       taskDescription: 'Test task',
+      activity: metadata.activity ?? 'idle',
       status: 'completed',
       createdAt: '2024-01-01T10:00:00.000Z',
       completedAt: '2024-01-01T11:00:00.000Z',
@@ -159,7 +165,7 @@ describe('SessionPage header and states', () => {
       runtime: null,
       stage: 'build',
       title: 'Test Session',
-      metadata: makeMockMetadata(),
+      metadata,
       turns: [],
       incomplete: false,
       ...overrides,
@@ -342,9 +348,14 @@ describe('SessionPage header and states', () => {
       })
     })
 
-    it('shows duration for completed sessions', async () => {
+    it('shows idle status for sessions that have finished executing (legacy completed)', async () => {
+      // issue-484: sessions never enter a terminal status; after execution the
+      // activity returns to 'idle'. The header no longer renders a duration
+      // chip — it renders the activity badge. Assert the idle badge instead.
       const detail = makeMockDetail({
+        activity: 'idle',
         metadata: makeMockMetadata({
+          activity: 'idle',
           completedAt: '2024-01-01T11:00:00.000Z',
           status: 'completed',
           statusKind: 'completed',
@@ -354,9 +365,8 @@ describe('SessionPage header and states', () => {
 
       renderWithQueryClient(<SessionPage />)
 
-      await waitFor(() => {
-        expect(screen.getByText('1h 00m')).toBeInTheDocument()
-      })
+      const header = await screen.findByTestId('session-header')
+      await within(header).findByText('Idle')
     })
 
     it('does not show duration for running sessions', async () => {
@@ -378,11 +388,12 @@ describe('SessionPage header and states', () => {
   })
 
   describe('status kind display', () => {
-    it('shows live status badge for running sessions with recent activity', async () => {
+    it('shows active status badge for active sessions with recent activity', async () => {
+      // issue-484: the old 'live' badge is now the 'active' activity badge.
       const detail = makeMockDetail({
+        activity: 'active',
         metadata: makeMockMetadata({
-          status: 'running',
-          statusKind: 'live',
+          activity: 'active',
           lastActivityAt: new Date().toISOString(),
         }),
       })
@@ -391,57 +402,17 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       const header = await screen.findByTestId('session-header')
-      await within(header).findByText('Running')
+      await within(header).findByText('Active')
     })
 
-    it('shows stale status badge for running sessions with old activity', async () => {
-      const detail = makeMockDetail({
-        metadata: makeMockMetadata({
-          status: 'running',
-          statusKind: 'stale',
-          lastActivityAt: '2024-01-01T10:00:00.000Z',
-        }),
-      })
-      setupSessionPage({ detail })
-
-      renderWithQueryClient(<SessionPage />)
-
-      const header = await screen.findByTestId('session-header')
-      await within(header).findByText('Stale')
-    })
-
-    it('shows finalizing status badge when session is finalizing', async () => {
-      const detail = makeMockDetail({
-        metadata: makeMockMetadata({
-          status: 'running',
-          statusKind: 'finalizing',
-          completedAt: '2024-01-01T11:00:00.000Z',
-        }),
-      })
-      setupSessionPage({ detail })
-
-      renderWithQueryClient(<SessionPage />)
-
-      const header = await screen.findByTestId('session-header')
-      await within(header).findByText('Finalizing')
-    })
-
-    it('shows failed status badge for failed sessions', async () => {
-      const detail = makeMockDetail({
-        metadata: makeMockMetadata({
-          status: 'failed',
-          statusKind: 'failed',
-          completedAt: '2024-01-01T11:00:00.000Z',
-        }),
-      })
-      setupSessionPage({ detail })
-
-      renderWithQueryClient(<SessionPage />)
-      const header = await screen.findByTestId('session-header')
-      const badge = await within(header).findByTestId('session-status-badge')
-      expect(badge).toHaveAttribute('data-status-kind', 'failed')
-      expect(badge.textContent).toContain('Session failed')
-    })
+    // issue-484: 'stale', 'finalizing', and 'failed' session status kinds were
+    // removed. Sessions never enter a terminal status, and the deprecated
+    // session.closed event no longer drives a 'finalizing' patch. The
+    // remaining status kinds are idle/active/unknown (badge-driven). The
+    // former 'failed' surface is now expressed via SessionErrorsEvidence /
+    // failureReason, not a status badge. These three scenarios are covered by
+    // the empty-state and errors-evidence suites; they are intentionally
+    // deleted here.
   })
 
   describe('loading and error state rendering', () => {
@@ -475,11 +446,13 @@ describe('SessionPage header and states', () => {
       })
     })
 
-    it('shows no-content state when session is running but no turns yet', async () => {
+    it('shows active no-content state when session is active but no turns yet', async () => {
+      // issue-484: previously 'running' (live). Now 'active' activity with no
+      // content renders the active-no-content empty state.
       const detail = makeMockDetail({
+        activity: 'active',
         metadata: makeMockMetadata({
-          status: 'running',
-          statusKind: 'live',
+          activity: 'active',
         }),
         turns: [],
       })
@@ -488,15 +461,18 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText(/started but no content has been received/i)).toBeInTheDocument()
+        expect(screen.getByText(/active but no content has been received/i)).toBeInTheDocument()
       })
     })
 
-    it('shows no-content state when session has no recorded content', async () => {
+    it('shows idle no-content state when session has no recorded content', async () => {
+      // issue-484: a session that finished without content returns to idle.
+      // The empty state now invites a follow-up rather than declaring the
+      // session completed-with-no-content.
       const detail = makeMockDetail({
+        activity: 'idle',
         metadata: makeMockMetadata({
-          status: 'completed',
-          statusKind: 'completed',
+          activity: 'idle',
         }),
         turns: [],
       })
@@ -505,15 +481,15 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText(/no content was received for this session/i)).toBeInTheDocument()
+        expect(screen.getByText(/this session is idle/i)).toBeInTheDocument()
       })
     })
 
-    it('treats completed session with no events as no-content state', async () => {
+    it('treats idle session with no events as no-content state', async () => {
       const detail = makeMockDetail({
+        activity: 'idle',
         metadata: makeMockMetadata({
-          status: 'completed',
-          statusKind: 'completed',
+          activity: 'idle',
         }),
         turns: [],
         incomplete: true,
@@ -523,7 +499,7 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText(/no content was received for this session/i)).toBeInTheDocument()
+        expect(screen.getByText(/this session is idle/i)).toBeInTheDocument()
       })
     })
   })
@@ -552,7 +528,9 @@ describe('SessionPage header and states', () => {
         }),
       ]
       const detail = makeMockDetail({
+        activity: 'idle',
         metadata: makeMockMetadata({
+          activity: 'idle',
           status: 'completed',
           statusKind: 'completed',
           stage: 'build',
@@ -570,9 +548,10 @@ describe('SessionPage header and states', () => {
       // Same SessionHeader shared with the empty and incomplete branches.
       expect(screen.getByText('Test Issue')).toBeInTheDocument()
       expect(screen.getByText('Build')).toBeInTheDocument()
-      // "Completed" appears in both the SessionHeader and the sticky title strip.
-      const completedBadges = screen.getAllByText('Completed')
-      expect(completedBadges.length).toBeGreaterThanOrEqual(1)
+      // issue-484: the status badge is now the activity badge ("Idle") and
+      // appears in both the SessionHeader and the sticky title strip.
+      const idleBadges = screen.getAllByText('Idle')
+      expect(idleBadges.length).toBeGreaterThanOrEqual(1)
       // h1 always renders a non-empty session title.
       const h1 = document.querySelector('h1')
       expect(h1).not.toBeNull()
@@ -607,13 +586,14 @@ describe('SessionPage header and states', () => {
 
     it('renders the same header on the main branch as on the empty branch', async () => {
       const baseMetadata = makeMockMetadata({
+        activity: 'idle',
         status: 'completed',
         statusKind: 'completed',
         stage: 'build',
         model: 'claude-3-5-sonnet',
       })
 
-      const mainDetail = makeMockDetail({ metadata: baseMetadata })
+      const mainDetail = makeMockDetail({ activity: 'idle', metadata: baseMetadata })
       setupSessionPage({
         detail: mainDetail,
         turns: [makeTurn({ id: 'turn-1' })],
@@ -623,13 +603,15 @@ describe('SessionPage header and states', () => {
       await screen.findByTestId('session-transcript-scroll-container')
       await within(screen.getByRole('link', { name: /Issue #123/ }).closest('.border-b') as HTMLElement).findByText('1 turn')
       expect(screen.getByText('Build')).toBeInTheDocument()
-      const completedBadges = screen.getAllByText('Completed')
-      expect(completedBadges.length).toBeGreaterThanOrEqual(1)
+      // issue-484: the activity badge is now "Idle".
+      const idleBadges = screen.getAllByText('Idle')
+      expect(idleBadges.length).toBeGreaterThanOrEqual(1)
       expect(screen.queryByText(/Jump to bottom/i)).not.toBeInTheDocument()
       expect(screen.queryByText(/No content was received for this session/i)).not.toBeInTheDocument()
       unmount()
 
       const emptyDetail = makeMockDetail({
+        activity: 'idle',
         metadata: baseMetadata,
         turns: [],
       })
@@ -642,9 +624,10 @@ describe('SessionPage header and states', () => {
 
       await screen.findByText('Issue #123')
       expect(screen.getByText('Build')).toBeInTheDocument()
-      const emptyCompletedBadges = screen.getAllByText('Completed')
-      expect(emptyCompletedBadges.length).toBeGreaterThanOrEqual(1)
-      expect(screen.getByText(/No content was received for this session/i)).toBeInTheDocument()
+      const emptyIdleBadges = screen.getAllByText('Idle')
+      expect(emptyIdleBadges.length).toBeGreaterThanOrEqual(1)
+      // issue-484: empty idle branch shows the idle empty state.
+      expect(screen.getByText(/this session is idle/i)).toBeInTheDocument()
       expect(screen.getByTestId('session-transcript-scroll-container')).toContainElement(screen.getByTestId('session-recovery-bar'))
     })
 

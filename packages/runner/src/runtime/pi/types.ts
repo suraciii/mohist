@@ -49,6 +49,10 @@ export interface PiSessionTarget {
   readonly workDir: string
 }
 
+export interface PiSessionResolveRequest {
+  readonly target: PiSessionTarget
+}
+
 export interface PiSessionCreateRequest {
   readonly target: PiSessionTarget
 }

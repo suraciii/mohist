@@ -231,26 +231,14 @@ public sealed record AgentSessionRuntime(
 
 public sealed record AgentSessionSettings(string? Model = null);
 
-/// <summary>
-/// One entry in the ordered lineage of runtime sessions bound to an
-/// <see cref="AgentSession"/> during its lifetime. The Mohist
-/// <see cref="AgentSession.Id"/> is the stable identity; each
-/// <see cref="AgentRuntimeSessionId"/> is a mutable runtime facet
-/// replaced after a reset or another runtime-boundary change
-/// (<c>design/conventions.md#identity-terms</c>). Compaction preserves the
-/// current runtime binding. The chain
-/// <see cref="AgentSessionStatusSnapshot.RuntimeSessionLineage"/>
-/// holds all such entries — predecessor/successor are derived by
-/// position. Entries are append-only on rebind; the first entry
-/// records the original runtime session bound by AttachPhysicalSession.
-/// <see cref="Runtime"/> carries the execution-backend name that owned
-/// the binding and remains null on legacy entries.
-/// </summary>
-[GenerateSerializer]
-public sealed record RuntimeSessionLineageEntry(
-    [property: Id(0)] string AgentRuntimeSessionId,
-    [property: Id(1)] DateTime BoundAt,
-    [property: Id(2)] string? Runtime = null);
+public enum AgentSessionActivity
+{
+    Idle,
+    Active,
+    Unknown,
+}
+
+public sealed record AgentRuntimeBinding(string RunnerId, string? Runtime, string? RuntimeSessionId);
 
 public sealed record AgentSessionStatusSnapshot(
     string? AgentRuntimeSessionId = null,
@@ -258,16 +246,16 @@ public sealed record AgentSessionStatusSnapshot(
     DateTime? BoundAt = null,
     DateTime? LastDataAt = null,
     AgentUsageSummary? UsageSummary = null,
-    IReadOnlyList<RuntimeSessionLineageEntry>? RuntimeSessionLineage = null,
     IReadOnlyList<ContextUsageHistoryEntry>? ContextUsageHistory = null,
     AgentSessionResetReservation? PendingReset = null,
     AgentSessionFollowupLease? PendingFollowup = null,
     IReadOnlyList<AgentSessionFollowupLease>? PendingFollowups = null,
     IReadOnlyList<AgentSessionTranscriptEvidence>? PendingTranscriptEvidence = null,
-    DateTime? CurrentTurnEndedAt = null)
+    DateTime? CurrentTurnEndedAt = null,
+    AgentSessionActivity Activity = AgentSessionActivity.Idle)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
-        new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), RuntimeSessionLineage: [], ContextUsageHistory: []);
+        new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: []);
 }
 
 public sealed record AgentUsageSummary(

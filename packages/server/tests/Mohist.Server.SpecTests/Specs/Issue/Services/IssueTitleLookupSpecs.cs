@@ -249,7 +249,6 @@ public class IssueTitleLookupSpecs
                 BoundAt: createdAt.AddSeconds(1),
                 LastDataAt: createdAt.AddMinutes(1),
                 UsageSummary: new AgentUsageSummary(),
-                RuntimeSessionLineage: [],
                 ContextUsageHistory: []),
             Metadata = new AgentSessionMetadata(labels),
         };

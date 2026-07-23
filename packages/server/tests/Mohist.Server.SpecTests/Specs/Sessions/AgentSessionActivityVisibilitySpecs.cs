@@ -210,7 +210,8 @@ public class AgentSessionActivityVisibilitySpecs
                 CreatedAt: startedAt,
                 BoundAt: startedAt.AddSeconds(1),
                 LastDataAt: _fixture.TimeProvider.GetUtcNow().UtcDateTime,
-                AgentRuntimeSessionId: sessionId),
+                AgentRuntimeSessionId: sessionId,
+                Activity: AgentSessionActivity.Active),
             Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [AgentSessionQueryMetadataKeys.ProjectId] = projectId,

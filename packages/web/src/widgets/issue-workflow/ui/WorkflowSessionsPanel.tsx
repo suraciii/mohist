@@ -145,7 +145,7 @@ function WorkflowSessionRow({ issueNumber, session }: { issueNumber: number; ses
       title={`Open ${session.sessionName} transcript`}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0" data-testid="workflow-session-row-header">
-        <StatusIcon status={session.status} />
+         <StatusIcon status={session.activity ?? 'unknown'} />
         <span className="min-w-0 truncate font-mono text-xs font-semibold text-foreground">{session.sessionName}</span>
         {model && (
           <span
@@ -160,7 +160,7 @@ function WorkflowSessionRow({ issueNumber, session }: { issueNumber: number; ses
         className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground"
         data-testid="workflow-session-row-metrics"
       >
-        <span>{statusLabel(session.status)}</span>
+         <span>{statusLabel(session.activity ?? 'unknown')}</span>
         <span>{usageText(session)}</span>
         {context && <span>{context}</span>}
         {cost && <span>{cost}</span>}

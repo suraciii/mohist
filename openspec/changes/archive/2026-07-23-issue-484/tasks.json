@@ -1,0 +1,107 @@
+{
+  "project": "mohist-local",
+  "description": "Make AgentSession reusable (no terminal lifecycle) and safely rebind when a Runtime Session is confirmed missing.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Session activity lifecycle: authoritative activity field, transitions, and transcript event contract",
+      "spec": "specs/agent-session-activity/spec.md#agent-session-activity-has-exactly-three-values",
+      "description": "Add a persisted Activity enum (idle/active/unknown) to AgentSessionStatusSnapshot, owned and written solely by the grain. Drive transitions from runner-reported facts: idle->active atomic with session.input acceptance (extend the existing session.input path in AppendEventsAsync); active->idle and ->unknown from a new session.activity event the runner publishes on turn end / uncertain stop, replacing today's session.closed and session.followup_completed/session.followup_failed signals. Add session.activity and session.context_reset to the transcript event catalog (TranscriptEventTypes, TranscriptPartTypes, canonical-event-types.ts). Remove all session.closed/followup_* writing in the runner (followup-handler.ts recordFollowupTerminal, workflow-agent-session-reporter.ts, pi.ts) and all grain special-casing of those types (AppendEventsAsync CurrentTurnEndedAt set, ClassifySessionClosedPayload, AppendSystemEventsAsync, AppendTerminalCloseAsync, CompleteFollowupTerminalsAsync, TerminatesFollowupLease). Remove the time-window StatusName heuristic and the ReadTerminalStateAsync terminal scan; DTOs temporarily map the new activity onto the existing status field so the system stays usable. Re-wire ContextExhaustionClassifier (which currently runs on session.closed via ClassifySessionClosedPayload) to classify turn-failed runtime events instead, so context-exhaustion enrichment and the AgentSessionContextExhausted domain event continue to fire when a turn fails due to context limits; if the turn-failed diagnostics are insufficient to classify, explicitly remove the classifier and document that context exhaustion is surfaced as a generic turn failure. Include a minimal server-side runner-disconnect -> unknown watchdog via RunnerConnectionTracker for sessions that are active when their runner disconnects.",
+      "acceptanceCriteria": [
+        "AgentSessionStatusSnapshot persists an Activity field defaulting to Idle; the grain is the only writer.",
+        "Accepting session.input while idle atomically transitions Activity to Active and records the input boundary in one durable write.",
+        "When a turn ends (success, failure, or confirmed cancel) the runner publishes session.activity:{idle} and the grain transitions to Idle; no session.closed or session.followup_* event is written.",
+        "When a stop or input-acceptance is uncertain the activity becomes unknown and new input is rejected until resolved.",
+        "An execution completing, failing, or being cancelled does not produce a completed/failed/stopped/cancelled/closed session state; a subsequent Follow-up is accepted without Reset.",
+        "Runtime process exit, cache eviction, or persisted-file cleanup alone does not change activity or close the session.",
+        "TaskRun/AgentJob result adjudication is unchanged and does not read AgentSession activity as a result.",
+        "server spec tests cover: idle<->active<->unknown transitions, session.input atomicity, execution-outcome-returns-to-idle, unknown-on-uncertain-stop, runner-disconnect-watchdog, and no-terminal-state — using injected fakes and no wall-clock timing.",
+        "runner unit tests cover: session.activity emitted on turn end and uncertain stop; session.closed/followup_* no longer emitted.",
+        "ContextExhaustionClassifier no longer depends on session.closed; it is either re-wired to turn-failed runtime events (preserving AgentSessionContextExhausted enrichment) or explicitly removed with context exhaustion surfaced via turn-failed diagnostics.",
+        "npm run build succeeds (dotnet build) and npm test passes for server and runner."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Authoritative Activity field on the AgentSession grain; runner emits session.activity instead of session.closed/followup_*; terminal-state derivation removed; transcript catalog has session.activity and session.context_reset.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D1, D2, D6. The session.context_reset event type is defined here so T-002 can write it on rebind; T-002 adds the rebind-path writing. DTO status remains mapped from activity (shim) until T-004 exposes activity directly. OpenCode and Pi must both emit session.activity uniformly."
+    },
+    {
+      "id": "T-002",
+      "title": "Unified binding replacement and lineage removal",
+      "spec": "specs/runtime-binding-recovery/spec.md#binding-replacement-is-compare-and-swap-and-idle-only",
+      "description": "Generalize RebindRuntimeSession (AgentSession.Transitions.cs) into the single binding-replacement path used by Reset, runtime change, and (in T-003) recovery: require Activity == Idle; compare the full expected binding (runnerId + runtime + runtimeSessionId) against current before replacing; on match, replace the binding, reset Runtime context to empty, and atomically write a session.context_reset transcript event carrying only the reason (reset/runtime-change/missing-recovery) with no physical session IDs. Remove RuntimeSessionLineage and RuntimeSessionLineageEntry from AgentSessionStatusSnapshot, the AppendLineageEntry helper, the lineage DTO and BuildLineageDto mapper, and the PreviousAgentRuntimeSessionId field from AgentSessionRuntimeBound. Ensure AttachPhysicalSession and EnsureExpectedRuntimeSession route through the same CAS semantics. Verify old grain state with lineage deserializes cleanly (nullable field ignored).",
+      "acceptanceCriteria": [
+        "RebindRuntimeSession requires Activity == Idle and rejects replacement while active or unknown.",
+        "Replacement compares the full expected binding against current and rejects (StaleRuntimeSessionBindingException) when they differ; the current binding is preserved on rejection.",
+        "A successful replacement atomically writes a session.context_reset event with only a reason and observedAt, carrying no old or new physical session ID, appearing before the next session.input.",
+        "RuntimeSessionLineage, RuntimeSessionLineageEntry, AppendLineageEntry, lineage DTOs, and PreviousAgentRuntimeSessionId are removed from grain state and server read models.",
+        "AgentSession ID, source, working directory, transcript, and cumulative usage are unchanged by a binding replacement; only the current binding and Runtime context change (context starts empty).",
+        "A Runtime event whose runtimeSessionId does not match the current binding is rejected and does not change binding, activity, or transcript.",
+        "An existing session with persisted lineage state deserializes without error after the field is removed (no migration step required).",
+        "server spec tests cover: CAS replace-on-match, stale-expected rejection, idle-only enforcement, session.context_reset atomicity and no-session-id payload, lineage-absent invariant, and late-event rejection.",
+        "npm run build and npm test pass for server."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Single CAS binding-replacement transition writing session.context_reset; lineage removed from grain state and server DTOs; old state deserializes cleanly.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D4, D5, and the context-reset writing half of D6. This unblocks T-003 (recovery uses this CAS rebind). Reset and runtime-change now share this path; the session.context_reset reason distinguishes them."
+    },
+    {
+      "id": "T-003",
+      "title": "Confirmed-missing recovery and OpenCode Reset across task, AgentJob, and idle Follow-up",
+      "spec": "specs/runtime-binding-recovery/spec.md#confirmed-missing-recovery-creates-at-most-one-empty-session-before-a-new-input",
+      "description": "Add one shared runner-side resolveOrRecoverBinding routine and wire it into all three input entry points: workflow task dispatch (executor.ts:320-354), AgentJob execution (agent-job-executor.ts:124-190), and idle Follow-up (followup-handler.ts:89-120). The routine resolves the current binding against the runtime; on a deterministic missing-session it creates at most one empty Runtime Session on the same Runner and runtime, asks the server to replace the binding via the T-002 CAS operation (carrying expected), records the input (session.input + idle->active) only after the server confirms the new binding is current, then submits the input exactly once (journaled by operationId via session-command-journal.ts). On any non-recovery condition (unavailable, timeout, permission, corrupt/unclassifiable response, unknown submission, different Runner, or active/unknown activity) the routine fails explicitly, preserves the binding, and does not replay input. Wire the OpenCode SessionCommand reset (command-runtime.ts callSessionCommand, currently returning unavailable for opencode) through OpenCodeRuntime.createSession + the unified rebind (T-002), mirroring the Pi reset path (dispatchPiReset), so an idle OpenCode session receiving Reset creates a new empty session instead of failing. Update the follow-up/cancel/recovery API routes so runtime_session_missing no longer carries hint:reset on the recovery path — it either auto-recovers or returns a binding-preserving failure. Recovery must not consume a Workflow recovery budget or create a new work attempt.",
+      "acceptanceCriteria": [
+        "When the owning Runner deterministically confirms the current Runtime Session is missing and the session is idle, a Workflow task input triggers at most one empty session creation on the same Runner/runtime, a CAS binding replacement, and exactly-once input submission.",
+        "The same recovery applies to AgentJob input and idle Follow-up input; an in-execution Follow-up does not trigger recovery.",
+        "Input is submitted only after the server confirms the new binding is current; if the expected binding changed concurrently the input is not submitted and the candidate produces only a diagnostic.",
+        "Successful recovery continues the same TaskRun/AgentJob work attempt and does not consume a Workflow recovery budget or create a new attempt.",
+        "Every non-recovery condition (unavailable, timeout, permission, corrupt data, unclassifiable response, unknown submission outcome, request on a different Runner, active/unknown activity) preserves the current binding and fails without replaying input.",
+        "A request that lands on a Runner other than the binding's owning Runner does not infer the original session is missing and does not migrate the binding.",
+        "Compact and Cancel on a missing session do not create a new Runtime Session.",
+        "Reset proceeds even when the original Runtime Session is also missing.",
+        "An idle OpenCode session receiving Reset creates a new empty Runtime Session via OpenCodeRuntime.createSession and binds it through the unified rebind; the runner no longer returns unavailable for OpenCode reset.",
+        "The 409 runtime_session_missing response no longer advertises hint:reset on paths where recovery applies; it auto-recovers or returns a binding-preserving failure.",
+        "runner unit tests cover: resolve-ready reuse, definitely-missing create-one-and-rebind, each non-recovery failure path, different-runner routing, exactly-once submission via journal, and candidate-unbound-no-submit.",
+        "server spec tests cover: CAS confirmation rejects stale expected, recovery does not advance Workflow recovery, and follow-up/cancel/recovery route semantics.",
+        "npm run build and npm test pass for server and runner."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Shared resolveOrRecoverBinding routine wired into task/AgentJob/idle-Follow-up; OpenCode Reset command wired through createSession + unified rebind; server CAS confirmation; API routes no longer hint Reset where recovery applies.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Design D3 plus the OpenCode Reset enablement decision (Resolved Questions). The runner already reports missing-session deterministically (opencode/runtime.ts, pi/runtime.ts); this task adds the create-and-rebind branch and the server confirmation. OpenCode create reuses OpenCodeRuntime.createSession for both recovery and reset; Pi reuses services.createSession. The operationId journal guarantees exactly-once submit across retries."
+    },
+    {
+      "id": "T-004",
+      "title": "Expose activity in API/Web and remove lineage history views",
+      "spec": "specs/agent-session-activity/spec.md#consumers-read-current-activity-not-historical-end-facts",
+      "description": "Make the breaking presentation contract change: expose the authoritative activity (idle/active/unknown) in AgentSessionSummaryDto and WorkflowSessionDto instead of the derived status field, and remove the temporary activity->status shim from T-001. Update the Session page and session-list Web consumers to derive state from the single activity field: replace the three duplicated status mappers (useGenericSessionDataSource.ts, useIssueSessionDataSource.tsx, buildGenericSessionMetadata.ts) with one activity-based derivation; stop subscribing to session.closed/session.followup_* for optimistic status patches (useWorkflowRunSessions.ts, useCoderSessions.ts, useSessionTranscript.ts); and remove the runtime-session history view and all lineage consumption (useGenericSessionDataSource.ts, SessionDataSource.ts). Command eligibility (Follow-up/Compact/Reset availability) reads current activity only.",
+      "acceptanceCriteria": [
+        "AgentSessionSummaryDto and WorkflowSessionDto expose activity (idle/active/unknown) as the authoritative session state; no completed/failed/stopped/cancelled lifecycle value is derived or returned.",
+        "The Web Session page and session lists derive display state from the single activity field via one shared mapper, not from completedAt or session.closed history.",
+        "No Web consumer subscribes to session.closed, session.followup_completed, or session.followup_failed for status derivation.",
+        "The runtime-session history view and all lineage DTO consumption are removed from the Web.",
+        "Follow-up, Compact, and Reset eligibility is evaluated against current activity; a session whose prior execution ended (activity idle) is not refused as inactive or terminal.",
+        "OpenCode/Pi and Workflow/Agent-launch sources render identically for a given activity.",
+        "web tests cover: activity-based status mapping for idle/active/unknown, no terminal-state rendering, and removal of legacy event subscriptions and lineage views.",
+        "npm run build, npm run typecheck -w packages/web, npm run test:run -w packages/web, and npm test pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "API exposes activity directly; Web derives state from activity via one mapper; lineage/history views and legacy event subscriptions removed.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Design D7 plus the Web half of D5. Depends on T-003 so the final API contract (recovery semantics + activity field) is coherent before the Web is updated against it. The CLI does not derive session status from history, so no CLI change is required."
+    }
+  ]
+}

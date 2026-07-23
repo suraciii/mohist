@@ -35,10 +35,15 @@ describe('routeEvent', () => {
     }
   })
 
+  // Issue 484 / D6: `session.followup_completed` / `session.followup_failed`
+  // are deprecated and removed from the activity-invalidation set. The
+  // activity-lifecycle signal that now invalidates `agent-activity` (so the
+  // Activity feed reflects a follow-up winding the session back to idle) is
+  // `session.activity`. This replaces the former follow-up-event assertions.
   it.each([
-    'session.followup_completed',
-    'session.followup_failed',
-  ])('invalidates agent activity for %s', (eventName) => {
+    'session.activity',
+    'coder_session_status_changed',
+  ])('invalidates agent activity for %s (activity lifecycle)', (eventName) => {
     const invalidateQueries = vi.fn()
 
     routeEvent(eventName, {}, {

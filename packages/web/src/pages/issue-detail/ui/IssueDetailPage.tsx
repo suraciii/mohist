@@ -197,7 +197,7 @@ export function IssueDetailPage({
       agentStatus: agentStatus ?? null,
       workflowSessions: workflowSessions.map((s) => ({
         sessionName: s.sessionName,
-        status: s.status,
+        activity: s.activity,
         startedAt: s.startedAt,
         createdAt: s.createdAt,
       })),

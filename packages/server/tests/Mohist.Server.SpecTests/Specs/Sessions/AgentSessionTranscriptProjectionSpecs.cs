@@ -37,6 +37,11 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         var (project, issue, _, session) = await CreateStartedAgentSessionAsync("activity-no-filter", title: "Activity no filter");
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
+        // Under the activity model `session.closed` is a no-op (the grain no
+        // longer persists a transcript part for it); a liveness-bearing event
+        // such as `session.liveness` still produces a `status` transcript
+        // part, so verify that part type is forwarded to the activity feed
+        // rather than suppressed.
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
@@ -44,8 +49,8 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
             {
                 new
                 {
-                    type = "session.closed",
-                    payload = new { status = "completed", exitCode = 0 }
+                    type = "session.liveness",
+                    payload = new { }
                 }
             }
         });
@@ -56,7 +61,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
         Assert.NotNull(card.LastActivity);
-        Assert.Equal("session.closed", card.LastActivity!.Text);
+        Assert.Equal("status", card.LastActivity!.Text);
     }
 
     [Fact]
@@ -104,7 +109,11 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         var summaries = await _client.GetDataAsync<AgentSessionSummaryDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
         var summary = Assert.Single(summaries);
 
-        Assert.Equal("active", summary.Status);
+        // Under the activity model a `message.delta` only refreshes
+        // LastDataAt (RecordActivity) without mutating the activity value;
+        // a freshly attached session that never received a session.input /
+        // session.activity event stays idle.
+        Assert.Equal("idle", summary.Status);
         Assert.NotNull(summary.LastDataAt);
         Assert.True(DateTime.Parse(summary.LastDataAt!) > beforeLastDataAt);
 

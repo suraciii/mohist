@@ -47,12 +47,14 @@ describe('SessionFollowupComposer — visibility and enabled state', () => {
   })
 })
 
-describe('SessionFollowupComposer — disabled (terminal state)', () => {
-  it('renders the disabled banner when disabled prop is true', () => {
+describe('SessionFollowupComposer — disabled (unknown activity)', () => {
+  it('renders the unavailable banner when disabled prop is true', () => {
     renderComposer({ disabled: true })
     const composer = screen.getByTestId('session-followup-composer')
     expect(composer).toHaveAttribute('data-disabled', 'true')
-    expect(composer).toHaveTextContent(/no longer accepting followups/i)
+    // New activity model: sessions never reach a terminal state; the
+    // composer is unavailable only when activity is 'unknown'.
+    expect(composer).toHaveTextContent(/activity is unknown/i)
     expect(screen.queryByTestId('session-followup-input')).not.toBeInTheDocument()
     expect(screen.queryByTestId('session-followup-send')).not.toBeInTheDocument()
   })
@@ -217,19 +219,21 @@ describe('SessionFollowupComposer — three-state data-state attribute', () => {
     expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'interactive')
   })
 
-  it('renders data-state="closed" when disabled is true', () => {
+  it('renders data-state="unavailable" when disabled is true', () => {
     renderComposer({ disabled: true })
     const composer = screen.getByTestId('session-followup-composer')
-    expect(composer).toHaveAttribute('data-state', 'closed')
+    // Activity model: 'closed' terminal state is gone; unknown activity
+    // resolves to 'unavailable'.
+    expect(composer).toHaveAttribute('data-state', 'unavailable')
     expect(composer).toHaveAttribute('data-disabled', 'true')
   })
 
-  it('renders data-state="closed" when state="closed" is explicitly passed overriding disabled=false', () => {
+  it('renders data-state="unavailable" when state="closed" is explicitly passed overriding disabled=false', () => {
     renderComposer({ state: 'closed' })
     const composer = screen.getByTestId('session-followup-composer')
-    expect(composer).toHaveAttribute('data-state', 'closed')
+    expect(composer).toHaveAttribute('data-state', 'unavailable')
     expect(composer).toHaveAttribute('data-disabled', 'true')
-    expect(composer).toHaveTextContent(/no longer accepting followups/i)
+    expect(composer).toHaveTextContent(/activity is unknown/i)
   })
 
   it('keeps the input disabled when disabled=true overrides an interactive visual state', () => {
@@ -251,44 +255,39 @@ describe('SessionFollowupComposer — three-state data-state attribute', () => {
   })
 })
 
-describe('SessionFollowupComposer — closed-state endedAt copy', () => {
-  it('renders a relative-time message that references endedAt past the 1-hour threshold (8h ago)', () => {
+describe('SessionFollowupComposer — unavailable banner copy (activity unknown)', () => {
+  // Issue 484: sessions never reach a terminal/ended state. The disabled
+  // composer now renders a single activity-unknown banner regardless of any
+  // legacy `endedAt` value (the prop is no longer rendered). The former
+  // endedAt relative-time scenarios are obsolete under the activity model.
+  it('renders the activity-unknown banner and ignores legacy endedAt', () => {
     const endedAt = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString()
     renderComposer({ disabled: true, endedAt })
 
     const composer = screen.getByTestId('session-followup-composer')
-    expect(composer).toHaveAttribute('data-state', 'closed')
-    expect(composer).toHaveTextContent(/session ended 8h ago/i)
-    expect(composer).toHaveTextContent(/not accepting new followups/i)
+    expect(composer).toHaveAttribute('data-state', 'unavailable')
+    expect(composer).toHaveTextContent(/activity is unknown/i)
+    expect(composer).not.toHaveTextContent(/session ended/i)
   })
 
-  it('renders a relative-time message within the 1-hour threshold (5m ago)', () => {
-    const endedAt = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-    renderComposer({ disabled: true, endedAt })
-
-    const composer = screen.getByTestId('session-followup-composer')
-    expect(composer).toHaveTextContent(/session ended 5m ago/i)
-    expect(composer).toHaveTextContent(/not accepting new followups/i)
-  })
-
-  it('falls back to the generic phrasing when endedAt is absent', () => {
+  it('renders the activity-unknown banner when endedAt is absent', () => {
     renderComposer({ disabled: true })
     const composer = screen.getByTestId('session-followup-composer')
-    expect(composer).toHaveTextContent(/no longer accepting followups/i)
-    expect(composer).not.toHaveTextContent(/session ended \d/i)
+    expect(composer).toHaveTextContent(/activity is unknown/i)
+    expect(composer).not.toHaveTextContent(/session ended/i)
   })
 
-  it('falls back to the generic phrasing when endedAt is null', () => {
+  it('renders the activity-unknown banner when endedAt is null', () => {
     renderComposer({ disabled: true, endedAt: null })
     const composer = screen.getByTestId('session-followup-composer')
-    expect(composer).toHaveTextContent(/no longer accepting followups/i)
+    expect(composer).toHaveTextContent(/activity is unknown/i)
   })
 
-  it('falls back to the generic phrasing when endedAt is an unparseable string', () => {
+  it('renders the activity-unknown banner when endedAt is an unparseable string', () => {
     renderComposer({ disabled: true, endedAt: 'not-a-date' })
     const composer = screen.getByTestId('session-followup-composer')
-    expect(composer).toHaveTextContent(/no longer accepting followups/i)
-    expect(composer).not.toHaveTextContent(/session ended \d/i)
+    expect(composer).toHaveTextContent(/activity is unknown/i)
+    expect(composer).not.toHaveTextContent(/session ended/i)
   })
 })
 

@@ -45,6 +45,9 @@ export function formatLogTime(time: string | null): string {
  * (FSD: `shared/lib` cannot depend on `entities/*`).
  */
 export type SessionTimeStatusKind =
+  | 'idle'
+  | 'active'
+  | 'unknown'
   | 'loading'
   | 'live'
   | 'finalizing'
@@ -110,10 +113,7 @@ export function formatSessionTime({
 
   const isTerminal = TERMINAL_STATUS_KINDS.has(statusKind)
   const pastThreshold = now - dateMs >= ABSOLUTE_RELATIVE_THRESHOLD_MS
-
-  if (isTerminal && pastThreshold) {
-    return { primary: absolute, secondary: relative }
-  }
+  if (isTerminal && pastThreshold) return { primary: absolute, secondary: relative }
   return { primary: relative, secondary: absolute }
 }
 

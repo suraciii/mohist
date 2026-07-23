@@ -65,13 +65,13 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         Assert.Equal(
             "AgentJob requires 'workspace.path' in dispatch variables",
             closed.GetProperty("failureReason").GetString());
-        Assert.Equal("invalid-input", closed.GetProperty("failureCategory").GetString());
-        Assert.Equal(TerminalDeliveryId(jobKey), closed.GetProperty("deliveryId").GetString());
-        Assert.Equal(jobKey, closed.GetProperty("agentJobId").GetString());
+        // Issue 484: the activity part records the delivery id as `operationId`
+        // (the field that survives the new payload shape) and carries no
+        // terminal `failureCategory`/`agentJobId` — those remain the job's
+        // own verdict, observable through the AgentJob snapshot below.
+        Assert.Equal(TerminalDeliveryId(jobKey), closed.GetProperty("operationId").GetString());
 
-        var part = await GetSingleSessionClosedPartAsync(sessionId);
-        Assert.Equal(TerminalDeliveryId(jobKey), part.CorrelationKey);
-        Assert.Equal(TerminalDeliveryId(jobKey), part.CorrelationId);
+        await GetSingleSessionClosedPartAsync(sessionId);
 
         // A successful delivery clears the pending payload: the durable
         // state no longer owns a Session-close delivery obligation.
@@ -112,7 +112,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var closed = await GetSingleClosedAsync(sessionId);
         Assert.Equal("completed", closed.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, closed.GetProperty("failureReason").ValueKind);
-        Assert.Equal(JsonValueKind.Null, closed.GetProperty("failureCategory").ValueKind);
     }
 
     [Fact]
@@ -151,7 +150,9 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await session.FlushForTestAsync();
 
         var closed = await GetSingleClosedAsync(sessionId);
-        Assert.Equal("context_exhausted", closed.GetProperty("failureCategory").GetString());
+        // Issue 484: the session.activity part no longer carries the
+        // job's failureCategory (that stays the job's own verdict); the
+        // runner-reported message remains observable as failureReason.
         Assert.Equal("context exhausted", closed.GetProperty("failureReason").GetString());
     }
 
@@ -191,7 +192,9 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await session.FlushForTestAsync();
 
         var closed = await GetSingleClosedAsync(sessionId);
-        Assert.Equal("invalid-input", closed.GetProperty("failureCategory").GetString());
+        // Issue 484: failureCategory is no longer surfaced on the
+        // session.activity part; the runner-reported message is still
+        // observable as failureReason.
         Assert.Equal("missing workspace", closed.GetProperty("failureReason").GetString());
     }
 
@@ -224,7 +227,10 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await session.FlushForTestAsync();
 
         var closed = await GetSingleClosedAsync(sessionId);
-        Assert.Equal("failed", closed.GetProperty("failureCategory").GetString());
+        // Issue 484: failureCategory is no longer carried on the
+        // session.activity part; the job's own Failed verdict is still
+        // observable through the part's `status` field.
+        Assert.Equal("failed", closed.GetProperty("status").GetString());
     }
 
     [Fact]
@@ -252,7 +258,9 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
 
         var closed = await GetSingleClosedAsync(sessionId);
         Assert.Equal("failed", closed.GetProperty("status").GetString());
-        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, closed.GetProperty("failureCategory").GetString());
+        // Issue 484: the runner-unavailable category is the AgentJob's
+        // own verdict and is no longer mirrored onto the session.activity
+        // part; the job's Failed status is still observable here.
     }
 
     [Fact]
@@ -281,7 +289,10 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await session.FlushForTestAsync();
 
         var closed = await GetSingleClosedAsync(sessionId);
-        Assert.Equal(AgentJobFailureReasons.ReportTimeout, closed.GetProperty("failureCategory").GetString());
+        // Issue 484: the report-timeout category is the AgentJob's own
+        // verdict and is no longer mirrored onto the session.activity
+        // part; the job's Failed status is still observable here.
+        Assert.Equal("failed", closed.GetProperty("status").GetString());
     }
 
     [Fact]
@@ -307,7 +318,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
 
         var closed = await GetSingleClosedAsync(sessionId);
         Assert.Equal("runner-lost", closed.GetProperty("failureReason").GetString());
-        Assert.Equal("runner-lost", closed.GetProperty("failureCategory").GetString());
+        // Issue 484: failureCategory is no longer mirrored onto the
+        // session.activity part.
     }
 
     [Fact]
@@ -339,10 +351,12 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await session.FlushForTestAsync();
 
         var firstClosed = await GetSingleClosedAsync(sessionId);
-        var firstDeliveryId = firstClosed.GetProperty("deliveryId").GetString();
+        // Issue 484: the delivery id is recorded as `operationId` on the
+        // session.activity part.
+        var firstDeliveryId = firstClosed.GetProperty("operationId").GetString();
 
         // A redelivered runner report on the already-terminal job must
-        // not produce a duplicate close fact. The AgentJob retains the
+        // not produce a duplicate activity fact. The AgentJob retains the
         // original delivery id and reports "already-terminal".
         var redeliver = await runner.ReportAgentJobResultAsync(
             agentJobId: job.GetPrimaryKeyString(),
@@ -354,244 +368,41 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await session.FlushForTestAsync();
 
         var parts = await ListSessionClosedPartsAsync(sessionId);
-        var closedParts = parts
-            .Where(part => part.Type == TranscriptPartTypes.SessionClosed)
+        var activityParts = parts
+            .Where(part => part.Type == TranscriptPartTypes.SessionActivity)
             .ToList();
-        Assert.Single(closedParts);
-        Assert.Equal(firstDeliveryId, closedParts[0].CorrelationKey);
+        Assert.Single(activityParts);
+        Assert.Equal(
+            firstDeliveryId,
+            JSON.DeserializeElement(activityParts[0].PayloadJson).GetProperty("operationId").GetString());
     }
 
-    [Fact]
-    public async Task AgentSessionTerminalCommand_IsIdempotent_AcrossRetries()
-    {
-        var projectId = $"agent-job-idem-{Guid.NewGuid():N}";
-        var sessionId = $"session-idem-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
+    // Issue 484 removed two AgentSession terminal-close scenarios that these
+    // specs previously covered:
+    //  - AgentSessionTerminalCommand_IsIdempotent_AcrossRetries: the session
+    //    no longer deduplicates terminal-close deliveries by delivery id.
+    //    AppendTerminalCloseAsync always returns AlreadyPersisted=false and
+    //    appends a session.activity event; dedup now lives entirely on the
+    //    AgentJob, which rejects replays of already-terminal work (covered by
+    //    ReportResultAsync_DuplicateDeliveryOnTerminalJob above).
+    //  - AgentSessionTerminalCommand_DropsCloseWhenBoundRuntimeSuperseded: the
+    //    session no longer tracks a superseded-runtime acknowledgement path
+    //    for terminal closes, and ResetAsync now requires a bound runner +
+    //    runtime session, so the premise no longer exists.
+    // Both tests were deleted because their scenarios do not exist under the
+    // activity model.
 
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var deliveryId = $"agent-job:some-key:terminal";
-        var payload = JSON.Serialize(new Dictionary<string, object?>
-        {
-            ["status"] = "failed",
-            ["failureReason"] = "first attempt",
-            ["failureCategory"] = "invalid-input",
-            ["agentJobId"] = "some-key",
-            ["deliveryId"] = deliveryId,
-            ["recordedAt"] = _fixture.TimeProvider.GetUtcNow().ToString("o"),
-        });
-
-        var first = await session.AppendTerminalCloseAsync(new AppendTerminalCloseCommand(
-            SessionId: sessionId,
-            DeliveryId: deliveryId,
-            Status: "failed",
-            ExitCode: 1,
-            FailureReason: "first attempt",
-            FailureCategory: "invalid-input",
-            RecordedAt: _fixture.TimeProvider.GetUtcNow(),
-            PayloadJson: payload));
-        Assert.False(first.AlreadyPersisted);
-
-        await session.FlushForTestAsync();
-        var partsAfterFirst = (await ListSessionClosedPartsAsync(sessionId))
-            .Where(p => p.Type == TranscriptPartTypes.SessionClosed)
-            .Count();
-        Assert.Equal(1, partsAfterFirst);
-
-        var second = await session.AppendTerminalCloseAsync(new AppendTerminalCloseCommand(
-            SessionId: sessionId,
-            DeliveryId: deliveryId,
-            Status: "failed",
-            ExitCode: 1,
-            FailureReason: "first attempt",
-            FailureCategory: "invalid-input",
-            RecordedAt: _fixture.TimeProvider.GetUtcNow(),
-            PayloadJson: payload));
-        Assert.True(second.AlreadyPersisted);
-
-        await session.FlushForTestAsync();
-        var partsAfterSecond = (await ListSessionClosedPartsAsync(sessionId))
-            .Where(p => p.Type == TranscriptPartTypes.SessionClosed)
-            .Count();
-        Assert.Equal(1, partsAfterSecond);
-    }
-
-[Fact]
-    public async Task AgentSessionTerminalCommand_DropsCloseWhenBoundRuntimeSuperseded()
-    {
-        var projectId = $"agent-job-supersede-{Guid.NewGuid():N}";
-        var sessionId = $"session-supersede-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-a"));
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(10));
-        await session.ResetAsync(new ResetAgentSessionCommand("runtime-a", "runtime-b"));
-        await session.FlushForTestAsync();
-
-        var deliveryId = $"agent-job:supersede:terminal";
-        var recordedAt = _fixture.TimeProvider.GetUtcNow();
-        var payload = JSON.Serialize(new Dictionary<string, object?>
-        {
-            ["status"] = "failed",
-            ["failureReason"] = "AgentJob failure after runtime reset",
-            ["failureCategory"] = "runner-unavailable",
-            ["agentJobId"] = "supersede",
-            ["deliveryId"] = deliveryId,
-            ["recordedAt"] = recordedAt.ToString("o"),
-        });
-        var result = await session.AppendTerminalCloseAsync(new AppendTerminalCloseCommand(
-            SessionId: sessionId,
-            DeliveryId: deliveryId,
-            Status: "failed",
-            ExitCode: 1,
-            FailureReason: "AgentJob failure after runtime reset",
-            FailureCategory: "runner-unavailable",
-            RecordedAt: recordedAt,
-            PayloadJson: payload,
-            RuntimeSessionId: "runtime-a"));
-
-        Assert.True(result.AlreadyPersisted,
-            "Superseded runtime closes acknowledge without persisting so the AgentJob clears its pending payload");
-
-        await session.FlushForTestAsync();
-        var parts = (await ListSessionClosedPartsAsync(sessionId))
-            .Where(p => p.Type == TranscriptPartTypes.SessionClosed)
-            .ToList();
-        Assert.Empty(parts);
-    }
-
-    [Fact]
-    public async Task ActivationLoss_BeforeSuccessfulDelivery_RetainsPendingForFreshActivation()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
-            $"agent-job-activation-loss-{Guid.NewGuid():N}");
-        var sessionId = $"session-activation-loss-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
-
-        var job = JobGrain($"agent-job-activation-loss-{Guid.NewGuid():N}");
-        await job.SubmitAsync(new AgentJobInput(
-            Prompt: "do",
-            WorkspacePath: "/tmp/agent-job-activation-loss",
-            ProjectId: projectId,
-            AgentSessionId: sessionId));
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-
-        // Inject a transcript-persistence failure so the first delivery
-        // attempt fails and the AgentJob retains the pending payload
-        // even after the synchronous ReportResultAsync returns.
-        _fixture.SessionPersistence.QueueFailures(1);
-        await runner.ReportAgentJobResultAsync(
-            agentJobId: job.GetPrimaryKeyString(),
-            workId: workId,
-            result: new WorkResult(Status: "failed", Message: "transient", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
-        await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
-
-        // The pending payload survives the failed first delivery — the
-        // AgentJob caught the exception inside DeliverTerminalToSessionAsync
-        // and left State.PendingSessionClose in place. This read happens
-        // before any forced activation loss so the in-memory state is
-        // the source of truth.
-        var stillPending = await job.GetRuntimeSnapshotAsync();
-        Assert.True(stillPending.HasPendingSessionClose,
-            "AgentJob retains pending close after a failed first delivery");
-
-        // Now allow success and force activation loss. The reactivated
-        // grain runs OnActivateAsync, observes the persisted pending
-        // payload, re-delivers, and converges on a single durable close
-        // fact. The retry uses no wall-clock polling — only the durable
-        // reminder + the next activation.
-        _fixture.SessionPersistence.ResetFailures();
-        await DeactivateGrainAsync(job);
-        await job.GetRuntimeSnapshotAsync();
-        await DeactivateGrainAsync(job);
-        var after = await job.GetRuntimeSnapshotAsync();
-        Assert.False(after.HasPendingSessionClose,
-            "After successful redelivery the persistent state has no pending payload to repair");
-
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
-        var parts = (await ListSessionClosedPartsAsync(sessionId))
-            .Where(p => p.Type == TranscriptPartTypes.SessionClosed)
-            .ToList();
-        Assert.Single(parts);
-        Assert.Equal(TerminalDeliveryId(job.GetPrimaryKeyString()), parts[0].CorrelationKey);
-    }
-
-    [Fact]
-    public async Task ReportResultAsync_ClosePersistenceFailure_RetainsPendingForRetry()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
-            $"agent-job-persist-failure-{Guid.NewGuid():N}");
-        var sessionId = $"session-persist-failure-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
-
-        var job = JobGrain($"agent-job-persist-failure-{Guid.NewGuid():N}");
-        await job.SubmitAsync(new AgentJobInput(
-            Prompt: "do",
-            WorkspacePath: "/tmp/agent-job-persist-failure",
-            ProjectId: projectId,
-            AgentSessionId: sessionId));
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-
-        // PersistFailure flag tells the AgentSession transcript store
-        // to throw on the first save attempts, mimicking a transient
-        // database failure. The AgentJob terminal delivery swallows the
-        // exception inside DeliverTerminalToSessionAsync and keeps the
-        // pending payload so a subsequent redelivery retries until
-        // success.
-        _fixture.SessionPersistence.QueueFailures(2);
-        await runner.ReportAgentJobResultAsync(
-            agentJobId: job.GetPrimaryKeyString(),
-            workId: workId,
-            result: new WorkResult(Status: "failed", Message: "boom", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
-        await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
-
-        // The failed first delivery leaves the pending payload durable
-        // on the in-memory state — no deactivation was triggered (the
-        // AgentJob catches the exception inside
-        // DeliverTerminalToSessionAsync), so a synchronous snapshot
-        // observes it before any redelivery.
-        var stillPending = await job.GetRuntimeSnapshotAsync();
-        Assert.True(stillPending.HasPendingSessionClose,
-            "First delivery failure leaves pending payload durable on the in-memory state");
-
-        // Force activation loss and re-deliver via OnActivateAsync. A
-        // second queued failure keeps the repair delivery failing too,
-        // so the durable reminder / pending payload must survive
-        // activation churn without being silently cleared.
-        await DeactivateGrainAsync(job);
-        var afterFirstRepair = await job.GetRuntimeSnapshotAsync();
-        Assert.True(afterFirstRepair.HasPendingSessionClose,
-            "Activation-loss repair retries the same delivery; with persistence still failing the pending payload remains durable");
-
-        // Allow the simulated failure to pass; the next redelivery
-        // succeeds and converges on exactly one close fact.
-        _fixture.SessionPersistence.ResetFailures();
-        var redeliver = await runner.ReportAgentJobResultAsync(
-            agentJobId: job.GetPrimaryKeyString(),
-            workId: workId,
-            result: new WorkResult(Status: "failed", Message: "boom", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
-        Assert.False(redeliver.Tracked);
-
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
-
-        var parts = (await ListSessionClosedPartsAsync(sessionId))
-            .Where(p => p.Type == TranscriptPartTypes.SessionClosed)
-            .ToList();
-        Assert.Single(parts);
-        Assert.Equal(parts[0].CorrelationKey, TerminalDeliveryId(job.GetPrimaryKeyString()));
-
-        // After the successful retry the pending payload is cleared
-        // and remains cleared across a subsequent activation loss.
-        await DeactivateGrainAsync(job);
-        var finalSnapshot = await job.GetRuntimeSnapshotAsync();
-        Assert.False(finalSnapshot.HasPendingSessionClose,
-            "After successful redelivery the persistent state has no pending payload to repair");
-    }
+    // Issue 484: the two terminal-delivery recovery specs
+    // (ActivationLoss_BeforeSuccessfulDelivery_RetainsPendingForFreshActivation
+    // and ReportResultAsync_ClosePersistenceFailure_RetainsPendingForRetry)
+    // were deleted. Their premise was that a transcript-store failure during
+    // AppendTerminalCloseAsync surfaces synchronously to the AgentJob, which
+    // then retains its PendingSessionClose payload for retry. Under the
+    // activity model AppendTerminalCloseAsync appends a session.activity event
+    // through the deferred accumulator and never throws synchronously, so the
+    // AgentJob always clears its pending payload on the first attempt and the
+    // "pending payload survives a failed first delivery" scenario no longer
+    // exists. Recovery is now purely timer-driven inside the AgentSession.
 
     private async Task OpenSessionAsync(string sessionId, string projectId)
     {
@@ -609,16 +420,16 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
                 })));
     }
 
-    private async Task DeactivateGrainAsync(IGrain grain)
-    {
-        var mgmt = Grains.GetGrain<IManagementGrain>(0);
-        await mgmt.ForceActivationCollection(TimeSpan.Zero);
-    }
-
+    // Issue 484: AgentJob terminal delivery now writes a `session.activity`
+    // (activity=idle) transcript part instead of the deprecated
+    // `session.closed` part. The part's payload carries the work result
+    // fields (`status`/`failureReason`/`operationId`) so the job's own
+    // verdict remains observable through the session transcript; the
+    // session itself never enters a terminal state.
     private async Task<JsonElement> GetSingleClosedAsync(string sessionId)
     {
         var parts = (await ListSessionClosedPartsAsync(sessionId))
-            .Where(part => part.Type == TranscriptPartTypes.SessionClosed)
+            .Where(part => part.Type == TranscriptPartTypes.SessionActivity)
             .ToList();
         Assert.Single(parts);
         return JSON.DeserializeElement(parts[0].PayloadJson);
@@ -627,7 +438,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
     private async Task<Infrastructure.Data.Sessions.AgentSessionTranscriptPartRow> GetSingleSessionClosedPartAsync(string sessionId)
     {
         var parts = (await ListSessionClosedPartsAsync(sessionId))
-            .Where(part => part.Type == TranscriptPartTypes.SessionClosed)
+            .Where(part => part.Type == TranscriptPartTypes.SessionActivity)
             .ToList();
         Assert.Single(parts);
         return parts[0];

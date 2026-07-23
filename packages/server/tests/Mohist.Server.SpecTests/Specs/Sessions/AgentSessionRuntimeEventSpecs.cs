@@ -44,7 +44,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
             runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
-                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
+                new { type = "session.activity", payload = new { activity = "idle", status = "completed", operationId = "op-flush" } }
             }
         });
 
@@ -55,7 +55,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         var parts = await LoadTranscriptPartsAsync(db, session.Id);
         Assert.Equal([1L, 2L], parts.Select(e => e.Sequence).ToArray());
         Assert.Equal("text", parts[0].Type);
-        Assert.Equal("session.closed", parts[1].Type);
+        Assert.Equal("session.activity", parts[1].Type);
     }
 
     [Fact]
@@ -191,7 +191,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
             runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
-                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
+                new { type = "session.activity", payload = new { activity = "idle", status = "completed", operationId = "op-terminal" } }
             }
         });
 
@@ -219,14 +219,14 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("inactive", grainSession.Status);
+        Assert.Equal("idle", grainSession.Status);
         Assert.Equal(10, grainSession.InputTokens);
         Assert.Equal(0.001, grainSession.CostAmount);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var runtimeEvents = (await LoadTranscriptPartsAsync(db, session.Id)).ToList();
         Assert.Equal(2, runtimeEvents.Count);
-        Assert.Equal("session.closed", runtimeEvents[0].Type);
+        Assert.Equal("session.activity", runtimeEvents[0].Type);
         Assert.Equal("usage", runtimeEvents[1].Type);
     }
 
@@ -294,8 +294,8 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
             {
                 new
                 {
-                    type = "session.closed",
-                    payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
+                    type = "session.activity",
+                    payload = new { activity = "idle", status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1, operationId = "op-terminal" }
                 }
             }
         });
@@ -305,7 +305,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("inactive", grainSession.Status);
+        Assert.Equal("idle", grainSession.Status);
         Assert.Equal("probe_timeout", grainSession.FailureCategory);
     }
 

@@ -225,14 +225,16 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
     expect(pi.resetCalls).toHaveLength(0)
   })
 
-  it("OpenCodeBinding_Reset_ReturnsUnavailable_WithoutInvokingEitherRuntime", async () => {
-    const { builder, pi } = setup()
+  it("OpenCodeBinding_Reset_CreatesAndReturnsReplacement", async () => {
+    const { builder, pi, opencode } = setup()
     const handler = builder.handlers.get("SessionCommand")
     if (!handler) throw new Error("SessionCommand handler not registered")
 
     const result = (await handler(makeResetRequest("opencode"))) as { ok: boolean; runtimeSessionId?: string; error?: string }
 
-    expect(result).toEqual({ ok: false, error: "unavailable" })
+    expect(result).toEqual({ ok: true, runtimeSessionId: "ses_replacement" })
+    expect(opencode.createSessionCalls).toHaveLength(1)
+    expect(opencode.createSessionCalls[0].target).toEqual({ runtime: "opencode", runtimeSessionId: null, workDir: "/work/project" })
     expect(pi.compactCalls).toHaveLength(0)
     expect(pi.resetCalls).toHaveLength(0)
   })

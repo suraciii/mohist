@@ -18,6 +18,7 @@ import {
   resetGenericSession,
   resetSession,
 } from '../../../entities/coder-session'
+import type { AgentSessionActivity } from '../../../entities/coder-session'
 import { useProject } from '../../../entities/project'
 
 const DISABLED_REASON_TITLE = 'Session is running'
@@ -26,7 +27,6 @@ const DISABLED_REASON_BODY =
 const PENDING_REASON_TITLE = 'Recovery action in progress'
 const PENDING_REASON_BODY =
   'Wait for the current recovery action to finish before starting another one.'
-const ACTIVE_STATUSES = new Set(['running', 'active', 'live'])
 const RESET_CONFIRM_BODY =
   'A new runtime session will start without prior context. Transcript and audit history remain available.'
 
@@ -53,11 +53,6 @@ function DisabledReasonTooltip({
   )
 }
 
-function isSessionActive(status: string | null | undefined): boolean {
-  if (!status) return false
-  return ACTIVE_STATUSES.has(status)
-}
-
 function resolveErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 409) {
@@ -78,7 +73,8 @@ export interface SessionRecoveryActionsProps {
   issueNumber: number
   sessionName: string
   genericSessionId?: string
-  status: string | null | undefined
+  activity?: AgentSessionActivity | string | null | undefined
+  status?: string | null | undefined
   recoveryAvailable?: boolean
   onSuccess?: () => void
   className?: string
@@ -118,7 +114,7 @@ export function SessionRecoveryActions({
   issueNumber,
   sessionName,
   genericSessionId,
-  status,
+  activity,
   recoveryAvailable,
   onSuccess,
   className,
@@ -129,7 +125,7 @@ export function SessionRecoveryActions({
   genericClients = defaultGenericClients,
 }: SessionRecoveryActionsProps) {
   const { projectId } = useProject()
-  const active = recoveryAvailable === undefined ? isSessionActive(status) : !recoveryAvailable
+  const active = recoveryAvailable === undefined ? activity !== 'idle' : !recoveryAvailable
   const [resetDialogOpen, setResetDialogOpen] = useState(false)
   const [inlineError, setInlineError] = useState<string | null>(null)
   const [compactIdempotencyKey, setCompactIdempotencyKey] = useState<string | null>(null)
@@ -137,7 +133,7 @@ export function SessionRecoveryActions({
 
   useEffect(() => {
     setInlineError(null)
-  }, [status])
+  }, [activity])
 
   const compactMutation = useMutation({
     mutationFn: (idempotencyKey: string) => {

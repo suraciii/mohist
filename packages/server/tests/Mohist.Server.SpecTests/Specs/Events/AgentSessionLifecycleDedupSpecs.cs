@@ -263,15 +263,26 @@ public class AgentSessionLifecycleDedupSpecs
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
-        await AppendTerminalAsync(session, status: "completed", exitCode: 0);
+        // Under the activity model the terminal-close observation is carried by
+        // the `session.activity` runtime event (the legacy `session.closed`
+        // event is a no-op). It must still be forwarded on the transcript
+        // channel and must not be persisted as a domain event.
+        await AppendEventsAsync(session, new
+        {
+            runtimeSessionId = session.Id,
+            runtimeEvents = new[]
+            {
+                new { type = "session.activity", payload = new { activity = "idle", status = "completed", operationId = "op-dedup" } }
+            }
+        });
 
-        Assert.Single(_fixture.RecordingTranscriptPublisher.Published, p => p.Type == "session.closed");
+        Assert.Single(_fixture.RecordingTranscriptPublisher.Published, p => p.Type == "session.activity");
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
         await grain.FlushForTestAsync();
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
-        Assert.Equal(0, stored.Count(s => s.Envelope.Type == "session.closed"));
+        Assert.Equal(0, stored.Count(s => s.Envelope.Type == "session.activity"));
     }
 
     [Fact]

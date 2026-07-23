@@ -59,7 +59,7 @@ export interface IssueDecisionContextInput {
     | 'blocker'
   >
   agentStatus: Pick<AgentStatus, 'runnerAvailable' | 'runnerMessage' | 'capacity' | 'activeAgents'> | null
-  workflowSessions: ReadonlyArray<Pick<WorkflowRunSession, 'sessionName' | 'status' | 'startedAt' | 'createdAt'>>
+  workflowSessions: ReadonlyArray<Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> & { status?: string }>
   projectPath: (path: string) => string
 }
 
@@ -93,27 +93,17 @@ function sessionTimestamp(session: Pick<WorkflowRunSession, 'startedAt' | 'creat
   return Number.isNaN(created) ? 0 : created
 }
 
-const ACTIVE_STATUSES = new Set(['active', 'running', 'probing'])
-const ACTIVE_PRIORITY: Record<string, number> = {
-  active: 0,
-  running: 1,
-  probing: 2,
-}
-
-function activePriority(status: string): number {
-  if (ACTIVE_STATUSES.has(status)) {
-    return ACTIVE_PRIORITY[status] ?? ACTIVE_STATUSES.size
-  }
-  return Number.MAX_SAFE_INTEGER
+function activePriority(activity: WorkflowRunSession['activity'] | undefined): number {
+  return activity === 'active' ? 0 : activity === 'unknown' ? 1 : 2
 }
 
 export function selectTranscriptSession(
-  sessions: ReadonlyArray<Pick<WorkflowRunSession, 'sessionName' | 'status' | 'startedAt' | 'createdAt'>>,
+  sessions: ReadonlyArray<Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> & { status?: string }>,
 ): Pick<WorkflowRunSession, 'sessionName'> | null {
   if (sessions.length === 0) return null
-  let best: { session: Pick<WorkflowRunSession, 'sessionName' | 'status' | 'startedAt' | 'createdAt'>; activeRank: number; ts: number } | null = null
+  let best: { session: Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> & { status?: string }; activeRank: number; ts: number } | null = null
   for (const session of sessions) {
-    const activeRank = activePriority(session.status)
+    const activeRank = activePriority(session.activity)
     const ts = sessionTimestamp(session)
     if (!best) {
       best = { session, activeRank, ts }

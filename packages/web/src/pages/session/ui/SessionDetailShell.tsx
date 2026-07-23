@@ -3,14 +3,13 @@ import { Link } from 'react-router-dom'
 import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, AlertTriangleIcon, CheckIcon, CopyIcon } from 'lucide-react'
 import {
   SessionTranscriptLayout as DefaultSessionTranscriptLayout,
-  formatDuration,
   selectFailedToolCalls,
   selectToolCallGroupIds,
   useTranscriptLocate,
 } from '../../../widgets/session-transcript'
 import type { DisplayToolPart } from '../../../widgets/session-transcript'
 import { SessionFollowupComposer as DefaultSessionFollowupComposer, SessionRecoveryActions as DefaultSessionRecoveryActions } from '../../../widgets/coder-session'
-import { ContextHealthBar as DefaultContextHealthBar, CompactionLineageLink as DefaultCompactionLineageLink } from '../../../widgets/coder-session'
+import { ContextHealthBar as DefaultContextHealthBar } from '../../../widgets/coder-session'
 import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
@@ -23,7 +22,7 @@ export interface SessionDetailShellComponents {
   SessionFollowupComposer: typeof DefaultSessionFollowupComposer
   SessionRecoveryActions: typeof DefaultSessionRecoveryActions
   ContextHealthBar: typeof DefaultContextHealthBar
-  CompactionLineageLink: typeof DefaultCompactionLineageLink
+  CompactionLineageLink?: unknown
 }
 
 const defaultComponents: SessionDetailShellComponents = {
@@ -31,11 +30,9 @@ const defaultComponents: SessionDetailShellComponents = {
   SessionFollowupComposer: DefaultSessionFollowupComposer,
   SessionRecoveryActions: DefaultSessionRecoveryActions,
   ContextHealthBar: DefaultContextHealthBar,
-  CompactionLineageLink: DefaultCompactionLineageLink,
 }
 
 interface SessionErrorsEvidenceProps {
-  statusKind: StatusKind
   failureCategory: string | null | undefined
   toolErrorCount: number | null | undefined
   failureReason: string | null | undefined
@@ -56,7 +53,6 @@ function formatFailureCategory(category: string): string {
 }
 
 export function SessionErrorsEvidence({
-  statusKind,
   failureCategory,
   toolErrorCount,
   failureReason,
@@ -64,10 +60,11 @@ export function SessionErrorsEvidence({
   locate,
 }: SessionErrorsEvidenceProps) {
   const hasFailureCategory = failureCategory != null && failureCategory !== ''
+  const hasFailureReason = failureReason != null && failureReason !== ''
   const hasToolErrors = toolErrorCount != null && toolErrorCount > 0
-  const isFailed = statusKind === 'failed'
+  const hasFailureEvidence = hasFailureCategory || hasFailureReason
   const [currentIndex, setCurrentIndex] = useState(0)
-  if (!isFailed && !hasFailureCategory && !hasToolErrors) return null
+  if (!hasFailureEvidence && !hasToolErrors) return null
 
   const activate = () => {
     const tool = failedTools[currentIndex]
@@ -95,13 +92,13 @@ export function SessionErrorsEvidence({
         }
       }}
       tabIndex={failedTools.length > 0 ? 0 : undefined}
-      role={failedTools.length > 0 ? 'button' : isFailed ? 'status' : undefined}
+      role={failedTools.length > 0 ? 'button' : hasFailureEvidence ? 'status' : undefined}
       aria-live={failedTools.length > 0 ? undefined : 'polite'}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <span className="inline-flex items-center gap-1 font-semibold">
           <AlertTriangleIcon className="h-3.5 w-3.5" aria-hidden="true" />
-          {isFailed ? 'Session failed' : 'Tool errors detected'}
+          {hasFailureEvidence ? 'Execution failed' : 'Tool errors detected'}
         </span>
         {hasFailureCategory && (
           <span
@@ -147,7 +144,6 @@ export function SessionDetailShell({
     SessionFollowupComposer,
     SessionRecoveryActions,
     ContextHealthBar,
-    CompactionLineageLink,
   } = { ...defaultComponents, ...components }
   const {
     sessionKey,
@@ -167,7 +163,6 @@ export function SessionDetailShell({
     newContentAvailable,
     scrollToBottom,
     setIsNearBottom,
-    isFinalizing,
     isThinking,
     isStreaming,
     transcriptVersion,
@@ -181,18 +176,12 @@ export function SessionDetailShell({
     contextUsagePercent,
     healthStatus,
     hasRecoveryActions,
-    recoveryAvailable,
     recoverySessionName,
     recoverySessionId,
-    runtimeSessionLineage,
-    viewedRuntimeSessionId,
-    buildLineageTargetPath,
     handleRecoverySuccess,
     issueNumber,
     cancel,
     emptyStateKind,
-    historicalRuntimeTarget,
-    historicalRuntimeId,
   } = data
 
   // ── All hooks must be before any early return ──
@@ -210,56 +199,41 @@ export function SessionDetailShell({
     transcriptVersion: number
   } | null>(null)
 
-  const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
   const displayTurnCount = meta?.turnCount ?? turns.length
   const hasContextUsage = contextWindowUsed != null || contextWindowSize != null
 
-  // Build recovery bar content (not hooks, just derived values)
-  const lineageLink = runtimeSessionLineage && runtimeSessionLineage.length >= 2 && buildLineageTargetPath ? (
-    <CompactionLineageLink
-      runtimeSessionLineage={runtimeSessionLineage}
-      viewedRuntimeSessionId={viewedRuntimeSessionId}
-      buildTargetPath={buildLineageTargetPath}
-    />
-  ) : null
-
-  const recoveryBarContent = hasRecoveryActions || lineageLink ? (
+  const recoveryBarContent = hasRecoveryActions ? (
     <div className="flex flex-col gap-2">
-      {hasRecoveryActions && (
-        <div className="flex flex-row flex-wrap gap-2 items-start justify-between md:flex-nowrap">
-          {hasContextUsage && (
-            <div className="flex-1 min-w-0">
-              <ContextHealthBar
-                contextWindowUsed={contextWindowUsed}
-                contextWindowSize={contextWindowSize}
-                contextUsagePercent={contextUsagePercent}
-                healthStatus={healthStatus}
-              />
-            </div>
-          )}
-          {(recoverySessionName || recoverySessionId) && (
-            <div className="contents md:block md:shrink-0">
-              <SessionRecoveryActions
-                issueNumber={issueNumber}
-                sessionName={recoverySessionName ?? ''}
-                genericSessionId={recoverySessionId ?? undefined}
-                status={meta?.status ?? null}
-                recoveryAvailable={recoveryAvailable}
-                onSuccess={handleRecoverySuccess}
-                bare
-              />
-            </div>
-          )}
-        </div>
-      )}
-      {lineageLink}
+      <div className="flex flex-row flex-wrap gap-2 items-start justify-between md:flex-nowrap">
+        {hasContextUsage && (
+          <div className="flex-1 min-w-0">
+            <ContextHealthBar
+              contextWindowUsed={contextWindowUsed}
+              contextWindowSize={contextWindowSize}
+              contextUsagePercent={contextUsagePercent}
+              healthStatus={healthStatus}
+            />
+          </div>
+        )}
+        {(recoverySessionName || recoverySessionId) && (
+          <div className="contents md:block md:shrink-0">
+            <SessionRecoveryActions
+              issueNumber={issueNumber}
+              sessionName={recoverySessionName ?? ''}
+              genericSessionId={recoverySessionId ?? undefined}
+               activity={meta?.activity}
+              onSuccess={handleRecoverySuccess}
+              bare
+            />
+          </div>
+        )}
+      </div>
     </div>
   ) : null
 
   // Errors evidence (region between usage summary and transcript)
   const errorsEvidence = (
     <SessionErrorsEvidence
-      statusKind={displayStatusKind}
       failureCategory={meta?.eventSummary?.failureCategory ?? null}
       toolErrorCount={meta?.eventSummary?.toolErrorCount ?? null}
       failureReason={meta?.failureReason ?? null}
@@ -346,7 +320,7 @@ export function SessionDetailShell({
 
     if (!isNearBottomRef.current || isUserScrollingRef.current || isSelectingTextRef.current) return
     container.scrollTop = container.scrollHeight
-  }, [handleScroll, isRunning, meta?.status, sessionKey, transcriptVersion, turns.length])
+  }, [handleScroll, isRunning, meta?.activity, sessionKey, transcriptVersion, turns.length])
 
   useEffect(() => {
     if (queuedFollowup?.sessionKey === sessionKey && transcriptVersion > queuedFollowup.transcriptVersion) {
@@ -420,7 +394,7 @@ export function SessionDetailShell({
       workflowContextPath={workflowContextPath}
       workflowContextLabel={workflowContextLabel}
       meta={meta}
-      statusKind={displayStatusKind}
+      statusKind={statusKind}
       turnCount={displayTurnCount}
       siblingNav={siblingNav}
       isRunning={isRunning}
@@ -445,7 +419,7 @@ export function SessionDetailShell({
             headerRef={headerRef}
             scrollContainerRef={scrollContainerRef}
             meta={meta}
-            statusKind={displayStatusKind}
+            statusKind={statusKind}
             turnCount={displayTurnCount}
           />
           <SessionUsageSummary usage={meta.usage} />
@@ -468,11 +442,7 @@ export function SessionDetailShell({
               scrollContainerRef={scrollContainerRef}
             />
           ) : (
-            <SessionEmptyStateView
-              kind={emptyStateKind ?? (isRunning ? 'running-no-content' : 'terminal-no-content')}
-              historicalRuntimeTarget={historicalRuntimeTarget}
-              historicalRuntimeId={historicalRuntimeId}
-            />
+            <SessionEmptyStateView kind={emptyStateKind ?? 'unknown-no-content'} />
           )}
         </div>
 
@@ -482,7 +452,6 @@ export function SessionDetailShell({
               onSend={handleFollowupSend}
               isSending={followupIsPending}
               disabled={!canFollowup}
-              endedAt={meta.completedAt}
               hasQueuedFollowup={queuedFollowup?.sessionKey === sessionKey}
               className="py-0.5"
             />
@@ -505,55 +474,24 @@ function getStageLabel(stage: string | null): string {
 
 function sessionTimeAnchorMs(
   meta: import('../../../entities/coder-session').SessionMetadata,
-  statusKind: StatusKind,
 ): number | null {
-  const lastActivityMs = meta?.lastActivityAt ? new Date(meta.lastActivityAt).getTime() : null
-  const completedMs = meta?.completedAt ? new Date(meta.completedAt).getTime() : null
-  const isTerminal = statusKind === 'completed' || statusKind === 'failed' || statusKind === 'stale'
-  if (isTerminal) {
-    if (lastActivityMs != null && completedMs != null) return Math.max(lastActivityMs, completedMs)
-    if (lastActivityMs != null) return lastActivityMs
-    if (completedMs != null) return completedMs
-    return null
-  }
-  return lastActivityMs
+  return meta.lastActivityAt ? new Date(meta.lastActivityAt).getTime() : null
 }
 
-const sessionStatusPresentation: Record<StatusKind, { label: string; className: string; dotClassName?: string; withDot?: boolean }> = {
-  loading: {
-    label: 'Loading',
+const sessionStatusPresentation: Partial<Record<StatusKind, { label: string; className: string; dotClassName?: string; withDot?: boolean }>> = {
+  active: {
+    label: 'Active',
+    className: 'bg-info-subtle text-info border-info-border',
+    dotClassName: 'bg-info',
+    withDot: true,
+  },
+  idle: {
+    label: 'Idle',
     className: 'bg-muted text-muted-foreground border-border',
     dotClassName: 'bg-muted-foreground/60',
   },
-  live: {
-    label: 'Running',
-    className: 'bg-info-subtle text-info border-info-border',
-    dotClassName: 'bg-info',
-    withDot: true,
-  },
-  probing: {
-    label: 'Checking session',
-    className: 'bg-info-subtle text-info border-info-border',
-    dotClassName: 'bg-info',
-    withDot: true,
-  },
-  finalizing: {
-    label: 'Finalizing',
-    className: 'bg-warning-subtle text-warning border-warning-border',
-    dotClassName: 'bg-warning',
-  },
-  completed: {
-    label: 'Completed',
-    className: 'bg-success-subtle text-success border-success-border',
-    dotClassName: 'bg-success',
-  },
-  failed: {
-    label: 'Session failed',
-    className: 'bg-danger-subtle text-danger border-danger-border',
-    dotClassName: 'bg-danger',
-  },
-  stale: {
-    label: 'Stale',
+  unknown: {
+    label: 'Unknown',
     className: 'bg-warning-subtle text-warning border-warning-border',
     dotClassName: 'bg-warning',
   },
@@ -566,8 +504,8 @@ const stageChipPresentation: Record<string, string> = {
   integrate: 'bg-muted text-muted-foreground border-border',
 }
 
-function StatusBadge({ kind, failureReason }: { kind: StatusKind; failureReason?: string | null }) {
-  const presentation = sessionStatusPresentation[kind]
+function StatusBadge({ kind }: { kind: StatusKind }) {
+  const presentation = sessionStatusPresentation[kind] ?? sessionStatusPresentation.unknown!
   const { label, className, dotClassName, withDot } = presentation
   return (
     <span
@@ -587,11 +525,6 @@ function StatusBadge({ kind, failureReason }: { kind: StatusKind; failureReason?
         </span>
       )}
       {label}
-      {kind === 'failed' && failureReason && (
-        <span className="ml-1 text-danger truncate max-w-[200px]" title={failureReason}>
-          {failureReason}
-        </span>
-      )}
     </span>
   )
 }
@@ -623,17 +556,9 @@ function SessionHeader({
   cancel: SessionDataSourceResult['cancel']
   headerRef: RefObject<HTMLDivElement | null>
 }) {
-  const isTerminal = statusKind === 'completed' || statusKind === 'failed'
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
   const [cancelState, setCancelState] = useState<string | null>(null)
   const showCancelControl = cancel != null && isRunning
-  const createdAt = meta?.createdAt ?? new Date().toISOString()
-  const completedAt = meta?.completedAt ?? null
-  const duration = isTerminal && completedAt
-    ? new Date(completedAt).getTime() - new Date(createdAt).getTime()
-    : isTerminal
-      ? Date.now() - new Date(createdAt).getTime()
-      : 0
 
   const changedFiles = meta?.changedFiles
   const fileSummary = changedFiles && changedFiles.length > 0
@@ -647,19 +572,12 @@ function SessionHeader({
 
   const isWideViewport = useMediaQuery('(min-width: 1280px)')
 
-  const lastActivityAnchorMs = sessionTimeAnchorMs(meta, statusKind)
+  const lastActivityAnchorMs = sessionTimeAnchorMs(meta)
   const lastActivityTime = lastActivityAnchorMs == null ? null : formatSessionTime({
     date: lastActivityAnchorMs,
     statusKind,
     now: Date.now(),
   })
-  const probeTime = (statusKind === 'probing' && meta?.probeSentAt)
-    ? formatSessionTime({
-        date: meta.probeSentAt,
-        statusKind: 'probing',
-        now: Date.now(),
-      }).primary
-    : null
 
   return (
     <div
@@ -710,7 +628,7 @@ function SessionHeader({
         >
           {meta.sessionName ?? 'Session'}
         </h1>
-        <StatusBadge kind={statusKind} failureReason={meta?.failureReason} />
+        <StatusBadge kind={statusKind} />
         <span
           data-testid="session-header-stage"
           data-stage={meta?.stage ?? ''}
@@ -753,26 +671,8 @@ function SessionHeader({
             {lastActivityTime.primary}
           </span>
         )}
-        {probeTime !== null && (
-          <span
-            data-testid="session-header-probing-since"
-            data-probing-since={probeTime}
-            className="text-warning"
-          >
-            Checking since {probeTime}
-          </span>
-        )}
         {fileSummary && (
           <span data-testid="session-header-file-summary">{fileSummary}</span>
-        )}
-        {isTerminal && (
-          <span
-            data-testid="session-header-duration"
-            data-duration-ms={duration}
-            className={statusKind === 'failed' ? 'text-danger' : ''}
-          >
-            {formatDuration(duration)}
-          </span>
         )}
         {meta?.sessionId && (
           <SessionIdCopyButton
@@ -975,55 +875,34 @@ function SessionIdCopyButton({ sessionId, truncated }: { sessionId: string; trun
   )
 }
 
-function SessionEmptyStateView({
-  kind,
-  historicalRuntimeTarget,
-  historicalRuntimeId,
-}: {
-  kind: EmptyStateKind
-  historicalRuntimeTarget: string | null
-  historicalRuntimeId: string | null
-}) {
-  if (kind === 'runtime-filtered') {
+function SessionEmptyStateView({ kind }: { kind: EmptyStateKind }) {
+  if (kind === 'active-no-content') {
     return (
-      <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind="runtime-filtered">
+      <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind={kind}>
         <div className="text-center space-y-3">
-          <div className="text-muted-foreground text-lg">The current runtime has no content</div>
-          {historicalRuntimeTarget && historicalRuntimeId ? (
-            <p className="text-muted-foreground text-sm">
-              Content is available from a historical runtime.{' '}
-              <Link
-                to={historicalRuntimeTarget}
-                data-testid="session-empty-state-history-link"
-                className="text-info hover:text-info/80 transition-colors"
-              >
-                View historical runtime
-              </Link>
-            </p>
-          ) : (
-            <p className="text-muted-foreground text-sm">Content is available from a historical runtime.</p>
-          )}
+          <div className="text-info text-lg">The session is active but no content has been received</div>
+          <p className="text-muted-foreground text-sm">Waiting for runtime output.</p>
         </div>
       </div>
     )
   }
 
-  if (kind === 'running-no-content') {
+  if (kind === 'unknown-no-content') {
     return (
-      <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind="running-no-content">
+      <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind={kind}>
         <div className="text-center space-y-3">
-          <div className="text-info text-lg">The session has started but no content has been received</div>
-          <p className="text-muted-foreground text-sm">The session is running but no content has been received yet.</p>
+          <div className="text-warning text-lg">Session activity is unknown</div>
+          <p className="text-muted-foreground text-sm">Mohist cannot confirm whether execution is still active.</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind="terminal-no-content">
+    <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind={kind}>
       <div className="text-center space-y-3">
-        <div className="text-muted-foreground text-lg">No content was received for this session</div>
-        <p className="text-muted-foreground text-sm">This session completed without recording any content.</p>
+        <div className="text-muted-foreground text-lg">This session is idle</div>
+        <p className="text-muted-foreground text-sm">Send a follow-up to continue the conversation.</p>
       </div>
     </div>
   )

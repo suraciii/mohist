@@ -13,10 +13,9 @@ export const WORKFLOW_SESSION_SORT_KEYS: readonly WorkflowSessionSortKey[] = [
   'duration',
 ] as const
 
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
-
-export function isTerminalSessionStatus(status: string): boolean {
-  return TERMINAL_STATUSES.has(status)
+export function isTerminalSessionStatus(activity: string): boolean {
+  void activity
+  return false
 }
 
 export function getSessionPipelineStage(session: Pick<WorkflowRunSession, 'stage'>): WorkflowPipelineStage | null {
@@ -36,18 +35,19 @@ export function getSessionTotalTokens(session: Pick<WorkflowRunSession, 'usage'>
 }
 
 export interface SessionDurationInput {
-  status: string
+  activity?: 'idle' | 'active' | 'unknown'
+  status?: string
   createdAt: string
   startedAt: string | null
   completedAt: string | null
 }
 
 export function computeSessionDurationMs(session: SessionDurationInput, nowMs: number): number {
-  const terminal = isTerminalSessionStatus(session.status)
+  const terminal = isTerminalSessionStatus(session.activity ?? 'unknown')
   const startIso = session.startedAt ?? session.createdAt
   const startMs = startIso ? new Date(startIso).getTime() : Number.NaN
   if (terminal) {
-    const endIso = session.completedAt ?? session.createdAt
+    const endIso = session.createdAt
     const endMs = endIso ? new Date(endIso).getTime() : Number.NaN
     if (Number.isNaN(startMs) || Number.isNaN(endMs)) return 0
     return Math.max(0, endMs - startMs)
@@ -85,9 +85,9 @@ export function useWorkflowSessionFiltering(
   const availableStatuses = useMemo(() => {
     const seen = new Set<string>()
     for (const session of sessions) {
-      if (session.status) seen.add(session.status)
+      seen.add(session.activity ?? 'unknown')
     }
-    const required = ['running', 'completed', 'failed']
+    const required = ['active', 'idle', 'unknown']
     for (const value of required) {
       seen.add(value)
     }
@@ -105,7 +105,7 @@ export function useWorkflowSessionFiltering(
 
   const filtered = useMemo(() => {
     return sessions.filter((session) => {
-      if (statusFilter && session.status !== statusFilter) return false
+      if (statusFilter && session.activity !== statusFilter) return false
       if (stageFilter) {
         const stage = getSessionPipelineStage(session)
         if (stage !== stageFilter) return false

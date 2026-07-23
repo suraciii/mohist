@@ -167,7 +167,12 @@ export async function callSessionCommand(
   observer: PiTurnObserver | null,
 ): Promise<SessionCommandResult> {
   if (handle.kind === "opencode") {
-    return { ok: false, error: "unavailable" }
+    if (command === "compact") return { ok: false, error: "unavailable" }
+    const result = await handle.runtime.createSession({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: request.workDir },
+    })
+    if (result.ok) return { ok: true, runtimeSessionId: result.value.runtimeSessionId }
+    return { ok: false, error: mapOpenCodeError(result.error.kind) }
   }
   if (command === "compact") {
     return dispatchPiCompact(handle.runtime, request, observer)
@@ -241,6 +246,11 @@ async function dispatchPiReset(
   const result: PiResetResult = await runtime.reset(piRequest)
   if (result.ok) return { ok: true, runtimeSessionId: result.value.runtimeSessionId }
   return { ok: false, error: mapPiError(result.error.kind) }
+}
+
+function mapOpenCodeError(kind: string): SessionCommandError {
+  if (kind === "missing-session") return "missing"
+  return "unavailable"
 }
 
 function mapPiError(kind: PiErrorKind): SessionCommandError {

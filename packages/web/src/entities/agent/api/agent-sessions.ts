@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type {
+  AgentSessionActivity,
   AgentSessionTranscriptResponse,
   AgentSessionUsage,
-  RuntimeSessionLineageEntry,
 } from '../../coder-session/@x/agent-session'
 import { useProject } from '../../project/@x/project-context'
 import { projectApiPath, request } from '../../../shared/api/client'
@@ -22,7 +22,8 @@ export interface AgentSessionListItemDto {
   sessionId: string
   agentId: string
   agentName: string
-  status: string
+  activity?: AgentSessionActivity
+  status?: string
   createdAt: string
   lastActivityAt: string | null
   resolvedModel: string | null
@@ -35,16 +36,16 @@ export interface GenericAgentSessionSummaryDto {
   agentName: string
   runtimeSessionId: string | null
   runtime: string | null
-  status: string
+  activity: AgentSessionActivity
   createdAt: string
   lastActivityAt: string | null
   resolvedModel: string | null
   failureCategory: string | null
+  failureReason: string | null
   toolCallCount: number | null
   toolErrorCount: number | null
   contextRefs: AgentSessionListContextRefsDto | null
   usage: AgentSessionUsage
-  runtimeSessionLineage: RuntimeSessionLineageEntry[] | null
   recoveryAvailable: boolean
 }
 
@@ -138,8 +139,7 @@ export function genericSessionSummaryQueryOptions(projectId: string | null | und
     refetchInterval: (query: { state: { data: GenericAgentSessionSummaryDto | undefined } }) => {
       const data = query.state.data
       if (!data) return 5000
-      const terminal = data.status === 'completed' || data.status === 'failed' || data.status === 'stopped' || data.status === 'cancelled'
-      return terminal ? false : 5000
+      return data.activity === 'idle' ? false : 5000
     },
   }
 }

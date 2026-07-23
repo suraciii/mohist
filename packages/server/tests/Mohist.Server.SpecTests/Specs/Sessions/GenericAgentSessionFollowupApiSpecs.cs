@@ -125,7 +125,6 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             Assert.Equal("runtime_session_missing", body.RootElement.GetProperty("code").GetString());
             Assert.Equal(sessionId, body.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
-            Assert.Equal("reset", body.RootElement.GetProperty("details").GetProperty("hint").GetString());
         }
         finally
         {
@@ -204,12 +203,9 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         await using var scope = _fixture.Services.CreateAsyncScope();
         var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
         var followupTarget = await querier.ResolveGenericFollowupTargetAsync(project.Id, sessionId);
-        var cancelTarget = await querier.ResolveGenericCancelTargetAsync(project.Id, sessionId);
 
         Assert.NotNull(followupTarget);
         Assert.Equal(_runnerId, followupTarget!.RunnerId);
-        Assert.NotNull(cancelTarget);
-        Assert.Equal(_runnerId, cancelTarget!.RunnerId);
     }
 
     [Fact]
@@ -273,69 +269,57 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         Assert.Equal(sessionId, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
     }
 
-    [Fact]
-    public async Task GenericFollowupEndpoint_TerminalSession_ReturnsConflict()
-    {
-        // After a session.closed runtime event the session's status flips
-        // to "inactive" and is treated as terminal. The endpoint must
-        // surface 409 conflict for that state.
-        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-terminal");
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
-        {
-            new AgentSessionRuntimeEventInput(
-                Type: RuntimeEventTypes.SessionClosed,
-                PayloadJson: "{\"status\":\"completed\"}"),
-        }, sessionId));
-        await grain.FlushForTestAsync();
-
-        using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ping" });
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("session_inactive", doc.RootElement.GetProperty("code").GetString());
-    }
+    // GenericFollowupEndpoint_TerminalSession_ReturnsConflict was removed:
+    // under the activity model (issue-484) a session never enters a
+    // terminal state, the session.closed runtime event is a no-op, and the
+    // session_inactive followup short-circuit no longer exists. The followup
+    // endpoint now joins the active/idle turn while the runner is reachable.
 
     [Fact]
-    public async Task GenericFollowupEndpoint_ActivityMarksActiveThenClosedBecomesConflict()
+    public async Task GenericFollowupEndpoint_ActivityMarksActiveThenClosedStaysFollowable()
     {
-        // Activity records flip the session to active (within the runtime
-        // event window); a subsequent session.closed moves it to terminal.
-        // The endpoint accepts followups only between those two events.
+        // Under the activity model (issue-484) session.closed is a no-op
+        // and a session never becomes terminal. After an activity record
+        // marks the session active, the followup endpoint joins the active
+        // turn; a subsequent session.closed observation does not flip the
+        // session to a non-followable state, so a second followup still
+        // succeeds while the runner is reachable.
         var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-lifecycle");
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
-                Type: RuntimeEventTypes.SessionLiveness,
-                PayloadJson: "{}"),
+                Type: RuntimeEventTypes.SessionActivity,
+                PayloadJson: "{\"activity\":\"active\"}"),
         }, sessionId));
         await grain.FlushForTestAsync();
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.SetInvocationResponse("ReceiveFollowup", new RunnerFollowupDeliveryResult(true));
         tracker.Register(_runnerId, "conn-gen-followup-lifecycle");
         try
         {
             using var activeResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "while alive" });
             Assert.Equal(HttpStatusCode.OK, activeResponse.StatusCode);
+
+            await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+            {
+                new AgentSessionRuntimeEventInput(
+                    Type: RuntimeEventTypes.SessionClosed,
+                    PayloadJson: "{\"status\":\"completed\"}"),
+            }, sessionId));
+            await grain.FlushForTestAsync();
+
+            using var terminalResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "after close" });
+            Assert.Equal(HttpStatusCode.OK, terminalResponse.StatusCode);
         }
         finally
         {
             tracker.Unregister(_runnerId);
         }
-
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
-        {
-            new AgentSessionRuntimeEventInput(
-                Type: RuntimeEventTypes.SessionClosed,
-                PayloadJson: "{\"status\":\"completed\"}"),
-        }, sessionId));
-        await grain.FlushForTestAsync();
-
-        using var terminalResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "after close" });
-        Assert.Equal(HttpStatusCode.Conflict, terminalResponse.StatusCode);
     }
 
     [Fact]
@@ -382,9 +366,10 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
-                Type: RuntimeEventTypes.SessionLiveness,
-                PayloadJson: "{}"),
+                Type: RuntimeEventTypes.SessionActivity,
+                PayloadJson: "{\"activity\":\"active\"}"),
         }, sessionId));
+        await grain.FlushForTestAsync();
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();

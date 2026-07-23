@@ -86,8 +86,8 @@ public class IssueSessionApiSpecs
                 },
                 new
                 {
-                    type = "session.closed",
-                    payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
+                    type = "session.activity",
+                    payload = new { activity = "idle", status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
                 },
                 new { type = "message.delta", payload = new { text = "world" } }
             }
@@ -105,7 +105,7 @@ public class IssueSessionApiSpecs
         Assert.Equal(currentSession.Id, root.GetProperty("runtimeSessionId").GetString());
         Assert.Equal("opencode", root.GetProperty("runtime").GetString());
         Assert.False(root.TryGetProperty("coderSessionId", out _));
-        Assert.False(string.IsNullOrEmpty(root.GetProperty("status").GetString()));
+        Assert.False(string.IsNullOrEmpty(root.GetProperty("activity").GetString()));
         Assert.Equal(work.Stage, root.GetProperty("stage").GetString());
         Assert.Equal("Plan session", root.GetProperty("title").GetString());
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
@@ -153,10 +153,6 @@ public class IssueSessionApiSpecs
         var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
-        // Drive usage to 96% (>= 90% threshold) then close the
-        // session as failed. The grain's classifier must rewrite
-        // the failureCategory to "context_exhaustion" and the API
-        // response must surface it.
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
             runtimeSessionId = currentSession.Id,
@@ -173,8 +169,8 @@ public class IssueSessionApiSpecs
                 },
                 new
                 {
-                    type = "session.closed",
-                    payload = new { status = "failed", exitCode = 1 }
+                    type = "turn.failed",
+                    payload = new { status = "failed", exitCode = 1, producedArtifacts = false }
                 }
             }
         });
@@ -182,13 +178,22 @@ public class IssueSessionApiSpecs
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 2, _fixture.Grains);
 
+        // Force the session grain to flush so the post-state-save event
+        // rows are committed before we read them.
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(currentSession.Id);
+        var exhaustion = Assert.Single(
+            stored,
+            s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionContextExhausted);
+        Assert.Equal("context_exhaustion", exhaustion.Envelope.Data!.Value.GetProperty("failureCategory").GetString());
+
         var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         using var doc = JsonDocument.Parse(raw);
         var root = doc.RootElement.GetProperty("data");
-        var eventSummary = root.GetProperty("eventSummary");
         var usage = root.GetProperty("usage");
 
-        Assert.Equal("context_exhaustion", eventSummary.GetProperty("failureCategory").GetString());
         Assert.Equal(960, usage.GetProperty("contextWindowUsed").GetInt64());
         Assert.Equal(1000, usage.GetProperty("contextWindowSize").GetInt64());
     }
@@ -250,7 +255,7 @@ public class IssueSessionApiSpecs
             runtimeSessionId = currentSession.Id,
             runtimeEvents = new object[]
             {
-                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
+                new { type = "session.activity", payload = new { activity = "idle", status = "completed", exitCode = 0 } }
             }
         });
 

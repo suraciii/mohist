@@ -24,7 +24,6 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
 
         Assert.Equal("opencode", _fixture.StateStore.State!.Runtime.Runtime);
-        Assert.Equal("opencode", Assert.Single(_fixture.StateStore.State.Status.RuntimeSessionLineage!).Runtime);
     }
 
     [Fact]

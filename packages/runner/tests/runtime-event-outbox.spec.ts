@@ -661,9 +661,9 @@ describe("AgentSessionRuntimeEventOutbox — legacy migration", () => {
     expect(records).toHaveLength(2)
     const op1 = records.find((r) => r.id === "legacy-followup-terminal:op-1")
     const op2 = records.find((r) => r.id === "legacy-followup-terminal:op-2")
-    expect(op1?.event.type).toBe("session.followup_failed")
+    expect(op1?.event.type).toBe("session.activity")
     expect(op1?.acknowledgementPolicy).toBe("successful-response")
-    expect(op2?.event.type).toBe("session.followup_completed")
+    expect(op2?.event.type).toBe("session.activity")
     expect(op2?.target).toMatchObject({ kind: "workflow" })
   })
 

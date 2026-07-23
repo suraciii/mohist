@@ -1,29 +1,8 @@
-import type { SessionTurn, AgentSessionTranscriptResponse, SessionMetadata, SessionStatusKind, RuntimeSessionLineageEntry } from '../../../entities/coder-session'
+import type { AgentSessionTranscriptResponse, SessionMetadata, SessionStatusKind, SessionTurn } from '../../../entities/coder-session'
 import type { DisplayTurn } from '../../../widgets/session-transcript'
 
-export type StatusKind = SessionStatusKind
-export type EmptyStateKind = 'running-no-content' | 'terminal-no-content' | 'runtime-filtered'
-
-export function findHistoricalRuntimeWithVisibleContent(
-  turns: SessionTurn[],
-  currentRuntimeId: string | null,
-  lineage: RuntimeSessionLineageEntry[] | null,
-): string | null {
-  if (!currentRuntimeId || !lineage) return null
-
-  const runtimesWithVisibleContent = new Set(
-    turns
-      .filter((turn) => turn.assistant.some((part) => {
-        if (part.type === 'tool') return !part.hidden
-        if (part.type === 'text' || part.type === 'reasoning') return part.text.trim().length > 0
-        return part.message.trim().length > 0
-      }))
-      .map((turn) => turn.user.runtimeSessionId)
-      .filter((runtimeId): runtimeId is string => !!runtimeId && runtimeId !== currentRuntimeId),
-  )
-
-  return lineage.find((entry) => runtimesWithVisibleContent.has(entry.runtimeSessionId))?.runtimeSessionId ?? null
-}
+export type StatusKind = SessionStatusKind | 'live' | 'finalizing' | 'probing' | 'completed' | 'failed' | 'stale'
+export type EmptyStateKind = 'active-no-content' | 'idle-no-content' | 'unknown-no-content'
 
 export interface SessionCancelOptions {
   onSuccess?: (result: { state: string }) => void
@@ -37,6 +16,11 @@ export interface SessionDataSourceResult {
 
   sessionKey: string
   runtimeSessionId: string
+  runtimeSessionLineage?: unknown
+  viewedRuntimeSessionId?: string | null
+  buildLineageTargetPath?: ((runtimeSessionId: string) => string) | null
+  historicalRuntimeTarget?: unknown
+  historicalRuntimeId?: string | null
   meta: SessionMetadata | null
   transcriptResponse: AgentSessionTranscriptResponse | null
   initialTurns: SessionTurn[]
@@ -59,12 +43,8 @@ export interface SessionDataSourceResult {
   healthStatus: string | null
 
   hasRecoveryActions: boolean
-  recoveryAvailable?: boolean
   recoverySessionName: string | null
   recoverySessionId?: string | null
-  runtimeSessionLineage: RuntimeSessionLineageEntry[] | null
-  viewedRuntimeSessionId: string | null
-  buildLineageTargetPath: ((runtimeId: string) => string) | null
 
   metadataQueryKey: readonly unknown[]
   transcriptQueryKey: readonly unknown[]
@@ -97,8 +77,6 @@ export interface SessionDataSourceResult {
   displayTurns: DisplayTurn[]
 
   emptyStateKind: EmptyStateKind | null
-  historicalRuntimeTarget: string | null
-  historicalRuntimeId: string | null
 
   issueNumber: number
 }

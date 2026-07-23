@@ -91,7 +91,7 @@ public sealed class IssueEventFeedAssembler : IScopedService
                 && session.LabelTriggerEventId != ""
                 && session.LabelTriggerRuleId != null
                 && session.LabelTriggerRuleId != ""
-                && part.Type == TranscriptPartTypes.SessionClosed
+                 && part.Type == TranscriptPartTypes.SessionActivity
                 && part.PayloadStatus == "failed"
                 && part.CorrelationKey.StartsWith("agent-job:")
                 && part.CorrelationKey.EndsWith(":terminal")

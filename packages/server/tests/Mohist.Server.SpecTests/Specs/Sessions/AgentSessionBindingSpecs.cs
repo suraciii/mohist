@@ -93,7 +93,9 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("inactive", grainSession.Status);
+        // session.closed is a no-op under the activity model (issue-484);
+        // the session never enters a terminal state, so it stays idle.
+        Assert.Equal("idle", grainSession.Status);
     }
 
     [Fact]
@@ -118,7 +120,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
             Metadata: WorkflowSessionMetadata(project.Id, session.IssueNumber, session.WorkflowRunId, session.SessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
 
         Assert.Equal(session.Id, reopened.Id);
-        Assert.Equal("inactive", reopened.Status);
+        Assert.Equal("idle", reopened.Status);
         Assert.Equal(_runnerId, reopened.RunnerId);
 
         var nextRunnerId = $"{_runnerId}-next";
@@ -128,7 +130,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
             Metadata: WorkflowSessionMetadata(project.Id, session.IssueNumber, session.WorkflowRunId, session.SessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
 
         Assert.Equal(session.Id, repeated.Id);
-        Assert.Equal("inactive", repeated.Status);
+        Assert.Equal("idle", repeated.Status);
         Assert.Equal(_runnerId, repeated.RunnerId);
     }
 
@@ -149,7 +151,11 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("active", grainSession.Status);
+        // session.closed is a no-op under the activity model (issue-484)
+        // and message.delta does not flip activity to active; only
+        // session.input does. The session stays idle but keeps absorbing
+        // runner events.
+        Assert.Equal("idle", grainSession.Status);
     }
 
     [Fact]
@@ -164,7 +170,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
                 Metadata: WorkflowSessionMetadata(project.Id, work.Issue!.IssueNumber, work.WorkflowRunId, session.SessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
 
         Assert.Equal(session.Id, opened.Id);
-        Assert.Equal("active", opened.Status);
+        Assert.Equal("idle", opened.Status);
         Assert.NotNull(opened.AgentSessionId);
     }
 
@@ -192,7 +198,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
                 Metadata: WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, session.SessionName, "fix-review-findings:1.1", "task", "check", "Fix review findings")));
 
         Assert.Equal(session.Id, opened.Id);
-        Assert.Equal("inactive", opened.Status);
+        Assert.Equal("idle", opened.Status);
         Assert.NotNull(opened.AgentSessionId);
     }
 

@@ -72,27 +72,19 @@ export function useWorkflowRunSessions(
         if (!mountedRef.current) return
         invalidate()
       }),
-      onAgentEvent('session.followup_completed', () => {
-        if (!mountedRef.current) return
-        invalidate()
-      }),
-      onAgentEvent('session.followup_failed', () => {
-        if (!mountedRef.current) return
-        invalidate()
-      }),
-      onAgentEvent('session.closed', (detail) => {
-        if (!mountedRef.current) return
-        setLiveState((prev) => prev.workflowRunId === workflowRunId
-          ? {
-              ...prev,
-              sessions: prev.sessions.map((session) =>
-                matchesCurrentBinding(session, detail)
-                  ? { ...session, status: detail.status, completedAt: new Date().toISOString() }
-                  : session,
-              ),
-            }
-          : prev)
-      }),
+       onAgentEvent('session.activity', (detail) => {
+         if (!mountedRef.current) return
+         setLiveState((prev) => prev.workflowRunId === workflowRunId
+           ? {
+               ...prev,
+               sessions: prev.sessions.map((session) =>
+                 matchesCurrentBinding(session, detail)
+                   ? { ...session, activity: detail.activity }
+                   : session,
+               ),
+             }
+           : prev)
+       }),
       onAgentEvent('coder_session_status_changed', (detail) => {
         if (!mountedRef.current) return
         setLiveState((prev) => prev.workflowRunId === workflowRunId
@@ -102,7 +94,7 @@ export function useWorkflowRunSessions(
                 matchesCurrentBinding(session, detail)
                   ? {
                       ...session,
-                      status: detail.status,
+                       activity: detail.status === 'active' ? 'active' : detail.status === 'unknown' ? 'unknown' : 'idle',
                       runtimeSessionId: detail.runtimeSessionId ?? session.runtimeSessionId,
                       ...(detail.lastDataAt !== undefined && { lastDataAt: detail.lastDataAt }),
                       ...(detail.failureReason !== undefined && { failureReason: detail.failureReason }),

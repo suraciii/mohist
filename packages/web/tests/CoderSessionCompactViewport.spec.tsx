@@ -297,8 +297,14 @@ describe('Coder Session compact viewport — structural contract', () => {
     expect(lastActivityNode.textContent?.trim().length ?? 0).toBeGreaterThan(0)
   })
 
-  it('renders the duration span on a terminal session via session-header-duration testid (visible at all widths)', async () => {
+  it('renders the activity badge (no duration span) on a session that has finished executing, visible at all widths', async () => {
+    // issue-484: the session-header-duration span was removed — sessions no
+    // longer carry a terminal status, so there is no terminal duration to
+    // render. The header now shows the activity badge ("Idle" for a session
+    // that has finished executing) instead. Assert the badge is present and
+    // visible (no `hidden` class) at all widths.
     _metadataData = makeMockMetadata({
+      activity: 'idle',
       status: 'completed',
       statusKind: 'completed',
       completedAt: '2026-06-15T11:00:00.000Z',
@@ -315,15 +321,17 @@ describe('Coder Session compact viewport — structural contract', () => {
     const { container } = renderPage()
 
     await waitFor(() => {
-      if (!container.querySelector('[data-testid="session-header-duration"]')) {
-        throw new Error('duration span not rendered yet')
+      if (!container.querySelector('[data-testid="session-status-badge"]')) {
+        throw new Error('status badge not rendered yet')
       }
     })
 
-    const durationNode = container.querySelector('[data-testid="session-header-duration"]') as HTMLElement
-    expect(durationNode).not.toBeNull()
-    expect(durationNode.textContent?.trim()).toBe('1h 00m')
-    expect(durationNode.className).not.toMatch(/\bhidden\b/)
+    // The duration span is intentionally gone.
+    expect(container.querySelector('[data-testid="session-header-duration"]')).toBeNull()
+    const badge = container.querySelector('[data-testid="session-status-badge"]') as HTMLElement
+    expect(badge).not.toBeNull()
+    expect(badge.textContent).toContain('Idle')
+    expect(badge.className).not.toMatch(/\bhidden\b/)
   })
 
   it('keeps the session name (h1), StatusBadge, and stage chip visible without hidden class', async () => {

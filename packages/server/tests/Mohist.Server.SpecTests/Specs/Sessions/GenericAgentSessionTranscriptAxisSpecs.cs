@@ -168,7 +168,11 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             Assert.Equal(0.0011, usagePayload.GetProperty("costAmount").GetDouble(), precision: 4);
             Assert.Equal("USD", usagePayload.GetProperty("costCurrency").GetString());
 
-            var closePayload = Assert.Single(await LoadTranscriptPartPayloadsAsync(dbFactory, sessionId, TranscriptPartTypes.SessionClosed));
+            // Under the activity model (issue-484) the AgentJob terminal
+            // close is persisted as a `session.activity` transcript part
+            // (the legacy `session.closed` part is gone). The close fact
+            // (status) still rides on the part payload.
+            var closePayload = Assert.Single(await LoadTranscriptPartPayloadsAsync(dbFactory, sessionId, TranscriptPartTypes.SessionActivity));
             Assert.Equal("completed", closePayload.GetProperty("status").GetString());
 
             using var summaryResponse = await _fixture.Client.GetAsync(
@@ -177,7 +181,10 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             var summaryPayload = await summaryResponse.Content.ReadFromJsonAsync<JsonElement>();
             var summaryData = summaryPayload.GetProperty("data");
             Assert.Equal(sessionId, summaryData.GetProperty("sessionId").GetString());
-            Assert.Equal("completed", summaryData.GetProperty("status").GetString());
+            // The summary now exposes `activity` (idle/active/unknown) rather
+            // than a terminal `status`. A completed close returns the session
+            // to idle activity.
+            Assert.Equal("idle", summaryData.GetProperty("activity").GetString());
             Assert.Equal(220, summaryData.GetProperty("usage").GetProperty("inputTokens").GetInt64());
             Assert.Equal(80, summaryData.GetProperty("usage").GetProperty("outputTokens").GetInt64());
             Assert.Equal(300, summaryData.GetProperty("usage").GetProperty("totalTokens").GetInt64());
@@ -241,7 +248,12 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
                 $"/api/projects/{project.Id}/agent-sessions/{sessionId}");
             Assert.Equal(HttpStatusCode.OK, completedRead.StatusCode);
             var completedPayload = await completedRead.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal("completed", completedPayload.GetProperty("data").GetProperty("status").GetString());
+            // The first turn's dispatch was reported completed (the helper
+            // reports the AgentJob result), which delivers a terminal close
+            // and returns the session to idle activity under the activity
+            // model (issue-484). The summary exposes `activity` rather than
+            // a terminal `status`.
+            Assert.Equal("idle", completedPayload.GetProperty("data").GetProperty("activity").GetString());
 
             await _fixture.Client.PostOkAsync(
                 $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/runtime-events",
@@ -340,6 +352,14 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionInput, """{"text":"first runtime turn","kind":"task"}"""),
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.MessageDelta, """{"text":"first runtime reply"}"""),
         }, "runtime-first"));
+        // Under the activity model (issue-484) the session is authoritative-
+        // ly active after the input/reply pair and no longer auto-idles by
+        // time window. Reset requires an idle session, so emit an explicit
+        // `session.activity:{idle}` turn-end signal before rebinding.
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, """{"activity":"idle"}"""),
+        }, "runtime-first"));
         await grain.FlushForTestAsync();
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         await grain.ResetAsync(new ResetAgentSessionCommand("runtime-first", "runtime-second"));
@@ -388,6 +408,13 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
         {
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionInput, """{"text":"first runtime turn","kind":"task"}"""),
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.MessageDelta, """{"text":"first runtime reply"}"""),
+        }, "runtime-first"));
+        // Under the activity model (issue-484) the session no longer auto-
+        // idles by time window; Reset requires an idle session, so emit an
+        // explicit `session.activity:{idle}` turn-end signal first.
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, """{"activity":"idle"}"""),
         }, "runtime-first"));
         await grain.FlushForTestAsync();
 

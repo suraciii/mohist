@@ -1,29 +1,8 @@
 import type { GenericAgentSessionSummaryDto } from '../../../entities/agent'
+import { deriveSessionStatusKind } from '../../../entities/coder-session'
 import type { SessionMetadata } from '../../../entities/coder-session'
 
-function getSessionStatusKind(
-  rawStatus: string | undefined,
-  lastActivityAt: string | null | undefined,
-  isRunning: boolean,
-): 'live' | 'stale' | 'completed' | 'failed' | 'probing' | 'finalizing' {
-  if (rawStatus === 'failed' || rawStatus === 'timeout' || rawStatus === 'cancelled') {
-    return 'failed'
-  }
-  if (rawStatus === 'completed') return 'completed'
-  if (rawStatus === 'inactive') return 'stale'
-  if (rawStatus === 'probing') return 'probing'
-  if (rawStatus === 'active') return lastActivityAt ? 'live' : 'stale'
-  if (!isRunning) return 'completed'
-  if (!lastActivityAt) return 'live'
-  const lastActivity = new Date(lastActivityAt).getTime()
-  const now = Date.now()
-  const twoMinutes = 2 * 60 * 1000
-  if (now - lastActivity > twoMinutes) return 'stale'
-  return 'live'
-}
-
 export function buildGenericSessionMetadata(summary: GenericAgentSessionSummaryDto): SessionMetadata {
-  const isRunning = summary.status === 'active' || summary.status === 'running' || summary.status === 'probing'
   return {
     sessionId: summary.sessionId,
     sessionName: summary.agentName,
@@ -31,8 +10,7 @@ export function buildGenericSessionMetadata(summary: GenericAgentSessionSummaryD
     runtime: summary.runtime,
     executionId: null,
     title: summary.agentName,
-    status: summary.status,
-    statusKind: getSessionStatusKind(summary.status, summary.lastActivityAt, isRunning),
+    activity: deriveSessionStatusKind(summary.activity),
     model: summary.resolvedModel,
     stage: null,
     createdAt: summary.createdAt,
@@ -42,7 +20,7 @@ export function buildGenericSessionMetadata(summary: GenericAgentSessionSummaryD
     lastDataAt: summary.lastActivityAt,
     probeSentAt: null,
     probeDeadlineAt: null,
-    failureReason: null,
+    failureReason: summary.failureReason ?? null,
     partCount: 0,
     toolCount: summary.toolCallCount ?? 0,
     turnCount: 0,
@@ -67,6 +45,5 @@ export function buildGenericSessionMetadata(summary: GenericAgentSessionSummaryD
           contextUsagePercent: summary.usage.contextUsagePercent ?? null,
         }
       : undefined,
-    runtimeSessionLineage: summary.runtimeSessionLineage,
   }
 }

@@ -3,13 +3,12 @@ import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import { issueWorkflowKeys, useIssue } from '../../../entities/issue'
-import { useCancelSessionMutation, useCoderSessions, getAgentSessionMetadata, getAgentSessionTranscript, useFollowupMutation } from '../../../entities/coder-session'
+import { canFollowupSession, deriveSessionStatusKind, useCancelSessionMutation, useCoderSessions, getAgentSessionMetadata, getAgentSessionTranscript, useFollowupMutation } from '../../../entities/coder-session'
 import type { AgentSessionMetadata, AgentSessionTranscriptResponse, CoderSessionDetail, SessionTurn, WorkflowRunSession } from '../../../entities/coder-session'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useSiblingSessions } from '../../../widgets/issue-workflow'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
-import { findHistoricalRuntimeWithVisibleContent } from './SessionDataSource'
-import type { SessionCancelOptions, SessionDataSourceResult, StatusKind, EmptyStateKind } from './SessionDataSource'
+import type { SessionCancelOptions, SessionDataSourceResult, EmptyStateKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
 export interface IssueSessionDataSourceDependencies {
@@ -42,7 +41,6 @@ function buildSessionMetadata(
   turnCount: number,
   runtimeSessionId: string,
 ) {
-  const isRunning = meta.status === 'active' || meta.status === 'running' || meta.status === 'probing'
   return {
     sessionId: meta.id,
     sessionName: meta.sessionName,
@@ -50,9 +48,7 @@ function buildSessionMetadata(
     runtime: meta.runtime ?? null,
     executionId: null,
     title: meta.title,
-    status: meta.status,
-    statusKind: meta.statusKind
-      ?? getSessionStatusKind(meta.status, lastEventAt ?? meta.lastActivityAt, isRunning, meta.completedAt),
+    activity: deriveSessionStatusKind(meta.activity),
     model: meta.model,
     stage: meta.stage,
     createdAt: meta.createdAt,
@@ -92,27 +88,6 @@ function buildSessionMetadata(
         }
       : undefined,
   }
-}
-
-function getSessionStatusKind(
-  rawStatus: string | undefined,
-  lastActivityAt: string | null | undefined,
-  isRunning: boolean,
-  completedAt?: string | null,
-): StatusKind {
-  if (rawStatus === 'failed' || rawStatus === 'timeout' || rawStatus === 'cancelled') return 'failed'
-  if (rawStatus === 'completed') return 'completed'
-  if (rawStatus === 'inactive') return 'stale'
-  if (rawStatus === 'probing') return 'probing'
-  if (rawStatus === 'active') return lastActivityAt ? 'live' : 'stale'
-  if (isRunning && completedAt) return 'finalizing'
-  if (!isRunning) return 'completed'
-  if (!lastActivityAt) return 'live'
-  const lastActivity = new Date(lastActivityAt).getTime()
-  const now = Date.now()
-  const twoMinutes = 2 * 60 * 1000
-  if (now - lastActivity > twoMinutes) return 'stale'
-  return 'live'
 }
 
 export function useIssueSessionDataSource(
@@ -178,8 +153,8 @@ export function useIssueSessionDataSource(
     [issueNumber, projectId, lookupKey],
   )
   const transcriptQueryKey = useMemo(
-    () => issueWorkflowKeys.session(projectId, issueNumber, 'session-transcript', lookupKey, searchParams.get('rt') ?? null),
-    [issueNumber, projectId, lookupKey, searchParams],
+    () => issueWorkflowKeys.session(projectId, issueNumber, 'session-transcript', lookupKey),
+    [issueNumber, projectId, lookupKey],
   )
 
   const handleRecoverySuccess = useCallback(() => {
@@ -208,7 +183,7 @@ export function useIssueSessionDataSource(
     queryKey: transcriptQueryKey,
     queryFn: async () => {
       if (!lookupKey) return null
-      return fetchAgentSessionTranscript(issueNumber, lookupKey, projectId, searchParams.get('rt'))
+      return fetchAgentSessionTranscript(issueNumber, lookupKey, projectId)
     },
     enabled: hasRoute && !!metadata,
   })
@@ -227,7 +202,7 @@ export function useIssueSessionDataSource(
       runtimeSessionId: metadata.runtimeSessionId ?? session?.runtimeSessionId ?? '',
       executionId: null,
       taskDescription: metadata.title,
-      status: metadata.status,
+       activity: metadata.activity === 'active' || metadata.activity === 'unknown' || metadata.activity === 'idle' ? metadata.activity : 'unknown',
       createdAt: metadata.createdAt,
       completedAt: metadata.completedAt,
       model: metadata.model,
@@ -240,33 +215,10 @@ export function useIssueSessionDataSource(
     }
   }, [metadata, transcriptResponse, initialTurns, lastEventAt, session?.runtimeSessionId])
 
-  const rawStatus = detail?.metadata?.status ?? detail?.status ?? session?.status
-  const apiStatusKind = detail?.metadata?.statusKind
-  const isRunning = detail == null && session == null
-    ? true
-    : (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
+  const activity = detail?.metadata.activity ?? detail?.activity ?? session?.activity
+  const statusKind = deriveSessionStatusKind(activity)
+  const isRunning = activity === 'active'
   const runtimeSessionId = detail?.runtimeSessionId ?? session?.runtimeSessionId ?? ''
-  const isHistoricalRuntimeView = !!searchParams.get('rt')
-
-  const shouldFetchUnfilteredTranscript = isHistoricalRuntimeView && transcriptResponse != null && transcriptResponse.turns.length === 0
-
-  const unfilteredTranscriptQueryKey = useMemo(
-    () => issueWorkflowKeys.session(projectId, issueNumber, 'session-transcript', lookupKey, null),
-    [issueNumber, projectId, lookupKey],
-  )
-
-  const { data: unfilteredTranscriptResponse } = useQuery<AgentSessionTranscriptResponse | null, Error>({
-    queryKey: unfilteredTranscriptQueryKey,
-    queryFn: async () => {
-      if (!lookupKey) return null
-      return fetchAgentSessionTranscript(issueNumber, lookupKey, projectId, null)
-    },
-    enabled: hasRoute && shouldFetchUnfilteredTranscript,
-  })
-
-  const statusKind: StatusKind = detail
-    ? (detail.metadata.statusKind ?? getSessionStatusKind(rawStatus, detail.metadata.lastActivityAt, isRunning, detail.metadata.completedAt ?? detail.completedAt))
-    : getSessionStatusKind(rawStatus, undefined, isRunning, session?.completedAt)
 
   const {
     turns,
@@ -281,26 +233,19 @@ export function useIssueSessionDataSource(
     issueNumber,
     projectId,
     sessionId: detail?.id ?? session?.id ?? decodedSessionId ?? '',
-    runtimeSessionId: searchParams.get('rt') ?? runtimeSessionId,
+    runtimeSessionId,
     runtime: detail?.runtime ?? null,
-    isHistoricalRuntimeView,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
   })
-
-  const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
 
   const displayTurns = useMemo(() => turns.map((turn) => projectTranscriptTurn(turn)), [turns, projectTranscriptTurn])
 
   const recoverySessionName = detail?.metadata?.sessionName ?? session?.sessionName ?? session?.executionId ?? lookupKey ?? ''
   const followup = useFollowup()
   const cancelMutation = useCancel()
-  const isTerminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'cancelled' || rawStatus === 'stopped'
-  const runtimeLineage = metadata?.runtimeSessionLineage ?? null
-  const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.runtimeSessionId ?? null
-  const isCurrentRuntimeView = viewedRuntimeSessionId === runtimeSessionId
-  const canFollowup = !isTerminal && isCurrentRuntimeView && !!runtimeSessionId && !!detail?.runtime && !!recoverySessionName
+  const canFollowup = canFollowupSession(activity) && !!runtimeSessionId && !!detail?.runtime && !!recoverySessionName
   const sendFollowup = useCallback(async (text: string) => {
     await followup.mutateAsync({ issueNumber, sessionName: recoverySessionName, text })
   }, [followup, issueNumber, recoverySessionName])
@@ -311,47 +256,17 @@ export function useIssueSessionDataSource(
     )
   }, [cancelMutation, issueNumber, recoverySessionName])
   const cancel = useMemo(
-    () => isRunning && isCurrentRuntimeView && runtimeSessionId && detail?.runtime && recoverySessionName
+    () => isRunning && runtimeSessionId && detail?.runtime && recoverySessionName
       ? { mutate: cancelSession, isPending: cancelMutation.isPending }
       : null,
-    [cancelMutation.isPending, cancelSession, detail?.runtime, isCurrentRuntimeView, isRunning, recoverySessionName, runtimeSessionId],
+    [cancelMutation.isPending, cancelSession, detail?.runtime, isRunning, recoverySessionName, runtimeSessionId],
   )
 
   const fromActivity = searchParams.get('from') === 'activity'
 
-  const buildLineageTargetPath = runtimeLineage && runtimeLineage.length >= 2
-    ? (runtimeId: string) => {
-        const base = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(recoverySessionName)}`)
-        const params = new URLSearchParams({ rt: runtimeId })
-        if (fromActivity) params.set('from', 'activity')
-        return `${base}?${params}`
-      }
-    : null
-
-  const emptyStateEvidence = useMemo(() => {
-    if (turns.length > 0) return { emptyStateKind: null as EmptyStateKind | null, historicalRuntimeTarget: null as string | null, historicalRuntimeId: null as string | null }
-
-    if (isHistoricalRuntimeView && unfilteredTranscriptResponse?.turns && unfilteredTranscriptResponse.turns.length > 0) {
-      const historicalRuntimeId = findHistoricalRuntimeWithVisibleContent(
-        unfilteredTranscriptResponse.turns,
-        searchParams.get('rt'),
-        runtimeLineage,
-      )
-      if (historicalRuntimeId) {
-        return {
-          emptyStateKind: 'runtime-filtered' as const,
-          historicalRuntimeTarget: buildLineageTargetPath?.(historicalRuntimeId) ?? null,
-          historicalRuntimeId,
-        }
-      }
-    }
-
-    if (isRunning) {
-      return { emptyStateKind: 'running-no-content' as const, historicalRuntimeTarget: null as string | null, historicalRuntimeId: null as string | null }
-    }
-
-    return { emptyStateKind: 'terminal-no-content' as const, historicalRuntimeTarget: null as string | null, historicalRuntimeId: null as string | null }
-  }, [turns.length, isHistoricalRuntimeView, unfilteredTranscriptResponse, searchParams, runtimeLineage, buildLineageTargetPath, isRunning])
+  const emptyStateKind: EmptyStateKind | null = turns.length > 0
+    ? null
+    : `${deriveSessionStatusKind(activity)}-no-content`
 
   const hasRecoveryActions = !!recoverySessionName
   const recoverySessionNameStr = recoverySessionName
@@ -392,7 +307,7 @@ export function useIssueSessionDataSource(
     meta: detail?.metadata ?? null,
     transcriptResponse: transcriptResponse ?? null,
     initialTurns,
-    statusKind: displayStatusKind,
+    statusKind,
     isRunning,
     canFollowup,
     followupIsPending: followup.isPending,
@@ -405,9 +320,6 @@ export function useIssueSessionDataSource(
     hasRecoveryActions,
     recoverySessionName: recoverySessionNameStr,
     recoverySessionId: null,
-    runtimeSessionLineage: runtimeLineage,
-    viewedRuntimeSessionId,
-    buildLineageTargetPath,
     metadataQueryKey,
     transcriptQueryKey,
     handleRecoverySuccess,
@@ -427,9 +339,7 @@ export function useIssueSessionDataSource(
     isThinking,
     isStreaming,
     displayTurns,
-    emptyStateKind: emptyStateEvidence.emptyStateKind,
-    historicalRuntimeTarget: emptyStateEvidence.historicalRuntimeTarget,
-    historicalRuntimeId: emptyStateEvidence.historicalRuntimeId,
+    emptyStateKind,
     issueNumber,
   }
 }
@@ -547,23 +457,13 @@ function SiblingSessionsSidebar({
             >
               <span
                 data-testid="session-sibling-status-dot"
-                data-tone={
-                  sibling.status === 'completed'
-                    ? 'success'
-                    : sibling.status === 'failed' || sibling.status === 'cancelled'
-                      ? 'danger'
-                      : sibling.status === 'running' || sibling.status === 'active' || sibling.status === 'probing'
-                        ? 'info'
-                        : 'neutral'
-                }
+                data-tone={sibling.activity === 'active' ? 'info' : sibling.activity === 'unknown' ? 'warning' : 'neutral'}
                 className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
-                  sibling.status === 'completed'
-                    ? 'bg-success'
-                    : sibling.status === 'failed' || sibling.status === 'cancelled'
-                      ? 'bg-danger'
-                      : sibling.status === 'running' || sibling.status === 'active' || sibling.status === 'probing'
-                        ? 'bg-info'
-                        : 'bg-muted-foreground/60'
+                  sibling.activity === 'active'
+                    ? 'bg-info'
+                    : sibling.activity === 'unknown'
+                      ? 'bg-warning'
+                      : 'bg-muted-foreground/60'
                 }`}
                 aria-hidden="true"
               />

@@ -414,46 +414,53 @@ describe('useSessionTranscript', () => {
     expect(screen.getByTestId('transcript').textContent).toBe('persisted')
   })
 
-  it('closes an in-flight follow-up as completed and refreshes session status without making the session terminal', () => {
+  // Issue 484 / D6: `session.followup_completed` / `session.followup_failed`
+  // are deprecated and no longer subscribed here. The "follow-up wound down,
+  // refresh status" signal now arrives as `session.activity` with
+  // activity='idle' (sessions never enter a terminal status — finishing
+  // brings activity back to idle, and the session remains follow-up-able).
+  // The handler closes the in-flight turn and invalidates the session query.
+  it('closes an in-flight follow-up and refreshes session status when activity returns to idle (without making the session terminal)', () => {
     const { queryClient } = renderSessionTranscript([followupTurn()])
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
     act(() => {
-      dispatchAgentEvent('session.followup_completed', {
+      dispatchAgentEvent('session.activity', {
         sessionId: 'session-84',
         runtimeSessionId: 'runtime-84',
         runtime: 'opencode',
-        operationId: 'operation-1',
-        status: 'completed',
+        activity: 'idle',
       })
     })
 
+    // The in-flight follow-up turn is closed (completedAt stamped).
     expect(screen.getByTestId('turn-outcome')).toHaveTextContent('completed')
     expect(screen.getByTestId('session-status')).toHaveTextContent('running')
     expect(screen.getByTestId('streaming-state')).toHaveTextContent('idle')
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-session', 'project-1', 'session-84'] })
   })
 
-  it('closes an in-flight follow-up as failed and refreshes session status without making the session terminal', () => {
-    const { queryClient } = renderSessionTranscript([followupTurn()])
-    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+  // Issue 484 / D6: the failure-specific follow-up signal is gone. An
+  // `activity='idle'` transition closes the turn the same way regardless of
+  // success/failure; execution failures are now surfaced through the
+  // transcript's own error parts (via recovery/liveness events) rather than
+  // a follow-up-specific event. This case documents that activity=idle does
+  // NOT synthesise a failure error part (it merely closes the turn).
+  it('does not synthesise a follow-up failure error part on an activity=idle transition', () => {
+    renderSessionTranscript([followupTurn()])
 
     act(() => {
-      dispatchAgentEvent('session.followup_failed', {
+      dispatchAgentEvent('session.activity', {
         sessionId: 'session-84',
         runtimeSessionId: 'runtime-84',
         runtime: 'opencode',
-        operationId: 'operation-2',
-        status: 'failed',
-        failureReason: 'Follow-up rejected',
+        activity: 'idle',
       })
     })
 
-    expect(screen.getByTestId('turn-outcome')).toHaveTextContent('failed')
-    expect(screen.getByTestId('error-message')).toHaveTextContent('Follow-up rejected')
-    expect(screen.getByTestId('session-status')).toHaveTextContent('running')
-    expect(screen.getByTestId('streaming-state')).toHaveTextContent('idle')
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-session', 'project-1', 'session-84'] })
+    // Turn closes as completed (no error part), not failed.
+    expect(screen.getByTestId('turn-outcome')).toHaveTextContent('completed')
+    expect(screen.getByTestId('error-message')).toHaveTextContent('')
   })
 
   it('renders follow-up input without engaging activity until a runtime response arrives', () => {

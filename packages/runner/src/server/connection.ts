@@ -6,9 +6,11 @@ import type { TaskLogBatch } from "../runtime/task-log.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
+  readonly runnerId: string
 
   constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null) {
     this.buildGitHash = buildGitHash
+    this.runnerId = options.runnerId
   }
 
   async connect(registration: RunnerRegistration, signal: AbortSignal) {
@@ -294,6 +296,12 @@ export class ServerConnection {
     return response.json() as Promise<WorkflowAgentSession>
   }
 
+  async recoverMissingWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<WorkflowAgentSession> {
+    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/recover-missing`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    if (!response.ok) throw new Error(`session missing recovery failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<WorkflowAgentSession>
+  }
+
   async workflowAgentSessionRuntimeEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventAcceptance[]> {
     const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`session runtime events failed: ${response.status} ${await response.text()}`)
@@ -322,8 +330,27 @@ export class ServerConnection {
     return response.json() as Promise<AgentSession>
   }
 
-  async attachAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal) {
-    await this.post(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/attach`, body, signal)
+  async attachAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSession | null> {
+    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/attach`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) throw new Error(`agent session attach failed: ${response.status} ${await response.text()}`)
+    const text = await response.text()
+    return text.length > 0 ? JSON.parse(text) as AgentSession : null
+  }
+
+  async recoverMissingAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSession> {
+    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/recover-missing`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) throw new Error(`agent session missing recovery failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<AgentSession>
   }
 
   async agentSessionRuntimeEvents(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {

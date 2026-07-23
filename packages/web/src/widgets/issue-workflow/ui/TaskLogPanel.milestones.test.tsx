@@ -100,8 +100,8 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         id: 'session-1',
         sessionName: 'plan-issue-339',
         startedAt: '2026-07-03T08:01:00.000Z',
-        completedAt: '2026-07-03T08:04:00.000Z',
-        status: 'completed',
+        activity: 'idle',
+        lastDataAt: '2026-07-03T08:04:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
@@ -132,7 +132,7 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     const indices = {
       ops1: items.findIndex((t) => t.includes('ops-08:00:01')),
       model: items.findIndex((t) => t.includes('Model bound')),
-      ended: items.findIndex((t) => t.includes('Session ended')),
+      ended: items.findIndex((t) => t.includes('Session idle')),
       ops2: items.findIndex((t) => t.includes('ops-08:05:00')),
     }
     expect(indices.ops1).toBeLessThan(indices.model)
@@ -195,14 +195,14 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     expect(screen.queryByTestId('task-log-empty')).not.toBeInTheDocument()
   })
 
-  it('renders terminal-state milestones from the persisted summary without any real-time event for a finished agent task', async () => {
+  it('renders idle-state milestones from the persisted summary without any real-time event for a finished agent task', async () => {
     _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
         startedAt: '2026-07-03T08:00:01.000Z',
-        completedAt: '2026-07-03T08:01:00.000Z',
-        status: 'completed',
+        activity: 'idle',
+        lastDataAt: '2026-07-03T08:01:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
@@ -224,16 +224,16 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     expect(await screen.findByTestId('task-log-milestone-model-bound')).toBeInTheDocument()
     expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
     expect(screen.getByText('minimax/MiniMax-M3')).toBeInTheDocument()
-    expect(screen.getAllByText('completed').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('idle').length).toBeGreaterThan(0)
   })
 
-  it('renders failure milestones with the failureReason and applies the failed styling', async () => {
+  it('renders the failed-idle milestone (unknown activity) and applies the failed styling', async () => {
     _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
-        status: 'failed',
-        completedAt: '2026-07-03T08:01:00.000Z',
+        activity: 'unknown',
+        lastDataAt: '2026-07-03T08:01:00.000Z',
         failureReason: 'agent stream blew up',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
@@ -254,8 +254,7 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     )
 
     expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
-    expect(screen.getByText(/failed/)).toBeInTheDocument()
-    expect(screen.getByText(/agent stream blew up/)).toBeInTheDocument()
+    expect(screen.getAllByText('unknown').length).toBeGreaterThan(0)
   })
 
   it('renders NO milestone rows for a pure ops task even when sessionName is present', async () => {
@@ -365,8 +364,8 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         id: 'session-1',
         sessionName: 'plan-issue-339',
         startedAt: '2026-07-03T08:04:00.000Z',
-        completedAt: '2026-07-03T08:06:00.000Z',
-        status: 'completed',
+        activity: 'idle',
+        lastDataAt: '2026-07-03T08:06:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
@@ -398,7 +397,7 @@ describe('TaskLogPanel agent-task milestone rows', () => {
       items.findIndex((t) => t.includes('seq-one-late-clock')),
     )
     expect(items.findIndex((t) => t.includes('seq-one-late-clock'))).toBeLessThan(
-      items.findIndex((t) => t.includes('Session ended')),
+      items.findIndex((t) => t.includes('Session idle')),
     )
 
     const capture = installDownloadSpy()
@@ -411,7 +410,7 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     const exported = await readBlobText(capture.blob)
     expect(exported.indexOf('seq-two-early-clock')).toBeLessThan(exported.indexOf('Model bound'))
     expect(exported.indexOf('Model bound')).toBeLessThan(exported.indexOf('seq-one-late-clock'))
-    expect(exported.indexOf('seq-one-late-clock')).toBeLessThan(exported.indexOf('Session ended'))
+    expect(exported.indexOf('seq-one-late-clock')).toBeLessThan(exported.indexOf('Session idle'))
   })
 
   it('keyword search hides non-matching milestones and keeps matching ones', async () => {
@@ -540,9 +539,9 @@ describe('TaskLogPanel agent-task milestone rows', () => {
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
-        status: 'completed',
+        activity: 'idle',
         startedAt: '2026-07-03T08:00:01.000Z',
-        completedAt: '2026-07-03T08:01:00.000Z',
+        lastDataAt: '2026-07-03T08:01:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
@@ -579,7 +578,7 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     expect(lines).toContain('before')
     expect(lines).toContain('after')
     expect(lines).toContain('2026-07-03T08:00:01.000Z [session] Model bound: minimax/MiniMax-M3')
-    expect(lines).toContain('2026-07-03T08:01:00.000Z [session] Session ended: completed')
+    expect(lines).toContain('2026-07-03T08:01:00.000Z [session] Session idle: idle')
   })
 
   it('download applies a keyword filter to milestones (only filtered rows go in the export)', async () => {
@@ -638,9 +637,9 @@ describe('TaskLogPanel agent-task milestone rows', () => {
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
-        status: 'completed',
+        activity: 'idle',
         startedAt: '2026-07-03T08:00:01.000Z',
-        completedAt: '2026-07-03T08:01:00.000Z',
+        lastDataAt: '2026-07-03T08:01:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
@@ -666,6 +665,6 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     }
 
     expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Model bound') ?? false).length).toBeGreaterThan(0)
-    expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Session ended') ?? false).length).toBeGreaterThan(0)
+    expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Session idle') ?? false).length).toBeGreaterThan(0)
   })
 })

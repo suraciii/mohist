@@ -267,7 +267,8 @@ public class AgentActivityFeedAssemblerSpecs
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: started,
                 AgentRuntimeSessionId: sessionId,
-                LastDataAt: isActive ? started.AddSeconds(1) : null),
+                LastDataAt: isActive ? started.AddSeconds(1) : null,
+                Activity: isActive ? AgentSessionActivity.Active : AgentSessionActivity.Idle),
             Metadata = new AgentSessionMetadata(labels),
         };
 

@@ -21,7 +21,11 @@ function session(overrides: Partial<WorkflowRunSession> & { usage?: Partial<NonN
     projectId: 'project-1',
     issueNumber: 42,
     runnerId: 'runner-1',
-    status: rest.status ?? 'completed',
+    // New activity model: sessions carry `activity` (idle/active/unknown).
+    // `status` is retained on the wire but is no longer used as a terminal
+    // classifier — a session never enters a terminal state.
+    activity: rest.activity ?? 'idle',
+    status: rest.status,
     stage: rest.stage ?? 'plan',
     model: rest.model ?? 'configured/model',
     workDir: null,
@@ -71,43 +75,60 @@ describe('getSessionTotalTokens', () => {
 })
 
 describe('isTerminalSessionStatus', () => {
-  it('returns true for terminal statuses', () => {
-    expect(isTerminalSessionStatus('completed')).toBe(true)
-    expect(isTerminalSessionStatus('failed')).toBe(true)
-    expect(isTerminalSessionStatus('cancelled')).toBe(true)
-  })
-
-  it('returns false for live statuses', () => {
+  // Issue 484: sessions never enter a terminal state — execution ending only
+  // returns the session to `idle`. The activity model keeps this helper as a
+  // hard-coded `false` so any legacy call sites collapse to "still alive".
+  it('always returns false regardless of the status/activity value', () => {
+    expect(isTerminalSessionStatus('completed')).toBe(false)
+    expect(isTerminalSessionStatus('failed')).toBe(false)
+    expect(isTerminalSessionStatus('cancelled')).toBe(false)
     expect(isTerminalSessionStatus('running')).toBe(false)
     expect(isTerminalSessionStatus('active')).toBe(false)
     expect(isTerminalSessionStatus('probing')).toBe(false)
+    expect(isTerminalSessionStatus('idle')).toBe(false)
+    expect(isTerminalSessionStatus('unknown')).toBe(false)
   })
 })
 
 describe('computeSessionDurationMs', () => {
-  it('measures completed sessions from start to completion', () => {
+  // Issue 484: sessions are never terminal, so the duration is always measured
+  // from the session start (startedAt, falling back to createdAt) to the current
+  // time. completedAt is no longer used as a measurement boundary.
+  it('measures sessions from start to current time (idle activity)', () => {
     const ms = computeSessionDurationMs({
-      status: 'completed',
+      activity: 'idle',
       createdAt: '2026-06-15T10:00:00.000Z',
       startedAt: '2026-06-15T10:01:00.000Z',
       completedAt: '2026-06-15T10:06:00.000Z',
     }, NOW)
-    expect(ms).toBe(5 * 60_000)
+    // NOW (12:00) - startedAt (10:01) = 119 min
+    expect(ms).toBe(119 * 60_000)
   })
 
-  it('falls back to createdAt when startedAt is null for completed sessions', () => {
+  it('falls back to createdAt when startedAt is null', () => {
     const ms = computeSessionDurationMs({
-      status: 'completed',
+      activity: 'idle',
       createdAt: '2026-06-15T10:00:00.000Z',
       startedAt: null,
       completedAt: '2026-06-15T10:10:00.000Z',
     }, NOW)
-    expect(ms).toBe(10 * 60_000)
+    // NOW (12:00) - createdAt (10:00) = 120 min
+    expect(ms).toBe(120 * 60_000)
   })
 
-  it('measures live sessions from start to current time', () => {
+  it('measures active sessions from start to current time identically', () => {
     const ms = computeSessionDurationMs({
-      status: 'running',
+      activity: 'active',
+      createdAt: '2026-06-15T10:00:00.000Z',
+      startedAt: '2026-06-15T11:30:00.000Z',
+      completedAt: null,
+    }, NOW)
+    expect(ms).toBe(30 * 60_000)
+  })
+
+  it('treats unknown activity the same as idle/active (never terminal)', () => {
+    const ms = computeSessionDurationMs({
+      activity: 'unknown',
       createdAt: '2026-06-15T10:00:00.000Z',
       startedAt: '2026-06-15T11:30:00.000Z',
       completedAt: null,
@@ -117,7 +138,7 @@ describe('computeSessionDurationMs', () => {
 
   it('returns zero when timestamps cannot be parsed', () => {
     expect(computeSessionDurationMs({
-      status: 'completed',
+      activity: 'idle',
       createdAt: 'not-a-date',
       startedAt: null,
       completedAt: null,
@@ -141,7 +162,8 @@ describe('useWorkflowSessionFiltering', () => {
         id: 's-check-1',
         sessionName: 'review-repair-1',
         stage: 'check',
-        status: 'completed',
+        // Issue 484: execution ended → activity back to `idle`.
+        activity: 'idle',
         createdAt: '2026-06-15T08:00:00.000Z',
         startedAt: '2026-06-15T08:01:00.000Z',
         completedAt: '2026-06-15T08:06:00.000Z',
@@ -151,7 +173,9 @@ describe('useWorkflowSessionFiltering', () => {
         id: 's-build-failed',
         sessionName: 'compile-assets-1',
         stage: 'build',
-        status: 'failed',
+        // Issue 484: failure that can't be resolved leaves the session in the
+        // `unknown` activity (unconfirmable), which the UI treats as failed.
+        activity: 'unknown',
         createdAt: '2026-06-15T09:00:00.000Z',
         startedAt: '2026-06-15T09:05:00.000Z',
         completedAt: '2026-06-15T09:10:00.000Z',
@@ -162,7 +186,8 @@ describe('useWorkflowSessionFiltering', () => {
         id: 's-plan-running',
         sessionName: 'proposal-draft-1',
         stage: 'plan',
-        status: 'running',
+        // Issue 484: a live execution is `active` (not the legacy `running`).
+        activity: 'active',
         createdAt: '2026-06-15T11:00:00.000Z',
         startedAt: '2026-06-15T11:30:00.000Z',
         completedAt: null,
@@ -172,7 +197,7 @@ describe('useWorkflowSessionFiltering', () => {
         id: 's-integrate-completed',
         sessionName: 'ship-pr-1',
         stage: 'integrate',
-        status: 'completed',
+        activity: 'idle',
         createdAt: '2026-06-15T10:00:00.000Z',
         startedAt: '2026-06-15T10:01:00.000Z',
         completedAt: '2026-06-15T10:02:00.000Z',
@@ -195,14 +220,17 @@ describe('useWorkflowSessionFiltering', () => {
     expect(result.current.sortKey).toBe('createdAt')
   })
 
-  it('exposes running/completed/failed in availableStatuses even when no running session exists', () => {
-    const onlyCompleted = buildSessions().filter((s) => s.status === 'completed' || s.status === 'failed')
+  it('exposes idle/active/unknown in availableStatuses even when no active session exists', () => {
+    // Issue 484: filtering is now by `activity` (idle/active/unknown), and the
+    // activity catalogue always carries the full idle/active/unknown set so the
+    // filter UI stays stable across data refreshes.
+    const onlyIdle = buildSessions().filter((s) => s.activity === 'idle' || s.activity === 'unknown')
     const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(onlyCompleted, { nowMs: NOW }),
+      useWorkflowSessionFiltering(onlyIdle, { nowMs: NOW }),
     )
 
     expect(result.current.availableStatuses).toEqual(
-      expect.arrayContaining(['completed', 'failed', 'running']),
+      expect.arrayContaining(['idle', 'active', 'unknown']),
     )
   })
 
@@ -214,13 +242,13 @@ describe('useWorkflowSessionFiltering', () => {
     expect(result.current.availableStages).toEqual(['plan', 'build', 'check', 'integrate'])
   })
 
-  it('filters sessions by status (failed hides non-failed sessions)', () => {
+  it('filters sessions by activity (unknown hides non-unknown sessions)', () => {
     const { result } = renderHook(() =>
       useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
     )
 
     act(() => {
-      result.current.setStatusFilter('failed')
+      result.current.setStatusFilter('unknown')
     })
 
     expect(result.current.sessions.map((s) => s.id)).toEqual(['s-build-failed'])
@@ -244,21 +272,21 @@ describe('useWorkflowSessionFiltering', () => {
     )
 
     act(() => {
-      result.current.setStatusFilter('completed')
+      result.current.setStatusFilter('idle')
       result.current.setStageFilter('check')
     })
 
     expect(result.current.sessions.map((s) => s.id)).toEqual(['s-check-1'])
 
     act(() => {
-      result.current.setStatusFilter('completed')
+      result.current.setStatusFilter('idle')
       result.current.setStageFilter('integrate')
     })
 
     expect(result.current.sessions.map((s) => s.id)).toEqual(['s-integrate-completed'])
 
     act(() => {
-      result.current.setStatusFilter('failed')
+      result.current.setStatusFilter('unknown')
       result.current.setStageFilter('integrate')
     })
 
@@ -271,7 +299,7 @@ describe('useWorkflowSessionFiltering', () => {
     )
 
     act(() => {
-      result.current.setStatusFilter('completed')
+      result.current.setStatusFilter('idle')
       result.current.setStageFilter('check')
     })
 
@@ -334,7 +362,7 @@ describe('useWorkflowSessionFiltering', () => {
     ])
   })
 
-  it('sorts by duration using completedAt for completed sessions and now for live sessions', () => {
+  it('sorts by duration measured from each session start to the current time (sessions are never terminal)', () => {
     const { result } = renderHook(() =>
       useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
     )
@@ -343,16 +371,18 @@ describe('useWorkflowSessionFiltering', () => {
       result.current.setSortKey('duration')
     })
 
-    // Durations (descending):
-    //  - plan-running:        NOW (12:00) - 11:30 = 30 min (live, measured to current time)
-    //  - check-1:             08:06 - 08:01        = 5 min  (completed)
-    //  - build-failed:        09:10 - 09:05        = 5 min  (completed, ties with check)
-    //  - integrate-completed: 10:02 - 10:01        = 1 min  (completed)
+    // Issue 484: a session never reaches a terminal state, so the duration is
+    // always measured from the session start (startedAt) to NOW (12:00),
+    // regardless of completedAt/activity. Descending by duration:
+    //  - check-1:             NOW (12:00) - 08:01 = 239 min
+    //  - build-failed:        NOW (12:00) - 09:05 = 175 min
+    //  - integrate-completed: NOW (12:00) - 10:01 = 119 min
+    //  - plan-running:        NOW (12:00) - 11:30 = 30 min
     expect(result.current.sessions.map((s) => s.id)).toEqual([
-      's-plan-running',
       's-check-1',
       's-build-failed',
       's-integrate-completed',
+      's-plan-running',
     ])
   })
 
@@ -362,11 +392,11 @@ describe('useWorkflowSessionFiltering', () => {
     )
 
     act(() => {
-      result.current.setStatusFilter('completed')
+      result.current.setStatusFilter('idle')
       result.current.setSortKey('tokens')
     })
 
-    // Only completed sessions, sorted by tokens desc.
+    // Only idle sessions, sorted by tokens desc.
     expect(result.current.sessions.map((s) => s.id)).toEqual([
       's-integrate-completed',
       's-check-1',

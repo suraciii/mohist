@@ -79,14 +79,13 @@ function formatTime(iso: string | null | undefined): string {
   return d.toLocaleDateString()
 }
 
-function statusIcon(status: string) {
-  switch (status) {
-    case 'running':
+function statusIcon(activity: string) {
+  switch (activity) {
+    case 'active':
       return <ClockIcon className="size-3.5 text-blue-500" />
-    case 'failed':
+    case 'unknown':
       return <XCircleIcon className="size-3.5 text-red-500" />
-    case 'completed':
-    case 'stopped':
+    case 'idle':
       return <CheckCircleIcon className="size-3.5 text-emerald-500" />
     default:
       return <AlertCircleIcon className="size-3.5 text-muted-foreground" />
@@ -113,7 +112,7 @@ function SessionSection({
           data-testid={`session-row-${s.sessionId}`}
           className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors text-sm"
         >
-          {statusIcon(s.status)}
+          {statusIcon(s.activity ?? 'unknown')}
           <span className="text-xs text-foreground font-medium truncate min-w-0 flex-1">
             {s.agentName}
           </span>
@@ -158,15 +157,15 @@ export function AgentDetailPage({
   const isArchived = agent?.status === 'archived'
 
   const runningSessions = useMemo(
-    () => allSessions.filter((s) => s.status === 'running'),
+    () => allSessions.filter((s) => s.activity === 'active'),
     [allSessions],
   )
   const failedSessions = useMemo(
-    () => allSessions.filter((s) => s.status === 'failed'),
+    () => allSessions.filter((s) => s.activity === 'unknown'),
     [allSessions],
   )
   const endedSessions = useMemo(
-    () => allSessions.filter((s) => s.status === 'completed' || s.status === 'stopped'),
+    () => allSessions.filter((s) => s.activity === 'idle'),
     [allSessions],
   )
   const recentSessions = useMemo(

@@ -59,16 +59,6 @@ public abstract class AgentSessionRecoveryApiTestSupport
         else
             runtime["runtime"] = runtimeName;
 
-        if (state["status"]?["runtimeSessionLineage"] is JsonArray lineage && lineage.Count > 0)
-        {
-            var current = lineage[lineage.Count - 1]?.AsObject()
-                ?? throw new InvalidOperationException($"Session {sessionId} current lineage entry is invalid.");
-            if (runtimeName is null)
-                current.Remove("runtime");
-            else
-                current["runtime"] = runtimeName;
-        }
-
         row.State = state.ToJsonString();
         await db.SaveChangesAsync();
 

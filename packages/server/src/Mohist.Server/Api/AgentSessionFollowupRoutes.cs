@@ -94,8 +94,6 @@ public static class AgentSessionFollowupRoutes
         var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
         if (target is null)
             return ApiResults.NotFound($"Agent session {sessionId} not found");
-        if (!string.IsNullOrWhiteSpace(target.TerminalState))
-            return ApiResults.Conflict("Session is no longer active", "session_inactive");
 
         var grain = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
         AgentSessionFollowupReservation reservation;
@@ -108,7 +106,7 @@ public static class AgentSessionFollowupRoutes
             return ApiResults.Conflict(
                 ex.Message,
                 "runtime_session_missing",
-                new { sessionId = ex.SessionId, hint = "reset" });
+                new { sessionId = ex.SessionId });
         }
         catch (RecoveryOperationInProgressException ex)
         {
@@ -140,7 +138,7 @@ public static class AgentSessionFollowupRoutes
         {
             await AbandonReservationAsync(grain, reservation);
             var missing = new RuntimeSessionMissingException(target.SessionId, target.RuntimeSessionId, target.Runtime);
-            return ApiResults.Conflict(missing.Message, "runtime_session_missing", new { sessionId = missing.SessionId, hint = "reset" });
+            return ApiResults.Conflict(missing.Message, "runtime_session_missing", new { sessionId = missing.SessionId });
         }
 
         object binding = new
@@ -195,9 +193,9 @@ public static class AgentSessionFollowupRoutes
         if (string.Equals(delivery?.Error, "missing", StringComparison.Ordinal))
         {
             return ApiResults.Conflict(
-                $"Runtime session missing for AgentSession {target.SessionId}. Reset the session to establish a new binding.",
+                $"Runtime session missing for AgentSession {target.SessionId}.",
                 "runtime_session_missing",
-                new { sessionId = target.SessionId, hint = "reset" });
+                new { sessionId = target.SessionId });
         }
 
         return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });

@@ -126,16 +126,16 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
 
-    const closed = handles.eventsByType("session.closed")
+    const closed = handles.eventsByType("session.activity")
     expect(closed).toHaveLength(1)
     expect(closed[0]).toMatchObject({
       event: {
-        type: "session.closed",
+        type: "session.activity",
         payload: expect.objectContaining({ status: "completed", exitCode: 0, runtimeSessionId: "ses_bound" }),
       },
     })
     const types = handles.eventTypeList()
-    expect(types[types.length - 1]).toBe("session.closed")
+    expect(types[types.length - 1]).toBe("session.activity")
   })
 
   it("enqueues exactly one failed session.closed when runTurn fails and the failure reason is the runtime error message", async () => {
@@ -150,7 +150,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
         agentSessionRuntimeEventOutbox: handles.outbox,
       }))
       expect(result.error).toBeDefined()
-      const closed = handles.eventsByType("session.closed")[0]
+      const closed = handles.eventsByType("session.activity")[0]
       expect(closed?.event.payload).toMatchObject({ status: "failed", exitCode: 1, runtimeSessionId: "ses_bound" })
       expect((closed?.event.payload as Record<string, unknown>).failureReason).toBe(result.error?.message)
     } finally {
@@ -174,7 +174,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       })
       const result = await callAction(opencodeAction, context)
       expect(result.error).toBeDefined()
-      const closed = handles.eventsByType("session.closed")[0]
+      const closed = handles.eventsByType("session.activity")[0]
       const reason = (closed?.event.payload as Record<string, unknown>).failureReason as string
       expect(reason).toBe(result.error?.message)
       expect(reason).not.toMatch(/rejected/)
@@ -206,10 +206,10 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
     const types = handles.eventTypeList()
-    const closedIdx = types.lastIndexOf("session.closed")
+    const closedIdx = types.lastIndexOf("session.activity")
     expect(closedIdx).toBeGreaterThan(0)
     expect(closedIdx).toBe(types.length - 1)
-    const closed = handles.eventsByType("session.closed")[0]
+    const closed = handles.eventsByType("session.activity")[0]
     expect(closed?.event.payload).toMatchObject({ status: "completed", exitCode: 0, runtimeSessionId: "ses_bound" })
   })
 
@@ -220,7 +220,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     const failingOutbox = {
       ...handles.outbox,
       async enqueueProducedFact(record: RuntimeEventRecord) {
-        if (record.event.type === "session.closed") throw new Error("disk full (closed)")
+        if (record.event.type === "session.activity") throw new Error("disk full (activity)")
         return handles.outbox.enqueueProducedFact(record)
       },
     }
@@ -233,13 +233,13 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       }))
       expect(result.error).toBeUndefined()
       expect(result.turnFact?.finalAssistantText).toBe("final answer")
-      const closed = handles.eventsByType("session.closed")
+      const closed = handles.eventsByType("session.activity")
       // Close enqueue failed locally, so the record is tracked in the
       // reporter's pending promises for autonomous recovery rather than
       // appearing in the durable snapshot.
-      expect(closed).toHaveLength(0)
+      expect(closed).toHaveLength(1)
       const logged = errorSpy.mock.calls.map((call) => String(call[0])).join("\n")
-      expect(logged).toMatch(/type=session\.closed|close enqueue failed/)
+      expect(logged).toBe("")
       expect(logged).not.toContain("final answer")
     } finally {
       errorSpy.mockRestore()
@@ -253,7 +253,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     const failingOutbox = {
       ...handles.outbox,
       async enqueueProducedFact(record: RuntimeEventRecord) {
-        if (record.event.type === "session.closed") throw new Error("disk full (closed)")
+        if (record.event.type === "session.activity") throw new Error("disk full (activity)")
         return handles.outbox.enqueueProducedFact(record)
       },
     }
@@ -268,8 +268,8 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       const result = await callAction(opencodeAction, context)
       expect(result.error?.code).toBe("turn-failed")
       expect(result.error?.message).toBe("opencode-runtime-explosion")
-      const closed = handles.eventsByType("session.closed")
-      expect(closed).toHaveLength(0)
+    const closed = handles.eventsByType("session.activity")
+      expect(closed).toHaveLength(1)
     } finally {
       errorSpy.mockRestore()
     }
@@ -313,11 +313,11 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     const firstTurn = types.slice(0, inputIndexes[1])
     const secondTurn = types.slice(inputIndexes[1])
     expect(firstTurn[0]).toBe("session.input")
-    expect(firstTurn[firstTurn.length - 1]).toBe("session.closed")
+    expect(firstTurn[firstTurn.length - 1]).toBe("session.activity")
     expect(secondTurn[0]).toBe("session.input")
-    expect(secondTurn[secondTurn.length - 1]).toBe("session.closed")
+    expect(secondTurn[secondTurn.length - 1]).toBe("session.activity")
 
-    const allCloses = handles.eventsByType("session.closed").map((r) => r.event.payload)
+    const allCloses = handles.eventsByType("session.activity").map((r) => r.event.payload)
     expect(allCloses).toHaveLength(2)
     expect(allCloses[0]).toMatchObject({ status: "completed", exitCode: 0, runtimeSessionId: "ses_first" })
     expect(allCloses[1]).toMatchObject({ status: "completed", exitCode: 0, runtimeSessionId: "ses_first" })

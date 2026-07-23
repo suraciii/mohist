@@ -22,8 +22,7 @@
 //     returns `unavailable` without invoking the runtime, so command
 //     delivery can be retried
 //   - invokes `runtime.followup` exactly once; the resolve/reject
-//     handler enqueues the corresponding `session.followup_completed`
-//     or `session.followup_failed` record (operation-correlated)
+//     handler enqueues the corresponding session.activity record
 //   - server upload failure does NOT change the accepted result and
 //     does NOT re-invoke the prompt — the durable record is now under
 //     the outbox's retry/recovery policy
@@ -45,12 +44,18 @@ import {
   type CommandRuntimeAccessors,
 } from "./command-runtime.js"
 import type { PiTurnObserver } from "../runtime/pi/index.js"
+import { resolveOrRecoverBinding } from "../runtime/binding-recovery.js"
+import type { FollowupOperationJournalStore } from "../runtime/followup-operation-journal.js"
+import type { ServerConnection } from "./connection.js"
 
 export interface FollowupHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
   agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
   openCodeRuntime?: CommandRuntimeAccessors["openCode"]
   piRuntime?: CommandRuntimeAccessors["pi"]
+  connection?: ServerConnection | null
+  runnerId?: string | null
+  followupOperationJournal?: FollowupOperationJournalStore | null
   randomId?: () => string
 }
 
@@ -63,8 +68,22 @@ export function registerFollowupHandler(
   conn: signalR.HubConnection,
   deps: FollowupHandlerDeps,
 ): void {
-  conn.on("ReceiveFollowup", async (payload: ReceiveFollowupPayload | null | undefined) =>
-    await handleFollowup(payload, deps))
+  const inFlight = new Map<string, Promise<FollowupDeliveryResult>>()
+  conn.on("ReceiveFollowup", async (payload: ReceiveFollowupPayload | null | undefined) => {
+    const key = followupOperationKey(payload)
+    if (!key) return await handleFollowup(payload, deps)
+
+    const existing = inFlight.get(key)
+    if (existing) return await existing
+
+    const operation = handleFollowup(payload, deps)
+    inFlight.set(key, operation)
+    try {
+      return await operation
+    } finally {
+      if (inFlight.get(key) === operation) inFlight.delete(key)
+    }
+  })
 }
 
 export function defaultFollowupRecordId(): string {
@@ -83,6 +102,9 @@ async function handleFollowup(
 
   const sessionTarget = resolveSessionTarget(payload)
   if (!sessionTarget) return unavailable()
+
+  const operationId = payload.operationId
+  const operationKey = operationId ? sessionTargetKey(sessionTarget) : null
 
   let target: FollowupTargetResolution
   try {
@@ -104,42 +126,126 @@ async function handleFollowup(
   if (!handle) return unavailable()
   if (!handle.runtime.ready()) return unavailable()
 
+  let selectedTarget = target
+  const connection = deps.connection ?? null
+  const runnerId = deps.runnerId ?? null
+  if (connection && runnerId) {
+    const expected = {
+      runnerId: binding.runnerId,
+      runtime: handle.kind,
+      runtimeSessionId: target.runtimeSessionId,
+      workDir: target.workDir,
+    } as const
+    const recovery = await resolveOrRecoverBinding({
+      runnerId,
+      expected,
+      runtime: handle,
+      probe: async (candidate) => {
+        const result = handle.kind === "opencode"
+          ? await handle.runtime.resolveSession({ target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
+          : await handle.runtime.resolveSession({ target: { runtime: "pi", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
+        return result.ok ? { ok: true } : { ok: false, kind: result.error.kind, message: result.error.message }
+      },
+      replace: async (current, replacement) => {
+        const body = {
+          expectedRunnerId: current.runnerId,
+          expectedRuntime: current.runtime,
+          expectedRuntimeSessionId: current.runtimeSessionId,
+          replacementRuntimeSessionId: replacement.runtimeSessionId,
+        }
+        if (sessionTarget.kind === "workflow") {
+          await connection.recoverMissingWorkflowAgentSession(sessionTarget.projectId, sessionTarget.workflowRunId, sessionTarget.sessionName, body, new AbortController().signal)
+        } else {
+          await connection.recoverMissingAgentSession(sessionTarget.projectId, sessionTarget.sessionId, body, new AbortController().signal)
+        }
+      },
+    })
+    if (!recovery.ok) return unavailable()
+    selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId! }
+  }
+
+  if (operationId && operationKey && deps.followupOperationJournal) {
+    try {
+      const claim = await deps.followupOperationJournal.claim(operationKey, operationId)
+      if (claim === "submitted") return { accepted: true }
+      if (claim === "claimed") return unavailable()
+    } catch (error) {
+      console.error("followup operation journal claim failed:", error instanceof Error ? error.message : String(error))
+      return unavailable()
+    }
+  }
+
   try {
-    await enqueueFollowupInput(outbox, sessionTarget, target, payload, deps.randomId ?? defaultFollowupRecordId)
+    await enqueueFollowupInput(outbox, sessionTarget, selectedTarget, payload, deps.randomId ?? defaultFollowupRecordId)
   } catch (error) {
+    if (operationId && operationKey && deps.followupOperationJournal) {
+      await deps.followupOperationJournal.release(operationKey, operationId).catch(() => undefined)
+    }
     console.error("followup durable input enqueue failed:", error instanceof Error ? error.message : String(error))
     return unavailable()
   }
 
   const followupRequest = {
-    target: { runtime: binding.runtime, runtimeSessionId: target.runtimeSessionId, workDir: target.workDir },
+    target: { runtime: binding.runtime, runtimeSessionId: selectedTarget.runtimeSessionId, workDir: selectedTarget.workDir },
     prompt: payload.text,
   }
-  const observer = buildFollowupObserver(outbox, sessionTarget, target, payload.operationId)
+  const observer = buildFollowupObserver(outbox, sessionTarget, selectedTarget, payload.operationId)
   try {
-    void callFollowup(handle, followupRequest, observer).then(
+    const completion = callFollowup(handle, followupRequest, observer).then(
       (result) => {
         if (!result.ok) {
           const message = readErrorMessage(result)
-          recordFollowupTerminal(outbox, sessionTarget, target, payload.operationId, "failed", message)
+          recordFollowupActivity(
+            outbox,
+            sessionTarget,
+            selectedTarget,
+            payload.operationId,
+            isUncertainFollowupFailure(readErrorKind(result)) ? "unknown" : "idle",
+            message,
+          )
           if (readErrorKind(result) === "unavailable-runtime") {
             console.error("followup runtime unavailable:", message)
           }
           return
         }
-        recordFollowupTerminal(outbox, sessionTarget, target, payload.operationId, "completed", null)
+        recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "idle")
       },
       (error) => {
         console.error("followup runtime.followup rejected:", error instanceof Error ? error.message : String(error))
-        recordFollowupTerminal(outbox, sessionTarget, target, payload.operationId, "failed", error)
+        recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "unknown", error)
       },
     )
+    if (operationId && operationKey && deps.followupOperationJournal) {
+      try {
+        await deps.followupOperationJournal.markSubmitted(operationKey, operationId)
+      } catch (error) {
+        console.error("followup operation journal submission mark failed:", error instanceof Error ? error.message : String(error))
+        return unavailable()
+      }
+    }
+    void completion
   } catch (error) {
     console.error("followup runtime.followup threw:", error instanceof Error ? error.message : String(error))
-    recordFollowupTerminal(outbox, sessionTarget, target, payload.operationId, "failed", error)
+    recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "unknown", error)
     return unavailable()
   }
   return { accepted: true }
+}
+
+function sessionTargetKey(target: SessionTarget): string {
+  return target.kind === "workflow"
+    ? `workflow:${target.projectId}:${target.workflowRunId}:${target.sessionName}`
+    : `generic:${target.projectId}:${target.sessionId}`
+}
+
+function followupOperationKey(payload: ReceiveFollowupPayload | null | undefined): string | null {
+  if (!payload?.operationId) return null
+  const target = resolveSessionTarget(payload)
+  return target ? `${sessionTargetKey(target)}:${payload.operationId}` : null
+}
+
+function isUncertainFollowupFailure(kind: string): boolean {
+  return kind === "unavailable-runtime" || kind === "deadline-exceeded"
 }
 
 function buildFollowupObserver(
@@ -209,28 +315,28 @@ async function enqueueFollowupInput(
   await outbox.enqueueBeforeExecution(record)
 }
 
-function recordFollowupTerminal(
+function recordFollowupActivity(
   outbox: AgentSessionRuntimeEventOutbox,
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   operationId: string | undefined,
-  status: "completed" | "failed",
-  error: unknown,
+  activity: "idle" | "unknown",
+  error?: unknown,
 ): void {
   if (!operationId) return
-  const message = error === null ? null : error instanceof Error ? error.message : errorMessage(error)
   const completedAt = new Date().toISOString()
   const record: RuntimeEventRecord = {
-    id: `followup-terminal:${operationId}:${status}:${completedAt}`,
+    id: `followup-activity:${operationId}:${activity}:${completedAt}`,
     producerFamily: sessionTarget.kind === "workflow" ? "workflow-session" : "generic-followup",
     target: sessionTargetToRuntimeTarget(sessionTarget),
     runtimeSessionId: target.runtimeSessionId,
     work: null,
     event: {
-      type: status === "failed" ? "session.followup_failed" : "session.followup_completed",
+      type: "session.activity",
       payload: {
-        status,
-        ...(message ? { failureReason: message } : {}),
+        activity,
+        status: activity === "idle" ? "completed" : "failed",
+        ...(error ? { failureReason: error instanceof Error ? error.message : errorMessage(error) } : {}),
         source: "followup",
         operationId,
         runtimeSessionId: target.runtimeSessionId,

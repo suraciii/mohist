@@ -159,22 +159,49 @@ describe('genericSessionSummaryQueryOptions', () => {
     expect(genericSessionSummaryQueryOptions('proj-1', '').enabled).toBe(false)
   })
 
-  it('polls every 5s when session is not terminal', () => {
+  // Issue 484: refetchInterval is now driven by `activity`, not `status`.
+  // Sessions never enter a terminal status (completed/failed/stopped/
+  // cancelled) — execution finishing brings activity back to `idle`.
+  // Polling continues while activity is `active` or `unknown`, and stops
+  // only when activity resolves to `idle` (the follow-up-able quiescent
+  // state). `status` is no longer consulted.
+  it('polls every 5s while activity is active', () => {
     const opts = genericSessionSummaryQueryOptions('proj-1', 'sess-abc')
     const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { status: 'running' } as never } })
+      ? opts.refetchInterval({ state: { data: { activity: 'active' } as never } })
       : opts.refetchInterval
     expect(interval).toBe(5000)
   })
 
+  it('polls every 5s while activity is unknown (awaiting resolution)', () => {
+    const opts = genericSessionSummaryQueryOptions('proj-1', 'sess-abc')
+    const interval = typeof opts.refetchInterval === 'function'
+      ? opts.refetchInterval({ state: { data: { activity: 'unknown' } as never } })
+      : opts.refetchInterval
+    expect(interval).toBe(5000)
+  })
+
+  it('stops polling when activity returns to idle', () => {
+    const opts = genericSessionSummaryQueryOptions('proj-1', 'sess-abc')
+    const interval = typeof opts.refetchInterval === 'function'
+      ? opts.refetchInterval({ state: { data: { activity: 'idle' } as never } })
+      : opts.refetchInterval
+    expect(interval).toBe(false)
+  })
+
+  // Issue 484: legacy `status` values (running/completed/failed/stopped/
+  // cancelled) are no longer read by refetchInterval, so they must NOT stop
+  // polling on their own. Sessions carrying a legacy status but no resolved
+  // activity keep polling until activity resolves to idle. This guards
+  // against a regression that re-introduces status-based gating.
   it.each(['completed', 'failed', 'stopped', 'cancelled'])(
-    'stops polling when session is terminal (%s)',
+    'does not stop polling based on a legacy status value (%s) — only activity=idle stops polling',
     (status) => {
       const opts = genericSessionSummaryQueryOptions('proj-1', 'sess-abc')
       const interval = typeof opts.refetchInterval === 'function'
-        ? opts.refetchInterval({ state: { data: { status } as never } })
+        ? opts.refetchInterval({ state: { data: { status, activity: 'active' } as never } })
         : opts.refetchInterval
-      expect(interval).toBe(false)
+      expect(interval).toBe(5000)
     },
   )
 })

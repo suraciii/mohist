@@ -174,6 +174,8 @@ function setupDefaultMocks() {
     title: 'Test session',
     status: 'completed',
     statusKind: 'completed',
+    // Issue 484: the sticky title shows an activity-derived status badge.
+    activity: 'idle',
     stage: 'build',
     model: 'minimax/MiniMax-M3',
     createdAt: '2026-06-15T10:00:00.000Z',
@@ -317,7 +319,8 @@ describe('SessionPage sticky recovery bar', () => {
     expect(stickyTitle!.className).toContain('top-0')
     expect(stickyTitle!.className).toContain('bg-background')
     expect(stickyTitle!.textContent).toContain('session-1')
-    expect(stickyTitle!.textContent).toContain('Completed')
+    // Activity model: a finished session reports activity 'idle'.
+    expect(stickyTitle!.textContent).toContain('Idle')
     expect(stickyTitle!.textContent).toContain('2 turns')
     expect(stickyTitle!.querySelectorAll('[data-testid="session-status-badge"]')).toHaveLength(1)
     expect(stickyTitle!.querySelector('button')).toBeNull()

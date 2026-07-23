@@ -60,7 +60,6 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         Assert.Equal("runtime-session-1", rehydrated.Status.AgentRuntimeSessionId);
         Assert.Equal("runner-1", rehydrated.Runtime.RunnerId);
         Assert.Equal("/work", rehydrated.Runtime.WorkDir);
-        Assert.Equal("opencode", Assert.Single(rehydrated.Status.RuntimeSessionLineage!).Runtime);
     }
 
     [Fact]
@@ -89,7 +88,6 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
             var row = await db.AgentSessions.SingleAsync(candidate => candidate.Id == session.Id);
             var state = JsonNode.Parse(row.State)!.AsObject();
             state["runtime"]!.AsObject().Remove("runtime");
-            state["status"]!["runtimeSessionLineage"]![0]!.AsObject().Remove("runtime");
             var labels = state["metadata"]!["labels"]!.AsObject();
             labels.Remove("mohist.io/project-id");
             labels.Remove("mohist.io/source-kind");
@@ -105,7 +103,6 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         Assert.NotNull(rehydrated);
         Assert.Equal("legacy-runtime-session", rehydrated!.Status.AgentRuntimeSessionId);
         Assert.Null(rehydrated.Runtime.Runtime);
-        Assert.Null(Assert.Single(rehydrated.Status.RuntimeSessionLineage!).Runtime);
         await using var verificationDb = new MohistDbContext(_database.Options);
         var persistedState = await verificationDb.AgentSessions
             .Where(candidate => candidate.Id == session.Id)

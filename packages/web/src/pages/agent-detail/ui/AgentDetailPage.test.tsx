@@ -124,9 +124,11 @@ function makeSession(overrides: Partial<AgentSessionListItemDto> = {}): AgentSes
     sessionId: 'sess-1',
     agentId: 'agent-1',
     agentName: 'Test Agent',
-    status: 'completed',
-    createdAt: '2026-06-10T00:00:00.000Z',
-    lastActivityAt: '2026-06-10T01:00:00.000Z',
+    // Issue 484: sessions are grouped by `activity` (active/unknown/idle),
+    // not `status`. Default to idle (an ended/awaiting-followup session).
+    activity: 'idle',
+    createdAt: '2026-06-10T00:00:00Z',
+    lastActivityAt: '2026-06-10T01:00:00Z',
     resolvedModel: 'gpt-4',
     contextRefs: null,
     ...overrides,
@@ -231,12 +233,17 @@ describe('AgentDetailPage', () => {
   })
 
   describe('session history grouping', () => {
+    // Issue 484: sessions are grouped by `activity`, not `status`.
+    // - Running section  <- activity === 'active'
+    // - Failed section   <- activity === 'unknown' (unconfirmed activity)
+    // - Ended section    <- activity === 'idle'    (finished, follow-up-able)
+    // Sessions never carry a terminal status anymore.
     it('renders sessions in running, failed, and ended sections', async () => {
       mockAgent(makeAgent())
       mockSessions([
-        makeSession({ sessionId: 's1', status: 'running' }),
-        makeSession({ sessionId: 's2', status: 'failed' }),
-        makeSession({ sessionId: 's3', status: 'completed' }),
+        makeSession({ sessionId: 's1', activity: 'active' }),
+        makeSession({ sessionId: 's2', activity: 'unknown' }),
+        makeSession({ sessionId: 's3', activity: 'idle' }),
       ])
       renderPage()
       await screen.findByTestId('agent-detail-sessions')

@@ -89,12 +89,11 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     [Theory]
     [InlineData("workflow")]
     [InlineData("agent-launch")]
-    public async Task Cancel_ActiveTurn_PreservesSessionTranscriptAndLineageForBothSources(string sourceKind)
+    public async Task Cancel_ActiveTurn_PreservesSessionTranscriptForBothSources(string sourceKind)
     {
         var (project, sessionId) = await CreateCanonicalSessionForCancelAsync(sourceKind);
         var before = await ReadSessionEvidenceAsync(sessionId);
         Assert.Equal(sourceKind, before.SourceKind);
-        Assert.NotEmpty(before.Lineage);
         Assert.NotEmpty(before.TranscriptParts);
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
@@ -134,7 +133,6 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
             Assert.Equal(before.SessionId, after.SessionId);
             Assert.Equal(before.SourceKind, after.SourceKind);
             Assert.Equal(before.RuntimeSessionId, after.RuntimeSessionId);
-            Assert.True(before.Lineage.SequenceEqual(after.Lineage, StringComparer.Ordinal));
             Assert.True(before.TranscriptTurns.SequenceEqual(after.TranscriptTurns, StringComparer.Ordinal));
             Assert.True(before.TranscriptParts.SequenceEqual(after.TranscriptParts, StringComparer.Ordinal));
         }
@@ -196,45 +194,13 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         }
     }
 
-    [Fact]
-    public async Task Cancel_AlreadyTerminalSession_ShortCircuitsWithoutCallingRunner()
-    {
-        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-terminal");
-        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
-        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-
-        // Mark the session terminal via a runtime event, then drain the
-        // transcript so the resolver's DB read sees the close event.
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
-        {
-            new AgentSessionRuntimeEventInput(
-                Type: RuntimeEventTypes.SessionClosed,
-                PayloadJson: "{\"status\":\"completed\"}"),
-        }, sessionId));
-        await grain.FlushForTestAsync();
-
-        runnerHub.Clear();
-        tracker.Register(_runnerId, "conn-gen-cancel-terminal");
-        try
-        {
-            using var response = await PostGenericCancelAsync(project.Id, sessionId);
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            // The server short-circuits and returns the current terminal
-            // state without invoking the runner. The response carries
-            // "completed" verbatim — the API does not report a fresh
-            // cancellation.
-            Assert.Equal("completed", doc.RootElement.GetProperty("data").GetProperty("state").GetString());
-            Assert.Empty(runnerHub.Invocations);
-        }
-        finally
-        {
-            tracker.Unregister(_runnerId);
-        }
-    }
+    // Cancel_AlreadyTerminalSession_ShortCircuitsWithoutCallingRunner and
+    // Cancel_AlreadyTerminalSession_MirrorsEachTerminalStateVerbatim were
+    // removed: under the activity model (issue-484) a session never enters a
+    // terminal state, so a manual session.closed injection is a no-op and the
+    // cancel terminal short-circuit no longer exists. The runner-reported
+    // terminal mirroring behaviour is still covered by
+    // Cancel_RunnerRepliesWithTerminalState_MirrorsThatTerminalState.
 
     [Fact]
     public async Task Cancel_AfterReset_IgnoresTerminalStateFromPredecessorRuntime()
@@ -267,31 +233,6 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         {
             tracker.Unregister(_runnerId);
         }
-    }
-
-    [Theory]
-    [InlineData("completed")]
-    [InlineData("failed")]
-    [InlineData("stopped")]
-    [InlineData("cancelled")]
-    public async Task Cancel_AlreadyTerminalSession_MirrorsEachTerminalStateVerbatim(string terminalStatus)
-    {
-        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync($"gen-cancel-terminal-{terminalStatus}");
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
-        {
-            new AgentSessionRuntimeEventInput(
-                Type: RuntimeEventTypes.SessionClosed,
-                PayloadJson: $"{{\"status\":\"{terminalStatus}\"}}"),
-        }, sessionId));
-        await grain.FlushForTestAsync();
-
-        using var response = await PostGenericCancelAsync(project.Id, sessionId);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal(terminalStatus, doc.RootElement.GetProperty("data").GetProperty("state").GetString());
     }
 
     [Fact]
@@ -358,8 +299,13 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
-    public async Task Cancel_BoundSessionWithMissingRuntime_ReturnsResetHint()
+    public async Task Cancel_BoundSessionWithUnregisteredRuntime_ReturnsNotCancellable()
     {
+        // The session is bound to an unregistered runtime (acp); the
+        // cancel path cannot reach a live runtime session, so the API
+        // honestly surfaces `not-cancellable` instead of faking a cancel.
+        // (issue-484: the runtime_session_missing reset hint no longer
+        // applies to the cancel path.)
         var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch", runtime: "acp");
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         tracker.Register(_runnerId, "conn-gen-cancel-missing-runtime");
@@ -367,11 +313,9 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         {
             using var response = await PostGenericCancelAsync(project.Id, sessionId);
 
-            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
-            Assert.Equal(sessionId, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
-            Assert.Equal("reset", doc.RootElement.GetProperty("details").GetProperty("hint").GetString());
+            Assert.Equal("not-cancellable", doc.RootElement.GetProperty("data").GetProperty("state").GetString());
         }
         finally
         {
@@ -405,60 +349,6 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         {
             tracker.Unregister(_runnerId);
         }
-    }
-
-    [Fact]
-    public async Task ResolveGenericCancelTargetAsync_UnknownSessionId_ReturnsNull()
-    {
-        var project = await CreateProjectAsync("gen-cancel-resolve-404");
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
-
-        var target = await querier.ResolveGenericCancelTargetAsync(project.Id, Guid.NewGuid().ToString("N"));
-
-        Assert.Null(target);
-    }
-
-    [Fact]
-    public async Task ResolveGenericCancelTargetAsync_ActiveSession_ReturnsNullTerminalState()
-    {
-        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-resolve-active");
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
-
-        var target = await querier.ResolveGenericCancelTargetAsync(project.Id, sessionId);
-
-        Assert.NotNull(target);
-        Assert.Equal(_runnerId, target!.RunnerId);
-        Assert.Equal(sessionId, target.SessionId);
-        Assert.Null(target.TerminalState);
-    }
-
-    [Theory]
-    [InlineData("failed")]
-    [InlineData("cancelled")]
-    public async Task ResolveGenericCancelTargetAsync_TerminalSession_ReturnsTerminalState(string terminalStatus)
-    {
-        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-resolve-terminal");
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
-        {
-            new AgentSessionRuntimeEventInput(
-                Type: RuntimeEventTypes.SessionClosed,
-                PayloadJson: $"{{\"status\":\"{terminalStatus}\"}}"),
-        }, sessionId));
-        await grain.FlushForTestAsync();
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
-
-        var target = await querier.ResolveGenericCancelTargetAsync(project.Id, sessionId);
-
-        Assert.NotNull(target);
-        Assert.Equal(terminalStatus, target!.TerminalState);
     }
 
 }

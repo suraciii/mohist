@@ -68,7 +68,7 @@ describe("mohist/pi Action", () => {
     expect(pi.createSession).not.toHaveBeenCalled()
   })
 
-  it("binds, accepts input, submits a fixed-duration turn, and closes the Session", async () => {
+  it("binds, accepts input, submits a fixed-duration turn, and returns the Session to idle", async () => {
     const pi = runtime()
     const connection = server()
     const result = await piAction(context({ piRuntime: pi as never, serverConnection: connection as never, projectId: "project" }))
@@ -77,7 +77,7 @@ describe("mohist/pi Action", () => {
     expect(pi.turns[0]).toMatchObject({ durationMs: PI_TURN_DURATION_MS })
     expect(connection.workflowAgentSessionRuntimeEvents).toHaveBeenCalledTimes(2)
     expect((connection.calls[0] as { runtimeEvents: Array<{ type: string }> }).runtimeEvents[0].type).toBe("session.input")
-    expect((connection.calls[1] as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.at(-1)?.type).toBe("session.closed")
+    expect((connection.calls[1] as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.at(-1)?.type).toBe("session.activity")
   })
 
   it("preserves an unexpected turn failure when terminal reporting also fails", async () => {
@@ -103,7 +103,7 @@ describe("mohist/pi Action", () => {
       },
     })
     expect(connection.workflowAgentSessionRuntimeEvents).toHaveBeenCalledTimes(2)
-    expect((connection.calls[1] as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.at(-1)?.type).toBe("session.closed")
+    expect((connection.calls[1] as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.at(-1)?.type).toBe("session.activity")
   })
 
   it("keeps unknown options diagnostic-only", async () => {

@@ -2,11 +2,14 @@ namespace Mohist.Server.Sessions.Services;
 
 internal static class RuntimeEventTypes
 {
-    public const string SessionInput = "session.input";
-    public const string SessionLiveness = "session.liveness";
     public const string SessionClosed = "session.closed";
     public const string SessionFollowupFailed = "session.followup_failed";
     public const string SessionFollowupCompleted = "session.followup_completed";
+    public const string SessionInput = "session.input";
+    public const string SessionLiveness = "session.liveness";
+    public const string SessionActivity = "session.activity";
+    public const string SessionContextReset = "session.context_reset";
+    public const string TurnFailed = "turn.failed";
     public const string MessageDelta = "message.delta";
     public const string ReasoningDelta = "reasoning.delta";
     public const string ToolCallStarted = "tool_call.started";
@@ -22,6 +25,7 @@ internal static class RuntimeEventTypes
 
 internal static class TranscriptPartTypes
 {
+    public const string SessionClosed = "session.closed";
     public const string Input = "input";
     public const string Text = "text";
     public const string Reasoning = "reasoning";
@@ -29,7 +33,9 @@ internal static class TranscriptPartTypes
     public const string Status = "status";
     public const string Usage = "usage";
     public const string Model = "model";
-    public const string SessionClosed = "session.closed";
+    public const string SessionActivity = "session.activity";
+    public const string SessionContextReset = "session.context_reset";
+    public const string TurnFailed = "turn.failed";
     public const string Compaction = "compaction";
     public const string ProviderRetry = "provider.retry";
 }
