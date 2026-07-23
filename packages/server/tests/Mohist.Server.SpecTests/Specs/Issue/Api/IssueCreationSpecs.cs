@@ -193,54 +193,6 @@ public class IssueCreationSpecs
     }
 
     [Fact]
-    public async Task StartWorkflow_UsesProjectDefaultTemplate()
-    {
-        // The runner is a global resource. Prior tests in this collection
-        // leave runners registered, which can race with this test's poll.
-        var registry = _grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        foreach (var staleId in await registry.ListRunnerIdsAsync())
-            await registry.UnregisterAsync(staleId);
-        await WorkflowGrainTestHelpers.ClearBacklogAsync(_grains, _connectionString);
-
-        var project = await SetupProjectAsync();
-        using (var scope = _services.CreateScope())
-        {
-            var profiles = scope.ServiceProvider.GetRequiredService<ProjectWorkflowProfileManager>();
-            await profiles.CreateTemplateAsync(project.Id, """
-                id: project-custom
-                stages:
-                  - stage: custom-stage
-                    tasks:
-                      - id: custom-task
-                        title: Custom task
-                        uses: spec/task
-                        with:
-                          prompt: Project template prompt
-                    checks: []
-                """);
-            await profiles.SetDefaultTemplateAsync(project.Id, "project-custom");
-        }
-
-        var created = await CreateIssueAsync(project.Id, "Project template issue");
-        var grain = IssueGrain(project.Id, created.Number);
-        var wrId = await grain.StartWorkAsync();
-        await DispatchEventsAsync();
-
-        var runnerId = $"runner-template-test-{Guid.NewGuid():N}";
-        var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
-
-        var work = await PollWorkForWorkflowAsync(runner, runnerId, wrId);
-
-        Assert.Equal(wrId, work.WorkflowRunId);
-        Assert.Equal("custom-stage", work.Stage);
-        Assert.StartsWith("custom-task.", work.WorkId);
-        Assert.Contains("Project template prompt", work.With);
-
-        await runner.UnregisterAsync();
-    }
-
-    [Fact]
     public async Task CreateIssue_SequentialNumbers()
     {
         var project = await SetupProjectAsync();

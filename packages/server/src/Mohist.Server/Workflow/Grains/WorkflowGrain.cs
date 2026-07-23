@@ -38,6 +38,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     internal string GrainKeyForTest { get; set; } = string.Empty;
 
+    internal Func<string, string, Task<WorkflowProfileReferenceResult>>? BindProfileForTest { get; set; }
+
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
@@ -638,12 +640,14 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private async Task PersistProfileBindingAsync(string projectId, string profileId)
     {
         await _runStore.SaveAsync(_run!);
-        var result = await GrainFactory
-            .GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId)
-            .BindWorkflowRunAsync(
-                new WorkflowProfileCommandPayload.BindWorkflowRun(projectId, GrainKey, profileId),
-                $"workflow-run:{GrainKey}:profile:{profileId}",
-                expectedRevision: null);
+        var result = BindProfileForTest is not null
+            ? await BindProfileForTest(projectId, profileId)
+            : await GrainFactory
+                .GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId)
+                .BindWorkflowRunAsync(
+                    new WorkflowProfileCommandPayload.BindWorkflowRun(projectId, GrainKey, profileId),
+                    $"workflow-run:{GrainKey}:profile:{profileId}",
+                    expectedRevision: null);
         if (!result.IsApplied)
         {
             await _runStore.DeleteAsync(GrainKey);

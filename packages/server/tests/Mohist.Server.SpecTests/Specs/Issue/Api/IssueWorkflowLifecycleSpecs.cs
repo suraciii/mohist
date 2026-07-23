@@ -124,7 +124,7 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Equal(wrId, final.WorkflowRunId);
 
         var run = await LoadWorkflowRunAsync(wrId);
-        Assert.Null(run!.WorkflowProfileId);
+        Assert.Equal("mohist/local", run!.WorkflowProfileId);
     }
 
     [Fact]
