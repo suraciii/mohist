@@ -63,10 +63,17 @@ public static class WorkflowProfileDataMigrator
             .ToListAsync(cancellationToken);
 
         var existingRecordKeys = await db.WorkflowProfileRecords
-            .Select(r => new { r.ProjectId, r.ProfileId })
+            .Select(r => new { r.ProjectId, r.ProfileId, r.SourceProvenance })
             .ToListAsync(cancellationToken);
         var existingRecordSet = new HashSet<(string ProjectId, string ProfileId)>(
             existingRecordKeys.Select(r => (r.ProjectId, r.ProfileId)));
+        var migratedRecordSet = new HashSet<(string ProjectId, string ProfileId)>(
+            existingRecordKeys
+                .Where(r => string.Equals(
+                    r.SourceProvenance,
+                    nameof(WorkflowProfileSourceProvenance.CanonicalLegacy),
+                    StringComparison.Ordinal))
+                .Select(r => (r.ProjectId, r.ProfileId)));
 
         // Detect target-id collisions per project before any write. The
         // (ProjectId, ProfileId) unique key is the failure surface, so a
@@ -121,7 +128,9 @@ public static class WorkflowProfileDataMigrator
             // already occupied by an existing record is a genuine conflict
             // — skipping it would silently drop the legacy Definition.
             if (targetId == sourceId) continue;
-            if (!existingRecordSet.Contains((row.ProjectId, targetId))) continue;
+            if (!existingRecordSet.Contains((row.ProjectId, targetId))
+                || migratedRecordSet.Contains((row.ProjectId, targetId)))
+                continue;
             externalCollisions.Add(
                 $"Project '{row.ProjectId}' legacy Profile '{sourceId}' target '{targetId}' is already occupied by an existing WorkflowProfile");
         }

@@ -143,7 +143,9 @@ public class WorkflowRunStore : IWorkflowRunStore
                 WorkflowRunId = run.Id,
                 State = JSON.Serialize(run),
                 EpicNumber = epicNumber,
-                WorkflowProfileIdKey = WorkflowProfileBindingKey.For(run.WorkflowProfileId),
+                WorkflowProfileIdKey = run.Status.IsTerminal()
+                    ? null
+                    : WorkflowProfileBindingKey.For(run.WorkflowProfileId),
             };
             db.WorkflowRuns.Add(newEntity);
             db.Entry(newEntity).Property<long>("ETag").CurrentValue = 1;

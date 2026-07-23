@@ -318,6 +318,10 @@ public static partial class IssueRoutes
                         return ApiResults.Conflict(
                             coordinatorResult.Message ?? "Repository revision is stale",
                             "repository_stale_revision");
+                    case IssueRepositoryBindingResultCode.WorkflowProfileNotFound:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "WorkflowProfile was not found",
+                            "workflow-profile-not-found");
                     default:
                         return ApiResults.Conflict(
                             coordinatorResult.Message ?? "Repository change rejected");
