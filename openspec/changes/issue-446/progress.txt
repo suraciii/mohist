@@ -1,0 +1,40 @@
+# issue-446 build progress
+
+## Codebase Patterns
+
+- Runner services live under `packages/server/src/Mohist.Server/Runner/Services/` and use `IScopedService` to opt into Scrutor-based DI registration. Interfaces get explicit forward bindings in `MohistServiceRegistration.ConfigureMohistServices` via `services.AddScoped<IInterface>(sp => sp.GetRequiredService<Concrete>())` (see `IAgentLauncher → AgentLauncher`, `IRunnerWorkspaceClient → RunnerWorkspaceClient`). The interface alone is not registered by Scrutor because Scrutor registers concretes `AsSelf()`.
+- `IActionCatalogSource` consumers should inject the **interface**, not the concrete. Saving managers get a clean fake seam: replace the interface binding in tests, no need to fake the registry grain.
+- `IRunnerRegistryGrain` is reached via `IGrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)`. `RunnerRegistryKeys.Global` is the canonical global key; the obsolete `ForProject(projectId)` helper exists for legacy call sites only.
+- `RunnerInfo.ActionCatalog` is the already-retained, hydrated `ActionCatalog` reported by the runner. It can be `null`. `RegisteredAt` is set by the registry grain on first registration, but downstream records (e.g. seeded from persistence during reactivation) can carry `null` — both are legitimate.
+- Tests under `Mohist.Server.UnitTests` use xunit.v3 + FakeTimeProvider. The IGrainFactory fake is verbose (every member explicit-implemented); only `GetGrain<TGrainInterface>(string, string?)` is needed in practice. Pattern reused from `SpecTests/Support/NullEventDispatchGrainFactory.cs`.
+
+## T-001: RunnerRegistryCatalogSource
+
+### Files
+- New: `packages/server/src/Mohist.Server/Runner/Services/IActionCatalogSource.cs` — single-method interface (`GetCatalogAsync()`) returning `ActionCatalog?`.
+- New: `packages/server/src/Mohist.Server/Runner/Services/RunnerRegistryCatalogSource.cs` — concrete `IScopedService` that resolves `IRunnerRegistryGrain` via `IGrainFactory` and walks `ListRunnersAsync()`, selecting the latest `RegisteredAt` runner with a non-null `ActionCatalog`. Returns `null` when no runner carries one. Treats `null` `RegisteredAt` as oldest (so any runner with a timestamp beats any without, and a runner with no timestamp is the worst option).
+- Modified: `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs` — added the forward binding for `IActionCatalogSource → RunnerRegistryCatalogSource` next to the other Runner service bindings so the test fixture picks it up automatically.
+- New: `packages/server/tests/Mohist.Server.UnitTests/Runner/Services/RunnerRegistryCatalogSourceTests.cs` — 7 unit tests covering: no runners; runner without catalog; single runner with catalog; multiple runners with catalogs (latest `RegisteredAt` wins); null `RegisteredAt` treated as oldest; all-null `RegisteredAt` deterministically picks the first (insertion order); runners without catalog only returns null. Fake `IGrainFactory` + fake `IRunnerRegistryGrain` keep the tests free of real grains, HTTP, or TimeProvider.
+
+### Decisions taken on this task
+- Implemented as `IScopedService` (Scrutor auto-registers `RunnerRegistryCatalogSource AsSelf()`), then explicitly added `services.AddScoped<IActionCatalogSource>(sp => sp.GetRequiredService<RunnerRegistryCatalogSource>())`. Mirrors the `IAgentLauncher → AgentLauncher` precedent.
+- Selection algorithm: walk the registry result, skip runners with `ActionCatalog == null`, and keep the one with the largest `RegisteredAt`. A `null` `RegisteredAt` is treated as oldest — so a non-null timestamp always beats a null one, two nulls keep the first encountered (deterministic per registry call), and a non-null > non-null uses `.Value > .Value`.
+- No logging added. Divergent-catalog observability is flagged as an Open Question in the design; defer until integrate-stage asks for it.
+
+### Gotchas
+- `RunnerInfo` is declared in `IRunnerGrain.cs`, not its own file — when constructing one in tests, the parameter names are `RunnerId, Capabilities, Hostname, ProjectId, CoderModels?, Kind, RegisteredAt?, BuildGitHash?, CoderModelVariants?, ActionCatalog?, RuntimeCatalogs?`. Calling `new RunnerInfo(..., ActionCatalog: ...)` works fine.
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj` invokes a `BuildWebAssets` MSBuild target that runs `npm run build -w packages/web`. In environments without `node_modules` (e.g., sandboxes without `npm ci`), it fails with `sh: 1: tsc: not found`. Pass `/p:SkipWebBuild=true` for C#-only checks.
+- `dotnet test` invocations from a non-standard `DOTNET_ROOT` need the env var or the host falls back to a default search path that doesn't see the preview SDK runtime location. `DOTNET_ROOT=/home/szf/.dotnet` is sufficient.
+
+### Verification
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` — 0 warnings, 0 errors.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj` (uses xunit.v3 in-process runner) — 1311 passed / 0 failed (includes the 7 new RunnerRegistryCatalogSourceTests).
+- `dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj` — 32 passed / 0 failed.
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj` — 3028 passed / 0 failed.
+- `dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj` — 162 passed / 0 failed.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj` — 1364 passed / 0 failed.
+
+### Carry-forward for T-002 / T-003
+- The `IActionCatalogSource` interface is the dependency injection point downstream (T-002 has no DI dependency; T-003's save managers will take it). 
+- `RunnerInfo.ActionCatalog != null` is the only "catalog present" check the source does; the validator (T-002) operates purely on the supplied `ActionCatalog` and the existing `WorkflowDefinition` model.
+- Save managers must inject `IActionCatalogSource` (not the concrete) so spec tests can substitute a fake without touching Orleans. The runtime decisions D2/D3/D4 from the design doc are preserved here; T-003 just wires them.
