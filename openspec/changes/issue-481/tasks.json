@@ -6,12 +6,12 @@
       "id": "T-001",
       "title": "Expose the cross-domain Activity evidence API",
       "spec": "specs/activity-list/spec.md#activity-list-returns-bounded-cross-domain-activity-evidence",
-      "description": "Add the project-scoped Activity evidence endpoint that merges the persisted Project Event feed with the existing AgentOps session/waiting and Runner status snapshots. Define provenance-aware Activity entries, reuse the source read models without adding persistence or event schemas, validate the final 1 through 200 collection limit, and prove project isolation.",
+      "description": "Add the Project-scoped Activity evidence endpoint that merges the persisted Project Event feed with existing Project-bound AgentOps session/waiting snapshots and global Runner status context. Define provenance- and scope-aware Activity entries, reuse the source read models without adding persistence or event schemas, validate the final 1 through 200 collection limit, and prove the explicit visibility rule.",
       "acceptanceCriteria": [
-        "GET /api/projects/{projectRef}/activity returns one normal API collection whose entries cover persisted Issue, WorkflowRun, and AgentSession history plus the existing AgentSession, waiting-workflow, and Runner snapshots.",
-        "Every entry has stable id, provenance, kind, time, title, and description; recorded entries preserve event type/identity/time, while snapshot entries identify the represented session, waiting work, or Runner without pretending to be replayed events.",
+        "GET /api/projects/{projectRef}/activity returns one normal API collection whose entries cover persisted Project-bound Issue, WorkflowRun, and AgentSession history plus Project-bound AgentSession/waiting snapshots and global Runner context.",
+        "Every entry has stable id, provenance, scope, kind, time, title, and description; recorded entries preserve event type/identity/time, while snapshot entries identify the represented session, waiting work, or Runner without pretending to be replayed events.",
         "The endpoint defaults to 100 records, accepts limits from 1 through 200, applies the limit after a stable merged ordering, rejects out-of-range limits with a client error, and resolves project scope through the existing project filter.",
-        "Server specs cover each evidence source, recorded-versus-snapshot provenance, stable ordering and final-limit enforcement, project isolation, invalid-limit rejection, and unchanged existing /events, /agent/activity, and Runner-status contracts.",
+        "Server specs cover each evidence source, recorded-versus-snapshot provenance, project-versus-global scope, stable ordering and final-limit enforcement, invalid-limit rejection, and unchanged existing /events, /agent/activity, and Runner-status contracts. They prove Project-bound entries do not cross Projects and a shared Runner may recur only as scope=global.",
         "dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj passes."
       ],
       "priority": 1,
@@ -20,23 +20,23 @@
       "output": "A read-only cross-domain Activity evidence endpoint, shared waiting projection, and focused server specification coverage.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Compose ProjectEventFeedAssembler, AgentActivityFeedAssembler, and RunnerStatusService; extract the route-private waiting projection for shared use. Do not create a new Activity store or change existing source contracts."
+      "notes": "Compose ProjectEventFeedAssembler, AgentActivityFeedAssembler, and RunnerStatusService; extract the route-private waiting projection for shared use. Do not create a new Activity store or change existing source contracts. RunnerStatusService context is global by design and must be labeled scope=global."
     },
     {
       "id": "T-002",
       "title": "Deliver the persistent activity list CLI",
       "spec": "specs/activity-list/spec.md#activity-list-supports-field-selection",
-      "description": "Add the singular Activity command group and its list leaf on top of the new evidence endpoint. Reuse ProjectRef and JsonSelection contracts, define the provenance-aware Activity-entry collection descriptor, and provide a scan-oriented human table plus selected JSON output without treating Activity as an Event stream.",
+      "description": "Add the singular Activity command group and its list leaf on top of the new evidence endpoint. Reuse ProjectRef and JsonSelection contracts, define the provenance- and scope-aware Activity-entry collection descriptor, and provide a scan-oriented human table plus selected JSON output without treating Activity as an Event stream.",
       "acceptanceCriteria": [
         "mo activity list resolves a project through --project or the active project, calls the Activity evidence endpoint with a 1 through 200 limit, and fails locally without HTTP for no active project or an invalid limit.",
-        "The command exposes bare --json discovery, rejects invalid fields locally with exit code 2, and emits a JSON array containing only selected Activity-entry fields, including provenance and source identity, for --json <fields>.",
-        "Default output renders provenance, kind, time, title, and the relevant Issue, WorkflowRun, AgentSession, or Runner identity in a dedicated Activity table; repeated reads of unchanged data are finite normal reads rather than a subscription.",
-        "CLI specs cover route/query construction, project override, local validation, JSON discovery/selection, recorded-versus-snapshot output, table rendering, and re-readable results; dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj passes."
+        "The command exposes bare --json discovery, rejects invalid fields locally with exit code 2, and emits a JSON array containing only selected Activity-entry fields, including provenance, scope, and source identity, for --json <fields>.",
+        "Default output renders provenance, scope, kind, time, title, and the relevant Issue, WorkflowRun, AgentSession, or Runner identity in a dedicated Activity table; repeated reads of unchanged data are finite normal reads rather than a subscription.",
+        "CLI specs cover route/query construction, project override, local validation, JSON discovery/selection, recorded-versus-snapshot and Project-versus-global output, table rendering, and re-readable results; dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj passes."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "mo activity list, its provenance-aware collection descriptor/table renderer, and CLI specification coverage.",
+      "output": "mo activity list, its provenance- and scope-aware collection descriptor/table renderer, and CLI specification coverage.",
       "dependsOn": [
         "T-001"
       ],
@@ -51,7 +51,7 @@
       "acceptanceCriteria": [
         "mo event tail and mo event dead-letter list/redeliver resolve and preserve their existing HTTP routes and behavior: tail remains post-subscription NDJSON with server-compiled --match and exit 130 cancellation, while dead-letter keeps limit/filter/id validation, operator credentials, loopback refusal, result reporting, and terminal-text sanitization.",
         "mo events tail, mo events dead-letter list, and mo event list fail as unknown command paths without HTTP; root help advertises singular activity and event but not plural events.",
-        "Leaf help distinguishes bounded Activity evidence with recorded-history/snapshot provenance, realtime Event subscription origin, and dead-letter recovery side effects, exposes no shared --mode or --source switch, and Event commands do not gain routing rule CRUD or routing test behavior.",
+        "Leaf help distinguishes bounded Activity evidence with recorded-history/snapshot provenance and Project/global scope, realtime Event subscription origin, and dead-letter recovery side effects, exposes no shared --mode or --source switch, and Event commands do not gain routing rule CRUD or routing test behavior.",
         "All affected CLI tests use singular Event invocations and add regressions for plural removal, event list absence, root help, and retained tail/dead-letter safety behavior; docs/cli-reference.md removes the shared-events implementation gap and plural Event examples without changing unrelated issue events or routing payload fields.",
         "dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj passes."
       ],

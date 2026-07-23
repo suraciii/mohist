@@ -31,7 +31,7 @@ The Activity evidence collection, including its persistent recorded history and 
 
 ### Requirement: the three entries carry distinct help with no shared mode flag
 
-`activity list`, `event tail`, and `event dead-letter` SHALL each document their own read semantics in their help: bounded Activity evidence with recorded-history/snapshot provenance, realtime origin from subscription establishment, and recovery side-effect respectively. The entries SHALL NOT share a `--mode` or `--source` flag that merges their behaviors.
+`activity list`, `event tail`, and `event dead-letter` SHALL each document their own read semantics in their help: bounded Activity evidence with recorded-history/snapshot provenance and Project/global scope, realtime origin from subscription establishment, and recovery side-effect respectively. The entries SHALL NOT share a `--mode` or `--source` flag that merges their behaviors.
 
 #### Scenario: Each entry documents its own semantics
 

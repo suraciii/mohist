@@ -5,7 +5,7 @@ Issue 481 separates three facts that the CLI currently places under the plural `
 The server already has the three underlying concerns, but their contracts differ:
 
 - `GET /api/projects/{projectRef}/events?limit=` is the persisted Activity evidence feed. `ProjectEventFeedAssembler` merges Issue, WorkflowRun, and AgentSession event stores, orders entries by recorded time and stable identity, and returns a bounded project-scoped collection. The Web combines that feed with its existing AgentOps session/waiting cards and Runner status snapshots to render its Activity page.
-- `GET /api/projects/{projectRef}/agent/activity?limit=` supplies the current AgentOps session and waiting snapshots; `RunnerStatusService.GetRunnersAsync(projectId)` supplies the current Runner snapshots. These are durable/current state facts, not replayed Event envelopes.
+- `GET /api/projects/{projectRef}/agent/activity?limit=` supplies the current Project-bound AgentOps session and waiting snapshots. `RunnerStatusService.GetRunnersAsync(projectId)` supplies global Runner snapshots: the registry intentionally ignores `projectId` because Runners are global execution resources. These are durable/current state facts, not replayed Event envelopes.
 - `GET /api/projects/{projectRef}/events/tail` opens a transient, project-scoped `IEventTailSource` subscription, validates `match` on the server, and writes envelope-only NDJSON. It deliberately does not replay envelopes from before subscription establishment.
 - `GET/POST /api/events/dead-letters` are global operator routes. They are registered only for loopback-only server listeners and require `OperatorCredential`; the CLI independently refuses to read or send that credential to a non-loopback base URL.
 
@@ -16,13 +16,14 @@ The Web continues to consume these sources separately. The CLI needs one finite 
 ## Goals / Non-Goals
 
 **Goals:**
-- Expose `mo activity list` as a project-scoped, finite Activity evidence read with `--limit`, `--project`, and field-selection output. It includes persisted Issue/WorkflowRun/AgentSession facts and the existing current AgentOps, waiting, and Runner facts, with explicit provenance.
+- Expose `mo activity list` as a Project-scoped, finite Activity evidence read with `--limit`, `--project`, and field-selection output. It includes persisted Project-bound Issue/WorkflowRun/AgentSession facts and current Project-bound AgentOps/waiting facts, plus explicitly global Runner context. Every entry carries provenance and scope.
 - Move tail and dead-letter operations to the singular `mo event` noun without changing their server delivery, matching, cancellation, or operator-credential semantics.
 - Make the command tree, leaf help, hints, examples, and regression tests express the distinct meanings of persistent history, realtime observation, and recovery side effects.
 - Preserve routing rule CRUD and `routing test` as the sole routing-management and match-evaluation surface.
 
 **Non-Goals:**
 - Do not change the content, ordering, lifecycle semantics, or persistence of the existing Activity evidence sources; the CLI list is a bounded projection of their existing recorded events and snapshots.
+- Do not invent a Project association for Runners. Existing global Runner context remains globally visible and is explicitly labeled rather than treated as Project-bound evidence.
 - Do not alter CloudEvent schemas, Event tail replay semantics, the server-side match language, routing rules, or delivery retry policy.
 - Do not add historical Event replay, arbitrary time-range scans, cross-project tails, logs, traces, metrics, or a generic `event list` command.
 - Do not retain plural `events` as an alias or compatibility path.
@@ -31,11 +32,11 @@ The Web continues to consume these sources separately. The CLI needs one finite 
 
 ### D1 - Add one Activity evidence projection over the existing recorded feed and snapshots
 
-Add `GET /api/projects/{projectRef}/activity?limit=` as a project-resolved read endpoint backed by an `ActivityEvidenceAssembler`. It reads the persisted `ProjectEventFeedAssembler` collection for Issue, WorkflowRun, and AgentSession history, then reads the same AgentOps session/waiting and Runner status snapshots already used by the Activity page. It maps all inputs into one `ActivityEntryDto` collection without writing data, changing event emission, or changing `/events`, `/agent/activity`, or Runner APIs.
+Add `GET /api/projects/{projectRef}/activity?limit=` as a Project-resolved read endpoint backed by an `ActivityEvidenceAssembler`. It reads the persisted `ProjectEventFeedAssembler` collection for Issue, WorkflowRun, and AgentSession history, then reads the same Project-bound AgentOps session/waiting and global Runner status snapshots already used by the Activity page. It maps all inputs into one `ActivityEntryDto` collection without writing data, changing event emission, or changing `/events`, `/agent/activity`, or Runner APIs.
 
 Extract the existing route-private waiting-card projection from `AgentRoutes` into a shared AgentOps read helper so `/agent/activity` and the new assembler consume the same waiting facts. The new assembler obtains Runner capacity/status through `RunnerStatusService` and passes the shared waiting/capacity inputs to `AgentActivityFeedAssembler`; it does not reimplement session, issue-title, transcript, task-progress, or runner-status derivation.
 
-`ActivityEntryDto` has a stable `id`, `provenance` (`recorded` or `snapshot`), `kind` (`issue`, `workflow-run`, `agent-session`, `runner`, or `waiting`), `time`, human-readable `title` and `description`, and nullable source identity fields (`eventType`, `issueNumber`, `workflowRunId`, `sessionId`, `runnerId`, `status`). Recorded entries preserve the Project Event identity/type/time; snapshots use deterministic identities derived from their existing resource identity. The endpoint merges all entries with a stable time-descending sort and applies the requested limit to the final collection.
+`ActivityEntryDto` has a stable `id`, `provenance` (`recorded` or `snapshot`), `scope` (`project` or `global`), `kind` (`issue`, `workflow-run`, `agent-session`, `runner`, or `waiting`), `time`, human-readable `title` and `description`, and nullable source identity fields (`eventType`, `issueNumber`, `workflowRunId`, `sessionId`, `runnerId`, `status`). Project Event, AgentOps, and waiting entries are `scope=project` and MUST be limited to the resolved Project. Runner snapshots are `scope=global`; they MAY recur in different Project reads and SHALL NOT be represented as Project-bound activity. Recorded entries preserve the Project Event identity/type/time; snapshots use deterministic identities derived from their existing resource identity. The endpoint merges all entries with a stable time-descending sort and applies the requested limit to the final collection.
 
 Use one declared range of 1 through 200 with a default of 100. The CLI validates it before HTTP and the route validates it again. A repeated read never consumes recorded history; snapshot rows change only when their existing source state changes.
 
@@ -49,9 +50,9 @@ Use one declared range of 1 through 200 with a default of 100. The CLI validates
 
 Introduce an `ActivityCommands` root group with a single `list` leaf, registered next to the other root resource groups. The leaf declares `ProjectRefOption`, hidden legacy `--project-id`, `--limit` (default 100, valid 1 through 200), and `JsonSelectionOption`.
 
-Define one `ResourceDescriptor` with `ResourceCardinality.Collection` and the `ActivityEntryDto` fields: `id`, `provenance`, `kind`, `time`, `title`, `description`, `eventType`, `issueNumber`, `workflowRunId`, `sessionId`, `runnerId`, and `status`. Parse field selection before project resolution or HTTP work; bare `--json` discovers the declared fields and invalid field lists fail locally with exit code 2.
+Define one `ResourceDescriptor` with `ResourceCardinality.Collection` and the `ActivityEntryDto` fields: `id`, `provenance`, `scope`, `kind`, `time`, `title`, `description`, `eventType`, `issueNumber`, `workflowRunId`, `sessionId`, `runnerId`, and `status`. Parse field selection before project resolution or HTTP work; bare `--json` discovers the declared fields and invalid field lists fail locally with exit code 2.
 
-After resolving the project through the issue-475 resolver, call `PrintResourceAsync` for `/api/projects/{resolved}/activity?limit={limit}`. Add `ActivityList` to `MohistCliApi.TableShape` and a renderer that presents provenance, kind, time, title, and the most relevant source identity. Selected JSON stays a flat array of declared Activity evidence fields; it does not wrap list metadata or emit raw source response objects.
+After resolving the Project through the issue-475 resolver, call `PrintResourceAsync` for `/api/projects/{resolved}/activity?limit={limit}`. Add `ActivityList` to `MohistCliApi.TableShape` and a renderer that presents provenance, scope, kind, time, title, and the most relevant source identity. Selected JSON stays a flat array of declared Activity evidence fields; it does not wrap list metadata or emit raw source response objects.
 
 **Alternatives considered:**
 
@@ -73,11 +74,11 @@ The tail continues to use `ResourceCardinality.Stream` and `NdjsonStream.ReadAsy
 
 ### D4 - Make the separation executable through help, docs, and focused tests
 
-Root help will show `activity` and `event`, never `events`. Leaf descriptions will be explicit: `activity list` describes a bounded persistent history; `event tail` names its post-subscription live-envelope origin and NDJSON; `event dead-letter` names inspection plus a retry side effect. No command receives a mode/source switch.
+Root help will show `activity` and `event`, never `events`. Leaf descriptions will be explicit: `activity list` describes bounded recorded Project history plus explicitly global Runner context; `event tail` names its post-subscription live-envelope origin and NDJSON; `event dead-letter` names inspection plus a retry side effect. No command receives a mode/source switch.
 
 Update the command-surface tests rather than only changing command invocations:
 
-- Add server specs for the Activity evidence assembler and route: persisted Issue/WorkflowRun/AgentSession entries, Runner and waiting/session snapshots, recorded-versus-snapshot provenance, project isolation, stable ordering, final-limit enforcement, and unchanged-source re-reads. Add CLI specs for route/query encoding, `--project` override, no-active-project failure before HTTP, 1 through 200 local limit validation, bare/selected/invalid `--json`, human table rendering, and recorded/snapshot field selection.
+- Add server specs for the Activity evidence assembler and route: persisted Issue/WorkflowRun/AgentSession entries, Project-bound waiting/session snapshots, global Runner snapshots, recorded-versus-snapshot provenance, project-versus-global scope, stable ordering, final-limit enforcement, and unchanged-source re-reads. Assert Project isolation for `scope=project` entries and that a shared Runner may recur only as `scope=global`. Add CLI specs for route/query encoding, `--project` override, no-active-project failure before HTTP, 1 through 200 local limit validation, bare/selected/invalid `--json`, human table rendering, and provenance/scope field selection.
 - Rename/update tail and dead-letter specs to invoke singular `event`; add explicit plural-path rejection assertions while retaining their existing streaming, match-diagnostic, cancellation, credential, and sanitization coverage.
 - Replace the root-shape assertion that currently rejects singular `event` with assertions that singular `event` and `activity` appear and plural `events` does not resolve or appear in help. Assert `event list` does not resolve.
 - Keep existing `/events`, `/agent/activity`, and Runner-status specs unchanged as regression coverage for the source read models; the new Activity route proves its projection rather than redefining any source contract.
@@ -92,6 +93,7 @@ Update `docs/cli-reference.md` command maps and its implementation-gap note. Do 
 ## Risks / Trade-offs
 
 - **[The Activity route combines recorded history and current snapshots]** -> Mitigation: make `provenance` mandatory, preserve recorded event identity/type/time, give snapshots deterministic identities, and state the distinction in help and field discovery.
+- **[Global Runner context can be mistaken for Project activity]** -> Mitigation: make `scope` mandatory; label Runner snapshots `global`, keep all Issue/WorkflowRun/AgentSession/waiting entries `project`, and test the explicit visibility rule across two Projects.
 - **[A second public Activity route could drift from its existing sources]** -> Mitigation: delegate to `ProjectEventFeedAssembler`, `AgentActivityFeedAssembler`, and `RunnerStatusService`; add projection tests for every source kind rather than duplicating persistence or lifecycle logic.
 - **[Limit behavior could diverge between CLI and server]** -> Mitigation: define one 1 through 200 range, validate locally for actionable no-request failures, and validate again on the server boundary.
 - **[Plural command removal breaks scripts]** -> Mitigation: this is an intentional breaking change. Return the normal unknown-command failure without a compatibility alias, and update all repository help, hints, examples, and CLI tests in the same change.
