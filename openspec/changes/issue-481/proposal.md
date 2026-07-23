@@ -1,0 +1,28 @@
+## Why
+
+Operators pick the observation entry by the question they are asking: "what happened recently" is a bounded, persistent look back; "what is happening now" is a realtime stream from a subscription; "a delivery failed, recover it" is a protected operation. Today the CLI answers all three through one plural `events` group that bundles a realtime tail with recovery commands, offers no persistent Activity read at all, and lets a shared navigation make the three facts look interchangeable — so a tail can read stale-looking data, a recovery command looks like a query, and "what happened recently" has no bounded, re-readable answer. The user voice asks for three honest entry points instead of one mixed `events list`.
+
+## What Changes
+
+- Add `mo activity list` (singular `activity`): a project-scoped, persistent, bounded/paginatable, read-only activity record supporting field selection, that can be read again unchanged after the command exits. It surfaces the existing project Activity read model; its aggregate content is not changed.
+- Rename `mo events tail` → `mo event tail` (singular). Behavior is unchanged: realtime event envelopes emitted only after the subscription is established, one JSON object per line (NDJSON), optional `--match` forwarded to the server as the single compile authority, project scope, and Ctrl-C exits `130`.
+- Rename `mo events dead-letter list` / `redeliver` → `mo event dead-letter list` / `redeliver` (singular). Behavior is unchanged: `list` returns current failed deliveries; `redeliver` retries an explicit dead-letter id and reports a decidable result; both continue to require the local operator credential and a loopback server URL.
+- **BREAKING** Remove the plural `events` navigation from the command tree, root/leaf help, hints, and examples. `events ...` no longer resolves.
+- Forbid any mixed `event list` path that would disguise Activity history as an event listing. The three entries carry distinct help — persistent history, realtime origin, recovery side-effect — and share no `--mode` / `--source` flag.
+- Keep routing rule CRUD and `routing test` as independent entries. Event and dead-letter commands do not duplicate rule management or match-expression evaluation.
+
+## Capabilities
+
+- `activity-list`: The new persistent, project-scoped, bounded activity read command (`mo activity list`) with field selection and re-readable history, kept distinct from realtime and recovery entries.
+- `event-tail`: The singular realtime event-envelope stream (`mo event tail`) that emits only from subscription establishment as NDJSON, forwards `--match` to the server compile authority, honors project scope, and stops cleanly on cancellation.
+- `event-dead-letter`: The singular protected delivery-recovery commands (`mo event dead-letter list` / `redeliver`) that list current failures and redeliver to an explicit target with a decidable result, enforcing the local operator credential and loopback server URL without degrading to anonymous reads or ambiguous network errors.
+- `activity-event-separation`: The command-tree invariants that keep the three entries apart — singular `activity` and `event` nouns at the root, no `event list` disguise of Activity history, distinct help text with no shared mode/source flag, an independent `routing` entry, and the removal of the plural `events` navigation from the tree, hints, and examples.
+
+## Impact
+
+- **CLI command surface** (`packages/cli/Mohist.Cli/MohistCliCommands.Event.cs`, registration at `packages/cli/Mohist.Cli/MohistCliCommands.cs:26`): the `events` group is split into a singular `event` group (tail + dead-letter) and a new singular `activity` group; help text, hints, and examples are rewritten to drop plural `events` and distinguish persistent history, realtime origin, and recovery side-effect.
+- **Shared CLI contracts from issue-475** (`MohistCliCommands.ProjectRefOption`, `JsonSelectionOption`, `ResourceDescriptor`/`ResourceCardinality`): reused by the new `activity list` and the renamed `event tail`, so all three entries share one project-scope and field-selection story.
+- **CLI tests** (`packages/cli/tests/Mohist.Cli.Tests/CliEventsTailCommandSpecs.cs`, `CliEventDeadLetterCommandSpecs.cs`): updated from the plural noun to singular (e.g. `Tail_SingularNoun_DoesNotResolve` flips to assert resolution), plus new `activity list` specs.
+- **Server read models (reused, aggregate content unchanged)**: the project Activity feed (`AgentActivityFeedAssembler`, `GET /api/projects/{project}/agent/activity`), the event tail source (`EventTailSource`, `GET /api/projects/{project}/events/tail`), and dead-letter recovery (`EventDispatcherService` / `IDeadLetterStore`, `/api/events/dead-letters`). Any bounded/pagination shape for `activity list` is a design decision, not an aggregate-content change.
+- **Docs** (`docs/cli-reference.md`): the "实装差距" item about the shared `events` navigation is closed, and the Activity/Event/dead-letter command map and examples reflect singular nouns.
+- **Dependencies/systems**: no new external dependency; no change to business-event schema, the routing expression language, or delivery retry policy.
