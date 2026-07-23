@@ -27,21 +27,23 @@
     {
       "id": "T-002",
       "title": "Integrate telemetry outcome accounting",
-      "spec": "specs/runtime-observability-metrics/spec.md#requirement-runtime-metric-catalog-is-fixed",
-      "description": "Refactor TraceIngester to classify a complete materialized request before writing and publish one derived IngestOutcome per batch. Add a typed accept-all-by-default protection decision boundary so fake protection exercises rejection and partial success without introducing real admission policy.",
+      "spec": "specs/runtime-observability-metrics/spec.md#requirement-otlp-http-outcomes-preserve-request-encoding",
+      "description": "Refactor TraceIngester to classify a complete materialized request before writing and publish one derived IngestOutcome per batch. Add a typed accept-all-by-default protection decision boundary and one content-type-aware OTLP response writer so fake protection exercises rejection and partial success without introducing real admission policy or an ad hoc wire contract.",
       "acceptanceCriteria": [
         "TraceIngester creates one immutable PreparedIngestBatch before opening the transaction; every identifiable Span attempt is classified as parsed-for-write, malformed dropped, protection rejected or another non-retryable drop.",
         "IIngestProtectionDecision defaults to accepting all attempts in production; tests inject deterministic reject decisions and #437/#471 remain owners of real policy.",
         "Exactly one IngestOutcome is recorded per batch, with counters counting Span attempts; duplicate commit, malformed drop, fake rejection and retryable rollback match the spec and never double-publish a write result.",
         "Only a production ingestion transaction that commits clears storage_write/storage_unverified; not-attempted empty, rejected, dropped or parse-failed requests do not establish write readiness, and rollback publishes saved=0 plus storage_write failure without adding dropped counts.",
-        "Accepted commit retains HTTP 200 empty success; fake rejection/drop returns HTTP 200 OTLP partial_success with rejected count/message; retryable rollback returns HTTP 503; invalid whole-body parsing retains 400.",
+        "OtlpTraceResponseWriter chooses response encoding from the recognized request Content-Type, not Accept: JSON full success is 200 application/json `{}`, while protobuf full success is 200 application/x-protobuf with the zero-byte default ExportTraceServiceResponse.",
+        "Fake rejection/drop returns HTTP 200 ExportTraceServiceResponse.partial_success in the request encoding, with rejected_spans equal to rejected+dropped and a bounded message; JSON uses canonical protobuf-JSON names/string int64 and protobuf uses standard field numbers.",
+        "Malformed JSON and malformed/truncated protobuf return HTTP 400 google.rpc.Status code 3 in their request encoding without publishing an outcome; retryable rollback returns HTTP 503 Status code 14, unsupported media returns 415 JSON Status, and wire-level tests decode every response category.",
         "JSON and protobuf paths map the same outcome categories without a production rejection policy.",
         "Focused ingester/OTLP/status-publication tests and repository npm test pass using in-memory SQLite and fake decisions."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Prepared ingest classification, fakeable protection decision, outcome publication, OTLP response mapping and focused tests.",
+      "output": "Prepared ingest classification, fakeable protection decision, outcome publication, content-type-specific OTLP response encoding and focused wire tests.",
       "dependsOn": [
         "T-001"
       ],

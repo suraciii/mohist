@@ -77,6 +77,36 @@ Telemetry outcomes SHALL count Span attempts. `received` SHALL count each Span a
 - **THEN** `received` SHALL increment and storage-write degradation SHALL activate
 - **AND** `saved`, `rejected` and `dropped` SHALL NOT increment for that attempt
 
+### Requirement: OTLP HTTP outcomes preserve request encoding
+
+The trace ingestion route SHALL encode every recognized-request response according to the normalized request `Content-Type`, independent of `Accept`. `application/json` SHALL receive JSON and `application/x-protobuf` or `application/protobuf` SHALL receive protobuf with canonical response content type `application/x-protobuf`. Full success SHALL return HTTP 200 with an empty standard `ExportTraceServiceResponse`: `{}` for JSON and the zero-byte default message for protobuf. A non-retryable partial success SHALL return HTTP 200 with `ExportTraceServiceResponse.partial_success`; `rejected_spans` SHALL equal the sum of rejected and dropped Span attempts and `error_message` SHALL be bounded to 256 characters. JSON SHALL use the protobuf-JSON field names `partialSuccess`, `rejectedSpans` as a decimal string, and `errorMessage`; protobuf SHALL use the standard message field numbers.
+
+Whole-body malformed JSON or protobuf SHALL return HTTP 400 with `google.rpc.Status` code 3 (`INVALID_ARGUMENT`) in the recognized request encoding and SHALL NOT publish an ingest outcome. A retryable rolled-back write SHALL return HTTP 503 with `google.rpc.Status` code 14 (`UNAVAILABLE`) in the request encoding. Error messages SHALL be bounded to 256 characters and `details` SHALL be absent. When no supported request encoding can be selected, the route SHALL return HTTP 415 with a JSON `google.rpc.Status`.
+
+#### Scenario: Protobuf ingestion partially succeeds
+
+- **WHEN** a protobuf trace request contains Span attempts that are rejected or dropped without retry
+- **THEN** the route SHALL return HTTP 200 and `application/x-protobuf`
+- **AND** the body SHALL decode as `ExportTraceServiceResponse` with the combined rejected count and bounded message in `partial_success`
+
+#### Scenario: JSON ingestion fully succeeds
+
+- **WHEN** a JSON trace request is fully accepted and committed
+- **THEN** the route SHALL return HTTP 200, `application/json` and the empty JSON message `{}`
+
+#### Scenario: A protobuf body is malformed
+
+- **WHEN** a recognized protobuf request contains a malformed or truncated wire message
+- **THEN** the route SHALL return HTTP 400 and `application/x-protobuf`
+- **AND** the body SHALL decode as `google.rpc.Status` with code 3 and no details
+- **AND** no ingestion outcome SHALL be published for that undecodable body
+
+#### Scenario: A retryable JSON write fails
+
+- **WHEN** a recognized JSON request reaches a write transaction that rolls back with a retryable failure
+- **THEN** the route SHALL return HTTP 503 and a JSON `google.rpc.Status` with code 14
+- **AND** its parsed Span attempts SHALL retain the retryable accounting semantics above
+
 ### Requirement: Metric identity has stable low cardinality
 
 Metric instrument names and the exact label-key set accepted by each instrument SHALL be stable, explicitly test-locked contracts. Route dimensions SHALL use the matched route template or another stable bounded route name, never a concrete request URL. HTTP methods SHALL normalize to `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS` or `OTHER`; response status values SHALL be `100` through `599`, with `0` for an unavailable or invalid status. Agent-path values SHALL be only `agent.status` or `agent.activity`. Project identifiers, issue numbers, WorkflowRun identifiers, AgentSession identifiers, raw URLs, trace identifiers, span identifiers and other per-instance identities MUST NOT appear as metric labels. A request for which no stable route name is available SHALL use the single fallback value `unmatched` rather than its raw path.
