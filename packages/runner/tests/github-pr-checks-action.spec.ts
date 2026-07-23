@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { callAction } from "./support/call-action.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { setGitHubPrChecksTimingForTest, setGitHubPrGhRunnerForTest } from "../src/actions/github-pr.js"
@@ -121,6 +121,62 @@ describe("mohist/github-pr-checks action", () => {
     expect(result.error).toBeUndefined()
     expect(output).toMatchObject({ status: "verified", prNumber: 42 })
     expect(polls).toBe(3)
+  })
+
+  it("polls an initially empty rollup until passing checks appear", async () => {
+    vi.useFakeTimers()
+    try {
+      setGitHubPrChecksTimingForTest({ pollIntervalMs: 10, noChecksGraceMs: 100 })
+      let polls = 0
+      installGhFlat({
+        "gh --version": () => ghOk("ok\n"),
+        "gh auth status": () => ghOk("ok\n"),
+        "gh pr view 42 --json statusCheckRollup --repo github.com/acme/repo": () => {
+          polls += 1
+          return polls < 3
+            ? ghOk(checksRollup([]))
+            : ghOk(checksRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
+        },
+      })
+
+      const resultPromise = callAction(githubPrChecksAction, prChecksContext({ prNumber: 42 }))
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(20)
+      const result = await resultPromise
+
+      expect(result.error).toBeUndefined()
+      expect(result.output).toMatchObject({ status: "verified", prNumber: 42 })
+      expect(polls).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("returns pr-checks-unavailable when the rollup remains empty through the grace period", async () => {
+    vi.useFakeTimers()
+    try {
+      setGitHubPrChecksTimingForTest({ pollIntervalMs: 10, noChecksGraceMs: 25 })
+      let polls = 0
+      installGhFlat({
+        "gh --version": () => ghOk("ok\n"),
+        "gh auth status": () => ghOk("ok\n"),
+        "gh pr view 42 --json statusCheckRollup --repo github.com/acme/repo": () => {
+          polls += 1
+          return ghOk(checksRollup([]))
+        },
+      })
+
+      const resultPromise = callAction(githubPrChecksAction, prChecksContext({ prNumber: 42 }))
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(30)
+      const result = await resultPromise
+
+      expect(result.error).toMatchObject({ code: "pr-checks-unavailable" })
+      expect(result.error?.message).toContain("no PR checks were reported")
+      expect(polls).toBe(4)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("fails with invalid-input when prNumber is missing", async () => {
