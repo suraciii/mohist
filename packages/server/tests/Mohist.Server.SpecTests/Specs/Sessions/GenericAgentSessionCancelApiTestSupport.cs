@@ -93,10 +93,6 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         await using var scope = _fixture.Services.CreateAsyncScope();
         var query = scope.ServiceProvider.GetRequiredService<AgentSessionQuery>();
         var record = Assert.Single(await query.ListByIdsAsync([sessionId]));
-        var lineage = (record.Session.Status.RuntimeSessionLineage ?? [])
-            .Select(entry => $"{entry.Runtime}|{entry.AgentRuntimeSessionId}|{entry.BoundAt:o}")
-            .ToArray();
-
         await using var db = await scope.ServiceProvider
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
@@ -118,7 +114,6 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
             record.Session.Id,
             record.Label(AgentSessionQueryMetadataKeys.SourceKind),
             record.Session.Status.AgentRuntimeSessionId,
-            lineage,
             turns.Select(turn => $"{turn.Id}|{turn.Sequence}|{turn.PromptKind}|{turn.PromptText}").ToArray(),
             parts.Select(part => $"{part.Id}|{part.Sequence}|{part.Type}|{part.Text}|{part.PayloadJson}").ToArray());
     }
@@ -212,7 +207,6 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         string SessionId,
         string? SourceKind,
         string? RuntimeSessionId,
-        string[] Lineage,
         string[] TranscriptTurns,
         string[] TranscriptParts);
     protected sealed record ProjectDto(string Id, string Name);

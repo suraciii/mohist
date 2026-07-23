@@ -61,14 +61,13 @@ export function deriveMilestones(session: WorkflowRunSession | null | undefined)
     }
   }
 
-  if (session.completedAt) {
-    const failed = typeof session.failureReason === 'string' && session.failureReason.length > 0
-    const status = typeof session.status === 'string' && session.status.length > 0 ? session.status : 'unknown'
-    const detail = failed ? `${status}\n${session.failureReason}` : status
+  if (session.activity !== 'active') {
+    const failed = session.activity === 'unknown'
+    const detail = session.activity ?? 'unknown'
     out.push({
       kind: 'session-ended',
-      timestamp: session.completedAt,
-      label: 'Session ended',
+      timestamp: session.lastDataAt ?? session.createdAt,
+      label: 'Session idle',
       detail,
       ...(failed ? { failed: true } : {}),
     })

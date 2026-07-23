@@ -31,6 +31,8 @@ import type {
   RuntimeResult,
   RuntimeSessionCreateRequest,
   RuntimeSessionCreateResult,
+  RuntimeSessionResolveRequest,
+  RuntimeSessionResolveResult,
   RuntimeTurnObserver,
   RuntimeTurnOptions,
   RuntimeTurnRequest,
@@ -117,6 +119,38 @@ export class OpenCodeRuntime {
    * runtime; the full turn execution lands in T-004. The result is
    * already a Mohist-owned shape (no SDK DTO leaks).
    */
+  async resolveSession(
+    request: RuntimeSessionResolveRequest,
+  ): Promise<RuntimeResult<RuntimeSessionResolveResult>> {
+    if (!this.state.server || !this.state.ready) {
+      const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    if (!request.target.runtimeSessionId) {
+      const error = normalizeMissingSession()
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    try {
+      const resolved = await this.state.server.client.session.get({
+        path: { id: request.target.runtimeSessionId },
+        query: { directory: request.target.workDir },
+      } as never)
+      const data = (resolved as { data?: { id?: string } } | undefined)?.data
+      if (!data || data.id !== request.target.runtimeSessionId) {
+        const error = normalizeMissingSession()
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+      return { ok: true, value: { runtimeSessionId: data.id, workDir: request.target.workDir }, diagnostics: [] }
+    } catch (cause) {
+      if ((cause as { status?: number } | undefined)?.status === 404) {
+        const error = normalizeMissingSession()
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+      const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to resolve persisted Runtime Session") })
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+  }
+
   async createSession(
     request: RuntimeSessionCreateRequest,
   ): Promise<RuntimeResult<RuntimeSessionCreateResult>> {

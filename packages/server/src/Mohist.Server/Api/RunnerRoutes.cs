@@ -310,14 +310,38 @@ public static class RunnerRoutes
             {
                 var session = await sessions.GetGrain(sessionId).AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
                     req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid,
-                    Runtime: req.Runtime ?? "opencode",
-                    ExpectedRuntime: req.ExpectedRuntime,
-                    ExpectedAgentSessionId: req.ExpectedRuntimeSessionId));
+                     Runtime: req.Runtime ?? "opencode",
+                     ExpectedRuntime: req.ExpectedRuntime,
+                     ExpectedAgentSessionId: req.ExpectedRuntimeSessionId,
+                     ExpectedRunnerId: req.ExpectedRunnerId));
                 return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
             }
             catch (InvalidOperationException ex)
             {
                 return ApiResults.Conflict(ex.Message, "agent_session_attach_conflict");
+            }
+        });
+
+        group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/recover-missing", async (
+            string projectId, string workflowRunId, string sessionName,
+            MissingRuntimeSessionRecoveryRequest req, AgentSessionResolver sessions,
+            CancellationToken ct) =>
+        {
+            var sessionId = await sessions.ResolveByLabelsAsync(WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
+            if (sessionId is null) return ApiResults.NotFound($"Session {sessionName} not found");
+            try
+            {
+                var session = await sessions.GetGrain(sessionId).RecoverMissingRuntimeSessionAsync(new RecoverMissingRuntimeSessionCommand(
+                    req.ExpectedRunnerId, req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.ReplacementRuntimeSessionId));
+                return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
+            }
+            catch (StaleRuntimeSessionBindingException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "stale_binding", new { sessionId = ex.SessionId });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "agent_session_recovery_conflict");
             }
         });
 
@@ -407,7 +431,10 @@ public static class RunnerRoutes
                 // session to that backend rather than a hardcoded literal.
                 var session = await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
                     req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid,
-                    Runtime: existing.Runtime ?? AgentConfigSchema.OpenCodeRuntime));
+                     Runtime: existing.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                     ExpectedRuntime: req.ExpectedRuntime,
+                     ExpectedAgentSessionId: req.ExpectedRuntimeSessionId,
+                     ExpectedRunnerId: req.ExpectedRunnerId));
                 if (!string.IsNullOrWhiteSpace(req.AgentJobId)
                     && !string.IsNullOrWhiteSpace(req.WorkId))
                 {
@@ -419,6 +446,31 @@ public static class RunnerRoutes
             catch (InvalidOperationException ex)
             {
                 return ApiResults.Conflict(ex.Message, "agent_session_attach_conflict");
+            }
+        });
+
+        group.MapPost("/agent-sessions/{projectId}/{sessionId}/recover-missing", async (
+            string projectId, string sessionId,
+            MissingRuntimeSessionRecoveryRequest req, AgentSessionResolver sessions,
+            AgentSessionQuery sessionQuery,
+            CancellationToken ct) =>
+        {
+            var grain = sessions.GetGrain(sessionId);
+            if (await grain.GetAsync() is null || !await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
+                return ApiResults.NotFound($"Agent session {sessionId} not found");
+            try
+            {
+                var session = await grain.RecoverMissingRuntimeSessionAsync(new RecoverMissingRuntimeSessionCommand(
+                    req.ExpectedRunnerId, req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.ReplacementRuntimeSessionId));
+                return Results.Ok(ToRunnerGenericAgentSession(session));
+            }
+            catch (StaleRuntimeSessionBindingException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "stale_binding", new { sessionId = ex.SessionId });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "agent_session_recovery_conflict");
             }
         });
 
@@ -743,7 +795,13 @@ public record AgentSessionAttachRequest(
     string? AgentJobId = null,
     string? Runtime = null,
     string? ExpectedRuntime = null,
-    string? ExpectedRuntimeSessionId = null);
+    string? ExpectedRuntimeSessionId = null,
+    string? ExpectedRunnerId = null);
+public record MissingRuntimeSessionRecoveryRequest(
+    string ExpectedRunnerId,
+    string ExpectedRuntime,
+    string ExpectedRuntimeSessionId,
+    string ReplacementRuntimeSessionId);
 public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents, string? RuntimeSessionId = null);
 public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);
 public record WorkDispatchResponse(

@@ -43,7 +43,7 @@ public sealed record AgentSessionMetadataDto(
     string SessionName,
     [property: JsonPropertyName("runtimeSessionId")] string? AgentRuntimeSessionId,
     [property: JsonPropertyName("runtime")] string? AgentRuntime,
-    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("activity")] string Activity,
     string? Model,
     string? Stage,
     string? Title,
@@ -51,20 +51,7 @@ public sealed record AgentSessionMetadataDto(
     string? CompletedAt,
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
-    [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata,
-    [property: JsonPropertyName("runtimeSessionLineage")] IReadOnlyList<RuntimeSessionLineageEntryDto>? RuntimeSessionLineage);
-
-/// <summary>
-/// DTO projection of <see cref="Mohist.Server.Sessions.Domain.RuntimeSessionLineageEntry"/>.
-/// Ordered by binding time. The first entry is the original runtime
-/// session; each subsequent entry records a compact/reset rebind
-/// successor. Absent on the wire when the chain is empty (historical
-/// sessions compacted before T-001) so the field degrades to hidden.
-/// </summary>
-public sealed record RuntimeSessionLineageEntryDto(
-    [property: JsonPropertyName("runtimeSessionId")] string? AgentRuntimeSessionId,
-    [property: JsonPropertyName("runtime")] string? Runtime,
-    [property: JsonPropertyName("boundAt")] string BoundAt);
+    [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata);
 
 public sealed record AgentSessionMetadataCounts(
     [property: JsonPropertyName("partCount")] int PartCount,
@@ -131,7 +118,7 @@ public sealed record AgentSessionSummaryDto(
     [property: JsonPropertyName("runtimeSessionId")] string? AgentRuntimeSessionId,
     [property: JsonPropertyName("executionId")] string? WorkId,
     [property: JsonPropertyName("taskDescription")] string? TaskTitle,
-    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("activity")] string Activity,
     string CreatedAt,
     string? CompletedAt,
     string? Model,
@@ -168,7 +155,7 @@ public sealed record WorkflowSessionDto(
     string? ProjectId,
     int? IssueNumber,
     string? RunnerId,
-    string Status,
+    [property: JsonPropertyName("activity")] string Activity,
     string? Stage,
     string? Model,
     string? WorkDir,
@@ -202,7 +189,7 @@ public sealed record AgentSessionListItemDto(
     string SessionId,
     string AgentId,
     string AgentName,
-    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("activity")] string Activity,
     string CreatedAt,
     string? LastActivityAt,
     string? ResolvedModel,
@@ -249,7 +236,7 @@ public sealed record GenericAgentSessionSummaryDto(
     string AgentName,
     [property: JsonPropertyName("runtimeSessionId")] string? RuntimeSessionId,
     [property: JsonPropertyName("runtime")] string? Runtime,
-    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("activity")] string Activity,
     string CreatedAt,
     string? LastActivityAt,
     string? ResolvedModel,
@@ -259,7 +246,6 @@ public sealed record GenericAgentSessionSummaryDto(
     int? ToolErrorCount,
     [property: JsonPropertyName("contextRefs")] GenericAgentSessionSummaryContextRefsDto? ContextRefs,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
-    [property: JsonPropertyName("runtimeSessionLineage")] IReadOnlyList<RuntimeSessionLineageEntryDto>? RuntimeSessionLineage,
     [property: JsonPropertyName("recoveryAvailable")] bool RecoveryAvailable);
 
 /// <summary>
@@ -277,7 +263,7 @@ public sealed record AgentSessionContextAssociationDto(
     string SessionId,
     string AgentId,
     string AgentName,
-    string Status,
+    [property: JsonPropertyName("activity")] string Activity,
     string CreatedAt,
     string SessionLink);
 

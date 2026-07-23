@@ -1,4 +1,5 @@
 export { useCoderSessions } from './model/useCoderSessions'
+export { canFollowupSession, canRecoverSession, deriveSessionActivity, deriveSessionStatusKind } from './model/sessionActivity'
 export { useWorkflowRunSessions } from './model/useWorkflowRunSessions'
 export { useFollowupMutation } from './model/useFollowupMutation'
 export type { FollowupMutationInput } from './model/useFollowupMutation'

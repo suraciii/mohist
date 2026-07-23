@@ -68,8 +68,8 @@ export const AGENT_ACTIVITY_EVENT_NAMES: ReadonlySet<string> = new Set<string>([
   'coder_session_cancelled',
   'coder_session_status_changed',
   'session.liveness',
-  'session.followup_completed',
-  'session.followup_failed',
+  'session.activity',
+  'turn.failed',
   'usage.updated',
 ])
 

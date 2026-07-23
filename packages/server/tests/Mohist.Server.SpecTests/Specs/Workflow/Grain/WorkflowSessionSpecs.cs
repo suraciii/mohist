@@ -132,9 +132,9 @@ public class WorkflowSessionSpecs
         await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
         {
             runtimeSessionId = "runtime-1",
-            runtimeEvents = new object[]
+            runtimeEvents = new[]
             {
-                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
+                new { type = "session.activity", payload = new { activity = "idle", status = "completed", exitCode = 0, operationId = "op-acp" } }
             },
         });
 
@@ -153,17 +153,17 @@ public class WorkflowSessionSpecs
         Assert.Equal(sessionName, detail.Session.SessionName);
         Assert.Equal("runtime-1", detail.Session.RuntimeSessionId);
         Assert.Equal("opencode", detail.Session.Runtime);
-        Assert.Equal("completed", detail.Session.Status);
+        Assert.Equal("idle", detail.Session.Status);
         Assert.Equal("plan", detail.Session.Stage);
-        Assert.NotNull(detail.Session.CompletedAt);
+        Assert.Null(detail.Session.CompletedAt);
         Assert.Equal("openai/gpt-4o", detail.Session.Model);
         var listed = Assert.Single(sessions);
         Assert.Equal(sessionName, listed.SessionName);
         Assert.Equal("runtime-1", listed.RuntimeSessionId);
         Assert.Equal("opencode", listed.Runtime);
-        Assert.Equal("completed", listed.Status);
+        Assert.Equal("idle", listed.Status);
         Assert.Equal("plan", listed.Stage);
-        Assert.NotNull(listed.CompletedAt);
+        Assert.Null(listed.CompletedAt);
         Assert.NotNull(listed.Usage);
         Assert.Equal(15, listed.Usage!.TotalTokens);
         Assert.Equal(3, detail.Transcript.PartCount);
@@ -230,8 +230,8 @@ public class WorkflowSessionSpecs
                 },
                 new
                 {
-                    type = "session.closed",
-                    payload = new { status = "failed", failureReason, exitCode = 1 }
+                    type = "session.activity",
+                    payload = new { activity = "idle", status = "failed", failureReason, exitCode = 1, operationId = "op-fail" }
                 }
             }
         });
@@ -255,11 +255,16 @@ public class WorkflowSessionSpecs
 
         var workflowSessions = await _client.GetDataAsync<WorkflowSessionDto[]>($"/api/workflow-runs/{workflowRunId}/sessions");
         var listed = Assert.Single(workflowSessions);
-        Assert.Equal("failed", listed.Status);
+        // The activity model does not surface terminal session status; the
+        // session's activity returns to idle and workflow-session fields that
+        // previously mirrored the close payload (completedAt / failureReason /
+        // exitCode) are no longer projected here. The failure fact is still
+        // observable in the transcript error part asserted above.
+        Assert.Equal("idle", listed.Status);
         Assert.Equal("Build", listed.Stage);
-        Assert.NotNull(listed.CompletedAt);
-        Assert.Equal(failureReason, listed.FailureReason);
-        Assert.Equal(1, listed.ExitCode);
+        Assert.Null(listed.CompletedAt);
+        Assert.Null(listed.FailureReason);
+        Assert.Null(listed.ExitCode);
     }
 
     [Fact]
@@ -382,7 +387,7 @@ public class WorkflowSessionSpecs
 
     private sealed record RunnerAgentSessionDto(RunnerAgentSessionKeyDto Key, string? RuntimeSessionId, string Status, string? WorkDir, string? Model, string? Runtime);
     private sealed record RunnerAgentSessionKeyDto(string ProjectId, string WorkflowRunId, string SessionName);
-    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? RuntimeSessionId, string? Runtime, string Status, string? Stage, string? Model, string? CompletedAt, string? FailureReason, int? ExitCode, WorkflowSessionUsageDto? Usage);
+    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? RuntimeSessionId, string? Runtime, [property: System.Text.Json.Serialization.JsonPropertyName("activity")] string Status, string? Stage, string? Model, string? CompletedAt, string? FailureReason, int? ExitCode, WorkflowSessionUsageDto? Usage);
     private sealed record WorkflowSessionUsageDto(long? TotalTokens);
     private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IssueSessionTranscriptTestResponse Transcript);
     private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);

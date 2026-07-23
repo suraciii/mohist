@@ -28,7 +28,10 @@ function resetCapturedOptions() {
 function baseSummary(overrides: Record<string, unknown> = {}) {
   return {
     sessionId: 'sess-abc', agentId: 'agent-1', agentName: 'Test Agent',
-    runtimeSessionId: 'rt-abc', runtime: 'opencode', status: 'active',
+    runtimeSessionId: 'rt-abc', runtime: 'opencode',
+    // Issue 484: summaries carry an `activity` (idle/active/unknown) instead
+    // of a `status`. Default to active so the session reads as live.
+    activity: 'active',
     createdAt: '2026-06-15T10:00:00.000Z', lastActivityAt: '2026-06-15T10:30:00.000Z',
     resolvedModel: 'gpt-4', failureCategory: null,
     toolCallCount: 5, toolErrorCount: 0, contextRefs: null, usage: null,
@@ -143,7 +146,11 @@ describe('useGenericSessionDataSource — transcript identity wiring', () => {
     expect(last.sessionId).toBe('sess-abc')
   })
 
-  it('sets isRunning to true during summary loading', async () => {
+  // Issue 484: `isRunning` is derived from `activity === 'active'`. While the
+  // summary is still loading there is no activity to read, so `isRunning`
+  // resolves to false (the generic source has no session-list fallback). The
+  // session is not considered running until activity resolves to active.
+  it('reports isRunning=false during summary loading (activity unresolved)', async () => {
     _summaryData = null
     _summaryLoading = true
 
@@ -153,11 +160,11 @@ describe('useGenericSessionDataSource — transcript identity wiring', () => {
       expect(capturedTranscriptOptions.length).toBeGreaterThan(0)
     })
 
-    expect(capturedTranscriptOptions[0].isRunning).toBe(true)
+    expect(capturedTranscriptOptions[0].isRunning).toBe(false)
   })
 
-  it('sets isRunning to false after summary loads with non-running status', async () => {
-    _summaryData = baseSummary({ status: 'completed' })
+  it('sets isRunning to false after summary loads with idle activity', async () => {
+    _summaryData = baseSummary({ activity: 'idle' })
 
     renderPage('/agent-sessions/sess-abc')
 
@@ -167,7 +174,11 @@ describe('useGenericSessionDataSource — transcript identity wiring', () => {
     })
   })
 
-  it('passes isHistoricalRuntimeView = true when ?rt= is present', async () => {
+  // Issue 484: the historical-runtime-view (?rt=) affordance was removed
+  // from this data source. It no longer forwards an `isHistoricalRuntimeView`
+  // flag (always undefined) and no longer remaps the runtime session id from
+  // the query string. These cases assert the new (non-)behaviour.
+  it('does not forward isHistoricalRuntimeView even when ?rt= is present', async () => {
     renderPage('/agent-sessions/sess-abc?rt=rt-old')
 
     await waitFor(() => {
@@ -175,11 +186,12 @@ describe('useGenericSessionDataSource — transcript identity wiring', () => {
     })
 
     const last = capturedTranscriptOptions[capturedTranscriptOptions.length - 1]
-    expect(last.isHistoricalRuntimeView).toBe(true)
-    expect(last.runtimeSessionId).toBe('rt-old')
+    expect(last.isHistoricalRuntimeView).toBeUndefined()
+    // The summary-reported runtime session id wins; ?rt= no longer overrides.
+    expect(last.runtimeSessionId).toBe('rt-abc')
   })
 
-  it('passes isHistoricalRuntimeView = false when no ?rt= is present', async () => {
+  it('does not forward isHistoricalRuntimeView when no ?rt= is present', async () => {
     renderPage('/agent-sessions/sess-abc')
 
     await waitFor(() => {
@@ -187,7 +199,7 @@ describe('useGenericSessionDataSource — transcript identity wiring', () => {
     })
 
     const last = capturedTranscriptOptions[capturedTranscriptOptions.length - 1]
-    expect(last.isHistoricalRuntimeView).toBe(false)
+    expect(last.isHistoricalRuntimeView).toBeUndefined()
   })
 
   it('passes runtime from summary as runtime', async () => {
@@ -203,29 +215,17 @@ describe('useGenericSessionDataSource — transcript identity wiring', () => {
     expect(last.runtime).toBe('claude')
   })
 
-  it('diagnoses an empty runtime view from visible content in the first eligible lineage runtime', async () => {
-    _summaryData = baseSummary({
-      runtimeSessionLineage: [
-        { runtimeSessionId: 'rt-oldest', boundAt: '2026-06-15T08:00:00.000Z' },
-        { runtimeSessionId: 'rt-middle', boundAt: '2026-06-15T09:00:00.000Z' },
-        { runtimeSessionId: 'rt-current', boundAt: '2026-06-15T10:00:00.000Z' },
-      ],
-    })
-    _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
-    _unfilteredTranscriptData = {
-      turns: [
-        { id: 'middle-turn', startedAt: '2026-06-15T09:00:00.000Z', completedAt: null, user: { role: 'mohist', text: 'middle', kind: 'task', sentAt: '2026-06-15T09:00:00.000Z', runtimeSessionId: 'rt-middle' }, assistant: [{ id: 'middle-text', type: 'text', text: 'middle content', startedAt: '2026-06-15T09:00:00.000Z', completedAt: null }] },
-        { id: 'oldest-turn', startedAt: '2026-06-15T08:00:00.000Z', completedAt: null, user: { role: 'mohist', text: 'oldest', kind: 'task', sentAt: '2026-06-15T08:00:00.000Z', runtimeSessionId: 'rt-oldest' }, assistant: [{ id: 'oldest-text', type: 'text', text: 'oldest content', startedAt: '2026-06-15T08:00:00.000Z', completedAt: null }] },
-      ],
-    }
-
-    renderPage('/agent-sessions/sess-abc?rt=rt-current')
-
-    const emptyState = await screen.findByTestId('session-empty-state')
-    await waitFor(() => expect(emptyState).toHaveAttribute('data-state-kind', 'runtime-filtered'))
-    expect(screen.getByTestId('session-empty-state-history-link')).toHaveAttribute('href', expect.stringContaining('rt=rt-oldest'))
-    expect(unfilteredTranscriptCalls).toEqual(['sess-abc'])
-  })
+  // Issue 484: the `runtime-filtered` empty-state branch (and the
+  // `?rt=`-driven historical-runtime-lineage diagnostics that produced it —
+  // the "first eligible lineage runtime" history link, the unfiltered
+  // transcript read, and the hidden-only-mismatch distinction) were removed
+  // from this data source. The transcript is now scoped solely by the
+  // summary-reported runtime session id. The two former cases below had no
+  // equivalent under the activity model and were deleted intentionally:
+  //   - "diagnoses an empty runtime view from visible content in the first
+  //      eligible lineage runtime" (asserted runtime-filtered + history link)
+  //   - "does not diagnose a runtime mismatch for hidden-only historical
+  //      content" (asserted running-no-content fallback)
 
   it('does not issue an unfiltered read for an unfiltered empty view', async () => {
     _summaryData = baseSummary()
@@ -235,24 +235,5 @@ describe('useGenericSessionDataSource — transcript identity wiring', () => {
 
     await screen.findByTestId('session-empty-state')
     expect(unfilteredTranscriptCalls).toEqual([])
-  })
-
-  it('does not diagnose a runtime mismatch for hidden-only historical content', async () => {
-    _summaryData = baseSummary({
-      runtimeSessionLineage: [
-        { runtimeSessionId: 'rt-current', boundAt: '2026-06-15T10:00:00.000Z' },
-        { runtimeSessionId: 'rt-old', boundAt: '2026-06-15T09:00:00.000Z' },
-      ],
-    })
-    _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
-    _unfilteredTranscriptData = {
-      turns: [{ id: 'hidden-turn', startedAt: '2026-06-15T09:00:00.000Z', completedAt: null, user: { role: 'mohist', text: 'hidden', kind: 'task', sentAt: '2026-06-15T09:00:00.000Z', runtimeSessionId: 'rt-old' }, assistant: [{ id: 'hidden-tool', type: 'tool', hidden: true, tool: { toolCallId: 'tool-1', toolName: 'internal', status: 'completed', startedAt: '2026-06-15T09:00:00.000Z' } }] }],
-    }
-
-    renderPage('/agent-sessions/sess-abc?rt=rt-current')
-
-    const emptyState = await screen.findByTestId('session-empty-state')
-    expect(emptyState).toHaveAttribute('data-state-kind', 'running-no-content')
-    expect(screen.queryByTestId('session-empty-state-history-link')).toBeNull()
   })
 })

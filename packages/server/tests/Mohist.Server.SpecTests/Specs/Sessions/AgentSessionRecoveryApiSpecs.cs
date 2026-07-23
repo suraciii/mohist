@@ -58,6 +58,18 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     public async Task CompactEndpoint_ActiveSession_ReturnsConflict()
     {
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-active", sessionName: "plan", attachAndStart: true);
+        // Under the activity model (issue-484) attaching the runtime no
+        // longer flips the session to active; a session.activity record
+        // does. Mark the session active so the idle boundary rejects
+        // Compact without dispatching to the runner.
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"active\"}"),
+        }, currentSession.Id));
+        await grain.FlushForTestAsync();
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
 
@@ -283,7 +295,6 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         Assert.Equal(requests[0].OperationId, requests[1].OperationId);
 
         var state = await LoadSessionStateAsync(currentSession.Id);
-        Assert.Equal(operation == "compact" ? 1 : 2, state.Status.RuntimeSessionLineage?.Count);
         Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state.Status.AgentRuntimeSessionId);
     }
 
@@ -332,7 +343,6 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         Assert.Equal(requests[0].OperationId, requests[1].OperationId);
 
         var state = await LoadSessionStateAsync(currentSession.Id);
-        Assert.Equal(operation == "compact" ? 1 : 2, state.Status.RuntimeSessionLineage?.Count);
         Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state.Status.AgentRuntimeSessionId);
     }
 
@@ -403,18 +413,30 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     Assert.Equal(currentSession.Id, request.ExpectedRuntimeSessionId);
   }
 
-  [Fact]
-  public async Task CompactEndpoint_PiBoundActiveSession_StillRejectsWithIdleConflict()
-  {
-    var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-pi-active", sessionName: "plan", attachAndStart: true);
-    await SetPersistedRuntimeAsync(currentSession.Id, "pi");
+    [Fact]
+    public async Task CompactEndpoint_PiBoundActiveSession_StillRejectsWithIdleConflict()
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-pi-active", sessionName: "plan", attachAndStart: true);
+        await SetPersistedRuntimeAsync(currentSession.Id, "pi");
+        // Under the activity model (issue-484) attaching the runtime no
+        // longer flips the session to active; a session.activity record
+        // does. Mark the session active so the idle boundary still rejects
+        // Compact even for a pi-bound session.
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"active\"}"),
+        }, currentSession.Id));
+        await grain.FlushForTestAsync();
 
-    using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
 
-    Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-    var body = await response.Content.ReadAsStringAsync();
-    using var doc = JsonDocument.Parse(body);
-    Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
-    Assert.Empty(RunnerHub.Invocations);
-  }
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
+        Assert.Empty(RunnerHub.Invocations);
+    }
 }

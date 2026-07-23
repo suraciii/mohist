@@ -199,8 +199,11 @@ describe('GenericSessionPage', () => {
   })
 
   describe('follow-up enable/disable', () => {
-    it('enables followup composer for non-terminal (running) sessions with turns', async () => {
-      _summaryData = baseSummary({ status: 'running' })
+    it('enables followup composer for active sessions with turns', async () => {
+      // Issue 484: sessions are never terminal. A running session has
+      // activity='active' and follow-up remains enabled (interrupts the
+      // current turn) per canFollowupSession.
+      _summaryData = baseSummary({ activity: 'active' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -243,60 +246,28 @@ describe('GenericSessionPage', () => {
   })
 
   describe('runtime lineage', () => {
-    it('links generic predecessor bindings back to the same stable session route', async () => {
-      _summaryData = baseSummary({
-        runtimeSessionLineage: [
-          { runtimeSessionId: 'rt-old', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
-          { runtimeSessionId: 'rt-abc', runtime: 'opencode', boundAt: '2026-06-15T10:10:00.000Z' },
-        ],
-      })
-      renderPage('/agent-sessions/sess-abc?from=activity')
-
-      await waitFor(() => {
-        expect(screen.getByTestId('compaction-lineage-link')).toHaveAttribute(
-          'href',
-          '/Test/agent-sessions/sess-abc?rt=rt-old&from=activity',
-        )
-      })
-    })
-
-    it('requests the selected runtime transcript for a history link', async () => {
-      _summaryData = baseSummary({
-        runtimeSessionLineage: [
-          { runtimeSessionId: 'rt-old', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
-          { runtimeSessionId: 'rt-abc', runtime: 'opencode', boundAt: '2026-06-15T10:10:00.000Z' },
-        ],
-      })
-      renderPage('/agent-sessions/sess-abc?rt=rt-old')
-
-      await waitFor(() => {
-        expect(_useGenericSessionTranscript).toHaveBeenCalledWith('sess-abc', 'rt-old')
-      })
-    })
-
-    it('makes a historical runtime view read-only for followup and cancel', async () => {
-      _summaryData = baseSummary({
-        status: 'running',
-        runtimeSessionLineage: [
-          { runtimeSessionId: 'rt-old', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
-          { runtimeSessionId: 'rt-abc', runtime: 'opencode', boundAt: '2026-06-15T10:10:00.000Z' },
-        ],
-      })
-      mocks.transcriptTurns = [makeTurn()]
-      renderPage('/agent-sessions/sess-abc?rt=rt-old')
-
-      await waitFor(() => {
-        expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-disabled', 'true')
-      })
-      expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
-    })
+    // Issue 484: the generic-session compaction/lineage predecessor
+    // rendering and the `?rt=<runtimeId>` historical-transcript
+    // selector were removed from the product code (the shell no longer
+    // renders a CompactionLineageLink and useGenericSessionTranscript is
+    // keyed only by sessionId). These two scenarios are obsolete under
+    // the activity model and have been removed:
+    //  - "links generic predecessor bindings back to the same stable
+    //     session route"
+    //  - "requests the selected runtime transcript for a history link"
+    //  - "makes a historical runtime view read-only for followup and
+    //     cancel" (the historical `?rt=` view no longer exists)
+    it.skip('runtime lineage scenarios removed under the activity model', () => {})
   })
 
   describe('cancel control', () => {
-    it.each(['active', 'running', 'probing'])(
-      'renders the cancel trigger in the header when the generic session is non-terminal (%s)',
-      async (status) => {
-        _summaryData = baseSummary({ status })
+    // Issue 484: cancel is available only while activity === 'active'
+    // (interrupts the current turn). Sessions never reach a terminal
+    // state, so 'non-terminal' now means 'active'.
+    it.each(['active'])(
+      'renders the cancel trigger in the header when the generic session is active (%s)',
+      async (activity) => {
+        _summaryData = baseSummary({ activity })
         mocks.transcriptTurns = [makeTurn()]
         renderPage()
         await waitFor(() => {
@@ -304,10 +275,10 @@ describe('GenericSessionPage', () => {
         })
       },
     )
-    it.each(['completed', 'failed', 'cancelled', 'stopped'])(
-      'does not render the cancel trigger when the session is terminal (%s)',
-      async (status) => {
-        _summaryData = baseSummary({ status })
+    it.each(['idle', 'unknown'])(
+      'does not render the cancel trigger when the session is not active (%s)',
+      async (activity) => {
+        _summaryData = baseSummary({ activity })
         mocks.transcriptTurns = [makeTurn()]
         renderPage()
         await waitFor(() => {
@@ -317,7 +288,7 @@ describe('GenericSessionPage', () => {
       },
     )
     it('does not render the cancel trigger inside the followup composer', async () => {
-      _summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ activity: 'active' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -328,7 +299,7 @@ describe('GenericSessionPage', () => {
       expect(composer.querySelector('[data-testid="session-cancel-alert"]')).toBeNull()
     })
     it('opens a destructive-toned AlertDialog without sending the cancel request', async () => {
-      _summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ activity: 'active' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -343,7 +314,7 @@ describe('GenericSessionPage', () => {
       expect(_cancelHandler).not.toHaveBeenCalled()
     })
     it('dismissing the dialog sends no cancel request and leaves the session running', async () => {
-      _summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ activity: 'active' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -359,7 +330,7 @@ describe('GenericSessionPage', () => {
       expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
     })
     it('confirming the dialog calls the cancel endpoint with the session id', async () => {
-      _summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ activity: 'active' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -375,7 +346,7 @@ describe('GenericSessionPage', () => {
       })
     })
     it('closes the confirmation dialog after the cancel mutation settles while the session remains non-terminal', async () => {
-      _summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ activity: 'active' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -393,7 +364,7 @@ describe('GenericSessionPage', () => {
     it('AlertDialog confirm button reflects cancel.isPending (dismissing disabled while in flight)', async () => {
       _blockCancel = true
 
-      _summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ activity: 'active' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {

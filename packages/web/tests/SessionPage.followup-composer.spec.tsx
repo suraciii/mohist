@@ -102,6 +102,10 @@ function makeMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentSessi
     sessionName: 'T-003.1',
     runtimeSessionId: 'runtime-123',
     runtime: 'opencode',
+    // issue-484: sessions key off `activity` (idle/active/unknown), not the
+    // legacy terminal status. Default to 'idle' (post-execution) so tests
+    // model the new world unless they override activity explicitly.
+    activity: 'idle',
     status: 'completed',
     statusKind: 'completed',
     model: 'claude-3-5-sonnet',
@@ -167,8 +171,7 @@ describe('SessionPage followup composer integration', () => {
   it('renders an interactive composer below the transcript when the session is active', async () => {
     sessionsData = makeSessionsForLookup()
     metadata = makeMetadata({
-      status: 'active',
-      statusKind: 'live',
+      activity: 'active',
       completedAt: null,
     })
     transcript = {
@@ -189,7 +192,7 @@ describe('SessionPage followup composer integration', () => {
 
   it('submits workflow follow-ups through the canonical session name', async () => {
     sessionsData = makeSessionsForLookup()
-    metadata = makeMetadata({ status: 'active', statusKind: 'live', completedAt: null })
+    metadata = makeMetadata({ activity: 'active', completedAt: null })
 
     renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
 
@@ -210,11 +213,13 @@ describe('SessionPage followup composer integration', () => {
     })
   })
 
-  it('hides the composer input when the session is completed', async () => {
+  it('keeps the composer interactive when the session has finished executing (legacy completed)', async () => {
+    // issue-484: sessions never enter a terminal status. After execution the
+    // activity returns to 'idle', and an idle session still accepts follow-ups.
+    // The composer is therefore interactive (no 'closed'/'session ended' UI).
     sessionsData = makeSessionsForLookup()
     metadata = makeMetadata({
-      status: 'completed',
-      statusKind: 'completed',
+      activity: 'idle',
       completedAt: '2024-01-01T11:00:00.000Z',
     })
     transcript = {
@@ -229,16 +234,19 @@ describe('SessionPage followup composer integration', () => {
       expect(screen.getByTestId('session-followup-composer')).toBeInTheDocument()
     })
     const composer = screen.getByTestId('session-followup-composer')
-    expect(composer).toHaveAttribute('data-disabled', 'true')
-    expect(screen.queryByTestId('session-followup-input')).not.toBeInTheDocument()
-    expect(composer).toHaveTextContent(/session ended .*not accepting new followups/i)
+    expect(composer).not.toHaveAttribute('data-disabled', 'true')
+    expect(screen.getByTestId('session-followup-input')).toBeInTheDocument()
+    expect(composer).not.toHaveTextContent(/session ended/i)
   })
 
-  it('hides the composer input when the session is failed', async () => {
+  it('keeps the composer interactive when the session previously failed (now idle)', async () => {
+    // issue-484: a session that previously failed is not terminal; execution
+    // ending returns activity to idle, so follow-up remains available. The
+    // failure surface is expressed via failureReason/errors evidence, not by
+    // disabling the composer.
     sessionsData = makeSessionsForLookup()
     metadata = makeMetadata({
-      status: 'failed',
-      statusKind: 'failed',
+      activity: 'idle',
       failureReason: 'agent crashed',
     })
     transcript = {
@@ -253,53 +261,56 @@ describe('SessionPage followup composer integration', () => {
       expect(screen.getByTestId('session-followup-composer')).toBeInTheDocument()
     })
     const composer = screen.getByTestId('session-followup-composer')
+    expect(composer).not.toHaveAttribute('data-disabled', 'true')
+    expect(screen.getByTestId('session-followup-input')).toBeInTheDocument()
+  })
+
+  it('renders the composer for an idle session with no turns', async () => {
+    // issue-484: idle session with no turns still shows an interactive
+    // composer (idle activity is followup-eligible). There is no 'closed'
+    // composer state anymore.
+    sessionsData = makeSessionsForLookup()
+    metadata = makeMetadata({
+      activity: 'idle',
+      completedAt: '2024-01-01T11:00:00.000Z',
+    })
+    transcript = { turns: [], partCount: 0, lastActivityAt: null }
+
+    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
+
+    const composer = await screen.findByTestId('session-followup-composer')
+    expect(composer).not.toHaveAttribute('data-disabled', 'true')
+    expect(screen.getByTestId('session-followup-input')).toBeInTheDocument()
+  })
+
+  it('shows the unavailable composer when activity is unknown and there are no turns', async () => {
+    // issue-484: the only state that disables the composer is activity==='unknown'
+    // (Mohist cannot confirm whether execution is still active). This replaces the
+    // old 'completed/failed session ended' closed-composer behaviour.
+    sessionsData = makeSessionsForLookup()
+    metadata = makeMetadata({
+      activity: 'unknown',
+      completedAt: '2024-01-01T11:00:00.000Z',
+    })
+    transcript = { turns: [], partCount: 0, lastActivityAt: null }
+
+    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
+
+    const composer = await screen.findByTestId('session-followup-composer')
     expect(composer).toHaveAttribute('data-disabled', 'true')
+    expect(composer).toHaveAttribute('data-state', 'unavailable')
+    expect(composer).toHaveTextContent(/follow-up is unavailable/i)
     expect(screen.queryByTestId('session-followup-input')).not.toBeInTheDocument()
   })
 
-  it('shows the closed composer when a completed session has no turns', async () => {
-    sessionsData = makeSessionsForLookup()
-    metadata = makeMetadata({
-      status: 'completed',
-      statusKind: 'completed',
-      completedAt: '2024-01-01T11:00:00.000Z',
-    })
-    transcript = { turns: [], partCount: 0, lastActivityAt: null }
-
-    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
-
-    const composer = await screen.findByTestId('session-followup-composer')
-    expect(composer).toHaveAttribute('data-state', 'closed')
-    expect(composer).toHaveTextContent(/session ended .*not accepting new followups/i)
-    expect(screen.queryByTestId('session-followup-input')).not.toBeInTheDocument()
-  })
-
-  it('shows the closed composer when a failed session has no turns', async () => {
-    sessionsData = makeSessionsForLookup()
-    metadata = makeMetadata({
-      status: 'failed',
-      statusKind: 'failed',
-      completedAt: '2024-01-01T11:00:00.000Z',
-    })
-    transcript = { turns: [], partCount: 0, lastActivityAt: null }
-
-    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
-
-    const composer = await screen.findByTestId('session-followup-composer')
-    expect(composer).toHaveAttribute('data-state', 'closed')
-    expect(composer).toHaveTextContent(/session ended .*not accepting new followups/i)
-    expect(screen.queryByTestId('session-followup-input')).not.toBeInTheDocument()
-  })
-
-  it('shows the composer even while waiting for activity on a running session with no turns', async () => {
+  it('shows the composer even while waiting for activity on an active session with no turns', async () => {
     sessionsData = [{
       ...makeSessionsForLookup()[0],
       status: 'running',
       completedAt: null,
     }]
     metadata = makeMetadata({
-      status: 'active',
-      statusKind: 'live',
+      activity: 'active',
       completedAt: null,
     })
     transcript = { turns: [], partCount: 0, lastActivityAt: null }
@@ -315,7 +326,7 @@ describe('SessionPage followup composer integration', () => {
 
   it('keeps a submitted followup queued until new transcript content arrives', async () => {
     sessionsData = makeSessionsForLookup()
-    metadata = makeMetadata({ status: 'active', statusKind: 'live', completedAt: null })
+    metadata = makeMetadata({ activity: 'active', completedAt: null })
     transcript = { turns: [makeTurn()], partCount: 1, lastActivityAt: '2024-01-01T10:00:01.000Z' }
 
     const page = renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)

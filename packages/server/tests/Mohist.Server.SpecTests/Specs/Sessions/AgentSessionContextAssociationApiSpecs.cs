@@ -50,7 +50,7 @@ public class AgentSessionContextAssociationApiSpecs
         Assert.Equal(sessionId, entry.GetProperty("sessionId").GetString());
         Assert.Equal(agentId, entry.GetProperty("agentId").GetString());
         Assert.Equal(agentName, entry.GetProperty("agentName").GetString());
-        Assert.NotNull(entry.GetProperty("status").GetString());
+        Assert.NotNull(entry.GetProperty("activity").GetString());
         Assert.NotNull(entry.GetProperty("createdAt").GetString());
         Assert.NotNull(entry.GetProperty("sessionLink").GetString());
         Assert.Contains(sessionId, entry.GetProperty("sessionLink").GetString()!);
@@ -104,7 +104,7 @@ public class AgentSessionContextAssociationApiSpecs
         Assert.Equal(sessionId, entry.GetProperty("sessionId").GetString());
         Assert.Equal(agentId, entry.GetProperty("agentId").GetString());
         Assert.Equal(agentName, entry.GetProperty("agentName").GetString());
-        Assert.NotNull(entry.GetProperty("status").GetString());
+        Assert.NotNull(entry.GetProperty("activity").GetString());
         Assert.NotNull(entry.GetProperty("createdAt").GetString());
         Assert.NotNull(entry.GetProperty("sessionLink").GetString());
         Assert.Contains(sessionId, entry.GetProperty("sessionLink").GetString()!);

@@ -6,137 +6,35 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Sessions;
 
-public class AgentSessionRuntimeStampingTests
+public sealed class AgentSessionRuntimeStampingTests
 {
     private static readonly DateTime CreatedAt = new(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc);
 
     [Fact]
-    public void Create_StampsNormalizedRuntime()
-    {
-        var session = CreateSession(" opencode ");
-
-        Assert.Equal("opencode", session.Runtime.Runtime);
-    }
-
-    [Fact]
-    public void AttachPhysicalSession_RecordsRuntimeInLineageAndEvent()
+    public void AttachPhysicalSession_InitialBindingHasNoLineageAndEmitsCurrentBinding()
     {
         var session = CreateSession("opencode");
-        var boundAt = CreatedAt.AddMinutes(1);
 
-        var events = session.AttachPhysicalSession(
-            "runtime-session-1",
-            "model-a",
-            "/work",
-            changeDir: null,
-            processPid: null,
-            boundAt);
+        var events = session.AttachPhysicalSession("runtime-session-1", null, "/work", null, null, CreatedAt.AddMinutes(1));
 
-        var lineage = Assert.Single(session.Status.RuntimeSessionLineage!);
-        Assert.Equal("opencode", lineage.Runtime);
-        var runtimeBound = Assert.IsType<AgentSessionRuntimeBound>(
-            Assert.Single(events, candidate => candidate.Value is AgentSessionRuntimeBound).Value);
-        Assert.Equal("opencode", runtimeBound.Runtime);
+        Assert.Equal("runtime-session-1", session.Status.AgentRuntimeSessionId);
+        Assert.DoesNotContain("Lineage", JsonSerializer.Serialize(session));
+        var bound = Assert.IsType<AgentSessionRuntimeBound>(Assert.Single(events).Value);
+        Assert.Equal("opencode", bound.Runtime);
     }
 
     [Fact]
-    public void RebindRuntimeSession_AppendsRuntimeWithoutChangingPriorLineage()
+    public void AttachPhysicalSession_RuntimeChangeUsesIdleCasAndClearsContext()
     {
         var session = CreateSession("opencode");
-        var firstBoundAt = CreatedAt.AddMinutes(1);
-        session.AttachPhysicalSession("runtime-session-1", null, "/work", null, null, firstBoundAt);
-
-        var events = session.RebindRuntimeSession(
-            "runtime-session-2",
-            contextWindowUsedAfter: null,
-            contextWindowSizeAfter: null,
-            now: firstBoundAt.AddMinutes(1),
-            runtime: "replacement-runtime");
-
-        Assert.Equal("replacement-runtime", session.Runtime.Runtime);
-        Assert.Collection(
-            session.Status.RuntimeSessionLineage!,
-            entry =>
-            {
-                Assert.Equal("runtime-session-1", entry.AgentRuntimeSessionId);
-                Assert.Equal("opencode", entry.Runtime);
-            },
-            entry =>
-            {
-                Assert.Equal("runtime-session-2", entry.AgentRuntimeSessionId);
-                Assert.Equal("replacement-runtime", entry.Runtime);
-            });
-        var runtimeBound = Assert.IsType<AgentSessionRuntimeBound>(Assert.Single(events).Value);
-        Assert.Equal("replacement-runtime", runtimeBound.Runtime);
-    }
-
-    [Fact]
-    public void RebindRuntimeSession_LegacyBindingKeepsUnknownPredecessorRuntime()
-    {
-        var session = CreateSession(runtime: null);
+        session.AttachPhysicalSession("oc-session", null, "/work", null, null, CreatedAt.AddMinutes(1));
         session.Status = session.Status with
         {
-            AgentRuntimeSessionId = "legacy-session",
-            BoundAt = CreatedAt,
-            RuntimeSessionLineage = null
+            UsageSummary = new AgentUsageSummary { TotalTokens = 10, ContextWindowUsed = 12, ContextWindowSize = 100 }
         };
 
-        session.RebindRuntimeSession(
-            "runtime-session-2",
-            contextWindowUsedAfter: null,
-            contextWindowSizeAfter: null,
-            now: CreatedAt.AddMinutes(1),
-            runtime: "opencode");
-
-        Assert.Collection(
-            session.Status.RuntimeSessionLineage!,
-            entry => Assert.Null(entry.Runtime),
-            entry => Assert.Equal("opencode", entry.Runtime));
-    }
-
-    [Fact]
-    public void LegacyStateWithoutRuntime_DeserializesWithoutBackfill()
-    {
-        var session = CreateSession("opencode");
-        session.AttachPhysicalSession("legacy-session", null, "/work", null, null, CreatedAt.AddMinutes(1));
-        var state = JsonNode.Parse(JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions))!.AsObject();
-        state["runtime"]!.AsObject().Remove("runtime");
-        state["status"]!["runtimeSessionLineage"]![0]!.AsObject().Remove("runtime");
-
-        var rehydrated = JsonSerializer.Deserialize<AgentSession>(state, AgentSessionJson.JsonOptions)!;
-
-        Assert.Equal(session.Id, rehydrated.Id);
-        Assert.Null(rehydrated.Runtime.Runtime);
-        Assert.Null(Assert.Single(rehydrated.Status.RuntimeSessionLineage!).Runtime);
-    }
-
-    [Fact]
-    public void IsRuntimeSessionMissing_RequiresBindingRuntimeAndRegisteredBackend()
-    {
-        static bool IsRegistered(string runtime) => runtime == "opencode";
-
-        var absentBinding = CreateSession("opencode");
-        var absentRuntime = CreateSession(runtime: null);
-        absentRuntime.Status = absentRuntime.Status with { AgentRuntimeSessionId = "legacy-session" };
-        var unavailableRuntime = CreateSession("acp");
-        unavailableRuntime.Status = unavailableRuntime.Status with { AgentRuntimeSessionId = "runtime-session" };
-        var availableRuntime = CreateSession("opencode");
-        availableRuntime.Status = availableRuntime.Status with { AgentRuntimeSessionId = "opencode-session" };
-
-        Assert.True(absentBinding.IsRuntimeSessionMissing(IsRegistered));
-        Assert.True(absentRuntime.IsRuntimeSessionMissing(IsRegistered));
-        Assert.True(unavailableRuntime.IsRuntimeSessionMissing(IsRegistered));
-        Assert.False(availableRuntime.IsRuntimeSessionMissing(IsRegistered));
-    }
-
-    [Fact]
-    public void AttachPhysicalSession_GuardedRuntimeChange_AppendsLineageAndPreservesIdentity()
-    {
-        var session = CreateSession("opencode");
-        session.AttachPhysicalSession("oc-session", null, "/work", null, null, CreatedAt.AddMinutes(1), "opencode", "opencode", null);
-
         var events = session.AttachPhysicalSession(
-            "pi-session-file",
+            "pi-session",
             null,
             "/work",
             null,
@@ -147,40 +45,45 @@ public class AgentSessionRuntimeStampingTests
             "oc-session");
 
         Assert.Equal("pi", session.Runtime.Runtime);
-        Assert.Equal("pi-session-file", session.Status.AgentRuntimeSessionId);
-        Assert.Equal("project-1", session.Metadata.Label("mohist.io/project-id"));
-        Assert.Equal("workflow-1", session.Metadata.Label("mohist.io/source-id"));
-        Assert.Equal("/work", session.Runtime.WorkDir);
-        Assert.Equal(2, session.Status.RuntimeSessionLineage!.Count);
-        Assert.Equal("oc-session", session.Status.RuntimeSessionLineage[0].AgentRuntimeSessionId);
-        Assert.Equal("pi-session-file", session.Status.RuntimeSessionLineage[1].AgentRuntimeSessionId);
-        Assert.Single(events);
+        Assert.Null(session.Status.UsageSummary!.ContextWindowUsed);
+        Assert.Equal(10, session.Status.UsageSummary.TotalTokens);
+        Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
+    }
+
+    [Fact]
+    public void LegacyStateWithRemovedLineageFieldDeserializes()
+    {
+        var session = CreateSession("opencode");
+        session.AttachPhysicalSession("legacy-session", null, "/work", null, null, CreatedAt.AddMinutes(1));
+        var state = JsonNode.Parse(JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions))!.AsObject();
+        state["status"]!.AsObject()["runtimeSessionLineage"] = new JsonArray(new JsonObject { ["agentRuntimeSessionId"] = "old" });
+        state["runtime"]!.AsObject().Remove("runtime");
+
+        var rehydrated = JsonSerializer.Deserialize<AgentSession>(state, AgentSessionJson.JsonOptions)!;
+
+        Assert.Equal("legacy-session", rehydrated.Status.AgentRuntimeSessionId);
+        Assert.Null(rehydrated.Runtime.Runtime);
+        Assert.DoesNotContain("Lineage", JsonSerializer.Serialize(rehydrated));
     }
 
     [Fact]
     public void AttachPhysicalSession_StaleExpectedBindingDoesNotMutate()
     {
         var session = CreateSession("opencode");
-        session.AttachPhysicalSession("oc-session", null, "/work", null, null, CreatedAt.AddMinutes(1), "opencode", "opencode", null);
+        session.AttachPhysicalSession("current", null, "/work", null, null, CreatedAt.AddMinutes(1));
 
         Assert.Throws<StaleRuntimeSessionBindingException>(() => session.AttachPhysicalSession(
-            "pi-session-file", null, "/work", null, null, CreatedAt.AddMinutes(2), "pi", "opencode", "stale"));
+            "replacement", null, "/work", null, null, CreatedAt.AddMinutes(2), "opencode", "opencode", "stale"));
 
-        Assert.Equal("oc-session", session.Status.AgentRuntimeSessionId);
-        Assert.Equal("opencode", session.Runtime.Runtime);
-        Assert.Single(session.Status.RuntimeSessionLineage!);
+        Assert.Equal("current", session.Status.AgentRuntimeSessionId);
     }
 
-    private static AgentSession CreateSession(string? runtime) =>
-        AgentSession.Create(
-            "session-1",
-            "runner-1",
-            "/work",
-            metadata: new AgentSessionMetadata()
-                .WithLabel("mohist.io/project-id", "project-1")
-                .WithLabel("mohist.io/source-kind", "workflow")
-                .WithLabel("mohist.io/source-id", "workflow-1")
-                .WithLabel("mohist.io/session-name", "build"),
-            now: CreatedAt,
-            runtime: runtime);
+    private static AgentSession CreateSession(string? runtime) => AgentSession.Create(
+        "session-1", "runner-1", "/work",
+        metadata: new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build"),
+        now: CreatedAt, runtime: runtime);
 }

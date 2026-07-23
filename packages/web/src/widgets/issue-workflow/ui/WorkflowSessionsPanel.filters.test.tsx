@@ -31,7 +31,9 @@ function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
     projectId: 'project-1',
     issueNumber: 55,
     runnerId: 'runner-1',
-    status: overrides.status ?? 'completed',
+    // Issue 484: filtering is now by `activity` (idle/active/unknown). `status`
+    // is retained on the wire but no longer drives filtering or badges.
+    activity: overrides.activity ?? 'idle',
     stage: overrides.stage ?? 'check',
     model: overrides.model ?? 'minimax/MiniMax-M3',
     workDir: null,
@@ -78,23 +80,26 @@ describe('WorkflowSessionsPanel filters', () => {
     expect(stageOptions.map((o) => o.getAttribute('data-disabled'))).toEqual([null, null, null, null, null])
   })
 
-  it('filters by status and surfaces a notice', async () => {
+  it('filters by activity and surfaces a notice', async () => {
     const user = userEvent.setup()
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', status: 'failed', createdAt: '2026-06-12T10:03:00.000Z' }),
-        session({ id: 's-check', sessionName: 'review-repair', stage: 'check', status: 'running', createdAt: '2026-06-12T10:02:00.000Z' }),
+        // Issue 484: status values map onto activities — a finished plan/build
+        // session is `idle`, a live session is `active`, and an unconfirmable
+        // failure surfaces as `unknown`.
+        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', activity: 'idle', createdAt: '2026-06-12T10:01:00.000Z' }),
+        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', activity: 'unknown', createdAt: '2026-06-12T10:03:00.000Z' }),
+        session({ id: 's-check', sessionName: 'review-repair', stage: 'check', activity: 'active', createdAt: '2026-06-12T10:02:00.000Z' }),
       ],
     })
 
     render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
     const statusFilter = screen.getByTestId('workflow-sessions-status-filter')
     await user.click(statusFilter)
-    await user.click(await screen.findByRole('option', { name: 'Failed' }))
+    await user.click(await screen.findByRole('option', { name: 'unknown' }))
 
-    expect(within(statusFilter).getByText('Failed')).toBeInTheDocument()
+    expect(within(statusFilter).getByText('unknown')).toBeInTheDocument()
     expect(screen.queryByText('proposal-draft')).not.toBeInTheDocument()
     expect(screen.queryByText('review-repair')).not.toBeInTheDocument()
     expect(screen.getByText('compile-assets')).toBeInTheDocument()
@@ -187,16 +192,17 @@ describe('WorkflowSessionsPanel filters', () => {
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', createdAt: '2026-06-12T10:01:00.000Z' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', status: 'failed', createdAt: '2026-06-12T10:03:00.000Z' }),
+        // Issue 484: mix activities so selecting one narrows the list.
+        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', activity: 'idle', createdAt: '2026-06-12T10:01:00.000Z' }),
+        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', activity: 'unknown', createdAt: '2026-06-12T10:03:00.000Z' }),
       ],
     })
 
     render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
     const renderedStatusFilter = screen.getByTestId('workflow-sessions-status-filter')
     await user.click(renderedStatusFilter)
-    await user.click(await screen.findByRole('option', { name: 'Failed' }))
-    expect(within(renderedStatusFilter).getByText('Failed')).toBeInTheDocument()
+    await user.click(await screen.findByRole('option', { name: 'unknown' }))
+    expect(within(renderedStatusFilter).getByText('unknown')).toBeInTheDocument()
     expect(screen.getByTestId('workflow-sessions-filter-notice')).toHaveTextContent('Showing 1 of 2 sessions')
 
     await user.click(renderedStatusFilter)

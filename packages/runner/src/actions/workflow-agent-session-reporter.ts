@@ -137,7 +137,8 @@ export class WorkflowAgentSessionReporter {
       type: event.type,
       payload: event.payload,
     }))
-    const promise = this.outbox.enqueueProducedFactBatch(records)
+    const promise = Promise.all(records.map((record) => this.outbox.enqueueProducedFact(record)))
+      .then(() => undefined)
       .catch((error) => {
         console.error(
           `workflow agent-session delta batch enqueue failed for workflow=${this.workflowRunId} work=${this.workMetadata.workId} session=${this.sessionName} count=${records.length}: ${errorMessage(error)}`,
@@ -156,19 +157,18 @@ export class WorkflowAgentSessionReporter {
   }): void {
     if (this.closed) return
     if (this.inputRejected) return
-    // Flush buffered deltas before the terminal fact so the outbox
-    // persists them in order: all deltas precede session.closed.
+    // Flush buffered deltas before the activity fact so the outbox preserves turn order.
     this.flushDeltaBuffer()
-    const eventRecord = this.buildRecord(payload.runtimeSessionId, {
-      type: "session.closed",
-      payload: {
-        status: payload.status,
-        exitCode: payload.exitCode,
-        ...(payload.failureReason ? { failureReason: payload.failureReason } : {}),
-        runtimeSessionId: payload.runtimeSessionId,
-      },
-    })
-    const promise = this.outbox.enqueueProducedFact(eventRecord)
+    const records: RuntimeEventRecord[] = []
+    if (payload.status === "failed") records.push(this.buildRecord(payload.runtimeSessionId, {
+      type: "turn.failed",
+      payload: { status: payload.status, exitCode: payload.exitCode, ...(payload.failureReason ? { failureReason: payload.failureReason } : {}) },
+    }))
+    records.push(this.buildRecord(payload.runtimeSessionId, {
+      type: "session.activity",
+      payload: { activity: "idle", status: payload.status, exitCode: payload.exitCode, ...(payload.failureReason ? { failureReason: payload.failureReason } : {}), runtimeSessionId: payload.runtimeSessionId, observedAt: new Date().toISOString() },
+    }))
+    const promise = this.outbox.enqueueProducedFactBatch(records)
       .catch((error) => {
         console.error(
           `workflow agent-session close enqueue failed for workflow=${this.workflowRunId} work=${this.workMetadata.workId} session=${this.sessionName}: ${errorMessage(error)}`,

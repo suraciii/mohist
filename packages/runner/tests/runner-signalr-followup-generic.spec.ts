@@ -111,7 +111,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     const types = recording.records.map((r) => r.event.type)
     expect(types).toEqual([
       "session.input",
-      "session.followup_completed",
+      "session.activity",
     ])
     for (const record of recording.records) {
       expect(record.target).toMatchObject({ kind: "generic", projectId: "proj-1", sessionId: "gen-session-1" })

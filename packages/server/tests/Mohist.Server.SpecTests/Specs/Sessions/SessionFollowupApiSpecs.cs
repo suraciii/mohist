@@ -36,7 +36,7 @@ public class SessionFollowupApiSpecs
     {
         var (project, issue, workflowRunId, session) = await CreateAndStartSessionAsync("followup-ok", sessionName: "plan", attachAndStart: true);
         var sessionState = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
-        Assert.Equal("active", sessionState?.Status);
+        Assert.Equal("idle", sessionState?.Status);
         var tasksBefore = await WaitForWorkflowTasksAsync(project.Id, issue.Number);
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
@@ -154,14 +154,13 @@ public class SessionFollowupApiSpecs
 
         using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "ping" });
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
-        Assert.Equal(session.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
-        Assert.Equal("reset", doc.RootElement.GetProperty("details").GetProperty("hint").GetString());
-        Assert.Contains(session.Id, doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
-        Assert.Contains("Reset", doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
-        Assert.Empty(runnerHub.SentMessages);
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+            Assert.Equal(session.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+            Assert.Contains(session.Id, doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+            Assert.Contains("Reset", doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+            Assert.Empty(runnerHub.SentMessages);
     }
 
     [Fact]

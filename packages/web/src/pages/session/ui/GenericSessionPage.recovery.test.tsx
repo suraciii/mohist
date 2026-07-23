@@ -39,16 +39,16 @@ const dependencies: GenericSessionPageDependencies = {
 }
 
 function makeSummary(
-  recoveryAvailable: boolean,
+  activity: 'idle' | 'active' | 'unknown',
   usage: unknown = null,
   overrides: Record<string, unknown> = {},
 ) {
   return {
     sessionId: 'sess-abc', agentId: 'agent-1', agentName: 'Test Agent',
-    runtimeSessionId: 'rt-abc', runtime: 'opencode', status: 'running',
+    runtimeSessionId: 'rt-abc', runtime: 'opencode', activity,
     createdAt: '2026-06-15T10:00:00.000Z', lastActivityAt: '2026-06-15T10:30:00.000Z',
     resolvedModel: 'gpt-4', failureCategory: null, toolCallCount: 0, toolErrorCount: 0,
-    contextRefs: null, usage, runtimeSessionLineage: null, recoveryAvailable, ...overrides,
+    contextRefs: null, usage, runtimeSessionLineage: null, ...overrides,
   }
 }
 
@@ -78,7 +78,7 @@ describe('GenericSessionPage recovery', () => {
   afterEach(() => vi.clearAllMocks())
 
   it('renders recovery context and controls for the stable session id', async () => {
-    summary = makeSummary(true, { contextWindowUsed: 12000, contextWindowSize: 32000, contextUsagePercent: 37.5, healthStatus: 'green' })
+    summary = makeSummary('idle', { contextWindowUsed: 12000, contextWindowSize: 32000, contextUsagePercent: 37.5, healthStatus: 'green' })
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('context-health-bar')).toBeInTheDocument())
@@ -87,7 +87,7 @@ describe('GenericSessionPage recovery', () => {
   })
 
   it('allows Compact and Reset when the server reports an idle generic session', async () => {
-    summary = makeSummary(true)
+    summary = makeSummary('idle')
     const { client } = renderPage()
     const invalidate = vi.spyOn(client, 'invalidateQueries')
 
@@ -102,7 +102,7 @@ describe('GenericSessionPage recovery', () => {
   })
 
   it('disables recovery when the server reports an active generic session', async () => {
-    summary = makeSummary(false)
+    summary = makeSummary('active')
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('session-recovery-compact')).toBeDisabled())
@@ -114,11 +114,14 @@ describe('GenericSessionPage recovery', () => {
   })
 
   it('keeps Reset available when a runtime binding is missing and followup is disabled', async () => {
-    summary = makeSummary(true, null, { runtimeSessionId: null, runtime: null })
+    // Issue 484: with no runtime binding canFollowup is false, so the
+    // composer renders disabled (not absent). Recovery depends only on
+    // activity, so Reset stays enabled while activity is idle.
+    summary = makeSummary('idle', null, { runtimeSessionId: null, runtime: null })
     renderPage()
 
-    expect(screen.queryByTestId('session-followup-composer')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('session-recovery-reset')).not.toBeDisabled())
+    expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-disabled', 'true')
     expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
-    expect(screen.getByTestId('session-recovery-reset')).not.toBeDisabled()
   })
 })

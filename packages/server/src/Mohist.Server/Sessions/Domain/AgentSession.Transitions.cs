@@ -36,7 +36,8 @@ public static partial class AgentSessionExtensions
             DateTime now,
             string? runtime = null,
             string? expectedRuntime = null,
-            string? expectedAgentSessionId = null)
+            string? expectedAgentSessionId = null,
+            string? expectedRunnerId = null)
         {
             _ = changeDir;
             _ = processPid;
@@ -46,15 +47,23 @@ public static partial class AgentSessionExtensions
             var nextRuntime = NormalizeRuntime(runtime) ?? existingRuntime ?? "opencode";
             if (string.IsNullOrWhiteSpace(nextRuntime))
                 throw new InvalidOperationException("AgentSession attach requires a registered runtime.");
-            if ((expectedRuntime is not null
-                    && !string.Equals(expectedRuntime, existingRuntime, StringComparison.OrdinalIgnoreCase))
-                || (expectedAgentSessionId is not null
-                    && !string.Equals(expectedAgentSessionId, existingAgentSessionId, StringComparison.Ordinal)))
-                throw new StaleRuntimeSessionBindingException(session.Id, expectedAgentSessionId, existingAgentSessionId);
+            if (expectedRuntime is not null || expectedAgentSessionId is not null || expectedRunnerId is not null)
+            {
+                var expected = new AgentRuntimeBinding(
+                    expectedRunnerId ?? session.Runtime.RunnerId,
+                    expectedRuntime,
+                    expectedAgentSessionId);
+                EnsureExpectedRuntimeBinding(session, expected, session.CurrentRuntimeBinding());
+            }
             if (!string.IsNullOrWhiteSpace(session.Runtime.WorkDir)
                 && !string.IsNullOrWhiteSpace(workDir)
                 && !string.Equals(session.Runtime.WorkDir, workDir, StringComparison.Ordinal))
                 throw new InvalidOperationException($"AgentSession {session.Id} is bound to work directory '{session.Runtime.WorkDir}', not '{workDir}'.");
+            // attach is a normal operation that reuses the current binding; it is
+            // not a binding-replacement entry point. Replacing a bound physical
+            // session under the same runtime must go through Reset / recover-missing
+            // (idle-only CAS), otherwise a stray attach would silently swap the
+            // runtime session the AgentSession is committed to.
             if (!string.IsNullOrWhiteSpace(existingAgentSessionId)
                 && string.Equals(existingRuntime, nextRuntime, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal))
@@ -62,8 +71,27 @@ public static partial class AgentSessionExtensions
                 throw new InvalidOperationException(
                     $"AgentSession {session.Id} is already bound to runtime session {existingAgentSessionId}; use Reset to replace the binding.");
             }
+
             var isNewRuntimeBinding = !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal)
                 || !string.Equals(existingRuntime, nextRuntime, StringComparison.OrdinalIgnoreCase);
+
+            // A runtime change (e.g. runner restart on a different backend) replaces
+            // the binding through the idle-only CAS path so the context window is
+            // cleared while cumulative usage is preserved. Same-runtime rebind was
+            // already rejected above.
+            if (isNewRuntimeBinding && !string.IsNullOrWhiteSpace(existingAgentSessionId)
+                && !string.Equals(existingRuntime, nextRuntime, StringComparison.OrdinalIgnoreCase))
+            {
+                session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
+                var replacementEvents = session.RebindRuntimeSession(
+                    session.CurrentRuntimeBinding(),
+                    new AgentRuntimeBinding(session.Runtime.RunnerId, nextRuntime, agentSessionId),
+                    "runtime-change",
+                    now: now).ToList();
+                if (!string.Equals(oldModel, model ?? oldModel, StringComparison.Ordinal))
+                    replacementEvents.Add(new AgentSessionModelChanged(model ?? oldModel));
+                return replacementEvents;
+            }
 
             session.Runtime = session.Runtime with
             {
@@ -76,14 +104,10 @@ public static partial class AgentSessionExtensions
                 AgentRuntimeSessionId = isNewRuntimeBinding ? agentSessionId : existingAgentSessionId,
                 BoundAt = isNewRuntimeBinding ? now : session.Status.BoundAt ?? now,
                 LastDataAt = now,
-                RuntimeSessionLineage = isNewRuntimeBinding
-                    ? AppendLineageEntry(session.Status.RuntimeSessionLineage, agentSessionId, now,
-                         runtime: nextRuntime)
-                    : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
             if (isNewRuntimeBinding)
-                events.Add(new AgentSessionRuntimeBound(agentSessionId, existingAgentSessionId, session.Runtime.Runtime));
+                events.Add(new AgentSessionRuntimeBound(agentSessionId, session.Runtime.Runtime));
             if (!string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal))
                 events.Add(new AgentSessionModelChanged(session.Settings.Model));
             return events;
@@ -103,6 +127,17 @@ public static partial class AgentSessionExtensions
         public IReadOnlyList<AgentSessionEvent> RecordActivity(DateTime now)
         {
             session.Status = session.Status with { LastDataAt = now, CurrentTurnEndedAt = null };
+            return [];
+        }
+
+        public IReadOnlyList<AgentSessionEvent> SetActivity(AgentSessionActivity activity, DateTime now)
+        {
+            session.Status = session.Status with
+            {
+                Activity = activity,
+                LastDataAt = now,
+                CurrentTurnEndedAt = activity == AgentSessionActivity.Idle ? now : session.Status.CurrentTurnEndedAt,
+            };
             return [];
         }
 
@@ -143,58 +178,45 @@ public static partial class AgentSessionExtensions
         }
 
         public IReadOnlyList<AgentSessionEvent> RebindRuntimeSession(
-            string newAgentSessionId,
-            long? contextWindowUsedAfter,
-            long? contextWindowSizeAfter,
-            DateTime now,
-            string? runtime = null)
+            AgentRuntimeBinding expected,
+            AgentRuntimeBinding replacement,
+            string reason,
+            DateTime now)
         {
-            var oldAgentSessionId = session.Status.AgentRuntimeSessionId;
-            var oldRuntime = session.Runtime.Runtime;
-            var nextRuntime = NormalizeRuntime(runtime) ?? oldRuntime;
-            var rebinds = !string.Equals(oldAgentSessionId, newAgentSessionId, StringComparison.Ordinal)
-                || !string.Equals(oldRuntime, nextRuntime, StringComparison.Ordinal);
-            if (rebinds)
-                session.Runtime = session.Runtime with { Runtime = nextRuntime };
+            if (session.Status.Activity != AgentSessionActivity.Idle)
+                throw new InvalidOperationException($"AgentSession {session.Id} is currently {session.Status.Activity}; binding replacement requires idle activity.");
+            EnsureExpectedRuntimeBinding(session, expected, session.CurrentRuntimeBinding());
+            if (string.IsNullOrWhiteSpace(replacement.RunnerId) || string.IsNullOrWhiteSpace(replacement.RuntimeSessionId))
+                throw new InvalidOperationException("Binding replacement requires a runner and runtime session.");
+            if (reason is not ("reset" or "runtime-change" or "missing-recovery"))
+                throw new ArgumentOutOfRangeException(nameof(reason), reason, "Unsupported binding replacement reason.");
+
+            session.Runtime = session.Runtime with
+            {
+                RunnerId = replacement.RunnerId,
+                Runtime = NormalizeRuntime(replacement.Runtime),
+            };
+            var usage = session.Status.UsageSummary ?? new AgentUsageSummary();
             session.Status = session.Status with
             {
-                AgentRuntimeSessionId = newAgentSessionId,
+                AgentRuntimeSessionId = replacement.RuntimeSessionId,
                 BoundAt = now,
                 LastDataAt = now,
-                UsageSummary = (session.Status.UsageSummary ?? new AgentUsageSummary()) with
-                {
-                    ContextWindowUsed = contextWindowUsedAfter,
-                    ContextWindowSize = contextWindowSizeAfter ?? (session.Status.UsageSummary ?? new AgentUsageSummary()).ContextWindowSize,
-                },
-                // Append the new runtime session entry while keeping every prior
-                // entry. On the very first rebind after a legacy rehydration
-                // (no lineage yet but a stale AgentRuntimeSessionId),
-                // AppendLineageEntry backfills the predecessor so the chain
-                // still answers "who came before?".
-                RuntimeSessionLineage = rebinds
-                    ? AppendLineageEntry(session.Status.RuntimeSessionLineage, newAgentSessionId, now,
-                        seedPrevious: oldAgentSessionId,
-                        seedPreviousRuntime: oldAgentSessionId is null ? null : oldRuntime,
-                        seedPreviousBoundAt: session.Status.BoundAt,
-                        runtime: nextRuntime)
-                    : session.Status.RuntimeSessionLineage
+                UsageSummary = usage with { ContextWindowUsed = null, ContextWindowSize = null },
             };
-            var events = new List<AgentSessionEvent>();
-            if (rebinds)
-                events.Add(new AgentSessionRuntimeBound(newAgentSessionId, oldAgentSessionId, session.Runtime.Runtime));
-            return events;
+            return [new AgentSessionRuntimeBound(replacement.RuntimeSessionId, session.Runtime.Runtime)];
         }
 
-        public void EnsureExpectedRuntimeSession(string? expectedRuntimeSessionId)
+        public AgentRuntimeBinding CurrentRuntimeBinding() =>
+            new(session.Runtime.RunnerId, NormalizeRuntime(session.Runtime.Runtime), session.Status.AgentRuntimeSessionId);
+
+        private static void EnsureExpectedRuntimeBinding(
+            AgentSession actualSession,
+            AgentRuntimeBinding expected,
+            AgentRuntimeBinding actual)
         {
-            var actualRuntimeSessionId = session.Status.AgentRuntimeSessionId;
-            if (!string.Equals(expectedRuntimeSessionId, actualRuntimeSessionId, StringComparison.Ordinal))
-            {
-                throw new StaleRuntimeSessionBindingException(
-                    session.Id,
-                    expectedRuntimeSessionId,
-                    actualRuntimeSessionId);
-            }
+            if (expected == actual) return;
+            throw new StaleRuntimeSessionBindingException(actualSession.Id, expected.RuntimeSessionId, actual.RuntimeSessionId);
         }
 
         public IReadOnlyList<AgentSessionEvent> RecordCompaction(
@@ -290,39 +312,6 @@ public static partial class AgentSessionExtensions
         {
             if (delta is null or < 0) return current;
             return (current ?? 0) + delta.Value;
-        }
-
-        /// <summary>
-        /// Returns a new lineage list with <paramref name="newAgentSessionId"/>
-        /// appended at <paramref name="now"/>. When the chain is empty
-        /// (legacy rehydration or never-bound session) and
-        /// <paramref name="seedPrevious"/> is non-null, the predecessor
-        /// is back-filled first so the chain still answers
-        /// "who came before?". Otherwise the chain is left untouched
-        /// on null (matches the historical "no lineage" rendering).
-        /// </summary>
-        private static IReadOnlyList<RuntimeSessionLineageEntry> AppendLineageEntry(
-            IReadOnlyList<RuntimeSessionLineageEntry>? lineage,
-            string newAgentSessionId,
-            DateTime now,
-            string? seedPrevious = null,
-            string? seedPreviousRuntime = null,
-            DateTime? seedPreviousBoundAt = null,
-            string? runtime = null)
-        {
-            var entries = lineage is null
-                ? new List<RuntimeSessionLineageEntry>()
-                : new List<RuntimeSessionLineageEntry>(lineage);
-
-            if (entries.Count == 0
-                && !string.IsNullOrEmpty(seedPrevious)
-                && !string.Equals(seedPrevious, newAgentSessionId, StringComparison.Ordinal))
-            {
-                entries.Add(new RuntimeSessionLineageEntry(seedPrevious, seedPreviousBoundAt ?? now, seedPreviousRuntime));
-            }
-
-            entries.Add(new RuntimeSessionLineageEntry(newAgentSessionId, now, runtime));
-            return entries;
         }
 
         private static string? NormalizeRuntime(string? runtime) =>

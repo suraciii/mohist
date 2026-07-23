@@ -23,6 +23,7 @@ import type {
   PiResult,
   PiRuntimeEvent,
   PiSessionCreateRequest,
+  PiSessionResolveRequest,
   PiSessionResult,
   PiTurnObserver,
   PiTurnRequest,
@@ -78,6 +79,21 @@ export class PiRuntime {
   ready(): boolean { return this.state.ready }
   diagnostic(): PiDiagnostic | null { return this.state.diagnostic }
   catalog(): PiCatalog | null { return this.state.catalog }
+
+  async resolveSession(request: PiSessionResolveRequest): Promise<PiResult<PiSessionResult>> {
+    if (!this.state.ready || !this.state.services) return this.unavailable()
+    const runtimeSessionId = request.target.runtimeSessionId
+    if (!runtimeSessionId) return this.failure("missing-session", "Pi Session binding is missing")
+    const path = normalizedPath(runtimeSessionId)
+    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    try {
+      const session = this.sessions.get(path) ?? await this.state.services.openSession(path, request.target.workDir)
+      this.sessions.set(path, session)
+      return { ok: true, value: { runtimeSessionId: path, workDir: request.target.workDir }, diagnostics: [] }
+    } catch (cause) {
+      return this.failure("missing-session", "The bound Pi Session is missing", [diagnostic("session-open-failed", this.mask(message(cause)))])
+    }
+  }
 
   async createSession(request: PiSessionCreateRequest): Promise<PiResult<PiSessionResult>> {
     if (!this.state.ready || !this.state.services) return this.unavailable()

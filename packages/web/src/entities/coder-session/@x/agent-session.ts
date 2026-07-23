@@ -1,6 +1,6 @@
 export type {
+  AgentSessionActivity,
   AgentSessionEventSummary,
   AgentSessionTranscriptResponse,
   AgentSessionUsage,
-  RuntimeSessionLineageEntry,
 } from '../model/types'

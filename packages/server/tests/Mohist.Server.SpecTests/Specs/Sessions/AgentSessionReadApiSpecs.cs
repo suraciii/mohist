@@ -49,7 +49,7 @@ public class AgentSessionReadApiSpecs
         {
             Assert.Equal(agent.Id, item.GetProperty("agentId").GetString());
             Assert.Equal(agentName, item.GetProperty("agentName").GetString());
-            Assert.NotNull(item.GetProperty("status").GetString());
+            Assert.NotNull(item.GetProperty("activity").GetString());
             Assert.NotNull(item.GetProperty("createdAt").GetString());
         }
     }
@@ -87,16 +87,21 @@ public class AgentSessionReadApiSpecs
         await InsertActiveGenericSessionAsync(project, runningSession, agent.Id, agentName, "test-runner");
         await InsertFailedGenericSessionAsync(project, failedSession, agent.Id, agentName);
 
+        // Under the activity model the ?status= filter matches the activity
+        // vocabulary (idle/active/unknown); the legacy running/failed values
+        // no longer match anything. The active helper seeds an `active`
+        // session and the failed helper seeds an `idle` one, so the filter
+        // narrows to exactly those rows.
         var running = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/agents/{agent.Id}/sessions?status=running");
+            $"/api/projects/{project}/agents/{agent.Id}/sessions?status=active");
         Assert.Single(running.EnumerateArray(), r => r.GetProperty("sessionId").GetString() == runningSession);
 
         var failed = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/agents/{agent.Id}/sessions?status=failed");
+            $"/api/projects/{project}/agents/{agent.Id}/sessions?status=idle");
         Assert.Single(failed.EnumerateArray(), f => f.GetProperty("sessionId").GetString() == failedSession);
 
         var multi = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/agents/{agent.Id}/sessions?status=running,failed");
+            $"/api/projects/{project}/agents/{agent.Id}/sessions?status=active,idle");
         Assert.Equal(2, multi.EnumerateArray().Count());
     }
 
@@ -127,7 +132,7 @@ public class AgentSessionReadApiSpecs
         Assert.Equal(sessionId, summary.GetProperty("sessionId").GetString());
         Assert.Equal(agentId, summary.GetProperty("agentId").GetString());
         Assert.Equal(agentName, summary.GetProperty("agentName").GetString());
-        Assert.NotNull(summary.GetProperty("status").GetString());
+        Assert.NotNull(summary.GetProperty("activity").GetString());
         Assert.NotNull(summary.GetProperty("createdAt").GetString());
         Assert.NotEqual(JsonValueKind.Undefined, summary.GetProperty("usage").ValueKind);
 
@@ -298,7 +303,8 @@ public class AgentSessionReadApiSpecs
                 CreatedAt: startedAt,
                 BoundAt: startedAt.AddSeconds(1),
                 LastDataAt: TestTime.UtcDateTime,
-                AgentRuntimeSessionId: sessionId),
+                AgentRuntimeSessionId: sessionId,
+                Activity: AgentSessionActivity.Active),
             Metadata = new AgentSessionMetadata(labels),
         };
 

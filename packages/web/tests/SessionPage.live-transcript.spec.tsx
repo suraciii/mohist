@@ -200,13 +200,19 @@ describe('useSessionTranscript live parity and convergence', () => {
     })
   })
 
-  it('marks live transcript finalizing after a bound completion event until refetch', async () => {
+  it('closes the live turn after a bound session.activity=idle event until refetch', async () => {
+    // issue-484: session.closed is deprecated (D6). Execution ending is now
+    // signalled by session.activity with activity 'idle', which closes the
+    // live turn and invalidates session queries. It does not set isFinalizing
+    // (that flag is reserved for recovery/liveness convergence).
     const { result } = renderLiveTranscript()
     expect(result.current.isFinalizing).toBe(false)
+    expect(result.current.turns.at(-1)?.completedAt).toBeNull()
     act(() => {
-      dispatchAgentEvent('session.closed', { sessionId: 'session-123', runtimeSessionId: 'runtime-123', status: 'completed' })
+      dispatchAgentEvent('session.activity', { sessionId: 'session-123', runtimeSessionId: 'runtime-123', activity: 'idle' })
     })
-    await waitFor(() => expect(result.current.isFinalizing).toBe(true))
+    await waitFor(() => expect(result.current.turns.at(-1)?.completedAt).not.toBeNull())
+    expect(result.current.isFinalizing).toBe(false)
   })
 
   it('appends one recovery part for a single live recovery event', async () => {
@@ -408,14 +414,18 @@ describe('useSessionTranscript live parity and convergence', () => {
   })
 
   it('appends recovery/terminal errors as dedicated parts', async () => {
+    // issue-484: session.closed no longer appends a failed error part (D6 —
+    // the event is deprecated and no longer subscribed). Terminal/recovery
+    // errors are now surfaced via session.liveness (status=failed), which
+    // appends a recovery-kind error part carrying the failure reason.
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('session.closed', { sessionId: 'session-123', runtimeSessionId: 'runtime-123', status: 'failed', failureReason: 'Out of memory' })
+      dispatchAgentEvent('session.liveness', { sessionId: 'session-123', runtimeSessionId: 'runtime-123', status: 'failed', failureReason: 'Out of memory', lastDataAt: '2024-01-01T00:00:02.000Z', lastActivityType: 'agent_thought_chunk' })
     })
     await waitFor(() => {
-      const errorParts = result.current.turns.at(-1)?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'failed')
+      const errorParts = result.current.turns.at(-1)?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'recovery')
       expect(errorParts).toHaveLength(1)
-      expect(errorParts?.[0].message).toBe('Out of memory')
+      expect(errorParts?.[0].message).toContain('Out of memory')
     })
   })
 })

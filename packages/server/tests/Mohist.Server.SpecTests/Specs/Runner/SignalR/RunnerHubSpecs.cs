@@ -37,6 +37,21 @@ public class RunnerHubSpecs
         Assert.NotEqual(resultA, resultB);
     }
 
+    [Fact]
+    public void DisconnectingAnOldConnectionDoesNotRemoveTheCurrentRunnerConnection()
+    {
+        var tracker = new RunnerConnectionTracker();
+        tracker.Register("runner-1", "old-connection");
+        tracker.Register("runner-1", "new-connection");
+        tracker.RegisterSession("runner-1", "session-1");
+
+        var staleSessions = tracker.UnregisterAndGetSessions("runner-1", "old-connection");
+
+        Assert.Empty(staleSessions);
+        Assert.Equal("new-connection", tracker.GetConnectionId("runner-1"));
+        Assert.Equal(["session-1"], tracker.UnregisterAndGetSessions("runner-1", "new-connection"));
+    }
+
     private static RunnerHub NewHub(RunnerConnectionTracker tracker, string connectionId)
     {
         return new RunnerHub(tracker, new ThrowingGrainFactory(), NullLogger<RunnerHub>.Instance)

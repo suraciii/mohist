@@ -41,6 +41,8 @@ import {
 import { registerWorkflowRunStatusHandler } from "./workflow-run-status-handler.js"
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "./runtime-event-outbox.js"
 import type { SessionCommandJournalStore } from "../runtime/session-command-journal.js"
+import type { FollowupOperationJournalStore } from "../runtime/followup-operation-journal.js"
+import type { ServerConnection } from "./connection.js"
 import type { PiTurnObserver } from "../runtime/pi/index.js"
 import {
   callSessionCommand,
@@ -88,12 +90,14 @@ export interface RunnerSignalRClientOptions {
    * selector reads the binding's `runtime` field per command.
    */
   piRuntime?: CommandRuntimeAccessors["pi"]
+  serverConnection?: ServerConnection | null
   /**
    * Optional override for the runner's `SessionCommand` journal.
    * Production wires the file-backed journal owned by the host;
    * tests inject an in-memory `SessionCommandJournalStore`.
    */
   sessionCommandJournal?: SessionCommandJournalStore | null
+  followupOperationJournal?: FollowupOperationJournalStore | null
   allowUnverifiedWorkspaceQueriesForTest?: boolean
 }
 
@@ -107,7 +111,9 @@ export class RunnerSignalRClient {
   private readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null
   private readonly openCodeRuntime: CommandRuntimeAccessors["openCode"]
   private readonly piRuntime: CommandRuntimeAccessors["pi"]
+  private readonly serverConnection: ServerConnection | null
   private readonly sessionCommandJournal: SessionCommandJournalStore | null
+  private readonly followupOperationJournal: FollowupOperationJournalStore | null
   private readonly allowUnverifiedWorkspaceQueriesForTest: boolean
 
   constructor(
@@ -133,7 +139,9 @@ export class RunnerSignalRClient {
     this.agentSessionRuntimeEventOutbox = options.agentSessionRuntimeEventOutbox ?? null
     this.openCodeRuntime = options.openCodeRuntime ?? null
     this.piRuntime = options.piRuntime ?? null
+    this.serverConnection = options.serverConnection ?? null
     this.sessionCommandJournal = options.sessionCommandJournal ?? null
+    this.followupOperationJournal = options.followupOperationJournal ?? null
     this.allowUnverifiedWorkspaceQueriesForTest = options.allowUnverifiedWorkspaceQueriesForTest === true
 
     this.registerHandlers()
@@ -149,6 +157,13 @@ export class RunnerSignalRClient {
         await this.sessionCommandJournal.load()
       } catch (error) {
         console.error("session command journal failed to load:", error)
+      }
+    }
+    if (this.followupOperationJournal) {
+      try {
+        await this.followupOperationJournal.load()
+      } catch (error) {
+        console.error("followup operation journal failed to load:", error)
       }
     }
     await this.connection.start()
@@ -203,6 +218,9 @@ export class RunnerSignalRClient {
       agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
       openCodeRuntime: this.openCodeRuntime,
       piRuntime: this.piRuntime,
+      connection: this.serverConnection,
+      runnerId: this.serverConnection?.runnerId ?? null,
+      followupOperationJournal: this.followupOperationJournal,
     })
 
     registerCancelHandler(this.connection, {
@@ -231,7 +249,7 @@ export class RunnerSignalRClient {
     }
     const runtimeSessionId = request.runtimeSessionId
     const workDir = request.workDir
-    if (!runtimeSessionId || !workDir) {
+    if (!workDir || (request.command === "compact" && !runtimeSessionId)) {
       return { ok: false, error: "unavailable" }
     }
     const observer = this.buildSessionCommandObserver(request)
@@ -239,7 +257,7 @@ export class RunnerSignalRClient {
       return { ok: false, error: "unavailable" }
     }
     return await callSessionCommand(handle, request.command, {
-      runtimeSessionId,
+      runtimeSessionId: runtimeSessionId ?? "",
       workDir,
     }, observer)
   }

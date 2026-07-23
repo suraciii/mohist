@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
-import { formatSessionTime } from '@/shared/lib/format-time'
 
 export interface SessionFollowupComposerProps {
   onSend: (text: string) => Promise<void> | void
@@ -10,27 +9,13 @@ export interface SessionFollowupComposerProps {
   disabled?: boolean
   className?: string
   placeholder?: string
-  /** End timestamp (ISO string) for the session; powers the closed-state copy. */
-  endedAt?: string | null
-  /**
-   * Whether a submitted followup is queued awaiting the agent's first response.
-   * When true (or `isSending` is true) the composer enters the queued state:
-   * input disabled, "queued" indicator visible, transient `Sent` flash suppressed.
-   */
   hasQueuedFollowup?: boolean
-  /**
-   * Explicit state override that wins over derivation. When supplied the
-   * `disabled` / `isSending` / `hasQueuedFollowup` signals still gate the
-   * underlying controls, but the rendered state, copy, and queued indicator
-   * follow `state` directly.
-   */
-  state?: 'interactive' | 'queued' | 'closed'
+  state?: 'interactive' | 'queued' | 'unavailable' | 'closed'
+  endedAt?: string | null
 }
 
 type ButtonState = 'idle' | 'sending' | 'sent'
-type ResolvedState = 'interactive' | 'queued' | 'closed'
-
-const SESSION_TIME_RELATIVE_PATTERN = /^\d+[mhd] ago$|^just now$/
+type ResolvedState = 'interactive' | 'queued' | 'unavailable'
 
 export function SessionFollowupComposer({
   onSend,
@@ -38,7 +23,6 @@ export function SessionFollowupComposer({
   disabled = false,
   className,
   placeholder = 'Send a followup message to the agent...',
-  endedAt,
   hasQueuedFollowup = false,
   state,
 }: SessionFollowupComposerProps) {
@@ -51,9 +35,9 @@ export function SessionFollowupComposer({
   const trimmed = text.trim()
   const isSending = isSendingProp || localSending
 
-  const resolvedState: ResolvedState = state ?? (
+  const resolvedState: ResolvedState = state === 'closed' ? 'unavailable' : state ?? (
     disabled
-      ? 'closed'
+      ? 'unavailable'
       : (isSending || hasQueuedFollowup)
         ? 'queued'
         : 'interactive'
@@ -116,37 +100,18 @@ export function SessionFollowupComposer({
     }
   }
 
-  if (resolvedState === 'closed') {
-    let closedCopy: string
-    if (endedAt) {
-      const parsed = Date.parse(endedAt)
-      if (Number.isFinite(parsed)) {
-        const out = formatSessionTime({
-          date: endedAt,
-          statusKind: 'completed',
-          now: Date.now(),
-        })
-        const relative = SESSION_TIME_RELATIVE_PATTERN.test(out.primary)
-          ? out.primary
-          : out.secondary
-        closedCopy = `Session ended ${relative} — not accepting new followups.`
-      } else {
-        closedCopy = 'Session is no longer accepting followups.'
-      }
-    } else {
-      closedCopy = 'Session is no longer accepting followups.'
-    }
+  if (resolvedState === 'unavailable') {
     return (
       <div
         data-testid="session-followup-composer"
         data-disabled="true"
-        data-state="closed"
+        data-state="unavailable"
         className={cn(
           'shrink-0 border-t border-border bg-muted px-4 py-2 text-xs text-muted-foreground',
           className,
         )}
       >
-        {closedCopy}
+        Session activity is unknown. Follow-up is unavailable until the activity is resolved.
       </div>
     )
   }

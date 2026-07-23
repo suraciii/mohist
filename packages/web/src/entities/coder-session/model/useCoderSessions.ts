@@ -43,7 +43,7 @@ export function useCoderSessions(
       const fetchedIds = new Set(sessions.map((session) => session.id))
       const liveOnly = previous.filter(
         (session) =>
-          (session.status === 'running' || session.status === 'probing') &&
+          session.activity === 'active' &&
           !fetchedIds.has(session.id),
       )
       return [...sessions, ...liveOnly]
@@ -55,7 +55,7 @@ export function useCoderSessions(
     timerRef.current = setInterval(() => {
       if (!mountedRef.current) return
       setLiveSessions((prev) => {
-        const hasActive = prev.some((s) => s.status === 'running' || s.status === 'probing')
+        const hasActive = prev.some((s) => s.activity === 'active')
         if (!hasActive) {
           if (timerRef.current !== null) {
             clearInterval(timerRef.current)
@@ -87,7 +87,7 @@ export function useCoderSessions(
           runtimeSessionId: detail.runtimeSessionId,
           executionId: detail.executionId ?? null,
           taskDescription: detail.taskDescription ?? null,
-          status: 'running',
+           activity: 'active',
           createdAt: new Date().toISOString(),
           completedAt: null,
           model: detail.model ?? null,
@@ -104,16 +104,16 @@ export function useCoderSessions(
       }),
     )
 
-    unsubs.push(
-      onAgentEvent('coder_session_completed', (detail) => {
+     unsubs.push(
+       onAgentEvent('coder_session_completed', (detail) => {
         if (detail.projectId !== projectId || detail.issueNumber !== issueNumber || !mountedRef.current) return
         setLiveSessions((prev) => {
           const next = prev.map((s) =>
             s.id === detail.sessionId
-              ? { ...s, status: detail.status, completedAt: new Date().toISOString() }
+                ? { ...s, activity: 'idle' as const }
               : s,
           )
-          const hasActive = next.some((s) => s.status === 'running' || s.status === 'probing')
+           const hasActive = next.some((s) => s.activity === 'active')
           if (!hasActive) stopTimer()
           return next
         })
@@ -129,7 +129,7 @@ export function useCoderSessions(
           const existing = prev[idx]
           const updated: CoderSessionSummary = {
             ...existing,
-            status: detail.status,
+             activity: (detail.status === 'active' ? 'active' : detail.status === 'unknown' ? 'unknown' : 'idle') as CoderSessionSummary['activity'],
             ...(detail.lastDataAt !== undefined && { lastDataAt: detail.lastDataAt }),
             ...(detail.probeSentAt !== undefined && { probeSentAt: detail.probeSentAt }),
             ...(detail.probeDeadlineAt !== undefined && { probeDeadlineAt: detail.probeDeadlineAt }),
@@ -137,7 +137,7 @@ export function useCoderSessions(
           }
           const next = [...prev]
           next[idx] = updated
-          const hasActive = next.some((s) => s.status === 'running' || s.status === 'probing')
+           const hasActive = next.some((s) => s.activity === 'active')
           if (!hasActive) stopTimer()
           else startTimer()
           return next

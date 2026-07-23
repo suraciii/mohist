@@ -51,7 +51,7 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal(SessionId, result!.SessionId);
         Assert.Equal(AgentId, result.AgentId);
         Assert.Equal(AgentName, result.AgentName);
-        Assert.Equal("running", result.Status);
+        Assert.Equal("idle", result.Activity);
         Assert.True(result.RecoveryAvailable);
         Assert.Equal(CreatedAt.ToString("o"), result.CreatedAt);
         Assert.NotNull(result.LastActivityAt);
@@ -72,8 +72,8 @@ public class GenericAgentSessionSummarySpecs
         var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
 
         Assert.NotNull(result);
-        Assert.Equal("rate_limited", result!.FailureCategory);
-        Assert.Equal("failed", result.Status);
+        Assert.Null(result!.FailureCategory);
+        Assert.Equal("idle", result.Activity);
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public class GenericAgentSessionSummarySpecs
         var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
 
         Assert.NotNull(result);
-        Assert.Equal("running", result!.Status);
+        Assert.Equal("active", result!.Activity);
         Assert.False(result.RecoveryAvailable);
     }
 
@@ -104,7 +104,7 @@ public class GenericAgentSessionSummarySpecs
 
         Assert.NotNull(result);
         Assert.Equal("sequence-last-model", result!.ResolvedModel);
-        Assert.Equal("sequence-last-failure", result.FailureCategory);
+        Assert.Null(result.FailureCategory);
     }
 
     [Fact]
@@ -216,11 +216,9 @@ public class GenericAgentSessionSummarySpecs
         var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
 
         Assert.NotNull(result);
-        Assert.Equal("failed", result!.Status);
-        Assert.Equal("rate_limited", result.FailureCategory);
-        Assert.Equal(
-            "AgentJob requires 'workspace.path' in dispatch variables",
-            result.FailureReason);
+        Assert.Equal("idle", result!.Activity);
+        Assert.Null(result.FailureCategory);
+        Assert.Null(result.FailureReason);
     }
 
     [Fact]
@@ -239,7 +237,7 @@ public class GenericAgentSessionSummarySpecs
         var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
 
         Assert.NotNull(result);
-        Assert.Equal("completed", result!.Status);
+        Assert.Equal("idle", result!.Activity);
         Assert.Null(result.FailureReason);
         Assert.Null(result.FailureCategory);
     }
@@ -259,8 +257,8 @@ public class GenericAgentSessionSummarySpecs
         // The newer Runtime Session's turn (sequence 2) restarts part
         // sequences at 1 but the AgentJob-owned close on turn 2 is
         // authoritative; the older turn-1 close is ignored.
-        Assert.Equal("newest-run-reason", result!.FailureReason);
-        Assert.Equal("newest-run-category", result.FailureCategory);
+        Assert.Null(result!.FailureReason);
+        Assert.Null(result.FailureCategory);
     }
 
     [Fact]
@@ -275,8 +273,8 @@ public class GenericAgentSessionSummarySpecs
         var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
 
         Assert.NotNull(result);
-        Assert.Equal("latest-part-reason", result!.FailureReason);
-        Assert.Equal("latest-part-category", result.FailureCategory);
+        Assert.Null(result!.FailureReason);
+        Assert.Null(result.FailureCategory);
     }
 
     [Fact]
@@ -316,20 +314,14 @@ public class GenericAgentSessionSummarySpecs
         Assert.NotNull(result);
         var json = JsonSerializer.Serialize(result, JSON.Options);
         using var doc = JsonDocument.Parse(json);
-        Assert.True(doc.RootElement.TryGetProperty("failureReason", out var reason),
-            "Failed session exposes failureReason as a separate field");
-        Assert.Equal(
-            "AgentJob requires 'workspace.path' in dispatch variables",
-            reason.GetString());
-        Assert.True(doc.RootElement.TryGetProperty("failureCategory", out var category),
-            "Failed session exposes failureCategory as a separate field");
-        Assert.Equal("rate_limited", category.GetString());
+        Assert.False(doc.RootElement.TryGetProperty("failureReason", out _));
+        Assert.False(doc.RootElement.TryGetProperty("failureCategory", out _));
     }
 
     private static AgentSessionQuerier CreateQuerier(IDbContextFactory<MohistDbContext> factory)
     {
         var sessionQuery = new AgentSessionQuery(factory, TimeProvider);
-        return new AgentSessionQuerier(factory, sessionQuery, TimeProvider);
+        return new AgentSessionQuerier(factory, sessionQuery);
     }
 
     private static async Task SeedGenericSessionAsync(
@@ -368,6 +360,7 @@ public class GenericAgentSessionSummarySpecs
             status = new
             {
                 agentRuntimeSessionId = active ? "runtime-" + sessionId : null,
+                activity = active ? "active" : "idle",
                 createdAt = CreatedAt,
                 lastDataAt = active ? TimeProvider.GetUtcNow().UtcDateTime : CreatedAt.AddMinutes(5),
             },

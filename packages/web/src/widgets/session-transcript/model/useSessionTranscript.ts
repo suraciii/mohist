@@ -48,7 +48,6 @@ function matchesSessionEvent(
   pageCanonicalId: string,
   pageRuntimeSessionId: string,
   pageRuntime: string | null | undefined,
-  isHistoricalView: boolean | undefined,
   detail: {
     sessionId?: string | null
     runtimeSessionId?: string | null
@@ -60,14 +59,6 @@ function matchesSessionEvent(
   const eventRt = detail.runtime
 
   if (isNonEmptyStr(eventSid) && eventSid !== pageCanonicalId) return false
-
-  if (isHistoricalView) {
-    const pageRsid = isNonEmptyStr(pageRuntimeSessionId) ? pageRuntimeSessionId : ''
-    if (!pageRsid || !isNonEmptyStr(eventRsid)) return false
-    if (eventRsid !== pageRsid) return false
-    if (pageRuntime != null && eventRt != null && eventRt !== pageRuntime) return false
-    return true
-  }
 
   const hasPageRsid = isNonEmptyStr(pageRuntimeSessionId)
   const hasEventRsid = isNonEmptyStr(eventRsid)
@@ -108,7 +99,6 @@ export function useSessionTranscript({
   sessionId,
   runtimeSessionId,
   runtime,
-  isHistoricalRuntimeView = false,
   initialTurns,
   sessionQueryKeys,
   isRunning,
@@ -240,7 +230,7 @@ export function useSessionTranscript({
       runtime?: string | null
     }) => {
       if (!mountedRef.current) return false
-      return matchesSessionEvent(sessionId, runtimeSessionId, runtime, isHistoricalRuntimeView, detail)
+      return matchesSessionEvent(sessionId, runtimeSessionId, runtime, detail)
     }
     const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started']) => {
       if (!isCurrentSessionEvent(detail)) return
@@ -479,67 +469,14 @@ export function useSessionTranscript({
     )
 
     unsubs.push(
-      onAgentEvent('session.closed', (detail) => {
+      onAgentEvent('session.activity', (detail) => {
         if (!isCurrentSessionEvent(detail)) return
 
         hasLiveTailRef.current = true
-        const now = new Date().toISOString()
-        setTurns((prev) => closeLatestTurn(prev, now))
-
-        if (detail.status === 'failed' || detail.status === 'cancelled') {
-          const errorPart = createErrorPart(
-            detail.failureReason ?? `Session ${detail.status}`,
-            detail.status === 'cancelled' ? 'cancelled' : 'failed',
-            now,
-          )
-          setTurns((prev) => {
-            const next = ensureLiveTurn(prev, now)
-            const lastTurn = next[next.length - 1]
-            next[next.length - 1] = {
-              ...lastTurn,
-              assistant: [...lastTurn.assistant, errorPart],
-            }
-            return next
-          })
+        if (detail.activity === 'idle' || detail.activity === 'unknown') {
+          const now = new Date().toISOString()
+          setTurns((prev) => closeLatestTurn(prev, now))
         }
-
-        setIsThinking(false)
-        clearStreaming()
-        invalidateAndRefetch()
-        markNewContentRef.current()
-      }),
-    )
-
-    unsubs.push(
-      onAgentEvent('session.followup_completed', (detail) => {
-        if (!isCurrentSessionEvent(detail)) return
-
-        hasLiveTailRef.current = true
-        const now = new Date().toISOString()
-        setTurns((prev) => closeLatestTurn(prev, now))
-        setIsThinking(false)
-        clearStreaming()
-        invalidateSessionQueries()
-        markNewContentRef.current(false)
-      }),
-    )
-
-    unsubs.push(
-      onAgentEvent('session.followup_failed', (detail) => {
-        if (!isCurrentSessionEvent(detail)) return
-
-        hasLiveTailRef.current = true
-        const now = new Date().toISOString()
-        const errorPart = createErrorPart(detail.failureReason ?? 'Follow-up failed', 'failed', now)
-        setTurns((prev) => {
-          const next = closeLatestTurn(prev, now)
-          const lastTurn = next[next.length - 1]
-          next[next.length - 1] = {
-            ...lastTurn,
-            assistant: [...lastTurn.assistant, errorPart],
-          }
-          return next
-        })
         setIsThinking(false)
         clearStreaming()
         invalidateSessionQueries()
@@ -643,7 +580,7 @@ export function useSessionTranscript({
       }
       for (const unsub of unsubs) unsub()
     }
-  }, [sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch, invalidateSessionQueries, isHistoricalRuntimeView])
+  }, [sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch, invalidateSessionQueries])
 
   return {
     turns,

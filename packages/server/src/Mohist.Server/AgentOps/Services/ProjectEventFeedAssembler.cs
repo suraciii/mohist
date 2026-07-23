@@ -179,7 +179,7 @@ public class ProjectEventFeedAssembler : IScopedService
             join turn in db.AgentSessionTranscriptTurns.AsNoTracking() on part.TurnId equals turn.Id
             join session in db.AgentSessions.AsNoTracking().Where(session => session.LabelProjectId == projectId)
                 on turn.SessionId equals session.Id
-            where part.Type == TranscriptPartTypes.SessionClosed
+            where part.Type == TranscriptPartTypes.SessionActivity
                 && (filter == null || !filter.RequiresAgentSessionStatusFailure
                     || part.PayloadStatus == "failed"
                     || part.PayloadStatus == "timeout"

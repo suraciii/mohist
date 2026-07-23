@@ -82,11 +82,10 @@ public sealed class AgentSessionQuery : IScopedService
     {
         if (string.IsNullOrWhiteSpace(status))
             return query;
-        var cutoff = now - AgentSessionJsonHelper.ActiveRuntimeEventWindow;
         return status.Trim().ToLowerInvariant() switch
         {
-            "active" => query.Where(s => s.AgentSessionId != null && s.LastDataAt >= cutoff),
-            "inactive" => query.Where(s => s.AgentSessionId == null || s.LastDataAt < cutoff),
+            "active" => query.Where(s => s.AgentSessionId != null),
+            "inactive" => query.Where(s => s.AgentSessionId == null),
             _ => query,
         };
     }

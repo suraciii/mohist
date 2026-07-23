@@ -146,9 +146,9 @@ public abstract class ProjectEventsApiTestSupport
         {
             TurnId = turn.Id,
             Sequence = 1,
-            Type = TranscriptPartTypes.SessionClosed,
-            CorrelationKey = $"session.closed_{Guid.NewGuid():N}",
-            PayloadJson = """{"status":"failed","failureReason":"runner timeout","exitCode":1}""",
+            Type = TranscriptPartTypes.SessionActivity,
+            CorrelationKey = $"session.activity_{Guid.NewGuid():N}",
+            PayloadJson = """{"activity":"idle","status":"failed","failureReason":"runner timeout","exitCode":1}""",
             FirstSeenAt = time.UtcDateTime,
             LastSeenAt = time.UtcDateTime,
         });

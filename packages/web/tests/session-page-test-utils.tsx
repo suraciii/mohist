@@ -72,6 +72,11 @@ export function convertLegacyToAgentMetadata(detail: CoderSessionDetail): AgentS
     id: detail.id,
     sessionName: legacy.sessionId,
     runtimeSessionId: detail.runtimeSessionId,
+    // issue-484: session no longer carries a terminal status; the UI keys off
+    // `activity` (idle/active/unknown). Propagate the activity already on the
+    // detail/metadata (defaulting to the detail-level activity) so tests that
+    // supply `activity` on the fixture see the correct badge/empty-state.
+    activity: legacy.activity ?? detail.activity,
     status: legacy.status ?? detail.status,
     statusKind: legacy.statusKind,
     model: legacy.model ?? detail.model,

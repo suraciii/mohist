@@ -73,8 +73,8 @@ public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
                 },
                 new
                 {
-                    type = "session.closed",
-                    payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
+                    type = "session.activity",
+                    payload = new { activity = "idle", status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1, operationId = "op-observe" }
                 }
             }
         });
