@@ -1,0 +1,68 @@
+{
+  "project": "mohist-local",
+  "description": "Deliver Project-scoped WorkflowProfile management, selection, and live WorkflowRun definition resolution through the new mo workflow surface.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Deliver the Project-scoped WorkflowProfile collection",
+      "spec": "specs/workflow-profile-collection/spec.md#Project-scoped-workflow-profile-collection",
+      "description": "Replace legacy template storage and cascade inputs with the Workflow-owned Project-scoped WorkflowProfile collection. Add the persistence migration for custom Profiles and existing default, Issue, and Run references; expose collection CRUD through the server, merge readable built-ins, validate custom saves through the authoritative Definition and Action catalog services, and protect referenced or built-in Profiles from mutation.",
+      "acceptanceCriteria": [
+        "Custom Profiles are scoped by Project, retain stable slash-capable IDs, and same IDs in different Projects resolve independently.",
+        "The collection returns built-in mohist/* Profiles with custom Profiles, while create, edit, and delete reject invalid built-in mutations with a read-only domain error.",
+        "Create and edit preserve raw Definition source and report Definition validation diagnostics separately from Action-contract diagnostics without CLI-side validation logic.",
+        "Delete reports every blocking Project default, Issue explicit selection, and active WorkflowRun binding; unreferenced custom Profiles delete successfully.",
+        "The data migration preserves custom templates and converts legacy default, Issue reference or inline Definition, and existing Run resolution into Profile ID references without Definition snapshots.",
+        "Server spec tests cover tenancy isolation, built-in behavior, save-validation sources, migration results, and all deletion-reference combinations using in-memory fakes and deterministic time."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "WorkflowProfile persistence/provider, collection API, EF migration, legacy data conversion, and server specification coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The Workflow collection provider is the sole existence and read-only authority for built-in and custom Profile IDs."
+    },
+    {
+      "id": "T-002",
+      "title": "Migrate Profile management and selection command surfaces",
+      "spec": "specs/workflow-profile-selection/spec.md#Project-default-workflow-Profile",
+      "description": "Switch the API and CLI to the sole Profile-management surface: mo workflow list, view, create, edit, and delete, plus project workflow set-default and Issue explicit or inherited Profile selection. Remove legacy template/config routes, commands, DTOs, help, and contract tests; retain only workflow validate --file as the existing local Definition-validation command.",
+      "acceptanceCriteria": [
+        "mo workflow manages only the current Project collection, encodes slash-capable Profile IDs correctly, and no legacy Profile-management command or API remains available.",
+        "workflow view <profile> --yaml returns the stored raw Definition, and --yaml combined with JSON field selection fails locally before an HTTP request.",
+        "project workflow set-default and Issue create/edit accept only Profiles in the current Project collection, including built-ins, and preserve an Issue's existing selection when the server rejects an unknown Profile.",
+        "issue edit --inherit-workflow-profile clears the explicit selection; combining it with --workflow-profile is rejected locally without an Issue update request or sentinel ID.",
+        "CLI help and user documentation describe the new command ownership and warn that editing a bound Profile can affect future active-Run stages.",
+        "CLI spec tests with fake HTTP cover routes, request bodies, slash ID encoding, YAML and JSON option exclusivity, selection flags, server errors, and removal of legacy contracts."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New workflow and project workflow CLI/API surfaces, Issue Profile-selection contract, updated docs/help, and CLI specification coverage.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Issue inheritance is represented by a nullable Profile ID; the CLI delegates all Definition and Action validation to the server."
+    },
+    {
+      "id": "T-003",
+      "title": "Bind WorkflowRuns and resolve future Stages live",
+      "spec": "specs/workflow-profile-live-resolution/spec.md#WorkflowRun-Profile-identity-binding",
+      "description": "Bind each newly started WorkflowRun to the selected explicit Issue Profile or inherited Project default Profile ID, then resolve the current Definition from that same ID only when an uninitialized Stage starts. Remove the legacy template cascade from runtime resolution while retaining initialized Stage state, accepted attempts, and historical results as immutable workflow facts.",
+      "acceptanceCriteria": [
+        "Run startup persists the selected Profile ID without a Definition snapshot and revalidates collection membership before writing the binding.",
+        "Changing a Project default or Issue selection affects only subsequently started Runs and never changes an active Run's bound Profile ID.",
+        "An edit to the bound Profile changes only later uninitialized Stages; initialized tasks, checks, lock behavior, accepted attempts, and recorded results remain unchanged.",
+        "A removed or invalid future Stage in the current bound Definition fails through the existing visible WorkflowRun failure path without fallback to a prior Definition or another Profile.",
+        "WorkflowRun server specs cover inherited and explicit startup binding, selection changes during active Runs, live later-Stage resolution, immutable initialized facts, and the missing-future-stage error path with deterministic fakes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowRun Profile-ID binding and live Stage-resolution implementation with server specification coverage.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "WorkflowRun must resolve only its persisted Profile ID and must not read Issue or Project selection again after startup."
+    }
+  ]
+}
