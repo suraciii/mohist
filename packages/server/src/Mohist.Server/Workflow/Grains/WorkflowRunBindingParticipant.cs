@@ -33,6 +33,16 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
         if (row is null)
             return WorkflowRunBindingOutcome.RunNotFound;
 
+        if (IsTerminalStatus(row.Status))
+        {
+            if (row.WorkflowProfileIdKey is null)
+                return WorkflowRunBindingOutcome.AlreadyApplied;
+
+            row.WorkflowProfileIdKey = null;
+            await db.SaveChangesAsync();
+            return WorkflowRunBindingOutcome.Applied;
+        }
+
         if (string.Equals(row.WorkflowProfileIdKey, payload.ProfileId, StringComparison.Ordinal))
             return WorkflowRunBindingOutcome.AlreadyApplied;
 
@@ -66,4 +76,10 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
 
     private static bool IsBuiltInProfile(string profileId) =>
         WorkflowProfileCatalog.IsSystemProfile(profileId);
+
+    private static bool IsTerminalStatus(string? status) =>
+        status is not null
+        && status.Equals("completed", StringComparison.OrdinalIgnoreCase)
+        || status?.Equals("done", StringComparison.OrdinalIgnoreCase) == true
+        || status?.Equals("stopped", StringComparison.OrdinalIgnoreCase) == true;
 }

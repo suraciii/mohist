@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Xunit;
@@ -379,6 +380,37 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
 
         await using var verify = new MohistDbContext(_database.Options);
         var run = await verify.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_active");
+        Assert.Null(run.WorkflowProfileIdKey);
+    }
+
+    [Fact]
+    public async Task BindingReplay_AfterTerminalization_DoesNotRestoreBackingKey()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        await _provider.CreateAsync(projectId, BuildCustom("delivery/review"));
+        await SeedWorkflowRunAsync(projectId, "wr_replayed", "delivery/review", status: "inProgress");
+
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            var row = await db.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_replayed");
+            row.Status = "done";
+            row.State = row.State.Replace("\"status\":\"inProgress\"", "\"status\":\"done\"", StringComparison.Ordinal);
+            row.WorkflowProfileIdKey = null;
+            await db.SaveChangesAsync();
+        }
+
+        var participant = new WorkflowRunBindingParticipant(new TestDbContextFactory(_database.Options));
+        var outcome = await participant.BindAsync(
+            new WorkflowProfileCommandPayload.BindWorkflowRun(projectId, "wr_replayed", "delivery/review"),
+            "replay-command",
+            expectedRevision: null);
+
+        Assert.Equal(WorkflowRunBindingOutcome.AlreadyApplied, outcome);
+
+        await using var verify = new MohistDbContext(_database.Options);
+        var run = await verify.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_replayed");
+        Assert.Equal("done", run.Status);
+        Assert.Contains("delivery/review", run.State);
         Assert.Null(run.WorkflowProfileIdKey);
     }
 
