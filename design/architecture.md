@@ -135,10 +135,22 @@ Events append in same transaction as state save. Dispatcher is the sole notifier
   handler 重新进入；这一步必须经过 durable dispatch，不得由参与者在命令内部再
   同步调回协调者。
 
-适用范围（当前唯一）：`IssueRepositoryCoordinatorGrain` 串行化 Project 内的
-Issue 创建 / 仓库重新指派 / cancelled Issue reopen / 仓库删除这一组会建立或破坏
-非终态绑定的命令。它对参与者使用窄接口（`IIssueParticipant` / `IProjectParticipant`），
-并通过 `ArchTest` 防止生产代码绕过协调者。
+适用范围：
+
+- `IssueRepositoryCoordinatorGrain` 串行化 Project 内的 Issue 创建 / 仓库重新指派 /
+  cancelled Issue reopen / 仓库删除这一组会建立或破坏非终态绑定的命令。Issue 显式
+  WorkflowProfile 选择（含 create / edit / `--inherit-workflow-profile` 清除）作为 Issue
+  聚合字段，随 Issue 创建在同一 `IIssueBindingParticipant` 事务内提交；该参与者在提交前
+  重新验证 Profile 存在性，与它验证仓库存在性的方式一致。
+- `WorkflowProfileReferenceCoordinator` 串行化 Project 内 Profile 删除、Project 默认
+  Profile 写入、WorkflowRun 启动 binding 写入这一组会建立或破坏 Profile 引用的命令。
+  删除检查由 `WorkflowProfileDeletionBlockerQuery` 汇总 Project default、非终态 Issue
+  显式选择与活动 Run binding；Issue 选择作为读投影被观察，不经过此协调者。
+
+两个协调者各自按 Project key 串行，对参与者使用窄接口（`IIssueBindingParticipant` /
+`IProjectBindingParticipant` / `IWorkflowRunBindingParticipant`），并通过 `ArchTest`
+防止生产代码绕过协调者。它们**不**互相调用、不共享事务：每个协调者一次同步调用链只进入
+一个参与者聚合，Issue 选择与 Project default / Run binding 分属两个 coordinator 责任面。
 
 不适用范围：参与者内部的不变量校验、跨聚合的最终一致性推进、UI 推送、session 与
 runtime 绑定——这些不走协调者。
