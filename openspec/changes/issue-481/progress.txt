@@ -1,0 +1,15 @@
+## Codebase Patterns
+
+- Cross-domain read assembly belongs in `AgentOps/Services` and uses the `IScopedService` marker for automatic DI registration.
+- Project routes resolve `{projectRef}` with `ProjectResolutionEndpointFilter`; handlers read the canonical identity through `HttpContext.GetResolvedProject()`.
+- Runner registry visibility is intentionally global even though `RunnerStatusService` accepts a project id; Activity must preserve this as `scope=global`.
+- The route-private approval waiting projection was extracted to `ActivityWaitingProjection` so `/agent/activity` and `/activity` share one source and mapping.
+- The Activity merge fetches up to the endpoint maximum from each bounded source, sorts the combined entries by time descending then deterministic id, and only then applies the caller limit.
+- Microsoft Testing Platform ignores the legacy `dotnet test --filter` property in this project; focused attempts execute the full spec assembly. Test apphosts require `DOTNET_ROOT=/home/szf/.dotnet` in this workspace.
+
+## T-001
+
+- Added `GET /api/projects/{projectRef}/activity` with default 100 and strict 1..200 validation.
+- Added stable recorded/snapshot identities and explicit project/global scope across Issue, WorkflowRun, AgentSession, waiting, and Runner evidence.
+- Existing `/events`, `/agent/activity`, and Runner status routes remain contract-compatible; the existing `/agent/activity` route now delegates waiting-card construction to the shared projection.
+- Added API specs covering all evidence sources, repeat reads, project isolation/global Runner recurrence, stable final-limit ordering, default limit, and invalid limits.
