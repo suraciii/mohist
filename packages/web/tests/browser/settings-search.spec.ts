@@ -72,7 +72,7 @@ async function mockSettingsApi(page: Page, repositories = project.repositories) 
         }),
       })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/workflow-profile/variables`) {
+    if (method === 'GET' && path === `/projects/${project.id}/variables`) {
       return route.fulfill({ json: apiResponse({ vars: { agent: { type: 'opencode', model: null } }, stages: {} }) })
     }
     if (method === 'GET' && path === '/opencode/runtime') {

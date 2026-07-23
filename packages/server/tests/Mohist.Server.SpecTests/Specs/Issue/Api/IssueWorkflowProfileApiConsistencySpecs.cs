@@ -230,7 +230,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         // still succeed on a started issue; the rejection guard is on
         // PATCH workflowProfileId only.
         using var response = await _client.PutAsJsonAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/issues/{issue.Number}/variables",
             new
             {
                 vars = new Dictionary<string, object?>
@@ -254,7 +254,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         // Seed variables through the dedicated runtime override endpoint so
         // we can verify the PATCH profile update does not touch them.
         await _client.PutAsJsonOkAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/issues/{issue.Number}/variables",
             new
             {
                 vars = new Dictionary<string, object?>
@@ -300,7 +300,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             new { title = "Stage clear contract", projectId = project.Id });
 
         await _client.PutAsJsonOkAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/issues/{issue.Number}/variables",
             new
             {
                 vars = new Dictionary<string, object?>
@@ -321,7 +321,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             });
 
         await _client.PatchOkAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/issues/{issue.Number}/variables",
             new
             {
                 stages = new Dictionary<string, object?>

@@ -176,9 +176,10 @@ Variables 命令使用与 `${{ vars.* }}` 相同的点分 key path。`--stage <s
 无需猜测 shell 文本是否会被自动转换类型：
 
 ```bash
-mo issue variable set 42 agent.model openai/gpt-5
+mo project variable set agent.model openai/gpt-5
 mo issue variable set 42 review.strict --value-json true --stage check
 mo issue variable unset 42 review.strict --stage check
+mo run variable get --issue 42 agent.model --effective --stage check
 ```
 
 `list` 和 `get` 读取被选 scope 自己保存的值；只有 Run 提供 `--effective`，因为合并结果是
@@ -348,8 +349,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - 当前根帮助、叶子帮助和 Mohist Skill 含有重复信息及部分内部实现描述。目标按本文的渐进披露边界重写。
 - 当前部分未知 area 或 action 会回退到根帮助并以 `0` 退出；目标是返回 `2`，只展示最近
   一级的相关 usage。
-- 当前 Run Variables 只有 effective read CLI；目标允许显式读写 Run scope，并保留独立的
-  effective read。
 - 当前 Agent launch 只返回 Session，CLI 也没有 AgentJob read surface；目标同时暴露 Job
   与 Session 的稳定身份和各自事实。
 - 当前 `runner`、`server` 同时包含远程资源或应用行为与本机受管服务行为；目标把本机进程

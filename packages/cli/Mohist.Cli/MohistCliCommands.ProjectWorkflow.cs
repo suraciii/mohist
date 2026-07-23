@@ -246,24 +246,10 @@ internal static class ProjectWorkflowCommands
 
     private static Command BuildConfigSet(MohistCliApi api)
     {
-        var cmd = new Command("set", "Composite config writes (default template / variables / prompts)");
+        var cmd = new Command("set", "Composite config writes (default template / prompts)");
         var defaultTemplateOpt = new Option<string?>("--default-template")
         {
             Description = "Set the default workflow template by ID (PUT /workflow-profile/default-template)",
-        };
-        var varOpt = new Option<string[]?>("--var")
-        {
-            Description = "Set a top-level variable as 'k=v'. Repeatable; merged into one PATCH /workflow-profile/variables.",
-            AllowMultipleArgumentsPerToken = true,
-        };
-        var stageVarOpt = new Option<string[]?>("--stage-var")
-        {
-            Description = "Set a stage-scoped variable as '<stage>.k=v'. Repeatable; merged into the same PATCH.",
-            AllowMultipleArgumentsPerToken = true,
-        };
-        var varsFileOpt = new Option<string?>("--vars-file")
-        {
-            Description = "Full replace of all variables from a JSON file (PUT /workflow-profile/variables). Mutually exclusive with --var and --stage-var.",
         };
         var promptOpt = new Option<string[]?>("--prompt")
         {
@@ -273,9 +259,6 @@ internal static class ProjectWorkflowCommands
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Options.Add(defaultTemplateOpt);
-        cmd.Options.Add(varOpt);
-        cmd.Options.Add(stageVarOpt);
-        cmd.Options.Add(varsFileOpt);
         cmd.Options.Add(promptOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -283,32 +266,20 @@ internal static class ProjectWorkflowCommands
         cmd.SetAction(ctx =>
         {
             var defaultTemplate = ctx.GetValue(defaultTemplateOpt);
-            var vars = ctx.GetValue(varOpt);
-            var stageVars = ctx.GetValue(stageVarOpt);
-            var varsFile = ctx.GetValue(varsFileOpt);
             var prompts = ctx.GetValue(promptOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             var defaultTemplateProvided = ctx.GetResult(defaultTemplateOpt) is not null;
-            var varProvided = ctx.GetResult(varOpt) is not null;
-            var stageVarProvided = ctx.GetResult(stageVarOpt) is not null;
-            var varsFileProvided = ctx.GetResult(varsFileOpt) is not null;
             var promptProvided = ctx.GetResult(promptOpt) is not null;
             return SetAsync();
 
             async Task<int> SetAsync()
             {
-                var hasAnyChange = defaultTemplateProvided || varProvided || stageVarProvided || varsFileProvided || promptProvided;
+                var hasAnyChange = defaultTemplateProvided || promptProvided;
                 if (!hasAnyChange)
                 {
-                    api.Error.WriteLine("nothing to change — pass at least one of --default-template, --var, --stage-var, --vars-file, or --prompt");
-                    return 1;
-                }
-
-                if (varsFileProvided && (varProvided || stageVarProvided))
-                {
-                    api.Error.WriteLine("--vars-file is mutually exclusive with --var and --stage-var");
+                    api.Error.WriteLine("nothing to change — pass at least one of --default-template or --prompt");
                     return 1;
                 }
 
@@ -325,72 +296,7 @@ internal static class ProjectWorkflowCommands
 
                 var profilePath = ProjectWorkflowProfilePath(resolvedProjectId);
 
-                var varsPayload = new Dictionary<string, object?>(StringComparer.Ordinal);
-                var stagesPayload = new Dictionary<string, object?>(StringComparer.Ordinal);
                 var promptPayloads = new List<(string Key, string Body)>();
-
-                if (varProvided)
-                {
-                    foreach (var entry in vars!)
-                    {
-                        var eq = entry.IndexOf('=');
-                        if (eq <= 0)
-                        {
-                            api.Error.WriteLine($"--var '{entry}' must be in 'k=v' form");
-                            return 1;
-                        }
-                        var key = entry[..eq];
-                        if (string.IsNullOrWhiteSpace(key))
-                        {
-                            api.Error.WriteLine($"--var '{entry}' has an empty key");
-                            return 1;
-                        }
-                        varsPayload[key] = entry[(eq + 1)..];
-                    }
-                }
-
-                if (stageVarProvided)
-                {
-                    foreach (var entry in stageVars!)
-                    {
-                        var dot = entry.IndexOf('.');
-                        if (dot <= 0)
-                        {
-                            api.Error.WriteLine($"--stage-var '{entry}' must be in '<stage>.k=v' form");
-                            return 1;
-                        }
-                        var stage = entry[..dot];
-                        if (string.IsNullOrWhiteSpace(stage))
-                        {
-                            api.Error.WriteLine($"--stage-var '{entry}' has an empty stage");
-                            return 1;
-                        }
-                        var remainder = entry[(dot + 1)..];
-                        var eq = remainder.IndexOf('=');
-                        if (eq <= 0)
-                        {
-                            api.Error.WriteLine($"--stage-var '{entry}' must be in '<stage>.k=v' form");
-                            return 1;
-                        }
-                        var key = remainder[..eq];
-                        if (string.IsNullOrWhiteSpace(key))
-                        {
-                            api.Error.WriteLine($"--stage-var '{entry}' has an empty key");
-                            return 1;
-                        }
-                        if (!stagesPayload.TryGetValue(stage, out var existing))
-                        {
-                            existing = new Dictionary<string, object?>(StringComparer.Ordinal)
-                            {
-                                ["vars"] = new Dictionary<string, object?>(StringComparer.Ordinal),
-                            };
-                            stagesPayload[stage] = existing;
-                        }
-                        var stageObj = (Dictionary<string, object?>)existing!;
-                        var stageVarsDict = (Dictionary<string, object?>)stageObj["vars"]!;
-                        stageVarsDict[key] = remainder[(eq + 1)..];
-                    }
-                }
 
                 if (promptProvided)
                 {
@@ -422,59 +328,6 @@ internal static class ProjectWorkflowCommands
                     }
                 }
 
-                // 1. If --vars-file is provided, do a full replace PUT
-                if (varsFileProvided)
-                {
-                    string fileContent;
-                    try
-                    {
-                        fileContent = await api.FileSystem.ReadAllTextAsync(varsFile!);
-                    }
-                    catch (Exception ex)
-                    {
-                        api.Error.WriteLine($"--vars-file: could not read file '{varsFile}' ({ex.Message})");
-                        return 1;
-                    }
-
-                    System.Text.Json.Nodes.JsonNode? varsBody;
-                    try
-                    {
-                        varsBody = System.Text.Json.Nodes.JsonNode.Parse(fileContent);
-                    }
-                    catch (Exception ex)
-                    {
-                        api.Error.WriteLine($"--vars-file: invalid JSON in '{varsFile}' ({ex.Message})");
-                        return 1;
-                    }
-
-                    var putExit = await api.PrintPutWithOutputAsync(
-                        profilePath + "/variables",
-                        varsBody!,
-                        mode,
-                        nameof(MohistCliApi.TableShape.WorkflowVariables));
-                    if (putExit != 0)
-                        return putExit;
-                }
-
-                // 2. Variables PATCH (incremental merge)
-                if (!varsFileProvided && (varProvided || stageVarProvided))
-                {
-                    var patchBody = new Dictionary<string, object?>(StringComparer.Ordinal);
-                    if (varProvided)
-                        patchBody["vars"] = varsPayload;
-                    if (stageVarProvided)
-                        patchBody["stages"] = stagesPayload;
-
-                    var patchExit = await api.PrintPatchWithOutputAsync(
-                        profilePath + "/variables",
-                        patchBody,
-                        mode,
-                        nameof(MohistCliApi.TableShape.WorkflowVariables));
-                    if (patchExit != 0)
-                        return patchExit;
-                }
-
-                // 3. Default-template PUT
                 if (defaultTemplateProvided)
                 {
                     var putExit = await api.PrintPutWithOutputAsync(
@@ -486,7 +339,6 @@ internal static class ProjectWorkflowCommands
                         return putExit;
                 }
 
-                // 4. Prompt PUTs
                 if (promptProvided)
                 {
                     foreach (var prompt in promptPayloads)
@@ -509,15 +361,10 @@ internal static class ProjectWorkflowCommands
 
     private static Command BuildConfigClear(MohistCliApi api)
     {
-        var cmd = new Command("clear", "Composite config removals (default template / variables / prompts)");
+        var cmd = new Command("clear", "Composite config removals (default template / prompts)");
         var defaultTemplateOpt = new Option<bool>("--default-template")
         {
             Description = "Clear the default template (DELETE /workflow-profile/default-template)",
-        };
-        var varOpt = new Option<string[]?>("--var")
-        {
-            Description = "Remove a variable by key. Use '<stage>.k' for stage-scoped variables. Repeatable; merged into one PATCH /workflow-profile/variables with each key set to null.",
-            AllowMultipleArgumentsPerToken = true,
         };
         var promptOpt = new Option<string[]?>("--prompt")
         {
@@ -527,30 +374,27 @@ internal static class ProjectWorkflowCommands
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Options.Add(defaultTemplateOpt);
-        cmd.Options.Add(varOpt);
         cmd.Options.Add(promptOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
-            var vars = ctx.GetValue(varOpt);
             var prompts = ctx.GetValue(promptOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             var defaultTemplateResult = ctx.GetResult(defaultTemplateOpt);
             var defaultTemplateProvided = defaultTemplateResult is not null && !defaultTemplateResult.Implicit;
-            var varProvided = ctx.GetResult(varOpt) is not null;
             var promptProvided = ctx.GetResult(promptOpt) is not null;
             return ClearAsync();
 
             async Task<int> ClearAsync()
             {
-                var hasAnyClear = defaultTemplateProvided || varProvided || promptProvided;
+                var hasAnyClear = defaultTemplateProvided || promptProvided;
                 if (!hasAnyClear)
                 {
-                    api.Error.WriteLine("nothing to clear — pass at least one of --default-template, --var, or --prompt");
+                    api.Error.WriteLine("nothing to clear — pass at least one of --default-template or --prompt");
                     return 1;
                 }
 
@@ -567,48 +411,7 @@ internal static class ProjectWorkflowCommands
 
                 var profilePath = ProjectWorkflowProfilePath(resolvedProjectId);
 
-                var varsPatchBody = new Dictionary<string, object?>(StringComparer.Ordinal);
                 var promptKeys = new List<string>();
-
-                if (varProvided)
-                {
-                    var varsPayload = new Dictionary<string, object?>(StringComparer.Ordinal);
-                    var stagesPayload = new Dictionary<string, object?>(StringComparer.Ordinal);
-                    foreach (var entry in vars!)
-                    {
-                        var key = entry;
-                        if (string.IsNullOrWhiteSpace(key))
-                        {
-                            api.Error.WriteLine($"--var '{entry}' has an empty key");
-                            return 1;
-                        }
-                        var dot = key.IndexOf('.');
-                        if (dot > 0 && dot < key.Length - 1)
-                        {
-                            var stage = key[..dot];
-                            var stageKey = key[(dot + 1)..];
-                            if (!stagesPayload.TryGetValue(stage, out var existing))
-                            {
-                                existing = new Dictionary<string, object?>(StringComparer.Ordinal)
-                                {
-                                    ["vars"] = new Dictionary<string, object?>(StringComparer.Ordinal),
-                                };
-                                stagesPayload[stage] = existing;
-                            }
-                            var stageObj = (Dictionary<string, object?>)existing!;
-                            var stageVarsDict = (Dictionary<string, object?>)stageObj["vars"]!;
-                            stageVarsDict[stageKey] = null;
-                        }
-                        else
-                        {
-                            varsPayload[key] = null;
-                        }
-                    }
-                    if (varsPayload.Count > 0)
-                        varsPatchBody["vars"] = varsPayload;
-                    if (stagesPayload.Count > 0)
-                        varsPatchBody["stages"] = stagesPayload;
-                }
 
                 if (promptProvided)
                 {
@@ -626,17 +429,6 @@ internal static class ProjectWorkflowCommands
                         }
                         promptKeys.Add(key);
                     }
-                }
-
-                if (varProvided && varsPatchBody.Count > 0)
-                {
-                    var patchExit = await api.PrintPatchWithOutputAsync(
-                        profilePath + "/variables",
-                        varsPatchBody,
-                        mode,
-                        nameof(MohistCliApi.TableShape.WorkflowVariables));
-                    if (patchExit != 0)
-                        return patchExit;
                 }
 
                 if (defaultTemplateProvided)

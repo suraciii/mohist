@@ -25,11 +25,11 @@ public class RuntimeSettingsSpecs
         });
         var projectId = (await _client.GetDataAsync<List<ProjectResponse>>("/api/projects")).Single(p => p.Name == projectName).Id;
 
-        await _client.PatchDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/workflow-profile/variables", new
+        await _client.PatchDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/variables", new
         {
             vars = new { agent = new { model = "openai/gpt-4o" } }
         });
-        await _client.PatchDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/workflow-profile/variables", new
+        await _client.PatchDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/variables", new
         {
             stages = new
             {
@@ -38,7 +38,7 @@ public class RuntimeSettingsSpecs
             }
         });
 
-        var variables = await _client.GetDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/workflow-profile/variables");
+        var variables = await _client.GetDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/variables");
 
         Assert.NotNull(variables.Vars);
         Assert.Equal("openai/gpt-4o", variables.Vars.RootElement.GetProperty("agent").GetProperty("model").GetString());

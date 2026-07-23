@@ -130,6 +130,55 @@ internal sealed class MohistCliApi
         }
     }
 
+    // Effective Variables are a flat merged object (no `vars`/`stages` envelope),
+    // so its selectable fields are the response's own top-level keys, discovered
+    // after the fetch rather than declared up front. `--json` is therefore
+    // resolved against the actual keys of the returned object.
+    internal async Task<int> PrintEffectiveVariablesAsync(
+        string path,
+        bool jsonProvided,
+        string? jsonValue,
+        Func<JsonNode?, Task<int>> humanRenderer)
+    {
+        var response = await ResponseReader.ReadAsync(HttpMethod.Get, path, cancellationToken: Invocation.CancellationToken)
+            .ConfigureAwait(false);
+        if (!response.IsSuccess)
+            return await new CliResultWriter(Invocation).WriteFailureAsync(response.Failure!).ConfigureAwait(false);
+
+        var descriptor = EffectiveDescriptorFor(response.Data);
+        var selection = JsonSelection.Parse(descriptor, jsonProvided, jsonValue);
+        if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+            return WriteJsonSelectionResult(descriptor, selection);
+
+        try
+        {
+            if (selection.Kind == JsonSelectionKind.Selected)
+            {
+                var projected = selection.Project(response.Data, descriptor.Cardinality);
+                return await new CliResultWriter(Invocation).WriteSuccessAsync(projected).ConfigureAwait(false);
+            }
+
+            return await humanRenderer(response.Data).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await new CliResultWriter(Invocation).WriteFailureAsync(
+                new CliFailure("invalid-response", ex.Message, null)).ConfigureAwait(false);
+        }
+    }
+
+    private static ResourceDescriptor EffectiveDescriptorFor(JsonNode? data)
+    {
+        if (data is JsonObject obj)
+        {
+            var keys = new List<string>(obj.Count);
+            foreach (var prop in obj)
+                keys.Add(prop.Key);
+            return new(ResourceCardinality.Single, keys);
+        }
+        return new(ResourceCardinality.Single, []);
+    }
+
     internal async Task<int> PrintMutationResourceAsync(
         HttpMethod method,
         string path,
