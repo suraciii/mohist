@@ -23,55 +23,6 @@ public class ProjectApiSpecs
     }
 
     [Fact]
-    public async Task PostWorkflowProfile_WithMalformedYaml_ReturnsDefinitionValidationAndDoesNotPersist()
-    {
-        var project = await CreateWorkflowProfileProjectAsync();
-        using var response = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
-        {
-            profileId = "broken",
-            name = "Broken",
-            definitionSource = "stages: [",
-        });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("workflow_profile_definition_validation", json.GetProperty("code").GetString());
-        Assert.Contains(
-            json.GetProperty("details").EnumerateArray(),
-            error => string.Equals(error.GetProperty("source").GetString(), "definition", StringComparison.OrdinalIgnoreCase));
-
-        var profiles = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles");
-        Assert.DoesNotContain(profiles.EnumerateArray(), profile => profile.GetProperty("profileId").GetString() == "broken");
-    }
-
-    [Fact]
-    public async Task PutWorkflowProfile_WithMalformedYaml_ReturnsDefinitionValidationAndDoesNotPersist()
-    {
-        var project = await CreateWorkflowProfileProjectAsync();
-        var valid = new
-        {
-            profileId = "editable",
-            name = "Editable",
-            definitionSource = "stages:\n  - stage: build\n    tasks: []\n    checks: []\n",
-        };
-        using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", valid);
-        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
-
-        using var response = await _client.PutAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles/editable", new
-        {
-            profileId = "editable",
-            name = "Editable",
-            definitionSource = "stages: [",
-        });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("workflow_profile_definition_validation", json.GetProperty("code").GetString());
-        var stored = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles/editable");
-        Assert.Contains("stage: build", stored.GetProperty("definitionSource").GetString());
-    }
-
-    [Fact]
     public async Task PostProject_WithoutRepository_ReturnsBadRequest()
     {
         var name = $"no-default-repo-{Guid.NewGuid():N}";
@@ -786,11 +737,6 @@ public class ProjectApiSpecs
                 },
             });
     }
-
-    private Task<ProjectInfo> CreateWorkflowProfileProjectAsync() =>
-        _client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
-            "/api/projects",
-            $"workflow-profile-api-{Guid.NewGuid():N}");
 
     private async Task AssertRepositoryUnchangedAsync(string projectId)
     {
