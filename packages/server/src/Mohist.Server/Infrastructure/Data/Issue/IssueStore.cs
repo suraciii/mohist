@@ -103,13 +103,36 @@ public class IssueStore : IIssueStore
     /// on <c>WorkflowProfileIdKey</c> rejects the write. Translate that race into the
     /// retryable <see cref="WorkflowProfileNotFoundException"/> so the coordinator
     /// surfaces the specified <c>workflow-profile-not-found</c> conflict instead of
-    /// an unclassified server error.
+    /// an unclassified server error. Only a genuine foreign-key violation on the
+    /// Issue's custom Profile backing key is translated; any unrelated
+    /// <c>DbUpdateException</c> (duplicate key, another FK, database error) is left
+    /// for the caller by returning null.
     /// </summary>
     private static Exception? TranslateProfileForeignKeyViolation(DbUpdateException ex, DomainIssue state)
     {
         if (state.WorkflowProfileId is null) return null;
         if (WorkflowProfileBindingKey.For(state.WorkflowProfileId) is null) return null;
+        if (!IsProfileForeignKeyViolation(ex)) return null;
         return new WorkflowProfileNotFoundException(state.ProjectId, state.WorkflowProfileId);
+    }
+
+    private static bool IsProfileForeignKeyViolation(DbUpdateException ex)
+    {
+        // The IssueRow's only custom-Profile foreign key is WorkflowProfileIdKey;
+        // every entity type staged by StageIssueAsync is an IssueRow. EF Core wraps
+        // the SQLite constraint as the inner SqliteException. SQLITE_CONSTRAINT_FK
+        // (extended error 787) is the foreign-key-specific code; fall back to the
+        // message so provider-specific wording still matches.
+        foreach (var entry in ex.Entries)
+        {
+            if (entry.Entity is not IssueRow) return false;
+        }
+        if (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqlite)
+        {
+            return sqlite.SqliteErrorCode == 19 && sqlite.SqliteExtendedErrorCode == 787;
+        }
+        var message = (ex.InnerException?.Message ?? ex.Message) ?? string.Empty;
+        return message.Contains("FOREIGN KEY", StringComparison.OrdinalIgnoreCase);
     }
 
     public Task DeleteAsync(string key) => throw new NotImplementedException();

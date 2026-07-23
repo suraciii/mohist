@@ -84,13 +84,15 @@ public sealed class WorkflowProfileDeletionBlockerQuery : IScopedService
             .ToList();
     }
 
+    // Mirrors WorkflowRunStatusExtensions.IsTerminal: only Stopped and
+    // Completed are permanently terminal. `Failed` is a recoverable mid-state
+    // (Retry/Rerun/RerunFromStage revive it) and its custom-Profile backing
+    // key is retained, so a failed run still blocks Profile deletion.
     private static readonly HashSet<string> TerminalRunStatuses = new(StringComparer.Ordinal)
     {
         "done",
         "completed",
-        "failed",
-        "cancelled",
-        "canceled",
+        "stopped",
     };
 }
 
