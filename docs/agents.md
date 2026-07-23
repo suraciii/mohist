@@ -9,6 +9,7 @@ Session 分属不同层次。
 | 概念 | 是什么 | 身份和生命周期 |
 |---|---|---|
 | Inline Agent | Workflow 直接配置并调用 Agent 能力的用法 | 不是资源，没有 Agent ID；配置随 task 输入存在 |
+| Agent 定义引用 | Workflow task 用 `uses: mohist/agent` 引用 Mohist Agent 定义的用法 | 不是资源，没有 Agent ID；定义快照随 dispatch 解析 |
 | Mohist Agent | Project 内预先定义、按名称复用的 Agent 资源 | 有稳定 Agent ID、名称、指令、配置、Skills 和状态 |
 | AgentJob | Mohist Agent 的一次工作 | 独立记录等待、执行、完成或失败，以及本次结果 |
 | AgentSession | Mohist 记录的一段持续会话 | 有稳定 Session ID；保存消息、上下文、用量、活动状态和当前 Runtime Session |
@@ -21,7 +22,7 @@ Action 不在 Agent 资源层：`mohist/opencode` 描述一次工作如何交给
 
 | 使用路径 | 是否有 Agent 身份 | 谁负责本次工作 | 如何执行 | AgentSession 来源 |
 |---|---|---|---|---|
-| Workflow 直接调用 | 否；这是 Inline Agent | TaskRun | 执行后端 Action（`mohist/opencode`、`mohist/pi`） | Workflow |
+| Workflow 直接调用 | 否（Inline Agent 或 Agent 定义引用） | TaskRun | 执行后端 Action（`mohist/opencode`、`mohist/pi`）或 `mohist/agent` | Workflow |
 | 启动 Mohist Agent | 是；使用已保存的 Mohist Agent | AgentJob | Mohist Agent 的内部执行入口 | Agent launch |
 
 两条路径可以使用同一种执行后端能力和同一种 AgentSession 模型，但不会共享 Agent
@@ -42,6 +43,14 @@ Inline Agent 是一种使用方式，不是持久化实体。Workflow task 直�
 Workflow TaskRun 拥有这次 task 的成功、失败和输出。Action 是执行接口，AgentSession
 只保存会话内容和执行事实。
 
+## Agent 定义引用
+
+task 也可以改用 `uses: mohist/agent` 并给出 `name`，引用一个预定义 Mohist Agent
+的指令与执行配置来完成本次执行。这不是 Inline Agent（指令与配置不随 task 输入
+存在，来自 Agent 资源），也不是启动 Mohist Agent（不创建 AgentJob）：TaskRun
+拥有成败，AgentSession 仍是 Workflow 来源。契约见
+[`mohist/agent` Action](actions/agent.md)。
+
 ## Mohist Agent
 
 Mohist Agent 也称 Named Agent，是 Project 内的一等资源。它保存：
@@ -51,7 +60,11 @@ Mohist Agent 也称 Named Agent，是 Project 内的一等资源。它保存：
 - Skills；
 - 并发限制与 active / archived 状态。
 
-用户可以手动启动 Mohist Agent，项目的事件路由规则命中后也可以启动它。启动时会创建
+Mohist Agent 有三种启动方式：用户手动启动；项目的事件路由规则命中后自动启动；
+在 issue 的 comment 里 `@` 它的名字点名启动。提及把评论正文作为本次输入，并
+自动带上该 issue 的上下文——这是一次性工作，适合「@my-agent 监督并推进这个
+issue」这样的当面包办；如果要求的是持续关注，Agent 会自己用 `mo issue watch add` 把这个 issue 加入关注。
+无论哪种方式，启动时都会创建
 AgentJob，并固定本次使用的 Agent 指令和配置；之后编辑 Agent，不改变已经开始的工作。
 
 Mohist Agent 的核心位置是代理人：它进入流水线上原本由 owner 负责的位置，通过
@@ -161,10 +174,10 @@ Compact 或 Reset 也不会重新启动 Mohist Agent。
 
 - `mohist/opencode`：直接通过 OpenCode 执行一次输入；Workflow 直接使用时形成 Inline Agent。
 - `mohist/pi`：直接通过 Pi 执行一次输入，和 `mohist/opencode` 处于同一层。
+- `mohist/agent`：引用预定义 Mohist Agent 的定义执行 task（定义引用，不创建 AgentJob），契约见 [`mohist/agent` Action](actions/agent.md)。
 
 `mohist/opencode` 与 `mohist/pi` 的 Workflow Action 均已实装；Mohist Agent 也可以按配置
-选择 OpenCode 或 Pi。`mohist/agent` 不在本次范围内；它保留给后续 Mohist Agent 专项
-设计，本篇不定义它的输入、复用或等待语义。
+选择 OpenCode 或 Pi。`mohist/agent` 已定义契约，尚未实装。
 
 Mohist Agent 的配置中包含执行后端选择（OpenCode 或 Pi）；启动时后端随 Agent snapshot
 固定到 AgentJob，执行中编辑 Agent 不改变已经开始的工作。

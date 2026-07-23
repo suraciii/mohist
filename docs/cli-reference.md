@@ -98,12 +98,12 @@ task-command     = mo <task> [target] [flags]
 |---|---|
 | `project` | `list`、`view`、`create`、`use`、`delete`；`workflow set-default`；`prompt list/view/set/unset/preview`；`variable list/get/set/unset` |
 | `repo` | `list`、`view`、`add`、`edit`、`remove`、`set-default` |
-| `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`；`comment list/add`；`commit list`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset` |
+| `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`；`comment list/add`；`commit list`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset`；`watch list/add/remove` |
 | `epic` | `list`、`view`、`create`、`edit`、`link`、`unlink`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
 | `label` | `list`、`view`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
 | `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
-| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`；`job list/view`；只读 `model list --runtime` |
+| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`setup-supervisor`；`job list/view`；只读 `model list --runtime` |
 | `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
 | `activity` | `list` |
 | `routing` | `rule list/view/create/edit/archive/restore/move`；`test` 评估整张路由表 |
@@ -192,6 +192,8 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 和用量。CLI 不用 Session 状态代替 AgentJob 结果。
 
 - `mo agent launch <agent>` 创建 AgentJob 与 AgentSession，并返回 Job ID 和 Session ID。
+- `mo agent setup-supervisor` 在 Project 内安装监管预设（`supervisor` Agent 与审批、
+  失败两条路由规则），幂等且不覆盖已有内容；产物是普通 Agent 与 RoutingRule。
 - `mo agent job list <agent>` 与 `mo agent job view <job-id>` 读取工作状态和结果。
 - `mo agent model list --runtime <runtime>` 读取 Agent 与 Issue 配置时可选择的模型；Runtime
   是配置维度，不是独立命令资源。

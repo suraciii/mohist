@@ -17,7 +17,9 @@ Runtime 特有行为放在 [`runtimes/`](runtimes/README.md)，例如
 | Adapter | OpenCodeRuntime、PiRuntime | Runner 进程 | protocol、进程、事件、状态核对、错误 |
 
 `Inline Agent` 是产品使用方式，不是另一个实体或 bounded context。它表示 Workflow
-TaskRun 直接选择 Runtime 特有的 Action 并提供输入，不解析 Mohist Agent。
+TaskRun 直接选择 Runtime 特有的 Action 并提供输入，不解析 Mohist Agent。`Agent
+定义引用`（`uses: mohist/agent`）同样不是实体：TaskRun 引用 Mohist Agent 的定义
+快照执行，工作所有权与 Session 来源不变。
 
 跨上下文统一定义见 [`../CONTEXT.md`](../CONTEXT.md)。本文只定义这些概念的生命周期、
 所有权、事件契约和模块边界，不建立第二套术语。
@@ -46,8 +48,14 @@ AgentSession 目标交给 Runtime adapter，Runtime 事实写回该 Session。�
 本次输入”。它们不接收 Agent ID，不解析 Agent 名称，不读取 Agent 定义，也不创建
 AgentJob。因此 Workflow 直接使用它们时形成 Inline Agent。
 
-本设计不定义 `mohist/agent` 契约；该名称留给后续 Mohist Agent 专项设计，不能充当
-Runtime 别名或 Runtime Action 的通用包装。
+`mohist/agent` 是 Agent 定义引用 Action：task 用 `with.name` 引用 Project 内的
+Mohist Agent，dispatch 时由 server 应用层把名字解析为指令与配置快照，task 按
+Inline Agent 同一套机制执行。它不是 Runtime 别名，也不是 AgentJob 的 dispatch
+通道：工作所有者是 TaskRun，Session 是 Workflow 来源，不创建 AgentJob。Workflow
+领域只持有名字 token；解析经 Agent 读侧在 dispatch 应用层完成，Workflow 不引用
+Agent 领域类型。解析失败（不存在或已归档）即 task dispatch 失败；每次 dispatch
+重新解析，retry 拿到当时的定义。产品契约见
+[`../docs/actions/agent.md`](../docs/actions/agent.md)。
 
 AgentJob 路径不能通过公开的 Workflow Action 契约 dispatch。Agent 定义完成解析和
 snapshot 后，其 executor 接收由 Agent 拥有的 execution request。Workflow Action

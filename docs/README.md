@@ -43,6 +43,8 @@
 - [Action 契约](actions/README.md) —— Workflow Action 的输入、输出与行为；当前包括 `mohist/opencode` 与 `mohist/pi`
 - [Runner 指南](runner.md) —— 执行平面怎么跑、怎么调并发
 - [Skill 机制](skills.md) —— 用 OpenCode / Claude Code 探索需求，再交给 Mohist
+- [Agent 事件路由](event-routing.md) —— 项目级路由表：一条表达式订阅任何实体的事件，按序触发 Mohist Agent 响应
+- [Agent 监管](agent-supervision.md) —— 一条命令安装监管 Agent：替你审批、替你修复失败，只有它停手时才轮到你
 
 ## 板块 6：部署与运维
 
@@ -56,7 +58,6 @@
 
 > 还没实装、但已对齐需求的产品方案。**这些功能当前不存在**，文档记录的是方向与用户需求，不是可用能力。落地后会搬到上面的板块并去掉 WIP 标记。
 
-- [Agent 事件路由](event-routing.md) —— 项目级路由表：一条表达式订阅任何实体的事件，按序触发 Agent 响应
 - [移动端 PWA 与推送](mobile-pwa.md) —— 手机上看进度、收推送的方案记录（暂缓）
 - [可观测性](observability.md) —— 安全地发现运行异常，并保留足够的诊断线索
 

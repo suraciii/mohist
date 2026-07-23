@@ -26,6 +26,8 @@ Mohist Agent。
   Workflow Session 和 Session 操作语义。
 - [`mohist/pi`](pi.md) —— 通过 Pi 执行一次输入;与 `mohist/opencode` 同层,共享
   模型选项形状与 Session 语义,但安装与信任边界不同。
+- [`mohist/agent`](agent.md) —— 引用预定义 Mohist Agent 的定义执行 task：指令与
+  配置来自 Agent 快照，工作机制与 Inline Agent 相同，不创建 AgentJob。
 
 **Git Actions**:工作区准备、rebase、rebase 状态、merge readiness 和 push 的显式 `with`
 输入契约。
@@ -63,5 +65,6 @@ Pi 是同层的独立 Action,不是 `mohist/opencode` 的输入扩展。
 ## 实装差距
 
 - `mohist/pi` 尚未实装,当前只有产品契约(见 [pi.md](pi.md) 的实装差距小节)。
+- `mohist/agent` 尚未实装,当前只有产品契约(见 [agent.md](agent.md) 的实装差距小节)。
 - Runner 派发时会按 manifest 校验未知字段、必填字段和类型;自定义 Profile 应在 `with`
   中显式绑定需要的 Variable 值。
