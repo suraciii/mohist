@@ -16,7 +16,7 @@ AgentSession 模型不在本文重复，见 [`event-routing.md`](event-routing.m
 
 预设不是新的领域资源。它是一组随 CLI 发布的文本资源，安装产物是普通
 Mohist Agent 与普通 RoutingRule。安装完成后产物与预设脱钩：用户用
-`mo agent edit`、`mo routing rule edit` 自由修改，`setup-supervisor` 不回写、
+`mo agent edit`、`mo routing rule edit` 自由修改，`install` 不回写、
 不追踪漂移。
 
 预设内容固定为：
@@ -42,9 +42,10 @@ event.type == "com.mohist.workflow.run.failed"
 ### 安装
 
 ```bash
-mo agent setup-supervisor
+mo agent install supervisor
 ```
 
+`install` 接收内置预设名，当前只有 `supervisor`；未知名直接拒绝并列出可用预设。
 安装按顺序执行，每步幂等（按名称判断存在与否，存在则跳过并报告）：
 
 1. 创建 Agent `supervisor`。同名 Agent 已存在时跳过创建，直接复用它。
@@ -178,7 +179,7 @@ Issue #{{event.issue}} 的 workflow run（{{event.workflowrunid}}）终态失败
 全新 Project 首次安装：
 
 ```text
-$ mo agent setup-supervisor
+$ mo agent install supervisor
 created agent: supervisor
 created routing rule: supervisor-approval (position 1)
 created routing rule: supervisor-failure (position 2)
@@ -189,7 +190,7 @@ warning: .agents/skills/mohist not found in repository 'web-app';
 重复安装（用户已编辑过身份指令，不被覆盖）：
 
 ```text
-$ mo agent setup-supervisor
+$ mo agent install supervisor
 exists, skipped: agent supervisor
 exists, skipped: routing rule supervisor-approval
 exists, skipped: routing rule supervisor-failure
@@ -197,7 +198,7 @@ exists, skipped: routing rule supervisor-failure
 
 ## Status
 
-全部未实装。当前代码中没有预设资源与 `setup-supervisor` 命令；监管场景只能
+全部未实装。当前代码中没有预设资源与 `mo agent install` 命令；监管场景只能
 手工组合 `mo agent create` 与 `mo routing rule create` 达成。实施 issue 待从
 本文创建。
 
