@@ -9,4 +9,4 @@ Issue 470 current plan repair
 - [completed] Current review F2: one content-type-aware response writer now fixes JSON/protobuf full success, partial success, malformed-body and retryable-failure wire contracts.
 - [completed] Current review F3: fake lifecycle tests own runtime host/probe facts; non-starting production composition owns only immutable-plan and service-registration facts.
 - [completed] Current review F4: request duration brackets the awaited endpoint with injected TimeProvider timestamps and is deterministically covered for success, exception and cancellation.
-- [in progress] Final consistency, DAG/anchor, JSON and untouched-self-review verification remain.
+- [completed] Final verification: tasks.json parses; all 8 task dependencies are acyclic and all spec anchors resolve; 17 requirements/58 scenarios remain represented; diff checks pass; no repair commit includes `self-review.md`, whose pre-existing worktree modification remains untouched.
