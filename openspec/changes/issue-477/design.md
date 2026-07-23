@@ -60,9 +60,10 @@ alias 与原始 ordering，migration 必须以固定的 canonical YAML renderer 
 Provider 暴露窄接口：列举、按 `(projectId, profileId)` 读取、验证自定义写入、以及取得当前
 `WorkflowDefinition`。它拒绝创建 `mohist/*`，并对内置 ID 的更新与删除返回 read-only 领域
 错误。所有读取和选择均通过 provider 判断 ID 是否属于当前 Project collection；不再让调用方
-直接探测 system catalog 或 legacy template table。custom Profile 的 `(ProjectId, ProfileId)` 是
-Project default、Issue selection 与 Run binding 的 restrictive foreign-key target；builtin IDs 不在
-该表中且不可删除，故不需要 foreign key。
+直接探测 system catalog 或 legacy template table。公开和领域模型只保存一个 Profile ID；持久化行另有
+nullable custom-Profile key backing column，仅当 ID 属于 custom Profile 时写入，作为 Project default、
+Issue selection 与 Run binding 到 custom `(ProjectId, ProfileId)` 的 restrictive foreign-key target。
+builtin IDs 的 backing column 为 null，且不可删除，故不需要 foreign key。
 
 选择此方案是因为 Profile 是独立、可稳定寻址且由 Workflow 拥有的资源。备选方案是继续用
 Project template 加 system catalog 的聚合 read model；它会保留两套写入/存在性规则，无法给
@@ -85,8 +86,8 @@ workflowRun.workflowProfileId = selectedProfileId
 Project default 与 WorkflowRun binding 通过 `WorkflowProfileReferenceCoordinator` 在各自队列位置
 调用 collection provider 验证存在性。Issue create/edit 留在 `IssueRepositoryCoordinatorGrain`：它
 在 `IIssueBindingParticipant` 的单一 Issue 事务内重新验证 Profile（与 repository 存在性同一入口）
-并提交 selection。对 custom Profile，restrictive foreign key 是并发删除的最终事务保护；对 builtin
-Profile，provider 的 read-only 生命周期保证不存在删除竞争。
+并提交 selection。对 custom Profile，nullable backing column 的 restrictive foreign key 是并发删除的
+最终事务保护；对 builtin Profile，该列为 null，provider 的 read-only 生命周期保证不存在删除竞争。
 `issue edit --inherit-workflow-profile` 仅清除 Issue 字段；同时传该 flag 与
 `--workflow-profile` 由 CLI 的互斥 option 在发请求前拒绝。修改 Project 或 Issue 引用绝不写入
 已有 WorkflowRun。
@@ -133,8 +134,9 @@ explicit selection，以及非终态 WorkflowRun binding。存在任一引用即
 Project、Issue 和 Run 不被同时修改。
 
 `WorkflowProfileDeletionBlockerQuery` 是可操作诊断而非并发正确性的唯一依赖。每个 custom Profile
-reference 使用指向 `(ProjectId, ProfileId)` 的 restrictive foreign key：Profile 删除与来自另一
-coordinator 的 Issue selection 在数据库事务中竞争时，先提交的 Issue reference 令 delete 受 FK
+reference 的 persistence row 填写 nullable backing key，并使用指向 `(ProjectId, ProfileId)` 的 restrictive
+foreign key；builtin reference 的 backing key 保持 null。Profile 删除与来自另一 coordinator 的 Issue
+selection 在数据库事务中竞争时，先提交的 Issue reference 令 delete 受 FK
 拒绝，随后重新查询并返回 blocker；先提交的 delete 令 Issue insert/update 受 FK 拒绝，映射为可重试的
 `workflow-profile-not-found` conflict，且不提交 dangling reference。Project-default 与 Run-binding 已由
 Profile coordinator 串行，foreign key 同时防止任何意外绕过。builtin Profile 不可删除，provider 是其
@@ -201,9 +203,9 @@ CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--
 
 - [删除检查与 Issue selection 位于不同 coordinator，存在跨队列竞态] -> 保持架构规定的 coordinator
   边界：Profile coordinator 串行 Project default / Run binding / delete，Issue coordinator 串行 Issue
-  selection 与 repository lifecycle。custom Profile 的 restrictive foreign key 把最终提交竞争收敛为
-  blocker 或 `workflow-profile-not-found` conflict，绝不留下悬空引用；builtin immutable，故无 delete
-  race。
+  selection 与 repository lifecycle。custom Profile 的 nullable backing-key restrictive foreign key 把最终
+  提交竞争收敛为 blocker 或 `workflow-profile-not-found` conflict，绝不留下悬空引用；builtin immutable，
+  故无 delete race。
 - [编辑绑定 Profile 可使未来 Stage 与先前 Stage 的 Definition 不同] -> 这是明确产品语义；
   `workflow edit` help 提示其可能影响活动 Run，Run 保留 Profile ID 和已初始化事实以便审计。
 - [旧 Issue inline Definition 无法无歧义映射为共享 Profile] -> 迁移时为每个仍有 inline
@@ -225,8 +227,9 @@ CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--
 
 ## Migration Plan
 
-1. 增加 collection、source provenance、Project/Issue/Run ID 引用字段、custom-reference restrictive
-   foreign keys 和必要索引的 EF migration；保留独立的 Variables/Prompts 存储，不把它们迁入 Profile。
+1. 增加 collection、source provenance、Project/Issue/Run ID 引用字段、仅 custom ID 填写的 nullable
+   foreign-key backing columns、restrictive foreign keys 和必要索引的 EF migration；保留独立的
+   Variables/Prompts 存储，不把它们迁入 Profile。
 2. 对每个 legacy custom template 或 inline Definition，以固定 canonical YAML renderer 从持久的
    semantic JSON 生成 source 并标记 `canonical-legacy`。新 API 后续 create/edit 写入 `verbatim` source；
    migration 不声称能恢复 legacy 原始 YAML。
