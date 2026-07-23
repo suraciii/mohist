@@ -54,7 +54,7 @@ Mohist SHALL publish the following instruments through a `Meter` named `Mohist.S
 
 The instrument name, kind, unit and complete attribute-key set SHALL be treated as one compatibility contract. Mohist MUST NOT add undeclared attributes to these instruments.
 
-Telemetry outcomes SHALL count Span attempts. `received` SHALL count each Span attempt that is successfully parsed at the ingest boundary. `saved` SHALL count each parsed Span whose write commits, including a duplicate upsert that commits successfully. `rejected` SHALL count each parsed Span intentionally refused by admission or storage protection with a non-retryable OTLP partial-success response. `dropped` SHALL count each malformed or otherwise lost Span for which the response does not request a retry. A parsed Span in a rolled-back write that returns a retryable failure SHALL increment `received`, SHALL NOT increment `saved`, `rejected` or `dropped`, and SHALL activate storage-write degradation. The four counters MUST NOT be required to satisfy a conservation equation.
+Telemetry outcomes SHALL count Span attempts. `received` SHALL count each Span attempt that is successfully parsed at the ingest boundary. `saved` SHALL count each parsed Span whose write commits, including a duplicate upsert that commits successfully. `rejected` SHALL count each parsed Span intentionally refused by admission or storage protection with a non-retryable OTLP partial-success response. `dropped` SHALL count each malformed or otherwise lost Span for which the response does not request a retry. Provisional Span classifications SHALL become rejected or dropped outcomes only when the batch response is non-retryable. If the accepted subset's write rolls back, the retryable result SHALL take precedence for the entire request: every parsed Span attempt SHALL increment `received`, while `saved`, `rejected` and `dropped` SHALL not increment, and only storage-write degradation SHALL activate. The four counters MUST NOT be required to satisfy a conservation equation.
 
 #### Scenario: The metric catalog changes unintentionally
 
@@ -85,11 +85,19 @@ Telemetry outcomes SHALL count Span attempts. `received` SHALL count each Span a
 - **THEN** `received` SHALL increment and storage-write degradation SHALL activate
 - **AND** `saved`, `rejected` and `dropped` SHALL NOT increment for that attempt
 
+#### Scenario: A mixed batch rolls back its accepted subset
+
+- **WHEN** a request contains provisionally rejected or dropped Span attempts and its accepted subset's write rolls back
+- **THEN** the retryable batch result SHALL take precedence and every parsed attempt SHALL increment `received`
+- **AND** `saved`, `rejected` and `dropped` SHALL NOT increment for that request attempt
+- **AND** only storage-write degradation SHALL activate; ingestion protection SHALL NOT activate or refresh
+- **AND** repeating the same rolled-back request SHALL NOT repeatedly increment rejected or dropped counters
+
 ### Requirement: OTLP HTTP outcomes preserve request encoding
 
 The trace ingestion route SHALL encode every recognized-request response according to the normalized request `Content-Type`, independent of `Accept`. `application/json` SHALL receive JSON and `application/x-protobuf` or `application/protobuf` SHALL receive protobuf with canonical response content type `application/x-protobuf`. Full success SHALL return HTTP 200 with an empty standard `ExportTraceServiceResponse`: `{}` for JSON and the zero-byte default message for protobuf. A non-retryable partial success SHALL return HTTP 200 with `ExportTraceServiceResponse.partial_success`; `rejected_spans` SHALL equal the sum of rejected and dropped Span attempts and `error_message` SHALL be bounded to 256 characters. JSON SHALL use the protobuf-JSON field names `partialSuccess`, `rejectedSpans` as a decimal string, and `errorMessage`; protobuf SHALL use the standard message field numbers.
 
-Whole-body malformed JSON or protobuf SHALL return HTTP 400 with `google.rpc.Status` code 3 (`INVALID_ARGUMENT`) in the recognized request encoding and SHALL NOT publish an ingest outcome. A retryable rolled-back write SHALL return HTTP 503 with `google.rpc.Status` code 14 (`UNAVAILABLE`) in the request encoding. Error messages SHALL be bounded to 256 characters and `details` SHALL be absent. When no supported request encoding can be selected, the route SHALL return HTTP 415 with a JSON `google.rpc.Status`.
+Whole-body malformed JSON or protobuf SHALL return HTTP 400 with `google.rpc.Status` code 3 (`INVALID_ARGUMENT`) in the recognized request encoding and SHALL NOT publish an ingest outcome. A retryable rolled-back write SHALL return HTTP 503 with `google.rpc.Status` code 14 (`UNAVAILABLE`) in the request encoding. This retryable response SHALL take precedence over partial success when the same batch also contains provisionally rejected or dropped attempts. Error messages SHALL be bounded to 256 characters and `details` SHALL be absent. When no supported request encoding can be selected, the route SHALL return HTTP 415 with a JSON `google.rpc.Status`.
 
 #### Scenario: Protobuf ingestion partially succeeds
 
@@ -114,6 +122,13 @@ Whole-body malformed JSON or protobuf SHALL return HTTP 400 with `google.rpc.Sta
 - **WHEN** a recognized JSON request reaches a write transaction that rolls back with a retryable failure
 - **THEN** the route SHALL return HTTP 503 and a JSON `google.rpc.Status` with code 14
 - **AND** its parsed Span attempts SHALL retain the retryable accounting semantics above
+
+#### Scenario: Partial classifications do not override a retryable write failure
+
+- **WHEN** a recognized request contains provisionally rejected or dropped attempts and its accepted subset rolls back
+- **THEN** the route SHALL return HTTP 503 rather than HTTP 200 partial success
+- **AND** the response SHALL be a `google.rpc.Status` with code 14 in the request encoding
+- **AND** JSON and protobuf contract tests SHALL lock this precedence together with the resulting counters
 
 ### Requirement: Metric identity has stable low cardinality
 

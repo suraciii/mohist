@@ -11,7 +11,7 @@
         "RuntimeObservability exposes source-owned collector, process, storage, ingest, request and path fact methods; no public generic source setter exists and one producer cannot clear another source.",
         "CompleteRequest and RecordAgentPath implement and directly contract-test normalized Meter publication; later request and agent tasks only invoke these established methods.",
         "The exact Mohist.Server.Runtime names, kinds, units, attribute keys and bounded values are locked by MeterListener tests; no metrics exporter targets the built-in receiver.",
-        "IngestOutcome cannot be constructed from four independent aggregates; its builder accepts complete classified batch totals plus exactly one typed write result and derives received/saved/rejected/dropped and source changes.",
+        "IngestOutcome cannot be constructed from four independent aggregates; its builder accepts complete classified batch totals plus exactly one typed write result and derives response precedence, received/saved/rejected/dropped and source changes.",
         "Five-minute protection expiry, repeated-loss extension, stable reason codes/default messages, 256-character truncation, deterministic latest-reason ordering and transition-only logs use FakeTimeProvider and overlap tests.",
         "RuntimeEpoch is reusable across host containers and snapshot reads perform no database, filesystem, HTTP or grain work.",
         "Focused unit tests and repository npm test pass without external backend, host filesystem, network, process or wall-clock waits."
@@ -33,10 +33,11 @@
         "TraceIngester creates one immutable PreparedIngestBatch before opening the transaction; every identifiable Span attempt is classified as parsed-for-write, malformed dropped, protection rejected or another non-retryable drop.",
         "IIngestProtectionDecision defaults to accepting all attempts in production; tests inject deterministic reject decisions and #437/#471 remain owners of real policy.",
         "Exactly one IngestOutcome is recorded per batch, with counters counting Span attempts; duplicate commit, malformed drop, fake rejection and retryable rollback match the spec and never double-publish a write result.",
-        "Only a production ingestion transaction that commits clears storage_write/storage_unverified; not-attempted empty, rejected, dropped or parse-failed requests do not establish write readiness, and rollback publishes saved=0 plus storage_write failure without adding dropped counts.",
+        "Only a production ingestion transaction that commits clears storage_write/storage_unverified; not-attempted empty, rejected, dropped or parse-failed requests do not establish write readiness, and rollback publishes saved/rejected/dropped=0 plus only storage_write failure.",
         "OtlpTraceResponseWriter chooses response encoding from the recognized request Content-Type, not Accept: JSON full success is 200 application/json `{}`, while protobuf full success is 200 application/x-protobuf with the zero-byte default ExportTraceServiceResponse.",
         "Fake rejection/drop returns HTTP 200 ExportTraceServiceResponse.partial_success in the request encoding, with rejected_spans equal to rejected+dropped and a bounded message; JSON uses canonical protobuf-JSON names/string int64 and protobuf uses standard field numbers.",
         "Malformed JSON and malformed/truncated protobuf return HTTP 400 google.rpc.Status code 3 in their request encoding without publishing an outcome; retryable rollback returns HTTP 503 Status code 14, unsupported media returns 415 JSON Status, and wire-level tests decode every response category.",
+        "For a mixed batch whose accepted subset rolls back, retryable failure takes precedence over provisional rejection/drop: JSON and protobuf wire tests assert HTTP 503 Status code 14, counter tests assert only parsed received attempts plus storage_write degradation, and repeated rollback attempts never add rejected/dropped or refresh ingest protection.",
         "JSON and protobuf paths map the same outcome categories without a production rejection policy.",
         "Focused ingester/OTLP/status-publication tests and repository npm test pass using in-memory SQLite and fake decisions."
       ],
