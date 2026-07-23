@@ -59,8 +59,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("mohist/github-pr", profile.Id);
     }
 
-    // ===================== Registry exposure =====================
-
     [Fact]
     public void Registry_GetById_ResolvesMohistGithubPr()
     {
@@ -154,8 +152,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("mohist/local", defaultInfo.Id);
         Assert.True(defaultInfo.IsDefault);
     }
-
-    // ===================== Full graph / action names =====================
 
     [Fact]
     public void GithubPrWorkflowDefinition_StagesFollowPlanBuildCheckIntegrateOrder()
@@ -340,7 +336,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.False(conflictHandler.RetrySelf);
         var resolveConflicts = Assert.Single(conflictHandler.Tasks);
         Assert.Equal("recover:resolve-rebase-conflicts", resolveConflicts.Id);
-        AssertCheckAgentTask(resolveConflicts, "${{ prompts.resolve-rebase-conflicts }}");
+        AssertAgentTask(resolveConflicts, "check", "${{ prompts.resolve-rebase-conflicts }}");
 
         var push = check.Tasks.Single(t => t.Id == "push");
         Assert.Equal("mohist/push", push.Uses);
@@ -361,7 +357,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.True(checksHandler.RetrySelf);
         Assert.Equal(new[] { "recover:fix-pr-checks", "recover:push" }, checksHandler.Tasks.Select(t => t.Id).ToArray());
         var fixPrChecks = checksHandler.Tasks.Single(t => t.Id == "recover:fix-pr-checks");
-        AssertCheckAgentTask(fixPrChecks, "${{ prompts.fix-pr-checks }}");
+        AssertAgentTask(fixPrChecks, "check", "${{ prompts.fix-pr-checks }}");
         Assert.Single(check.Checks);
         var status = check.Checks.Single();
         Assert.Equal("github-pr-status", status.Id);
@@ -686,10 +682,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
             Assert.Equal(profile.Description, describedEntry.Description);
         }
     }
-
-    // ===================== Helpers =====================
-
-    private static void AssertCheckAgentTask(TaskDefinition task, string prompt) => AssertAgentTask(task, "check", prompt);
 
     private static void AssertAgentTask(TaskDefinition task, string session, string prompt) => Assert.Equal(("mohist/opencode", session, prompt, "${{ vars.agent }}"), (task.Uses, ReadStringWith(task, "session"), ReadStringWith(task, "prompt"), ReadStringWith(task, "options")));
 
