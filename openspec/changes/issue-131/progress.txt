@@ -44,3 +44,15 @@
 - Focused `AgentRefResolverTests`: 2/2 passed; focused `WorkflowItemTranslatorSpecs` + `DispatchServiceReconciliationSpecs`: 46/46 passed.
 - Full verification: Workflow Definition 175/175, CLI 1411/1411, server unit 1339/1339, and server specs 3052/3052 passed.
 - ArchTests: 31/32 passed. The sole failure is the pre-existing T-001 test-file size ratchet for `ActionContractValidatorTests.cs` (43,726 bytes versus its 29,000-byte allowance); T-002 introduces no architecture-rule failure.
+
+## T-003 Decisions
+
+- `WorkflowDispatchRejectedException` carries the structured `ExecutionError` produced by Agent resolution instead of reducing it to a message.
+- `DispatchService` passes that error through `IWorkflowGrain.RejectActiveWorkDispatchAsync`; the grain stores it on `TaskRun.Error` and uses the normal failed `TaskResult` path so `WorkflowRun.Failure.Error` retains the same code for recovery matching.
+- Resolution rejection is handled before a dispatch is returned, so Runner claim/reporting and Workflow-origin AgentSession creation remain absent; no AgentJob path is involved.
+
+## T-003 Verification
+
+- Added missing and archived Agent dispatch specs asserting `agent_not_found`, empty Runner dispatches, failed task/run state, and a `failure.error.code=agent_not_found` recovery rule.
+- Full server spec suite: 3057/3057 passed.
+- Full server unit suite: 1339/1339 passed.

@@ -7,6 +7,7 @@ using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
+
 namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 
 public partial class WorkflowItemTranslatorSpecs
@@ -107,6 +108,60 @@ public partial class WorkflowItemTranslatorSpecs
             () => _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
         Assert.Contains("with.agent", error.Message, StringComparison.Ordinal);
+        Assert.Equal("invalid_input", error.Error.Code);
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_MissingAgent_RejectsWithAgentNotFound()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-missing");
+        _agentResolver.Snapshot = null;
+
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With(@"{ ""name"": ""archived-reviewer"", ""prompt"": ""Review the change."" }"));
+
+        var error = await Assert.ThrowsAsync<WorkflowDispatchRejectedException>(
+            () => _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
+
+        Assert.Equal("agent_not_found", error.Error.Code);
+        Assert.Contains("archived-reviewer", error.Error.Message, StringComparison.Ordinal);
+        Assert.Contains("archived-reviewer", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_AgentResolverUnavailable_RejectsWithAgentNotFound()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-no-resolver");
+        var translatorWithoutResolver = new WorkflowItemTranslator(
+            _profileManager, _bindService, TranslatorNullLogger, agentSnapshots: null);
+
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With(@"{ ""name"": ""reviewer"", ""prompt"": ""Review the change."" }"));
+
+        var error = await Assert.ThrowsAsync<WorkflowDispatchRejectedException>(
+            () => translatorWithoutResolver.TranslateToDispatchAsync(item, runId, run, "runner-1"));
+
+        Assert.Equal("agent_not_found", error.Error.Code);
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_MalformedInput_RejectsWithInvalidAgentInput()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-malformed");
+        _agentResolver.Snapshot = new AgentExecutionSnapshot(
+            "Review the change.",
+            JsonSerializer.SerializeToElement(new { runtime = "opencode", model = "model-a" }));
+
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With(@"{ ""name"": ""  "", ""prompt"": ""Review the change."" }"));
+
+        var error = await Assert.ThrowsAsync<WorkflowDispatchRejectedException>(
+            () => _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
+
+        Assert.Equal("invalid_agent_input", error.Error.Code);
     }
 
     [Fact]

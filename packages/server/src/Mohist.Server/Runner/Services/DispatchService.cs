@@ -263,10 +263,10 @@ public sealed class DispatchService : IScopedService
         WorkflowDispatchRejectedException exception)
     {
         _log.LogWarning(exception,
-            "DispatchService rejected dispatch for workflow {WorkflowId} work {WorkId}",
-            workflowRunId, workId);
+            "DispatchService rejected dispatch for workflow {WorkflowId} work {WorkId}: {Code} {Message}",
+            workflowRunId, workId, exception.Error.Code, exception.Error.Message);
         await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
-            .RejectActiveWorkDispatchAsync(workerId, workId, exception.Message);
+            .RejectActiveWorkDispatchAsync(workerId, workId, exception.Error);
     }
 
     private static WorkDispatch WithIssueFromRunAnnotations(WorkDispatch dispatch, WorkflowRun run)

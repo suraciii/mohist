@@ -263,7 +263,10 @@ EpicNumber: ReadEpicNumber(run),
         string workId)
     {
         if (_agentSnapshots is null)
-            throw new WorkflowDispatchRejectedException($"Workflow task '{workId}' references an Agent but Agent resolution is unavailable.");
+            throw new WorkflowDispatchRejectedException(
+                $"Workflow task '{workId}' references an Agent but Agent resolution is unavailable.",
+                new ExecutionError("agent_not_found",
+                    $"Workflow task '{workId}' cannot resolve the referenced Agent because Agent resolution is unavailable."));
 
         var with = item.With;
         if (with is null
@@ -275,7 +278,10 @@ EpicNumber: ReadEpicNumber(run),
             || promptElement is null
             || promptElement.Value.ValueKind != JsonValueKind.String)
         {
-            throw new WorkflowDispatchRejectedException($"Workflow task '{workId}' has invalid mohist/agent input.");
+            throw new WorkflowDispatchRejectedException(
+                $"Workflow task '{workId}' has invalid mohist/agent input.",
+                new ExecutionError("invalid_agent_input",
+                    $"Workflow task '{workId}' declares an mohist/agent task without a non-empty 'name' or 'prompt'."));
         }
 
         var projectId = TryGetAnnotation(run, "projectId", out var value) ? value : null;
@@ -283,7 +289,13 @@ EpicNumber: ReadEpicNumber(run),
             ? null
             : await _agentSnapshots.ResolveAsync(projectId, nameElement.Value.GetString()!);
         if (snapshot is null)
-            throw new WorkflowDispatchRejectedException($"Workflow task '{workId}' references Agent '{nameElement.Value.GetString()}' which is not active.");
+        {
+            var requestedRef = nameElement.Value.GetString()!;
+            throw new WorkflowDispatchRejectedException(
+                $"Workflow task '{workId}' references Agent '{requestedRef}' which is not active.",
+                new ExecutionError("agent_not_found",
+                    $"Workflow task '{workId}' references Agent '{requestedRef}' which does not exist or is archived."));
+        }
 
         var rawPrompt = promptElement.Value.GetString()!;
         var composedPrompt = string.IsNullOrWhiteSpace(snapshot.Instructions)
@@ -346,7 +358,10 @@ EpicNumber: ReadEpicNumber(run),
         {
             throw new WorkflowDispatchRejectedException(
                 $"Workflow task '{workId}' declares legacy agent configuration under 'with.agent'. " +
-                "Bind the selected Action's 'options' explicitly, e.g. 'options: ${{ vars.agent }}'.");
+                "Bind the selected Action's 'options' explicitly, e.g. 'options: ${{ vars.agent }}'.",
+                new ExecutionError("invalid_input",
+                    $"Workflow task '{workId}' declares legacy agent configuration under 'with.agent'. " +
+                    "Bind the selected Action's 'options' explicitly."));
         }
 
         if (with is not null && with.TryGetValue("expect", out var legacyExpect) && legacyExpect.HasValue
@@ -355,7 +370,10 @@ EpicNumber: ReadEpicNumber(run),
             throw new WorkflowDispatchRejectedException(
                 $"Workflow task '{workId}' declares Workflow completion policy under 'with.expect'. " +
                 "Move 'files', 'markers', and 'failIf' to task-level 'expect'. " +
-                "'with.expect' is reserved for Action-owned input on the selected Action contract.");
+                "'with.expect' is reserved for Action-owned input on the selected Action contract.",
+                new ExecutionError("invalid_input",
+                    $"Workflow task '{workId}' declares Workflow completion policy under 'with.expect'. " +
+                    "Move 'files', 'markers', and 'failIf' to task-level 'expect'."));
         }
 
         // Spec scenario "Legacy agent input is invalid": persisted or
@@ -368,7 +386,10 @@ EpicNumber: ReadEpicNumber(run),
             throw new WorkflowDispatchRejectedException(
                 $"Workflow task '{workId}' declares legacy execution discriminator 'with.kind'. " +
                 "The 'mohist/opencode' Action is selected by 'uses' and does not read 'kind'. " +
-                "Remove 'with.kind'; if model configuration is intended, bind 'options: ${{ vars.agent }}'.");
+                "Remove 'with.kind'; if model configuration is intended, bind 'options: ${{ vars.agent }}'.",
+                new ExecutionError("invalid_input",
+                    $"Workflow task '{workId}' declares legacy execution discriminator 'with.kind'. " +
+                    "Remove 'with.kind'; if model configuration is intended, bind 'options: ${{ vars.agent }}'."));
         }
 
         if (with is not null && with.ContainsKey("type"))
@@ -376,7 +397,10 @@ EpicNumber: ReadEpicNumber(run),
             throw new WorkflowDispatchRejectedException(
                 $"Workflow task '{workId}' declares legacy execution discriminator 'with.type'. " +
                 "The 'mohist/opencode' Action is selected by 'uses' and does not read 'type'. " +
-                "Remove 'with.type'; if model configuration is intended, bind 'options: ${{ vars.agent }}'.");
+                "Remove 'with.type'; if model configuration is intended, bind 'options: ${{ vars.agent }}'.",
+                new ExecutionError("invalid_input",
+                    $"Workflow task '{workId}' declares legacy execution discriminator 'with.type'. " +
+                    "Remove 'with.type'; if model configuration is intended, bind 'options: ${{ vars.agent }}'."));
         }
 
         _ = expect;
