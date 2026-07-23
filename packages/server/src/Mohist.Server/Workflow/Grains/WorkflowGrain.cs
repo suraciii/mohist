@@ -430,6 +430,26 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         return item;
     }
 
+    public async Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null || !_run.IsAssignedTo(workerId)) return null;
+        var active = _run.FindActiveWork(workId, workerId);
+        if (active is null || !active.IsTask) return null;
+        if (!string.Equals(dispatch.WorkflowRunId, GrainKey, StringComparison.Ordinal)
+            || !string.Equals(dispatch.WorkId, workId, StringComparison.Ordinal)
+            || !string.Equals(dispatch.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal)
+            || dispatch.AgentJobId is not null)
+            return null;
+        if (active.DispatchSnapshot is not null) return active.DispatchSnapshot;
+
+        var task = _run.CurrentStage().RunningTask;
+        if (task is null || !string.Equals(task.WorkId, workId, StringComparison.Ordinal)) return null;
+        task.DispatchSnapshot = dispatch;
+        await SaveRunAsync();
+        return dispatch;
+    }
+
     public async Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)
     {
         EnsureRun();

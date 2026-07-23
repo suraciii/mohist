@@ -19,6 +19,7 @@ internal static class ActionContractValidator
         {
             actionsByName.TryAdd(entry.Name, entry);
         }
+        actionsByName[VirtualActionManifests.MohistAgentUses] = VirtualActionManifests.MohistAgent;
 
         var tombstonesByName = new Dictionary<string, ActionCatalogTombstone>(StringComparer.Ordinal);
         foreach (var entry in catalog.Tombstones)
@@ -114,6 +115,15 @@ internal static class ActionContractValidator
         ValidateUses(errors, "Check", check.Id, check.Uses, checkPath, actionsByName, tombstonesByName);
 
         if (string.IsNullOrEmpty(check.Uses)) return;
+
+        if (string.Equals(check.Uses, VirtualActionManifests.MohistAgentUses, StringComparison.Ordinal))
+        {
+            errors.Add(new ValidationError(checkPath,
+                $"Check '{Identifier(check.Id, checkPath)}' uses Action '{check.Uses}' which is not supported for check work; use it on a task only.",
+                ValidationSource.Action));
+            return;
+        }
+
         if (!actionsByName.TryGetValue(check.Uses, out var action)) return;
 
         ValidateWith(errors, check.Id, "Check", checkPath, check.With, action);
@@ -160,6 +170,8 @@ internal static class ActionContractValidator
             declaredInputs.TryAdd(input.Name, input);
         }
 
+        var isMohistAgent = string.Equals(action.Name, VirtualActionManifests.MohistAgentUses, StringComparison.Ordinal);
+
         if (with is not null)
         {
             foreach (var (key, value) in with)
@@ -176,7 +188,16 @@ internal static class ActionContractValidator
 
                 if (!value.HasValue) continue;
 
-                if (TemplateTokens.Contains(value.Value)) continue;
+                if (TemplateTokens.Contains(value.Value))
+                {
+                    if (isMohistAgent && string.Equals(key, "name", StringComparison.Ordinal))
+                    {
+                        errors.Add(new ValidationError($"{itemPath}.with.name",
+                            $"{kind} '{Identifier(itemId, itemPath)}' of Action '{action.Name}' input 'name' must be a literal string; workflow template expressions are not supported",
+                            ValidationSource.Action));
+                    }
+                    continue;
+                }
 
                 if (value.Value.ValueKind == JsonValueKind.Null)
                 {

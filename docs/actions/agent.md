@@ -2,6 +2,7 @@
 
 `mohist/agent` 让一个 Workflow task 引用 Project 内预定义的 Mohist Agent 来执行：
 task 获得该 Agent 的指令与执行配置快照，按 Inline Agent 同一套机制运行。
+它只支持 task，不支持 workflow check。
 
 它是**定义引用，不是工作委托**：不启动 AgentJob，工作的成功失败仍由 TaskRun
 裁定，AgentSession 仍是 Workflow 来源。Agent、AgentJob 和 AgentSession 的总体
@@ -26,13 +27,16 @@ task 获得该 Agent 的指令与执行配置快照，按 Inline Agent 同一套
 
 | 字段 | 必填 | 默认 | 含义 |
 |---|---:|---|---|
-| `name` | 是 | — | Mohist Agent 的名称或 id，解析规则与 `mo` 命令面的 `--agent` 相同 |
+| `name` | 是 | — | Mohist Agent 的静态名称或 id；不支持模板表达式 |
 | `prompt` | 是 | — | 本次交给该 Agent 的任务输入，支持模板表达式 |
 | `session` | 否 | — | WorkflowRun 内的逻辑 Session 名称；省略时使用当前 Work ID |
 | `timeout` | 否 | 与后端 Action 相同 | 本次执行的期限 |
 
 执行后端与模型由 Agent 配置决定，task 不覆盖。`expect`、`artifacts`、`setVars`
 与 recovery 等 task 级构造的行为与其它 Action 相同。
+
+`name` 的解析顺序与 `mo` 命令面相同：以 `agent_` 开头的引用只按 id
+解析；其它引用先按名称解析，名称未命中时再按 id 解析。
 
 ## 解析与快照
 
@@ -52,6 +56,5 @@ task 获得该 Agent 的指令与执行配置快照，按 Inline Agent 同一套
 执行期错误（后端不可用、超时等）与所选执行后端的 Action 相同，recovery 的
 `when` 匹配同样适用。
 
-## 实装差距
-
-全部未实装；`mohist/agent` 当前不是可用的 `uses` 值。
+`mohist/agent` 仅能用于 task；用于 check 时会被拒绝。引用的 Agent 不存在或已归档时，
+dispatch 失败码为 `agent_not_found`。

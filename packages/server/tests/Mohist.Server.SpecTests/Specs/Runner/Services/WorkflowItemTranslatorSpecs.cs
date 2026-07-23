@@ -31,6 +31,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     private readonly WorkflowProfileManager _profileManager;
     private readonly WorkflowItemTranslator _translator;
     private readonly IWorkflowArtifactBindService _bindService;
+    private readonly FakeAgentExecutionSnapshotResolver _agentResolver;
 
     public WorkflowItemTranslatorSpecs()
     {
@@ -44,7 +45,8 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
             WorkflowGrainTestHelpers.CreateEmptyConfigService(), runProfileManager);
         _bindService = new WorkflowArtifactBindService(
             factory, BindNullLogger, new FakeTimeProvider(TestTime.UtcNow));
-        _translator = new WorkflowItemTranslator(_profileManager, _bindService, TranslatorNullLogger);
+        _agentResolver = new FakeAgentExecutionSnapshotResolver();
+        _translator = new WorkflowItemTranslator(_profileManager, _bindService, TranslatorNullLogger, _agentResolver);
     }
 
     private static Microsoft.Extensions.Logging.ILogger<WorkflowItemTranslator> TranslatorNullLogger =>
@@ -466,6 +468,14 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     private static Dictionary<string, JsonElement?> With(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json) ?? new();
+
+    private sealed class FakeAgentExecutionSnapshotResolver : IAgentExecutionSnapshotResolver
+    {
+        public AgentExecutionSnapshot? Snapshot { get; set; }
+
+        public Task<AgentExecutionSnapshot?> ResolveAsync(string projectId, string agentRef) =>
+            Task.FromResult(Snapshot);
+    }
 
     private sealed class NullLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
     {
