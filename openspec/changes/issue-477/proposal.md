@@ -23,7 +23,7 @@ Workflow Profiles are currently split between a system-template catalog, project
 ## Impact
 
 - **Server** (`packages/server`): Workflow Profile persistence, Project and Issue selection references, Profile APIs, reference checks, and `WorkflowProfileManager`/WorkflowRun resolution move from the template cascade to the Project collection contract.
-- **CLI** (`packages/cli`): adds the `mo workflow` management verbs and `mo project workflow set-default`; issue create/edit gains Profile selection and inheritance flags; legacy template/Profile management commands are removed or redirected to the new owned surfaces.
+- **CLI** (`packages/cli`): adds the `mo workflow` management verbs and `mo project workflow set-default`; issue create/edit gains Profile selection and inheritance flags; legacy template/Profile management commands are removed, with no aliases or redirects to the new owned surfaces.
 - **Tests**: Server and CLI specs cover collection ownership, built-in immutability, validation hand-off, reference protection, selection precedence, and live Stage resolution.
 - **Docs** (`docs`, `design`): workflow Profile ownership and CLI reference move from templates to the Project-scoped collection model.
 - **Dependencies**: consumes the existing #432 Definition validator and #446 Action catalog validation; no new external dependency.
