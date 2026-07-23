@@ -56,7 +56,9 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         var recoveryEvent = Assert.Single(_fixture.StateStore.Events.Skip(eventCountBefore));
         var runtimeBound = Assert.IsType<AgentSessionRuntimeBound>(recoveryEvent.Value);
         Assert.Equal("runtime-after-reset", runtimeBound.AgentRuntimeSessionId);
-        var resetTranscript = Assert.Single(_fixture.TranscriptStore.Flushes);
+        var resetTranscript = Assert.Single(
+            _fixture.TranscriptStore.Flushes,
+            flush => flush.Turn.SessionId == sessionId);
         Assert.Equal("session.context_reset", resetTranscript.Parts.Single().Type);
         using var payload = JsonDocument.Parse(resetTranscript.Parts.Single().PayloadJson);
         Assert.Equal("reset", payload.RootElement.GetProperty("reason").GetString());
@@ -216,7 +218,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-post-commit");
         var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
-        _fixture.StateStore.CommitThenThrowNext = true;
+        _fixture.StateStore.CommitThenThrowNextSave(sessionId);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => grain.CompleteCompactAsync(
             new CompleteCompactAgentSessionCommand(request.OperationId, Summary: "summary")));
@@ -381,7 +383,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     [Fact]
     public async Task PendingIdleFollowup_RejectsDuplicateDeliveryUntilItsMatchingFailureArrives()
     {
-        var (grain, _) = await CreateAttachedSessionAsync("runtime-followup-operations");
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-followup-operations");
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         var first = await grain.BeginFollowupAsync();
         await Assert.ThrowsAsync<FollowupOperationInProgressException>(() => grain.BeginFollowupAsync());
@@ -390,6 +392,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "available"));
         Assert.True(result.WasCompacted);
         Assert.Equal(0, _fixture.TranscriptStore.Flushes.Count(flush =>
+            flush.Turn.SessionId == sessionId &&
             flush.Parts.Any(part => part.Type == TranscriptPartTypes.Status)));
     }
 

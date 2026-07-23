@@ -104,7 +104,9 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
             }, "runtime-1"));
 
-        Fixture.StateStore.NextException = new InvalidOperationException("state store down");
+        Fixture.StateStore.FailNextSave(
+            grain.GetPrimaryKeyString(),
+            new InvalidOperationException("state store down"));
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => grain.FlushForTestAsync());
         Assert.Contains("state store down", ex.Message);
@@ -133,7 +135,9 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
         // state (which would re-append already-committed lifecycle events).
         var grain = await OpenBoundGrainAsync();
 
-        Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
+        Fixture.TranscriptStore.FailNextSave(
+            grain.GetPrimaryKeyString(),
+            new InvalidOperationException("transcript store down"));
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
@@ -182,7 +186,9 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         var openedSaveCount = Fixture.StateStore.SaveCount;
         var attachEventCount = Fixture.StateStore.Events.Count;
 
-        Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
+        Fixture.TranscriptStore.FailNextSave(
+            grain.GetPrimaryKeyString(),
+            new InvalidOperationException("transcript store down"));
 
         var result = await grain.CompactAsync(
             new CompactAgentSessionCommand(Summary: "s"));
@@ -223,12 +229,16 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-durable-evidence"));
         Fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
 
-        Fixture.TranscriptStore.NextException = new InvalidOperationException("first transcript failure");
+        Fixture.TranscriptStore.FailNextSave(
+            grain.GetPrimaryKeyString(),
+            new InvalidOperationException("first transcript failure"));
         await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "durable"));
 
         // The deactivation flush can fail too. The pending evidence must remain
         // in persisted session state instead of relying on the disposed timer.
-        Fixture.TranscriptStore.NextException = new InvalidOperationException("second transcript failure");
+        Fixture.TranscriptStore.FailNextSave(
+            grain.GetPrimaryKeyString(),
+            new InvalidOperationException("second transcript failure"));
         await DeactivateAsync(grain);
 
         await grain.FlushForTestAsync();
@@ -282,7 +292,9 @@ public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSp
     {
         var grain = await OpenBoundGrainAsync();
 
-        Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
+        Fixture.TranscriptStore.FailNextSave(
+            grain.GetPrimaryKeyString(),
+            new InvalidOperationException("transcript store down"));
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
