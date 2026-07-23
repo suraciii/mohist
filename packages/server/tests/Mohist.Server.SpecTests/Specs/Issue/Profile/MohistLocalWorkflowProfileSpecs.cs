@@ -1133,7 +1133,7 @@ public class MohistLocalWorkflowProfileSpecs
     [Fact]
     public async Task ProjectWorkflowProfileManager_SystemTemplates_ExposeDescriptionAndIsDefault()
     {
-        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine());
+        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
 
         var templates = await manager.ListSystemTemplatesAsync();
 

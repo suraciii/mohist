@@ -105,11 +105,13 @@ public static partial class IssueRoutes
         var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
         if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
+        ActionValidationStatus actionValidation = ActionValidationStatus.Skipped;
         try
         {
-            await issueProfileManager.UpdateTemplateAsync(projectId, number, new IssueTemplateUpdateRequest(
+            var result = await issueProfileManager.UpdateTemplateAsync(projectId, number, new IssueTemplateUpdateRequest(
                 ProjectTemplateId: req.ProjectTemplateId,
                 Template: yaml));
+            actionValidation = result.ActionValidation;
         }
         catch (YamlException ex)
         {
@@ -128,7 +130,7 @@ public static partial class IssueRoutes
         }
 
         var response = await BuildIssueWorkflowProfileResponseAsync(projectId, number, issueProfileManager, issuesQuery, projectsQuery);
-        return ApiResults.Ok(response!);
+        return Results.Json(new { success = true, data = response, actionValidation = ProjectRoutes.ToActionValidationNotice(actionValidation) });
     }
 
     internal static JsonElement? BuildRebaseTaskWith(string baseBranch)

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Runner.Grains;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
@@ -19,7 +20,7 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
     public ProjectWorkflowProfileManagerSpecs()
     {
         _database = TestSqliteDatabase.CreateModelSchema();
-        _manager = new ProjectWorkflowProfileManager(new TestDbContextFactory(_database.Options), new StubPromptLoader(), new PromptTemplateEngine());
+        _manager = new ProjectWorkflowProfileManager(new TestDbContextFactory(_database.Options), new StubPromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
     }
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
@@ -45,10 +46,11 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
     [Fact]
     public async Task CreateTemplate_ParsesYamlAndStores()
     {
-        var info = await _manager.CreateTemplateAsync("proj-create", MinimalYaml("my-template"));
+        var result = await _manager.CreateTemplateAsync("proj-create", MinimalYaml("my-template"));
 
-        Assert.Equal("proj-create", info.ProjectId);
-        Assert.Equal("my-template", info.TemplateId);
+        Assert.Equal("proj-create", result.Template.ProjectId);
+        Assert.Equal("my-template", result.Template.TemplateId);
+        Assert.Equal(ActionValidationStatus.Skipped, result.ActionValidation);
 
         var profile = await _manager.GetTemplateProfileAsync("proj-create", "my-template");
         Assert.NotNull(profile);
@@ -153,8 +155,17 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
     [Fact]
     public async Task CreateTemplate_InlineAgentGuardReturnsActionError()
     {
+        var catalog = new ActionCatalog(
+            [new ActionCatalogEntry("mohist/opencode", [], [], [])],
+            []);
+        var managerWithCatalog = new ProjectWorkflowProfileManager(
+            new TestDbContextFactory(_database.Options),
+            new StubPromptLoader(),
+            new PromptTemplateEngine(),
+            new StubActionCatalogSource(catalog));
+
         var exception = await Assert.ThrowsAsync<WorkflowDefinitionValidationException>(() =>
-            _manager.CreateTemplateAsync("proj-action-error", """
+            managerWithCatalog.CreateTemplateAsync("proj-action-error", """
                 stages:
                   - stage: build
                     tasks:

@@ -19,3 +19,19 @@ public sealed record ProjectTemplateInfo(
     DateTimeOffset UpdatedAt,
     string? Name = null,
     string? Description = null);
+
+/// <summary>
+/// Outcome of the save-time Action-contract validation step.
+/// Performed: a Runner Action catalog was available and the save ran the
+/// catalog check. Skipped: no Runner has reported a catalog yet and the
+/// save proceeded with Definition-only validation.
+/// </summary>
+public enum ActionValidationStatus
+{
+    Performed,
+    Skipped,
+}
+
+public sealed record ProjectTemplateSaveResult(
+    ProjectTemplateInfo Template,
+    ActionValidationStatus ActionValidation);

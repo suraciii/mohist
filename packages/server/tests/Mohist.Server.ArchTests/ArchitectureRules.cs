@@ -479,6 +479,20 @@ public class ArchitectureRules
         ("Runner", "Sessions"),
         ("Runner", "Workflow"),
         ("Workflow", "Sessions"),
+        // issue-446 T-002: the save-time Action-contract validator
+        // (ActionContractValidator) reads the Runner-reported catalog
+        // records (ActionCatalog, ActionCatalogEntry,
+        // ActionCatalogTombstone, ActionCatalogInput) directly so the
+        // validator and the catalog share one type — design D1. The
+        // dependency is data-only: the records are pure serializable
+        // models declared alongside the Runner grain types. Treating
+        // this as a full Runner coupling would be a misread; the
+        // validator never calls into Orleans. Allowed here so issue-446
+        // can ship the catalog-backed Profile save-time check without
+        // a record-relocation refactor. Long-term fix, if the rule
+        // ever tightens, is to lift the catalog records into a shared
+        // contracts namespace.
+        ("Workflow", "Runner"),
         // KNOWN DEBT — Project→Workflow is a config-data placement issue, not an
         // engine dependency: ProjectGrain/ProjectQuerier reference only the
         // ProjectWorkflowProfile config type (template selection + variables),

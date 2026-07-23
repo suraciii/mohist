@@ -30,5 +30,7 @@
   "Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowRetrySpecs.cs": 25955,
   "Mohist.Server.SpecTests/Support/DispatcherFixture.cs": 33846,
   "Mohist.Server.UnitTests/Foundation/VariableBundleTests.cs": 27944,
-  "Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs": 41204
+  "Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs": 41204,
+  "Mohist.Server.UnitTests/Workflow/Services/ActionContractValidatorTests.cs": 29000,
+  "Mohist.Server.SpecTests/Specs/Workflow/ProfileActionValidationSpecs.cs": 26000
 }

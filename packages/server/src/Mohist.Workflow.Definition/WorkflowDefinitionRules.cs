@@ -36,10 +36,6 @@ internal sealed class TaskPositionMap
 
 internal static class WorkflowDefinitionRules
 {
-    private static readonly Regex TemplateTokenRegex = new(
-        @"\$\{\{\s*(?<path>[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}",
-        RegexOptions.Compiled);
-
     public static void Apply(
         WorkflowDefinition definition,
         List<ValidationError> errors,
@@ -739,7 +735,7 @@ internal static class WorkflowDefinitionRules
         List<ValidationError> errors,
         HashSet<string>? emittedPaths)
     {
-        var matches = TemplateTokenRegex.Matches(text);
+        var matches = TemplateTokens.TokenRegex.Matches(text);
         if (matches.Count == 0) return;
 
         foreach (Match match in matches)
