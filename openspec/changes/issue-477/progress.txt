@@ -19,3 +19,11 @@
 - Slash-capable Profile IDs use terminal catch-all server routes and `Uri.EscapeDataString` in CLI paths.
 - Legacy template/default-template routes and commands, Issue template configuration, and the old `run validate` location were removed. Existing tests asserting those contracts were removed or replaced with T-002 surface coverage.
 - CLI verification: full `Mohist.Cli.Tests` passed 1340/1340; CLI and server production/test projects build without warnings. The full server suite still has 20 failures from pre-T-002 tests that assert removed global/template APIs and disabled-profile behavior; `WorkflowProfileCollectionSpecs` passes via the direct xUnit class runner.
+
+## T-003 Notes
+
+- `WorkflowRun.WorkflowProfileId` is persisted in the run state. Startup selects the Issue explicit ID or Project `DefaultWorkflowProfileId`, creates the immutable Stage topology from that Definition, saves the run, then binds the ID through `WorkflowProfileReferenceCoordinator`.
+- Active runtime Definition reads use only the persisted Run Profile ID. Stage initialization and sequential lock lookup pass that ID explicitly; no later Issue or Project selection is consulted. New or reordered Definition Stages therefore do not alter an active Run topology.
+- A missing current Definition or future Stage records `DefinitionResolutionFailed` and persists the Run as `Failed` before returning the actionable resolution error. Terminal run persistence clears only `WorkflowProfileIdKey` and retains public state/history.
+- Existing grain fixtures still seed legacy template/default columns, so startup keeps a narrow migration/test fallback only when no collection selection exists; once a Run has a bound collection Profile ID, resolution is strict and never falls back.
+- Verification: server production/test build passed; all 1320 server unit tests passed; StageInitEagerSpecs passed 6/6; StageLockSpecs passed 4/4. Full SpecTests currently has 243 failures from the pre-T-002 legacy API/template contract suite.

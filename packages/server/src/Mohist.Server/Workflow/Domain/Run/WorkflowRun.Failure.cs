@@ -10,6 +10,18 @@ public static partial class WorkflowRunExtensions
 
     extension(WorkflowRun run)
     {
+        public IReadOnlyList<WorkflowEvent> FailDefinitionResolution(string message)
+        {
+            var current = run.CurrentStage();
+            current.Failure = new FailureDetails(
+                FailureReason.DefinitionResolutionFailed,
+                current.Id,
+                Message: message);
+            run.Failure = current.Failure;
+            run.Status = WorkflowRunStatus.Failed;
+            return [new WorkflowRunFailed(message)];
+        }
+
         public FailureDetails? EffectiveFailure()
         {
             if (run.Failure is not null) return run.Failure;

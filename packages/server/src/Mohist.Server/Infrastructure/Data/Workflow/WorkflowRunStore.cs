@@ -141,6 +141,8 @@ public class WorkflowRunStore : IWorkflowRunStore
 
         entity.EpicNumber = epicNumber;
         entity.State = JSON.Serialize(run);
+        if (run.Status.IsTerminal())
+            entity.WorkflowProfileIdKey = null;
         var entry = db.Entry(entity);
         entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
     }
