@@ -258,10 +258,14 @@ public static class WorkflowProfileDataMigrator
             countsMutable.ProjectDefaultsSeeded++;
         }
 
-        // 3. Rewrite ProjectWorkflowProfiles.DefaultTemplateId -> DefaultWorkflowProfileId.
+        // 3. Rewrite the legacy default only when the new default has not been
+        // populated. The legacy column remains unchanged and is therefore not
+        // a safe source after the first migration.
         foreach (var profile in projectProfileRows)
         {
-            var existing = profile.DefaultTemplateId;
+            var existing = !string.IsNullOrWhiteSpace(profile.DefaultWorkflowProfileId)
+                ? profile.DefaultWorkflowProfileId
+                : profile.DefaultTemplateId;
             string? resolvedDefault = null;
             if (!string.IsNullOrWhiteSpace(existing))
             {
@@ -315,7 +319,7 @@ public static class WorkflowProfileDataMigrator
             var renamed = renames.TryGetValue(selection, out var next) ? next : selection;
             run.State = RewriteNestedProperty(run.State, "metadata", "annotations", "workflowProfileId", renamed) ?? run.State;
             var status = ReadRunStatus(run.State);
-            var isTerminal = status is "done" or "failed" or "cancelled";
+            var isTerminal = status is "completed" or "stopped";
             if (isTerminal)
             {
                 run.WorkflowProfileIdKey = null;

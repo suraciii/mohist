@@ -479,6 +479,9 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         var (projectId, _, _) = await SeedProjectAsync();
         await using (var db = new MohistDbContext(_database.Options))
         {
+            var legacyProjectProfile = await db.ProjectWorkflowProfiles.SingleAsync(r => r.ProjectId == projectId);
+            legacyProjectProfile.DefaultTemplateId = "mohist/local";
+            legacyProjectProfile.DefaultWorkflowProfileId = null;
             db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = projectId,
@@ -497,6 +500,9 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         var result = await WorkflowProfileDataMigrator.MigrateAsync(secondDb, _timeProvider);
 
         Assert.Empty(result.Diagnostics);
+        var projectProfile = await secondDb.ProjectWorkflowProfiles.SingleAsync(r => r.ProjectId == projectId);
+        Assert.StartsWith("legacy-reserved/", projectProfile.DefaultWorkflowProfileId);
+        Assert.Equal(projectProfile.DefaultWorkflowProfileId, projectProfile.DefaultWorkflowProfileIdKey);
         var entries = await _provider.ListAsync(projectId);
         Assert.Single(entries, e => !e.IsBuiltIn && e.ProfileId.StartsWith("legacy-reserved/", StringComparison.Ordinal));
     }
@@ -540,11 +546,20 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
             });
             db.WorkflowRuns.Add(new WorkflowRunRow
             {
-                WorkflowRunId = "wr_done",
-                State = "{\"status\":\"done\"}",
-                Status = "done",
+                WorkflowRunId = "wr_completed",
+                State = "{\"status\":\"completed\"}",
+                Status = "completed",
                 MetadataProjectId = projectId,
                 IssueNumber = 2,
+                WorkflowProfileIdKey = "legacy-custom",
+            });
+            db.WorkflowRuns.Add(new WorkflowRunRow
+            {
+                WorkflowRunId = "wr_stopped",
+                State = "{\"status\":\"stopped\"}",
+                Status = "stopped",
+                MetadataProjectId = projectId,
+                IssueNumber = 3,
                 WorkflowProfileIdKey = "legacy-custom",
             });
             await db.SaveChangesAsync();
@@ -554,9 +569,11 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         await WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider);
 
         var active = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_active");
-        var done = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_done");
+        var completed = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_completed");
+        var stopped = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_stopped");
         Assert.Equal("legacy-custom", active.WorkflowProfileIdKey);
-        Assert.Null(done.WorkflowProfileIdKey);
+        Assert.Null(completed.WorkflowProfileIdKey);
+        Assert.Null(stopped.WorkflowProfileIdKey);
     }
 
     private async Task<(string ProjectId, int Dummy, bool Initialized)> SeedProjectAsync(string projectId = "proj-1")
