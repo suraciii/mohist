@@ -1,0 +1,98 @@
+{
+  "project": "mohist-local",
+  "description": "Allow Workflow tasks and checks to execute a project Agent through a durable server-resolved runtime Action snapshot.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add the virtual Agent Action contract for tasks and checks",
+      "spec": "specs/workflow-agent-action/spec.md#agent-definition-reference-action",
+      "description": "Add the server-owned `mohist/agent` manifest with closed `name`, `prompt`, optional `session`, and optional `timeout` inputs to profile catalog validation. Apply the same contract to task and check definitions without querying current Agent state during profile save.",
+      "acceptanceCriteria": [
+        "Profiles accept valid mohist/agent tasks and checks before the referenced Agent exists",
+        "Missing name or prompt and unknown inputs fail profile validation for tasks and checks",
+        "Template prompt values remain valid at profile-save time"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server virtual Action manifest and profile validation specs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The Runner must not register mohist/agent."
+    },
+    {
+      "id": "T-002",
+      "title": "Resolve Agent references and persist task/check dispatch snapshots",
+      "spec": "specs/workflow-agent-action/spec.md#dispatch-time-agent-snapshot",
+      "description": "Extract an active-only name-or-id Agent execution snapshot resolver. Extend Workflow active-work state and grain commands to compare-and-store a complete transformed WorkDispatch. Transform task uses and each checks[*] uses before storage; poll redelivery reads the stored envelope and retry/new checks work resolves again.",
+      "acceptanceCriteria": [
+        "Task and check dispatches resolve an active Agent to concrete mohist/opencode or mohist/pi envelopes with raw prompt retained",
+        "After Agent edit plus server restart or grain activation, redelivery returns the original stored envelope",
+        "A task retry and a newly-created checks attempt resolve the current Agent definition",
+        "No Agent entity, AgentJob, or direct AgentSession lifecycle enters Workflow"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Agent execution snapshot resolver, durable Workflow active-work dispatch snapshot, translator and poll reconciliation specs",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Store the full wire envelope, not only Agent identity or config."
+    },
+    {
+      "id": "T-003",
+      "title": "Carry Agent instructions through both runtime Actions",
+      "spec": "specs/workflow-agent-action/spec.md#agent-execution-input-composition",
+      "description": "Extend mohist/opencode and mohist/pi to accept only options.instructions, options.model, and options.variant. Validate the closed shape, compose instructions before rendered prompt, forward model/variant and input/default timeout to their runtime turn requests, and leave inline Action behavior unchanged when instructions are absent.",
+      "acceptanceCriteria": [
+        "OpenCode and Pi receive instructions before the rendered workflow prompt, with the prompt retained as the current goal",
+        "Both Actions reject unknown or malformed options and forward model, variant, and supplied timeout",
+        "Absent timeout retains the existing one-hour Action default and runtime timeout failures retain their current error codes",
+        "Fake-runtime tests cover both backends without Agent lookup"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner Action/runtime option contracts and focused tests for OpenCode and Pi",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "The server sends `{ prompt, session?, timeout?, options }`; no arbitrary AgentConfig reaches Runner."
+    },
+    {
+      "id": "T-004",
+      "title": "Preserve structured Agent resolution failures in Workflow reports",
+      "spec": "specs/workflow-agent-action/spec.md#missing-agent-dispatch-failure",
+      "description": "Make dispatch rejection carry ExecutionError through DispatchService and IWorkflowGrain. Failed task dispatch stores agent_not_found on TaskRun. Failed checks dispatch records agent_not_found on the unresolved named check and check-not-run on remaining checks, then uses normal Workflow recovery and advancement decisions.",
+      "acceptanceCriteria": [
+        "Missing or archived task Agent produces TaskRun.Error.code equal to agent_not_found and recovery can match failure.error.code",
+        "Missing or archived check Agent produces a named agent_not_found CheckResult and check-not-run results for remaining batch entries",
+        "Neither failure path offers Runner work or creates an AgentSession or AgentJob"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Structured Workflow dispatch rejection path with task/check specs",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Workflow remains the decision maker; this task only preserves Runner-independent facts."
+    },
+    {
+      "id": "T-005",
+      "title": "Verify the complete Workflow-owned Agent Action behavior",
+      "spec": "specs/workflow-agent-action/spec.md#workflow-owned-execution-lifecycle",
+      "description": "Add focused server and runner coverage for task/check transformation, snapshot redelivery and retry, runtime input composition, structured resolution failures, Workflow-origin session addressing, and unchanged inline Action behavior. Run affected server and runner typecheck/test suites.",
+      "acceptanceCriteria": [
+        "Specs cover both OpenCode and Pi task paths and an Agent-backed check path",
+        "Specs prove no AgentJob is created and named Workflow sessions retain their existing namespace",
+        "npm test and npm run typecheck -w packages/runner pass without real runtime, network, filesystem, or wall-clock dependencies"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "VERIFY",
+      "output": "Focused server/runner regression coverage and passing verification commands",
+      "dependsOn": ["T-003", "T-004"],
+      "passes": false,
+      "notes": "Use existing fake runtime hosts and injected time only."
+    }
+  ]
+}
