@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Otel.OtlpJson;
@@ -30,16 +31,32 @@ public sealed class TraceIngester
 {
     private readonly OtelDb _db;
     private readonly ILogger<TraceIngester> _logger;
+    private readonly RuntimeObservability? _runtime;
+    private readonly IIngestProtectionDecision _protection;
+    private readonly Action? _transactionStarted;
 
     /// <summary>OTLP-defined service.name attribute key.</summary>
     public const string ServiceNameAttributeKey = "service.name";
 
     public TraceIngester(OtelDb db, ILogger<TraceIngester> logger)
+        : this(db, logger, null, null, null)
+    {
+    }
+
+    public TraceIngester(
+        OtelDb db,
+        ILogger<TraceIngester> logger,
+        RuntimeObservability? runtime,
+        IIngestProtectionDecision? protection = null,
+        Action? transactionStarted = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(logger);
         _db = db;
         _logger = logger;
+        _runtime = runtime;
+        _protection = protection ?? new AcceptAllIngestProtectionDecision();
+        _transactionStarted = transactionStarted;
     }
 
     /// <summary>
@@ -62,72 +79,95 @@ public sealed class TraceIngester
 
     internal int Ingest(OtlpTraceRequest? request, CancellationToken ct = default)
     {
-        if (request?.ResourceSpans is null || request.ResourceSpans.Count == 0)
-            return 0;
+        var outcome = IngestBatch(request, ct);
+        if (outcome.IsRetryable)
+            throw new IngestStorageException(outcome.WriteResult.Reason);
+        return checked((int)outcome.Saved);
+    }
+
+    internal IngestOutcome IngestBatch(OtlpTraceRequest? request, CancellationToken ct = default)
+    {
+        var prepared = Prepare(request);
+        if (prepared.ParsedSpans.Length == 0)
+        {
+            var empty = IngestOutcomeBuilder.Build(prepared.Classification, IngestWriteResult.NotAttempted());
+            _runtime?.RecordIngest(empty);
+            return empty;
+        }
 
         using var connection = _db.OpenReadWriteConnection();
         using var transaction = connection.BeginTransaction();
-
-        var totalSpans = 0;
-        var droppedSpans = 0;
+        _transactionStarted?.Invoke();
 
         try
         {
-            foreach (var rs in request.ResourceSpans)
+            ct.ThrowIfCancellationRequested();
+            foreach (var item in prepared.ParsedSpans)
             {
-                var resourceAttributes = rs.Resource?.Attributes ?? new List<KeyValue>();
-                var serviceName = ExtractServiceName(resourceAttributes)
-                    ?? "unknown_service";
-
-                var resourceAttributesJson = SerializeKeyValues(resourceAttributes);
-
-                if (rs.ScopeSpans is null)
-                    continue;
-
-                foreach (var scope in rs.ScopeSpans)
-                {
-                    if (scope.Spans is null)
-                        continue;
-
-                    foreach (var span in scope.Spans)
-                    {
-                        ct.ThrowIfCancellationRequested();
-
-                        if (!TryNormalizeSpan(span, out var normalized))
-                        {
-                            droppedSpans++;
-                            _logger.LogDebug(
-                                "Skipping span missing required fields (traceId/spanId/name/start/end).");
-                            continue;
-                        }
-
-                        UpsertSpan(
-                            connection,
-                            transaction,
-                            normalized,
-                            serviceName,
-                            resourceAttributesJson);
-
-                        totalSpans++;
-                    }
-                }
+                ct.ThrowIfCancellationRequested();
+                UpsertSpan(connection, transaction, item.Span, item.ServiceName, item.ResourceAttributesJson);
             }
 
             transaction.Commit();
+            var committed = IngestOutcomeBuilder.Build(prepared.Classification, IngestWriteResult.Committed());
+            _runtime?.RecordIngest(committed);
+            return committed;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             transaction.Rollback();
+            var cancelled = IngestOutcomeBuilder.Build(prepared.Classification, IngestWriteResult.Cancelled());
+            _runtime?.RecordIngest(cancelled);
             throw;
         }
+        catch (Exception ex)
+        {
+            transaction.Rollback();
+            var rolledBack = IngestOutcomeBuilder.Build(
+                prepared.Classification,
+                IngestWriteResult.RolledBack(ex.Message));
+            _runtime?.RecordIngest(rolledBack);
+            return rolledBack;
+        }
+    }
 
-        _logger.LogDebug(
-            "Ingested {SpanCount} span(s), dropped {DroppedSpanCount} malformed span(s), across {ResourceCount} resource(s).",
-            totalSpans,
-            droppedSpans,
-            request.ResourceSpans.Count);
+    public PreparedIngestBatch Prepare(OtlpTraceRequest? request)
+    {
+        if (request?.ResourceSpans is null || request.ResourceSpans.Count == 0)
+            return new PreparedIngestBatch(ImmutableArray<PreparedIngestSpan>.Empty, 0, 0, 0);
 
-        return totalSpans;
+        var parsed = new List<PreparedIngestSpan>();
+        long rejected = 0;
+        long malformed = 0;
+        foreach (var rs in request.ResourceSpans)
+        {
+            var resourceAttributes = rs.Resource?.Attributes ?? new List<KeyValue>();
+            var serviceName = ExtractServiceName(resourceAttributes) ?? "unknown_service";
+            var resourceAttributesJson = SerializeKeyValues(resourceAttributes);
+            if (rs.ScopeSpans is null)
+                continue;
+            foreach (var scope in rs.ScopeSpans)
+            {
+                if (scope.Spans is null)
+                    continue;
+                foreach (var span in scope.Spans)
+                {
+                    if (!TryNormalizeSpan(span, out var normalized))
+                    {
+                        malformed++;
+                        _logger.LogDebug("Skipping span missing required fields (traceId/spanId/name/start/end).");
+                        continue;
+                    }
+
+                    var prepared = new PreparedIngestSpan(normalized, serviceName, resourceAttributesJson);
+                    if (_protection.Decide(prepared).Accepted)
+                        parsed.Add(prepared);
+                    else
+                        rejected++;
+                }
+            }
+        }
+        return new PreparedIngestBatch(parsed.ToImmutableArray(), rejected, malformed, 0);
     }
 
     private static string? ExtractServiceName(IReadOnlyList<KeyValue> attributes)
@@ -143,7 +183,7 @@ public sealed class TraceIngester
         return null;
     }
 
-    private static bool TryNormalizeSpan(Span span, out NormalizedSpan normalized)
+    private static bool TryNormalizeSpan(Span span, out NormalizedIngestSpan normalized)
     {
         normalized = default;
 
@@ -156,7 +196,7 @@ public sealed class TraceIngester
             || !TryConvertUnixNanoToUtcIso(span.EndTimeUnixNano, out var endIso))
             return false;
 
-        normalized = new NormalizedSpan(
+        normalized = new NormalizedIngestSpan(
             TraceId: span.TraceId,
             SpanId: span.SpanId,
             ParentSpanId: string.IsNullOrEmpty(span.ParentSpanId) ? null : span.ParentSpanId,
@@ -173,7 +213,7 @@ public sealed class TraceIngester
     private void UpsertSpan(
         Microsoft.Data.Sqlite.SqliteConnection connection,
         Microsoft.Data.Sqlite.SqliteTransaction transaction,
-        NormalizedSpan span,
+        NormalizedIngestSpan span,
         string serviceName,
         string? resourceAttributesJson)
     {
@@ -333,15 +373,12 @@ public sealed class TraceIngester
         };
     }
 
-    private readonly record struct NormalizedSpan(
-        string TraceId,
-        string SpanId,
-        string? ParentSpanId,
-        string Name,
-        int Kind,
-        string StartTime,
-        string EndTime,
-        int StatusCode,
-        string? StatusMessage,
-        string? AttributesJson);
+}
+
+public sealed class IngestStorageException : Exception
+{
+    public IngestStorageException(string? reason)
+        : base(reason ?? "OTLP storage write failed.")
+    {
+    }
 }

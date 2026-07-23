@@ -178,6 +178,8 @@ public static class MohistServiceRegistration
         });
         services.AddSingleton<OtelDb>();
         services.AddSingleton<OtelCollectorStatus>();
+        services.AddSingleton<IIngestProtectionDecision, AcceptAllIngestProtectionDecision>();
+        services.AddSingleton<OtlpTraceResponseWriter>();
         services.AddSingleton<TraceIngester>();
         services.AddSingleton<TraceQuerier>();
         services.AddSingleton<IOtelQueryExecutor>(provider => provider.GetRequiredService<TraceQuerier>());
