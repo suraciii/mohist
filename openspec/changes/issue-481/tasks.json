@@ -51,7 +51,7 @@
       "acceptanceCriteria": [
         "mo event tail and mo event dead-letter list/redeliver resolve and preserve their existing HTTP routes and behavior: tail remains post-subscription NDJSON with server-compiled --match and exit 130 cancellation, while dead-letter keeps limit/filter/id validation, operator credentials, loopback refusal, result reporting, and terminal-text sanitization.",
         "mo events tail, mo events dead-letter list, and mo event list fail as unknown command paths without HTTP; root help advertises singular activity and event but not plural events.",
-        "Leaf help distinguishes persistent Activity history, realtime Event subscription origin, and dead-letter recovery side effects, exposes no shared --mode or --source switch, and Event commands do not gain routing rule CRUD or routing test behavior.",
+        "Leaf help distinguishes bounded Activity evidence with recorded-history/snapshot provenance, realtime Event subscription origin, and dead-letter recovery side effects, exposes no shared --mode or --source switch, and Event commands do not gain routing rule CRUD or routing test behavior.",
         "All affected CLI tests use singular Event invocations and add regressions for plural removal, event list absence, root help, and retained tail/dead-letter safety behavior; docs/cli-reference.md removes the shared-events implementation gap and plural Event examples without changing unrelated issue events or routing payload fields.",
         "dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj passes."
       ],

@@ -19,19 +19,19 @@ The root command surface SHALL expose persistent activity under the singular nou
 - **THEN** the help SHALL advertise the `activity` and `event` groups
 - **AND** the help SHALL NOT advertise the plural `events` group
 
-### Requirement: activity history is reachable only through activity list
+### Requirement: Activity evidence is reachable only through activity list
 
-Persistent activity history SHALL be reachable only through `mo activity list`. There SHALL be no `event list` (or plural `events list`) path that serves Activity history, so a caller cannot mistake persistent history for a realtime event feed.
+The Activity evidence collection, including its persistent recorded history and current snapshots, SHALL be reachable only through `mo activity list`. There SHALL be no `event list` (or plural `events list`) path that serves Activity evidence, so a caller cannot mistake it for a realtime event feed.
 
-#### Scenario: No event list path serves activity history
+#### Scenario: No event list path serves Activity evidence
 
 - **WHEN** a caller attempts `mo event list`
-- **THEN** the command SHALL NOT serve the persistent activity records
-- **AND** persistent activity history SHALL remain reachable only via `mo activity list`
+- **THEN** the command SHALL NOT serve Activity evidence
+- **AND** recorded Activity history and its snapshots SHALL remain reachable only via `mo activity list`
 
 ### Requirement: the three entries carry distinct help with no shared mode flag
 
-`activity list`, `event tail`, and `event dead-letter` SHALL each document their own read semantics in their help: persistent history, realtime origin from subscription establishment, and recovery side-effect respectively. The entries SHALL NOT share a `--mode` or `--source` flag that merges their behaviors.
+`activity list`, `event tail`, and `event dead-letter` SHALL each document their own read semantics in their help: bounded Activity evidence with recorded-history/snapshot provenance, realtime origin from subscription establishment, and recovery side-effect respectively. The entries SHALL NOT share a `--mode` or `--source` flag that merges their behaviors.
 
 #### Scenario: Each entry documents its own semantics
 
