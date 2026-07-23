@@ -66,6 +66,8 @@ await DatabaseInitializer.InitializeAsync(app.Services);
 // 静态资源。详见 OtelPortIsolationMiddleware。
 app.UseOtelPortIsolation();
 app.UseResponseCompression();
+app.UseRouting();
+app.UseRuntimeRequestMetrics();
 
 app.MapMohistApi();
 app.MapMohistWeb();
@@ -127,6 +129,8 @@ static async Task<WebApplication> BuildAlternateApp(string[] args)
     await DatabaseInitializer.InitializeAsync(alt.Services);
     alt.UseResponseCompression();
     alt.UseOtelPortIsolation();
+    alt.UseRouting();
+    alt.UseRuntimeRequestMetrics();
     alt.MapMohistApi();
     alt.MapMohistWeb();
     return alt;

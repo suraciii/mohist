@@ -203,6 +203,7 @@ public sealed class RuntimeObservability : IDisposable
     public RuntimeEpoch Epoch => _epoch;
     public DateTimeOffset Since => _epoch.Since;
     public Meter Meter => _meter;
+    public bool Enabled => _enabled;
 
     public RuntimeRequestFact CompleteRequest(RuntimeRequestFact fact)
     {

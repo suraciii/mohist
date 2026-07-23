@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Hosting;
@@ -91,7 +92,9 @@ public static class MohistServiceRegistration
         services.AddMohistOpenTelemetry(configuration);
 
         services.AddDbContextFactory<MohistDbContext>(options =>
-            options.UseSqlite(connectionString));
+            options.UseSqlite(connectionString)
+                .AddInterceptors(new RequestWorkDbCommandInterceptor()));
+        services.AddTransient<IHttpMessageHandlerBuilderFilter, RequestWorkHttpMessageHandlerBuilderFilter>();
 
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>>(sp => sp.GetRequiredService<IIssueStore>());
         services.AddScoped<IIssueStore, IssueStore>();
