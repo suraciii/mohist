@@ -1,11 +1,5 @@
-# Review Findings
+# Review
 
-## P0: Effective list discards the returned variables
+No remaining problems requiring fixes before merge were found. The clean resource routes, manager write validation, effective list rendering and dynamic `--json` selection, dotted-path traversal rejection, inheritance semantics, and attempt snapshot behavior are covered by the current implementation and tests.
 
-The effective endpoint returns a flat merged object, as shown by `WorkflowQuerier.GetEffectiveVariablesAsync` at `packages/server/src/Mohist.Server/Workflow/Services/WorkflowQuerier.cs:129-132` and the route at `packages/server/src/Mohist.Server/Api/WorkflowRoutes.cs:26-35`. However, `run variable list --effective` sends that response through the scope-local `WorkflowVariablesDescriptor` and `TableShape.WorkflowVariables` in `packages/cli/Mohist.Cli/VariableCommands.cs:105-113`. That renderer expects `data.vars` and `data.stages` (`TableRenderer.IssueTemplates.cs:117-145`), so a real response such as `{ "agent": { "model": "latest" } }` is reported as an empty bundle instead of showing the effective values. The regression test only returns `{}` and asserts the URL, so it does not catch this. Use the run-effective flat-object renderer/descriptor for effective list, while retaining the bundle descriptor for scope-local list, and assert representative returned values in the test. This violates the effective-list requirement in `specs/variable-commands/spec.md:81-91`.
-
-## P0: Dotted writes still overwrite non-object path segments
-
-`VariableKeyPath.TryParse` only rejects empty textual segments (`packages/cli/Mohist.Cli/VariableKeyPath.cs:56-87`); `variable set` then immediately builds and sends the PATCH without reading the current scope (`packages/cli/Mohist.Cli/VariableCommands.cs:274-313`). On the server, `VariableJsonMerge.ApplyObjectPatch` replaces an existing scalar/array whenever the patch descends through it (`packages/server/src/Mohist.Server/Workflow/Domain/VariableJsonMerge.cs:66-74`). Thus, with `{ "vars": { "agent": "literal" } }`, `variable set agent.model new` silently changes `agent` into an object instead of rejecting the path and preserving the original document. The same issue affects nested `unset`. Validate the existing target path before constructing the write, or enforce traversal validation in the manager/merge boundary, and add a regression test for scalar and array intermediate nodes. This is required by the invalid-key-path acceptance criterion and `specs/variable-resources/spec.md:28-42`.
-
-<promise>FAIL</promise>
+<promise>PASS</promise>
