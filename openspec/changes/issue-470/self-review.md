@@ -1,81 +1,82 @@
 # Self-Review - Issue 470
 
-Reviewed the current proposal, all three capability specs, design, and
-nine-task graph against the live issue #470 details and the current Server/CLI
-implementation.
+Reviewed the live issue, proposal, design, all three capability specs, the
+eight-task graph, and the relevant current Server implementation.
 
 ## Verdict
 
-The plan is not ready to build. Product coverage is complete and the task DAG is
-structurally valid, but one task boundary is not independently deliverable and
-three implementation contracts still require an autonomous agent to invent
-important lifecycle or suppression behavior.
+The plan is not ready to build. Its product coverage and task graph are broadly
+sound, but four contracts still leave materially different behavior or an
+unexecutable verification requirement for the build agents to resolve.
 
 ## Findings
 
-### F1 - The status baseline is not independently deliverable (high)
+### F1 - A read-only probe can declare an unverified ingest path healthy (high)
 
-T-003 replaces the production status API and CLI but explicitly leaves enabled
-runtime `storage_unverified` until T-004 (`tasks.json:55,73`). Collector success,
-process publication, and the first real storage sample also belong to T-004.
-After T-003, a normally configured enabled Server therefore cannot reach the
-spec's `healthy` state or provide the required current process values.
+The status spec defines `healthy` as meaning ingestion and storage are usable
+(`specs/otel-runtime-status/spec.md:3`). D5's readiness probe only opens a
+read/write-create connection, executes `PRAGMA schema_version`, and reads file
+lengths (`design.md:112`). D6 then defines enabled with no active source as
+healthy (`design.md:120-126`), and T-003 explicitly requires the first successful
+storage probe to reach healthy (`tasks.json:64`).
 
-This conflicts with the task-generation rule that every task leave its feature
-module usable. Merge T-003 and T-004, or move enough startup publication into
-T-003 that all three states and required fields work in production while T-004
-adds only independently optional recurring behavior.
+A readable existing SQLite database can still be unwritable, so this sequence
+can clear `storage_unverified` and report healthy before the ingest write path
+has ever been established. The plan must choose and specify one coherent
+contract: either verify write readiness without corrupting telemetry, retain an
+unverified source until a real write succeeds, or redefine healthy as "no known
+failure" in the spec and user-facing semantics.
 
-### F2 - Trace feedback suppression has no technical design (high)
+### F2 - Protobuf partial-success and error responses have no wire contract (high)
 
-The runtime spec excludes both runtime metrics and existing traces for OTel
-ingest, query, status, and maintenance
-(`specs/runtime-observability-metrics/spec.md:129-142`). Design D2 only rejects a
-new metrics exporter, and D3 only prevents creation of the new request-counting
-scope (`design.md:59-88`). Neither explains how existing ASP.NET Core, EF Core,
-Orleans, and HttpClient instrumentation is suppressed for those operations.
+T-002 requires JSON and protobuf ingestion to expose the same outcome categories
+and requires partial-success responses for rejected or dropped spans
+(`tasks.json:37-38`). The design defines classification and counters but never
+defines response content negotiation or the protobuf
+`ExportTraceServiceResponse` encoding (`design.md:53`).
 
-T-006 consequently asks an AFK implementer to invent an "explicit OTel
-execution-suppression scope" and integrate it across four instrumentation
-families (`tasks.json:124-145`). The design must name the suppression primitive,
-where it begins/ends for HTTP and background storage work, and how existing
-ASP.NET/exporter filters compose with it. Tests alone are not an implementation
-boundary.
+This is not supplied by the current implementation: protobuf requests are
+parsed manually, every success is returned as JSON, and only `JsonException` is
+mapped to a whole-body 400 (`packages/server/src/Mohist.Server/Api/OtlpRoutes.cs:85-108`;
+`packages/server/src/Mohist.Server/Otel/OtlpProtobuf/OtlpProtobufTraceParser.cs:7-29`).
+The plan must specify content-type-specific success/partial-success bodies and
+malformed-protobuf error mapping so an AFK task does not invent an OTLP protocol
+contract.
 
-### F3 - Bind-fallback lifecycle tests lack an injectable host boundary (medium)
+### F3 - The fallback production-composition test is incompatible with test constraints (medium)
 
-Fallback currently lives in top-level `Program.cs` around concrete
-`WebApplication.StartAsync` and alternate construction. D7 and T-008 require
-deterministic start/stop/dispose/failure tests without real ports
-(`design.md:132-140`; `tasks.json:172-192`) but identify no host factory or
-lifecycle interface through which tests trigger a classified bind failure and
-observe both host graphs.
+D7 correctly introduces fake hosts for lifecycle tests, but also assigns a
+production-factory composition spec responsibility for proving one surviving
+silo/sampler and exactly one storage probe (`design.md:136-142`; `tasks.json:160`).
+The production factory configures Kestrel listeners and Orleans, while repository
+tests may not use real sockets or system services (`design/testing.md:45-55`).
+A non-starting composition test can verify registrations and listener intent,
+but cannot prove the stated runtime facts; fake-host tests cannot prove the
+production graph.
 
-Define the narrow injectable boundary that owns primary/alternate construction,
-start, stop, dispose, and bind-failure classification. Otherwise T-008 combines
-a high-impact startup refactor with an unspecified test architecture.
+Split the assertions between the fake lifecycle boundary and static production
+composition, or define an in-memory host/silo seam through which the production
+factory can be started without real network resources.
 
-### F4 - Sampler failure invalidation exists only in task prose (medium)
+### F4 - Request duration lacks an injectable time contract (medium)
 
-The specs require failed process/storage samples to expose null rather than
-stale values. T-004 correctly requires invalidation and growth-baseline reset
-(`tasks.json:81-87`), but D5 describes publishing independent failures without
-stating that `PublishProcess(failure)` clears all cached process fields or that
-`PublishStorage(failure)` clears usage, growth, window, and the growth baseline
-(`design.md:102-114`). D6 discusses source activation only.
+The metric catalog and route ranking require request duration, but D3 specifies
+only scope creation and atomic closure (`design.md:71-86`), and T-004 does not
+state how elapsed time is measured (`tasks.json:79-89`). The repository requires
+new time behavior to use injected `TimeProvider` and deterministic tests
+(`design/testing.md:59-68`).
 
-Make atomic cache invalidation and recovery-baseline behavior part of the design
-contract so the task is implementing an agreed model rather than defining it.
+Specify that middleware captures and computes elapsed duration through the
+injected `TimeProvider` timestamp APIs, including exceptional and cancelled
+responses, and lock that behavior with fake-time tests.
 
 ## Coverage And Structure
 
 - Proposal capabilities and spec directories match.
-- The specs contain 16 requirements and 52 correctly formed scenarios.
-- `tasks.json` contains nine AFK/WRITE tasks with `passes=false`; all anchors
-  resolve and every dependency points to a lower priority in an acyclic graph.
-- The plan otherwise covers the live issue's tri-state status, bounded route
-  summary, telemetry outcomes, low-cardinality catalog, agent amplification,
-  transition logs, no-scan status, core-health independence, and non-persistent
-  diagnostics.
+- The eight task dependencies are resolved and acyclic.
+- The plan otherwise covers the issue's tri-state status, bounded route summary,
+  process and storage pressure, telemetry outcomes, low-cardinality metric
+  catalog, agent-path amplification, transition-only logs, self-observation
+  exclusion, history-independent status cost, and core-health independence.
 
 <promise>FAIL</promise>
