@@ -80,20 +80,21 @@
       "id": "T-004",
       "title": "Install request-local work accounting",
       "spec": "specs/runtime-observability-metrics/spec.md#requirement-runtime-signals-are-available-through-a-standard-meter-and-a-local-summary",
-      "description": "Deliver RequestWorkScope, middleware, and EF/Orleans/HttpClient counting adapters as an independently usable request-accounting module. Keep agent response scopes active while OTel is off, but invoke T-001 Meter publication only while enabled.",
+      "description": "Deliver RequestWorkScope, TimeProvider-driven middleware, and EF/Orleans/HttpClient counting adapters as an independently usable request-accounting module. Keep agent response scopes active while OTel is off, but invoke T-001 Meter publication only while enabled.",
       "acceptanceCriteria": [
         "Middleware creates scope exactly when OTel is enabled outside /otel/v1 and /otel/api, or for canonical/compatibility agent status/activity; CompleteRequest runs only enabled.",
+        "Middleware injects TimeProvider, brackets the awaited endpoint delegate with GetTimestamp/GetElapsedTime, and closes/publishes once in finally for normal, exceptional and cancelled completion without replacing the original exception; unavailable status normalizes to 0.",
         "RequestWorkScope provides additive database/downstream and agent-path APIs; Snapshot is non-terminal and CloseAndSnapshot is linearizable with post-close no-op increments.",
         "Business EF commands, caller-side Orleans invocations and physical HTTP sends/retries count once; incoming Orleans turns clear/restore scope and an in-process chain proves no transitive leakage.",
         "The outermost HTTP builder filter invokes remaining filters first and appends counting last outside PrimaryHandler; retry-order tests prove one count per physical attempt.",
         "The EF interceptor is installed in MohistServiceRegistration, MohistIntegrationFixture and GrainTestConfig only; dedicated tests construct options explicitly and unrelated factories remain unchanged.",
         "OTel endpoints create no request scope, direct otel.db is excluded, and off agent scopes retain local counters but emit no Meter/route observation.",
-        "Adapter, parallel, close, snapshot, Orleans-chain, retry, normalization and off-state tests pass, followed by npm test."
+        "FakeTimeProvider tests advance deterministic duration for success, exception and cancellation without wall-clock waits or tolerance assertions; adapter, parallel, close, snapshot, Orleans-chain, retry, normalization and off-state tests pass, followed by npm test."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "RequestWorkScope and middleware, EF/Orleans/HTTP adapters, named composition-root wiring and deterministic accounting tests.",
+      "output": "RequestWorkScope and TimeProvider-driven middleware, EF/Orleans/HTTP adapters, named composition-root wiring and deterministic accounting/duration tests.",
       "dependsOn": [
         "T-001"
       ],

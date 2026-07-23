@@ -76,7 +76,7 @@ Alternative considered: export metrics through the current OTLP endpoint. Reject
 
 ### D3. One request-local scope counts work at infrastructure boundaries
 
-Install `RuntimeRequestMetricsMiddleware` after routing. It creates a scope when `(OTel enabled AND endpoint is outside /otel/v1 and /otel/api) OR endpoint is a canonical/compatibility agent status/activity route`. It clears the ambient slot in `finally`. At response completion, `CloseAndSnapshot()` atomically closes the scope; increments linearized before close are included and later increments no-op. `CompleteRequest` runs once only when OTel is enabled.
+Install `RuntimeRequestMetricsMiddleware` after routing and inject `TimeProvider`. It creates a scope when `(OTel enabled AND endpoint is outside /otel/v1 and /otel/api) OR endpoint is a canonical/compatibility agent status/activity route`. Immediately before invoking the endpoint delegate it captures `startedTimestamp = TimeProvider.GetTimestamp()`. In `finally`, including when the delegate throws or request cancellation surfaces, it captures a second timestamp and computes duration with `TimeProvider.GetElapsedTime(startedTimestamp, completedTimestamp).TotalMilliseconds`; no wall-clock API or stopwatch is used. The same `finally` clears the ambient slot and calls `CloseAndSnapshot()` exactly once, so increments linearized before close are included and later increments no-op. When an exceptional or cancelled delegate has not produced a stable HTTP status, normalization uses status `0`; recording never handles or replaces the original exception. `CompleteRequest` runs once only when OTel is enabled. Production composition registers `TimeProvider.System`, and middleware tests replace it with `FakeTimeProvider`.
 
 `RequestWorkScope` has lock-protected additive database/downstream counters plus optional agent-path state. `SetAgentPath` succeeds once with `agent.status` or `agent.activity`; `AddCandidates`, `AddProcessed`, and `AddTranscriptRecords` accept non-negative deltas. `Snapshot()` is non-terminal so an agent handler can read all five values after awaited assembly; `CloseAndSnapshot()` is terminal. When enabled, the final path values are also published once through `RecordAgentPath`.
 
@@ -91,7 +91,7 @@ The HTTP builder filter is registered outermost, invokes the remaining filter ch
 
 Introduce `IBackgroundTaskLauncher` for the two current fire-and-forget sites, `SystemUpdateService` and `BackgroundHermesIssueNotificationDispatcher`. Production temporarily clears only the request-scope ambient slot while queuing `Task.Run`, then restores the caller slot. Its fake captures callbacks and exposes awaitable started/completed signals. Tests separately prove scope suppression, post-close immutability, and both services' use of the launcher.
 
-Alternative considered: reconstruct counts from child Spans. Rejected because sampling can omit Activities, completion lags the response, and a second listener would duplicate existing tracing.
+Alternative considered: reconstruct counts and duration from child Spans. Rejected because sampling can omit Activities, completion lags the response, and a second listener would duplicate existing tracing.
 
 Alternative considered: add counters manually to every service. Rejected because new EF, grain, or HTTP calls would silently escape accounting.
 

@@ -8,4 +8,5 @@ Issue 470 current plan repair
 - [completed] Current review F1: metadata readability no longer establishes ingestion health; `storage_unverified` remains owned by `storage_write` until a real production write transaction commits.
 - [completed] Current review F2: one content-type-aware response writer now fixes JSON/protobuf full success, partial success, malformed-body and retryable-failure wire contracts.
 - [completed] Current review F3: fake lifecycle tests own runtime host/probe facts; non-starting production composition owns only immutable-plan and service-registration facts.
-- [in progress] Current review F4: injected request-duration timing still requires plan updates.
+- [completed] Current review F4: request duration brackets the awaited endpoint with injected TimeProvider timestamps and is deterministically covered for success, exception and cancellation.
+- [in progress] Final consistency, DAG/anchor, JSON and untouched-self-review verification remain.

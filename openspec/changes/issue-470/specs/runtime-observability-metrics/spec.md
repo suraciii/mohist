@@ -1,6 +1,6 @@
 ### Requirement: Runtime signals are available through a standard Meter and a local summary
 
-Mohist SHALL emit runtime observability signals through a standard .NET `Meter` and SHALL update an in-process summary from the same observations. The signals SHALL cover stable-route request count and latency, database-call and downstream-call count, current process CPU, working set and GC heap pressure, telemetry received, saved, rejected and dropped, and observability storage usage and growth. A request observation SHALL close atomically at response completion; work that executes later in a detached background context MUST NOT mutate that completed request. Reading the local summary SHALL NOT depend on an external metrics backend or on exporting the local metrics to the built-in collector.
+Mohist SHALL emit runtime observability signals through a standard .NET `Meter` and SHALL update an in-process summary from the same observations. The signals SHALL cover stable-route request count and latency, database-call and downstream-call count, current process CPU, working set and GC heap pressure, telemetry received, saved, rejected and dropped, and observability storage usage and growth. Request duration SHALL be the elapsed time between injected `TimeProvider` monotonic timestamps captured immediately before and after the awaited endpoint delegate. A request observation SHALL close atomically in `finally`, including exceptional and cancelled completion; work that executes later in a detached background context MUST NOT mutate that completed request. If exceptional or cancelled completion has no stable HTTP response status, its normalized status SHALL be `0`. Measurement MUST NOT swallow or replace the endpoint exception. Reading the local summary SHALL NOT depend on an external metrics backend or on exporting the local metrics to the built-in collector.
 
 #### Scenario: A request updates both observation surfaces
 
@@ -19,6 +19,14 @@ Mohist SHALL emit runtime observability signals through a standard .NET `Meter` 
 - **WHEN** a request launches background work that executes after the response-completion boundary
 - **THEN** the completed route observation SHALL remain unchanged by that later work
 - **AND** the background execution SHALL NOT retain the request's ambient work scope
+
+#### Scenario: A request exits exceptionally
+
+- **WHEN** an instrumented endpoint advances injected time and then exits by exception or cancellation
+- **THEN** the route observation SHALL record the injected elapsed duration and close exactly once
+- **AND** SHALL use status `0` when no stable response status exists
+- **AND** SHALL propagate the original exception or cancellation unchanged
+- **AND** verification SHALL advance fake time without wall-clock waits or elapsed-time tolerances
 
 ### Requirement: Runtime metric catalog is fixed
 
