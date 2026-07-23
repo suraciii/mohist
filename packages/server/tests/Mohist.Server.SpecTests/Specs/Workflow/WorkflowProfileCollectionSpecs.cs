@@ -474,6 +474,34 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Migrate_ReservedId_IsIdempotentAfterTheFirstRun()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = projectId,
+                TemplateId = "mohist/local",
+                Template = LegacySemanticProfile(),
+                CreatedAt = _timeProvider.GetUtcNow(),
+                UpdatedAt = _timeProvider.GetUtcNow(),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await using (var firstDb = new MohistDbContext(_database.Options))
+            await WorkflowProfileDataMigrator.MigrateAsync(firstDb, _timeProvider);
+
+        await using var secondDb = new MohistDbContext(_database.Options);
+        var result = await WorkflowProfileDataMigrator.MigrateAsync(secondDb, _timeProvider);
+
+        Assert.Empty(result.Diagnostics);
+        var entries = await _provider.ListAsync(projectId);
+        Assert.Single(entries, e => !e.IsBuiltIn && e.ProfileId.StartsWith("legacy-reserved/", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Migrate_MissingProjectDefault_SeedsMohistLocal()
     {
         var (projectId, _, _) = await SeedProjectAsync();

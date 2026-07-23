@@ -84,6 +84,24 @@ public class WorkflowRunStoreSpecs
     }
 
     [Fact]
+    public async Task SaveAsync_NewTerminalRun_DoesNotPersistProfileBackingKey()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var run = CreateRun("wr_terminal_insert", epicNumber: null);
+        run.Status = WorkflowRunStatus.Completed;
+        run.WorkflowProfileId = "delivery/review";
+
+        await store.SaveAsync(run);
+
+        await using var db = new MohistDbContext(database.Options);
+        var row = await db.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == run.Id);
+        Assert.Null(row.WorkflowProfileIdKey);
+    }
+
+    [Fact]
     public async Task SaveAsync_WithIssueContext_StampsIssueNumberOnPersistedEventExtensions()
     {
         using var database = TestSqliteDatabase.CreateMigrated();
