@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Workflow.Domain;
 using Orleans;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 using DomainIssueEvent = Mohist.Server.Issue.Domain.Events.IssueEvent;
@@ -52,7 +53,14 @@ public class IssueStore : IIssueStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         await StageIssueAsync(db, state, CancellationToken.None);
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (TranslateProfileForeignKeyViolation(ex, state) is { } mapped)
+        {
+            throw mapped;
+        }
     }
 
     public async Task SaveAsync(string key, DomainIssue state, IReadOnlyList<DomainIssueEvent> events, CancellationToken ct = default)
@@ -78,12 +86,31 @@ public class IssueStore : IIssueStore
         {
             throw;
         }
+        catch (DbUpdateException ex) when (TranslateProfileForeignKeyViolation(ex, state) is { } mapped)
+        {
+            throw mapped;
+        }
 
         PokeDispatcherBestEffort();
     }
 
     private void PokeDispatcherBestEffort() =>
         EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueStore));
+
+    /// <summary>
+    /// issue-477: when a Profile deletion commits between the Issue participant's
+    /// existence check and its <c>SaveChangesAsync</c>, the restrictive foreign key
+    /// on <c>WorkflowProfileIdKey</c> rejects the write. Translate that race into the
+    /// retryable <see cref="WorkflowProfileNotFoundException"/> so the coordinator
+    /// surfaces the specified <c>workflow-profile-not-found</c> conflict instead of
+    /// an unclassified server error.
+    /// </summary>
+    private static Exception? TranslateProfileForeignKeyViolation(DbUpdateException ex, DomainIssue state)
+    {
+        if (state.WorkflowProfileId is null) return null;
+        if (WorkflowProfileBindingKey.For(state.WorkflowProfileId) is null) return null;
+        return new WorkflowProfileNotFoundException(state.ProjectId, state.WorkflowProfileId);
+    }
 
     public Task DeleteAsync(string key) => throw new NotImplementedException();
 

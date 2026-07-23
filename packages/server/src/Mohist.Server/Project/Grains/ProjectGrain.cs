@@ -94,6 +94,11 @@ public class ProjectGrain : Grain, IProjectGrain
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         db.Projects.Add(entry);
+        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+        {
+            ProjectId = GrainKey,
+            DefaultWorkflowProfileId = WorkflowProfileCatalog.LocalId,
+        });
         await db.SaveChangesAsync();
 
         _project = new ProjectInfo

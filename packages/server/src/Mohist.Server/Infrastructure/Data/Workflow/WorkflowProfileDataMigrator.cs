@@ -62,11 +62,21 @@ public static class WorkflowProfileDataMigrator
         var workflowRunRows = await db.WorkflowRuns
             .ToListAsync(cancellationToken);
 
+        var existingRecordKeys = await db.WorkflowProfileRecords
+            .Select(r => new { r.ProjectId, r.ProfileId })
+            .ToListAsync(cancellationToken);
+        var existingRecordSet = new HashSet<(string ProjectId, string ProfileId)>(
+            existingRecordKeys.Select(r => (r.ProjectId, r.ProfileId)));
+
         // Detect target-id collisions per project before any write. The
         // (ProjectId, ProfileId) unique key is the failure surface, so a
         // collision is a conflict within the same Project — two different
         // legacy custom Profiles in different Projects resolving to the
-        // same target ID is allowed.
+        // same target ID is allowed. A legacy target that resolves to an
+        // already-present custom Profile it did not itself produce is also
+        // a collision: skipping it would silently drop the legacy
+        // Definition, so the migration fails atomically with the
+        // Project / source / target triple instead.
         var targetOccupancyByProject = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.Ordinal);
         foreach (var row in projectTemplateRows)
         {
@@ -97,6 +107,29 @@ public static class WorkflowProfileDataMigrator
             }
             throw new InvalidOperationException(
                 "WorkflowProfile reserved-ID migration failed with target collisions:\n" + string.Join("\n", diagnostics));
+        }
+
+        var externalCollisions = new List<string>();
+        foreach (var row in projectTemplateRows)
+        {
+            var sourceId = row.TemplateId;
+            var targetId = ResolveTargetId(sourceId, renames);
+            // Only reserved renames (target != source) can collide with an
+            // already-present Profile: a non-reserved legacy ID is stable
+            // across migration, so an existing record at that ID is the
+            // idempotent re-run of a prior migration. A reserved target
+            // already occupied by an existing record is a genuine conflict
+            // — skipping it would silently drop the legacy Definition.
+            if (targetId == sourceId) continue;
+            if (!existingRecordSet.Contains((row.ProjectId, targetId))) continue;
+            externalCollisions.Add(
+                $"Project '{row.ProjectId}' legacy Profile '{sourceId}' target '{targetId}' is already occupied by an existing WorkflowProfile");
+        }
+        if (externalCollisions.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "WorkflowProfile reserved-ID migration failed: target IDs already occupied by existing Profiles:\n"
+                + string.Join("\n", externalCollisions));
         }
 
         var now = timeProvider.GetUtcNow();
