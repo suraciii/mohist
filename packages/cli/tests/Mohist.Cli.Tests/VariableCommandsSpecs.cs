@@ -170,6 +170,60 @@ public class VariableCommandsSpecs
         Assert.Equal(JsonValueKind.String, ((JsonValue)prNumber!).GetValue<JsonElement>().ValueKind);
     }
 
+    [Fact]
+    public async Task ProjectSet_ScalarIntermediatePath_FailsWithoutPatch()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get
+                && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/variables")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { vars = new { agent = "literal" } },
+                });
+            }
+
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "variable", "set", "agent.model", "new"],
+            output, error, fs, executor);
+
+        Assert.Equal(2, exitCode);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Patch);
+        Assert.Contains("not a JSON object", error.ToString());
+    }
+
+    [Fact]
+    public async Task IssueUnset_ArrayIntermediatePath_FailsWithoutPatch()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get
+                && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/variables")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { vars = new { agent = new[] { "literal" } } },
+                });
+            }
+
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "variable", "unset", "42", "agent.model"],
+            output, error, fs, executor);
+
+        Assert.Equal(2, exitCode);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Patch);
+        Assert.Contains("not a JSON object", error.ToString());
+    }
+
     // ────────────────────────────────────────────────────────────────────
     //  set --stage + --value-json: Stage and type preserved
     // ────────────────────────────────────────────────────────────────────
@@ -502,7 +556,11 @@ public class VariableCommandsSpecs
             if (req.Method == HttpMethod.Get
                 && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective")
             {
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { agent = new { model = "latest" } },
+                });
             }
             return null!;
         });
@@ -515,6 +573,8 @@ public class VariableCommandsSpecs
         Assert.Contains(handler.Requests, r =>
             r.Method == HttpMethod.Get
             && r.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective");
+        Assert.Contains("agent", output.ToString());
+        Assert.Contains("latest", output.ToString());
     }
 
     [Fact]

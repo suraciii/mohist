@@ -110,7 +110,11 @@ internal static class VariableCommands
                     path,
                     VariableBundleDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowVariables)).ConfigureAwait(false);
+                    data => api.RenderTableAsync(
+                        data,
+                        scope == VariableScopeKind.Run && effective
+                            ? MohistCliApi.TableShape.WorkflowRunVariables
+                            : MohistCliApi.TableShape.WorkflowVariables)).ConfigureAwait(false);
             }
         });
         return cmd;
@@ -303,6 +307,10 @@ internal static class VariableCommands
 
                 var patchBody = VariableKeyPath.BuildSetPatch(segments, stage, leaf);
                 var path = BuildVariablesPath(scope, address);
+                var pathExit = await ValidateExistingPathAsync(api, path, segments, stage).ConfigureAwait(false);
+                if (pathExit != 0)
+                    return pathExit;
+
                 return await api.PrintPatchAsync(path, patchBody).ConfigureAwait(false);
             }
         });
@@ -368,6 +376,10 @@ internal static class VariableCommands
 
                 var patchBody = VariableKeyPath.BuildUnsetPatch(segments, stage);
                 var path = BuildVariablesPath(scope, address);
+                var pathExit = await ValidateExistingPathAsync(api, path, segments, stage).ConfigureAwait(false);
+                if (pathExit != 0)
+                    return pathExit;
+
                 return await api.PrintPatchAsync(path, patchBody).ConfigureAwait(false);
             }
         });
@@ -407,6 +419,53 @@ internal static class VariableCommands
 
         await api.Output.WriteLineAsync(value.ToJsonString(MohistCliApi.JsonOutputOptions))
             .ConfigureAwait(false);
+        return CliExitCode.For(CliExitOutcome.Success);
+    }
+
+    private static async Task<int> ValidateExistingPathAsync(
+        MohistCliApi api,
+        string bundlePath,
+        IReadOnlyList<string> segments,
+        string? stage)
+    {
+        if (segments.Count <= 1)
+            return CliExitCode.For(CliExitOutcome.Success);
+
+        var response = await api.ResponseReader.ReadAsync(
+            HttpMethod.Get,
+            bundlePath,
+            cancellationToken: api.Invocation.CancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccess)
+        {
+            return await new CliResultWriter(api.Invocation)
+                .WriteFailureAsync(response.Failure!).ConfigureAwait(false);
+        }
+
+        var current = ExtractScopeLocalRoot(response.Data as JsonObject, stage);
+        for (var i = 0; i < segments.Count - 1; i++)
+        {
+            if (current is null)
+                return CliExitCode.For(CliExitOutcome.Success);
+
+            if (current is not JsonObject objectValue)
+            {
+                var traversed = string.Join('.', segments.Take(i));
+                await api.Error.WriteLineAsync(
+                    $"Cannot address '{string.Join('.', segments)}': '{traversed}' is not a JSON object.").ConfigureAwait(false);
+                return CliExitCode.For(CliExitOutcome.UsageFailure);
+            }
+
+            current = objectValue[segments[i]];
+        }
+
+        if (current is not null and not JsonObject)
+        {
+            var traversed = string.Join('.', segments.Take(segments.Count - 1));
+            await api.Error.WriteLineAsync(
+                $"Cannot address '{string.Join('.', segments)}': '{traversed}' is not a JSON object.").ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.UsageFailure);
+        }
+
         return CliExitCode.For(CliExitOutcome.Success);
     }
 
