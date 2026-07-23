@@ -15,3 +15,7 @@
 - Empty classification is defensive `pending`, while non-empty completed non-failing rollups retain the passing path and existing unavailable retry handling is unchanged.
 - Added fake-timer coverage for empty-to-passing and permanently-empty check-stage polling, plus merge-stage unavailable behavior with no merge command; both tests restore real timers.
 - Runner verification passed: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, and full `npm run test:run -w packages/runner` (1383 tests).
+
+## Review Fix
+
+- Restored profile assertions for integrate's base-moved conflict resolver and failing-check recovery, including runtime, session, prompt, and agent option contracts.

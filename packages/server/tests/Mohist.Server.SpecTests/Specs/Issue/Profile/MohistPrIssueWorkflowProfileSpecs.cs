@@ -441,6 +441,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.False(conflictHandler.RetrySelf);
         var conflictTasks = conflictHandler.Tasks.ToList();
         Assert.Single(conflictTasks);
+        AssertAgentTask(conflictTasks.Single(), "integrate", "${{ prompts.resolve-rebase-conflicts }}");
 
         var recoverPushBaseMoved = baseMovedTasks.Single(t => t.Id == "recover:push");
         Assert.Equal("mohist/push", recoverPushBaseMoved.Uses);
@@ -454,6 +455,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.True(prChecksFailed.RetrySelf);
         var prChecksTasks = prChecksFailed.Tasks.ToList();
         Assert.Equal(new[] { "recover:fix-pr-checks", "recover:push" }, prChecksTasks.Select(t => t.Id).ToArray());
+        AssertAgentTask(prChecksTasks.Single(t => t.Id == "recover:fix-pr-checks"), "integrate", "${{ prompts.fix-pr-checks }}");
 
         var recoverPushPrChecks = prChecksTasks.Single(t => t.Id == "recover:push");
         Assert.Equal("mohist/push", recoverPushPrChecks.Uses);
@@ -687,7 +689,9 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
     // ===================== Helpers =====================
 
-    private static void AssertCheckAgentTask(TaskDefinition task, string prompt) => Assert.Equal(("mohist/opencode", "check", prompt, "${{ vars.agent }}"), (task.Uses, ReadStringWith(task, "session"), ReadStringWith(task, "prompt"), ReadStringWith(task, "options")));
+    private static void AssertCheckAgentTask(TaskDefinition task, string prompt) => AssertAgentTask(task, "check", prompt);
+
+    private static void AssertAgentTask(TaskDefinition task, string session, string prompt) => Assert.Equal(("mohist/opencode", session, prompt, "${{ vars.agent }}"), (task.Uses, ReadStringWith(task, "session"), ReadStringWith(task, "prompt"), ReadStringWith(task, "options")));
 
     private static IEnumerable<Mohist.Workflow.Definition.TaskDefinition> CollectAllTasks(
         Mohist.Workflow.Definition.StageDefinition stage)
