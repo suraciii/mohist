@@ -209,3 +209,18 @@ Task: Retire the `system` group, align dead-verb guidance strings, and update do
 - `runner start|stop|restart|service-status|logs|uninstall` and the `runner show → view` rename (T-002) — still in the tree. The task graph has T-002 as a dependency of T-004; my work doesn't reach into those, but the ACs that depend on those (e.g. `mo runner --help` listing only `list`/`view`/`status`) belong to T-002 and weren't promoted to T-004. The runner lifecycle verbs still emit their old `mo server start` / `mo runner start` literals nowhere — only the cross-cutting guidance strings (`ServerUnavailableMessage`, `RenderSystemInfoDegradedAsync`, `NdjsonStream`, `Update.Finalize`) were touched.
 - `mo project status` removal — done in T-003; T-004 only updated docs to point at `mo server status`.
 
+# Verification re-check after T-004
+
+Re-ran `npm test` (i.e. `dotnet test Mohist.sln`) on the committed T-004 head to diagnose the verify-check failure. Confirmed the failing test is `Mohist.Server.SpecTests.Specs.Api.InboxApiSpecs.WorkflowRunStoreEvent_PersistsRowAndDispatcherProjectsItToInbox` (Orleans dispatcher projection), and the failure is pre-existing and unrelated to issue-480:
+
+- `git diff origin/master HEAD --name-only` shows only `packages/cli/**` files changed by issue-480; no server source or test file was touched.
+- Re-running the failing test in isolation on the T-004 head: passes 3/3 in ~3-4s each. The same single-test run on `origin/master` (detached HEAD) also passes 3/3 in ~3-4s.
+- Re-running the full `Mohist.Server.SpecTests` suite on `origin/master` reproduces the same `WorkflowRunStoreEvent_PersistsRowAndDispatcherProjectsItToInbox` failure (and intermittently an additional `AgentJobTerminalDeliverySpecs.ReportResultAsync_RunnerCategoryPrecedence_ErrorCodeUsedWhenOutputCategoryMissing`). The issue-480 commits do not change the failure shape — same pattern, same test, same time budget.
+
+Per `design/testing.md` (no flake-masking; no wall-clock looseness) and the task's repair policy (stay within the issue-480 scope), the fix lives in the server domain (Orleans dispatcher saturation under parallel test load) and is out of scope here. Evidence (failure log under `Mohist.Server.SpecTests/bin/Debug/net11.0/TestResults/`) is left intact.
+
+Focused checks covering the changed area:
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors (TreatWarningsAsErrors).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-build` → 1406 passed, 0 failed.
+- Worktree is clean; no verification-only files were created.
+
