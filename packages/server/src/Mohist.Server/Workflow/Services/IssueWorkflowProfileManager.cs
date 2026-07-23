@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -20,10 +22,14 @@ namespace Mohist.Server.Workflow.Services;
 public class IssueWorkflowProfileManager : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly IActionCatalogSource _catalogSource;
 
-    public IssueWorkflowProfileManager(IDbContextFactory<MohistDbContext> dbFactory)
+    public IssueWorkflowProfileManager(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IActionCatalogSource catalogSource)
     {
         _dbFactory = dbFactory;
+        _catalogSource = catalogSource;
     }
 
     // =======================================================================
@@ -71,7 +77,7 @@ public class IssueWorkflowProfileManager : IScopedService
     /// - both null:                      clear issue-level template (inherit project default)
     /// - both set:                       invalid
     /// </summary>
-    public async Task<IssueWorkflowProfileState> UpdateTemplateAsync(
+    public async Task<IssueTemplateUpdateResult> UpdateTemplateAsync(
         string projectId,
         int issueNumber,
         IssueTemplateUpdateRequest request)
@@ -83,9 +89,14 @@ public class IssueWorkflowProfileManager : IScopedService
             throw new InvalidOperationException("Cannot set both ProjectTemplateId and custom Template at the same time");
 
         WorkflowProfile? parsedProfile = null;
+        ActionValidationStatus actionValidation = ActionValidationStatus.Skipped;
         if (!string.IsNullOrWhiteSpace(request.Template))
         {
-            parsedProfile = WorkflowProfileYamlParser.Parse(request.Template, CustomProfileId(projectId, issueNumber));
+            var catalog = await _catalogSource.GetCatalogAsync();
+            actionValidation = catalog is null
+                ? ActionValidationStatus.Skipped
+                : ActionValidationStatus.Performed;
+            parsedProfile = WorkflowProfileYamlParser.Parse(request.Template, CustomProfileId(projectId, issueNumber), catalog);
         }
 
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -109,7 +120,7 @@ public class IssueWorkflowProfileManager : IScopedService
         }
 
         await db.SaveChangesAsync();
-        return ToState(row);
+        return new IssueTemplateUpdateResult(ToState(row), actionValidation);
     }
 
     // =======================================================================
@@ -246,3 +257,7 @@ public sealed record IssueWorkflowProfileState(
     WorkflowProfile? Template,
     VariableBundle Variables,
     DateTimeOffset? UpdatedAt);
+
+public sealed record IssueTemplateUpdateResult(
+    IssueWorkflowProfileState State,
+    ActionValidationStatus ActionValidation);

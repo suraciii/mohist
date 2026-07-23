@@ -261,7 +261,7 @@ public static class WorkflowGrainTestHelpers
             .UseSqlite(connectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine());
+        var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine(), NullActionCatalogSource.Instance);
         await manager.PatchVariablesAsync(projectId, patch);
     }
 
@@ -275,7 +275,7 @@ public static class WorkflowGrainTestHelpers
             .UseSqlite(connectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new IssueWorkflowProfileManager(factory);
+        var manager = new IssueWorkflowProfileManager(factory, NullActionCatalogSource.Instance);
         await manager.PatchVariablesAsync(projectId, issueNumber, patch);
     }
 

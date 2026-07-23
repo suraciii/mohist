@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -21,6 +23,7 @@ public class ProjectWorkflowProfileManager : IScopedService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IPromptLoader _promptLoader;
     private readonly PromptTemplateEngine _engine;
+    private readonly IActionCatalogSource _catalogSource;
 
     /// <summary>
     /// Hardcoded system templates (in-binary, read-only).
@@ -47,11 +50,13 @@ public class ProjectWorkflowProfileManager : IScopedService
     public ProjectWorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
         IPromptLoader promptLoader,
-        PromptTemplateEngine engine)
+        PromptTemplateEngine engine,
+        IActionCatalogSource catalogSource)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
         _engine = engine;
+        _catalogSource = catalogSource;
     }
 
     // =======================================================================
@@ -111,14 +116,15 @@ public class ProjectWorkflowProfileManager : IScopedService
         return row is null ? null : WorkflowProfilePersistence.Deserialize(row.Template);
     }
 
-    public async Task<ProjectTemplateInfo> CreateTemplateAsync(string projectId, string yaml)
+    public async Task<ProjectTemplateSaveResult> CreateTemplateAsync(string projectId, string yaml)
     {
         if (string.IsNullOrWhiteSpace(projectId))
             throw new ArgumentException("projectId is required", nameof(projectId));
         if (string.IsNullOrWhiteSpace(yaml))
             throw new ArgumentException("yaml is required", nameof(yaml));
 
-        var profile = WorkflowProfileYamlParser.Parse(yaml, "workflow");
+        var catalog = await _catalogSource.GetCatalogAsync();
+        var profile = WorkflowProfileYamlParser.Parse(yaml, "workflow", catalog);
         var templateId = profile.Id;
         if (string.IsNullOrWhiteSpace(templateId))
             throw new InvalidOperationException("Template id is required");
@@ -141,15 +147,17 @@ public class ProjectWorkflowProfileManager : IScopedService
         db.ProjectWorkflowTemplates.Add(row);
         await db.SaveChangesAsync();
 
-        return new ProjectTemplateInfo(row.ProjectId, row.TemplateId, row.CreatedAt, row.UpdatedAt, profile.Name, profile.Description);
+        var info = new ProjectTemplateInfo(row.ProjectId, row.TemplateId, row.CreatedAt, row.UpdatedAt, profile.Name, profile.Description);
+        return new ProjectTemplateSaveResult(info, BuildActionValidationStatus(catalog));
     }
 
-    public async Task<ProjectTemplateInfo?> UpdateTemplateAsync(string projectId, string templateId, string yaml)
+    public async Task<ProjectTemplateSaveResult?> UpdateTemplateAsync(string projectId, string templateId, string yaml)
     {
         if (string.IsNullOrWhiteSpace(yaml))
             throw new ArgumentException("yaml is required", nameof(yaml));
 
-        var profile = WorkflowProfileYamlParser.Parse(yaml, templateId);
+        var catalog = await _catalogSource.GetCatalogAsync();
+        var profile = WorkflowProfileYamlParser.Parse(yaml, templateId, catalog);
         if (!string.Equals(profile.Id, templateId, StringComparison.Ordinal))
             throw new InvalidOperationException($"Template id mismatch: expected '{templateId}' but YAML declares '{profile.Id}'");
 
@@ -162,7 +170,8 @@ public class ProjectWorkflowProfileManager : IScopedService
         row.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
 
-        return new ProjectTemplateInfo(row.ProjectId, row.TemplateId, row.CreatedAt, row.UpdatedAt, profile.Name, profile.Description);
+        var info = new ProjectTemplateInfo(row.ProjectId, row.TemplateId, row.CreatedAt, row.UpdatedAt, profile.Name, profile.Description);
+        return new ProjectTemplateSaveResult(info, BuildActionValidationStatus(catalog));
     }
 
     public async Task<bool> DeleteTemplateAsync(string projectId, string templateId)
@@ -549,5 +558,10 @@ public class ProjectWorkflowProfileManager : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.ProjectWorkflowTemplates.AnyAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
     }
+
+    private static ActionValidationStatus BuildActionValidationStatus(ActionCatalog? catalog) =>
+        catalog is null
+            ? ActionValidationStatus.Skipped
+            : ActionValidationStatus.Performed;
 
 }

@@ -19,7 +19,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
     public IssueWorkflowProfileManagerSpecs()
     {
         _database = TestSqliteDatabase.CreateModelSchema();
-        _manager = new IssueWorkflowProfileManager(new TestDbContextFactory(_database.Options));
+        _manager = new IssueWorkflowProfileManager(new TestDbContextFactory(_database.Options), NullActionCatalogSource.Instance);
 
         using var db = new MohistDbContext(_database.Options);
         var issueNumbers = new[] { 1, 2, 4, 5, 6, 7, 8, 9 };
@@ -57,13 +57,13 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
     [Fact]
     public async Task UpdateTemplate_ProjectReference_StoresSourceTemplateId()
     {
-        var row = await _manager.UpdateTemplateAsync(ProjectId, 1,
+        var result = await _manager.UpdateTemplateAsync(ProjectId, 1,
             new IssueTemplateUpdateRequest(ProjectTemplateId: "some-template"));
 
-        Assert.Equal(ProjectId, row.ProjectId);
-        Assert.Equal(1, row.IssueNumber);
-        Assert.Equal("some-template", row.SourceTemplateId);
-        Assert.Null(row.Template);
+        Assert.Equal(ProjectId, result.State.ProjectId);
+        Assert.Equal(1, result.State.IssueNumber);
+        Assert.Equal("some-template", result.State.SourceTemplateId);
+        Assert.Null(result.State.Template);
 
         var stored = await _manager.GetProfileAsync(ProjectId, 1);
         Assert.Equal(ProjectId, stored!.ProjectId);
@@ -80,11 +80,12 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
                 tasks: []
                 checks: []
             """;
-        var row = await _manager.UpdateTemplateAsync(ProjectId, 2,
+        var result = await _manager.UpdateTemplateAsync(ProjectId, 2,
             new IssueTemplateUpdateRequest(Template: yaml));
 
-        Assert.Null(row.SourceTemplateId);
-        Assert.NotNull(row.Template);
+        Assert.Null(result.State.SourceTemplateId);
+        Assert.NotNull(result.State.Template);
+        Assert.Equal(ActionValidationStatus.Skipped, result.ActionValidation);
 
         var state = await _manager.GetStateAsync(ProjectId, 2);
         Assert.NotNull(state.Template);
@@ -114,11 +115,11 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         await _manager.UpdateTemplateAsync(ProjectId, 4,
             new IssueTemplateUpdateRequest(ProjectTemplateId: "t1"));
         // then clear
-        var row = await _manager.UpdateTemplateAsync(ProjectId, 4,
+        var result = await _manager.UpdateTemplateAsync(ProjectId, 4,
             new IssueTemplateUpdateRequest());
 
-        Assert.Null(row.SourceTemplateId);
-        Assert.Null(row.Template);
+        Assert.Null(result.State.SourceTemplateId);
+        Assert.Null(result.State.Template);
     }
 
     [Fact]

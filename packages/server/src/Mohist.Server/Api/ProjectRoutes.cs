@@ -325,8 +325,8 @@ public static class ProjectRoutes
             var project = context.GetResolvedProject();
             try
             {
-                var template = await manager.CreateTemplateAsync(project.Id, req.Yaml);
-                return Results.Json(new { success = true, data = template }, statusCode: 201);
+                var result = await manager.CreateTemplateAsync(project.Id, req.Yaml);
+                return Results.Json(new { success = true, data = result.Template, actionValidation = ToActionValidationNotice(result.ActionValidation) }, statusCode: 201);
             }
             catch (WorkflowDefinitionValidationException ex)
             {
@@ -360,9 +360,9 @@ public static class ProjectRoutes
             var project = context.GetResolvedProject();
             try
             {
-                var template = await manager.UpdateTemplateAsync(project.Id, templateId, req.Yaml);
-                return template is not null
-                    ? ApiResults.Ok(template)
+                var result = await manager.UpdateTemplateAsync(project.Id, templateId, req.Yaml);
+                return result is not null
+                    ? Results.Json(new { success = true, data = result.Template, actionValidation = ToActionValidationNotice(result.ActionValidation) }, statusCode: 200)
                     : ApiResults.NotFound("Project template not found");
             }
             catch (WorkflowDefinitionValidationException ex)
@@ -621,6 +621,17 @@ public static class ProjectRoutes
         prompt.Source == "project"
             ? prompt with { Source = "project-override" }
             : prompt;
+
+    internal static object ToActionValidationNotice(ActionValidationStatus status) => status switch
+    {
+        ActionValidationStatus.Performed => new { performed = true },
+        ActionValidationStatus.Skipped => new
+        {
+            performed = false,
+            reason = "Action-contract validation was not performed: no Runner has reported an Action catalog yet.",
+        },
+        _ => new { performed = false },
+    };
 
     private static bool TryGetRepositoryNameError(
         ArgumentException exception,
