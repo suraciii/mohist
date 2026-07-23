@@ -6,11 +6,12 @@
       "id": "T-001",
       "title": "Add the virtual Agent Action contract for tasks and checks",
       "spec": "specs/workflow-agent-action/spec.md#agent-definition-reference-action",
-      "description": "Add the server-owned `mohist/agent` manifest with closed `name`, `prompt`, optional `session`, and optional `timeout` inputs to profile catalog validation. Apply the same contract to task and check definitions without querying current Agent state during profile save.",
+      "description": "Add the server-owned `mohist/agent` manifest with closed static `name`, template-renderable `prompt`, optional `session`, and optional `timeout` inputs to profile catalog validation. Apply the same contract to task and check definitions without querying current Agent state during profile save.",
       "acceptanceCriteria": [
         "Profiles accept valid mohist/agent tasks and checks before the referenced Agent exists",
         "Missing name or prompt and unknown inputs fail profile validation for tasks and checks",
-        "Template prompt values remain valid at profile-save time"
+        "Template prompt values remain valid at profile-save time",
+        "Template name values fail profile validation for tasks and checks"
       ],
       "priority": 1,
       "mode": "AFK",
@@ -24,12 +25,13 @@
       "id": "T-002",
       "title": "Resolve Agent references and persist task/check dispatch snapshots",
       "spec": "specs/workflow-agent-action/spec.md#dispatch-time-agent-snapshot",
-      "description": "Extract an active-only name-or-id Agent execution snapshot resolver. Extend Workflow active-work state and grain commands to compare-and-store a complete transformed WorkDispatch. Transform task uses and each checks[*] uses before storage; poll redelivery reads the stored envelope and retry/new checks work resolves again.",
+      "description": "Extract an active-only name-or-id Agent execution snapshot resolver using the command-surface order: agent_* references are id-only; all others are name-first with an id fallback. Extend Workflow active-work state and grain commands to compare-and-store a complete transformed WorkDispatch. Transform task uses and each checks[*] uses before storage; poll redelivery reads the stored envelope and retry/new checks work resolves again.",
       "acceptanceCriteria": [
         "Task and check dispatches resolve an active Agent to concrete mohist/opencode or mohist/pi envelopes with raw prompt retained",
         "After Agent edit plus server restart or grain activation, redelivery returns the original stored envelope",
         "A task retry and a newly-created checks attempt resolve the current Agent definition",
-        "No Agent entity, AgentJob, or direct AgentSession lifecycle enters Workflow"
+        "No Agent entity, AgentJob, or direct AgentSession lifecycle enters Workflow",
+        "A non-prefixed legacy id that collides with an Agent name resolves to the name match"
       ],
       "priority": 2,
       "mode": "AFK",
@@ -93,6 +95,24 @@
       "dependsOn": ["T-003", "T-004"],
       "passes": false,
       "notes": "Use existing fake runtime hosts and injected time only."
+    },
+    {
+      "id": "T-006",
+      "title": "Align the Agent Action product contract with check support",
+      "spec": "specs/workflow-agent-action/spec.md#agent-definition-reference-action",
+      "description": "Update docs/actions/agent.md to define mohist/agent for both Workflow tasks and checks, state that name is static while prompt supports templates, and document the canonical agent_* id-only and otherwise name-first/id-fallback resolver order.",
+      "acceptanceCriteria": [
+        "The product documentation describes task and check usage consistently with the Action contract",
+        "The product documentation states that template expressions are accepted only for prompt and rejected for name",
+        "The product documentation states the exact name-or-id resolver precedence"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated docs/actions/agent.md product contract",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "This resolves the existing task-only documentation discrepancy before the Action is published."
     }
   ]
 }

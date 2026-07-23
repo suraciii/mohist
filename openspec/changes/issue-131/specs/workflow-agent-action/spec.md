@@ -1,5 +1,5 @@
 ### Requirement: Agent definition reference action
-Workflow profiles SHALL support `uses: mohist/agent` for task and check work. Its `with` input MUST contain `name` and `prompt`, MAY contain `session` and `timeout`, and MUST reject any input that is not part of that contract. `name` MUST resolve an Agent by the same name-or-id rules used by the Agent command surface; `prompt` MUST support workflow template expressions.
+Workflow profiles SHALL support `uses: mohist/agent` for task and check work. Its `with` input MUST contain `name` and `prompt`, MAY contain `session` and `timeout`, and MUST reject any input that is not part of that contract. `name` MUST be a static string: a value containing a workflow template expression MUST fail profile validation. `prompt` MUST support workflow template expressions. `name` MUST resolve an Agent by the same name-or-id rules used by the Agent command surface: an `agent_*` reference is an id lookup only; every other reference is looked up by name first, then by id only when no matching name exists.
 
 #### Scenario: A task references an Agent by name
 - **WHEN** a workflow task declares `uses: mohist/agent` with an active Agent name and a prompt
@@ -12,6 +12,14 @@ Workflow profiles SHALL support `uses: mohist/agent` for task and check work. It
 #### Scenario: A check references an Agent
 - **WHEN** a workflow check declares `uses: mohist/agent` with an active Agent name and a prompt
 - **THEN** the check is eligible for dispatch through that Agent definition
+
+#### Scenario: A reference name contains a template expression
+- **WHEN** a workflow task or check declares `mohist/agent` with `name: ${{ variables.agent }}`
+- **THEN** profile validation MUST reject the Action input before dispatch
+
+#### Scenario: A name collides with a legacy non-prefixed id
+- **WHEN** a reference that does not start with `agent_` matches one Agent name and another Agent's id
+- **THEN** dispatch MUST select the Agent matched by name
 
 ### Requirement: Definition-independent profile validation
 Workflow profile save and workflow validation MUST validate the `mohist/agent` input shape without requiring the referenced Agent to exist or be active.

@@ -2,7 +2,7 @@
 
 Workflow profiles currently use `mohist/opencode` or `mohist/pi` and repeat a role's instructions, runtime, model, and runtime options in every task or check. Issue 128 introduced project-scoped Agent definitions, but Workflow has no way to reuse one without taking ownership of an AgentJob or a direct AgentSession.
 
-Issue 131 adds `mohist/agent` as a Workflow Action. The product contract is in [`docs/actions/agent.md`](../../../docs/actions/agent.md); the requirements are in [`specs/workflow-agent-action/spec.md`](specs/workflow-agent-action/spec.md). The controlling constraints are that WorkflowRun remains the authority for task state and recovery, templates are rendered only by Runner at execution time, and Workflow must not depend on Agent domain entities. Agent definitions are project-scoped, can be resolved by name or id, and archived definitions are not executable.
+Issue 131 expands [`docs/actions/agent.md`](../../../docs/actions/agent.md)'s product contract from task-only to task and check work; that documentation change is part of this plan. The requirements are in [`specs/workflow-agent-action/spec.md`](specs/workflow-agent-action/spec.md). The controlling constraints are that WorkflowRun remains the authority for task state and recovery, templates are rendered only by Runner at execution time, and Workflow must not depend on Agent domain entities. Agent definitions are project-scoped, can be resolved by name or id, and archived definitions are not executable.
 
 The existing `WorkflowItemTranslator` already constructs immutable attempt dispatch context while preserving raw `with` data for Runner rendering. OpenCode and Pi Actions already share the Workflow-origin AgentSession path and report their facts back to TaskRun. This change must reuse that path rather than introduce a third execution lifecycle.
 
@@ -12,7 +12,7 @@ Stakeholders are workflow-profile authors, who want reusable agent roles; Workfl
 
 **Goals:**
 
-- Accept `uses: mohist/agent` with only `name`, `prompt`, optional `session`, and optional `timeout` as its author-facing input contract for tasks and checks.
+- Accept `uses: mohist/agent` with static `name`, template-renderable `prompt`, optional `session`, and optional `timeout` as its author-facing input contract for tasks and checks.
 - Resolve the referenced active Agent at task and check snapshot creation by the same name-or-id rules as the Agent command surface.
 - Freeze instructions, runtime, model, and execution configuration into a durable active-work dispatch snapshot while retaining the raw workflow prompt for Runner-side template rendering.
 - Translate the resolved definition to the selected existing `mohist/opencode` or `mohist/pi` execution path and retain their timeout, session, error, result, and Workflow-origin session behavior.
@@ -31,7 +31,7 @@ Stakeholders are workflow-profile authors, who want reusable agent roles; Workfl
 
 ### 1. `mohist/agent` is a server-resolved virtual Workflow Action for tasks and checks
 
-The profile-validation catalog will expose a static `mohist/agent` manifest with required `name` and `prompt`, optional `session` and `timeout`, closed input keys, and documented `agent_not_found` failure. It validates author intent but is not a Runner executable Action.
+The profile-validation catalog will expose a static `mohist/agent` manifest with required `name` and `prompt`, optional `session` and `timeout`, closed input keys, and documented `agent_not_found` failure. `prompt` is its only template-renderable input. The validator will reject a `name` containing a template token during profile validation for either a task or check, before dispatch can attempt to resolve literal template text. It validates author intent but is not a Runner executable Action.
 
 Before producing a task or checks `WorkDispatch`, `WorkflowItemTranslator` will recognize every `mohist/agent` occurrence, resolve the Agent through a narrow Agent read-side port, and replace the outbound `uses` and `with` with the selected Runtime Action contract. `BuildChecksDispatchAsync` transforms each `checks[*]` entry before serializing the batch. The runner therefore receives only `mohist/opencode` or `mohist/pi` and does not learn Agent ids, names, lifecycle, or storage shapes.
 
@@ -41,7 +41,7 @@ Alternative considered: register `mohist/agent` as a Runner Action and have Runn
 
 ### 2. Resolve once per attempt and persist the transformed envelope on active Workflow work
 
-The translator will derive `projectId` from the WorkflowRun's issue metadata and ask the Agent read-side port to resolve `name` as id first or name using the command-surface resolver's canonical rules. It will accept only an active result. The resolver returns a small execution snapshot DTO, not an Agent entity: instructions and a cloned `AgentConfig` validated by `AgentConfigSchema`. The mapper resolves `runtime` (`opencode` default or `pi`), `model`, and `variant` from that cloned config.
+The translator will derive `projectId` from the WorkflowRun's issue metadata and ask the Agent read-side port to resolve `name` using the command-surface resolver's canonical rules: an `agent_*` reference is an id lookup only; every other reference is looked up by name first and then by id only when no matching name exists. It will accept only an active result. The resolver returns a small execution snapshot DTO, not an Agent entity: instructions and a cloned `AgentConfig` validated by `AgentConfigSchema`. The mapper resolves `runtime` (`opencode` default or `pi`), `model`, and `variant` from that cloned config.
 
 The translator maps each resolved reference to `{ prompt, session?, timeout?, options: { instructions, model?, variant? } }`, retaining the original `prompt` value verbatim. After claim and before the poll response, `DispatchService` asks `IWorkflowGrain` to atomically store that concrete `WorkDispatch` on the owning active work if it has no snapshot, then returns the stored value. The snapshot belongs in durable `WorkflowRun` active-work state, not `RunnerWork`: it includes the complete wire envelope (`uses`, raw `with`, raw `expect`, variables, ownership, and task/check metadata) and survives server restart and grain activation. `RenderActiveWorkAsync` returns this stored envelope without invoking the translator. A retry or a newly-created checks work has no snapshot, so it resolves again and stores a new one.
 
@@ -79,7 +79,7 @@ Alternative considered: reuse `IAgentLauncher` because it already snapshots Agen
 
 ### 5. Cover the new boundary with focused server and runner tests
 
-Server definition tests cover the virtual manifest in tasks and checks: required keys, rejected unknown keys, templates accepted for `prompt`, and validation succeeding when no matching Agent exists. Translator/spec tests use a fake Agent read-side port to verify name/id resolution, active-only behavior, task and check transformation, and unchanged Workflow dispatch ownership. Poll/reconciliation specs restart or deactivate the server-side grain after an offer and prove redelivery returns the persisted envelope after an Agent edit; retry proves a new snapshot is resolved.
+Server definition tests cover the virtual manifest in tasks and checks: required keys, rejected unknown keys, templates accepted for `prompt`, templates rejected for `name`, and validation succeeding when no matching Agent exists. Translator/spec tests use a fake Agent read-side port to verify active-only behavior, task and check transformation, unchanged Workflow dispatch ownership, and the canonical resolver order when a non-prefixed legacy id collides with a name. Poll/reconciliation specs restart or deactivate the server-side grain after an offer and prove redelivery returns the persisted envelope after an Agent edit; retry proves a new snapshot is resolved.
 
 Runner Action tests cover the closed option shapes, unknown-key rejection, instruction-before-prompt composition, model/variant forwarding, and supplied/default timeout behavior for OpenCode and Pi through existing fake runtime hosts. They do not add a Runner test that resolves Agents, because Runner has no Agent dependency. Workflow specs prove a rejected task persists `TaskRun.Error.code = agent_not_found` and recovery sees that code; rejected checks preserve the named `agent_not_found` row and the `check-not-run` companion rows. Tests use fakes and injected time as required by `design/testing.md`.
 
@@ -89,24 +89,25 @@ Alternative considered: end-to-end tests using an actual runtime or database-bac
 
 - [A virtual Action's profile contract can drift from transformed Runtime Action contracts] -> Keep its schema and transformation mapping in one server-owned module; add contract tests for both selected runtimes and fail unsupported Agent runtime values before dispatch.
 - [An Agent edit between resolution and Runner claim could appear ambiguous] -> Persist the translated `WorkDispatch` on active Workflow work before offering it; reoffers return it verbatim and retries create a new dispatch.
-- [Agent name/id semantics could diverge from CLI/API behavior] -> Reuse or extract the existing Agent command-surface resolver rather than adding translator-local lookup logic.
+- [Agent name/id semantics could diverge from CLI/API behavior] -> Reuse or extract the existing Agent command-surface resolver rather than adding translator-local lookup logic: `agent_*` is id-only; other references are name-first with an id fallback. Cover a name/legacy-id collision.
 - [Archived Agents might be accidentally accepted by a broad read query] -> Make the read-side port return only active execution snapshots; map any non-active or absent result to `agent_not_found`.
 - [Instructions/configuration could be lost or overridden during runtime mapping] -> Use a closed `{ instructions, model?, variant? }` Action options contract and runtime-specific tests that assert selected runtime, model/variant, instructions, session, timeout, and rendered prompt arrive at the runtime.
 - [Untransformed `mohist/agent` work items could reach Runner after an interrupted rollout] -> Runner does not register it as executable; server rejects or transforms it before dispatch, and deployment order keeps the server change ahead of profiles that use it.
 
 ## Migration Plan
 
-1. Add the server-owned virtual Action manifest and include it in Workflow profile catalog validation for tasks and checks.
+1. Add the server-owned virtual Action manifest and include it in Workflow profile catalog validation for tasks and checks, rejecting template tokens in `name` while retaining Runner-side rendering for `prompt`.
 2. Introduce the narrow Agent execution-snapshot resolver and the mapping from a resolved snapshot to the closed OpenCode/Pi Action payload.
 3. Persist a transformed `WorkDispatch` on active Workflow work and change poll reconciliation to reoffer it; extend `WorkflowItemTranslator` to transform task and check occurrences before that persistence.
 4. Extend both runtime Actions and their runtime request types for validated instructions and timeout forwarding; retain existing inline Action behavior when instructions are absent.
 5. Add structured task/check dispatch rejection reports that preserve `ExecutionError`, then add server and runner regression tests for every transformed runtime path.
-6. Deploy server and runner support before publishing or enabling workflow profiles using `mohist/agent`; no data migration is required because old active work has no snapshot and new snapshots are optional persisted fields.
+6. Update `docs/actions/agent.md` to define the Action for both task and check work, including static-name validation and the canonical name-or-id resolver contract.
+7. Deploy server and runner support before publishing or enabling workflow profiles using `mohist/agent`; no data migration is required because old active work has no snapshot and new snapshots are optional persisted fields.
 
 Rollback consists of stopping new profiles from using `mohist/agent` and deploying the prior server and runner versions together. Already dispatched attempts require the runner version that recognizes the closed `options.instructions` payload; pending work with the virtual Action must be rerun with an inline Action profile after rollback. Existing inline Actions and Agent definitions are untouched.
 
 ## Resolved Interfaces
 
-- Extract the name-or-id active-only behavior from `AgentRefResolver` behind a server-side `IAgentExecutionSnapshotResolver`; it returns no Agent entity and is registered only at the Workflow-to-Agent read boundary.
+- Extract the name-or-id active-only behavior from `AgentRefResolver` behind a server-side `IAgentExecutionSnapshotResolver`: `agent_*` is id-only; other references are name-first with an id fallback. It returns no Agent entity and is registered only at the Workflow-to-Agent read boundary.
 - Persist the optional `WorkDispatch` snapshot on the WorkflowRun active-work model. `IWorkflowGrain` owns compare-and-store/read operations for it; `DispatchService` never writes Workflow storage directly.
 - Change `WorkflowDispatchRejectedException`, `IWorkflowGrain.RejectActiveWorkDispatchAsync`, and the grain report implementation to carry `ExecutionError`, with a check name when the rejected work is checks.
