@@ -31,11 +31,11 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.ListCurrentAsync(project.Id, status, limit ?? 50));
         });
 
-        group.MapGet("/activity", async (HttpContext context, int? limit, AgentActivityFeedAssembler activityFeed, IssueQuerier issues, RunnerStatusService runnerStatus, CancellationToken ct) =>
+        group.MapGet("/activity", async (HttpContext context, int? limit, AgentActivityFeedAssembler activityFeed, ActivityWaitingProjection waitingProjection, RunnerStatusService runnerStatus, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
             var capacity = await runnerStatus.GetCapacityAsync(project.Id);
-            var waiting = await BuildWaitingCardsAsync(issues, project.Id, ct);
+            var waiting = await waitingProjection.ListAsync(project.Id, ct);
             return ApiResults.Ok(await activityFeed.GetActivityAsync(project.Id, limit, waiting: waiting, capacity: capacity, ct: ct));
         });
 
@@ -103,25 +103,6 @@ public static class AgentRoutes
         if (doneIssuesCount <= 0) return new AgentCostMetricDto(null, totalCost.Currency, 0);
         if (totalCost.Amount is null) return new AgentCostMetricDto(null, totalCost.Currency, 0);
         return new AgentCostMetricDto(totalCost.Amount.Value / doneIssuesCount, totalCost.Currency, 1);
-    }
-
-    private static async Task<IReadOnlyList<ActivityWaitingCardDto>> BuildWaitingCardsAsync(
-        IssueQuerier issues,
-        string projectId,
-        CancellationToken ct)
-    {
-        var waiting = await issues.ListInProgressWithApprovalGateAsync(projectId);
-        if (waiting.Count == 0) return [];
-
-        return waiting
-            .Select(issue => new ActivityWaitingCardDto(
-                IssueNumber: issue.Number,
-                IssueTitle: string.IsNullOrWhiteSpace(issue.Title) ? $"Issue #{issue.Number}" : issue.Title,
-                Stage: issue.WorkflowStage,
-                Label: "Needs Approval",
-                RequestedAt: issue.StageApproval is null ? null : issue.StageApproval.RequestedAt.ToString("o"),
-                Preview: null))
-            .ToList();
     }
 
     private static RunnerCapacityView SumCapacity(IReadOnlyList<RunnerStatusView> runners)

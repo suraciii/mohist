@@ -5,9 +5,9 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public sealed class CliEventsTailCommandSpecs : IDisposable
+public sealed class CliEventTailCommandSpecs : IDisposable
 {
-    public CliEventsTailCommandSpecs()
+    public CliEventTailCommandSpecs()
     {
         EventCommands.TailCancellationOverride = default;
     }
@@ -33,7 +33,7 @@ public sealed class CliEventsTailCommandSpecs : IDisposable
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["events", "tail"], output, error, fs, executor);
+            http, ["event", "tail"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var request = Assert.Single(handler.Requests);
@@ -70,7 +70,7 @@ public sealed class CliEventsTailCommandSpecs : IDisposable
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["events", "tail", "--match", "event.type == \"com.mohist.issue.completed\" && event.issue in [\"42\", \"43\"]"],
+            ["event", "tail", "--match", "event.type == \"com.mohist.issue.completed\" && event.issue in [\"42\", \"43\"]"],
             output,
             error,
             fs,
@@ -103,7 +103,7 @@ public sealed class CliEventsTailCommandSpecs : IDisposable
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["events", "tail", "--match", "(event.type == \"x\""],
+            ["event", "tail", "--match", "(event.type == \"x\""],
             output,
             error,
             fs,
@@ -130,7 +130,7 @@ public sealed class CliEventsTailCommandSpecs : IDisposable
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["events", "tail"], output, error, fs, executor);
+            http, ["event", "tail"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.False(called);
@@ -150,7 +150,7 @@ public sealed class CliEventsTailCommandSpecs : IDisposable
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["events", "tail", "--match", "event.type == \"x\""], output, error, fs, executor);
+            http, ["event", "tail", "--match", "event.type == \"x\""], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.False(called);
@@ -170,7 +170,7 @@ public sealed class CliEventsTailCommandSpecs : IDisposable
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["events", "tail", "--project", "proj_other"],
+            ["event", "tail", "--project", "proj_other"],
             output,
             error,
             fs,
@@ -198,7 +198,7 @@ public sealed class CliEventsTailCommandSpecs : IDisposable
         });
 
         var runTask = MohistCliCommands.RunAsync(
-            http, ["events", "tail"], output, error, fs, executor);
+            http, ["event", "tail"], output, error, fs, executor);
 
         await block.Task;
         cts.Cancel();
@@ -223,14 +223,31 @@ public sealed class CliEventsTailCommandSpecs : IDisposable
     }
 
     [Fact]
-    public async Task Tail_SingularNoun_DoesNotResolve()
+    public async Task Tail_PluralNoun_DoesNotResolveWithoutHttp()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["event", "tail"], output, error, fs, executor);
+            http, ["events", "tail"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Tail_Help_DescribesPostSubscriptionNdjsonWithoutSharedFlags()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["event", "tail", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var help = output.ToString();
+        Assert.Contains("subscription establishment", help, StringComparison.Ordinal);
+        Assert.Contains("NDJSON", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("--mode", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("--source", help, StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 }

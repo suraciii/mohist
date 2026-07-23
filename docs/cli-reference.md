@@ -353,8 +353,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
   一级的相关 usage。
 - 当前 Agent launch 只返回 Session，CLI 也没有 AgentJob read surface；目标同时暴露 Job
   与 Session 的稳定身份和各自事实。
-- 当前持久 Activity feed、实时 Event tail 和 dead-letter 操作共用 `events` 导航；目标把
-  Activity read model 与 Event delivery operations 分开。
 - 当前 `opencode` 和根级 `config` 是实现或配置容器导向的入口；目标把模型目录放到 Agent
   配置辅助命令，并删除没有明确资源所有者的泛化 config 命令。
 - 其它用户指南在迁移期间仍可能展示当前可运行的旧路径；完成命令迁移后再一次性更新示例。

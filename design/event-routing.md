@@ -93,7 +93,7 @@ mo routing rule create --name <n> --match <expr> --agent <agent> \
 mo routing rule list | show <n> | update <n> | archive <n>
 mo routing rule move <n> --before <rule> | --after <rule>
 mo routing test [--last <N>]     # 用最近 N 个事件干跑整张表，逐条显示命中
-mo events tail [--match <expr>]  # 用同一 matcher 过滤事件流
+mo event tail [--match <expr>]   # 用同一 matcher 过滤事件流
 ```
 
 命名遵循 [`cli.md`](cli.md)：资源在前、项目作用域走 active project / `--project`。
