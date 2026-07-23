@@ -20,6 +20,12 @@ Mohist SHALL emit runtime observability signals through a standard .NET `Meter` 
 - **THEN** the completed route observation SHALL remain unchanged by that later work
 - **AND** the background execution SHALL NOT retain the request's ambient work scope
 
+#### Scenario: A post-commit dispatcher poke is detached
+
+- **WHEN** a WorkflowRun, Issue or AgentSession store schedules its best-effort EventDispatcher poke after commit
+- **THEN** the complete grain lookup, caller-side invocation and failure observation SHALL execute without the originating request's ambient work scope
+- **AND** releasing that work after response completion SHALL NOT change the completed request's database or downstream counts
+
 #### Scenario: A request exits exceptionally
 
 - **WHEN** an instrumented endpoint advances injected time and then exits by exception or cancellation

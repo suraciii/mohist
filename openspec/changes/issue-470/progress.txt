@@ -17,3 +17,4 @@ Issue 470 current plan repair
 - [completed] Current self-review F1: fallback guarantees collector_bind_failed only for the alternate's initial latest reason; later process/storage/protection events replace it by the common sequence rule while the collector source remains active.
 - [completed] Current self-review F4: bind-failure classification now consumes the collector listener BindHost/Port intent only, with an explicit test where the outbound exporter Endpoint differs.
 - [completed] Current self-review F2: transaction-time request cancellation has its own cancelled write result, one received-only outcome, unchanged degradation sources, unchanged exception propagation, and a signal-driven deterministic test.
+- [completed] Current self-review F3: EventDispatcherPoke and all three calling stores now join the scope-suppressing launcher boundary; tests cover the detached grain invocation and its unchanged originating request counts.

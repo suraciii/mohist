@@ -109,8 +109,9 @@
       "spec": "specs/runtime-observability-metrics/spec.md#requirement-built-in-observability-work-cannot-observe-itself-into-a-feedback-loop",
       "description": "Introduce the scope-suppressing background launcher and complete trace/runtime suppression around OTel ingest, query, status, sampling and maintenance. Integrate against the concrete status/sampler and request-scope modules.",
       "acceptanceCriteria": [
-        "IBackgroundTaskLauncher replaces direct Task.Run in SystemUpdateService and BackgroundHermesIssueNotificationDispatcher, clears only RequestWorkScope while queueing, and provides awaitable fake signals.",
-        "Tests separately prove production launcher suppression, terminal snapshot immutability and both service migrations without scheduler waits.",
+        "IBackgroundTaskLauncher replaces direct Task.Run in SystemUpdateService and BackgroundHermesIssueNotificationDispatcher and owns EventDispatcherPoke scheduling; it clears only RequestWorkScope while queueing and provides awaitable fake signals.",
+        "EventDispatcherPoke accepts the launcher; WorkflowRunStore, IssueStore and AgentSessionStore receive and pass it, and the queued callback owns grain lookup, DispatchNowAsync awaiting and best-effort failure logging so no caller-side invocation or continuation is created in request scope.",
+        "Tests separately prove production launcher suppression, terminal snapshot immutability, both service migrations, all three store poke paths, and signal-released poke work leaving originating request database/downstream counts unchanged without scheduler waits.",
         "OtelSuppressionMiddleware retains the /otel ASP.NET filter and enters SuppressInstrumentationScope.Begin around the awaited /otel/v1 and /otel/api endpoint delegate; disposal is guaranteed in failure/cancellation paths.",
         "The sampler enters the same scope around each storage probe and registered OTel maintenance callback, while process reads/publication remain outside; suppression does not alter results or degradation publication.",
         "Existing exporter URI filtering remains defense in depth; OTel endpoint/probe/maintenance work emits no equivalent ASP.NET/EF/Orleans/HttpClient trace or runtime measurement to the built-in collector.",

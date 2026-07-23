@@ -95,7 +95,9 @@ Four adapters update the active scope and otherwise no-op:
 
 The HTTP builder filter is registered outermost, invokes the remaining filter chain first, then appends the counting handler last in `AdditionalHandlers`, immediately outside `PrimaryHandler`. A composition test with a retry handler locks that ordering. Production installs the EF interceptor in `MohistServiceRegistration`. `MohistIntegrationFixture` and `GrainTestConfig`, the two roots used for HTTP-to-Orleans accounting specs, mirror it; unrelated custom factories remain unchanged and interceptor unit tests construct options explicitly.
 
-Introduce `IBackgroundTaskLauncher` for the two current fire-and-forget sites, `SystemUpdateService` and `BackgroundHermesIssueNotificationDispatcher`. Production temporarily clears only the request-scope ambient slot while queuing `Task.Run`, then restores the caller slot. Its fake captures callbacks and exposes awaitable started/completed signals. Tests separately prove scope suppression, post-close immutability, and both services' use of the launcher.
+Introduce `IBackgroundTaskLauncher` for every current detached execution path: `SystemUpdateService`, `BackgroundHermesIssueNotificationDispatcher`, and `EventDispatcherPoke.PokeAfterCommit`. Production temporarily clears only the request-scope ambient slot while queuing `Task.Run`, then restores the caller slot. Its fake captures callbacks and exposes awaitable started/completed signals.
+
+`EventDispatcherPoke` accepts the launcher, and `WorkflowRunStore`, `IssueStore`, and `AgentSessionStore` receive and pass the same dependency. The queued callback owns the complete grain lookup, `DispatchNowAsync` invocation, await, and best-effort exception logging; neither the caller-side Orleans invocation nor its continuation is created in the request execution context. Tests separately prove launcher suppression, post-close immutability, both services' migration, all three store call paths, and that a signal-released poke cannot inherit or increment the originating request's database/downstream counters. The Orleans incoming filter remains defense in depth for grain turns, not the mechanism that suppresses this detached caller-side invocation.
 
 Alternative considered: reconstruct counts and duration from child Spans. Rejected because sampling can omit Activities, completion lags the response, and a second listener would duplicate existing tracing.
 
@@ -173,7 +175,7 @@ Alternative considered: expose global agent counters or only ratios. Rejected be
 
 ## Risks / Trade-offs
 
-- `[Ambient scope leaks across Orleans or detached work] ->` Clear it for incoming grain turns, close atomically at response completion, and queue fire-and-forget work through the scope-suppressing launcher.
+- `[Ambient scope leaks across Orleans or detached work] ->` Clear it for incoming grain turns, close atomically at response completion, and queue every detached path, including post-commit dispatcher pokes, through the scope-suppressing launcher.
 - `[Infrastructure adapters miss direct calls] ->` Define database calls as `MohistDbContext` commands and downstream calls as caller-side Orleans plus factory-created HTTP sends; contract tests lock those boundaries.
 - `[Automatic tracing appears to duplicate counters] ->` Adapters increment integers only and never start Activities; Trace and amplification retain distinct roles.
 - `[OTel child instrumentation forms a feedback loop] ->` Keep the inbound/exporter filters and wrap awaited OTel endpoint, probe, and maintenance work in `SuppressInstrumentationScope`; tests assert suppression disposal and unaffected non-OTel traces.
