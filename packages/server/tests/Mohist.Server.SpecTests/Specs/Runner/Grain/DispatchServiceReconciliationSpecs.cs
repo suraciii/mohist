@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
@@ -8,6 +10,7 @@ using Mohist.Server.SpecTests.Support;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using System.Text.Json;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
@@ -42,6 +45,22 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
             workflowIds[index] = workflowId;
         }
         return (runnerId, workflowIds);
+    }
+
+    [Fact]
+    public async Task Redelivery_UsesPersistedDispatchSnapshotAfterGrainActivation()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var runnerId = _runnerId!;
+        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        var persisted = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(persisted.CurrentStage().Tasks);
+        Assert.Equal(first, task.DispatchSnapshot);
+
+        await workflow.DeactivateForTestAsync();
+        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Equal(first, redelivery);
     }
 
     [Fact]
@@ -91,6 +110,78 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         var task = Assert.Single(run.CurrentStage().Tasks);
         Assert.Equal(TaskRunStatus.Failed, task.Status);
         Assert.Contains("with.agent", run.Failure?.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Dispatch_MissingAgent_PersistsAgentNotFoundOnTaskRunAndFailure()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks:
+            [
+                new TaskDefinition(
+                    "reviewer",
+                    "Use Agent reviewer",
+                    "mohist/agent",
+                    With("""{"name":"reviewer","prompt":"Review the change."}"""),
+                    Recovery: new RecoveryDefinition(
+                        1,
+                        [new RecoveryHandlerDefinition("failure.error.code=agent_not_found", [], RetrySelf: true)])),
+            ],
+            checks: [],
+            stage: "build"));
+        var runnerId = _runnerId!;
+
+        var assignment = await workflow.AssignWorkerAsync(runnerId);
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
+        var claimed = await workflow.ClaimNextAsync(runnerId);
+        Assert.NotNull(claimed);
+
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+
+        Assert.Empty(response.Dispatches);
+        var run = await LoadRunAsync(_workflowId!);
+        Assert.Equal(WorkflowRunStatus.Failed, run.Status);
+        var task = Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal(TaskRunStatus.Failed, task.Status);
+        Assert.Equal("agent_not_found", task.Error?.Code);
+        Assert.Equal("agent_not_found", run.Failure?.Error?.Code);
+        Assert.Contains("reviewer", run.Failure?.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Dispatch_ArchivedAgent_PersistsAgentNotFoundOnTaskRunAndFailure()
+    {
+        var projectId = TestProjectId(_workflowId ?? $"wf-{Guid.NewGuid():N}");
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks:
+            [
+                new TaskDefinition(
+                    "reviewer",
+                    "Use Agent reviewer",
+                    "mohist/agent",
+                    With("""{"name":"reviewer","prompt":"Review the change."}""")),
+            ],
+            checks: [],
+            stage: "build"));
+        var runnerId = _runnerId!;
+
+        await SeedArchivedAgentAsync(projectId, "reviewer");
+
+        var assignment = await workflow.AssignWorkerAsync(runnerId);
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
+        var claimed = await workflow.ClaimNextAsync(runnerId);
+        Assert.NotNull(claimed);
+
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+
+        Assert.Empty(response.Dispatches);
+        var run = await LoadRunAsync(_workflowId!);
+        Assert.Equal(WorkflowRunStatus.Failed, run.Status);
+        var task = Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal(TaskRunStatus.Failed, task.Status);
+        Assert.Equal("agent_not_found", task.Error?.Code);
+        Assert.Equal("agent_not_found", run.Failure?.Error?.Code);
+        Assert.Contains("reviewer", run.Failure?.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -262,6 +353,28 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         {
             WorkflowRunId = workflowRunId,
             State = JSON.Serialize(run),
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SeedArchivedAgentAsync(string projectId, string agentName)
+    {
+        using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var id = $"agent_{Guid.NewGuid():N}";
+        db.Agents.Add(new AgentRow
+        {
+            Id = id,
+            ProjectId = projectId,
+            Name = agentName,
+            Status = AgentStatus.Archived,
+            State = JsonSerializer.Serialize(new Mohist.Server.Agent.Domain.Agent
+            {
+                Id = id,
+                ProjectId = projectId,
+                Name = agentName,
+                Status = AgentStatus.Archived,
+            }, Mohist.Server.Infrastructure.JSON.Options),
         });
         await db.SaveChangesAsync();
     }

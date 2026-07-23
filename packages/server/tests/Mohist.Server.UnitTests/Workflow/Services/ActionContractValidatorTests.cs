@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Services;
 
-public class ActionContractValidatorTests
+public partial class ActionContractValidatorTests
 {
     private static ActionCatalogEntry CreateAction(
         string name,
@@ -698,4 +698,5 @@ public class ActionContractValidatorTests
         var unknownUses = errors.Single(e => e.Message.Contains("unknown Action"));
         Assert.Equal("stages[0].tasks[0]", unknownUses.Path);
     }
+
 }
