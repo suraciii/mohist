@@ -229,6 +229,26 @@ stages:
           files:
             - path: openspec/changes/issue-${{ issue.number }}/review.md
 
+      - id: rebase
+        title: Rebase onto repository base
+        uses: mohist/rebase
+        with:
+          baseBranch: ${{ repository.baseBranch }}
+          remote: origin
+          squash: false
+        recovery:
+          budget: 2
+          handlers:
+            - when: error.code=conflict
+              tasks:
+                - id: recover:resolve-rebase-conflicts
+                  title: Resolve rebase conflicts
+                  uses: mohist/opencode
+                  with:
+                    session: check
+                    prompt: ${{ prompts.resolve-rebase-conflicts }}
+                    options: ${{ vars.agent }}
+
       - id: push
         title: Push
         uses: mohist/push

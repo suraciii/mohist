@@ -330,44 +330,44 @@ describe("mohist/merge-github-pr action", () => {
     })
   })
 
-  it("proceeds to merge after the grace window when statusCheckRollup is readable and empty", async () => {
-    setGitHubPrChecksTimingForTest({ pollIntervalMs: 1, noChecksGraceMs: 5 })
-    const ghCalls: string[] = []
-    installMoIssueShow()
-    installGit(() => { throw new Error("git should not be called") })
-    installGh((cmd, args) => {
-      const full = [cmd, ...args].join(" ")
-      ghCalls.push(full)
-      switch (full) {
-        case "gh --version":
-        case "gh auth status":
-          return ghOk("ok\n")
-        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
-          return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-        case "gh pr view 42 --json statusCheckRollup":
-          return ghOk(checksRollup([]))
-        case "gh pr view 42 --json mergeStateStatus":
-          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
-        case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
-          return ghOk("Merged pull request #42\n")
-        case "gh pr view 42 --json state,mergeCommit,url":
-          return ghOk(JSON.stringify({ state: "MERGED", url: "https://github.com/example/repo/pull/42", mergeCommit: { oid: "merge-sha-1" } }))
-        default:
-          return ghFail(`unexpected gh call: ${full}`)
-      }
-    })
+  it("returns pr-checks-unavailable without merging when the rollup remains empty through the grace period", async () => {
+    vi.useFakeTimers()
+    try {
+      setGitHubPrChecksTimingForTest({ pollIntervalMs: 10, noChecksGraceMs: 25 })
+      const ghCalls: string[] = []
+      installMoIssueShow()
+      installGit(() => { throw new Error("git should not be called") })
+      installGh((cmd, args) => {
+        const full = [cmd, ...args].join(" ")
+        ghCalls.push(full)
+        switch (full) {
+          case "gh --version":
+          case "gh auth status":
+            return ghOk("ok\n")
+          case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
+            return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
+          case "gh pr view 42 --json statusCheckRollup":
+            return ghOk(checksRollup([]))
+          default:
+            return ghFail(`unexpected gh call: ${full}`)
+        }
+      })
 
-    const result = await callAction(mergeGitHubPrAction, context({
-      prNumber: 42,
-      method: "squash",
-      subjectFrom: "issue.title",
-    }))
-    const output = result.output as Record<string, unknown>
+      const resultPromise = callAction(mergeGitHubPrAction, context({
+        prNumber: 42,
+        method: "squash",
+        subjectFrom: "issue.title",
+      }))
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(30)
+      const result = await resultPromise
 
-    expect(result.error).toBeUndefined()
-    expect(ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length).toBeGreaterThan(1)
-    expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
-    expect(output).toMatchObject({ kind: "merge-github-pr", status: "completed", mergeCommitSha: "merge-sha-1" })
+      expect(result.error).toMatchObject({ code: "pr-checks-unavailable" })
+      expect(result.error?.message).toContain("no PR checks were reported")
+      expect(ghCalls).not.toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("retries transient pr-checks-unavailable inside the action before merging", async () => {

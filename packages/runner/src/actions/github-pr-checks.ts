@@ -66,7 +66,7 @@ type PrChecksClassification =
   | { kind: "failed"; message: string }
 
 export function classifyPrChecks(entries: PrCheckEntry[]): PrChecksClassification {
-  if (entries.length === 0) return { kind: "passed" }
+  if (entries.length === 0) return { kind: "pending" }
   const failed: string[] = []
   for (const entry of entries) {
     const bucket = (entry.bucket ?? "").toLowerCase()

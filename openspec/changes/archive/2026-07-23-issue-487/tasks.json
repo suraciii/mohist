@@ -1,0 +1,45 @@
+{
+  "project": "mohist-local",
+  "description": "Make the GitHub PR check gate synchronize an AI-approved candidate before verification and require non-empty passing PR checks.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Synchronize the approved PR candidate in the check gate",
+      "spec": "specs/github-pr-check-gate/spec.md#synchronize-only-an-approved-review-candidate",
+      "description": "Update the built-in mohist/github-pr workflow so a passing AI review is followed by the existing rebase action before push, PR readying, and PR-check verification. Reuse integrate's conflict-resolution handler without retrying a resolved rebase, keep review-failure recovery unsynchronized, and preserve integrate's existing final merge protection.",
+      "acceptanceCriteria": [
+        "The check-stage task order after successful AI review is rebase onto repository.baseBranch, push, mark the existing PR ready, then verify PR checks before approval can be requested.",
+        "The post-review rebase uses origin, does not squash, and on a conflict invokes the existing rebase-conflict resolution prompt without retrying the rebase or starting check verification before resolution completes.",
+        "The review-failure repair and re-review path contains no base-synchronization step, while an already-current branch can complete the configured rebase without an extra workflow branch.",
+        "Profile specification tests assert the rebase placement, conflict recovery configuration, check-stage ordering, and unchanged integrate base-moved and branch-protection recovery; the server test suite passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated built-in GitHub PR workflow definition and workflow-profile specification coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not add workflow variables, a mergeable preflight, or a new action."
+    },
+    {
+      "id": "T-002",
+      "title": "Reject unavailable GitHub PR checks after bounded polling",
+      "spec": "specs/github-pr-check-gate/spec.md#require-non-empty-passing-pr-checks",
+      "description": "Change the shared PR-check polling used by mohist/github-pr-checks and mohist/merge-github-pr so an empty status-check rollup continues through the existing bounded wait and then returns unavailable rather than passing or permitting a merge. Preserve both action contracts and actionable pr-checks-unavailable error mappings; only non-empty, completed, non-failing rollups may pass.",
+      "acceptanceCriteria": [
+        "An initially empty PR check rollup is polled for the existing bounded grace period and succeeds only if a non-empty passing rollup appears before the deadline.",
+        "A rollup that remains empty through the deadline returns unavailable and is surfaced as pr-checks-unavailable rather than as a successful result or a speculative repair loop; mohist/merge-github-pr surfaces the same code and does not issue a merge command.",
+        "Non-empty rollups with pending or failed checks do not pass, while a non-empty rollup with every check completed and non-failing passes.",
+        "Runner tests cover empty-to-passing, permanently empty, pending, failed, and passing rollups for the checks action, and update the merge specification so a permanently empty rollup returns pr-checks-unavailable without issuing a merge command.",
+        "Bounded-polling tests use vi.useFakeTimers() with deterministic timer advancement for empty-to-passing and permanently-empty scenarios, restore real timers afterward, and use fake gh responses; runner typecheck and tests pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated shared GitHub PR checks polling/classification implementation and runner coverage for checks and merge actions.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the current Action inputs and schemas unchanged. The shared wait changes final integrate behavior as well as check-stage verification."
+    }
+  ]
+}
