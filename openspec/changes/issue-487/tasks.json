@@ -25,20 +25,21 @@
       "id": "T-002",
       "title": "Reject unavailable GitHub PR checks after bounded polling",
       "spec": "specs/github-pr-check-gate/spec.md#require-non-empty-passing-pr-checks",
-      "description": "Change mohist/github-pr-checks polling so an empty status-check rollup continues through the existing bounded wait and then returns unavailable rather than passing. Preserve the existing action contract and actionable pr-checks-unavailable error mapping; only non-empty, completed, non-failing rollups may pass.",
+      "description": "Change the shared PR-check polling used by mohist/github-pr-checks and mohist/merge-github-pr so an empty status-check rollup continues through the existing bounded wait and then returns unavailable rather than passing or permitting a merge. Preserve both action contracts and actionable pr-checks-unavailable error mappings; only non-empty, completed, non-failing rollups may pass.",
       "acceptanceCriteria": [
         "An initially empty PR check rollup is polled for the existing bounded grace period and succeeds only if a non-empty passing rollup appears before the deadline.",
-        "A rollup that remains empty through the deadline returns unavailable and is surfaced as pr-checks-unavailable rather than as a successful result or a speculative repair loop.",
+        "A rollup that remains empty through the deadline returns unavailable and is surfaced as pr-checks-unavailable rather than as a successful result or a speculative repair loop; mohist/merge-github-pr surfaces the same code and does not issue a merge command.",
         "Non-empty rollups with pending or failed checks do not pass, while a non-empty rollup with every check completed and non-failing passes.",
-        "Runner unit tests cover empty-to-passing, permanently empty, pending, failed, and passing rollups using injected timing and fake gh responses; runner typecheck and tests pass."
+        "Runner tests cover empty-to-passing, permanently empty, pending, failed, and passing rollups for the checks action, and update the merge specification so a permanently empty rollup returns pr-checks-unavailable without issuing a merge command.",
+        "Bounded-polling tests use vi.useFakeTimers() with deterministic timer advancement for empty-to-passing and permanently-empty scenarios, restore real timers afterward, and use fake gh responses; runner typecheck and tests pass."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Updated GitHub PR checks polling/classification implementation and runner unit coverage.",
+      "output": "Updated shared GitHub PR checks polling/classification implementation and runner coverage for checks and merge actions.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep the current Action inputs and schemas unchanged."
+      "notes": "Keep the current Action inputs and schemas unchanged. The shared wait changes final integrate behavior as well as check-stage verification."
     }
   ]
 }

@@ -2,14 +2,14 @@
 
 The built-in `mohist/github-pr` workflow currently runs `ai-review`, pushes the branch, marks the PR ready, and verifies checks in its check stage. The branch can therefore be behind `repository.baseBranch` when check-stage approval is requested. The existing integrate-stage `base-moved` recovery already rebases, resolves conflicts, pushes, and retries the merge, but that occurs after approval.
 
-The runner's `mohist/github-pr-checks` action polls `gh pr view --json statusCheckRollup`. It waits briefly for an empty rollup, but its empty-entry classification is currently passing, so an empty result becomes successful once the wait expires. Runner reports this observation; the workflow definition controls sequencing and approval. No persistent model, public API, Action input, or dependency changes are permitted.
+The runner's `mohist/github-pr-checks` and `mohist/merge-github-pr` actions share `waitForGitHubPrChecks`, which polls `gh pr view --json statusCheckRollup`. It waits briefly for an empty rollup, but its empty-entry classification is currently passing, so an empty result becomes successful once the wait expires and can permit a merge. Runner reports this observation; the workflow definition controls sequencing and approval. No persistent model, public API, Action input, or dependency changes are permitted.
 
 ## Goals / Non-Goals
 
 **Goals:**
 - Make check-stage approval evidence apply to an AI-reviewed branch rebased onto the latest configured base and then published.
 - Reuse the existing rebase conflict-resolution path without verifying checks while a rebase is unresolved or rerunning a successfully resolved rebase.
-- Require at least one completed, non-failing check before `mohist/github-pr-checks` succeeds; return `pr-checks-unavailable` after the existing bounded empty-check wait expires.
+- Require at least one completed, non-failing check before either shared-wait caller proceeds; return `pr-checks-unavailable` after the existing bounded empty-check wait expires.
 - Retain integrate's final merge protection for changes after approval.
 
 **Non-Goals:**
@@ -32,7 +32,7 @@ Alternative considered: put a rebase in the review recovery handler or before re
 
 Keep polling in `waitForGitHubPrChecks` from the first empty rollup for the configured grace period. If it is still empty at the deadline, return `{ kind: "unavailable" }` with a message that identifies the bounded wait and lack of reported checks. Do this before the normal check classification path. Update empty-entry classification so it cannot independently mean `passed`; only a non-empty set whose entries are all completed without failure may pass.
 
-The action already maps `unavailable` to the actionable `pr-checks-unavailable` error code. The check-stage recovery remains scoped to `pr-checks-failed`, so unavailable evidence blocks the stage instead of invoking a speculative code-fix loop.
+Both callers already map `unavailable` to the actionable `pr-checks-unavailable` error code. The check-stage recovery remains scoped to `pr-checks-failed`, so unavailable evidence blocks the stage instead of invoking a speculative code-fix loop; the merge action must surface the same code and stop before issuing `gh pr merge`.
 
 Alternative considered: treat repositories with no checks as successful after a delay. That is the current behavior and leaves approval without protection evidence. Adding an Action input to opt out is excluded because the issue requires the built-in GitHub PR gate to be strict and changes no public Action contract.
 
@@ -54,12 +54,12 @@ Alternative considered: remove the integrate rebase once check is synchronized. 
 - [A force-push delays GitHub check registration] -> Retain the existing bounded grace-period polling before reporting unavailable.
 - [Rebase conflict requires agent resolution] -> Reuse the existing resolver and do not start publishing or check polling until it completes.
 - [Base moves after check approval] -> Keep integrate's serialized final merge and its existing base-moved recovery.
-- [Workflow YAML task ordering regresses] -> Add server workflow-profile assertions for rebase placement, its conflict recovery, and the resulting task order; add runner unit tests for empty, pending, failing, and passing rollups using injected timing and fake `gh` responses.
+- [Workflow YAML task ordering regresses] -> Add server workflow-profile assertions for rebase placement, its conflict recovery, and the resulting task order; add runner tests for empty, pending, failing, and passing rollups in both shared-wait callers. Tests for bounded empty-rollup polling use `vi.useFakeTimers()`, deterministic timer advancement, and `vi.useRealTimers()` cleanup with fake `gh` responses.
 
 ## Migration Plan
 
 1. Update the built-in GitHub PR workflow definition and its profile specification tests.
-2. Update runner check classification/polling and runner tests without changing action schemas.
+2. Update runner check classification/polling and both action callers' runner tests without changing action schemas.
 3. Run server and runner typecheck/test suites, then deploy through the normal server and runner release path. Existing workflow runs retain their resolved definition; new runs use the updated built-in profile.
 4. Roll back by redeploying the prior server/runner versions. No data migration or cleanup is required. A run blocked after rollout remains resumable according to its persisted workflow definition and can be handled through normal recovery.
 

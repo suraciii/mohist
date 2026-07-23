@@ -36,7 +36,7 @@ After a successful post-review synchronization, the check stage SHALL publish th
 - **THEN** the workflow SHALL NOT request check-stage approval
 
 ### Requirement: Require non-empty passing PR checks
-PR check verification SHALL pass only when the current PR head has a non-empty check set, no reported check is pending, and no reported check has failed. When the check set is empty, verification MUST continue polling for a bounded wait; if it remains empty at the end of that wait, verification MUST fail with an actionable checks-unavailable result.
+PR check verification and the integrate action's final shared PR-check wait SHALL proceed only when the current PR head has a non-empty check set, no reported check is pending, and no reported check has failed. When the check set is empty, either caller MUST continue polling for a bounded wait; if it remains empty at the end of that wait, it MUST fail with an actionable checks-unavailable result.
 
 #### Scenario: Current PR head has passing checks
 - **WHEN** the current PR head reports one or more checks and every reported check has completed without failure
@@ -49,6 +49,10 @@ PR check verification SHALL pass only when the current PR head has a non-empty c
 #### Scenario: Checks have not appeared before the bounded wait ends
 - **WHEN** the current PR head continues to report an empty check set until the bounded wait expires
 - **THEN** PR check verification SHALL return an actionable `pr-checks-unavailable` failure and SHALL NOT treat the empty check set as passing
+
+#### Scenario: Integrate sees no checks before the bounded wait ends
+- **WHEN** integrate's final shared PR-check wait continues to report an empty check set until the bounded wait expires
+- **THEN** integrate SHALL return an actionable `pr-checks-unavailable` failure and SHALL NOT issue a merge command
 
 ### Requirement: Retain final integration protection
 The integrate stage SHALL retain its final merge protection, including recovery when the repository base moves after check-stage approval and handling when branch protection changes before merge.
