@@ -29,3 +29,14 @@ Changing the Issue's selection or its Project default after a WorkflowRun starts
 #### Scenario: Change the Issue to a different Profile during a Run
 - **WHEN** an active WorkflowRun is bound to `delivery/review` and the Issue or Project selection changes to `mohist/github-pr`
 - **THEN** the active Run SHALL remain bound to `delivery/review` and SHALL resolve its later uninitialized Stages from `delivery/review`'s current Definition
+
+### Requirement: Terminal Run releases its deletable custom-Profile backing key
+When a WorkflowRun becomes terminal, its WorkflowRun transaction SHALL clear only the nullable custom-Profile backing key used by the restrictive foreign key. It SHALL retain its public Profile ID, initialized Stages, attempts, and history. Existing terminal Runs migrated to this model SHALL likewise retain their public Profile ID with a null backing key.
+
+#### Scenario: Terminalize a Run bound to a custom Profile
+- **WHEN** a WorkflowRun bound to a custom Profile reaches a terminal state
+- **THEN** its backing key SHALL be cleared in that terminalization transaction while its public Profile ID and history remain unchanged
+
+#### Scenario: Migrate an existing terminal Run
+- **WHEN** an existing terminal WorkflowRun is migrated with a resolved custom Profile ID
+- **THEN** the Run SHALL retain that public Profile ID and have no custom-Profile backing key

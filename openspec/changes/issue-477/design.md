@@ -62,8 +62,9 @@ Provider 暴露窄接口：列举、按 `(projectId, profileId)` 读取、验证
 错误。所有读取和选择均通过 provider 判断 ID 是否属于当前 Project collection；不再让调用方
 直接探测 system catalog 或 legacy template table。公开和领域模型只保存一个 Profile ID；持久化行另有
 nullable custom-Profile key backing column，仅当 ID 属于 custom Profile 时写入，作为 Project default、
-Issue selection 与 Run binding 到 custom `(ProjectId, ProfileId)` 的 restrictive foreign-key target。
-builtin IDs 的 backing column 为 null，且不可删除，故不需要 foreign key。
+Issue selection 与活动 Run binding 到 custom `(ProjectId, ProfileId)` 的 restrictive foreign-key target。
+Run 在自己的终态转换事务中仅清除该 backing key，保留公开 Profile ID 及所有历史事实；builtin IDs 的
+backing column 为 null，且不可删除，故不需要 foreign key。
 
 选择此方案是因为 Profile 是独立、可稳定寻址且由 Workflow 拥有的资源。备选方案是继续用
 Project template 加 system catalog 的聚合 read model；它会保留两套写入/存在性规则，无法给
@@ -133,9 +134,10 @@ explicit selection，以及非终态 WorkflowRun binding。存在任一引用即
 辨识的 Issue number / WorkflowRun ID；不只返回第一项。删除命令只删除 Profile 自己的 custom record，
 Project、Issue 和 Run 不被同时修改。
 
-`WorkflowProfileDeletionBlockerQuery` 是可操作诊断而非并发正确性的唯一依赖。每个 custom Profile
-reference 的 persistence row 填写 nullable backing key，并使用指向 `(ProjectId, ProfileId)` 的 restrictive
-foreign key；builtin reference 的 backing key 保持 null。Profile 删除与来自另一 coordinator 的 Issue
+`WorkflowProfileDeletionBlockerQuery` 是可操作诊断而非并发正确性的唯一依赖。Project default、Issue
+selection 与活动 Run 的每个 custom Profile reference persistence row 填写 nullable backing key，并使用指向
+`(ProjectId, ProfileId)` 的 restrictive foreign key；WorkflowRun 在转为终态的自身事务中只清除该 backing
+key，仍保留公开 Profile ID 与历史。builtin reference 的 backing key 保持 null。Profile 删除与来自另一 coordinator 的 Issue
 selection 在数据库事务中竞争时，先提交的 Issue reference 令 delete 受 FK
 拒绝，随后重新查询并返回 blocker；先提交的 delete 令 Issue insert/update 受 FK 拒绝，映射为可重试的
 `workflow-profile-not-found` conflict，且不提交 dangling reference。Project-default 与 Run-binding 已由
@@ -188,7 +190,8 @@ CLI spec 中 `workflow` 对 WorkflowProfile 的唯一导航相悖，后者会长
 
 Server spec tests 覆盖同 Project collection、跨 Project 隔离、builtin read-only、verbatim 新 source 与
 canonical legacy source、两类保存错误来源、Project 创建时 `mohist/local` default、全部删除阻塞关系、
-participant fake 验证 Profile coordinator 内 Project-default / Run-binding / deletion 的顺序；另用真实
+终态转换仅清除 Run backing key 后可删除仅被终态 Run 引用的 Profile 且 Run 历史不变，participant fake
+验证 Profile coordinator 内 Project-default / Run-binding / deletion 的顺序；另用真实
 transactional in-memory relational provider 验证 Issue coordinator 的 selection 与 deletion 的交错：
 Issue reference 先提交则 delete 返回 blocker，delete 先提交则 Issue transaction 返回 retryable conflict
 且不提交。测试须包含终态 Issue 引用的 blocker。WorkflowRun spec 必须证明 Profile/selection 更新不会
@@ -241,8 +244,9 @@ CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--
    ID。缺少 legacy Project default 而原先会落到 system fallback 的 Project 写入 `mohist/local`；内置
    ID 保持内置引用。
 4. 对所有现存 Run，根据迁移前有效级联解析一次并写入迁移后的 Profile ID；若来源为 inline
-   Definition，复用步骤 2 创建的 Profile。终态 Run 同样只保留 ID 和既有历史持久状态，不补写
-   Definition snapshot；后续允许删除仅被终态 Run 引用的 Profile。
+   Definition，复用步骤 2 创建的 Profile。活动 custom Run 写入 restrictive foreign-key backing key；已是终态
+   的 custom Run 写入 null backing key，只保留公开 Profile ID 和既有历史持久状态，不补写 Definition
+   snapshot；后续允许删除仅被终态 Run 引用的 Profile。
 5. 切换 Server provider、`WorkflowProfileReferenceCoordinator`（Project default、Run binding 与
    delete）、`IssueRepositoryCoordinatorGrain`（Issue selection 与既有 repository lifecycle）、Run
    创建/Stage 初始化、collection API 和引用保护到新模型，随后删除旧 cascade、inline write path 和

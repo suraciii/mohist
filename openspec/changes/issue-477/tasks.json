@@ -11,13 +11,13 @@
         "Custom Profiles are scoped by Project, retain stable slash-capable IDs, and same IDs in different Projects resolve independently.",
         "The collection returns built-in mohist/* Profiles with custom Profiles, while create, edit, and delete reject invalid built-in mutations with a read-only domain error.",
         "Create and edit preserve verbatim submitted Definition source; migrated legacy semantic Definitions persist and return documented canonical YAML source. Both report Definition validation diagnostics separately from Action-contract diagnostics without CLI-side validation logic.",
-        "Delete reports every blocking Project default, Issue explicit selection including terminal Issues, and active WorkflowRun binding; unreferenced custom Profiles delete successfully.",
+        "Delete reports every blocking Project default, Issue explicit selection including terminal Issues, and active WorkflowRun binding; unreferenced custom Profiles and Profiles referenced only by terminal Runs delete successfully without losing Run history.",
         "WorkflowProfileReferenceCoordinator serializes deletion with Project-default and Run-binding writes; IssueRepositoryCoordinatorGrain continues to serialize Issue selection with repository lifecycle. Issue create still calls IIssueBindingParticipant in one Issue transaction that commits repository binding and Profile selection together. Deterministic coordinator specs cover Project-default/Run writes, and transactional nullable-backing-key foreign-key specs prove concurrent Issue selection and deletion yield either a blocking reference or a retryable workflow-profile-not-found conflict, never a dangling reference.",
         "A WorkflowProfileDeletionBlockerQuery projection summarizes Project default, all Issue explicit selections including terminal Issues, and active WorkflowRun bindings for a Profile, mirroring RepositoryDeletionBlockerQuery's read of Issue rows; nullable custom-Profile backing-key foreign keys are the final concurrency backstop.",
         "design/architecture.md is updated to register WorkflowProfileReferenceCoordinator as a second durable application process manager, state its ownership boundary (Project default / WorkflowRun binding / Profile deletion), record that Issue Profile selection remains on IssueRepositoryCoordinatorGrain, and specify the terminal-Issue deletion rule: a Profile referenced by any Issue (including a terminal Issue) blocks deletion, backed by nullable custom-Profile foreign keys as the concurrency backstop; the plan then conforms to that document.",
         "The data migration renders canonical source for legacy semantic templates, preserves verbatim source for new saves, converts legacy default, Issue reference or inline Definition, and existing Run resolution into Profile ID references without Definition snapshots, and deterministically renames reserved legacy custom IDs with complete reference rewrites or an atomic migration failure on target collision.",
         "Every newly created Project persists mohist/local as its default Profile, and migrated Projects that previously used the system fallback receive that explicit default.",
-        "Server spec tests cover tenancy isolation, built-in behavior, save-validation sources, migration results, and all deletion-reference combinations using in-memory fakes and deterministic time."
+        "Server spec tests cover tenancy isolation, built-in behavior, save-validation sources, migration results, and all deletion-reference combinations using in-memory fakes and deterministic time, including a transactional terminalization/deletion proof that clears only the terminal Run backing key and retains its public Profile ID and history."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -25,7 +25,7 @@
       "output": "WorkflowProfile persistence/provider, collection API, WorkflowProfileReferenceCoordinator, WorkflowProfileDeletionBlockerQuery, nullable custom-Profile foreign-key backing columns, EF migration, legacy source and reserved-ID conversion, and server specification coverage.",
       "dependsOn": [],
       "passes": false,
-      "notes": "The Workflow collection provider is the sole existence and read-only authority for built-in and custom Profile IDs. WorkflowProfileReferenceCoordinator owns deletion, Project-default, and Run-binding writes; IssueRepositoryCoordinatorGrain owns Issue selection and preserves the single Issue transaction for repository binding plus Profile selection. Nullable backing-key foreign keys protect custom Profile delete races; built-ins are immutable."
+      "notes": "The Workflow collection provider is the sole existence and read-only authority for built-in and custom Profile IDs. WorkflowProfileReferenceCoordinator owns deletion, Project-default, and Run-binding writes; IssueRepositoryCoordinatorGrain owns Issue selection and preserves the single Issue transaction for repository binding plus Profile selection. Nullable backing-key foreign keys protect custom Profile delete races; terminal WorkflowRuns clear only their backing key in their own terminalization transaction while retaining their public Profile ID and history; built-ins are immutable."
     },
     {
       "id": "T-002",
@@ -58,7 +58,7 @@
         "Changing a Project default or Issue selection affects only subsequently started Runs and never changes an active Run's bound Profile ID.",
         "An edit to the bound Profile changes only later uninitialized Stages; initialized tasks, checks, lock behavior, accepted attempts, and recorded results remain unchanged.",
         "A removed or invalid future Stage in the current bound Definition fails through the existing visible WorkflowRun failure path without fallback to a prior Definition or another Profile.",
-        "WorkflowRun server specs cover inherited and explicit startup binding, selection changes during active Runs, live later-Stage resolution, immutable initialized facts, and the missing-future-stage error path with deterministic fakes."
+        "WorkflowRun server specs cover inherited and explicit startup binding, selection changes during active Runs, live later-Stage resolution, immutable initialized facts, terminalization clearing only a custom Profile backing key while retaining history, migration of existing terminal Runs with null backing keys, and the missing-future-stage error path with deterministic fakes."
       ],
       "priority": 3,
       "mode": "AFK",
