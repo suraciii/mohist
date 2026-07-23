@@ -1,7 +1,7 @@
 # Review Findings
 
-## P2: Integrate recovery contracts were removed from profile coverage
+No blocking findings. The check-stage workflow places rebase after a passing AI review and before push, PR readying, and check verification; failed review recovery remains unsynchronized. Rebase conflict recovery preserves the in-progress rebase, and integrate retains its final base-moved and branch-protection recovery. Shared check polling requires a non-empty, completed, non-failing rollup, returns `pr-checks-unavailable` after the bounded empty-rollup wait, and prevents merge issuance.
 
-`packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs:435-443` now checks only that integrate's base-moved rebase conflict handler contains one task, and `:453-456` checks only the failing-check recovery task IDs. The change removed the previous assertions that these tasks use `mohist/opencode`, run in the `integrate` session, and use `${{ prompts.resolve-rebase-conflicts }}` or `${{ prompts.fix-pr-checks }}`. Retaining integrate's base-moved and branch-protection recovery is an explicit acceptance criterion, so restore those assertions to keep the unchanged final merge protection protected by the profile test.
+Verification passed: runner typecheck, runner test typecheck, all 1,383 runner tests, and the server spec test command (3,041 tests).
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
