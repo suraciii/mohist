@@ -83,7 +83,14 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 
 - **WHEN** the configured collector port cannot bind and the alternate Server starts successfully
 - **THEN** collection SHALL remain enabled and status SHALL report the collector-bind degradation
+- **AND** the alternate's initial status snapshot SHALL expose `collector_bind_failed` as the latest degradation
 - **AND** storage probing SHALL start only from the successfully started Server rather than from both attempted Servers
+
+#### Scenario: A later failure follows collector bind degradation
+
+- **WHEN** an alternate Server starts with `collector_bind_failed` and a process, storage or protection failure occurs later
+- **THEN** status SHALL remain degraded with the collector failure still active
+- **AND** the later event SHALL replace `collector_bind_failed` as `latest_degradation`
 
 ### Requirement: Status exposes storage, ingestion and process pressure
 
