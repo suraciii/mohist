@@ -1,0 +1,45 @@
+## Codebase Patterns
+
+- Cross-domain read assembly belongs in `AgentOps/Services` and uses the `IScopedService` marker for automatic DI registration.
+- Project routes resolve `{projectRef}` with `ProjectResolutionEndpointFilter`; handlers read the canonical identity through `HttpContext.GetResolvedProject()`.
+- Runner registry visibility is intentionally global even though `RunnerStatusService` accepts a project id; Activity must preserve this as `scope=global`.
+- The route-private approval waiting projection was extracted to `ActivityWaitingProjection` so `/agent/activity` and `/activity` share one source and mapping.
+- The Activity merge fetches up to the endpoint maximum from each bounded source, sorts the combined entries by time descending then deterministic id, and only then applies the caller limit.
+- Microsoft Testing Platform ignores the legacy `dotnet test --filter` property in this project; focused attempts execute the full spec assembly. Test apphosts require `DOTNET_ROOT=/home/szf/.dotnet` in this workspace.
+- CLI shared contracts: `MohistCliCommands.ProjectRefOption()` returns `(--project, --project-id-hidden)`; `MohistCliCommands.JsonSelectionOption()` returns the bare-or-selected `--json`. `api.PrintResourceAsync(path, descriptor, selection, humanRenderer)` already handles discovery/invalid/success/data error paths and is the right entry for finite reads.
+- `WriteJsonSelectionResult` returns exit code 2 for `JsonSelectionKind.Invalid`, so command bodies can early-return without re-implementing local validation. Local failure paths use `CliExitCode.For(CliExitOutcome.UsageFailure)` (= 2) for clean semantics.
+- `TableShape.*` enum entries are mapped to `ResourceCardinality` and field lists in `ResourceOutputCatalog.For`; a new collection entry must be added to both `cardinality` and `fields` switches. Renderer dispatch lives in `TableRenderer.Render` with peer branches per shape — same partial-class convention as `Events.cs`.
+- `RecordingHttpHandler` exposes captured requests in `Requests`; tests that want to assert re-readable results must use fresh `StringWriter` instances per call (the shared `output` writer accumulates across two `RunAsync` invocations in the same test).
+
+## T-001
+
+- Added `GET /api/projects/{projectRef}/activity` with default 100 and strict 1..200 validation.
+- Added stable recorded/snapshot identities and explicit project/global scope across Issue, WorkflowRun, AgentSession, waiting, and Runner evidence.
+- Existing `/events`, `/agent/activity`, and Runner status routes remain contract-compatible; the existing `/agent/activity` route now delegates waiting-card construction to the shared projection.
+- Added API specs covering all evidence sources, repeat reads, project isolation/global Runner recurrence, stable final-limit ordering, default limit, and invalid limits.
+
+## T-002
+
+- `mo activity list` is a single root group with one `list` leaf; registered next to `EventCommands` in `MohistCliCommands.Build`.
+- `ActivityList` added to `MohistCliApi.TableShape` (Collection) and to `ResourceOutputCatalog.For` with the 13 declared fields; the command-owned descriptor is the source of truth and is reused for both default and `--json` selection.
+- The leaf reuses `api.PrintResourceAsync` + `api.RenderTableAsync` rather than `PrintWithOutputAsync`, keeping the field contract command-owned instead of inferred through the global catalog.
+- Field selection is parsed before project resolution or HTTP work: bare `--json` enumerates declared fields, invalid field lists hit `WriteJsonSelectionResult` (exit 2). `--limit` is then validated locally (1..200) before `ResolveProject` so neither failure path issues HTTP.
+- Added `RenderActivityList` to `TableRenderer.Events.cs` (Activity is a sibling of Event delivery for table rendering, matching the partial-class peer layout). Columns: provenance / scope / kind / time / title / source — `source` collapses to the most relevant identity (`issueNumber` for Issue/waiting, `workflowRunId`/`sessionId` for those kinds, `runnerId` for Runners).
+- The command sends `?limit={limit}` after percent-encoding the resolved project id and never touches `/events`, `/agent/activity`, or Runner APIs.
+- Specs cover route/query construction, default limit, project override, no-active-project and 1..200 local validation, bare/selected/invalid `--json`, provenance/scope distinction, default table rendering, and re-readable finite results. Existing `CliRootCommandShapeTests.LegacyEventNoun_FailsToResolveAndExitsNonZero` continues to assert that the singular `event` noun resolves under `event` (not `events`), which T-003 will flip and we leave alone here.
+
+## T-003
+
+- The CLI Event root is now singular `event`; tail and dead-letter handlers retain the plural server routes `/api/projects/{project}/events/tail` and `/api/events/dead-letters` unchanged, with no `events` alias or `event list` path.
+- Tail, Activity list, and dead-letter leaf help now state their distinct subscription, bounded evidence/provenance/scope, and recovery-side-effect semantics; none exposes shared `--mode` or `--source`, and `event` contains no routing commands.
+- All behavior specs invoke singular Event commands. Dedicated regressions reject plural tail/dead-letter and `event list` before HTTP while preserving matching, cancellation, validation, credential, loopback, result, and terminal-sanitization coverage.
+- Removed the shared-`events` implementation gap from `docs/cli-reference.md` and updated the current routing design example; unrelated `issue events`, routing response fields named `events`, and server API paths remain unchanged.
+- Baseline CLI suite passed 1424 tests before the migration; final suite passes 1431 tests with `DOTNET_ROOT=/home/szf/.dotnet`.
+
+## Fix-CI Recovery
+
+- **Root cause:** the workflow runner executes the verify script in a clean shell without `DOTNET_ROOT` exported, but the .NET runtime is installed at `/home/szf/.dotnet`. Without the env var, the test apphosts (Microsoft Testing Platform, used by all .NET 11 test projects in `Mohist.sln`) cannot locate the runtime and the `dotnet test` step fails immediately. The captured stderr the runner surfaced was just the `npm warn deprecated node-domexception` line because `set -e` aborts right after `npm ci` once `dotnet test` errors out, and the runner truncates the captured output.
+- **Reproduction:** `unset DOTNET_ROOT && dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --nologo` fails with "DOTNET_ROOT = <not set>" and the `error run failed` diagnostic the apphost prints. `export DOTNET_ROOT=/home/szf/.dotnet` first, and the same command passes 1431 tests.
+- **Fix:** updated the project workflow profile's `ci.verify` script (`mo project workflow config set --vars-file`) to export `DOTNET_ROOT=/home/szf/.dotnet` immediately after `set -e`, before `npm ci`. No code or test changes were needed; the worktree stays clean (verified `git status` after the change). The same six commands then run end-to-end with `DOTNET_ROOT=/home/szf/.dotnet` exported locally.
+- **Why not in repo:** the verify script lives in `ProjectWorkflowProfiles.Variables` for the `mohist-local` project (see `mo project workflow config get`). Putting `export DOTNET_ROOT=...` in the repo would not reach the runner, because the runner reads the verify script from the profile and never sources anything in the worktree. The fix has to land in the profile, mirroring the constraint already noted for local CLI runs.
+- **Pending:** the current workflow run captured the verify script before the update, so the in-flight run still holds the broken script. The next `mo issue retry 481` (build stage) should pick up the patched script and pass.

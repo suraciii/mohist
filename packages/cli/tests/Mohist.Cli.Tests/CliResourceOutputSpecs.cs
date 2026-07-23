@@ -148,7 +148,7 @@ public sealed class CliResourceOutputSpecs
             "{\"type\":\"two\",\"id\":\"e2\",\"source\":\"test\"}"]))) ;
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["events", "tail", "--json", "id,type"], output, error, fs, executor);
+            http, ["event", "tail", "--json", "id,type"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);

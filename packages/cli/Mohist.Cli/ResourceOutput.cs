@@ -41,7 +41,8 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.RoutingRuleList or
             MohistCliApi.TableShape.DeadLetterList or
             MohistCliApi.TableShape.OpencodeModels or
-            MohistCliApi.TableShape.RunList => ResourceCardinality.Collection,
+            MohistCliApi.TableShape.RunList or
+            MohistCliApi.TableShape.ActivityList => ResourceCardinality.Collection,
             _ => ResourceCardinality.Single,
         };
 
@@ -84,6 +85,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.WorkflowProfileList => ["id", "name", "displayName", "description", "isDefault"],
             MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "name", "target", "priority", "enabled", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.DeadLetterList or MohistCliApi.TableShape.DeadLetterRedelivery => ["id", "eventId", "handler", "attempts", "status", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.ActivityList => ["id", "provenance", "scope", "kind", "time", "title", "description", "eventType", "issueNumber", "workflowRunId", "sessionId", "runnerId", "status"],
             MohistCliApi.TableShape.OpencodeModels => ["id"],
             MohistCliApi.TableShape.RunnerList =>
                 ["id", "kind", "hostname", "scope", "status", "registeredAt", "lastHeartbeatAt", "connectionState", "capabilities", "coderModels", "coderModelCount", "capacity", "activeWork", "activeWorks"],

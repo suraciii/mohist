@@ -1117,6 +1117,7 @@ internal sealed class MohistCliApi
         RunList,
         DeadLetterList,
         DeadLetterRedelivery,
+        ActivityList,
     }
 
     internal static TableShape ParseTableShape(string? shape)
