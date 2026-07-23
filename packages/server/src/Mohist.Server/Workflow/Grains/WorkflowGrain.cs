@@ -645,7 +645,12 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
                 $"workflow-run:{GrainKey}:profile:{profileId}",
                 expectedRevision: null);
         if (!result.IsApplied)
+        {
+            await _runStore.DeleteAsync(GrainKey);
+            _run = null;
+            _runDirty = false;
             throw new InvalidOperationException(result.Message ?? $"Unable to bind WorkflowRun '{GrainKey}' to Profile '{profileId}'");
+        }
     }
 
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)

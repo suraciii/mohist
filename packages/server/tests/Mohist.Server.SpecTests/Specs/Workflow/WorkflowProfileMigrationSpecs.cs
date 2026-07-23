@@ -278,6 +278,15 @@ public class WorkflowProfileMigrationSpecs : IAsyncLifetime
                 IssueNumber = 3,
                 WorkflowProfileIdKey = "legacy-custom",
             });
+            db.WorkflowRuns.Add(new WorkflowRunRow
+            {
+                WorkflowRunId = "wr_done",
+                State = "{\"status\":\"done\",\"workflowProfileId\":\"legacy-custom\",\"history\":[\"legacy-entry\"]}",
+                Status = "done",
+                MetadataProjectId = projectId,
+                IssueNumber = 4,
+                WorkflowProfileIdKey = "legacy-custom",
+            });
             await db.SaveChangesAsync();
         }
 
@@ -287,9 +296,14 @@ public class WorkflowProfileMigrationSpecs : IAsyncLifetime
         var active = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_active");
         var completed = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_completed");
         var stopped = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_stopped");
+        var done = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_done");
         Assert.Equal("legacy-custom", active.WorkflowProfileIdKey);
         Assert.Null(completed.WorkflowProfileIdKey);
         Assert.Null(stopped.WorkflowProfileIdKey);
+        Assert.Null(done.WorkflowProfileIdKey);
+        var doneState = JsonDocument.Parse(done.State).RootElement;
+        Assert.Equal("legacy-custom", doneState.GetProperty("workflowProfileId").GetString());
+        Assert.Equal("legacy-entry", doneState.GetProperty("history")[0].GetString());
     }
 
     [Fact]

@@ -331,7 +331,7 @@ public static class WorkflowProfileDataMigrator
                 _ => run.State,
             };
             var status = ReadRunStatus(run.State);
-            var isTerminal = status is "completed" or "stopped";
+            var isTerminal = status is "completed" or "done" or "stopped";
             if (isTerminal)
             {
                 run.WorkflowProfileIdKey = null;
