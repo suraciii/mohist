@@ -82,10 +82,11 @@ internal static class ActionContractValidator
     {
         ValidateUses(errors, "Task", task.Id, task.Uses, taskPath, actionsByName, tombstonesByName);
 
-        if (string.IsNullOrEmpty(task.Uses)) return;
-        if (!actionsByName.TryGetValue(task.Uses, out var action)) return;
-
-        ValidateWith(errors, task.Id, "Task", taskPath, task.With, action);
+        if (!string.IsNullOrEmpty(task.Uses)
+            && actionsByName.TryGetValue(task.Uses, out var action))
+        {
+            ValidateWith(errors, task.Id, "Task", taskPath, task.With, action);
+        }
 
         if (task.Recovery?.Handlers is { Count: > 0 } handlers)
         {
@@ -222,7 +223,9 @@ internal static class ActionContractValidator
         return kind switch
         {
             "string" => value.ValueKind == JsonValueKind.String,
-            "number" => value.ValueKind == JsonValueKind.Number,
+            "number" => value.ValueKind == JsonValueKind.Number
+                && value.TryGetDouble(out var number)
+                && double.IsFinite(number),
             "boolean" => value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False,
             "object" => value.ValueKind == JsonValueKind.Object,
             "array" => value.ValueKind == JsonValueKind.Array,

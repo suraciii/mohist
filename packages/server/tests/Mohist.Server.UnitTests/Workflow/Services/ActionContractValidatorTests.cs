@@ -283,6 +283,26 @@ public class ActionContractValidatorTests
     }
 
     [Fact]
+    public void Validate_OutOfRangeNumberForNumberInput_RejectedAsNonFinite()
+    {
+        var task = new TaskDefinition("compile",
+            Uses: "mohist/wait",
+            With: With(("timeout", JsonDocument.Parse("1e9999").RootElement.Clone())));
+        var stage = new StageDefinition("build", [task], []);
+        var definition = new WorkflowDefinition([stage]);
+        var catalog = new ActionCatalog(
+            [CreateAction("mohist/wait", NumberInput("timeout", required: true))],
+            []);
+
+        var errors = ActionContractValidator.Validate(definition, catalog);
+
+        var error = Assert.Single(errors);
+        Assert.Equal("stages[0].tasks[0].with.timeout", error.Path);
+        Assert.Contains("number", error.Message);
+        Assert.Contains("received number", error.Message);
+    }
+
+    [Fact]
     public void Validate_ObjectForStringInput_RejectedWithoutSerialization()
     {
         var task = new TaskDefinition("compile",
@@ -502,6 +522,30 @@ public class ActionContractValidatorTests
         Assert.Contains(errors, e => e.Path == "approval.feedback.tasks[0]");
         Assert.Contains(errors, e => e.Path == "stages[0].tasks[1].recovery.handlers[0].tasks[0]");
         Assert.All(errors, e => Assert.Equal(ValidationSource.Action, e.Source));
+    }
+
+    [Fact]
+    public void Validate_RecoveryTaskIsJudgedWhenParentActionIsUnknown()
+    {
+        var innerTask = new TaskDefinition("recover", Uses: "mohist/recovery-missing");
+        var handler = new RecoveryHandlerDefinition(null, [innerTask], RetrySelf: false);
+        var recovery = new RecoveryDefinition(1, [handler]);
+        var parent = new TaskDefinition("compile", Uses: "mohist/parent-missing", Recovery: recovery);
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [parent], []),
+        ]);
+        var catalog = new ActionCatalog([], []);
+
+        var errors = ActionContractValidator.Validate(definition, catalog);
+
+        Assert.Equal(2, errors.Count);
+        Assert.Contains(errors, error =>
+            error.Path == "stages[0].tasks[0]"
+            && error.Message.Contains("mohist/parent-missing"));
+        Assert.Contains(errors, error =>
+            error.Path == "stages[0].tasks[0].recovery.handlers[0].tasks[0]"
+            && error.Message.Contains("mohist/recovery-missing"));
+        Assert.All(errors, error => Assert.Equal(ValidationSource.Action, error.Source));
     }
 
     [Fact]
