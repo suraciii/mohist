@@ -25,7 +25,7 @@ internal static class ActivityCommands
     {
         var cmd = new Command(
             "list",
-            "List the Activity evidence collection for the resolved Project as a bounded, read-only finite read. Includes recorded Project-bound Issue/WorkflowRun/AgentSession history, Project-bound AgentSession/waiting snapshots, and global Runner context. Re-readable after exit; not a subscription.");
+            "List bounded, read-only Activity evidence for the resolved Project. Includes recorded Issue/WorkflowRun/AgentSession history, current AgentSession/waiting and global Runner snapshots, and labels provenance (recorded/snapshot) and scope (project/global). Re-readable after exit; not a subscription.");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var limitOpt = new Option<int>("--limit")
         {

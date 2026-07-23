@@ -433,6 +433,28 @@ public sealed class CliActivityListCommandSpecs
     }
 
     [Fact]
+    public async Task List_Help_DescribesBoundedProvenanceAndScopeWithoutSharedFlags()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["activity", "list", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var help = output.ToString();
+        Assert.Contains("bounded", help, StringComparison.Ordinal);
+        Assert.Contains("recorded", help, StringComparison.Ordinal);
+        Assert.Contains("snapshot", help, StringComparison.Ordinal);
+        Assert.Contains("provenance", help, StringComparison.Ordinal);
+        Assert.Contains("scope", help, StringComparison.Ordinal);
+        Assert.Contains("project", help, StringComparison.Ordinal);
+        Assert.Contains("global", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("--mode", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("--source", help, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task List_Limit_ValidatedBeforeProjectResolution()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);

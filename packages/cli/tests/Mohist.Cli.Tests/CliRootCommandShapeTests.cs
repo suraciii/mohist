@@ -40,6 +40,8 @@ public class CliRootCommandShapeTests
             "server",
             "service",
             "notification",
+            "activity",
+            "event",
         ];
         foreach (var name in requiredResourceGroups)
             Assert.Contains($"\n  {name} ", stdout);
@@ -56,6 +58,7 @@ public class CliRootCommandShapeTests
         Assert.DoesNotContain("\n  use ", stdout);
         Assert.DoesNotContain("\n  notify ", stdout);
         Assert.DoesNotContain("\n  system ", stdout);
+        Assert.DoesNotContain("\n  events ", stdout);
     }
 
     [Fact]
@@ -167,17 +170,34 @@ public class CliRootCommandShapeTests
     }
 
     [Fact]
-    public async Task LegacyEventNoun_FailsToResolveAndExitsNonZero()
+    public async Task EventList_FailsToResolveAndExitsNonZero()
     {
-        // The singular `mo event` noun was consolidated under the plural
-        // `mo events` noun in issue-413 T-003 (BREAKING). The legacy
-        // singular form must no longer resolve.
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["event", "dead-letter", "list"], output, error, fs, executor);
+            http, ["event", "list"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task EventHelp_ListsOnlyDeliveryOperationsWithoutRoutingCommands()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["event", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var help = output.ToString();
+        Assert.Contains("\n  tail ", help);
+        Assert.Contains("\n  dead-letter ", help);
+        Assert.DoesNotContain("\n  list ", help);
+        Assert.DoesNotContain("\n  rule ", help);
+        Assert.DoesNotContain("\n  test ", help);
+        Assert.DoesNotContain("\n  create ", help);
+        Assert.DoesNotContain("\n  edit ", help);
         Assert.Empty(handler.Requests);
     }
 

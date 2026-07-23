@@ -15,13 +15,17 @@ internal static class EventCommands
 
     public static Command Build(MohistCliApi api, OperatorCredentialProvider credentials)
     {
-        var events = new Command("events", "Event delivery operations");
-        events.Subcommands.Add(BuildTail(api));
-        var deadLetter = new Command("dead-letter", "Inspect and recover dead-lettered event deliveries");
+        var eventCommand = new Command(
+            "event",
+            "Subscribe to realtime Event envelopes and inspect or recover failed deliveries.");
+        eventCommand.Subcommands.Add(BuildTail(api));
+        var deadLetter = new Command(
+            "dead-letter",
+            "Inspect current failed deliveries and retry them with explicit recovery side effects.");
         deadLetter.Subcommands.Add(BuildList(api, credentials));
         deadLetter.Subcommands.Add(BuildRedeliver(api, credentials));
-        events.Subcommands.Add(deadLetter);
-        return events;
+        eventCommand.Subcommands.Add(deadLetter);
+        return eventCommand;
     }
 
     private static Command BuildTail(MohistCliApi api)
@@ -29,7 +33,9 @@ internal static class EventCommands
         var descriptor = new ResourceDescriptor(
             ResourceCardinality.Stream,
             ["type", "source", "id", "time", "specversion", "subject", "extensions", "data"]);
-        var cmd = new Command("tail", "Follow the project's live event stream; emit one JSON object per line. With --match, only matching events are emitted.");
+        var cmd = new Command(
+            "tail",
+            "Subscribe to realtime Event envelopes from subscription establishment; emit one NDJSON object per line. With --match, only matching events are emitted.");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var matchOpt = new Option<string?>("--match") { Description = "Match expression (CEL subset) forwarded to the server; the server is the single compile authority" };
         var jsonOpt = MohistCliCommands.JsonSelectionOption();
@@ -102,7 +108,9 @@ internal static class EventCommands
 
     private static Command BuildList(MohistCliApi api, OperatorCredentialProvider credentials)
     {
-        var cmd = new Command("list", "List unresolved dead-lettered event deliveries");
+        var cmd = new Command(
+            "list",
+            "List current unresolved event deliveries for operator recovery. Redeliver retries the recorded failing handler and may repeat delivery side effects.");
         var handlerOpt = new Option<string?>("--handler") { Description = "Filter by failing handler full name" };
         var limitOpt = new Option<int>("--limit")
         {
@@ -146,7 +154,9 @@ internal static class EventCommands
 
     private static Command BuildRedeliver(MohistCliApi api, OperatorCredentialProvider credentials)
     {
-        var cmd = new Command("redeliver", "Retry the failing handler recorded by a dead-letter row");
+        var cmd = new Command(
+            "redeliver",
+            "Retry the failing handler recorded by a dead-letter row; this recovery action may repeat delivery side effects.");
         var idArg = new Argument<long>("id") { Description = "Dead-letter id" };
         var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
         cmd.Arguments.Add(idArg);

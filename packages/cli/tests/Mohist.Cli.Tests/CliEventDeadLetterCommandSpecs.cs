@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public sealed class CliEventsDeadLetterCommandSpecs
+public sealed class CliEventDeadLetterCommandSpecs
 {
     private static (HttpClient Http, RecordingHttpHandler Handler, StringWriter Output, StringWriter Error, FakeFileSystem FileSystem, FakeCommandExecutor Executor, MockEnvironmentVariableProvider Environment) Setup(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
@@ -47,7 +47,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "list", "--handler", "Handler+One", "--limit", "25"],
+            ["event", "dead-letter", "list", "--handler", "Handler+One", "--limit", "25"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -80,7 +80,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "list", "--json", "id"],
+            ["event", "dead-letter", "list", "--json", "id"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -100,7 +100,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "list", "--limit", "0"],
+            ["event", "dead-letter", "list", "--limit", "0"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -123,7 +123,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "redeliver", "17"],
+            ["event", "dead-letter", "redeliver", "17"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -151,7 +151,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "redeliver", "17"],
+            ["event", "dead-letter", "redeliver", "17"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -171,7 +171,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "list"],
+            ["event", "dead-letter", "list"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -193,7 +193,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "list"],
+            ["event", "dead-letter", "list"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -222,7 +222,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "list"],
+            ["event", "dead-letter", "list"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -263,7 +263,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "list"],
+            ["event", "dead-letter", "list"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -300,7 +300,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "list"],
+            ["event", "dead-letter", "list"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -312,5 +312,68 @@ public sealed class CliEventsDeadLetterCommandSpecs
         Assert.Contains("visible red", output, StringComparison.Ordinal);
         Assert.DoesNotContain("\u001b", output, StringComparison.Ordinal);
         Assert.DoesNotContain("hidden", output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task Redeliver_NonPositiveId_FailsBeforeCallingApi(long id)
+    {
+        var env = Setup((_, _) => throw new InvalidOperationException("API must not be called"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            env.Http,
+            ["event", "dead-letter", "redeliver", id.ToString()],
+            env.Output,
+            env.Error,
+            env.FileSystem,
+            env.Executor,
+            env.Environment);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("id must be positive", env.Error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(env.Handler.Requests);
+    }
+
+    [Fact]
+    public async Task PluralNoun_DoesNotResolveWithoutHttp()
+    {
+        var env = Setup((_, _) => throw new InvalidOperationException("API must not be called"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            env.Http,
+            ["events", "dead-letter", "list"],
+            env.Output,
+            env.Error,
+            env.FileSystem,
+            env.Executor,
+            env.Environment);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(env.Handler.Requests);
+    }
+
+    [Fact]
+    public async Task List_Help_DescribesRecoverySideEffectsWithoutSharedFlags()
+    {
+        var env = Setup((_, _) => throw new InvalidOperationException("API must not be called"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            env.Http,
+            ["event", "dead-letter", "list", "--help"],
+            env.Output,
+            env.Error,
+            env.FileSystem,
+            env.Executor,
+            env.Environment);
+
+        Assert.Equal(0, exitCode);
+        var help = env.Output.ToString();
+        Assert.Contains("current unresolved", help, StringComparison.Ordinal);
+        Assert.Contains("Redeliver", help, StringComparison.Ordinal);
+        Assert.Contains("side effects", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("--mode", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("--source", help, StringComparison.Ordinal);
+        Assert.Empty(env.Handler.Requests);
     }
 }

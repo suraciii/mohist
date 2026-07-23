@@ -27,3 +27,11 @@
 - Added `RenderActivityList` to `TableRenderer.Events.cs` (Activity is a sibling of Event delivery for table rendering, matching the partial-class peer layout). Columns: provenance / scope / kind / time / title / source — `source` collapses to the most relevant identity (`issueNumber` for Issue/waiting, `workflowRunId`/`sessionId` for those kinds, `runnerId` for Runners).
 - The command sends `?limit={limit}` after percent-encoding the resolved project id and never touches `/events`, `/agent/activity`, or Runner APIs.
 - Specs cover route/query construction, default limit, project override, no-active-project and 1..200 local validation, bare/selected/invalid `--json`, provenance/scope distinction, default table rendering, and re-readable finite results. Existing `CliRootCommandShapeTests.LegacyEventNoun_FailsToResolveAndExitsNonZero` continues to assert that the singular `event` noun resolves under `event` (not `events`), which T-003 will flip and we leave alone here.
+
+## T-003
+
+- The CLI Event root is now singular `event`; tail and dead-letter handlers retain the plural server routes `/api/projects/{project}/events/tail` and `/api/events/dead-letters` unchanged, with no `events` alias or `event list` path.
+- Tail, Activity list, and dead-letter leaf help now state their distinct subscription, bounded evidence/provenance/scope, and recovery-side-effect semantics; none exposes shared `--mode` or `--source`, and `event` contains no routing commands.
+- All behavior specs invoke singular Event commands. Dedicated regressions reject plural tail/dead-letter and `event list` before HTTP while preserving matching, cancellation, validation, credential, loopback, result, and terminal-sanitization coverage.
+- Removed the shared-`events` implementation gap from `docs/cli-reference.md` and updated the current routing design example; unrelated `issue events`, routing response fields named `events`, and server API paths remain unchanged.
+- Baseline CLI suite passed 1424 tests before the migration; final suite passes 1431 tests with `DOTNET_ROOT=/home/szf/.dotnet`.
