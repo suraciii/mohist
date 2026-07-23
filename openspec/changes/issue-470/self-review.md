@@ -1,82 +1,75 @@
 # Self-Review - Issue 470
 
 Reviewed the live issue, proposal, design, all three capability specs, the
-eight-task graph, and the relevant current Server implementation.
+eight-task graph, and the relevant current Server and Web implementation.
 
 ## Verdict
 
-The plan is not ready to build. Its product coverage and task graph are broadly
-sound, but four contracts still leave materially different behavior or an
-unexecutable verification requirement for the build agents to resolve.
+The plan is not ready to build. The prior review's storage-readiness,
+protobuf-wire, injectable-duration, and production-composition concerns have
+been addressed, but three contracts still permit contradictory behavior or
+omit required startup work.
 
 ## Findings
 
-### F1 - A read-only probe can declare an unverified ingest path healthy (high)
+### F1 - Mixed OTLP batches have contradictory retry and accounting semantics (high)
 
-The status spec defines `healthy` as meaning ingestion and storage are usable
-(`specs/otel-runtime-status/spec.md:3`). D5's readiness probe only opens a
-read/write-create connection, executes `PRAGMA schema_version`, and reads file
-lengths (`design.md:112`). D6 then defines enabled with no active source as
-healthy (`design.md:120-126`), and T-003 explicitly requires the first successful
-storage probe to reach healthy (`tasks.json:64`).
+The metric contract defines `rejected` and `dropped` as non-retryable outcomes
+(`specs/runtime-observability-metrics/spec.md:57`). D1 classifies every Span
+before writing and preserves rejected/dropped classifications when the accepted
+subset's transaction rolls back (`design.md:53`), while D1's response contract
+returns HTTP 503 for a rolled-back write (`design.md:57`). That response asks the
+exporter to retry the entire request.
 
-A readable existing SQLite database can still be unwritable, so this sequence
-can clear `storage_unverified` and report healthy before the ingest write path
-has ever been established. The plan must choose and specify one coherent
-contract: either verify write readiness without corrupting telemetry, retain an
-unverified source until a real write succeeds, or redefine healthy as "no known
-failure" in the spec and user-facing semantics.
+For a batch containing a malformed or protection-rejected Span plus a valid
+Span whose write rolls back, the plan would therefore count the first Span as
+non-retryable loss while returning a retryable result for it. A retry could also
+increment the rejected/dropped counters repeatedly. T-002 tests isolated
+rejection, drop, and rollback cases but not this combination
+(`tasks.json:33-40`). The plan must define precedence and accounting for mixed
+classification plus rollback, and lock it with wire-level and counter tests.
 
-### F2 - Protobuf partial-success and error responses have no wire contract (high)
+### F2 - The host-runner refactor does not preserve database initialization (high)
 
-T-002 requires JSON and protobuf ingestion to expose the same outcome categories
-and requires partial-success responses for rejected or dropped spans
-(`tasks.json:37-38`). The design defines classification and counters but never
-defines response content negotiation or the protobuf
-`ExportTraceServiceResponse` encoding (`design.md:53`).
+The current primary and alternate startup paths both call
+`DatabaseInitializer.InitializeAsync` before `StartAsync`
+(`packages/server/src/Mohist.Server/Program.cs:62` and `:126`). That initializer
+runs EF migrations and the repository data upgrade
+(`packages/server/src/Mohist.Server/Infrastructure/Data/Db/DatabaseInitializer.cs:9`).
 
-This is not supplied by the current implementation: protobuf requests are
-parsed manually, every success is returned as JSON, and only `JsonException` is
-mapped to a whole-body 400 (`packages/server/src/Mohist.Server/Api/OtlpRoutes.cs:85-108`;
-`packages/server/src/Mohist.Server/Otel/OtlpProtobuf/OtlpProtobufTraceParser.cs:7-29`).
-The plan must specify content-type-specific success/partial-success bodies and
-malformed-protobuf error mapping so an AFK task does not invent an OTLP protocol
-contract.
+D7 reduces top-level `Program` to constructing adapters and invoking
+`MohistHostRunner`, but its host interface exposes only services and ordinary
+start/stop/dispose/wait lifecycle operations (`design.md:142`). Neither D7 nor
+T-007 assigns database initialization to the runner, factory, or production
+host adapter, and no acceptance criterion verifies its ordering or behavior for
+primary and alternate attempts. An implementation following the plan can omit
+migrations and data upgrades entirely. The design must explicitly place this
+startup step and test its ordering and failure behavior.
 
-### F3 - The fallback production-composition test is incompatible with test constraints (medium)
+### F3 - T-007 asks a lifecycle fake to prove an HTTP health contract (medium)
 
-D7 correctly introduces fake hosts for lifecycle tests, but also assigns a
-production-factory composition spec responsibility for proving one surviving
-silo/sampler and exactly one storage probe (`design.md:136-142`; `tasks.json:160`).
-The production factory configures Kestrel listeners and Orleans, while repository
-tests may not use real sockets or system services (`design/testing.md:45-55`).
-A non-starting composition test can verify registrations and listener intent,
-but cannot prove the stated runtime facts; fake-host tests cannot prove the
-production graph.
+D7's fake host exposes services and lifecycle signals only (`design.md:142`),
+but its fake runner tests must assert that core health is successful
+(`design.md:148`). T-007 repeats the `/api/health` assertion "through the fake
+lifecycle boundary" (`tasks.json:162`) while the production composition test is
+explicitly non-starting (`tasks.json:164`). The actual health behavior exists as
+a mapped HTTP endpoint
+(`packages/server/src/Mohist.Server/Api/HealthRoutes.cs:7`), so neither test
+surface can prove its status code or payload.
 
-Split the assertions between the fake lifecycle boundary and static production
-composition, or define an in-memory host/silo seam through which the production
-factory can be started without real network resources.
-
-### F4 - Request duration lacks an injectable time contract (medium)
-
-The metric catalog and route ranking require request duration, but D3 specifies
-only scope creation and atomic closure (`design.md:71-86`), and T-004 does not
-state how elapsed time is measured (`tasks.json:79-89`). The repository requires
-new time behavior to use injected `TimeProvider` and deterministic tests
-(`design/testing.md:59-68`).
-
-Specify that middleware captures and computes elapsed duration through the
-injected `TimeProvider` timestamp APIs, including exceptional and cancelled
-responses, and lock that behavior with fake-time tests.
+The core-health independence assertion already belongs to T-003's API test
+(`tasks.json:67`). T-007 should restrict its fake assertions to lifecycle and
+runtime-status projection, or define an explicit in-memory HTTP surface if it
+must own an HTTP assertion.
 
 ## Coverage And Structure
 
 - Proposal capabilities and spec directories match.
 - The eight task dependencies are resolved and acyclic.
-- The plan otherwise covers the issue's tri-state status, bounded route summary,
-  process and storage pressure, telemetry outcomes, low-cardinality metric
-  catalog, agent-path amplification, transition-only logs, self-observation
-  exclusion, history-independent status cost, and core-health independence.
+- The plan otherwise covers the issue's tri-state status, bounded route
+  summary, process and storage pressure, telemetry outcomes, low-cardinality
+  metric catalog, agent-path amplification, transition-only logs,
+  self-observation exclusion, history-independent status cost, and core-health
+  independence.
 
 <promise>FAIL</promise>
