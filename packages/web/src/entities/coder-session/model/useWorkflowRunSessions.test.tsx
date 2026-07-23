@@ -35,7 +35,12 @@ function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
     projectId: overrides.projectId ?? 'project-1',
     issueNumber: overrides.issueNumber ?? 42,
     runnerId: overrides.runnerId ?? 'runner-1',
-    status: overrides.status ?? 'completed',
+    // Issue 484: sessions carry an `activity` (idle/active/unknown) instead
+    // of a `status`. The legacy `status` field is still present on the DTO
+    // (some event payloads and fixtures set it) but the hook no longer reads
+    // it for live patching — activity is the source of truth. Default to
+    // 'idle' (a finished/awaiting-followup session).
+    activity: overrides.activity ?? 'idle',
     stage: overrides.stage ?? 'plan',
     model: overrides.model ?? 'minimax/MiniMax-M3',
     workDir: overrides.workDir ?? null,
@@ -96,7 +101,7 @@ describe('useWorkflowRunSessions', () => {
 
   describe('event handlers', () => {
     it('usage.updated applies contextUsagePercent and healthStatus to matched session', async () => {
-      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', status: 'running' })]
+      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', activity: 'active' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -157,14 +162,17 @@ describe('useWorkflowRunSessions', () => {
       expect(result.current.sessions[0]?.runtimeSessionId).toBe('runtime-new')
     })
 
+    // Issue 484 / D6: `session.followup_completed` and `session.followup_failed`
+    // are deprecated — the hook no longer subscribes to them, so dispatching
+    // them must NOT refetch the sessions list nor patch any session field.
+    // (Follow-up status now flows through `coder_session_status_changed` /
+    // `session.activity` instead.) This replaces the former assertions that
+    // the hook refetched on these events without applying the status globally.
     it.each([
-      ['session.followup_completed', 'completed'],
-      ['session.followup_failed', 'failed'],
-    ] as const)('refetches sessions for %s without applying %s as a global session status', async (eventName, status) => {
-      _sessionsResponses = [
-        [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', status: 'running' })],
-        [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', status: 'inactive' })],
-      ]
+      'session.followup_completed',
+      'session.followup_failed',
+    ] as const)('ignores deprecated %s event (no refetch, no activity patch)', async (eventName) => {
+      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', activity: 'active' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -176,26 +184,29 @@ describe('useWorkflowRunSessions', () => {
       )
 
       await flush()
-      expect(result.current.sessions[0]?.status).toBe('running')
+      expect(result.current.sessions[0]?.activity).toBe('active')
+      const fetchCountBefore = workflowRunSessionsFetcher.mock.calls.length
 
       act(() => {
-        dispatchAgentEvent(eventName, {
+        // The deprecated follow-up events carry a typed `status` on the wire,
+        // but the hook no longer subscribes — cast the payload so the union
+        // event name doesn't force an impossible intersected status type.
+        ;(dispatchAgentEvent as any)(eventName, {
           sessionId: 'sess-1',
           runtimeSessionId: 'runtime-1',
           runtime: 'opencode',
           operationId: 'operation-1',
-          status,
         })
       })
 
-      expect(result.current.sessions[0]?.status).toBe('running')
       await flush()
-      expect(workflowRunSessionsFetcher).toHaveBeenCalledTimes(2)
-      expect(result.current.sessions[0]?.status).toBe('inactive')
+      // Activity is unchanged and no refetch was triggered.
+      expect(result.current.sessions[0]?.activity).toBe('active')
+      expect(workflowRunSessionsFetcher.mock.calls.length).toBe(fetchCountBefore)
     })
 
     it('ignores runtime events without a physical binding', async () => {
-      _sessionsData = [session({ id: 'sess-1', status: 'running' })]
+      _sessionsData = [session({ id: 'sess-1', activity: 'active' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -227,8 +238,13 @@ describe('useWorkflowRunSessions', () => {
       expect(workflowRunSessionsFetcher.mock.calls.length).toBe(fetchCountBefore)
     })
 
-    it('updates terminal status from a current runtime session event', async () => {
-      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', status: 'running' })]
+    // Issue 484: `session.closed` is deprecated and no longer handled. The
+    // equivalent "session reached idle after finishing" signal now arrives
+    // via `coder_session_status_changed`, which patches `activity` (sessions
+    // never enter a terminal status — finishing brings activity back to
+    // idle). A status of 'completed' maps to activity 'idle'.
+    it('updates activity to idle from a current runtime session status-changed event', async () => {
+      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', activity: 'active' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -242,22 +258,24 @@ describe('useWorkflowRunSessions', () => {
       await flush()
       expect(result.current.sessions).toHaveLength(1)
       act(() => {
-        dispatchAgentEvent('session.closed', {
+        dispatchAgentEvent('coder_session_status_changed', {
           sessionId: 'sess-1',
           runtimeSessionId: 'runtime-1',
           runtime: 'opencode',
+          issueNumber: 42,
+          projectId: 'project-1',
           status: 'completed',
         })
       })
 
-      expect(result.current.sessions[0].status).toBe('completed')
+      expect(result.current.sessions[0].activity).toBe('idle')
     })
 
-    it('ignores a stale terminal event for the current logical session', async () => {
+    it('ignores a stale status-changed event for a different runtime binding', async () => {
       _sessionsData = [session({
         id: 'sess-1',
         runtimeSessionId: 'runtime-current',
-        status: 'running',
+        activity: 'active',
       })]
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -271,22 +289,24 @@ describe('useWorkflowRunSessions', () => {
       await flush()
       expect(result.current.sessions).toHaveLength(1)
       act(() => {
-        dispatchAgentEvent('session.closed', {
+        dispatchAgentEvent('coder_session_status_changed', {
           sessionId: 'sess-1',
           runtimeSessionId: 'runtime-old',
           runtime: 'opencode',
+          issueNumber: 42,
+          projectId: 'project-1',
           status: 'completed',
         })
       })
 
-      expect(result.current.sessions[0].status).toBe('running')
+      expect(result.current.sessions[0].activity).toBe('active')
     })
 
     it('ignores a stale physical runtime event for the current logical session', async () => {
       _sessionsData = [session({
         id: 'sess-1',
         runtimeSessionId: 'runtime-current',
-        status: 'running',
+        activity: 'active',
         usage: { contextUsagePercent: 30 },
       })]
       const queryClient = createQueryClient()

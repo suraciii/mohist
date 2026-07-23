@@ -196,8 +196,8 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
             {
                 TurnId = turn.Id,
                 Sequence = 4,
-                Type = TranscriptPartTypes.SessionClosed,
-                CorrelationKey = "session.closed",
+                Type = TranscriptPartTypes.SessionActivity,
+                CorrelationKey = "session.activity",
                 PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = ContextExhaustionClassifier.SuspectedContextExhaustionCategory }, JSON.Options),
                 LastSeenAt = CreatedAt.AddMinutes(4),
             });

@@ -59,10 +59,28 @@ public static partial class AgentSessionExtensions
                 && !string.IsNullOrWhiteSpace(workDir)
                 && !string.Equals(session.Runtime.WorkDir, workDir, StringComparison.Ordinal))
                 throw new InvalidOperationException($"AgentSession {session.Id} is bound to work directory '{session.Runtime.WorkDir}', not '{workDir}'.");
+            // attach is a normal operation that reuses the current binding; it is
+            // not a binding-replacement entry point. Replacing a bound physical
+            // session under the same runtime must go through Reset / recover-missing
+            // (idle-only CAS), otherwise a stray attach would silently swap the
+            // runtime session the AgentSession is committed to.
+            if (!string.IsNullOrWhiteSpace(existingAgentSessionId)
+                && string.Equals(existingRuntime, nextRuntime, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"AgentSession {session.Id} is already bound to runtime session {existingAgentSessionId}; use Reset to replace the binding.");
+            }
+
             var isNewRuntimeBinding = !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal)
                 || !string.Equals(existingRuntime, nextRuntime, StringComparison.OrdinalIgnoreCase);
 
-            if (isNewRuntimeBinding && !string.IsNullOrWhiteSpace(existingAgentSessionId))
+            // A runtime change (e.g. runner restart on a different backend) replaces
+            // the binding through the idle-only CAS path so the context window is
+            // cleared while cumulative usage is preserved. Same-runtime rebind was
+            // already rejected above.
+            if (isNewRuntimeBinding && !string.IsNullOrWhiteSpace(existingAgentSessionId)
+                && !string.Equals(existingRuntime, nextRuntime, StringComparison.OrdinalIgnoreCase))
             {
                 session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
                 var replacementEvents = session.RebindRuntimeSession(

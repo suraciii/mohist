@@ -167,19 +167,6 @@ public class AgentSessionDomainTests
     }
 
     [Fact]
-    public void AttachPhysicalSession_DifferentPhysicalSession_UsesBindingReplacement()
-    {
-        var session = CreateSession();
-        var firstBoundAt = new DateTime(2026, 6, 17, 1, 0, 0, DateTimeKind.Utc);
-        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, firstBoundAt);
-
-        session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, firstBoundAt.AddMinutes(1));
-
-        Assert.Equal("runtime-session-2", session.Status.AgentRuntimeSessionId);
-        Assert.Equal("model-b", session.Settings.Model);
-    }
-
-    [Fact]
     public void RuntimeActivity_AfterClosedObservation_CanContinue()
     {
         var session = CreateSession();

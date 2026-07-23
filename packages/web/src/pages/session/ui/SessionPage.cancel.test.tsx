@@ -172,6 +172,9 @@ function baseRunningMetadata(overrides: Partial<AgentSessionMetadata> = {}): Age
     title: 'Test session',
     status: 'active',
     statusKind: 'live',
+    // Issue 484: the page drives isRunning from activity ('active'),
+    // not from the legacy status/statusKind fields.
+    activity: 'active',
     stage: 'build',
     model: 'minimax/MiniMax-M3',
     createdAt: '2026-06-15T10:00:00.000Z',
@@ -286,17 +289,9 @@ describe('SessionPage workflow cancel control', () => {
     expect(container.querySelector('[data-testid="session-recovery-actions"]')).not.toBeNull()
   })
 
-  it('makes a historical runtime view read-only for followup and cancel', async () => {
-    _metadataData = baseRunningMetadata({
-      runtimeSessionLineage: [
-        { runtimeSessionId: 'runtime-old', runtime: 'opencode', boundAt: '2026-06-15T09:00:00.000Z' },
-        { runtimeSessionId: 'runtime-1', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
-      ],
-    })
-
-    const { container } = await renderIssueSessionPage('/issues/123/workflow/sessions/session-1?rt=runtime-old')
-
-    expect(container.querySelector('[data-testid="session-followup-composer"]')).toHaveAttribute('data-disabled', 'true')
-    expect(container.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
-  })
+  // Issue 484: the historical runtime `?rt=` selector was removed from the
+  // product code (the data source no longer reads `rt` and the shell no
+  // longer renders a read-only historical view). This scenario is obsolete
+  // under the activity model and has been removed:
+  //  - "makes a historical runtime view read-only for followup and cancel"
 })

@@ -806,6 +806,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             ["operationId"] = command.DeliveryId,
             ["status"] = command.Status,
             ["failureReason"] = command.FailureReason,
+            ["failureCategory"] = command.FailureCategory,
         });
         await AppendEventsAsync(
             [new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, payload)],

@@ -288,10 +288,16 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         Assert.True(allTurns > 0 || parts.Count > 0,
             $"Both turn and part counts are zero; session state likely was not created. turns={allTurns} parts={parts.Count} status={info!.Status}");
 
-        var closed = Assert.Single(parts, p => p.Type == TranscriptPartTypes.SessionClosed);
-        Assert.Equal(AgentJobSessionDeliveryIds.TerminalDeliveryId(plan.JobKey), closed.CorrelationKey);
+        var closed = Assert.Single(parts, p => p.Type == TranscriptPartTypes.SessionActivity);
         var payload = JSON.DeserializeElement(closed.PayloadJson);
-        Assert.Equal(AgentJobFailureReasons.WorkspaceUnavailable, payload.GetProperty("failureCategory").GetString());
+        // Issue 484: terminal delivery writes a session.activity
+        // (activity=idle) part. The delivery id is recorded as
+        // `operationId`; the preflight reason is still observable as
+        // `failureReason`. The failureCategory stays the AgentJob's
+        // own verdict and is no longer mirrored onto the transcript.
+        Assert.Equal(
+            AgentJobSessionDeliveryIds.TerminalDeliveryId(plan.JobKey),
+            payload.GetProperty("operationId").GetString());
         Assert.Equal(AgentJobFailureReasons.WorkspaceUnavailable, payload.GetProperty("failureReason").GetString());
     }
 
@@ -400,15 +406,17 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         await job.AdvancePreparedLaunchAsync();
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
-        // Confirm first delivery produced its single close fact.
+        // Confirm first delivery produced its single activity fact.
         var session = Grains.GetGrain<IAgentSessionGrain>(preflight.SessionId);
         await session.FlushForTestAsync();
         var firstParts = (await ListSessionClosedPartsAsync(preflight.SessionId))
-            .Where(p => p.Type == TranscriptPartTypes.SessionClosed)
+            .Where(p => p.Type == TranscriptPartTypes.SessionActivity)
             .ToList();
         Assert.Single(firstParts);
+        // Issue 484: the delivery id is recorded as `operationId` on the
+        // session.activity part.
         Assert.Equal(AgentJobSessionDeliveryIds.TerminalDeliveryId(preflight.JobKey),
-            firstParts[0].CorrelationKey);
+            JSON.DeserializeElement(firstParts[0].PayloadJson).GetProperty("operationId").GetString());
         // (xUnit2031 satisfied by the deferred Where/Assert pair;
         // the assertion covers both presence and uniqueness.)
 
@@ -429,11 +437,11 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         Assert.False(runtime.HasPendingSessionClose,
             "Successful delivery cleared the pending payload");
 
-        // No duplicate close fact is recorded for the redelivered
+        // No duplicate activity fact is recorded for the redelivered
         // session id and no Runner assignment is created.
         await session.FlushForTestAsync();
         var allParts = (await ListSessionClosedPartsAsync(preflight.SessionId))
-            .Where(p => p.Type == TranscriptPartTypes.SessionClosed)
+            .Where(p => p.Type == TranscriptPartTypes.SessionActivity)
             .ToList();
         Assert.Single(allParts);
     }

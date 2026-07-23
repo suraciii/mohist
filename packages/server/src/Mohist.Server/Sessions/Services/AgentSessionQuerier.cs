@@ -255,7 +255,6 @@ public class AgentSessionQuerier : IScopedService
             runnerId,
             workflowRunId,
             record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? sessionName,
-            null,
             AgentSessionJsonHelper.ActivityName(session) == "active");
     }
 
@@ -300,7 +299,6 @@ public class AgentSessionQuerier : IScopedService
         return new GenericFollowupTarget(
             runnerId ?? string.Empty,
             sessionId,
-            null,
             AgentSessionJsonHelper.ActivityName(record.Session) == "active");
     }
 
@@ -335,7 +333,6 @@ public class AgentSessionQuerier : IScopedService
             sourceKind!,
             workflowRunId,
             sessionName,
-            null,
             session.Runtime.Runtime,
             session.Status.AgentRuntimeSessionId,
             session.Runtime.WorkDir);
@@ -365,58 +362,10 @@ public class AgentSessionQuerier : IScopedService
             sourceKind!,
             workflowRunId,
             sessionName,
-            null,
             record.Session.Runtime.Runtime,
             record.Session.Status.AgentRuntimeSessionId,
             record.Session.Runtime.WorkDir);
     }
-
-    /// <summary>
-    /// Resolves the cancel target for a generic (non-workflow)
-    /// <see cref="AgentSession"/> (issue-129 T-005). Distinct from
-    /// <see cref="ResolveGenericFollowupTargetAsync"/>: cancel is
-    /// best-effort over the runner's OpenCode runtime, so the endpoint
-    /// needs the runner id AND the terminal-state verdict up front —
-    /// if the session is already terminal the server short-circuits
-    /// without calling the runner at all. The returned
-    /// <see cref="GenericCancelTarget.TerminalState"/> is the verbatim
-    /// <c>status</c> field of the most recent <c>session.closed</c>
-    /// transcript event (<c>completed</c> / <c>failed</c> / <c>stopped</c>),
-    /// so the HTTP response can mirror the runner's reported state
-    /// without inventing a value.
-    /// </summary>
-    /// <remarks>
-    /// Returns <c>null</c> when the session is unknown OR belongs to a
-    /// different project (cross-project leakage guard), matching the
-    /// null-return contract <see cref="ResolveGenericFollowupTargetAsync"/>
-    /// uses for the same cases.
-    /// </remarks>
-    public async Task<GenericCancelTarget?> ResolveGenericCancelTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var records = await _sessionQuery.ListByIdsAsync([sessionId], ct);
-        var record = records.FirstOrDefault();
-        if (record is null) return null;
-
-        var sessionProjectId = record.Label(AgentSessionQueryMetadataKeys.ProjectId);
-        if (!string.Equals(sessionProjectId, projectId, StringComparison.Ordinal))
-            return null;
-
-        var runnerId = record.Row.RunnerId;
-        return new GenericCancelTarget(
-            runnerId ?? string.Empty,
-            sessionId,
-            null);
-    }
-
-    /// <summary>
-    /// Reads the most recent <c>session.closed</c> transcript event and
-    /// returns its <c>status</c> field
-    /// (<c>completed</c> / <c>failed</c> / <c>stopped</c>), or <c>null</c>
-    /// when no terminal event has been recorded yet. Used by
-    /// <see cref="ResolveGenericCancelTargetAsync"/> to short-circuit the
-    /// cancel endpoint on already-terminal sessions (issue-129 T-005).
-    /// </summary>
 
     public async Task<AgentSessionMetadataDto?> GetSessionMetadataAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
     {
@@ -448,16 +397,15 @@ public class AgentSessionQuerier : IScopedService
     /// (issue-130 T-003 / design D4). Returns <c>null</c> when the
     /// session id does not resolve to a generic <c>agent-launch</c>
     /// session in the requested project — the cross-project guard
-    /// matches <see cref="ResolveGenericFollowupTargetAsync"/> and
-    /// <see cref="ResolveGenericCancelTargetAsync"/> so the caller never
+    /// matches <see cref="ResolveGenericFollowupTargetAsync"/> so the caller never
     /// observes a session from a different project.
     /// </summary>
     /// <remarks>
     /// The DTO omits workflow-only fields (workflowRunId, sessionName,
     /// workId, workType, stage) by construction — the record does not
-    /// declare them. Status uses the spec vocabulary (<c>running</c> /
-    /// <c>completed</c> / <c>failed</c> / <c>stopped</c>) resolved by
-    /// the same terminal-fact + bound state logic that powers
+    /// declare them. Activity surfaces the authoritative
+    /// <c>idle</c> / <c>active</c> / <c>unknown</c> value resolved by the
+    /// same logic that powers
     /// <see cref="ListAgentSessionsAsync"/> so list and summary stay in
     /// lockstep. Resolved model, failure category, and tool
     /// call/error counts are computed via
@@ -765,7 +713,6 @@ public sealed record FollowupTarget(
     string RunnerId,
     string WorkflowRunId,
     string SessionName,
-    string? TerminalState,
     bool IsActive);
 
 /// <summary>
@@ -779,7 +726,6 @@ public sealed record FollowupTarget(
 public sealed record GenericFollowupTarget(
     string RunnerId,
     string SessionId,
-    string? TerminalState,
     bool IsActive);
 
 public sealed record CanonicalFollowupTarget(
@@ -788,7 +734,6 @@ public sealed record CanonicalFollowupTarget(
     string SourceKind,
     string? WorkflowRunId,
     string? SessionName,
-    string? TerminalState,
     string? Runtime,
     string? RuntimeSessionId,
     string? WorkDir);
@@ -799,23 +744,6 @@ public sealed record SessionCancelTarget(
     string SourceKind,
     string? WorkflowRunId,
     string? SessionName,
-    string? TerminalState,
     string? Runtime,
     string? RuntimeSessionId,
     string? WorkDir);
-
-/// <summary>
-/// Cancel target for a generic (non-workflow) <see cref="AgentSession"/>
-/// (issue-129 T-005). Carries the runner id (so the server can resolve
-/// the runner's SignalR connection) and the most-recent terminal state
-/// observed in the session's transcript (so the endpoint can short-circuit
-/// without ever invoking the runner when the session is already
-/// <c>completed</c> / <c>failed</c> / <c>stopped</c>). <see cref="TerminalState"/>
-/// is <c>null</c> when the session is not yet terminal, in which case the
-/// endpoint must call the runner and let it report the cancellation
-/// outcome (design D6).
-/// </summary>
-public sealed record GenericCancelTarget(
-    string RunnerId,
-    string SessionId,
-    string? TerminalState);

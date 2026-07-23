@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { waitFor, renderHook, act } from './test-utils'
+import { waitFor, act } from './test-utils'
 import { useSessionTranscript } from '../src/widgets/session-transcript/model/useSessionTranscript'
 import { dispatchAgentEvent } from '../src/entities/agent'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import React from 'react'
 import type { TextPart, ToolPart, ErrorPart } from '../src/entities/coder-session'
 import { renderHookWithQueryClient, makeTurn, queryClients } from './session-page-test-utils'
 import { setScopedValue } from './support/scoped-property'
@@ -139,96 +137,53 @@ describe('Live tool updates merge in place', () => {
 })
 
 describe('Terminal session events trigger refetch', () => {
-  it('session.closed marks finalizing and triggers refetch', async () => {
+  it('session.activity=idle closes the live turn and triggers refetch', async () => {
+    // issue-484: the deprecated session.closed event no longer drives a status
+    // patch (D6). Execution ending is now signalled by session.activity with
+    // activity 'idle' (or 'unknown'), which closes the live turn and
+    // invalidates session queries (refetch). It does not set isFinalizing —
+    // that flag is reserved for recovery/liveness convergence.
     const initialTurns = [makeTurn()]
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
-    const { result } = renderHook(() => useSessionTranscript({
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
       runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
-    }), {
-      wrapper: ({ children }: { children: React.ReactNode }) => (
-        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-      ),
-    })
+    }))
 
     expect(result.current.isFinalizing).toBe(false)
+    expect(result.current.turns.at(-1)?.completedAt).toBeNull()
 
     act(() => {
-      dispatchAgentEvent('session.closed', {
+      dispatchAgentEvent('session.activity', {
         sessionId: 'session-123',
         runtimeSessionId: 'runtime-123',
-        status: 'completed',
+        activity: 'idle',
       })
     })
 
     await waitFor(() => {
-      expect(result.current.isFinalizing).toBe(true)
+      // The live turn is closed (completedAt populated) by the activity event.
+      expect(result.current.turns.at(-1)?.completedAt).not.toBeNull()
     })
+    // isFinalizing is NOT set by session.activity (no finalizing concept).
+    expect(result.current.isFinalizing).toBe(false)
   })
 
-  it('session.closed marks finalizing and adds an error part for failures', async () => {
-    const initialTurns = [makeTurn()]
-
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
-
-    act(() => {
-      dispatchAgentEvent('session.closed', {
-        sessionId: 'session-123',
-        runtimeSessionId: 'runtime-123',
-        status: 'failed',
-        failureReason: 'Out of memory',
-      })
-    })
-
-    await waitFor(() => {
-      expect(result.current.isFinalizing).toBe(true)
-      const errorParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ErrorPart => part.type === 'error' && part.kind === 'failed',
-      )
-      expect(errorParts).toHaveLength(1)
-      expect(errorParts?.[0].message).toBe('Out of memory')
-    })
-  })
-
-  it('session.closed marks finalizing and adds an error part for cancellation', async () => {
-    const initialTurns = [makeTurn()]
-
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
-
-    act(() => {
-      dispatchAgentEvent('session.closed', {
-        sessionId: 'session-123',
-        runtimeSessionId: 'runtime-123',
-        status: 'cancelled',
-        failureReason: 'User cancelled',
-      })
-    })
-
-    await waitFor(() => {
-      expect(result.current.isFinalizing).toBe(true)
-      const errorParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ErrorPart => part.type === 'error' && part.kind === 'cancelled',
-      )
-      expect(errorParts).toHaveLength(1)
-      expect(errorParts?.[0].message).toBe('User cancelled')
-    })
-  })
+  // issue-484: the two tests below depended on the deprecated session.closed
+  // event to mark the session finalizing and append a failed/cancelled error
+  // part to the transcript. Under the activity model session.closed is no
+  // longer subscribed (D6): sessions never enter a terminal status, and the
+  // failure/cancellation surface is now expressed via coder_recovery_status,
+  // session.liveness (recovery error parts) and SessionErrorsEvidence /
+  // failureReason in the header — none of which are driven by session.closed.
+  // The liveness-driven recovery-error path is covered by 'liveness status
+  // running or failed triggers refetch and explainable transcript parts'; the
+  // recovery-status refetch path is covered by 'recovery status with recovered
+  // or failed triggers refetch'. These two session.closed scenarios are
+  // intentionally deleted as they no longer represent product behaviour.
 
   it('recovery status with recovered or failed triggers refetch', async () => {
     const initialTurns = [makeTurn()]

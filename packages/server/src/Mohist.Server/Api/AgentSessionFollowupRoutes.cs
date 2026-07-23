@@ -94,8 +94,6 @@ public static class AgentSessionFollowupRoutes
         var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
         if (target is null)
             return ApiResults.NotFound($"Agent session {sessionId} not found");
-        if (!string.IsNullOrWhiteSpace(target.TerminalState))
-            return ApiResults.Conflict("Session is no longer active", "session_inactive");
 
         var grain = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
         AgentSessionFollowupReservation reservation;

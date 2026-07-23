@@ -148,11 +148,14 @@ public class AgentSessionContextEventPublishingSpecs
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":960,"contextWindowSize":1000}"""),
             }, RuntimeSessionId: "runtime-context"));
 
-        // Trigger the exhaustion classification.
+        // Trigger the exhaustion classification. Under the activity model the
+        // terminal-close event (`session.closed`) is a no-op; context-exhaustion
+        // classification is now driven by the `turn.failed` runtime event, so
+        // emit one against the same near-full context window.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
-                new AgentSessionRuntimeEventInput("session.closed", """{"status":"failed","exitCode":1}"""),
+                new AgentSessionRuntimeEventInput("turn.failed", """{"status":"failed","exitCode":1,"producedArtifacts":false}"""),
             }, RuntimeSessionId: "runtime-context"));
 
         // Force a flush so the post-state-save event rows are

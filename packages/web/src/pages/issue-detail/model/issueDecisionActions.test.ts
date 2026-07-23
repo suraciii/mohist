@@ -278,9 +278,9 @@ describe('deriveIssueDecisionActions', () => {
   })
 
   it('emits a transcript action only when a concrete session exists and labels it with the session name', () => {
-    const session: Pick<WorkflowRunSession, 'sessionName' | 'status' | 'startedAt' | 'createdAt'> = {
+    const session: Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> = {
       sessionName: 'review-1',
-      status: 'completed',
+      activity: 'idle',
       startedAt: '2026-07-20T00:00:00Z',
       createdAt: '2026-07-19T00:00:00Z',
     }
@@ -308,9 +308,9 @@ describe('deriveIssueDecisionActions', () => {
   })
 
   it('keeps transcript navigation available on archived and terminal issues when sessions exist', () => {
-    const session: Pick<WorkflowRunSession, 'sessionName' | 'status' | 'startedAt' | 'createdAt'> = {
+    const session: Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> = {
       sessionName: 'review-1',
-      status: 'completed',
+      activity: 'idle',
       startedAt: '2026-07-20T00:00:00Z',
       createdAt: '2026-07-19T00:00:00Z',
     }
@@ -330,9 +330,9 @@ describe('deriveIssueDecisionActions', () => {
   })
 
   it('omits transcript when there is no workflowRunId', () => {
-    const session: Pick<WorkflowRunSession, 'sessionName' | 'status' | 'startedAt' | 'createdAt'> = {
+    const session: Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> = {
       sessionName: 'review-1',
-      status: 'completed',
+      activity: 'idle',
       startedAt: '2026-07-20T00:00:00Z',
       createdAt: '2026-07-19T00:00:00Z',
     }
@@ -378,7 +378,7 @@ describe('deriveIssueDecisionActions', () => {
     const result = deriveIssueDecisionActions(makeContext({
       decision: makeDecision({ primary: stop, actions: [stop] }),
       issue: makeIssue({ isDraft: true }),
-      workflowSessions: [{ sessionName: 'review-1', status: 'completed', startedAt: '2026-07-20T00:00:00Z', createdAt: '2026-07-19T00:00:00Z' }],
+      workflowSessions: [{ sessionName: 'review-1', activity: 'idle', startedAt: '2026-07-20T00:00:00Z', createdAt: '2026-07-19T00:00:00Z' }],
     }))
 
     const kinds = result.actions.map((a) => a.kind)
@@ -406,33 +406,36 @@ describe('deriveIssueDecisionActions', () => {
 })
 
 describe('selectTranscriptSession', () => {
-  const sessions: Array<Pick<WorkflowRunSession, 'sessionName' | 'status' | 'startedAt' | 'createdAt'>> = [
-    { sessionName: 'old', status: 'completed', startedAt: '2026-01-01T00:00:00Z', createdAt: '2025-12-31T00:00:00Z' },
-    { sessionName: 'live', status: 'running', startedAt: '2026-02-01T00:00:00Z', createdAt: '2026-01-31T00:00:00Z' },
-    { sessionName: 'queued', status: 'pending', startedAt: '2026-03-01T00:00:00Z', createdAt: '2026-02-28T00:00:00Z' },
+  // Issue 484: selection ranks by `activity` (active > unknown > idle),
+  // then by most-recent timestamp, then by session name. The legacy `status`
+  // field is no longer consulted.
+  const sessions: Array<Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'>> = [
+    { sessionName: 'old', activity: 'idle', startedAt: '2026-01-01T00:00:00Z', createdAt: '2025-12-31T00:00:00Z' },
+    { sessionName: 'live', activity: 'active', startedAt: '2026-02-01T00:00:00Z', createdAt: '2026-01-31T00:00:00Z' },
+    { sessionName: 'queued', activity: 'idle', startedAt: '2026-03-01T00:00:00Z', createdAt: '2026-02-28T00:00:00Z' },
   ]
 
-  it('prefers an active session over older or newer completed sessions', () => {
+  it('prefers an active session over older or newer idle sessions', () => {
     expect(selectTranscriptSession(sessions)?.sessionName).toBe('live')
   })
 
-  it('prefers active over probing when both exist', () => {
-    const probed: typeof sessions = [
-      { sessionName: 'probe', status: 'probing', startedAt: '2026-04-01T00:00:00Z', createdAt: '2026-03-31T00:00:00Z' },
-      { sessionName: 'active', status: 'active', startedAt: '2026-04-02T00:00:00Z', createdAt: '2026-04-01T00:00:00Z' },
+  it('prefers active over unknown when both exist', () => {
+    const mixed: typeof sessions = [
+      { sessionName: 'probe', activity: 'unknown', startedAt: '2026-04-01T00:00:00Z', createdAt: '2026-03-31T00:00:00Z' },
+      { sessionName: 'active', activity: 'active', startedAt: '2026-04-02T00:00:00Z', createdAt: '2026-04-01T00:00:00Z' },
     ]
-    expect(selectTranscriptSession(probed)?.sessionName).toBe('active')
+    expect(selectTranscriptSession(mixed)?.sessionName).toBe('active')
   })
 
   it('falls back to the most recently started session when no active one exists', () => {
-    const noActive: typeof sessions = sessions.filter((s) => !['active', 'running', 'probing'].includes(s.status ?? ''))
+    const noActive: typeof sessions = sessions.filter((s) => s.activity !== 'active')
     expect(selectTranscriptSession(noActive)?.sessionName).toBe('queued')
   })
 
   it('uses session name as a stable tie-break when timestamps are equal', () => {
     const tied: typeof sessions = [
-      { sessionName: 'zeta', status: 'completed', startedAt: '2026-01-01T00:00:00Z', createdAt: '2025-12-31T00:00:00Z' },
-      { sessionName: 'alpha', status: 'completed', startedAt: '2026-01-01T00:00:00Z', createdAt: '2025-12-31T00:00:00Z' },
+      { sessionName: 'zeta', activity: 'idle', startedAt: '2026-01-01T00:00:00Z', createdAt: '2025-12-31T00:00:00Z' },
+      { sessionName: 'alpha', activity: 'idle', startedAt: '2026-01-01T00:00:00Z', createdAt: '2025-12-31T00:00:00Z' },
     ]
     expect(selectTranscriptSession(tied)?.sessionName).toBe('alpha')
   })
@@ -443,8 +446,8 @@ describe('selectTranscriptSession', () => {
 
   it('falls back to createdAt when startedAt is missing', () => {
     const onlyCreated: typeof sessions = [
-      { sessionName: 'older', status: 'completed', startedAt: null, createdAt: '2026-01-01T00:00:00Z' },
-      { sessionName: 'newer', status: 'completed', startedAt: null, createdAt: '2026-02-01T00:00:00Z' },
+      { sessionName: 'older', activity: 'idle', startedAt: null, createdAt: '2026-01-01T00:00:00Z' },
+      { sessionName: 'newer', activity: 'idle', startedAt: null, createdAt: '2026-02-01T00:00:00Z' },
     ]
     expect(selectTranscriptSession(onlyCreated)?.sessionName).toBe('newer')
   })

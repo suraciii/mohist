@@ -597,8 +597,14 @@ describe('Coder Session evidence view — issue-session ID resolution', () => {
 })
 
 describe('Coder Session evidence view — shared theme tokens', () => {
-  it('uses the shared danger token families for status surfaces in light mode', async () => {
+  it('uses the shared danger token families for the errors evidence region in light mode', async () => {
+    // issue-484: the status badge no longer has a 'failed' kind (sessions are
+    // never terminal). Failure is surfaced via the SessionErrorsEvidence region,
+    // which keeps the shared danger tokens. The badge renders the activity
+    // (unknown here, since failed no longer maps to an activity) using warning
+    // tokens.
     mocks.metadata = baseCompletedMetadata({
+      activity: 'unknown',
       status: 'failed',
       statusKind: 'failed',
       eventSummary: {
@@ -618,17 +624,21 @@ describe('Coder Session evidence view — shared theme tokens', () => {
     })
 
     const badge = container.querySelector('[data-testid="session-status-badge"]')
-    expect(badge!.className).toContain('bg-danger-subtle')
-    expect(badge!.className).toContain('text-danger')
-    expect(badge!.className).toContain('border-danger-border')
+    // activity=unknown → warning token family on the badge.
+    expect(badge!.className).toContain('bg-warning-subtle')
+    expect(badge!.className).toContain('text-warning')
 
     const errorsRegion = container.querySelector('[data-testid="session-errors-region"]')
     expect(errorsRegion!.className).toContain('bg-danger-subtle')
     expect(errorsRegion!.className).toContain('text-danger')
   })
 
-  it('uses the shared success token families for completed status surfaces in light mode', async () => {
+  it('uses the shared neutral token families for the idle activity badge in light mode', async () => {
+    // issue-484: the legacy 'completed' success badge is gone. A session that
+    // finished executing returns to 'idle', whose badge uses the shared muted/
+    // neutral token family.
     mocks.metadata = baseCompletedMetadata({
+      activity: 'idle',
       status: 'completed',
       statusKind: 'completed',
       eventSummary: {
@@ -647,14 +657,16 @@ describe('Coder Session evidence view — shared theme tokens', () => {
     })
 
     const badge = container.querySelector('[data-testid="session-status-badge"]')
-    expect(badge!.className).toContain('bg-success-subtle')
-    expect(badge!.className).toContain('text-success')
+    expect(badge!.getAttribute('data-tone')).toBe('neutral')
+    expect(badge!.className).toContain('bg-muted')
+    expect(badge!.className).toContain('text-muted-foreground')
   })
 
-  it('uses the shared info token families for live status surfaces in dark mode', async () => {
+  it('uses the shared info token families for the active activity badge in dark mode', async () => {
     document.documentElement.classList.add('dark')
     try {
       mocks.metadata = baseCompletedMetadata({
+        activity: 'active',
         status: 'active',
         statusKind: 'live',
         completedAt: null,
@@ -677,15 +689,20 @@ describe('Coder Session evidence view — shared theme tokens', () => {
   })
 
   it.each([
-    ['stale', 'warning'],
-    ['probing', 'info'],
-    ['finalizing', 'warning'],
-  ])('maps statusKind=%s status badge to the shared %s token family', async (statusKind, expectedTone) => {
+    // issue-484: only idle/active/unknown status kinds remain. 'stale' and
+    // 'finalizing' were removed (sessions never enter a terminal/finalizing
+    // state); the deprecated session.closed event no longer drives a finalizing
+    // patch. The active/unknown badges share the info/warning token families;
+    // idle uses the muted/neutral family (covered by the dedicated test above).
+    ['active', 'info'],
+    ['unknown', 'warning'],
+  ] as const)('maps activity=%s status badge to the shared %s token family', async (activity, expectedTone) => {
     document.documentElement.classList.add('dark')
     try {
       mocks.metadata = baseCompletedMetadata({
-        status: statusKind,
-        statusKind,
+        activity,
+        status: activity,
+        statusKind: activity,
         completedAt: null,
       })
 

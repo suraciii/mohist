@@ -21,6 +21,11 @@ describe('canonical event types', () => {
   })
 
   it('includes the transcript event types', () => {
+    // Issue 484: the transcript event catalogue now also carries the
+    // activity-model transport events (`session.activity`,
+    // `session.context_reset`, `turn.failed`). The legacy
+    // `session.closed` / `session.followup_*` names are retained on the
+    // wire for now (frontend no longer patches status off them).
     expect(TRANSCRIPT_EVENT_TYPES).toEqual([
       'session.input',
       'message.delta',
@@ -29,11 +34,14 @@ describe('canonical event types', () => {
       'tool_call.updated',
       'tool_call.completed',
       'session.liveness',
-      'usage.updated',
-      'model.resolved',
+      'session.activity',
+      'session.context_reset',
+      'turn.failed',
       'session.closed',
       'session.followup_completed',
       'session.followup_failed',
+      'usage.updated',
+      'model.resolved',
       'compaction',
       'compaction_event',
       'context_health_update',

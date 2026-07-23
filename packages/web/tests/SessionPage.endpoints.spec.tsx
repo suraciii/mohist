@@ -109,6 +109,8 @@ function makeMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentSessi
     id: 'proj/wr/T-003.1',
     sessionName: 'T-003.1',
     runtimeSessionId: 'runtime-123',
+    // issue-484: default to 'idle' (post-execution activity).
+    activity: 'idle',
     status: 'completed',
     statusKind: 'completed',
     model: 'claude-3-5-sonnet',
@@ -266,8 +268,9 @@ describe('SessionPage split endpoints', () => {
       })
 
       expect(screen.getByText('Issue #51')).toBeInTheDocument()
-      const completedBadges = screen.getAllByText('Completed')
-      expect(completedBadges.length).toBeGreaterThanOrEqual(1)
+      // issue-484: the status badge is now the activity badge ("Idle").
+      const idleBadges = screen.getAllByText('Idle')
+      expect(idleBadges.length).toBeGreaterThanOrEqual(1)
       expect(screen.getByText('Build')).toBeInTheDocument()
       expect(screen.getByText('claude-3-5-sonnet')).toBeInTheDocument()
       expect(_metadataHandler).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
@@ -290,7 +293,9 @@ describe('SessionPage split endpoints', () => {
         expect(screen.getByRole('heading', { name: 'T-003.1' })).toBeInTheDocument()
       })
       expect(screen.getByText('Issue #51')).toBeInTheDocument()
-      expect(screen.getByText(/session-?1h 00m|1h 00m/)).toBeInTheDocument()
+      // issue-484: the header no longer renders a duration chip; the activity
+      // badge ("Idle") is shown instead. Assert the idle badge is present.
+      expect(screen.getAllByText('Idle').length).toBeGreaterThanOrEqual(1)
       expect(screen.queryByRole('heading', { name: 'Implement endpoint split' })).not.toBeInTheDocument()
     })
 

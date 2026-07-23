@@ -70,9 +70,6 @@ public static class AgentSessionCancelRoutes
         if (target is null)
             return ApiResults.NotFound($"Agent session {sessionId} not found");
 
-        if (!string.IsNullOrEmpty(target.TerminalState))
-            return ApiResults.Ok(new { state = target.TerminalState });
-
         if (string.IsNullOrWhiteSpace(target.RunnerId))
             return ApiResults.Ok(new { state = "not-cancellable" });
 

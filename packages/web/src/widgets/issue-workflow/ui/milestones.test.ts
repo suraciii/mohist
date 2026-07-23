@@ -17,7 +17,11 @@ function sessionFixture(overrides: Partial<WorkflowRunSession> = {}): WorkflowRu
     projectId: null,
     issueNumber: null,
     runnerId: null,
-    status: 'completed',
+    // Issue 484: the default fixture is an executing session (`active`). The
+    // session-ended/"Session idle" milestone is only emitted when activity
+    // drops back to `idle` (or `unknown` for failures), so tests that exercise
+    // that branch now set `activity` explicitly.
+    activity: 'active',
     stage: null,
     model: null,
     workDir: null,
@@ -122,18 +126,22 @@ describe('deriveMilestones', () => {
     expect(out[0]).toMatchObject({ detail: 'minimax/MiniMax-M3' })
   })
 
-  it('omits the model-bound milestone when no resolved or fallback model is set', () => {
+  it('omits the model-bound milestone when no resolved or fallback model is set, and emits only the session-ended milestone for an idle session', () => {
+    // Issue 484: with no model anchor only the "Session idle" milestone is
+    // emitted, and only when activity has dropped back from `active`. The
+    // timestamp comes from lastDataAt (falling back to createdAt), and the
+    // detail is the activity value.
     expect(deriveMilestones(sessionFixture({
       model: null,
       eventSummary: {},
-      completedAt: '2026-06-15T10:02:00.000Z',
-      status: 'completed',
+      activity: 'idle',
+      lastDataAt: '2026-06-15T10:02:00.000Z',
     }))).toEqual([
       {
         kind: 'session-ended',
         timestamp: '2026-06-15T10:02:00.000Z',
-        label: 'Session ended',
-        detail: 'completed',
+        label: 'Session idle',
+        detail: 'idle',
       },
     ])
   })
@@ -145,50 +153,68 @@ describe('deriveMilestones', () => {
     }))).toEqual([])
   })
 
-  it('emits the session-ended milestone when completedAt is set, using the raw status verbatim', () => {
+  it('emits the session-ended milestone for an idle session, using lastDataAt as the timestamp and the activity as the detail', () => {
     const out = deriveMilestones(sessionFixture({
-      completedAt: '2026-06-15T10:02:00.000Z',
-      status: 'completed',
+      activity: 'idle',
+      lastDataAt: '2026-06-15T10:02:00.000Z',
     }))
     expect(out).toHaveLength(1)
     expect(out[0]).toEqual({
       kind: 'session-ended',
       timestamp: '2026-06-15T10:02:00.000Z',
-      label: 'Session ended',
-      detail: 'completed',
+      label: 'Session idle',
+      detail: 'idle',
     })
   })
 
-  it('marks session-ended as failed and appends failureReason when present', () => {
+  it('falls back to createdAt for the session-ended timestamp when lastDataAt is missing', () => {
     const out = deriveMilestones(sessionFixture({
-      completedAt: '2026-06-15T10:02:00.000Z',
-      status: 'failed',
+      activity: 'idle',
+      createdAt: '2026-06-15T10:00:00.000Z',
+      lastDataAt: null,
+    }))
+    expect(out[0]).toMatchObject({ kind: 'session-ended', timestamp: '2026-06-15T10:00:00.000Z' })
+  })
+
+  it('marks the session-ended milestone as failed when activity is unknown (unconfirmable session)', () => {
+    // Issue 484: the failed flag is now driven by `activity === 'unknown'`
+    // (a session whose state can't be resolved) rather than by a terminal
+    // `status: 'failed'`. The milestone detail carries only the activity
+    // value; failureReason is no longer appended to the milestone detail.
+    const out = deriveMilestones(sessionFixture({
+      activity: 'unknown',
+      lastDataAt: '2026-06-15T10:02:00.000Z',
       failureReason: 'something blew up\nwith a newline',
     }))
     expect(out[0]).toEqual({
       kind: 'session-ended',
       timestamp: '2026-06-15T10:02:00.000Z',
-      label: 'Session ended',
-      detail: 'failed\nsomething blew up\nwith a newline',
+      label: 'Session idle',
+      detail: 'unknown',
       failed: true,
     })
   })
 
-  it('treats empty-string failureReason as not failed (only non-empty triggers the flag)', () => {
+  it('does not flag the session-ended milestone as failed when activity resolves to idle', () => {
+    // Issue 484: `idle` (execution ended cleanly) is not a failure; only the
+    // unconfirmable `unknown` activity triggers the failed styling. The legacy
+    // failureReason-text gating no longer applies.
     const out = deriveMilestones(sessionFixture({
-      completedAt: '2026-06-15T10:02:00.000Z',
-      status: 'failed',
+      activity: 'idle',
+      lastDataAt: '2026-06-15T10:02:00.000Z',
       failureReason: '',
     }))
     expect(out[0]).not.toHaveProperty('failed', true)
-    expect(out[0].detail).toBe('failed')
+    expect(out[0].detail).toBe('idle')
   })
 
-  it('returns both milestones in a finished session', () => {
+  it('returns both milestones when a session that was active has returned to idle', () => {
+    // Issue 484: model-bound is anchored on startedAt; session-ended ("Session
+    // idle") fires once activity drops back from `active` to `idle`.
     const out = deriveMilestones(sessionFixture({
       startedAt: '2026-06-15T10:01:00.000Z',
-      completedAt: '2026-06-15T10:02:00.000Z',
-      status: 'completed',
+      activity: 'idle',
+      lastDataAt: '2026-06-15T10:02:00.000Z',
       eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
     }))
     expect(out.map((m) => m.kind)).toEqual(['model-bound', 'session-ended'])

@@ -34,6 +34,10 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
 }
 
+// NOTE (issue 484): the recovery model migrated from session `status`
+// (completed/failed/running/...) to an `activity` field (idle/active/unknown).
+// Recovery actions are enabled only when `activity === 'idle'`. Tests below
+// drive the component via `activity` instead of the deprecated `status`.
 function renderActions(props: Partial<React.ComponentProps<typeof SessionRecoveryActions>> = {}) {
   const queryClient = createQueryClient()
   return render(
@@ -48,7 +52,7 @@ function renderActions(props: Partial<React.ComponentProps<typeof SessionRecover
         <SessionRecoveryActions
           issueNumber={110}
           sessionName="session-abc"
-          status="completed"
+          activity="idle"
           clients={recoveryClients}
           {...props}
         />
@@ -110,8 +114,8 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
     expect(screen.getByTestId('session-recovery-reset')).not.toBeDisabled()
   })
 
-  it('disables both buttons when status is running and drops the native title attribute', () => {
-    renderActions({ status: 'running' })
+  it('disables both buttons when activity is active and drops the native title attribute', () => {
+    renderActions({ activity: 'active' })
     const compact = screen.getByTestId('session-recovery-compact')
     const reset = screen.getByTestId('session-recovery-reset')
     expect(compact).toBeDisabled()
@@ -122,16 +126,16 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
     expect(reset).not.toHaveAttribute('title')
   })
 
-  it('disables both buttons for the legacy "active" status', () => {
-    renderActions({ status: 'active' })
+  it('disables both buttons when activity is unknown', () => {
+    renderActions({ activity: 'unknown' })
     expect(screen.getByTestId('session-recovery-compact')).toBeDisabled()
     expect(screen.getByTestId('session-recovery-reset')).toBeDisabled()
   })
 
-  it('disables both buttons for the "live" status kind', () => {
-    renderActions({ status: 'live' })
-    expect(screen.getByTestId('session-recovery-compact')).toBeDisabled()
-    expect(screen.getByTestId('session-recovery-reset')).toBeDisabled()
+  it('keeps both buttons enabled when activity is idle', () => {
+    renderActions({ activity: 'idle' })
+    expect(screen.getByTestId('session-recovery-compact')).not.toBeDisabled()
+    expect(screen.getByTestId('session-recovery-reset')).not.toBeDisabled()
   })
 })
 
@@ -145,8 +149,8 @@ describe('SessionRecoveryActions — structured disabled-reason tooltip', () => 
     return wrapper
   }
 
-  it('renders the running-block structured tooltip when the session is running', () => {
-    renderActions({ status: 'running' })
+  it('renders the running-block structured tooltip when the session activity is active', () => {
+    renderActions({ activity: 'active' })
 
     focusDisabledWrapper('session-recovery-compact')
 
@@ -160,8 +164,8 @@ describe('SessionRecoveryActions — structured disabled-reason tooltip', () => 
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 
-  it('renders the running-block structured tooltip on the Reset button when the session is running', () => {
-    renderActions({ status: 'running' })
+  it('renders the running-block structured tooltip on the Reset button when the session activity is active', () => {
+    renderActions({ activity: 'active' })
 
     focusDisabledWrapper('session-recovery-reset')
 
@@ -306,8 +310,8 @@ describe('SessionRecoveryActions — compact action', () => {
     expect(screen.getByTestId('session-recovery-error')).toHaveTextContent(/session not found/i)
   })
 
-  it('does not call compactSession when the session is running', () => {
-    renderActions({ status: 'running' })
+  it('does not call compactSession when the session activity is active', () => {
+    renderActions({ activity: 'active' })
 
     const compact = screen.getByTestId('session-recovery-compact')
     expect(compact).toBeDisabled()
@@ -355,8 +359,8 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
     expect(resetClient).not.toHaveBeenCalled()
   })
 
-  it('does not open the dialog when the session is running', () => {
-    renderActions({ status: 'running' })
+  it('does not open the dialog when the session activity is active', () => {
+    renderActions({ activity: 'active' })
     const reset = screen.getByTestId('session-recovery-reset')
     expect(reset).toBeDisabled()
     fireEvent.click(reset)
@@ -410,7 +414,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
     expect(screen.getByTestId('session-recovery-error')).toHaveTextContent(/session not found/i)
   })
 
-  it('clears the inline error when the user changes the session status', async () => {
+  it('clears the inline error when the session activity changes', async () => {
     const { rerender } = render(
       <QueryClientProvider client={createQueryClient()}>
         <ProjectProvider initialProjectId="proj-1" initialProjects={[{
@@ -423,7 +427,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
           <SessionRecoveryActions
             issueNumber={110}
             sessionName="session-abc"
-            status="completed"
+            activity="idle"
             clients={recoveryClients}
           />
         </ProjectProvider>
@@ -448,7 +452,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
           <SessionRecoveryActions
             issueNumber={110}
             sessionName="session-abc"
-            status="failed"
+            activity="active"
             clients={recoveryClients}
           />
         </ProjectProvider>

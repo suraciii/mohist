@@ -273,17 +273,21 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
                     .ToListAsync();
                 if (turnIds.Count == 0) return null;
                 return await db.AgentSessionTranscriptParts
-                    .Where(p => turnIds.Contains(p.TurnId) && p.Type == TranscriptPartTypes.SessionClosed)
+                    .Where(p => turnIds.Contains(p.TurnId) && p.Type == TranscriptPartTypes.SessionActivity)
                     .Select(p => p.PayloadJson)
                     .FirstOrDefaultAsync();
             },
             payload => !string.IsNullOrWhiteSpace(payload),
             TimeSpan.FromSeconds(2),
             TimeSpan.FromMilliseconds(50),
-            "generic session terminal close transcript event")!;
+            "generic session terminal activity transcript event")!;
         using var payload = JsonDocument.Parse(closedPayload!);
+        // Issue 484: terminal delivery now writes a session.activity
+        // (activity=idle) part. The work result status remains on the
+        // payload; the failureCategory is the AgentJob's own verdict
+        // (asserted above via terminal.FailureReason) and is no longer
+        // mirrored onto the session transcript.
         Assert.Equal("failed", payload.RootElement.GetProperty("status").GetString());
-        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, payload.RootElement.GetProperty("failureCategory").GetString());
     }
 
     [Fact]
@@ -410,12 +414,17 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             .Select(turn => turn.Id)
             .ToListAsync();
         var closed = Assert.Single(await db.AgentSessionTranscriptParts
-            .Where(part => turnIds.Contains(part.TurnId) && part.Type == TranscriptPartTypes.SessionClosed)
+            .Where(part => turnIds.Contains(part.TurnId) && part.Type == TranscriptPartTypes.SessionActivity)
             .ToListAsync());
 
         Assert.Equal(1, closed.RawEventCount);
         using var payload = JsonDocument.Parse(closed.PayloadJson);
-        Assert.Equal("prompt_timeout", payload.RootElement.GetProperty("failureCategory").GetString());
+        // Issue 484: terminal delivery now writes exactly one
+        // session.activity (activity=idle) part. The runtime failure
+        // category is the AgentJob's own verdict and is no longer
+        // mirrored onto the session transcript; the work result status
+        // remains observable on the part payload.
+        Assert.Equal("failed", payload.RootElement.GetProperty("status").GetString());
     }
 
     [Fact]

@@ -64,7 +64,7 @@ public class WorkflowSessionTerminalConvergenceSpecs
                     type = "tool_call.updated",
                     payload = new { toolCallId = "tool-1", kind = "read", status = "completed", rawOutput = new { text = "first-result" } }
                 },
-                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
+                new { type = "session.activity", payload = new { activity = "idle", status = "completed", exitCode = 0, operationId = "op-turn1" } }
             }
         });
 
@@ -75,7 +75,7 @@ public class WorkflowSessionTerminalConvergenceSpecs
             {
                 new { type = "session.input", payload = new { text = "second-prompt", kind = "task" } },
                 new { type = "message.delta", payload = new { text = "second-answer" } },
-                new { type = "session.closed", payload = new { status = "failed", failureReason = "second-turn-failure", exitCode = 1 } }
+                new { type = "session.activity", payload = new { activity = "idle", status = "failed", failureReason = "second-turn-failure", exitCode = 1, operationId = "op-turn2" } }
             }
         });
 
@@ -107,14 +107,18 @@ public class WorkflowSessionTerminalConvergenceSpecs
         Assert.Contains(transcript.Turns[1].Assistant, p => p.Type == "text" && p.Text == "second-answer");
         Assert.Contains(transcript.Turns[1].Assistant, p => p.Type == "error" && p.Kind == "failed" && p.Message == "second-turn-failure");
 
-        // Latest accepted session.closed drives the Workflow session
-        // read; the second turn's failed terminal observation wins.
+        // Under the activity model the Workflow session read no longer mirrors
+        // a terminal session status: the session's activity settles on idle and
+        // the workflow-session shape stopped projecting completedAt /
+        // failureReason / exitCode (those belong to the AgentJob work result).
+        // The second turn's failure fact is still observable in the transcript
+        // error part asserted above.
         var workflowSessions = await _client.GetDataAsync<WorkflowSessionDto[]>($"/api/workflow-runs/{workflowRunId}/sessions");
         var listed = Assert.Single(workflowSessions);
-        Assert.Equal("failed", listed.Status);
-        Assert.Equal(1, listed.ExitCode);
-        Assert.Equal("second-turn-failure", listed.FailureReason);
-        Assert.NotNull(listed.CompletedAt);
+        Assert.Equal("idle", listed.Status);
+        Assert.Null(listed.ExitCode);
+        Assert.Null(listed.FailureReason);
+        Assert.Null(listed.CompletedAt);
     }
 
     private async Task<(ProjectDto Project, IssueDto Issue, string SessionName, string WorkflowRunId)> CreateIssueWorkflowSessionAsync(string name, string? title = null)
@@ -197,7 +201,7 @@ public class WorkflowSessionTerminalConvergenceSpecs
 
     private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(string Id, int Number, string Title, string Status, string? WorkflowRunId);
-    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string Status, string? CompletedAt, string? FailureReason, int? ExitCode);
+    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, [property: System.Text.Json.Serialization.JsonPropertyName("activity")] string Status, string? CompletedAt, string? FailureReason, int? ExitCode);
     private sealed record IssueSessionTranscriptTestResponse(IssueSessionTranscriptTurnTestDto[] Turns);
     private sealed record IssueSessionTranscriptTurnTestDto(string Id, IssueSessionTranscriptUserTestDto User, IssueSessionTranscriptPartTestDto[] Assistant);
     private sealed record IssueSessionTranscriptUserTestDto(string Text, string Kind);
