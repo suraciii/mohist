@@ -72,22 +72,13 @@ internal static class RunnerCommands
 {
     public static Command Build(MohistCliApi api, IServiceProvider provider)
     {
-        var runner = new Command("runner", "Runner management");
-        var installer = provider.GetRequiredService<IServiceInstaller>();
+        var runner = new Command(
+            "runner",
+            "Server-registered Runner resources. Read-only — reads presence, capacity, heartbeat, and status from the connected Server.");
         var environment = provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance;
 
-        runner.Subcommands.Add(BuildSystemd("start", installer.StartRunnerAsync, installer));
-        runner.Subcommands.Add(BuildSystemd("stop", installer.StopRunnerAsync, installer));
-        runner.Subcommands.Add(BuildSystemd("restart", installer.RestartRunnerAsync, installer));
-        runner.Subcommands.Add(BuildSystemd(
-            "service-status",
-            "Show runner managed service lifecycle status",
-            installer.StatusRunnerAsync,
-            installer));
-        runner.Subcommands.Add(BuildLogs(installer));
-        runner.Subcommands.Add(BuildSystemd("uninstall", installer.UninstallRunnerAsync, installer));
         runner.Subcommands.Add(BuildList(api, environment));
-        runner.Subcommands.Add(BuildShow(api));
+        runner.Subcommands.Add(BuildView(api));
         runner.Subcommands.Add(BuildStatus(api));
 
         return runner;
@@ -143,9 +134,9 @@ internal static class RunnerCommands
         return cmd;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("show", "Show a single runner's full detail (read-only)");
+        var cmd = new Command("view", "Show a single runner's full detail (read-only)");
         var runnerIdArg = new Argument<string>("runner-id") { Description = "Runner identifier" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
@@ -159,9 +150,9 @@ internal static class RunnerCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
-            return ShowAsync();
+            return ViewAsync();
 
-            async Task<int> ShowAsync()
+            async Task<int> ViewAsync()
             {
                 if (string.IsNullOrWhiteSpace(runnerId))
                 {
@@ -227,53 +218,4 @@ internal static class RunnerCommands
         return null;
     }
 
-    private static Command BuildSystemd(
-        string name,
-        Func<ServiceCommandOptions, Task<int>> handler,
-        IServiceInstaller installer)
-    {
-        return BuildSystemd(name, $"{name} runner managed service", handler, installer);
-    }
-
-    private static Command BuildSystemd(
-        string name,
-        string description,
-        Func<ServiceCommandOptions, Task<int>> handler,
-        IServiceInstaller installer)
-    {
-        var cmd = new Command(name, description);
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        var unitDirOpt = MohistCliCommands.UnitDirOption();
-        cmd.Options.Add(dryRunOpt);
-        cmd.Options.Add(unitDirOpt);
-        cmd.SetAction(ctx =>
-        {
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var unitDir = ctx.GetValue(unitDirOpt);
-            return handler(new ServiceCommandOptions(dryRun, unitDir, 100, false));
-        });
-        return cmd;
-    }
-
-    private static Command BuildLogs(IServiceInstaller installer)
-    {
-        var cmd = new Command("logs", "View runner service logs");
-        var linesOpt = MohistCliCommands.LinesOption();
-        var followOpt = MohistCliCommands.FollowOption();
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        var unitDirOpt = MohistCliCommands.UnitDirOption();
-        cmd.Options.Add(linesOpt);
-        cmd.Options.Add(followOpt);
-        cmd.Options.Add(dryRunOpt);
-        cmd.Options.Add(unitDirOpt);
-        cmd.SetAction(ctx =>
-        {
-            var lines = ctx.GetValue(linesOpt);
-            var follow = ctx.GetValue(followOpt);
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var unitDir = ctx.GetValue(unitDirOpt);
-            return installer.LogsRunnerAsync(new ServiceCommandOptions(dryRun, unitDir, lines, follow));
-        });
-        return cmd;
-    }
 }
