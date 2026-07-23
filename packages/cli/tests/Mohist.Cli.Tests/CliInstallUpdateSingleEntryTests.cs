@@ -275,18 +275,14 @@ public class CliInstallUpdateSingleEntryTests
     public async Task SurvivingRunnerSubcommands_StillResolve()
     {
         var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
-        var env = new EnvironmentAbstractions.TestHelpers.MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "--help"], output, error, fs, executor,
+            installer: installer);
 
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
         foreach (var sub in new[] { "list", "view", "status" })
-        {
-            var commandArgs = sub == "view"
-                ? new[] { "runner", sub, "r-1" }
-                : new[] { "runner", sub };
-            var exitCode = await MohistCliCommands.RunAsync(
-                http, commandArgs, output, error, fs, executor,
-                environment: env,
-                installer: installer);
-            Assert.Equal(0, exitCode);
-        }
+            Assert.Contains($"\n  {sub} ", stdout);
+        Assert.Empty(handler.Requests);
     }
 }
