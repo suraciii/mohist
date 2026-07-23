@@ -199,10 +199,8 @@ public class WorkflowProfileManager : IScopedService
             .FirstOrDefaultAsync(x => x.ProjectId == projectId))?.DefaultWorkflowProfileId;
         var profileId = string.IsNullOrWhiteSpace(issueSelection) ? projectDefault : issueSelection;
         if (string.IsNullOrWhiteSpace(profileId))
-        {
-            var legacy = await LoadStructureAsync(runId, projectId, issueNumber);
-            return legacy with { Id = string.Empty };
-        }
+            throw new InvalidOperationException(
+                $"Project '{projectId}' has no default Workflow Profile for Workflow '{runId}'");
 
         var definition = await _profileProvider.GetDefinitionAsync(projectId, profileId);
         if (definition is null)
