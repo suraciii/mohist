@@ -430,7 +430,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     public async Task IssueProfileStartContext_SeedsAgentWhenAbsent_AndPreservesExplicitAgent()
     {
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var issueManager = new IssueWorkflowProfileManager(dbFactory);
+        var issueManager = new IssueWorkflowProfileManager(dbFactory, NullActionCatalogSource.Instance);
 
         await SeedIssueOnly(
             "proj_issue_seed", 1, "wr_issue_seed01",

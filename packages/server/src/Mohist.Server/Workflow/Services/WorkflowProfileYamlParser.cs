@@ -1,4 +1,5 @@
 using System.Text;
+using Mohist.Server.Runner.Grains;
 using Mohist.Workflow.Definition;
 using YamlDotNet.RepresentationModel;
 
@@ -6,7 +7,7 @@ namespace Mohist.Server.Workflow.Services;
 
 internal static class WorkflowProfileYamlParser
 {
-    public static WorkflowProfile Parse(string yaml, string fallbackId)
+    public static WorkflowProfile Parse(string yaml, string fallbackId, ActionCatalog? catalog = null)
     {
         YamlStream stream;
         using (var reader = new StringReader(yaml))
@@ -33,8 +34,8 @@ internal static class WorkflowProfileYamlParser
         var definitionYaml = Serialize(root);
         var result = WorkflowDefinitionParser.Parse(definitionYaml);
         var errors = result.Errors.ToList();
-        if (result.Definition is not null)
-            errors.AddRange(WorkflowActionGuards.Validate(result.Definition));
+        if (result.Definition is not null && catalog is not null)
+            errors.AddRange(ActionContractValidator.Validate(result.Definition, catalog));
         if (errors.Count > 0)
             throw new WorkflowDefinitionValidationException(errors
                 .OrderBy(error => error.Path, StringComparer.Ordinal)

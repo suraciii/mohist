@@ -16,7 +16,7 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
     public ProjectWorkflowProfileDisabledSpecs()
     {
         _database = TestSqliteDatabase.CreateModelSchema();
-        _manager = new ProjectWorkflowProfileManager(new TestDbContextFactory(_database.Options), new StubPromptLoader(), new PromptTemplateEngine());
+        _manager = new ProjectWorkflowProfileManager(new TestDbContextFactory(_database.Options), new StubPromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
     }
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;

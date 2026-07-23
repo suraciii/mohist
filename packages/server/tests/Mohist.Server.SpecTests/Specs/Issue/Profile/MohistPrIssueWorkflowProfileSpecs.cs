@@ -651,7 +651,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public async Task ProjectWorkflowProfileManager_SystemTemplates_ExposeGithubPrTemplate()
     {
-        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine());
+        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
 
         var templates = await manager.ListSystemTemplatesAsync();
 
@@ -667,7 +667,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     public async Task BothCatalogPaths_AgreeWithProfileInstanceForBothBuiltIns()
     {
         var registry = BuildRegistry();
-        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine());
+        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
 
         var templates = await manager.ListSystemTemplatesAsync();
         var described = registry.ListDescribed();

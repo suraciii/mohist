@@ -390,7 +390,7 @@ public abstract class WorkflowGrainSpecs
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine());
+        var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine(), NullActionCatalogSource.Instance);
         await manager.PatchVariablesAsync(projectId, patch);
     }
 
@@ -418,7 +418,7 @@ public abstract class WorkflowGrainSpecs
             }
         }
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new IssueWorkflowProfileManager(factory);
+        var manager = new IssueWorkflowProfileManager(factory, NullActionCatalogSource.Instance);
         await manager.PatchVariablesAsync(projectId, issueNumber, patch);
     }
 

@@ -12,7 +12,7 @@ public class WorkflowProfileCatalogSpecs
         new(new FakePromptLoader(), new FakeDbContextFactory());
 
     private static ProjectWorkflowProfileManager BuildManager() =>
-        new(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine());
+        new(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
 
     // ===================== Profile ID constants =====================
 

@@ -321,3 +321,24 @@ checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自�
    `ActionContext` 全量暴露 server 连接与 runtime 句柄;目标收敛为默认 host + 声明式
    能力注入。
 5. **文档缺口**:已闭合——`docs/actions/` 中的契约页已按 manifest 编齐并保持一致（issue #448）。
+
+### 现状补充
+
+- **Profile 保存期 Action 契约校验**（issue #446，closed）：保存入口
+  `WorkflowProfileYamlParser.Parse` 已通过新增的 `ActionCatalog?` 参数接入
+  Runner 上报的 catalog。三个保存入口（项目模板 create/update、issue 模板
+  update）在调用 Parse 前先经 `IActionCatalogSource.GetCatalogAsync()` 拉取
+  catalog；得到 catalog 则跑 `ActionContractValidator.Validate`，把 Action
+  错误合并进同一条 `WorkflowDefinitionValidationException`，按 YAML path 与
+  Definition 错误共享路径但以 `ValidationSource.Action` 标签区分。模板
+  create/update 与 issue-template update 的成功响应增加
+  `actionValidation: { performed: true|false, reason? }` 通知调用方
+  Action-contract 校验是否执行。无可用 catalog 时按 D4 跳过且响应显式说明
+  “未执行 Action-contract 校验”。`WorkflowActionGuards` 与它的过渡专项
+  测试已删除，所有 Action 现在都接受完整的 uses/输入 校验；legacy `with.agent` /
+  `with.kind` / `with.type` / `with.expect` 被一般 “unknown input” 规则
+  取代。Built-in profile 加载（`WorkflowProfileCatalog`）和运行时加载
+  （`WorkflowProfilePersistence.Deserialize`）以及 `mo run validate` 保持
+  Definition-only，不依赖 catalog。Runner 派发期校验（Runner 本地 manifest，
+  fail-closed）仍是权威边界，不受保存期反馈影响。
+

@@ -171,6 +171,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
         services.AddScoped<ISessionCommandDispatcher, RunnerSessionCommandDispatcher>();
+        services.AddScoped<IActionCatalogSource>(sp => sp.GetRequiredService<RunnerRegistryCatalogSource>());
         services.AddSingleton<IRunnerWorkflowStatusRouter, RunnerWorkflowStatusRouter>();
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
         {
