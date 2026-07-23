@@ -68,3 +68,8 @@
 - Focused translator, reconciliation, and virtual-action specs: 68/68 passed.
 - Full server spec suite: 3059/3059 passed; full server unit suite: 1339/1339 passed.
 - `npm test` also passed Workflow Definition (175), CLI (1411), server unit (1339), and server spec (3059) suites. The known ArchTests ratchet remains the only failure (31/32): T-001's pre-existing `ActionContractValidatorTests.cs` size allowance.
+
+## T-005 Decisions
+
+- Reconciled `docs/actions/agent.md` with the implemented task-only contract: `name` is static, only `prompt` accepts template expressions, checks are rejected, and resolver precedence is id-only for `agent_*` references followed by name-first/id-fallback for all other references.
+- Documented `agent_not_found` for missing or archived Agent definitions and removed the stale statement that `mohist/agent` is unimplemented.
