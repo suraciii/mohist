@@ -74,7 +74,7 @@ public class UpdateVerifyRuntimeSpecs
         var errOutput = f.Stderr.ToString();
         Assert.Contains("not fully usable", errOutput);
         Assert.Contains("Runner unavailable", errOutput);
-        Assert.Contains("mo runner start", errOutput);
+        Assert.Contains("mo service start runner", errOutput);
     }
 
     [Fact]

@@ -132,7 +132,7 @@ mo issue rebase <n>     # 尝试自动 rebase
 
 ```bash
 # 确保 Runner 已经起来
-mo project status
+mo server status
 ```
 
 仍在等待的 Workflow 会自动继续。已经 blocked 的 Workflow 在 Runner 恢复后执行 Retry；已完成阶段和历史不会丢失。
@@ -145,7 +145,7 @@ mo project status
 
 ```bash
 mo issue sessions <n>   # 看最后一行
-mo system logs          # 看应用级日志（Mohist server 自身的 log tail）
+mo server logs          # 看应用级日志（Mohist server 自身的 log tail）
 ```
 
 **解决**：
@@ -214,7 +214,7 @@ mo issue rebase <n>     # 主动 rebase
 别一次启动 20 个 issue 超过 capacity。会排队但你看不到。
 
 ```bash
-mo project status   # 看 capacity 使用
+mo server status   # 看 capacity 使用
 ```
 
 ### 5. 定期清理 worktree
@@ -245,7 +245,7 @@ git worktree prune
 mo issue logs <n>
 mo issue events <n>
 mo issue sessions <n>
-mo system logs
+mo server logs
 
 # 还不行
 # Web UI → Logs 页 → 找 error 级别日志

@@ -230,7 +230,7 @@ public class WorkflowCliProfileListTests
         var err = stderr.ToString();
         Assert.Equal(string.Empty, stdout.ToString());
         Assert.Contains("Server is not running", err);
-        Assert.Contains("mo server start", err);
+        Assert.Contains("mo service start server", err);
     }
 
     [Fact]

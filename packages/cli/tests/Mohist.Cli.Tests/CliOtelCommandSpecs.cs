@@ -329,7 +329,7 @@ public class CliOtelCommandSpecs
         var exitCode = await RunAsync(handler, ["otel", "status"], output, error);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Equal("Server is not running. Start with: mo server start" + Environment.NewLine, error.ToString());
+        Assert.Equal(MohistCliApi.ServerUnavailableMessage + Environment.NewLine, error.ToString());
         Assert.DoesNotContain("ECONNREFUSED", error.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Connection refused", error.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Empty(output.ToString());

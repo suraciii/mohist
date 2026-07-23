@@ -281,4 +281,39 @@ public class CliServiceCommandSpecs
         Assert.Contains("mo update", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("--project", stdout, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ServiceInstall_FailsToResolveAndTriggersNoInstallerAction()
+    {
+        // Issue #480 T-004 AC: `mo service install server` MUST exit
+        // non-zero. Install remains a root-level verb only — `service`
+        // exposes the six lifecycle verbs (`start|stop|restart|status|logs|uninstall`).
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["service", "install", "server"], output, error, fs, executor,
+            installer: installer);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(installer.Calls);
+        Assert.Empty(installer.InstallServerCalls);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ServiceHelp_DoesNotAdvertiseInstall()
+    {
+        // Anchor the service group's six-verb surface: install/update are
+        // root-level only and must not be duplicated under `service`.
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["service", "--help"], output, error, fs, executor,
+            installer: installer);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.DoesNotContain("\n  install ", stdout);
+        Assert.DoesNotContain("\n  update ", stdout);
+    }
 }

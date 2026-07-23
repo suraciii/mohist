@@ -364,7 +364,7 @@ public class CliRunnerCommandSpecs
             http, ["runner", "list"], output, error, fileSystem, executor, env);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Contains("Server is not running. Start with: mo server start", error.ToString());
+        Assert.Contains(MohistCliApi.ServerUnavailableMessage, error.ToString());
     }
 
     [Fact]
@@ -958,7 +958,7 @@ public class CliRunnerCommandSpecs
             http, ["runner", "status"], output, error, fileSystem, executor, env);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Contains("Server is not running. Start with: mo server start", error.ToString());
+        Assert.Contains(MohistCliApi.ServerUnavailableMessage, error.ToString());
     }
 
     [Fact]
