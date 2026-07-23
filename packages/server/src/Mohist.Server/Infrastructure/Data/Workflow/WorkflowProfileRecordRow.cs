@@ -39,3 +39,13 @@ public class WorkflowProfileRecordRow
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+public static class WorkflowProfileBindingKey
+{
+    public static string? For(string? profileId) =>
+        IsBuiltIn(profileId) ? null : profileId;
+
+    private static bool IsBuiltIn(string? profileId) =>
+        string.Equals(profileId, "mohist/local", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(profileId, "mohist/github-pr", StringComparison.OrdinalIgnoreCase);
+}

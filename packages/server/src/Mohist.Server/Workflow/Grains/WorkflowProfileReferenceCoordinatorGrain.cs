@@ -370,9 +370,9 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             blockers.IssueSelections
                 .Select(i => new WorkflowProfileIssueBlockerDto(i.ProjectId, i.IssueNumber, i.Status))
                 .ToList(),
-            blockers.ActiveRun is { } run
-                ? new WorkflowProfileRunBlockerDto(run.WorkflowRunId, run.Status)
-                : null);
+            blockers.ActiveRuns
+                .Select(run => new WorkflowProfileRunBlockerDto(run.WorkflowRunId, run.Status))
+                .ToList());
 
     private static string FormatBlockersMessage(string profileId, WorkflowProfileDeletionBlockers blockers)
     {
@@ -381,7 +381,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             parts.Add("Project default reference");
         foreach (var issue in blockers.IssueSelections)
             parts.Add($"Issue #{issue.IssueNumber} ({issue.Status}) selection");
-        if (blockers.ActiveRun is { } run)
+        foreach (var run in blockers.ActiveRuns)
             parts.Add($"active WorkflowRun '{run.WorkflowRunId}' ({run.Status}) binding");
         return $"WorkflowProfile '{profileId}' is still referenced: {string.Join("; ", parts)}";
     }

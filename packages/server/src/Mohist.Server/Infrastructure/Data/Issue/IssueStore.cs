@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Orleans;
@@ -104,6 +105,7 @@ public class IssueStore : IIssueStore
                 Risk = state.Risk,
                 EpicNumber = state.EpicNumber,
                 ParentIssueNumber = state.ParentIssueNumber,
+                WorkflowProfileIdKey = WorkflowProfileBindingKey.For(state.WorkflowProfileId),
             });
         }
         else
@@ -112,6 +114,7 @@ public class IssueStore : IIssueStore
             row.Risk = state.Risk;
             row.EpicNumber = state.EpicNumber;
             row.ParentIssueNumber = state.ParentIssueNumber;
+            row.WorkflowProfileIdKey = WorkflowProfileBindingKey.For(state.WorkflowProfileId);
         }
     }
 

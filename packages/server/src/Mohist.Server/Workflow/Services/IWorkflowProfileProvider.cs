@@ -38,8 +38,8 @@ public interface IWorkflowProfileProvider
     Task<WorkflowDefinition?> GetDefinitionAsync(string projectId, string profileId, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns the persisted YAML source for a custom Profile. Built-ins
-    /// are not persisted; this method returns <c>null</c> for them.
+    /// Returns the YAML source for a Profile. Custom Profiles return their
+    /// persisted source; built-ins return their authoritative canonical source.
     /// </summary>
     Task<string?> GetDefinitionSourceAsync(string projectId, string profileId, CancellationToken ct = default);
 
@@ -90,8 +90,8 @@ public interface IWorkflowProfileProvider
 /// <summary>
 /// issue-477 T-001: a single Profile as exposed through the collection
 /// provider. Built-in entries have <see cref="SourceProvenance"/> =
-/// <c>BuiltIn</c> and no persisted YAML source; custom entries carry
-/// <c>Verbatim</c> or <c>CanonicalLegacy</c> provenance.
+    /// <c>BuiltIn</c>; custom entries carry <c>Verbatim</c> or
+    /// <c>CanonicalLegacy</c> provenance.
 /// </summary>
 public sealed record WorkflowProfileCollectionEntry(
     string ProjectId,
@@ -110,7 +110,9 @@ public sealed record WorkflowProfileCollectionEntry(
             Description: string.Empty,
             SourceProvenance: WorkflowProfileSourceProvenance.BuiltIn,
             IsBuiltIn: true,
-            DefinitionSource: null);
+            DefinitionSource: WorkflowProfileCanonicalYamlRenderer.Render(
+                WorkflowProfileCatalog.GetProfile(profileId)
+                    ?? throw new InvalidOperationException($"Unknown built-in Profile '{profileId}'")));
 }
 
 public enum WorkflowProfileSourceProvenance

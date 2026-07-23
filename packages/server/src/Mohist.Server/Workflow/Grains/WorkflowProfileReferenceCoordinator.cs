@@ -79,7 +79,7 @@ public sealed record WorkflowProfileReferenceResult(
 public sealed record WorkflowProfileDeletionBlockersDto(
     [property: Id(0)] bool ProjectDefault,
     [property: Id(1)] IReadOnlyList<WorkflowProfileIssueBlockerDto> Issues,
-    [property: Id(2)] WorkflowProfileRunBlockerDto? ActiveRun);
+    [property: Id(2)] IReadOnlyList<WorkflowProfileRunBlockerDto> ActiveRuns);
 
 [GenerateSerializer]
 public sealed record WorkflowProfileIssueBlockerDto(

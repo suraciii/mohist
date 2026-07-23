@@ -94,8 +94,14 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
     public async Task<string?> GetDefinitionSourceAsync(
         string projectId, string profileId, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(profileId) || WorkflowProfileCatalog.IsSystemProfile(profileId))
+        if (string.IsNullOrWhiteSpace(profileId))
             return null;
+
+        if (WorkflowProfileCatalog.IsSystemProfile(profileId))
+        {
+            var profile = WorkflowProfileCatalog.GetProfile(profileId);
+            return profile is null ? null : WorkflowProfileCanonicalYamlRenderer.Render(profile);
+        }
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.WorkflowProfileRecords.AsNoTracking()

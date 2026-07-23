@@ -35,12 +35,12 @@ public sealed class WorkflowProfileDeletionBlockerQuery : IScopedService
 
         var projectDefault = await IsProjectDefaultAsync(db, projectId, profileId, ct);
         var issueSelection = await ListIssueBlockersAsync(db, projectId, profileId, ct);
-        var activeRun = await FindActiveRunAsync(db, projectId, profileId, ct);
+        var activeRuns = await ListActiveRunsAsync(db, projectId, profileId, ct);
 
         return new WorkflowProfileDeletionBlockers(
             ProjectDefault: projectDefault,
             IssueSelections: issueSelection,
-            ActiveRun: activeRun);
+            ActiveRuns: activeRuns);
     }
 
     private static async Task<bool> IsProjectDefaultAsync(
@@ -66,10 +66,10 @@ public sealed class WorkflowProfileDeletionBlockerQuery : IScopedService
             .ToList();
     }
 
-    private static async Task<WorkflowProfileRunBlocker?> FindActiveRunAsync(
+    private static async Task<IReadOnlyList<WorkflowProfileRunBlocker>> ListActiveRunsAsync(
         MohistDbContext db, string projectId, string profileId, CancellationToken ct)
     {
-        var row = await db.WorkflowRuns.AsNoTracking()
+        var rows = await db.WorkflowRuns.AsNoTracking()
             .Where(r => r.MetadataProjectId == projectId
                 && r.WorkflowProfileIdKey != null
                 && r.WorkflowProfileIdKey == profileId
@@ -77,10 +77,11 @@ public sealed class WorkflowProfileDeletionBlockerQuery : IScopedService
                 && !TerminalRunStatuses.Contains(r.Status.ToLower()))
             .OrderByDescending(r => r.CreatedAt)
             .Select(r => new { r.WorkflowRunId, r.Status })
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
 
-        if (row is null) return null;
-        return new WorkflowProfileRunBlocker(row.WorkflowRunId, row.Status ?? "unknown");
+        return rows
+            .Select(row => new WorkflowProfileRunBlocker(row.WorkflowRunId, row.Status ?? "unknown"))
+            .ToList();
     }
 
     private static readonly HashSet<string> TerminalRunStatuses = new(StringComparer.Ordinal)
@@ -96,15 +97,15 @@ public sealed class WorkflowProfileDeletionBlockerQuery : IScopedService
 public sealed record WorkflowProfileDeletionBlockers(
     bool ProjectDefault,
     IReadOnlyList<WorkflowProfileIssueBlocker> IssueSelections,
-    WorkflowProfileRunBlocker? ActiveRun)
+    IReadOnlyList<WorkflowProfileRunBlocker> ActiveRuns)
 {
     public static WorkflowProfileDeletionBlockers Empty { get; } =
-        new(false, Array.Empty<WorkflowProfileIssueBlocker>(), null);
+        new(false, Array.Empty<WorkflowProfileIssueBlocker>(), Array.Empty<WorkflowProfileRunBlocker>());
 
     public bool HasAnyBlocker =>
         ProjectDefault
         || IssueSelections.Count > 0
-        || ActiveRun is not null;
+        || ActiveRuns.Count > 0;
 }
 
 public sealed record WorkflowProfileIssueBlocker(

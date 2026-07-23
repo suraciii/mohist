@@ -163,6 +163,7 @@ public static class WorkflowProfileDataMigrator
             if (targetId != inlineId)
                 renames[inlineId] = targetId;
             issue.SourceTemplateId = targetId;
+            issue.Template = null;
             inlineSelections[(issue.ProjectId, issue.IssueNumber)] = targetId;
 
             if (await db.WorkflowProfileRecords.AsNoTracking()

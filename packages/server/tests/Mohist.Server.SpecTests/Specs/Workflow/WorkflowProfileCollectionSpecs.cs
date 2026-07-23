@@ -13,15 +13,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow;
 
-/// <summary>
-/// issue-477 T-001: spec coverage for the Project-scoped WorkflowProfile
-/// collection. Covers collection ownership, built-in immutability,
-/// verbatim / canonical-legacy source provenance, save-time validation
-/// hand-off, deletion-blocker projection, and the data migration that
-/// converts legacy storage into the new collection. Uses in-memory
-/// SQLite + the existing <see cref="StubActionCatalogSource"/> so the
-/// tests never touch the runner registry or the wall clock.
-/// </summary>
 public class WorkflowProfileCollectionSpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database;
@@ -45,10 +36,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    // =======================================================================
-    // Build a basic custom Profile for assertion helpers.
-    // =======================================================================
-
     private static WorkflowProfileCollectionEntry BuildCustom(
         string profileId,
         string name = "Custom",
@@ -71,10 +58,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
             IsBuiltIn: false,
             DefinitionSource: yaml);
 
-    // =======================================================================
-    // Collection ownership — built-in + custom Profiles merged.
-    // =======================================================================
-
     [Fact]
     public async Task List_MergesBuiltInAndCustomProfiles()
     {
@@ -86,6 +69,18 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         Assert.Contains(entries, e => e.IsBuiltIn && e.ProfileId == "mohist/local");
         Assert.Contains(entries, e => e.IsBuiltIn && e.ProfileId == "mohist/github-pr");
         Assert.Contains(entries, e => !e.IsBuiltIn && e.ProfileId == "delivery/review");
+    }
+
+    [Fact]
+    public async Task BuiltInProfile_ReturnsCanonicalDefinitionSource()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+
+        var source = await _provider.GetDefinitionSourceAsync(projectId, WorkflowProfileCatalog.LocalId);
+
+        Assert.NotNull(source);
+        Assert.Contains("id: mohist/local", source);
+        Assert.Contains("stages:", source);
     }
 
     [Fact]
@@ -106,10 +101,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         Assert.Equal(projectA, customA.ProjectId);
         Assert.Equal(projectB, customB.ProjectId);
     }
-
-    // =======================================================================
-    // Built-in immutability.
-    // =======================================================================
 
     [Fact]
     public async Task Create_BuiltInId_RejectedWithReadOnlyException()
@@ -137,10 +128,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         await Assert.ThrowsAsync<WorkflowProfileReadOnlyException>(() =>
             _provider.DeleteAsync(projectId, "mohist/local"));
     }
-
-    // =======================================================================
-    // Save validation sources — Definition vs. Action-contract.
-    // =======================================================================
 
     [Fact]
     public async Task Create_InvalidDefinition_BlockedWithoutPersisting()
@@ -250,10 +237,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         Assert.Equal(updated, result.Profile.DefinitionSource);
     }
 
-    // =======================================================================
-    // Deletion-blocker projection.
-    // =======================================================================
-
     [Fact]
     public async Task Delete_ProjectDefault_RejectedWithBlocker()
     {
@@ -261,8 +244,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         await _provider.CreateAsync(projectId, BuildCustom("delivery/review"));
         await SetProjectDefaultAsync(projectId, "delivery/review");
 
-        // The blocker query projects the Project default reference; the
-        // coordinator uses this to reject deletion.
         var blockers = await _blockerQuery.GetBlockersAsync(projectId, "delivery/review");
         Assert.True(blockers.ProjectDefault);
         Assert.True(blockers.HasAnyBlocker);
@@ -304,8 +285,26 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
 
         var blockers = await _blockerQuery.GetBlockersAsync(projectId, "delivery/review");
 
-        Assert.NotNull(blockers.ActiveRun);
-        Assert.Equal("wr_active", blockers.ActiveRun!.WorkflowRunId);
+        Assert.Single(blockers.ActiveRuns);
+        Assert.Equal("wr_active", blockers.ActiveRuns[0].WorkflowRunId);
+    }
+
+    [Fact]
+    public async Task Delete_MultipleActiveRuns_ReportsEveryRun()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        await _provider.CreateAsync(projectId, BuildCustom("delivery/review"));
+        await SeedWorkflowRunAsync(projectId, "wr_active_a", "delivery/review", status: "inProgress");
+        await SeedWorkflowRunAsync(projectId, "wr_active_b", "delivery/review", status: "paused");
+
+        var blockers = await _blockerQuery.GetBlockersAsync(projectId, "delivery/review");
+
+        Assert.Equal(
+            ["wr_active_a", "wr_active_b"],
+            blockers.ActiveRuns.Select(run => run.WorkflowRunId).OrderBy(id => id).ToArray());
+        Assert.Equal(
+            ["inprogress", "paused"],
+            blockers.ActiveRuns.Select(run => run.Status).OrderBy(status => status).ToArray());
     }
 
     [Fact]
@@ -331,15 +330,11 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
 
         var blockers = await _blockerQuery.GetBlockersAsync(projectId, "delivery/review");
         Assert.False(blockers.HasAnyBlocker);
-        Assert.Null(blockers.ActiveRun);
+        Assert.Empty(blockers.ActiveRuns);
 
         var deleted = await _provider.DeleteAsync(projectId, "delivery/review");
         Assert.True(deleted);
     }
-
-    // =======================================================================
-    // Terminalization — backing key cleared, public ID retained.
-    // =======================================================================
 
     [Fact]
     public async Task TerminalRun_LosesBackingKey_RetainsPublicProfileId()
@@ -348,7 +343,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         await _provider.CreateAsync(projectId, BuildCustom("delivery/review"));
         await SeedWorkflowRunAsync(projectId, "wr_active", "delivery/review", status: "inProgress");
 
-        // Simulate the terminalization transaction clearing the backing key.
         await using (var db = new MohistDbContext(_database.Options))
         {
             var row = await db.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_active");
@@ -358,7 +352,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         }
 
         var blockers = await _blockerQuery.GetBlockersAsync(projectId, "delivery/review");
-        Assert.Null(blockers.ActiveRun);
+        Assert.Empty(blockers.ActiveRuns);
 
         var deleted = await _provider.DeleteAsync(projectId, "delivery/review");
         Assert.True(deleted);
@@ -367,10 +361,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         var run = await verify.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_active");
         Assert.Null(run.WorkflowProfileIdKey);
     }
-
-    // =======================================================================
-    // Migration — legacy semantic JSON → canonical YAML.
-    // =======================================================================
 
     [Fact]
     public async Task Migrate_SeedLegacyCustomTemplate_RendersCanonicalYAML()
@@ -477,7 +467,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         await using var migrateDb = new MohistDbContext(_database.Options);
         await WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider);
 
-        // Both Projects resolve their own legacy-reserved/{base64url} entry.
         var entriesA = await _provider.ListAsync(projectA);
         var entriesB = await _provider.ListAsync(projectB);
         Assert.Contains(entriesA, e => !e.IsBuiltIn && e.ProfileId.StartsWith("legacy-reserved/", StringComparison.Ordinal));
@@ -541,10 +530,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         Assert.Equal("legacy-custom", active.WorkflowProfileIdKey);
         Assert.Null(done.WorkflowProfileIdKey);
     }
-
-    // =======================================================================
-    // Helpers
-    // =======================================================================
 
     private async Task<(string ProjectId, int Dummy, bool Initialized)> SeedProjectAsync(string projectId = "proj-1")
     {
