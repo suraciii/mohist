@@ -711,7 +711,8 @@ public class CliRunControlSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "stop", WrId], output, error, fs, executor);
+            http, ["run", "stop", WrId], output, error, fs, executor,
+            terminalOverride: new CliTerminal(false));
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -725,7 +726,8 @@ public class CliRunControlSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "stop", "--issue", "42"], output, error, fs, executor);
+            http, ["run", "stop", "--issue", "42"], output, error, fs, executor,
+            terminalOverride: new CliTerminal(false));
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
