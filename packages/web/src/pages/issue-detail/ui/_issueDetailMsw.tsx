@@ -4,7 +4,7 @@ import { server, useMswServer } from '../../../../tests/support/msw'
 const ISSUES = '*/api/projects/:projectId/issues/:number'
 const AGENT_STATUS = '*/api/projects/:projectId/agent/status'
 const OPENCODE_MODELS = '*/api/projects/:projectId/opencode/models'
-const WORKFLOW_VARIABLES = '*/api/projects/:projectId/workflow-profile/variables'
+const WORKFLOW_VARIABLES = '*/api/projects/:projectId/variables'
 const PROJECT_DEFAULT = '*/api/projects/:projectId/workflow-profile'
 const SYSTEM_PROFILES = '*/api/workflow-templates/system*'
 const RUN_YAML = '*/api/workflow-runs/:runId/yaml'
@@ -44,7 +44,7 @@ function issueDetailHandlers({ issue }: IssueDetailFixture) {
     http.get(`${ISSUES}/workflow/tasks/:taskId/logs`, () =>
       HttpResponse.json({ success: true, data: { lines: [], nextCursor: null, truncated: false } }),
     ),
-    http.get(`${ISSUES}/workflow-profile/variables`, () =>
+    http.get(`${ISSUES}/variables`, () =>
       HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
     ),
     http.get(`${ISSUES}/workflow-profile`, () =>

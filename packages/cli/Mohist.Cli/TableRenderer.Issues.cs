@@ -629,7 +629,7 @@ internal sealed partial class TableRenderer
         {
             var display = kvp.Value is JsonValue jv
                 ? (jv.TryGetValue<string>(out var s) ? s : jv.ToJsonString())
-                : kvp.Value?.ToJsonString(MohistCliApi.JsonOutputOptions) ?? "<null>";
+                : kvp.Value?.ToJsonString(MohistCliApi.JsonCompactOutputOptions) ?? "<null>";
             cells.Add(new[]
             {
                 Truncate(kvp.Key, widths[0]),

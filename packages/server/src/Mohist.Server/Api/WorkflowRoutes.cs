@@ -98,27 +98,41 @@ public static partial class WorkflowRoutes
             return ApiResults.Ok(new { workflowRunId, variables });
         });
 
-        app.MapGet("/api/workflow-runs/{workflowRunId}/workflow-profile/variables", async (
+        app.MapGet("/api/workflow-runs/{workflowRunId}/variables", async (
             string workflowRunId,
             WorkflowRunProfileManager runProfileManager) =>
         {
             return ApiResults.Ok(await runProfileManager.GetVariablesAsync(workflowRunId));
         });
 
-        app.MapPut("/api/workflow-runs/{workflowRunId}/workflow-profile/variables", async (
+        app.MapPut("/api/workflow-runs/{workflowRunId}/variables", async (
             string workflowRunId,
             VariableBundle bundle,
             WorkflowRunProfileManager runProfileManager) =>
         {
-            return ApiResults.Ok(await runProfileManager.SetVariablesAsync(workflowRunId, bundle));
+            try
+            {
+                return ApiResults.Ok(await runProfileManager.SetVariablesAsync(workflowRunId, bundle));
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_variables");
+            }
         });
 
-        app.MapPatch("/api/workflow-runs/{workflowRunId}/workflow-profile/variables", async (
+        app.MapPatch("/api/workflow-runs/{workflowRunId}/variables", async (
             string workflowRunId,
             VariableBundle patch,
             WorkflowRunProfileManager runProfileManager) =>
         {
-            return ApiResults.Ok(await runProfileManager.PatchVariablesAsync(workflowRunId, patch));
+            try
+            {
+                return ApiResults.Ok(await runProfileManager.PatchVariablesAsync(workflowRunId, patch));
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_variables");
+            }
         });
 
         return app;

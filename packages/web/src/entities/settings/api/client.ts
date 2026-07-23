@@ -61,11 +61,11 @@ export function getOpencodeModelVariantsFor(modelIds: ReadonlyArray<string | nul
 }
 
 export function getProjectWorkflowVariables(projectId?: string | null) {
-  return request<VariableBundle>(projectApiPath(projectId, '/workflow-profile/variables'))
+  return request<VariableBundle>(projectApiPath(projectId, '/variables'))
 }
 
 export function patchProjectWorkflowVariables(projectId: string | null | undefined, patch: VariableBundle) {
-  return request<VariableBundle>(projectApiPath(projectId, '/workflow-profile/variables'), {
+  return request<VariableBundle>(projectApiPath(projectId, '/variables'), {
     method: 'PATCH',
     body: JSON.stringify(patch),
   })

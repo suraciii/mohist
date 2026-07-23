@@ -84,6 +84,9 @@ describe('IssueDetailPage composite parent workflow suppression', () => {
     workflowCalls = []
     server.use(
       http.get('*/api/projects/:projectId/issues/:number/:surface', ({ params }) => {
+        if (params.surface === 'variables') {
+          return HttpResponse.json({ success: true, data: { vars: {}, stages: {} } })
+        }
         workflowCalls.push(String(params.surface))
         return HttpResponse.json({ success: true, data: [] })
       }),

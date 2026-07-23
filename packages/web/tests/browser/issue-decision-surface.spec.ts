@@ -197,7 +197,7 @@ async function mockIssueDetailApi(
         contentType: artifactPath.endsWith('.md') ? 'text/markdown' : 'application/json',
       })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/issues/${issue.number}/workflow-profile/variables`) {
+    if (method === 'GET' && path === `/projects/${project.id}/issues/${issue.number}/variables`) {
       return route.fulfill({ json: response({ vars: {}, stages: {} }) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issue.number}/workflow-profile`) {
@@ -223,7 +223,7 @@ async function mockIssueDetailApi(
         }),
       })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/workflow-profile/variables`) {
+    if (method === 'GET' && path === `/projects/${project.id}/variables`) {
       return route.fulfill({ json: response({ vars: {}, stages: {} }) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/workflow-profile`) {

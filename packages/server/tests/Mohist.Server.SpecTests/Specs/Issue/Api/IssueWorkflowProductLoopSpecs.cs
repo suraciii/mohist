@@ -129,7 +129,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         var startedIssue = await _client.GetDataAsync<ProductLoopIssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
         var patched = await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/issues/{issue.Number}/variables",
             new { vars = new { agent = new { model = "kimi/k2" } } });
         Assert.NotNull(patched.Vars);
 
@@ -152,7 +152,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         _issueNumber = issue.Number;
 
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/issues/{issue.Number}/variables",
             new
             {
                 vars = new { agent = new { model = "issue/default-model" } },
@@ -187,10 +187,10 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         await ReportAsync(proposal.WorkflowRunId, proposal.WorkId, "completed");
 
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
-            $"/api/projects/{project.Id}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/variables",
             new { vars = new { agent = new { model = "project/model-new" } } });
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
-            $"/api/projects/{project.Id}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/variables",
             new { stages = new { build = new { vars = new { agent = new { model = "project/build-model" } } } } });
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
@@ -233,7 +233,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
 
         // Project is configured with model A BEFORE the issue is started.
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
-            $"/api/projects/{project.Id}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/variables",
             new { vars = new { agent = new { model = "old-coding/legacy" } } });
 
         var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Live project config propagation", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
@@ -250,7 +250,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
 
         // Project model changed to B AFTER the issue is already running.
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
-            $"/api/projects/{project.Id}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/variables",
             new { vars = new { agent = new { model = "deepseek/deepseek-v4-pro" } } });
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
@@ -297,10 +297,10 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
 
         await ReportAsync(proposal.WorkflowRunId, proposal.WorkId, "completed");
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
-            $"/api/projects/{project.Id}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/variables",
             new { vars = new { agent = new { model = "project/default-model" } } });
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/issues/{issue.Number}/variables",
             new { stages = new { build = new { vars = new { agent = new { model = "minimax-coding-plan/MiniMax-M3" } } } } });
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");

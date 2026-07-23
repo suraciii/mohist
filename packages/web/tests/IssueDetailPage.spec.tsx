@@ -64,10 +64,10 @@ useMswServer(
   http.get('*/api/projects/:projectId/opencode/models', () =>
     HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } }),
   ),
-  http.get('*/api/projects/:projectId/issues/:number/workflow-profile/variables', () =>
+  http.get('*/api/projects/:projectId/issues/:number/variables', () =>
     HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
   ),
-  http.get('*/api/projects/:projectId/workflow-profile/variables', () =>
+  http.get('*/api/projects/:projectId/variables', () =>
     HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
   ),
   http.get('*/api/projects/:projectId/issues', () =>
@@ -94,7 +94,7 @@ useMswServer(
   http.get('*/api/workflow-runs/:runId/sessions', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
-  http.patch('*/api/projects/:projectId/issues/:number/workflow-profile/variables', () =>
+  http.patch('*/api/projects/:projectId/issues/:number/variables', () =>
     HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
   ),
   http.post('*/api/projects/:projectId/issues/:number/start', () =>

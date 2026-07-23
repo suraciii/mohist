@@ -247,8 +247,6 @@ dispatch 流转就足够。
 
 与当前实现的差距：
 
-- 当前 Project、Issue 和 Run Variables 仍存放在带 `WorkflowProfile` 名称的记录和 API
-  下；目标资源路径不再包含 `workflow-profile`。
 - 当前 Profile YAML 仍可包含 embedded variables，配置中还有 global variables；目标模型
   只从 Project、Issue 和 Run Variables 解析。
 - 当前 merge 可以用持久化 `null` 屏蔽前一个 scope 的值；目标模型暂不提供这一额外状态，

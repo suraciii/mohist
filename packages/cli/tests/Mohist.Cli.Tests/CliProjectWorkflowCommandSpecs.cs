@@ -475,6 +475,23 @@ public class CliProjectWorkflowCommandSpecs
         Assert.Contains("preview", stdout);
     }
 
+    [Theory]
+    [InlineData("set")]
+    [InlineData("clear")]
+    public async Task ConfigMutationHelp_AdvertisesOnlyTemplateAndPromptChanges(string verb)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", verb, "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("--default-template", stdout);
+        Assert.Contains("--prompt", stdout);
+        Assert.DoesNotContain("variable", stdout.ToLowerInvariant());
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task ConfigGet_TableMode_SendsGetAndRendersDefaultTemplateVariablesPrompts()
     {
@@ -632,98 +649,8 @@ public class CliProjectWorkflowCommandSpecs
         Assert.Equal(0, exitCode);
         var putReq = handler.Requests.Single(r => r.Method == HttpMethod.Put);
         Assert.Equal("/api/projects/proj_abc/workflow-profile/default-template", putReq.RequestUri?.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task ConfigSet_VarAndStageVar_SendsPatchOnly()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
-        {
-            if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
-            {
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "config", "set", "--var", "foo=bar", "--stage-var", "plan.baz=qux"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        Assert.Single(handler.Requests);
-        var patchReq = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
-        Assert.Equal("/api/projects/proj_abc/workflow-profile/variables", patchReq.RequestUri?.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task ConfigSet_VarAndStageVar_PatchBodyHasCorrectShape()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
-        {
-            if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
-            {
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "config", "set", "--var", "foo=bar", "--stage-var", "plan.baz=qux"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var patchReq = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
-        var body = JsonNode.Parse(patchReq.Body!) as JsonObject;
-        Assert.NotNull(body);
-        Assert.Equal("bar", body!["vars"]?["foo"]?.GetValue<string>());
-        Assert.Equal("qux", body["stages"]?["plan"]?["vars"]?["baz"]?.GetValue<string>());
-    }
-
-    [Fact]
-    public async Task ConfigSet_VarsFile_SendsPutVariables()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
-        {
-            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
-            {
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
-            }
-            return null!;
-        });
-        fs.AddFile("/vars.json", "{\"vars\": {\"foo\": \"bar\"}}");
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "config", "set", "--vars-file", "/vars.json"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        Assert.Single(handler.Requests);
-        var putReq = handler.Requests.Single(r => r.Method == HttpMethod.Put);
-        Assert.Equal("/api/projects/proj_abc/workflow-profile/variables", putReq.RequestUri?.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task ConfigSet_VarsFileAndVar_MutuallyExclusive()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "config", "set", "--vars-file", "/vars.json", "--var", "foo=bar"], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("mutually exclusive", error.ToString());
-    }
-
-    [Fact]
-    public async Task ConfigSet_VarsFileAndStageVar_MutuallyExclusive()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "config", "set", "--vars-file", "/vars.json", "--stage-var", "plan.baz=qux"], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("mutually exclusive", error.ToString());
+        var body = JsonNode.Parse(putReq.Body!) as JsonObject;
+        Assert.Equal("tpl_abc", body!["templateId"]?.GetValue<string>());
     }
 
     [Fact]
@@ -784,7 +711,7 @@ public class CliProjectWorkflowCommandSpecs
     }
 
     [Fact]
-    public async Task ConfigSet_Composite_SendsMultipleRequests()
+    public async Task ConfigSet_Composite_SendsDefaultTemplateAndPromptRequests()
     {
         var callCount = 0;
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
@@ -792,18 +719,16 @@ public class CliProjectWorkflowCommandSpecs
             callCount++;
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/default-template")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
-            if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/greeting")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
             return null!;
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "config", "set", "--default-template", "tpl_abc", "--var", "foo=bar", "--prompt", "greeting=Hi"], output, error, fs, executor);
+            http, ["project", "workflow", "config", "set", "--default-template", "tpl_abc", "--prompt", "greeting=Hi"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(3, callCount);
+        Assert.Equal(2, callCount);
     }
 
     [Fact]
@@ -825,28 +750,6 @@ public class CliProjectWorkflowCommandSpecs
         Assert.Single(handler.Requests);
         var deleteReq = handler.Requests.Single(r => r.Method == HttpMethod.Delete);
         Assert.Equal("/api/projects/proj_abc/workflow-profile/default-template", deleteReq.RequestUri?.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task ConfigClear_Var_SendsPatchWithNull()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
-        {
-            if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
-            {
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "config", "clear", "--var", "foo"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var patchReq = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
-        var body = JsonNode.Parse(patchReq.Body!) as JsonObject;
-        Assert.NotNull(body);
-        Assert.True(body!["vars"]?["foo"] is null);
     }
 
     [Fact]
@@ -883,7 +786,7 @@ public class CliProjectWorkflowCommandSpecs
     }
 
     [Fact]
-    public async Task ConfigClear_Composite_SendsMultipleRequests()
+    public async Task ConfigClear_Composite_SendsDefaultTemplateAndPromptRequests()
     {
         var callCount = 0;
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
@@ -891,18 +794,16 @@ public class CliProjectWorkflowCommandSpecs
             callCount++;
             if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/default-template")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
-            if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
             if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/greeting")
                 return RecordingHttpHandler.Json(new { success = true, data = new { key = "greeting", deleted = true } });
             return null!;
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "workflow", "config", "clear", "--default-template", "--var", "foo", "--prompt", "greeting"], output, error, fs, executor);
+            http, ["project", "workflow", "config", "clear", "--default-template", "--prompt", "greeting"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(3, callCount);
+        Assert.Equal(2, callCount);
     }
 
     [Fact]

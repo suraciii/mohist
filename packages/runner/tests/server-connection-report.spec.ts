@@ -215,7 +215,7 @@ describe("ServerConnection.patchRunVars", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe("http://localhost:3456/api/workflow-runs/wf-1/workflow-profile/variables")
+    expect(url).toBe("http://localhost:3456/api/workflow-runs/wf-1/variables")
     expect(init.method).toBe("PATCH")
     expect(JSON.parse(init.body as string)).toEqual({
       vars: {

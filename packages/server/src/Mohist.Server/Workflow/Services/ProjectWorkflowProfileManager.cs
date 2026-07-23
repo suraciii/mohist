@@ -238,6 +238,7 @@ public class ProjectWorkflowProfileManager : IScopedService
 
     public async Task<VariableBundle> SetVariablesAsync(string projectId, VariableBundle bundle)
     {
+        VariableBundleShapeValidator.Validate(bundle);
         var sanitized = ProjectVariablesFilter.Sanitize(bundle);
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.ProjectWorkflowProfiles
@@ -265,6 +266,7 @@ public class ProjectWorkflowProfileManager : IScopedService
 
     public async Task<VariableBundle> PatchVariablesAsync(string projectId, VariableBundle patch)
     {
+        VariableBundleShapeValidator.Validate(patch);
         var sanitizedPatch = ProjectVariablesFilter.Sanitize(patch);
         var current = await GetVariablesAsync(projectId);
         var merged = VariableBundle.Patch(current, sanitizedPatch);

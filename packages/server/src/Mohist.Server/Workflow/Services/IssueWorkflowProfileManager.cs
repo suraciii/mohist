@@ -141,6 +141,7 @@ public class IssueWorkflowProfileManager : IScopedService
 
     public async Task<VariableBundle> SetVariablesAsync(string projectId, int issueNumber, VariableBundle bundle)
     {
+        VariableBundleShapeValidator.Validate(bundle);
         ValidateAgentRuntimes(bundle);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -166,6 +167,7 @@ public class IssueWorkflowProfileManager : IScopedService
 
     public async Task<VariableBundle> PatchVariablesAsync(string projectId, int issueNumber, VariableBundle patch)
     {
+        VariableBundleShapeValidator.Validate(patch);
         var current = await GetVariablesAsync(projectId, issueNumber);
         var merged = VariableBundle.Patch(current, patch);
         return await SetVariablesAsync(projectId, issueNumber, merged);

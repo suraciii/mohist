@@ -16,6 +16,7 @@ internal static class ProjectCommands
         project.Subcommands.Add(BuildDelete(api));
         project.Subcommands.Add(BuildStatus(api));
         project.Subcommands.Add(ProjectWorkflowCommands.Build(api));
+        project.Subcommands.Add(VariableCommands.BuildVariableGroup(api, VariableScopeKind.Project));
 
         return project;
     }

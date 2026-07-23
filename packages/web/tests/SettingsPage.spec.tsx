@@ -63,10 +63,10 @@ useMswServer(
     _configData = { ..._configData, [key]: body.value }
     return HttpResponse.json({ success: true, data: _configData })
   }),
-  http.get('*/api/projects/:projectId/workflow-profile/variables', () =>
+  http.get('*/api/projects/:projectId/variables', () =>
     HttpResponse.json({ success: true, data: _workflowVariablesData }),
   ),
-  http.patch('*/api/projects/:projectId/workflow-profile/variables', async ({ request }) => {
+  http.patch('*/api/projects/:projectId/variables', async ({ request }) => {
     const body = await request.json() as any
     if (body.vars) {
       _workflowVariablesData = { ..._workflowVariablesData, vars: { ...(_workflowVariablesData.vars || {}), ...body.vars } }

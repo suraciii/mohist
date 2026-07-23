@@ -326,8 +326,9 @@ CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、
 - 命令树中每项能力只有一个规范路径；同一 group 内没有同义 action。
 - `run variable` 能读写 Run Variables；effective read 保持只读，并证明新 attempt 使用更新值、
   已接受 attempt 保持自己的 context snapshot。
-- Project / Issue / Run 的 `variable` 命令共享 dotted key path、`--stage` 和 string / explicit
-  JSON value 规则；`--json` 仍只表示输出字段选择，不能被重载成输入值。
+- Project / Issue / Run 的 `variable` 命令共享 dotted key path 与 `--stage`；位置形式
+  `set <key> <value>` 始终保存 string，boolean、number、object 或 array 必须通过互斥的
+  `--value-json <json>` 输入；`--json` 仍只表示输出字段选择，不能被重载成输入值。
 - `agent launch` 返回 Job ID 与 Session ID；AgentJob read model 与 AgentSession 命令不会互相
   声称拥有对方的状态或结果。
 - `runner` / `server` 命令不得调用本机 service manager，`service` 命令不得依赖 Project 或
@@ -347,6 +348,10 @@ CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、
 不要用整页 snapshot 作为唯一测试。结构测试锁定必须存在的区块和语义，少量 golden test 只覆盖确实属于公开排版契约的输出。
 
 ## Status
+
+Project / Issue / Run Variables 命令切片已经交付：三个 scope 都使用
+`variable list/get/set/unset`，位置值始终保存为 string，显式 JSON 类型只通过
+`--value-json <json>` 输入，Run 的 effective read 保持只读。
 
 当前实现与目标设计的主要差距记录在 [`docs/cli-reference.md`](../docs/cli-reference.md#实装差距)。落地按独立产品价值切片：
 

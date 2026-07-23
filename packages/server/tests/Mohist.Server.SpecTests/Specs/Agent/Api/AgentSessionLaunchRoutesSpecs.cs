@@ -301,7 +301,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         var issueNumber = await CreateIssueAsync(projectId, "Issue runtime override");
 
         using var patch = await _fixture.Client.PatchAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/workflow-profile/variables",
+            $"/api/projects/{projectId}/issues/{issueNumber}/variables",
             new { vars = new { agent = new { runtime = "pi" } } });
         Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
 
@@ -331,7 +331,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         var issueNumber = await CreateIssueAsync(projectId, "No issue runtime override");
 
         using var projectPatch = await _fixture.Client.PatchAsJsonAsync(
-            $"/api/projects/{projectId}/workflow-profile/variables",
+            $"/api/projects/{projectId}/variables",
             new { vars = new { agent = new { runtime = "pi" } } });
         Assert.Equal(HttpStatusCode.OK, projectPatch.StatusCode);
 
@@ -360,7 +360,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         var issueNumber = await CreateIssueAsync(projectId, "Invalid issue runtime");
 
         using var response = await _fixture.Client.PatchAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/workflow-profile/variables",
+            $"/api/projects/{projectId}/issues/{issueNumber}/variables",
             new { vars = new { agent = new { runtime = "unknown" } } });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);

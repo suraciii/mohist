@@ -263,7 +263,7 @@ export function getWorkflowTimeline(number: number, projectId?: string | null, s
 }
 
 export function getIssueWorkflowVariables(number: number, projectId: string) {
-  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/workflow-profile/variables`))
+  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/variables`))
 }
 
 export function getIssueWorkflowDefinitionVar(number: number, _name: string, projectId: string) {
@@ -271,14 +271,14 @@ export function getIssueWorkflowDefinitionVar(number: number, _name: string, pro
 }
 
 export function patchIssueWorkflowDefinitionVar(number: number, name: string, value: unknown, projectId: string) {
-  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/workflow-profile/variables`), {
+  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/variables`), {
     method: 'PATCH',
     body: JSON.stringify({ vars: { [name]: value } }),
   })
 }
 
 export function patchIssueWorkflowStageDefinitionVar(number: number, stage: string, name: string, value: unknown, projectId: string) {
-  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/workflow-profile/variables`), {
+  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/variables`), {
     method: 'PATCH',
     body: JSON.stringify({ stages: { [stage]: { vars: { [name]: value } } } }),
   })

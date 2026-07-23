@@ -56,7 +56,7 @@ public static partial class IssueRoutes
             return ApiResults.Ok(response!);
         });
 
-        group.MapGet("/{number:int}/workflow-profile/variables", async (
+        group.MapGet("/{number:int}/variables", async (
             HttpContext ctx,
             string projectRef,
             int number,
@@ -71,7 +71,7 @@ public static partial class IssueRoutes
             return ApiResults.Ok(await issueProfileManager.GetVariablesAsync(project.Id, number));
         });
 
-        group.MapPut("/{number:int}/workflow-profile/variables", async (
+        group.MapPut("/{number:int}/variables", async (
             HttpContext ctx,
             string projectRef,
             int number,
@@ -94,7 +94,7 @@ public static partial class IssueRoutes
             }
         });
 
-        group.MapPatch("/{number:int}/workflow-profile/variables", async (
+        group.MapPatch("/{number:int}/variables", async (
             HttpContext ctx,
             string projectRef,
             int number,

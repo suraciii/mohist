@@ -44,6 +44,7 @@ public class WorkflowRunProfileManager : IScopedService
 
     public async Task<VariableBundle> SetVariablesAsync(string workflowRunId, VariableBundle bundle)
     {
+        VariableBundleShapeValidator.Validate(bundle);
         return await MutateVariablesAsync(workflowRunId, _ => bundle);
     }
 
@@ -120,6 +121,7 @@ public class WorkflowRunProfileManager : IScopedService
 
     public async Task<VariableBundle> PatchVariablesAsync(string workflowRunId, VariableBundle patch)
     {
+        VariableBundleShapeValidator.Validate(patch);
         return await MutateVariablesAsync(
             workflowRunId,
             current => VariableBundle.Patch(
