@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Hosting;
 using Xunit;
 using Mohist.Server.SpecTests.Support;
 
@@ -120,6 +122,51 @@ public class DatabaseInitializationSpecs
 
         Assert.True(await TableExistsAsync(connection, "Projects"));
         Assert.True(await ColumnExistsAsync(connection, "WorkflowRuns", "ETag"));
+    }
+
+    [Fact]
+    public async Task MohistDatabaseInitializer_AppliesEfMigrationsToEmptyDatabase()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var services = new ServiceCollection()
+            .AddDbContext<MohistDbContext>(options => options.UseSqlite(connection))
+            .BuildServiceProvider();
+
+        await using (services)
+        {
+            var initializer = new MohistDatabaseInitializer();
+            await initializer.InitializeAsync(services, CancellationToken.None);
+
+            Assert.True(await TableExistsAsync(connection, "Projects"));
+            Assert.True(await TableExistsAsync(connection, "WorkflowRuns"));
+            Assert.True(await TableExistsAsync(connection, "__EFMigrationsHistory"));
+            var migrations = await RecordedMigrationsAsync(connection);
+            Assert.NotEmpty(migrations);
+            Assert.Contains("20260605025642_InitialSchema", migrations);
+        }
+    }
+
+    [Fact]
+    public async Task MohistDatabaseInitializer_IsIdempotentAcrossRepeatedInvocations()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var services = new ServiceCollection()
+            .AddDbContext<MohistDbContext>(options => options.UseSqlite(connection))
+            .BuildServiceProvider();
+
+        await using (services)
+        {
+            var initializer = new MohistDatabaseInitializer();
+            await initializer.InitializeAsync(services, CancellationToken.None);
+            await initializer.InitializeAsync(services, CancellationToken.None);
+
+            Assert.True(await TableExistsAsync(connection, "Projects"));
+            Assert.True(await ColumnExistsAsync(connection, "WorkflowRuns", "ETag"));
+        }
     }
 
     private static async Task<bool> TableExistsAsync(SqliteConnection connection, string name)

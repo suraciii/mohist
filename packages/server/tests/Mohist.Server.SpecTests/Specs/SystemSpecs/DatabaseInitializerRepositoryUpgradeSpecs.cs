@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
@@ -44,7 +45,8 @@ public class DatabaseInitializerRepositoryUpgradeSpecs
                 await db.SaveChangesAsync();
             }
 
-            await DatabaseInitializer.InitializeAsync(services);
+            var initializer = new MohistDatabaseInitializer();
+            await initializer.InitializeAsync(services, CancellationToken.None);
 
             using var assertionScope = services.CreateScope();
             var assertionDb = assertionScope.ServiceProvider.GetRequiredService<MohistDbContext>();
