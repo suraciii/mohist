@@ -73,3 +73,10 @@
 
 - Reconciled `docs/actions/agent.md` with the implemented task-only contract: `name` is static, only `prompt` accepts template expressions, checks are rejected, and resolver precedence is id-only for `agent_*` references followed by name-first/id-fallback for all other references.
 - Documented `agent_not_found` for missing or archived Agent definitions and removed the stale statement that `mohist/agent` is unimplemented.
+
+## Verify Check Repair
+
+- The failed verify check reproduced as the server architecture test ratchet: `ActionContractValidatorTests.cs` had a 29,000-byte allowance but measured 43,726 bytes after the T-001 virtual-action tests were added. The behavior tests themselves passed; this was a test-file organization defect, not a production failure.
+- Moved the 19 virtual `mohist/agent` validator tests into `MohistAgentActionContractValidatorTests.cs` through a partial test class. No assertions or baseline allowance were weakened; the files now measure 28,554 and 14,057 bytes.
+- Focused validator tests passed (1,339 total unit tests) and ArchTests passed 32/32. `npm run verify && npm run archtest` passed: Definition 175, CLI 1,411, server unit 1,339, server architecture 32, server spec 3,059, Web 5,127 with 1 skipped, Runner 1,381, and architecture scripts 7/7.
+- Verification left only the two intended test-file changes and no generated Git-visible artifacts.
