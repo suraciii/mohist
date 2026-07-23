@@ -12,21 +12,27 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 
 public partial class WorkflowItemTranslatorSpecs
 {
-    [Fact]
-    public async Task TranslateToDispatch_AgentTask_ComposesRawPromptAndConcreteRuntimeInput()
+    [Theory]
+    [InlineData("opencode", "mohist/opencode")]
+    [InlineData("pi", "mohist/pi")]
+    public async Task TranslateToDispatch_AgentTask_ComposesRawPromptAndConcreteRuntimeInput(
+        string runtime,
+        string expectedUses)
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var run = await SeedRunningWorkflowAsync(runId, "proj-agent-dispatch");
         _agentResolver.Snapshot = new AgentExecutionSnapshot(
             "Review the change.",
-            JsonSerializer.SerializeToElement(new { runtime = "pi", model = "model-a", variant = "fast" }));
+            JsonSerializer.SerializeToElement(new { runtime, model = "model-a", variant = "fast" }));
 
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent", With("""
             { "name": "reviewer", "prompt": "Fix ${{ vars.target }}", "session": "review", "timeout": 123 }
             """));
         var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
 
-        Assert.Equal("mohist/pi", dispatch.Uses);
+        Assert.Equal(expectedUses, dispatch.Uses);
+        Assert.Equal(WorkDispatchOwnerKinds.Workflow, dispatch.OwnerKind);
+        Assert.Null(dispatch.AgentJobId);
         using var with = JsonDocument.Parse(dispatch.With!);
         Assert.Equal("Review the change.\n\nFix ${{ vars.target }}", with.RootElement.GetProperty("prompt").GetString());
         Assert.Equal("review", with.RootElement.GetProperty("session").GetString());
@@ -35,6 +41,7 @@ public partial class WorkflowItemTranslatorSpecs
         Assert.Equal("model-a", options.GetProperty("model").GetString());
         Assert.Equal("fast", options.GetProperty("variant").GetString());
         Assert.False(options.TryGetProperty("instructions", out _));
+        Assert.Equal(new[] { "model", "variant" }, options.EnumerateObject().Select(p => p.Name));
         Assert.Equal(4, with.RootElement.EnumerateObject().Count());
         Assert.Equal("Fix ${{ vars.target }}", item.With!["prompt"]!.Value.GetString());
     }
@@ -127,6 +134,31 @@ public partial class WorkflowItemTranslatorSpecs
         Assert.Equal("agent_not_found", error.Error.Code);
         Assert.Contains("archived-reviewer", error.Error.Message, StringComparison.Ordinal);
         Assert.Contains("archived-reviewer", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_RetryResolutionUsesCurrentSnapshot()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-retry");
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With("""{"name":"reviewer","prompt":"Review the change."}"""));
+
+        _agentResolver.Snapshot = new AgentExecutionSnapshot(
+            "Original instructions",
+            JsonSerializer.SerializeToElement(new { runtime = "opencode" }));
+        var first = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        _agentResolver.Snapshot = new AgentExecutionSnapshot(
+            "Edited instructions",
+            JsonSerializer.SerializeToElement(new { runtime = "opencode" }));
+        var retried = await _translator.TranslateToDispatchAsync(
+            item with { Id = "task-1.2" }, runId, run, "runner-1");
+
+        Assert.Contains("Original instructions", first.With, StringComparison.Ordinal);
+        Assert.Contains("Edited instructions", retried.With, StringComparison.Ordinal);
+        Assert.DoesNotContain("Original instructions", retried.With, StringComparison.Ordinal);
+        Assert.NotEqual(first.WorkId, retried.WorkId);
     }
 
     [Fact]

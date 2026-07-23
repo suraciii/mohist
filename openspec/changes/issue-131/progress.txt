@@ -56,3 +56,15 @@
 - Added missing and archived Agent dispatch specs asserting `agent_not_found`, empty Runner dispatches, failed task/run state, and a `failure.error.code=agent_not_found` recovery rule.
 - Full server spec suite: 3057/3057 passed.
 - Full server unit suite: 1339/1339 passed.
+
+## T-004 Decisions
+
+- Extended the translator contract spec across both `mohist/opencode` and `mohist/pi`; the assertions require the published `{ prompt, session?, timeout?, options: { model?, variant? } }` envelope and Workflow ownership with no `AgentJobId`.
+- Added injected-resolver coverage proving a retry translation resolves the current Agent definition into a new attempt; the existing grain reconciliation spec covers persisted redelivery after activation.
+- Existing virtual-action validation coverage already proves `mohist/agent` is rejected for checks, including malformed check inputs, so no duplicate validation implementation was added.
+
+## T-004 Verification
+
+- Focused translator, reconciliation, and virtual-action specs: 68/68 passed.
+- Full server spec suite: 3059/3059 passed; full server unit suite: 1339/1339 passed.
+- `npm test` also passed Workflow Definition (175), CLI (1411), server unit (1339), and server spec (3059) suites. The known ArchTests ratchet remains the only failure (31/32): T-001's pre-existing `ActionContractValidatorTests.cs` size allowance.
