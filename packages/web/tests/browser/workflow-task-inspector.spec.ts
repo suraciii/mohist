@@ -118,7 +118,7 @@ async function mockApi(page: Page) {
     if (method === 'GET' && path.endsWith('/workflow/artifacts')) return route.fulfill({ json: apiResponse([]) })
     if (method === 'GET' && path.endsWith('/coder-sessions')) return route.fulfill({ json: apiResponse([]) })
     if (method === 'GET' && path.endsWith('/workflow-profile')) return route.fulfill({ json: apiResponse(null) })
-    if (method === 'GET' && path.includes('/workflow-profile/variables')) return route.fulfill({ json: apiResponse({ vars: {}, stages: {} }) })
+    if (method === 'GET' && path.endsWith('/variables')) return route.fulfill({ json: apiResponse({ vars: {}, stages: {} }) })
     if (method === 'GET' && path.endsWith('/workspace-status')) return route.fulfill({ json: apiResponse(null) })
     if (method === 'GET' && path.endsWith('/opencode/models')) return route.fulfill({ json: apiResponse({ models: [], modelVariants: {} }) })
     if (method === 'GET' && path === `/projects/${project.id}/issues`) return route.fulfill({ json: apiResponse([]) })

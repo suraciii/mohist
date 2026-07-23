@@ -97,13 +97,6 @@ internal static class VariableCommands
                     await WriteEffectiveRejectedAsync(api, scope, "list").ConfigureAwait(false);
                     return CliExitCode.For(CliExitOutcome.UsageFailure);
                 }
-                if (scope == VariableScopeKind.Run && effective && stageProvided)
-                {
-                    await api.Error.WriteLineAsync(
-                        "'list' accepts either --effective or --stage, not both.").ConfigureAwait(false);
-                    return CliExitCode.For(CliExitOutcome.UsageFailure);
-                }
-
                 var address = await ResolveScopeAddressAsync(
                     api, scope, project, projectId, number, runId, issue).ConfigureAwait(false);
                 if (address.Exit != 0)

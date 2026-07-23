@@ -111,13 +111,13 @@ async function mockApi(page: Page) {
     if (method === 'GET' && issue && path.endsWith('/workspace-status')) {
       return route.fulfill({ json: response({ exists: false, reason: 'not_started' }) })
     }
-    if (method === 'GET' && issue && path.endsWith('/workflow-profile/variables')) {
+    if (method === 'GET' && issue && path.endsWith('/variables')) {
       return route.fulfill({ json: response({ vars: {}, stages: {} }) })
     }
     if (method === 'GET' && issue && path.endsWith('/workflow-profile')) {
       return route.fulfill({ json: response({ issueNumber, projectId: project.id, hasCustomTemplate: false, yaml: null, workflowRunId: null, profileId: '' }) })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/workflow-profile/variables`) {
+    if (method === 'GET' && path === `/projects/${project.id}/variables`) {
       return route.fulfill({ json: response({ vars: {}, stages: {} }) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/workflow-profile`) {

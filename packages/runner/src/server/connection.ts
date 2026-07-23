@@ -279,7 +279,7 @@ export class ServerConnection {
   }
 
   async patchRunVars(workflowRunId: string, vars: JsonObject, signal: AbortSignal) {
-    const response = await fetch(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/workflow-profile/variables`, {
+    const response = await fetch(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/variables`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ vars }),

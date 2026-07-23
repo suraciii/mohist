@@ -27,7 +27,7 @@ public sealed class VariableCommandsCollectionDefinition
 //   * Run target resolution reuses the contract shared by every other `run`
 //     verb (positional ID or `--issue`, exactly one).
 //
-// The server-side route rename (`workflow-profile/variables` → `variables`)
+// The server-side route rename (`workflow-profile/variables` -> `variables`)
 // and the new `VariableBundleShapeValidator` live in T-001. These tests
 // already target the clean paths so they assert the post-T-001 contract.
 [Collection("VariableCommands")]
@@ -575,18 +575,32 @@ public class VariableCommandsSpecs
     }
 
     [Fact]
-    public async Task RunList_EffectiveWithStage_FailsLocallyExitTwoNoHttp()
+    public async Task RunList_EffectiveWithStage_HitsStageEffectiveEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get
+                && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective?stage=check")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { vars = new { strict = true }, stages = new { } },
+                });
+            }
+
+            return null!;
+        });
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
             ["run", "variable", "list", WrId, "--effective", "--stage", "check"],
             output, error, fs, executor);
 
-        Assert.Equal(2, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("either", error.ToString());
+        Assert.Equal(0, exitCode);
+        Assert.Contains(handler.Requests, r =>
+            r.Method == HttpMethod.Get
+            && r.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective?stage=check");
     }
 
     // ────────────────────────────────────────────────────────────────────

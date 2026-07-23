@@ -317,17 +317,17 @@ public class PathContractRegressionSpecs
         var workflowRunId = $"wr_api_{Guid.NewGuid():N}";
 
         using var putResponse = await _client.PutAsJsonAsync(
-            $"/api/workflow-runs/{workflowRunId}/workflow-profile/variables",
+            $"/api/workflow-runs/{workflowRunId}/variables",
             new { vars = new { github = new { pr = new { number = 10 } }, source = "put" } });
         Assert.Equal(System.Net.HttpStatusCode.OK, putResponse.StatusCode);
 
         using var patchResponse = await _client.PatchAsJsonAsync(
-            $"/api/workflow-runs/{workflowRunId}/workflow-profile/variables",
+            $"/api/workflow-runs/{workflowRunId}/variables",
             new { vars = new { github = new { pr = new { url = "https://example.test/pr/10" } } } });
         Assert.Equal(System.Net.HttpStatusCode.OK, patchResponse.StatusCode);
 
         using var variablesResponse = await _client.GetAsync(
-            $"/api/workflow-runs/{workflowRunId}/workflow-profile/variables");
+            $"/api/workflow-runs/{workflowRunId}/variables");
         Assert.Equal(System.Net.HttpStatusCode.OK, variablesResponse.StatusCode);
         var variablesJson = JsonDocument.Parse(await variablesResponse.Content.ReadAsStringAsync()).RootElement;
         var vars = variablesJson.GetProperty("data").GetProperty("vars");
@@ -375,7 +375,7 @@ public class PathContractRegressionSpecs
         Assert.False(string.IsNullOrWhiteSpace(workflowRunId), "expected start to create a workflow run");
 
         using var putResponse = await _client.PutAsJsonAsync(
-            $"/api/workflow-runs/{workflowRunId}/workflow-profile/variables",
+            $"/api/workflow-runs/{workflowRunId}/variables",
             new
             {
                 vars = new

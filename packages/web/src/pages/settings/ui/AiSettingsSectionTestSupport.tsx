@@ -23,10 +23,10 @@ export const aiSettingsSectionHandlers = [
   http.get('/api/projects/:projectId/opencode/models', () =>
     HttpResponse.json({ success: true, data: availableModels }),
   ),
-  http.get('/api/projects/:projectId/workflow-profile/variables', () =>
+  http.get('/api/projects/:projectId/variables', () =>
     HttpResponse.json({ success: true, data: workflowVariables }),
   ),
-  http.patch('/api/projects/:projectId/workflow-profile/variables', async ({ request }) => {
+  http.patch('/api/projects/:projectId/variables', async ({ request }) => {
     const body = await request.json()
     patchCaptures.push(body as Record<string, unknown>)
     return HttpResponse.json({ success: true, data: body })

@@ -47,7 +47,7 @@ useMswServer(
       },
     }),
   ),
-  http.get('*/api/projects/:projectId/workflow-profile/variables', () =>
+  http.get('*/api/projects/:projectId/variables', () =>
     HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
   ),
   http.get('*/api/projects/:projectId/opencode/models', () =>

@@ -418,25 +418,37 @@ public static class ProjectRoutes
             return ApiResults.Ok(new { projectId = project.Id, defaultTemplateId = (string?)null });
         });
 
-        byRef.MapGet("/workflow-profile/variables", async (HttpContext context, ProjectWorkflowProfileManager manager) =>
+        byRef.MapGet("/variables", async (HttpContext context, ProjectWorkflowProfileManager manager) =>
         {
             var project = context.GetResolvedProject();
             var variables = await manager.GetVariablesAsync(project.Id);
             return ApiResults.Ok(variables);
         });
 
-        byRef.MapPut("/workflow-profile/variables", async (HttpContext context, VariableBundle bundle, ProjectWorkflowProfileManager manager) =>
+        byRef.MapPut("/variables", async (HttpContext context, VariableBundle bundle, ProjectWorkflowProfileManager manager) =>
         {
             var project = context.GetResolvedProject();
-            var result = await manager.SetVariablesAsync(project.Id, bundle);
-            return ApiResults.Ok(result);
+            try
+            {
+                return ApiResults.Ok(await manager.SetVariablesAsync(project.Id, bundle));
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_variables");
+            }
         });
 
-        byRef.MapPatch("/workflow-profile/variables", async (HttpContext context, VariableBundle patch, ProjectWorkflowProfileManager manager) =>
+        byRef.MapPatch("/variables", async (HttpContext context, VariableBundle patch, ProjectWorkflowProfileManager manager) =>
         {
             var project = context.GetResolvedProject();
-            var result = await manager.PatchVariablesAsync(project.Id, patch);
-            return ApiResults.Ok(result);
+            try
+            {
+                return ApiResults.Ok(await manager.PatchVariablesAsync(project.Id, patch));
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_variables");
+            }
         });
 
         // =======================================================================
