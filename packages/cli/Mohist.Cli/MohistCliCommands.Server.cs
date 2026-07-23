@@ -6,21 +6,34 @@ namespace Mohist.Cli;
 
 internal static class ServerCommands
 {
-    public static Command Build(MohistCliApi api, IServiceProvider provider)
+    public static Command Build(MohistCliApi api, IServiceProvider _)
     {
-        var server = new Command("server", "Server management");
-        var installer = provider.GetRequiredService<IServiceInstaller>();
+        var server = new Command(
+            "server",
+            "Connected Mohist Server application. Read-only — reads facts about the running Server (status, health, info, application logs) over the Server API. Local managed-service lifecycle (start, stop, restart, status, logs, uninstall) lives under 'mo service <verb> server'.");
 
+        server.Subcommands.Add(BuildStatus(api));
         server.Subcommands.Add(BuildHealth(api));
-        server.Subcommands.Add(BuildSystemd("start", installer.StartServerAsync, installer));
-        server.Subcommands.Add(BuildSystemd("stop", installer.StopServerAsync, installer));
-        server.Subcommands.Add(BuildSystemd("restart", installer.RestartServerAsync, installer));
-        server.Subcommands.Add(BuildSystemd("status", installer.StatusServerAsync, installer));
-        server.Subcommands.Add(BuildLogs(installer));
-        server.Subcommands.Add(BuildSystemd("uninstall", installer.UninstallServerAsync, installer));
         server.Subcommands.Add(BuildInfo(api));
+        server.Subcommands.Add(BuildLogs(api));
 
         return server;
+    }
+
+    private static Command BuildStatus(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "status",
+            "Show overall Server status (aggregated across all projects). Formerly exposed as 'mo project status'.");
+        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/status?all=true"));
+        return cmd;
+    }
+
+    private static Command BuildHealth(MohistCliApi api)
+    {
+        var cmd = new Command("health", "Check server health");
+        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/health"));
+        return cmd;
     }
 
     private static Command BuildInfo(MohistCliApi api)
@@ -45,48 +58,12 @@ internal static class ServerCommands
         return cmd;
     }
 
-    private static Command BuildHealth(MohistCliApi api)
+    private static Command BuildLogs(MohistCliApi api)
     {
-        var cmd = new Command("health", "Check server health");
-        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/health"));
-        return cmd;
-    }
-
-    private static Command BuildSystemd(string name, Func<ServiceCommandOptions, Task<int>> handler, IServiceInstaller installer)
-    {
-        var cmd = new Command(name, $"{name} server managed service");
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        var unitDirOpt = MohistCliCommands.UnitDirOption();
-        cmd.Options.Add(dryRunOpt);
-        cmd.Options.Add(unitDirOpt);
-        cmd.SetAction(ctx =>
-        {
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var unitDir = ctx.GetValue(unitDirOpt);
-            return handler(new ServiceCommandOptions(dryRun, unitDir, 100, false));
-        });
-        return cmd;
-    }
-
-    private static Command BuildLogs(IServiceInstaller installer)
-    {
-        var cmd = new Command("logs", "View server service logs");
-        var linesOpt = MohistCliCommands.LinesOption();
-        var followOpt = MohistCliCommands.FollowOption();
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        var unitDirOpt = MohistCliCommands.UnitDirOption();
-        cmd.Options.Add(linesOpt);
-        cmd.Options.Add(followOpt);
-        cmd.Options.Add(dryRunOpt);
-        cmd.Options.Add(unitDirOpt);
-        cmd.SetAction(ctx =>
-        {
-            var lines = ctx.GetValue(linesOpt);
-            var follow = ctx.GetValue(followOpt);
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var unitDir = ctx.GetValue(unitDirOpt);
-            return installer.LogsServerAsync(new ServiceCommandOptions(dryRun, unitDir, lines, follow));
-        });
+        var cmd = new Command(
+            "logs",
+            "Show the connected Server's application logs (the Mohist server's own log tail). These are application logs and are not interchangeable with service-manager logs; use 'mo service logs server' for service-manager logs (systemd journal or scheduled-task output).");
+        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/logs/tail"));
         return cmd;
     }
 }

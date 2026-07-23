@@ -79,3 +79,55 @@ Implementation complete. Files added/touched:
 - T-002 (`runner` slim) can remove `runner start|stop|restart|status|service-status|logs|uninstall`; the new `service` group already covers equivalent semantics.
 - T-003 (`server` reshape) can remove `server start|stop|restart|status|logs|uninstall`; the new `service` group + `server logs` already covers the rest.
 - T-004 (`system` retire, D6 string guidance) is unblocked once T-002 and T-003 land.
+
+# T-003 progress notes
+
+Branch: `mohist/run-wr_582017ee3dca416f8104a8678fd1b632`
+Task: Reshape `server` to read-only application facts and relocate status/logs
+
+## Plan
+
+- `MohistCliCommands.Server.cs::ServerCommands` — drop lifecycle verbs:
+  - Removed: `start` (`StartServerAsync`), `stop`, `restart`, `status` (local unit), `uninstall`, and the service-manager `logs` (`LogsServerAsync`).
+  - Kept: `health` (`PrintGetAsync("/api/health")`), `info` (`PrintSystemInfoAsync`).
+  - Added: `status` (`PrintGetAsync("/api/status?all=true")` — formerly `project status`).
+  - Repurposed: `logs` (`PrintGetAsync("/api/logs/tail")` — application logs, not service-manager).
+  - The new group description names the read-only contract and points at `mo service <verb> server` for lifecycle.
+  - The `logs` description identifies it as application logs and points to `mo service logs server` for service-manager logs (mirror of `service logs` description from T-001).
+  - The unused `IServiceProvider provider` parameter was renamed to `_` (TreatWarningsAsErrors enforces no unused params).
+- `MohistCliCommands.Project.cs::ProjectCommands` — drop `BuildStatus` and the `status` subcommand registration.
+- Tests:
+  - `CliProjectStatusCommandSpecs.cs` deleted; the project-status tests are no longer meaningful.
+  - `CliServerStatusCommandSpecs.cs` created with 14 tests covering all the ACs plus spec scenarios (server health/info still work; `mo server start|stop|restart|uninstall` parse-error and no installer call; `mo server logs` no longer hits the service-manager installer; `mo project status` no longer resolves; `mo project --help` no longer advertises `status`).
+  - `CliInstallUpdateSingleEntryTests.cs::ServerHelp_DoesNotAdvertiseInstallOrUpdate` and `SurvivingServerSubcommands_StillResolve` updated to the new four-verb server surface.
+
+## Acceptance-criteria-to-test mapping
+
+| AC | Test | Result |
+|---|---|---|
+| `mo server --help` lists only status, health, info, logs | `ServerHelp_ListsOnlyReadSubcommands` | ✅ |
+| `mo server status` issues GET /api/status?all=true and renders the overall Server status | `ServerStatus_HitsStatusEndpointAndRendersResponse` | ✅ |
+| `mo project status` no longer resolves (exit non-zero, no HTTP) | `LegacyProjectStatus_NoLongerResolvesAndExitsNonZero` | ✅ |
+| `mo server logs` issues GET /api/logs/tail and its help identifies application logs and points to `mo service logs server` | `ServerLogs_HitsApplicationLogsEndpoint` + `ServerLogs_HelpIdentifiesApplicationLogsAndPointsToServiceLogs` | ✅ |
+| `mo server start`, `mo server restart`, `mo server uninstall` exit non-zero and invoke no installer action | `LegacyServerStart_FailsToResolveAndInvokesNoInstallerAction` + `LegacyServerRestart_…` + `LegacyServerUninstall_…` (plus `LegacyServerStop_…` and `LegacyServerLogsAsServiceManager_…` as regression guards) | ✅ |
+| CliProjectStatusCommandSpecs migrated to the server status path; `dotnet build Mohist.sln` clean and `dotnet test` for Mohist.Cli.Tests passes | full suite below | ✅ |
+
+## Final test counts
+
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors (TreatWarningsAsErrors enforced).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj` → 1409 passed, 0 failed (was 1401; +14 new `CliServerStatusCommandSpecs`, -6 removed `CliProjectStatusCommandSpecs`).
+
+## Gotchas / decisions during the build
+
+- Reused the exact API paths `project status` and `system logs` used — no Server route or response-shape change (design D3). The CLI simply relocates the same calls into the `server` group.
+- Repurposing `server logs` from a service-manager read (via `LogsServerAsync`) to an application read (via `PrintGetAsync("/api/logs/tail")`) creates a temporary overlap with `system logs` (still registered, still working). T-004 will retire `system` entirely once T-002 lands; leaving both alive for now is intentional and matches the additive phase.
+- Did **not** touch the cross-cutting D6 string changes (`MohistCliApi.ServerUnavailableMessage` still says "mo server start"). T-004 owns that work; the spec scenario for "Server unreachable emits start-service guidance" cannot fully pass until then.
+- `mo server status` and the runner-level `mo runner status` are both reachable in T-003. The runner `status` is an HTTP read of `/api/projects/<project>/runners`; the server `status` is an HTTP read of `/api/status?all=true`. They have distinct intent (per-resource vs cross-project) and live in distinct command groups, so the AC's "read-only application facts" still holds.
+- Renamed `Build`'s second parameter to `_` because TreatWarningsAsErrors flags unused parameters. Cleaner than `_ = provider` since the runner group (which still uses the parameter) lives in the same file and the call site already passes the same `provider` to both.
+- CliInstallUpdateSingleEntryTests's two regression guards (`ServerHelp_DoesNotAdvertiseInstallOrUpdate` and `SurvivingServerSubcommands_StillResolve`) had to change because they iterated over the old eight-verb server surface; the new four-verb surface is asserted instead. `install`/`update` removal invariants are still pinned.
+- CliSystemLogsCommandSpecs and CliRunnerCommandSpecs untouched — T-003 only touches the server half. The "mo server start" literal still in their `RunnerList_ServerDown_…` assertions survives this task and gets updated in T-004.
+
+## Open items for downstream tasks
+
+- T-002 will slim `RunnerCommands` and rename `show` → `view` (per the AC list); the runner's `RunnerShow_*` tests will need to retarget the new verb.
+- T-004 will retire `SystemCommands` (now redundant with `server logs`), update `MohistCliApi.ServerUnavailableMessage` to `mo service start server`, update `NdjsonStream.cs:30` and `MohistCliApi.cs:729` and `Update.Finalize.cs:66` likewise, and update the remaining tests asserting "mo server start" / "mo runner start" literals to the new guidance strings.
