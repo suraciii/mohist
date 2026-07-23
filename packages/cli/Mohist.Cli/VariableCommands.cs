@@ -89,32 +89,42 @@ internal static class VariableCommands
 
             async Task<int> ListAsync()
             {
-                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
-                    return api.WriteJsonSelectionResult(VariableBundleDescriptor, selection);
-
                 if (scope != VariableScopeKind.Run && effective)
                 {
                     await WriteEffectiveRejectedAsync(api, scope, "list").ConfigureAwait(false);
                     return CliExitCode.For(CliExitOutcome.UsageFailure);
                 }
+
+                if (scope == VariableScopeKind.Run && effective)
+                {
+                    var effectiveAddress = await ResolveScopeAddressAsync(
+                        api, scope, project, projectId, number, runId, issue).ConfigureAwait(false);
+                    if (effectiveAddress.Exit != 0)
+                        return effectiveAddress.Exit;
+
+                    var effectivePath = StageQueryString(
+                        BuildEffectiveListPath(effectiveAddress.RunId!, stage), stage);
+                    return await api.PrintEffectiveVariablesAsync(
+                        effectivePath,
+                        jsonProvided,
+                        json,
+                        data => api.RenderTableAsync(
+                            data, MohistCliApi.TableShape.WorkflowRunVariables)).ConfigureAwait(false);
+                }
+
+                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(VariableBundleDescriptor, selection);
+
                 var address = await ResolveScopeAddressAsync(
                     api, scope, project, projectId, number, runId, issue).ConfigureAwait(false);
                 if (address.Exit != 0)
                     return address.Exit;
 
-                var path = scope == VariableScopeKind.Run && effective
-                    ? StageQueryString(BuildEffectiveListPath(address.RunId!, stage), stage)
-                    : BuildVariablesPath(scope, address);
-
                 return await api.PrintResourceAsync(
-                    path,
+                    BuildVariablesPath(scope, address),
                     VariableBundleDescriptor,
                     selection,
-                    data => api.RenderTableAsync(
-                        data,
-                        scope == VariableScopeKind.Run && effective
-                            ? MohistCliApi.TableShape.WorkflowRunVariables
-                            : MohistCliApi.TableShape.WorkflowVariables)).ConfigureAwait(false);
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowVariables)).ConfigureAwait(false);
             }
         });
         return cmd;

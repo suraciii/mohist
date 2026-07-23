@@ -577,6 +577,90 @@ public class VariableCommandsSpecs
         Assert.Contains("latest", output.ToString());
     }
 
+    // The effective endpoint returns a flat merged object (no `vars`/`stages`
+    // envelope), so `--json` selection must project against the response's own
+    // top-level keys. Regression for the review finding where this path emitted
+    // `{ "vars": null }`.
+    [Fact]
+    public async Task RunList_Effective_JsonProjectsFlatTopLevelKeys()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get
+                && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { agent = new { model = "latest" } },
+                });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["run", "variable", "list", WrId, "--effective", "--json", "agent"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("\"agent\"", stdout);
+        Assert.Contains("\"latest\"", stdout);
+        Assert.DoesNotContain("\"vars\"", stdout);
+    }
+
+    [Fact]
+    public async Task RunList_Effective_JsonDiscoveryListsActualKeys()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get
+                && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { agent = new { model = "latest" }, review = new { strict = true } },
+                });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["run", "variable", "list", WrId, "--effective", "--json"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("\"agent\"", stdout);
+        Assert.Contains("\"review\"", stdout);
+    }
+
+    [Fact]
+    public async Task RunList_Effective_JsonUnknownFieldRejected()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get
+                && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { agent = new { model = "latest" } },
+                });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["run", "variable", "list", WrId, "--effective", "--json", "stages"],
+            output, error, fs, executor);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("Invalid --json field", error.ToString());
+    }
+
     [Fact]
     public async Task RunGet_EffectiveWithStage_HitsStageEffectiveEndpoint()
     {
