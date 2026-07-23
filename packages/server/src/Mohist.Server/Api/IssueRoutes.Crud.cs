@@ -156,6 +156,8 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest(coordinatorResult.Message ?? $"Repository '{resolution.Repository!.Name}' is not declared", "repository_not_found");
             if (coordinatorResult.Code == IssueRepositoryBindingResultCode.RepositoryStaleRevision)
                 return ApiResults.Conflict(coordinatorResult.Message ?? "Repository revision is stale", "repository_stale_revision");
+            if (coordinatorResult.Code == IssueRepositoryBindingResultCode.WorkflowProfileNotFound)
+                return ApiResults.Conflict(coordinatorResult.Message ?? "WorkflowProfile was not found", "workflow-profile-not-found");
 
             try
             {
@@ -372,8 +374,18 @@ public static partial class IssueRoutes
                 catch (AttachmentLimitException ex) { return ApiResults.Fail(ex.Message, 413, "attachment_count_limit_exceeded"); }
                 catch (AttachmentValidationException ex) { return ApiResults.BadRequest(ex.Message, "invalid_attachment"); }
 
-                if (!coordinatorResult.IsApplied)
-                    return ApiResults.Conflict(coordinatorResult.Message ?? "Issue update rejected");
+                switch (coordinatorResult.Code)
+                {
+                    case IssueRepositoryBindingResultCode.Applied:
+                    case IssueRepositoryBindingResultCode.AlreadyApplied:
+                        break;
+                    case IssueRepositoryBindingResultCode.WorkflowProfileNotFound:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "WorkflowProfile was not found",
+                            "workflow-profile-not-found");
+                    default:
+                        return ApiResults.Conflict(coordinatorResult.Message ?? "Issue update rejected");
+                }
 
                 await ApplyUpdateModelMetadataAsync(issueProfileManager, project.Id, number, req, req.Raw);
                 return ApiResults.Ok(await issuesQuery.GetAsync(project.Id, number));
