@@ -109,7 +109,9 @@ public class AgentSessionGrainInputBoundaryPersistFailureSpecs : AgentSessionGra
 
         // The next input will trigger the prior-data flush; that
         // flush must fail so the new input is rejected.
-        Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
+        Fixture.TranscriptStore.FailNextSave(
+            grain.GetPrimaryKeyString(),
+            new InvalidOperationException("transcript store down"));
 
         var secondInputResults = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>

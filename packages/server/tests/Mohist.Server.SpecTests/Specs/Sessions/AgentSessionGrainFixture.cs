@@ -91,16 +91,20 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         public AgentSession? State { get; private set; }
         public List<AgentSessionEvent> Events { get; } = [];
         public int SaveCount { get; private set; }
-        public Exception? NextException { get; set; }
-        public bool CommitThenThrowNext { get; set; }
+        private (string Key, Exception Error)? _nextFailure;
+        private string? _commitThenThrowNextKey;
+
+        public void FailNextSave(string key, Exception error) => _nextFailure = (key, error);
+
+        public void CommitThenThrowNextSave(string key) => _commitThenThrowNextKey = key;
 
         public void Reset()
         {
-            NextException = null;
+            _nextFailure = null;
             SaveCount = 0;
             State = null;
             Events.Clear();
-            CommitThenThrowNext = false;
+            _commitThenThrowNextKey = null;
         }
 
         public Task<AgentSession?> LoadAsync(string key) => Task.FromResult(State is null ? null : Clone(State));
@@ -110,7 +114,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 
         public Task SaveAsync(string key, AgentSession state)
         {
-            ThrowIfPending();
+            ThrowIfPending(key);
             SaveCount++;
             State = Clone(state);
             return Task.CompletedTask;
@@ -118,14 +122,15 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 
         public Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
         {
-            if (!CommitThenThrowNext)
-                ThrowIfPending();
+            var commitThenThrow = string.Equals(_commitThenThrowNextKey, key, StringComparison.Ordinal);
+            if (!commitThenThrow)
+                ThrowIfPending(key);
             SaveCount++;
             State = Clone(state);
             Events.AddRange(events);
-            if (CommitThenThrowNext)
+            if (commitThenThrow)
             {
-                CommitThenThrowNext = false;
+                _commitThenThrowNextKey = null;
                 throw new InvalidOperationException("store committed before transport failure");
             }
             return Task.CompletedTask;
@@ -137,12 +142,14 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private void ThrowIfPending()
+    private void ThrowIfPending(string key)
     {
-        if (NextException is null) return;
-        var ex = NextException;
-        NextException = null;
-        throw ex;
+        if (_nextFailure is not { } failure ||
+            !string.Equals(failure.Key, key, StringComparison.Ordinal))
+            return;
+
+        _nextFailure = null;
+        throw failure.Error;
     }
 
     private static AgentSession Clone(AgentSession state) =>
@@ -153,21 +160,23 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 public sealed class FakeAgentSessionTranscriptStore : IAgentSessionTranscriptStore
 {
     public List<AgentSessionTranscriptFlush> Flushes { get; } = [];
-    public Exception? NextException { get; set; }
+    private (string SessionId, Exception Error)? _nextFailure;
+
+    public void FailNextSave(string sessionId, Exception error) => _nextFailure = (sessionId, error);
 
     public void Reset()
     {
-        NextException = null;
+        _nextFailure = null;
         Flushes.Clear();
     }
 
     public Task SaveAsync(AgentSessionTranscriptFlush transcript, CancellationToken ct = default)
     {
-        if (NextException is not null)
+        if (_nextFailure is { } failure &&
+            string.Equals(failure.SessionId, transcript.Turn.SessionId, StringComparison.Ordinal))
         {
-            var ex = NextException;
-            NextException = null;
-            throw ex;
+            _nextFailure = null;
+            throw failure.Error;
         }
 
         Flushes.Add(transcript);
