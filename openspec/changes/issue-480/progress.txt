@@ -1,0 +1,81 @@
+# T-001 progress notes
+
+Branch: `mohist/run-wr_582017ee3dca416f8104a8678fd1b632`
+Task: Add the `service` command group for local managed-process lifecycle
+
+## Codebase Patterns
+
+- Each command group lives in `packages/cli/Mohist.Cli/MohistCliCommands.<Area>.cs` and is `internal static` with a `Build(MohistCliApi, IServiceProvider)`.
+- Root registration happens in `MohistCliCommands.cs:Build`. Subcommand order matters only for help rendering.
+- Shared option factories in `MohistCliCommands.cs`: `DryRunOption`, `UnitDirOption`, `LinesOption`, `FollowOption`, `OutputOption`, `ProjectRefOption` (returns `(Option<string?> Project, Option<string?> ProjectId)`).
+- `IServiceInstaller` signature is fixed per-target (`StartServerAsync`, `StopRunnerAsync`, etc.). Reuse unchanged (design D1).
+- `ServiceCommandOptions(DryRun, UnitDir, Lines, Follow)` is reused unchanged.
+- Tests use `MohistCliCommands.RunAsync(...)` with a `FakeServiceInstaller` injected via the `installer` parameter (set up through `Support/CliTestFactory.CreateInternal` and direct construction). The standard helper excludes the installer from its return tuple; specs that need it construct the dependencies manually.
+- Exit-code convention: usage/parse failure exits non-zero (typically `CliExitCode.For(CliExitOutcome.UsageFailure)`).
+- `--help` invocations are routed through `System.CommandLine`, so a `Command("logs", "description")` produces a help block including the description.
+
+## Plan
+
+- New file: `MohistCliCommands.Service.cs`
+  - `internal enum ServiceTarget { Server, Runner }`
+  - `internal static class ServiceCommands`
+    - `Build` constructs the root `service` Command and adds the six verbs. The verb/target→handler dispatch is a static dictionary `Dictionary<(string Verb, ServiceTarget Target), Func<IServiceInstaller, ServiceCommandOptions, Task<int>>>` that wraps each `IServiceInstaller` method. (D1 — reuse the per-target methods.)
+    - Each verb Command adds `--dry-run` and `--unit-dir`; `logs` additionally adds `--lines`/`-n` and `--follow`/`-f`.
+    - `<target>` is a positional `Argument<ServiceTarget>` — System.CommandLine parses with `Enum.Parse` → unknown values produce a parse error (exit 2). (D2 — free parse-time validation.)
+  - The `logs` description explicitly points to `mo server logs` for application logs.
+  - No `--project` / `--project-id` on any verb (spec: `service` does not parse Project).
+- Register in `MohistCliCommands.cs:Build` after `RunnerCommands.Build` (placement is cosmetic).
+- Tests: `tests/Mohist.Cli.Tests/CliServiceCommandSpecs.cs`
+  - `--help` lists six verbs and no `--project`.
+  - Invalid target (e.g. `database`) → parse error, no installer call.
+  - `service start server --dry-run` via `FakeServiceInstaller` (using the real `SystemdServiceInstaller` is not necessary — `FakeServiceInstaller` is the existing test path that records calls; the production dry-run text is exercised by `SystemdServiceInstaller` tests already).
+  - `service stop runner` issues no HTTP.
+  - `service logs --help` advertises `--lines`/`--follow` and references `mo server logs`.
+  - All verbs' help lists exactly start, stop, restart, status, logs, uninstall (no `install`/`update`).
+- Old `runner`/`server` lifecycle verbs stay in place (additive per task description; later tasks remove them).
+
+## Acceptance-criteria-to-test mapping
+
+- "mo service --help lists exactly start, stop, restart, status, logs, uninstall and advertises no --project/--project-id option" → `ServiceHelp_ListsLifecycleVerbsOnly_NoProjectOption`.
+- "mo service start server --dry-run prints the service-manager command via FakeServiceInstaller and performs no state change" → `ServiceStart_DryRun_RecordsOnlyStartCallOnFakeInstaller` (records `StartServerAsync` call with `DryRun=true`).
+- "mo service status database exits non-zero (usage error) and invokes no installer action" → `ServiceStatus_InvalidTarget_ExitsNonZeroWithoutInstallerCall`.
+- "mo service logs server --help advertises --lines/--follow and references mo server logs" → `ServiceLogs_Help_AdvertisesLinesFollowAndServerLogsReference`.
+- "mo service stop runner issues no HTTP request to the Server" → `ServiceStop_Runner_IssuesNoHttp`.
+- "New CliServiceCommandSpecs … dotnet build clean and dotnet test for Mohist.Cli.Tests passes" → run both.
+
+## Completion notes
+
+Implementation complete. Files added/touched:
+- `packages/cli/Mohist.Cli/MohistCliCommands.Service.cs` (new)
+- `packages/cli/Mohist.Cli/MohistCliCommands.cs` (root registration added)
+- `packages/cli/tests/Mohist.Cli.Tests/CliServiceCommandSpecs.cs` (new — 13 tests)
+
+### Final test counts
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors (TreatWarningsAsErrors enforced).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj` → 1401 passed, 0 failed (full suite including the 13 new `CliServiceCommandSpecs`).
+
+### Acceptance-criteria verification
+
+| AC | Test | Result |
+|---|---|---|
+| `mo service --help` lists the six verbs, no `--project`/`--project-id` | `ServiceHelp_ListsExactlyTheSixLifecycleVerbs` + `ServiceHelp_AdvertisesNoProjectOption` | ✅ |
+| `mo service start server --dry-run` records only `StartServerAsync` and prints preview | `ServiceStartServer_DryRun_RecordsOnlyStartServerCall` + `ServiceStartServer_DryRun_PreviewsServiceManagerCommand` | ✅ |
+| `mo service status database` exits non-zero, no installer action | `ServiceStatus_InvalidTarget_ExitsNonZeroWithoutInstallerCall` (asserts `installer.Calls` empty, `handler.Requests` empty, exit != 0) | ✅ (exit 2 — usage failure) |
+| `mo service logs server --help` advertises `--lines`/`--follow` and references `mo server logs` | `ServiceLogsHelp_AdvertisesLinesAndFollow` + `ServiceLogsHelp_ReferencesServerLogsForApplicationLogs` | ✅ |
+| `mo service stop runner` issues no HTTP | `ServiceStop_AnyTarget_IssuesNoHttp` | ✅ |
+
+### Gotchas / decisions during the build
+
+- `Argument<ServiceTarget>` parses **case-insensitively** (`Enum.Parse` default). The dispatches use `service-server/Service-Runner` style; users can type `Server` or `server`. Pinned by `ServiceTarget_AcceptsCaseInsensitive`.
+- `Argument<ServiceTarget>` name in `--help` shows as `<Runner|Server>` (System.CommandLine's auto-derived enum help). No third value can ever sneak in via typos; the post-error help reprint step lists the allowed values too.
+- The `--help` description block for the service group fits in two lines and stays terse on purpose — the verbs' own descriptions carry the operational detail (especially `logs`, which calls out non-interchangeability with `mo server logs`).
+- `BuildSimple(verb, description, installer)` collapses what was originally three near-identical builders (`BuildLifecycle`, `BuildStatus`, `BuildLogs`-without-options) since they share the same option set (`<target>`/`--dry-run`/`--unit-dir`) and dispatch shape. `BuildLogs` is the only special case (adds `--lines`/`--follow`).
+- Did **not** add `--project`/`--project-id` to any verb (spec explicitly forbids it). Verified via `ServiceHelp_AdvertisesNoProjectOption` and `Service_Help_DoesNotMentionRunnerOrServerLifecycleDetails`.
+- Old `runner`/`server` lifecycle verbs left in place (additive per the task description; T-002/T-003 will retire them).
+- Refused to widen the diff to also tackle the cross-cutting D6 string changes (`MohistCliApi.ServerUnavailableMessage`, etc.) — those belong to T-004 per the task graph. Running them here would silently surface `mo service start server` text before the `service` group is reachable from all routes, breaking the dependency chain.
+
+### Open items for downstream tasks
+
+- T-002 (`runner` slim) can remove `runner start|stop|restart|status|service-status|logs|uninstall`; the new `service` group already covers equivalent semantics.
+- T-003 (`server` reshape) can remove `server start|stop|restart|status|logs|uninstall`; the new `service` group + `server logs` already covers the rest.
+- T-004 (`system` retire, D6 string guidance) is unblocked once T-002 and T-003 land.
