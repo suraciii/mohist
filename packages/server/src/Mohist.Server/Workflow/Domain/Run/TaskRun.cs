@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -41,6 +42,7 @@ public sealed class TaskRun
     public string? CausedByFailedTaskId { get; init; }
     public JsonElement? Output { get; set; }
     public ExecutionError? Error { get; set; }
+    public WorkDispatch? DispatchSnapshot { get; set; }
 }
 
 public static class TaskRunExtensions

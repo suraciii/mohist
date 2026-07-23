@@ -45,6 +45,22 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
+    public async Task Redelivery_UsesPersistedDispatchSnapshotAfterGrainActivation()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var runnerId = _runnerId!;
+        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        var persisted = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(persisted.CurrentStage().Tasks);
+        Assert.Equal(first, task.DispatchSnapshot);
+
+        await workflow.DeactivateForTestAsync();
+        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Equal(first, redelivery);
+    }
+
+    [Fact]
     public async Task Redelivery_RedeliversRunningWork_WhenProcessDoesNotReportIt()
     {
         await StartWorkflowAsync(SingleStage(checks: []));

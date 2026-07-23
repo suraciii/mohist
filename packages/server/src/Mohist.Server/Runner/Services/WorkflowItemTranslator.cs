@@ -31,15 +31,26 @@ public sealed class WorkflowItemTranslator : IScopedService
 {
     private readonly WorkflowProfileManager _profileManager;
     private readonly IWorkflowArtifactBindService _artifactBindService;
+    private readonly IAgentExecutionSnapshotResolver? _agentSnapshots;
     private readonly ILogger<WorkflowItemTranslator> _log;
 
     public WorkflowItemTranslator(
         WorkflowProfileManager profileManager,
         IWorkflowArtifactBindService artifactBindService,
         ILogger<WorkflowItemTranslator> log)
+        : this(profileManager, artifactBindService, log, null)
+    {
+    }
+
+    public WorkflowItemTranslator(
+        WorkflowProfileManager profileManager,
+        IWorkflowArtifactBindService artifactBindService,
+        ILogger<WorkflowItemTranslator> log,
+        IAgentExecutionSnapshotResolver? agentSnapshots)
     {
         _profileManager = profileManager;
         _artifactBindService = artifactBindService;
+        _agentSnapshots = agentSnapshots;
         _log = log;
     }
 
@@ -90,14 +101,20 @@ public sealed class WorkflowItemTranslator : IScopedService
         }
 
         var variables = JSON.Serialize(payload);
-        var withStr = SerializeRaw(item.With);
+        var with = item.With;
+        var uses = item.Uses;
+        if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
+        {
+            (uses, with) = await ResolveAgentTaskAsync(item, run, workId);
+        }
+        var withStr = SerializeRaw(with);
         var expectStr = SerializeRaw(item.Expect);
-        ValidateLegacyAgentTaskInput(item, workId, item.With, item.Expect);
+        ValidateLegacyAgentTaskInput(item with { Uses = uses }, workId, with, item.Expect);
 
         return new WorkDispatch(
             WorkflowRunId: workflowRunId,
             WorkId: workId,
-            Uses: item.Uses,
+            Uses: uses,
             With: withStr,
             Variables: variables,
             WorkType: "task",
@@ -238,6 +255,79 @@ EpicNumber: ReadEpicNumber(run),
         }
 
         return payload;
+    }
+
+    private async Task<(string Uses, Dictionary<string, JsonElement?> With)> ResolveAgentTaskAsync(
+        WorkItem item,
+        WorkflowRun run,
+        string workId)
+    {
+        if (_agentSnapshots is null)
+            throw new WorkflowDispatchRejectedException($"Workflow task '{workId}' references an Agent but Agent resolution is unavailable.");
+
+        var with = item.With;
+        if (with is null
+            || !with.TryGetValue("name", out var nameElement)
+            || nameElement is null
+            || nameElement.Value.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(nameElement.Value.GetString())
+            || !with.TryGetValue("prompt", out var promptElement)
+            || promptElement is null
+            || promptElement.Value.ValueKind != JsonValueKind.String)
+        {
+            throw new WorkflowDispatchRejectedException($"Workflow task '{workId}' has invalid mohist/agent input.");
+        }
+
+        var projectId = TryGetAnnotation(run, "projectId", out var value) ? value : null;
+        var snapshot = projectId is null
+            ? null
+            : await _agentSnapshots.ResolveAsync(projectId, nameElement.Value.GetString()!);
+        if (snapshot is null)
+            throw new WorkflowDispatchRejectedException($"Workflow task '{workId}' references Agent '{nameElement.Value.GetString()}' which is not active.");
+
+        var rawPrompt = promptElement.Value.GetString()!;
+        var composedPrompt = string.IsNullOrWhiteSpace(snapshot.Instructions)
+            ? rawPrompt
+            : $"{snapshot.Instructions}\n\n{rawPrompt}";
+        var model = ReadAgentConfigString(snapshot.AgentConfig, "model");
+        var variant = model is null ? null : ReadAgentConfigString(snapshot.AgentConfig, "variant");
+        var options = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        if (model is not null) options["model"] = JSON.SerializeToElement(model);
+        if (variant is not null) options["variant"] = JSON.SerializeToElement(variant);
+
+        var transformed = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
+        {
+            ["prompt"] = JSON.SerializeToElement(composedPrompt),
+            ["options"] = JSON.SerializeToElement(options),
+        };
+        CopyIfPresent(with, transformed, "session");
+        CopyIfPresent(with, transformed, "timeout");
+
+        return (ReadAgentConfigString(snapshot.AgentConfig, "runtime") switch
+        {
+            AgentConfigSchema.PiRuntime => "mohist/pi",
+            _ => "mohist/opencode",
+        }, transformed);
+    }
+
+    private static string? ReadAgentConfigString(JsonElement? config, string key)
+    {
+        if (config is not { ValueKind: JsonValueKind.Object } value
+            || !value.TryGetProperty(key, out var property)
+            || property.ValueKind != JsonValueKind.String)
+            return null;
+
+        var result = property.GetString();
+        return string.IsNullOrWhiteSpace(result) ? null : result;
+    }
+
+    private static void CopyIfPresent(
+        Dictionary<string, JsonElement?> source,
+        Dictionary<string, JsonElement?> target,
+        string key)
+    {
+        if (source.TryGetValue(key, out var value))
+            target[key] = value?.Clone();
     }
 
     private static string? SerializeRaw(Dictionary<string, JsonElement?>? values) =>

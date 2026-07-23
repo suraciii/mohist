@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain;
@@ -10,6 +11,34 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 
 public partial class WorkflowItemTranslatorSpecs
 {
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_ComposesRawPromptAndConcreteRuntimeInput()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-dispatch");
+        _agentResolver.Snapshot = new AgentExecutionSnapshot(
+            "Review the change.",
+            JsonSerializer.SerializeToElement(new { runtime = "pi", model = "model-a", variant = "fast" }));
+
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent", With("""
+            { "name": "reviewer", "prompt": "Fix ${{ vars.target }}", "session": "review", "timeout": 123 }
+            """));
+        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        Assert.Equal("mohist/pi", dispatch.Uses);
+        using var with = JsonDocument.Parse(dispatch.With!);
+        Assert.Equal("Review the change.\n\nFix ${{ vars.target }}", with.RootElement.GetProperty("prompt").GetString());
+        Assert.Equal("review", with.RootElement.GetProperty("session").GetString());
+        Assert.Equal(123, with.RootElement.GetProperty("timeout").GetInt32());
+        var options = with.RootElement.GetProperty("options");
+        Assert.Equal("model-a", options.GetProperty("model").GetString());
+        Assert.Equal("fast", options.GetProperty("variant").GetString());
+        Assert.False(options.TryGetProperty("instructions", out _));
+        Assert.Equal(4, with.RootElement.EnumerateObject().Count());
+        Assert.Equal("Fix ${{ vars.target }}", item.With!["prompt"]!.Value.GetString());
+    }
+
+
     [Fact]
     public async Task TranslateToDispatch_TaskItem_PreservesRawDeclarationsAlongsideSnapshot()
     {

@@ -30,3 +30,17 @@
 - The check-rejection error path must run BEFORE `ValidateWith` so authors get the actionable check message instead of generic "missing required input" messages for malformed checks.
 - The check path also short-circuits with `return` after emitting the rejection so the standard input-shape validation does not produce additional confusing errors.
 - Test yaml uses explicit `id:` so `TemplateId` matches expectations; the `WorkflowProfileYamlParser` falls back to "workflow" when `id` is absent.
+
+## T-002 Decisions
+
+- `IAgentExecutionSnapshotResolver` reuses `AgentRefResolver` so `agent_*` remains id-only and non-prefixed references remain name-first with id fallback; it returns only active definitions as cloned instructions/config snapshots.
+- `WorkflowItemTranslator` transforms only `mohist/agent` task work into `mohist/opencode` or `mohist/pi`, composes instructions with the unrendered prompt, and emits only `prompt`, optional `session`/`timeout`, and `options.model`/`options.variant`.
+- The original raw task input remains on `TaskRun.WithInput`; translation builds a separate dictionary, so Runner-side template rendering receives the composed raw template without mutating the workflow goal.
+- `TaskRun.DispatchSnapshot` stores the complete transformed `WorkDispatch`. `IWorkflowGrain.StoreActiveWorkDispatchAsync` validates ownership and compare-and-stores the first envelope; `DispatchService` returns that stored value and redelivery bypasses translation.
+- Retry creates a new `TaskRun`, so it starts without `DispatchSnapshot` and resolves the current Agent definition. Completed/failed task snapshots remain audit state but are never active or reused.
+
+## T-002 Verification
+
+- Focused `AgentRefResolverTests`: 2/2 passed; focused `WorkflowItemTranslatorSpecs` + `DispatchServiceReconciliationSpecs`: 46/46 passed.
+- Full verification: Workflow Definition 175/175, CLI 1411/1411, server unit 1339/1339, and server specs 3052/3052 passed.
+- ArchTests: 31/32 passed. The sole failure is the pre-existing T-001 test-file size ratchet for `ActionContractValidatorTests.cs` (43,726 bytes versus its 29,000-byte allowance); T-002 introduces no architecture-rule failure.

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -145,6 +146,8 @@ public class RunnerWorkflowStatusRouterSpecs
             Task.FromResult(new Mohist.Server.Workflow.Grains.WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned));
         public Task<WorkItem?> ClaimNextAsync(string workerId) =>
             Task.FromResult<WorkItem?>(null);
+        public Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch) =>
+            Task.FromResult<WorkDispatch?>(dispatch);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> FailActiveWorkAsync(string workerId, string message)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, string message)
