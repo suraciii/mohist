@@ -14,14 +14,23 @@ public class RunnerConnectionTracker : ISingletonService, IAgentSessionConnectio
         _connections[runnerId] = connectionId;
     }
 
-    public void Unregister(string runnerId)
+    public void Unregister(string runnerId, string? connectionId = null)
     {
-        _connections.TryRemove(runnerId, out _);
+        if (connectionId is null)
+        {
+            _connections.TryRemove(runnerId, out _);
+            return;
+        }
+
+        _connections.TryRemove(
+            new KeyValuePair<string, string>(runnerId, connectionId));
     }
 
-    public IReadOnlyList<string> UnregisterAndGetSessions(string runnerId)
+    public IReadOnlyList<string> UnregisterAndGetSessions(string runnerId, string connectionId)
     {
-        _connections.TryRemove(runnerId, out _);
+        if (!_connections.TryRemove(new KeyValuePair<string, string>(runnerId, connectionId)))
+            return [];
+
         if (!_sessions.TryRemove(runnerId, out var sessions)) return [];
         return sessions.Keys.ToArray();
     }

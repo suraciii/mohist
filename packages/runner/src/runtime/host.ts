@@ -28,6 +28,7 @@ import {
 } from "./opencode-models.js"
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiCatalog, type PiRuntime } from "./pi/index.js"
 import { SessionCommandJournal } from "./session-command-journal.js"
+import { FollowupOperationJournal } from "./followup-operation-journal.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { DispatchWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
@@ -132,6 +133,7 @@ export class RunnerHost {
    * dedup + on-disk recovery the host owns.
    */
   private readonly sessionCommandJournal: SessionCommandJournal
+  private readonly followupOperationJournal: FollowupOperationJournal
 
   // The active outer-run signal. The onReconnected callback fires from
   // outside the run loop, so we capture the signal here to bound the
@@ -186,6 +188,7 @@ export class RunnerHost {
     )
     this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry)
     this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
+    this.followupOperationJournal = new FollowupOperationJournal(options.runnerRoot)
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
       options.runnerId,
@@ -200,6 +203,7 @@ export class RunnerHost {
         piRuntime: () => this.piRuntime,
         serverConnection: this.connection,
         sessionCommandJournal: this.sessionCommandJournal,
+        followupOperationJournal: this.followupOperationJournal,
       },
     )
   }

@@ -14,6 +14,7 @@ import {
   type RecordingOutbox,
 } from "./support/followup-handler-fixture.js"
 import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
+import type { FollowupOperationJournalStore } from "../src/runtime/followup-operation-journal.js"
 import { makeFakePiRuntime, type FakePiRuntimeHandles } from "./support/pi-runtime-fixture.js"
 
 let runtime: FakeRuntimeHandles
@@ -243,7 +244,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     })
   })
 
-  it("Followup_Failure_RecordsUnknownActivity", async () => {
+  it("Followup_Failure_RecordsIdleActivity", async () => {
     runtime.setFollowupResult({
       ok: false,
       error: {
@@ -272,7 +273,8 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
         event: {
           type: "session.activity",
           payload: expect.objectContaining({
-            status: "failed",
+            status: "completed",
+            activity: "idle",
             failureReason: "opencode crashed",
             operationId: "followup-1",
           }),
@@ -281,6 +283,29 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     } finally {
       errorSpy.mockRestore()
     }
+  })
+
+  it("Followup_DuplicateOperationIdDoesNotEnqueueOrInvokeAgain", async () => {
+    const claimed = new Set<string>()
+    const journal: FollowupOperationJournalStore = {
+      load: async () => {},
+      claim: async (_sessionKey, operationId) => {
+        if (claimed.has(operationId)) return false
+        claimed.add(operationId)
+        return true
+      },
+      release: async (_sessionKey, operationId) => { claimed.delete(operationId) },
+    }
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime, followupOperationJournal: journal })
+    const payload = { ...workflowPayload("send once"), operationId: "followup-once" }
+
+    await expect(invokeFollowup(lastBuilder(), payload)).resolves.toEqual({ accepted: true })
+    await expect(invokeFollowup(lastBuilder(), payload)).resolves.toEqual({ accepted: true })
+    await flush()
+
+    expect(runtime.followupCalls).toHaveLength(1)
+    expect(recording.beforeExecutionCalls).toHaveLength(1)
   })
 
   it("Followup_DropsPayloadWhenTextIsMissing", async () => {

@@ -38,7 +38,7 @@ public class RunnerHub : Hub
         var runnerId = Context.GetHttpContext()?.Request.Query["runnerId"].ToString();
         if (!string.IsNullOrEmpty(runnerId))
         {
-            foreach (var sessionId in _tracker.UnregisterAndGetSessions(runnerId))
+            foreach (var sessionId in _tracker.UnregisterAndGetSessions(runnerId, Context.ConnectionId))
                 _ = _grains.GetGrain<IAgentSessionGrain>(sessionId).RunnerDisconnectedAsync();
         }
         return base.OnDisconnectedAsync(exception);
