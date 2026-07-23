@@ -1,17 +1,18 @@
 {
   "project": "mohist-local",
-  "description": "Allow Workflow tasks and checks to execute a project Agent through a durable server-resolved runtime Action snapshot.",
+  "description": "Allow Workflow tasks to execute a project Agent through a durable server-resolved runtime Action snapshot, keeping the finalized task-only contract and the existing runtime Action input contracts unchanged.",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Add the virtual Agent Action contract for tasks and checks",
+      "title": "Add the virtual Agent Action contract for tasks",
       "spec": "specs/workflow-agent-action/spec.md#agent-definition-reference-action",
-      "description": "Add the server-owned `mohist/agent` manifest with closed static `name`, template-renderable `prompt`, optional `session`, and optional `timeout` inputs to profile catalog validation. Apply the same contract to task and check definitions without querying current Agent state during profile save.",
+      "description": "Add the server-owned `mohist/agent` manifest with closed static `name`, template-renderable `prompt`, optional `session`, and optional `timeout` inputs to profile catalog validation. Accept it for tasks and reject it for checks without querying current Agent state during profile save.",
       "acceptanceCriteria": [
-        "Profiles accept valid mohist/agent tasks and checks before the referenced Agent exists",
-        "Missing name or prompt and unknown inputs fail profile validation for tasks and checks",
+        "Profiles accept valid mohist/agent tasks before the referenced Agent exists",
+        "Profiles reject mohist/agent when used for a check",
+        "Missing name or prompt and unknown inputs fail profile validation for tasks",
         "Template prompt values remain valid at profile-save time",
-        "Template name values fail profile validation for tasks and checks"
+        "Template name values fail profile validation for tasks"
       ],
       "priority": 1,
       "mode": "AFK",
@@ -19,100 +20,84 @@
       "output": "Server virtual Action manifest and profile validation specs",
       "dependsOn": [],
       "passes": false,
-      "notes": "The Runner must not register mohist/agent."
+      "notes": "The Runner must not register mohist/agent. Checks are unsupported, not silently ignored."
     },
     {
       "id": "T-002",
-      "title": "Resolve Agent references and persist task/check dispatch snapshots",
+      "title": "Resolve Agent references, compose instructions, and persist task dispatch snapshots",
       "spec": "specs/workflow-agent-action/spec.md#dispatch-time-agent-snapshot",
-      "description": "Extract an active-only name-or-id Agent execution snapshot resolver using the command-surface order: agent_* references are id-only; all others are name-first with an id fallback. Extend Workflow active-work state and grain commands to compare-and-store a complete transformed WorkDispatch. Transform task uses and each checks[*] uses before storage; poll redelivery reads the stored envelope and retry/new checks work resolves again.",
+      "description": "Extract an active-only name-or-id Agent execution snapshot resolver using the command-surface order: agent_* references are id-only; all others are name-first with an id fallback. In the translator, compose the resolved Agent instructions ahead of the task's raw (unrendered) prompt into a single dispatch prompt, map the result to the existing OpenCode/Pi input contract, and extend Workflow active-work state and grain commands to compare-and-store the complete transformed WorkDispatch. Transform task uses before storage; poll redelivery reads the stored envelope and retry resolves again.",
       "acceptanceCriteria": [
-        "Task and check dispatches resolve an active Agent to concrete mohist/opencode or mohist/pi envelopes with raw prompt retained",
+        "Task dispatches resolve an active Agent and produce a concrete mohist/opencode or mohist/pi envelope whose prompt is the Agent instructions followed by the raw task prompt, with the raw prompt retained as the workflow goal",
+        "The transformed envelope's options contains at most model and variant; no instructions key is emitted to the Runner",
+        "Template expressions in the raw task prompt are still rendered by the Runner, not by the server",
         "After Agent edit plus server restart or grain activation, redelivery returns the original stored envelope",
-        "A task retry and a newly-created checks attempt resolve the current Agent definition",
+        "A task retry resolves the current Agent definition into a new snapshot",
         "No Agent entity, AgentJob, or direct AgentSession lifecycle enters Workflow",
         "A non-prefixed legacy id that collides with an Agent name resolves to the name match"
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Agent execution snapshot resolver, durable Workflow active-work dispatch snapshot, translator and poll reconciliation specs",
+      "output": "Agent execution snapshot resolver, server-side prompt composition, durable Workflow active-work dispatch snapshot, translator and poll reconciliation specs",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Store the full wire envelope, not only Agent identity or config."
+      "notes": "Store the full wire envelope, not only Agent identity or config. Composition is on the raw prompt only."
     },
     {
       "id": "T-003",
-      "title": "Carry Agent instructions through both runtime Actions",
-      "spec": "specs/workflow-agent-action/spec.md#agent-execution-input-composition",
-      "description": "Extend mohist/opencode and mohist/pi to accept only options.instructions, options.model, and options.variant. Validate the closed shape, compose instructions before rendered prompt, forward model/variant and input/default timeout to their runtime turn requests, and leave inline Action behavior unchanged when instructions are absent.",
+      "title": "Preserve structured Agent resolution failures in Workflow task reports",
+      "spec": "specs/workflow-agent-action/spec.md#missing-agent-dispatch-failure",
+      "description": "Make dispatch rejection carry ExecutionError through DispatchService and IWorkflowGrain. A failed task dispatch stores agent_not_found on TaskRun, then uses normal Workflow recovery and advancement decisions. Do not alter the runtime Action contracts; resolution failure is reported before any Runner invocation.",
       "acceptanceCriteria": [
-        "OpenCode and Pi receive instructions before the rendered workflow prompt, with the prompt retained as the current goal",
-        "Both Actions reject unknown or malformed options and forward model, variant, and supplied timeout",
-        "Absent timeout retains the existing one-hour Action default and runtime timeout failures retain their current error codes",
-        "Fake-runtime tests cover both backends without Agent lookup"
+        "Missing or archived task Agent produces TaskRun.Error.code equal to agent_not_found and recovery can match failure.error.code",
+        "The failure path offers no Runner work and creates no AgentSession or AgentJob",
+        "The published input contracts and existing unknown-options-key behavior of mohist/opencode and mohist/pi are unchanged"
       ],
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Runner Action/runtime option contracts and focused tests for OpenCode and Pi",
-      "dependsOn": ["T-002"],
-      "passes": false,
-      "notes": "The server sends `{ prompt, session?, timeout?, options }`; no arbitrary AgentConfig reaches Runner."
-    },
-    {
-      "id": "T-004",
-      "title": "Preserve structured Agent resolution failures in Workflow reports",
-      "spec": "specs/workflow-agent-action/spec.md#missing-agent-dispatch-failure",
-      "description": "Make dispatch rejection carry ExecutionError through DispatchService and IWorkflowGrain. Failed task dispatch stores agent_not_found on TaskRun. Failed checks dispatch records agent_not_found on the unresolved named check and check-not-run on remaining checks, then uses normal Workflow recovery and advancement decisions.",
-      "acceptanceCriteria": [
-        "Missing or archived task Agent produces TaskRun.Error.code equal to agent_not_found and recovery can match failure.error.code",
-        "Missing or archived check Agent produces a named agent_not_found CheckResult and check-not-run results for remaining batch entries",
-        "Neither failure path offers Runner work or creates an AgentSession or AgentJob"
-      ],
-      "priority": 4,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "Structured Workflow dispatch rejection path with task/check specs",
+      "output": "Structured Workflow dispatch rejection path with task specs",
       "dependsOn": ["T-002"],
       "passes": false,
       "notes": "Workflow remains the decision maker; this task only preserves Runner-independent facts."
     },
     {
-      "id": "T-005",
+      "id": "T-004",
       "title": "Verify the complete Workflow-owned Agent Action behavior",
       "spec": "specs/workflow-agent-action/spec.md#workflow-owned-execution-lifecycle",
-      "description": "Add focused server and runner coverage for task/check transformation, snapshot redelivery and retry, runtime input composition, structured resolution failures, Workflow-origin session addressing, and unchanged inline Action behavior. Run affected server and runner typecheck/test suites.",
+      "description": "Add focused server coverage for task transformation, server-side instruction composition against the raw prompt, snapshot redelivery and retry, structured resolution failures, Workflow-origin session addressing, check rejection at profile validation, and unchanged inline Action behavior. Run the affected server typecheck/test suites.",
       "acceptanceCriteria": [
-        "Specs cover both OpenCode and Pi task paths and an Agent-backed check path",
+        "Specs cover both OpenCode and Pi task paths and prove the transformed envelope stays within each runtime Action's published input contract",
         "Specs prove no AgentJob is created and named Workflow sessions retain their existing namespace",
-        "npm test and npm run typecheck -w packages/runner pass without real runtime, network, filesystem, or wall-clock dependencies"
+        "Specs prove mohist/agent is rejected for checks at profile validation",
+        "npm test passes for the affected server suites without real runtime, network, filesystem, or wall-clock dependencies"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "VERIFY",
+      "output": "Focused server regression coverage and passing verification commands",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "No runner changes exist in this plan; existing runner tests guard the unchanged runtime Actions. Use injected time only."
+    },
+    {
+      "id": "T-005",
+      "title": "Reconcile the Agent Action product contract with the implementation",
+      "spec": "specs/workflow-agent-action/spec.md#agent-definition-reference-action",
+      "description": "Confirm docs/actions/agent.md already describes mohist/agent as task-only with static name, template-renderable prompt, the canonical agent_* id-only / name-first id-fallback resolver order, and the agent_not_found failure. Apply only the minimal wording needed so the documented contract matches this implementation; do not expand scope to checks.",
+      "acceptanceCriteria": [
+        "The product documentation describes task-only usage consistent with the implemented Action contract",
+        "The product documentation states that template expressions are accepted only for prompt and rejected for name",
+        "The product documentation states the exact name-or-id resolver precedence and the agent_not_found failure"
       ],
       "priority": 5,
       "mode": "AFK",
-      "type": "VERIFY",
-      "output": "Focused server/runner regression coverage and passing verification commands",
-      "dependsOn": ["T-003", "T-004"],
-      "passes": false,
-      "notes": "Use existing fake runtime hosts and injected time only."
-    },
-    {
-      "id": "T-006",
-      "title": "Align the Agent Action product contract with check support",
-      "spec": "specs/workflow-agent-action/spec.md#agent-definition-reference-action",
-      "description": "Update docs/actions/agent.md to define mohist/agent for both Workflow tasks and checks, state that name is static while prompt supports templates, and document the canonical agent_* id-only and otherwise name-first/id-fallback resolver order.",
-      "acceptanceCriteria": [
-        "The product documentation describes task and check usage consistently with the Action contract",
-        "The product documentation states that template expressions are accepted only for prompt and rejected for name",
-        "The product documentation states the exact name-or-id resolver precedence"
-      ],
-      "priority": 6,
-      "mode": "AFK",
       "type": "WRITE",
-      "output": "Updated docs/actions/agent.md product contract",
+      "output": "Confirmed or minimally updated docs/actions/agent.md product contract",
       "dependsOn": ["T-001", "T-002"],
       "passes": false,
-      "notes": "This resolves the existing task-only documentation discrepancy before the Action is published."
+      "notes": "The contract is already task-only; this task is reconciliation, not expansion."
     }
   ]
 }
