@@ -144,8 +144,13 @@ Events append in same transaction as state save. Dispatcher is the sole notifier
   重新验证 Profile 存在性，与它验证仓库存在性的方式一致。
 - `WorkflowProfileReferenceCoordinator` 串行化 Project 内 Profile 删除、Project 默认
   Profile 写入、WorkflowRun 启动 binding 写入这一组会建立或破坏 Profile 引用的命令。
-  删除检查由 `WorkflowProfileDeletionBlockerQuery` 汇总 Project default、非终态 Issue
-  显式选择与活动 Run binding；Issue 选择作为读投影被观察，不经过此协调者。
+  每个 custom Profile 引用的持久行带 nullable custom-Profile backing key 与指向
+  `(ProjectId, ProfileId)` 的 restrictive foreign key（builtin 引用保持 null，因不可删除）；
+  该外键是并发删除正确性的主依赖。`WorkflowProfileDeletionBlockerQuery` 汇总 Project
+  default、该 Project 的**所有** Issue 显式选择（含终态 Issue）与活动 Run binding，作为
+  可操作的删除诊断与错误来源。Issue 选择由 `IssueRepositoryCoordinatorGrain` 串行，
+  不经过 Profile 协调者；跨协调者的删除/选择并发由外键裁决为先提交的引用阻塞删除，或
+  Issue 端收到可重试的 `workflow-profile-not-found` conflict，绝不留 dangling reference。
 
 两个协调者各自按 Project key 串行，对参与者使用窄接口（`IIssueBindingParticipant` /
 `IProjectBindingParticipant` / `IWorkflowRunBindingParticipant`），并通过 `ArchTest`

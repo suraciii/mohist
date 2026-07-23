@@ -218,8 +218,9 @@ CLI spec tests 用 fake HTTP 验证命令路径、slash ID 编码、`--yaml`/`--
   `legacy-reserved/{base64url-utf8(originalProfileId)}`，并重写同 Project 的 default、Issue reference、
   inline-derived reference 与 Run binding。若 Project 已有不同 custom Profile 使用该确定目标 ID，migration
   在写入前失败并报告 Project、source ID 与 target ID，不执行部分迁移；操作者须先修复冲突后重试。
-- [builtin asset 不是数据库行，关系约束无法由外键表达] -> collection provider 统一存在性与
-  read-only 判定，Project/Issue/Run 写入均调用它，不依赖关系数据库单独保护。
+- [builtin asset 不是数据库行，关系约束无法由外键表达] -> custom Profile 引用由 nullable
+  backing-key restrictive foreign key 保护；builtin 引用的 backing key 保持 null，因其不可删除，
+  存在性与 read-only 判定统一由 collection provider 负责，不依赖关系数据库单独保护。
 - [移除 legacy API/CLI 会破坏已自动化的调用方] -> 本项标记为 breaking；同一发布更新 CLI、
   help、docs 和 tests，不提供 alias，调用方按新唯一 surface 迁移。
 - [catalog 暂不可用时保存的 Profile 可能在 Runner 失败] -> 返回明确 `actionValidation` skipped
