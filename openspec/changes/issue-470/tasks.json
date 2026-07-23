@@ -5,7 +5,7 @@
     {
       "id": "T-001",
       "title": "Build the runtime observability publication core",
-      "spec": "specs/runtime-observability-metrics/spec.md#runtime-metric-catalog-is-fixed",
+      "spec": "specs/runtime-observability-metrics/spec.md#requirement-runtime-metric-catalog-is-fixed",
       "description": "Create RuntimeEpoch and RuntimeObservability as the process-local publication authority for the fixed Meter catalog, source-owned degradation, telemetry counters, transition logs, and immutable snapshots. Deliver typed collector/process/storage/ingest/request/path fact contracts without integrating ingestion, HTTP status, sampling, request middleware, or route retention yet.",
       "acceptanceCriteria": [
         "RuntimeObservability exposes source-owned collector, process, storage, ingest, request and path fact methods; no public generic source setter exists and one producer cannot clear another source.",
@@ -27,7 +27,7 @@
     {
       "id": "T-002",
       "title": "Integrate telemetry outcome accounting",
-      "spec": "specs/runtime-observability-metrics/spec.md#runtime-metric-catalog-is-fixed",
+      "spec": "specs/runtime-observability-metrics/spec.md#requirement-runtime-metric-catalog-is-fixed",
       "description": "Refactor TraceIngester to classify a complete materialized request before writing and publish one derived IngestOutcome per batch. Add a typed accept-all-by-default protection decision boundary so fake protection exercises rejection and partial success without introducing real admission policy.",
       "acceptanceCriteria": [
         "TraceIngester creates one immutable PreparedIngestBatch before opening the transaction; every identifiable Span attempt is classified as parsed-for-write, malformed dropped, protection rejected or another non-retryable drop.",
@@ -51,7 +51,7 @@
     {
       "id": "T-003",
       "title": "Deliver complete tri-state status and diagnostics",
-      "spec": "specs/otel-runtime-status/spec.md#otel-status-has-exactly-three-states",
+      "spec": "specs/otel-runtime-status/spec.md#requirement-otel-status-has-exactly-three-states",
       "description": "Replace count-based status with the fixed API/CLI contract, non-initializing storage probe, sole process/storage sampler, and normal collector publication as one usable status module. The delivered production state supports off, healthy and degraded without waiting for another task.",
       "acceptanceCriteria": [
         "GET /otel/api/status maps complete snake-case snapshots; JsonIgnoreCondition.Never preserves nullable sampled fields/latest_degradation, since uses RuntimeEpoch, collector_online projection is truthful, budget remains visible off, and legacy counts are absent.",
@@ -77,7 +77,7 @@
     {
       "id": "T-004",
       "title": "Install request-local work accounting",
-      "spec": "specs/runtime-observability-metrics/spec.md#runtime-signals-are-available-through-a-standard-meter-and-a-local-summary",
+      "spec": "specs/runtime-observability-metrics/spec.md#requirement-runtime-signals-are-available-through-a-standard-meter-and-a-local-summary",
       "description": "Deliver RequestWorkScope, middleware, and EF/Orleans/HttpClient counting adapters as an independently usable request-accounting module. Keep agent response scopes active while OTel is off, but invoke T-001 Meter publication only while enabled.",
       "acceptanceCriteria": [
         "Middleware creates scope exactly when OTel is enabled outside /otel/v1 and /otel/api, or for canonical/compatibility agent status/activity; CompleteRequest runs only enabled.",
@@ -101,7 +101,7 @@
     {
       "id": "T-005",
       "title": "Isolate detached and observability work",
-      "spec": "specs/runtime-observability-metrics/spec.md#built-in-observability-work-cannot-observe-itself-into-a-feedback-loop",
+      "spec": "specs/runtime-observability-metrics/spec.md#requirement-built-in-observability-work-cannot-observe-itself-into-a-feedback-loop",
       "description": "Introduce the scope-suppressing background launcher and complete trace/runtime suppression around OTel ingest, query, status, sampling and maintenance. Integrate against the concrete status/sampler and request-scope modules.",
       "acceptanceCriteria": [
         "IBackgroundTaskLauncher replaces direct Task.Run in SystemUpdateService and BackgroundHermesIssueNotificationDispatcher, clears only RequestWorkScope while queueing, and provides awaitable fake signals.",
@@ -125,7 +125,7 @@
     {
       "id": "T-006",
       "title": "Expose the bounded ranked route summary",
-      "spec": "specs/runtime-observability-metrics/spec.md#local-ranked-route-diagnostics-are-bounded-and-ephemeral",
+      "spec": "specs/runtime-observability-metrics/spec.md#requirement-local-ranked-route-diagnostics-are-bounded-and-ephemeral",
       "description": "Add the half-open five-minute route ring over T-004 observations and expose deterministic top rows through the complete status API and CLI.",
       "acceptanceCriteria": [
         "The ring uses 301 half-open one-second buckets with 256 named routes plus other; overflow contributes to other and retained aggregate count is fixed.",
@@ -149,7 +149,7 @@
     {
       "id": "T-007",
       "title": "Preserve degraded status through bind fallback",
-      "spec": "specs/otel-runtime-status/spec.md#otel-status-has-exactly-three-states",
+      "spec": "specs/otel-runtime-status/spec.md#requirement-otel-status-has-exactly-three-states",
       "description": "Move startup orchestration into MohistHostRunner and transfer RuntimeEpoch/collector failure into a clean alternate host. Stop/dispose before rebuilding, preserve enabled intent, and prevent failed startup from probing storage.",
       "acceptanceCriteria": [
         "MohistHostRunner accepts IMohistHostFactory and IOtelBindFailureClassifier; IMohistHost exposes Services, StartAsync, StopAsync, DisposeAsync and WaitForShutdownAsync, with WebApplication and signal-controlled fake adapters.",
@@ -172,7 +172,7 @@
     {
       "id": "T-008",
       "title": "Expose agent status and activity amplification",
-      "spec": "specs/agent-path-amplification/spec.md#agent-status-exposes-the-work-used-to-build-its-response",
+      "spec": "specs/agent-path-amplification/spec.md#requirement-agent-status-exposes-the-work-used-to-build-its-response",
       "description": "Extract shared project-resolved status/activity handlers, add exact amplification objects, and restore literal project-selector aliases. Use T-004's response-local snapshot in both states and invoke established path publication only enabled.",
       "acceptanceCriteria": [
         "Canonical routes/aliases call the same handlers; aliases trim values, select first nonblank projectId then X-Mohist-Project, accept resolver IDs/names, return 400 absent and give query precedence.",
