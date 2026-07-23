@@ -1,5 +1,5 @@
 ### Requirement: WorkflowRun Profile identity binding
-When a WorkflowRun starts, it SHALL resolve the Issue's explicit Profile selection or inherited Project default and persist only the selected Profile ID as the Run's Profile binding. A WorkflowRun MUST NOT persist a snapshot or version of that Profile's Definition.
+When a WorkflowRun starts, `WorkflowProfileReferenceCoordinator` SHALL resolve the Issue's explicit Profile selection or inherited Project default and persist only the selected Profile ID as the Run's Profile binding. A WorkflowRun MUST NOT persist a snapshot or version of that Profile's Definition.
 
 #### Scenario: Start a Run from an inherited Project default
 - **WHEN** an Issue with no explicit selection starts a WorkflowRun while its Project default is `delivery/review`
