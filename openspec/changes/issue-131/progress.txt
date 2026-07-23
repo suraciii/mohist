@@ -1,0 +1,32 @@
+# Issue 131 — mohist/agent Action
+
+## Codebase Patterns
+
+- Workflow profile validation uses `ActionContractValidator.Validate(definition, catalog)` (server-side static).
+- The catalog flows from runner-side registration via `IActionCatalogSource` (`RunnerRegistryCatalogSource`), through `ProjectWorkflowProfileManager`/`IssueWorkflowProfileManager` to `WorkflowProfileYamlParser.Parse(...)`.
+- The validator's `ValidateWith` skips type checks when an input contains a workflow template token (`TemplateTokens.Contains(value)`). This is the default for inline Actions (`mohist/opencode`, `mohist/pi`).
+- `ActionContractValidator.ValidateCheck` runs `ValidateWith` after `ValidateUses`. We must intercept the check path before `ValidateWith` runs, because we want a distinct check-rejection message and the input shape check must not mask it.
+- Runner never registers `mohist/agent`. We add it server-side only and never let it leak into the runner-published catalog.
+- Acceptance criterion "Profiles accept valid mohist/agent tasks before the referenced Agent exists" maps to: server-only validation, no AgentQuerier usage in the validation path.
+
+## T-001 Decisions
+
+- `VirtualActionManifests.MohistAgent` defines the server-owned `mohist/agent` ActionCatalogEntry: required `name` (string, no template), required `prompt` (string, template OK), optional `session` (string), optional `timeout` (number), error code `agent_not_found`.
+- `ActionContractValidator.Validate` augments the catalog with the virtual entry via dictionary assignment (replaces any rogue runner-supplied entry with the same name, so the server-owned manifest always wins).
+- `ValidateCheck` rejects `mohist/agent` with a clear "not supported for check work" error before `ValidateWith` runs.
+- `ValidateWith` special-cases the `name` field of `mohist/agent`: if a template token is present, we emit a focused "must be a literal string; workflow template expressions are not supported" error. We do this only for `mohist/agent`; the general template-allowed behavior for other Actions is unchanged.
+
+## Verification
+
+- Unit tests (`ActionContractValidatorTests`): 19 new tests, all 53 pass.
+- Spec tests (`VirtualAgentActionValidationSpecs`): 15 new tests, all pass. Confirms profile save and issue-template update paths both honor the new rules and that the existing catalog skip path still works when no catalog is provided.
+- Full server unit test suite: 1337 / 1337 pass.
+- Full server spec test suite: 3050 / 3050 pass.
+- Workflow definition tests: 175 / 175 pass.
+
+## Gotchas
+
+- The runner catalog's `mohist/agent` placeholder must not survive into validation. The dictionary assignment (overwrite) handles a hypothetical rogue entry; the runner itself never publishes `mohist/agent`.
+- The check-rejection error path must run BEFORE `ValidateWith` so authors get the actionable check message instead of generic "missing required input" messages for malformed checks.
+- The check path also short-circuits with `return` after emitting the rejection so the standard input-shape validation does not produce additional confusing errors.
+- Test yaml uses explicit `id:` so `TemplateId` matches expectations; the `WorkflowProfileYamlParser` falls back to "workflow" when `id` is absent.
