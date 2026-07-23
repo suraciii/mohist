@@ -308,6 +308,41 @@ public class CliOtelCommandSpecs
     }
 
     [Fact]
+    public async Task OtelStatus_RendersAllRouteFields()
+    {
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = ValidStatus(true, "healthy", new object[]
+            {
+                new
+                {
+                    route = "/api/items",
+                    request_count = 3L,
+                    average_duration_ms = 12.5,
+                    max_duration_ms = 20.0,
+                    database_calls_per_request = 2.0,
+                    downstream_calls_per_request = 1.0,
+                },
+            }),
+        })));
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["otel", "status"], output, error);
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("route: \"/api/items\"", text);
+        Assert.Contains("request_count: 3", text);
+        Assert.Contains("average_duration_ms: 12.5", text);
+        Assert.Contains("max_duration_ms: 20", text);
+        Assert.Contains("database_calls_per_request: 2", text);
+        Assert.Contains("downstream_calls_per_request: 1", text);
+    }
+
+    [Fact]
     public async Task OtelStatus_ServerDown_ShowsStandardMessageWithoutStack()
     {
         var handler = new ThrowingHttpHandler();
@@ -410,7 +445,7 @@ public class CliOtelCommandSpecs
             queryExecutor: queryExecutor);
     }
 
-    private static object ValidStatus(bool collectorOnline, string status) => new
+    private static object ValidStatus(bool collectorOnline, string status, object[]? routes = null) => new
     {
         status,
         collector_online = collectorOnline,
@@ -419,7 +454,7 @@ public class CliOtelCommandSpecs
         telemetry = new { received_spans = 7L, saved_spans = 6L, rejected_spans = 1L, dropped_spans = 0L },
         process = new { cpu_utilization = (double?)null, working_set_bytes = (long?)100, gc_heap_bytes = (long?)200 },
         latest_degradation = (object?)null,
-        routes = Array.Empty<object>(),
+        routes = routes ?? Array.Empty<object>(),
     };
 
     private sealed class ThrowingHttpHandler : HttpMessageHandler

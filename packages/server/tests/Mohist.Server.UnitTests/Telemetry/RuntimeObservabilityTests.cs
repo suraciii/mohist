@@ -206,6 +206,74 @@ public class RuntimeObservabilityTests
     }
 
     [Fact]
+    public void RouteSummaryUsesFiveMinuteHalfOpenWindow()
+    {
+        var time = new FakeTimeProvider(Start);
+        using var runtime = HealthyRuntime(time);
+
+        runtime.CompleteRequest("/old", "GET", 200, 10, 1, 0);
+
+        time.Advance(TimeSpan.FromMinutes(5).Subtract(TimeSpan.FromMilliseconds(1)));
+        Assert.Single(runtime.GetSnapshot().Routes);
+
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Single(runtime.GetSnapshot().Routes);
+
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Single(runtime.GetSnapshot().Routes);
+
+        time.Advance(TimeSpan.FromMilliseconds(999));
+        Assert.Empty(runtime.GetSnapshot().Routes);
+    }
+
+    [Fact]
+    public void RouteSummaryFoldsOverflowAndKeepsFixedCardinality()
+    {
+        var time = new FakeTimeProvider(Start);
+        using var runtime = HealthyRuntime(time);
+
+        for (var i = 0; i < RuntimeObservability.MaxRoutesPerBucket + 1; i++)
+            runtime.CompleteRequest($"z{i:000}", "GET", 200, 1, 0, 0);
+
+        var snapshot = runtime.GetSnapshot();
+
+        Assert.Equal(RuntimeObservability.RouteBucketCount, 301);
+        Assert.Equal(10, snapshot.Routes.Count);
+        Assert.Contains(snapshot.Routes, route => route.Route == "other");
+        Assert.Equal(1, snapshot.Routes.Single(route => route.Route == "other").RequestCount);
+    }
+
+    [Fact]
+    public void RouteSummaryRanksAmplificationThenLatencyThenOrdinal()
+    {
+        var time = new FakeTimeProvider(Start);
+        using var runtime = HealthyRuntime(time);
+
+        runtime.CompleteRequest("/slow", "GET", 200, 100, 1, 0);
+        runtime.CompleteRequest("/fast", "GET", 200, 10, 1, 1);
+        runtime.CompleteRequest("/beta", "GET", 200, 10, 1, 0);
+        runtime.CompleteRequest("/alpha", "GET", 200, 10, 1, 0);
+
+        var routes = runtime.GetSnapshot().Routes;
+
+        Assert.Equal(new[] { "/fast", "/slow", "/alpha", "/beta" }, routes.Select(route => route.Route));
+        Assert.Equal(2, routes[0].DatabaseCallsPerRequest + routes[0].DownstreamCallsPerRequest);
+        Assert.Equal(100, routes[1].AverageDurationMilliseconds);
+    }
+
+    [Fact]
+    public void RouteSummaryStartsEmptyForNewRuntime()
+    {
+        var time = new FakeTimeProvider(Start);
+        using var first = HealthyRuntime(time);
+        first.CompleteRequest("/route", "GET", 200, 1, 1, 1);
+
+        using var restarted = HealthyRuntime(time);
+
+        Assert.Empty(restarted.GetSnapshot().Routes);
+    }
+
+    [Fact]
     public void RuntimeEpochCanBeSharedByMultipleAuthorities()
     {
         var time = new FakeTimeProvider(Start);

@@ -9,6 +9,9 @@ public sealed class RuntimeObservability : IDisposable
 {
     public const int MaxReasonLength = RuntimeValueRules.MaxReasonLength;
     public const long DefaultStorageBudgetBytes = RuntimeValueRules.StorageBudgetBytes;
+    public const int RouteBucketCount = 301;
+    public const int MaxRoutesPerBucket = 256;
+    private const string OtherRoute = "other";
     public static readonly TimeSpan ProtectionWindow = TimeSpan.FromMinutes(5);
     public static readonly EventId StateTransitionEvent = new(470, "RuntimeObservabilityStateTransition");
 
@@ -19,6 +22,9 @@ public sealed class RuntimeObservability : IDisposable
     private readonly ILogger<RuntimeObservability>? _logger;
     private readonly Action<RuntimeStateTransition>? _transitionSink;
     private readonly Dictionary<DegradationSource, RuntimeDegradation> _activeDegradations = [];
+    private readonly RouteBucket[] _routeBuckets = Enumerable.Range(0, RouteBucketCount)
+        .Select(static _ => new RouteBucket())
+        .ToArray();
     private readonly Meter _meter;
     private readonly Counter<long> _httpRequestCount;
     private readonly Histogram<double> _httpRequestDuration;
@@ -221,6 +227,11 @@ public sealed class RuntimeObservability : IDisposable
         _httpRequestDuration.Record(normalized.DurationMilliseconds, tags);
         _httpRequestDatabaseCalls.Record(normalized.DatabaseCalls, tags);
         _httpRequestDownstreamCalls.Record(normalized.DownstreamCalls, tags);
+        lock (_gate)
+        {
+            if (!_disposed)
+                RecordRouteLocked(normalized, _timeProvider.GetUtcNow().ToUnixTimeSeconds());
+        }
         return normalized;
     }
 
@@ -429,28 +440,41 @@ public sealed class RuntimeObservability : IDisposable
     public RuntimeObservabilitySnapshot GetSnapshot()
     {
         List<RuntimeStateTransition> transitions;
-        RuntimeObservabilitySnapshot snapshot;
+        IReadOnlyList<RouteAggregate> routeCopy;
+        RuntimeState status;
+        bool collectorOnline;
+        RuntimeStorageSnapshot storage;
+        RuntimeTelemetrySnapshot telemetry;
+        RuntimeProcessSnapshot process;
+        RuntimeDegradation? latestDegradation;
+        IReadOnlyDictionary<DegradationSource, RuntimeDegradation> activeDegradations;
         var now = _timeProvider.GetUtcNow();
         lock (_gate)
         {
             transitions = EvaluateAndApplyLocked(now, static () => MutationReason.None);
-            var active = RuntimeObservabilitySnapshot.CopyDegradations(_activeDegradations);
-            var routes = Array.AsReadOnly(Array.Empty<RuntimeRouteSnapshot>());
-            snapshot = new RuntimeObservabilitySnapshot(
-                ProjectStateLocked(),
-                _enabled && !_activeDegradations.ContainsKey(DegradationSource.Collector),
-                _epoch.Since,
-                _storage,
-                new RuntimeTelemetrySnapshot(
-                    _receivedSpans,
-                    _savedSpans,
-                    _rejectedSpans,
-                    _droppedSpans),
-                _process,
-                _latestDegradation,
-                routes,
-                active);
+            status = ProjectStateLocked();
+            collectorOnline = _enabled && !_activeDegradations.ContainsKey(DegradationSource.Collector);
+            storage = _storage;
+            telemetry = new RuntimeTelemetrySnapshot(
+                _receivedSpans,
+                _savedSpans,
+                _rejectedSpans,
+                _droppedSpans);
+            process = _process;
+            latestDegradation = _latestDegradation;
+            activeDegradations = RuntimeObservabilitySnapshot.CopyDegradations(_activeDegradations);
+            routeCopy = CopyRoutesLocked(now);
         }
+        var snapshot = new RuntimeObservabilitySnapshot(
+            status,
+            collectorOnline,
+            _epoch.Since,
+            storage,
+            telemetry,
+            process,
+            latestDegradation,
+            RankRoutes(routeCopy),
+            activeDegradations);
         EmitTransitions(transitions);
         return snapshot;
     }
@@ -540,6 +564,89 @@ public sealed class RuntimeObservability : IDisposable
             NormalizeDuration(fact.DurationMilliseconds),
             RuntimeValueRules.NonNegative(fact.DatabaseCalls),
             RuntimeValueRules.NonNegative(fact.DownstreamCalls));
+
+    private void RecordRouteLocked(RuntimeRequestFact fact, long second)
+    {
+        var bucket = _routeBuckets[BucketIndex(second)];
+        if (bucket.Second != second)
+        {
+            bucket.Second = second;
+            bucket.Routes.Clear();
+            bucket.Other = null;
+        }
+
+        if (!bucket.Routes.TryGetValue(fact.Route!, out var aggregate))
+        {
+            if (bucket.Routes.Count >= MaxRoutesPerBucket)
+            {
+                bucket.Other ??= new RouteAggregateState();
+                aggregate = bucket.Other;
+            }
+            else
+            {
+                aggregate = new RouteAggregateState();
+                bucket.Routes.Add(fact.Route!, aggregate);
+            }
+        }
+
+        aggregate.Add(fact);
+    }
+
+    private IReadOnlyList<RouteAggregate> CopyRoutesLocked(DateTimeOffset now)
+    {
+        var oldest = now - ProtectionWindow;
+        var copy = new List<RouteAggregate>(RouteBucketCount * (MaxRoutesPerBucket + 1));
+        foreach (var bucket in _routeBuckets)
+        {
+            if (bucket.Second is not { } second)
+                continue;
+
+            var start = DateTimeOffset.FromUnixTimeSeconds(second);
+            if (start.AddSeconds(1) <= oldest || start > now)
+                continue;
+
+            foreach (var (route, aggregate) in bucket.Routes)
+                copy.Add(new RouteAggregate(route, aggregate.Copy()));
+            if (bucket.Other is not null)
+                copy.Add(new RouteAggregate(OtherRoute, bucket.Other.Copy()));
+        }
+        return copy;
+    }
+
+    private static IReadOnlyList<RuntimeRouteSnapshot> RankRoutes(IReadOnlyList<RouteAggregate> values)
+    {
+        var merged = new Dictionary<string, RouteAggregateState>(StringComparer.Ordinal);
+        foreach (var value in values)
+        {
+            if (!merged.TryGetValue(value.Route, out var aggregate))
+            {
+                aggregate = new RouteAggregateState();
+                merged.Add(value.Route, aggregate);
+            }
+            aggregate.Merge(value.Values);
+        }
+
+        return merged
+            .Select(static pair =>
+            {
+                var aggregate = pair.Value;
+                var average = aggregate.TotalDuration / aggregate.RequestCount;
+                return new RuntimeRouteSnapshot(
+                    pair.Key,
+                    aggregate.RequestCount,
+                    average,
+                    aggregate.MaxDuration,
+                    (double)aggregate.DatabaseCalls / aggregate.RequestCount,
+                    (double)aggregate.DownstreamCalls / aggregate.RequestCount);
+            })
+            .OrderByDescending(static route => route.DatabaseCallsPerRequest + route.DownstreamCallsPerRequest)
+            .ThenByDescending(static route => route.AverageDurationMilliseconds)
+            .ThenBy(static route => route.Route, StringComparer.Ordinal)
+            .Take(10)
+            .ToArray();
+    }
+
+    private static int BucketIndex(long second) => (int)((second % RouteBucketCount + RouteBucketCount) % RouteBucketCount);
 
     private static double NormalizeDuration(double duration)
     {
@@ -828,4 +935,49 @@ public sealed class RuntimeObservability : IDisposable
     private readonly record struct ExpirationResult(
         RuntimeState PreviousState,
         RuntimeDegradation Cleared);
+
+    private sealed class RouteBucket
+    {
+        public long? Second { get; set; }
+        public Dictionary<string, RouteAggregateState> Routes { get; } = new(StringComparer.Ordinal);
+        public RouteAggregateState? Other { get; set; }
+    }
+
+    private sealed class RouteAggregateState
+    {
+        public long RequestCount { get; private set; }
+        public double TotalDuration { get; private set; }
+        public double MaxDuration { get; private set; }
+        public long DatabaseCalls { get; private set; }
+        public long DownstreamCalls { get; private set; }
+
+        public void Add(RuntimeRequestFact fact)
+        {
+            RequestCount = RuntimeValueRules.Add(RequestCount, 1);
+            TotalDuration += fact.DurationMilliseconds;
+            MaxDuration = Math.Max(MaxDuration, fact.DurationMilliseconds);
+            DatabaseCalls = RuntimeValueRules.Add(DatabaseCalls, fact.DatabaseCalls);
+            DownstreamCalls = RuntimeValueRules.Add(DownstreamCalls, fact.DownstreamCalls);
+        }
+
+        public void Merge(RouteAggregateState other)
+        {
+            RequestCount = RuntimeValueRules.Add(RequestCount, other.RequestCount);
+            TotalDuration += other.TotalDuration;
+            MaxDuration = Math.Max(MaxDuration, other.MaxDuration);
+            DatabaseCalls = RuntimeValueRules.Add(DatabaseCalls, other.DatabaseCalls);
+            DownstreamCalls = RuntimeValueRules.Add(DownstreamCalls, other.DownstreamCalls);
+        }
+
+        public RouteAggregateState Copy() => new()
+        {
+            RequestCount = RequestCount,
+            TotalDuration = TotalDuration,
+            MaxDuration = MaxDuration,
+            DatabaseCalls = DatabaseCalls,
+            DownstreamCalls = DownstreamCalls,
+        };
+    }
+
+    private readonly record struct RouteAggregate(string Route, RouteAggregateState Values);
 }

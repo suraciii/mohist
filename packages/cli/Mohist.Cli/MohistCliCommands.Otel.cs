@@ -406,7 +406,20 @@ internal static class OtelCommands
         await output.WriteLineAsync($"  working_set_bytes: {RenderJsonValue(process["working_set_bytes"])}").ConfigureAwait(false);
         await output.WriteLineAsync($"  gc_heap_bytes: {RenderJsonValue(process["gc_heap_bytes"])}").ConfigureAwait(false);
         await output.WriteLineAsync($"latest_degradation: {RenderJsonValue(data?["latest_degradation"])}").ConfigureAwait(false);
-        await output.WriteLineAsync($"routes: {data?["routes"]?.AsArray().Count ?? 0}").ConfigureAwait(false);
+        var routes = data?["routes"]?.AsArray();
+        await output.WriteLineAsync($"routes: {routes?.Count ?? 0}").ConfigureAwait(false);
+        if (routes is not null)
+        {
+            foreach (var route in routes)
+            {
+                await output.WriteLineAsync($"  route: {RenderJsonValue(route?["route"])}").ConfigureAwait(false);
+                await output.WriteLineAsync($"    request_count: {RenderJsonValue(route?["request_count"])}").ConfigureAwait(false);
+                await output.WriteLineAsync($"    average_duration_ms: {RenderJsonValue(route?["average_duration_ms"])}").ConfigureAwait(false);
+                await output.WriteLineAsync($"    max_duration_ms: {RenderJsonValue(route?["max_duration_ms"])}").ConfigureAwait(false);
+                await output.WriteLineAsync($"    database_calls_per_request: {RenderJsonValue(route?["database_calls_per_request"])}").ConfigureAwait(false);
+                await output.WriteLineAsync($"    downstream_calls_per_request: {RenderJsonValue(route?["downstream_calls_per_request"])}").ConfigureAwait(false);
+            }
+        }
     }
 
     private static string RenderJsonValue(JsonNode? value) => value is null || value is JsonValue { } jsonValue && jsonValue.ToJsonString() == "null"
