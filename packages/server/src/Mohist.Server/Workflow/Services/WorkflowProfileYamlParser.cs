@@ -1,6 +1,7 @@
 using System.Text;
 using Mohist.Server.Runner.Grains;
 using Mohist.Workflow.Definition;
+using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
 namespace Mohist.Server.Workflow.Services;
@@ -10,10 +11,16 @@ internal static class WorkflowProfileYamlParser
     public static WorkflowProfile Parse(string yaml, string fallbackId, ActionCatalog? catalog = null)
     {
         YamlStream stream;
-        using (var reader = new StringReader(yaml))
+        try
         {
+            using var reader = new StringReader(yaml);
             stream = new YamlStream();
             stream.Load(reader);
+        }
+        catch (YamlException exception)
+        {
+            throw new WorkflowDefinitionValidationException(
+                [new ValidationError("", $"invalid YAML: {exception.Message}")]);
         }
 
         if (stream.Documents.Count > 1)

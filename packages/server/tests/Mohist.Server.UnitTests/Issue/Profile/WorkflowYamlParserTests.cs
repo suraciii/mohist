@@ -10,6 +10,18 @@ namespace Mohist.Server.UnitTests.Issue.Profile;
 public class WorkflowYamlParserTests
 {
     [Fact]
+    public void WorkflowYamlParser_MalformedYaml_ReturnsDefinitionDiagnostic()
+    {
+        var exception = Assert.Throws<WorkflowDefinitionValidationException>(() =>
+            WorkflowProfileYamlParser.Parse("stages: [", "broken"));
+
+        var error = Assert.Single(exception.Errors);
+        Assert.Equal(ValidationSource.Definition, error.Source);
+        Assert.Equal(string.Empty, error.Path);
+        Assert.Contains("invalid YAML", error.Message);
+    }
+
+    [Fact]
     public void WorkflowYamlParser_CheckLevelRepairFieldsThrowSchemaDiagnostic()
     {
         var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""

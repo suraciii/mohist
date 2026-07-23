@@ -292,6 +292,65 @@ public class WorkflowProfileMigrationSpecs : IAsyncLifetime
         Assert.Null(stopped.WorkflowProfileIdKey);
     }
 
+    [Fact]
+    public async Task Migrate_RewritesRootAndLegacyRunProfileBindings()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = projectId,
+                TemplateId = "mohist/local",
+                Template = LegacySemanticProfile(),
+                CreatedAt = _timeProvider.GetUtcNow(),
+                UpdatedAt = _timeProvider.GetUtcNow(),
+            });
+            db.WorkflowRuns.Add(new WorkflowRunRow
+            {
+                WorkflowRunId = "wr_root_active",
+                State = "{\"status\":\"inProgress\",\"workflowProfileId\":\"mohist/local\"}",
+                Status = "inProgress",
+                MetadataProjectId = projectId,
+                WorkflowProfileIdKey = "mohist/local",
+            });
+            db.WorkflowRuns.Add(new WorkflowRunRow
+            {
+                WorkflowRunId = "wr_root_terminal",
+                State = "{\"status\":\"completed\",\"workflowProfileId\":\"mohist/local\"}",
+                Status = "completed",
+                MetadataProjectId = projectId,
+                WorkflowProfileIdKey = null,
+            });
+            db.WorkflowRuns.Add(new WorkflowRunRow
+            {
+                WorkflowRunId = "wr_legacy_annotation",
+                State = "{\"status\":\"inProgress\",\"metadata\":{\"annotations\":{\"workflowProfileId\":\"mohist/local\"}}}",
+                Status = "inProgress",
+                MetadataProjectId = projectId,
+                WorkflowProfileIdKey = "mohist/local",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await using var migrateDb = new MohistDbContext(_database.Options);
+        await WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider);
+
+        var active = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_root_active");
+        var terminal = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_root_terminal");
+        var legacy = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_legacy_annotation");
+        var renamed = $"{WorkflowProfileDataMigrator.ReservedIdPrefix}bW9oaXN0L2xvY2Fs";
+
+        Assert.Equal(renamed, JsonDocument.Parse(active.State).RootElement.GetProperty("workflowProfileId").GetString());
+        Assert.Equal(renamed, active.WorkflowProfileIdKey);
+        Assert.Equal(renamed, JsonDocument.Parse(terminal.State).RootElement.GetProperty("workflowProfileId").GetString());
+        Assert.Null(terminal.WorkflowProfileIdKey);
+        Assert.Equal(
+            renamed,
+            JsonDocument.Parse(legacy.State).RootElement.GetProperty("metadata").GetProperty("annotations").GetProperty("workflowProfileId").GetString());
+        Assert.Equal(renamed, legacy.WorkflowProfileIdKey);
+    }
+
     private async Task<(string ProjectId, int Dummy, bool Initialized)> SeedProjectAsync(string projectId = "proj-1")
     {
         await using var db = new MohistDbContext(_database.Options);

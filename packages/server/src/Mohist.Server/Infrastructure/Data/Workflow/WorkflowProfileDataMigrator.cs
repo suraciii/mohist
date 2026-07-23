@@ -312,21 +312,24 @@ public static class WorkflowProfileDataMigrator
             countsMutable.IssueSelectionsRewritten++;
         }
 
-        // 5. Rewrite WorkflowRun.WorkflowProfileIdKey from the existing
-        //    backing key (or fall back to the State JSON annotation). The
-        //    backing key is the canonical source for legacy pointer rows
-        //    that already used the (ProjectId, ProfileId) foreign-key
-        //    shape; this preserves terminal-Run null backing keys.
+        // 5. Rewrite the public Run binding in the same state shape in which
+        //    it was found. The backing key remains authoritative for the
+        //    relationship constraint, but terminal Runs intentionally have
+        //    no backing key and still need their public history rewritten.
         foreach (var run in workflowRunRows)
         {
-            var selection = !string.IsNullOrWhiteSpace(run.WorkflowProfileIdKey)
-                ? run.WorkflowProfileIdKey
-                : ReadWorkflowProfileIdFromRunState(run.State);
+            var binding = ReadWorkflowProfileBinding(run.State);
+            var selection = binding.ProfileId ?? run.WorkflowProfileIdKey;
             if (string.IsNullOrWhiteSpace(selection))
                 continue;
 
             var renamed = renames.TryGetValue(selection, out var next) ? next : selection;
-            run.State = RewriteNestedProperty(run.State, "metadata", "annotations", "workflowProfileId", renamed) ?? run.State;
+            run.State = binding.Location switch
+            {
+                WorkflowProfileBindingLocation.Root => RewriteProperty(run.State, "workflowProfileId", renamed) ?? run.State,
+                WorkflowProfileBindingLocation.LegacyAnnotation => RewriteNestedProperty(run.State, "metadata", "annotations", "workflowProfileId", renamed) ?? run.State,
+                _ => run.State,
+            };
             var status = ReadRunStatus(run.State);
             var isTerminal = status is "completed" or "stopped";
             if (isTerminal)
@@ -408,25 +411,42 @@ public static class WorkflowProfileDataMigrator
         }
     }
 
-    private static string? ReadWorkflowProfileIdFromRunState(string? stateJson)
+    private static WorkflowProfileBinding ReadWorkflowProfileBinding(string? stateJson)
     {
         if (string.IsNullOrWhiteSpace(stateJson))
-            return null;
+            return new(null, WorkflowProfileBindingLocation.None);
         try
         {
             using var doc = JsonDocument.Parse(stateJson);
-            if (!doc.RootElement.TryGetProperty("metadata", out var metadata))
-                return null;
-            if (!metadata.TryGetProperty("annotations", out var annotations))
-                return null;
-            if (!annotations.TryGetProperty("workflowProfileId", out var value))
-                return null;
-            return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+            if (doc.RootElement.TryGetProperty("workflowProfileId", out var rootValue)
+                && rootValue.ValueKind == JsonValueKind.String)
+            {
+                return new(rootValue.GetString(), WorkflowProfileBindingLocation.Root);
+            }
+
+            if (doc.RootElement.TryGetProperty("metadata", out var metadata)
+                && metadata.TryGetProperty("annotations", out var annotations)
+                && annotations.TryGetProperty("workflowProfileId", out var annotationValue)
+                && annotationValue.ValueKind == JsonValueKind.String)
+            {
+                return new(annotationValue.GetString(), WorkflowProfileBindingLocation.LegacyAnnotation);
+            }
         }
         catch
         {
-            return null;
+            // Invalid legacy state is left for the normal run recovery path.
         }
+
+        return new(null, WorkflowProfileBindingLocation.None);
+    }
+
+    private sealed record WorkflowProfileBinding(string? ProfileId, WorkflowProfileBindingLocation Location);
+
+    private enum WorkflowProfileBindingLocation
+    {
+        None,
+        Root,
+        LegacyAnnotation,
     }
 
     private static string? RewriteProperty(string? stateJson, string property, string value)
