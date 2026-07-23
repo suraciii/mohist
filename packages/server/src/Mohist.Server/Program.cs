@@ -81,7 +81,7 @@ try
     await app.StartAsync();
     if (otelOptions.Enabled)
     {
-        app.Services.GetRequiredService<OtelCollectorStatus>().SetPortBound(true);
+        app.Services.GetRequiredService<RuntimeObservability>().PublishCollector(CollectorResult.Online());
     }
 }
 catch (IOException ex) when (otelOptions.Enabled && OtelBindFailureDetector.IsOtlpPortBindFailure(ex, otelOptions.Port))

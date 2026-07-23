@@ -524,7 +524,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetStatus_OnMainApi_ReturnsCollectorStatus()
+    public async Task GetStatus_OnMainApi_ReturnsBoundedRuntimeStatus()
     {
         using var client = _factory.CreateMainApiClient();
         using var response = await client.GetAsync(StatusPath);
@@ -532,18 +532,18 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var data = doc.RootElement.GetProperty("data");
-        Assert.True(data.TryGetProperty("collector_online", out _));
-        Assert.True(data.TryGetProperty("db_size_bytes", out _));
-        Assert.True(data.TryGetProperty("trace_count", out _));
-        Assert.True(data.TryGetProperty("span_count", out _));
+        foreach (var field in new[] { "status", "collector_online", "since", "storage", "telemetry", "process", "latest_degradation", "routes" })
+            Assert.True(data.TryGetProperty(field, out _));
+        Assert.False(data.TryGetProperty("trace_count", out _));
+        Assert.False(data.TryGetProperty("span_count", out _));
     }
 
     [Fact]
     public async Task GetStatus_ReportsCollectorOnline()
     {
         using var scope = _factory.Services.CreateScope();
-        var status = scope.ServiceProvider.GetRequiredService<OtelCollectorStatus>();
-        status.SetPortBound(true);
+        var runtime = scope.ServiceProvider.GetRequiredService<RuntimeObservability>();
+        runtime.PublishCollector(CollectorResult.Online());
 
         using var client = _factory.CreateMainApiClient();
         using var response = await client.GetAsync(StatusPath);
@@ -556,8 +556,8 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     public async Task GetStatus_ReportsCollectorOffline()
     {
         using var scope = _factory.Services.CreateScope();
-        var status = scope.ServiceProvider.GetRequiredService<OtelCollectorStatus>();
-        status.SetPortBound(false);
+        var runtime = scope.ServiceProvider.GetRequiredService<RuntimeObservability>();
+        runtime.PublishCollector(CollectorResult.Unverified());
 
         using var client = _factory.CreateMainApiClient();
         using var response = await client.GetAsync(StatusPath);
@@ -567,7 +567,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetStatus_WithTraces_ReportsCountsAndSize()
+    public async Task GetStatus_WithTraces_DoesNotInspectHistory()
     {
         SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
         SeedTrace("t2", "svc", "2026-01-02T00:00:00Z", "2026-01-02T00:00:01Z", 1);
@@ -581,12 +581,9 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var data = doc.RootElement.GetProperty("data");
 
-        Assert.Equal(3L, data.GetProperty("trace_count").GetInt64());
-        Assert.True(data.GetProperty("span_count").GetInt64() >= 3L);
-        // db_size_bytes is the otel.db file size; it is 0 against the in-memory
-        // database this factory uses. The file-size contract (> 0 for a
-        // file-backed db) is covered by TraceQuerierSpecs.GetStatusAsync_ReportsCountsAndFileSize.
-        Assert.True(data.GetProperty("db_size_bytes").GetInt64() >= 0L);
+        Assert.False(data.TryGetProperty("trace_count", out _));
+        Assert.False(data.TryGetProperty("span_count", out _));
+        Assert.Equal(0L, data.GetProperty("telemetry").GetProperty("received_spans").GetInt64());
     }
 
     [Fact]

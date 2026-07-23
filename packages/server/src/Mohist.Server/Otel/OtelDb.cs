@@ -212,6 +212,17 @@ public sealed class OtelDb
         return connection;
     }
 
+    public SqliteConnection OpenReadinessConnection()
+    {
+        var builder = new SqliteConnectionStringBuilder(ReadWriteConnectionString)
+        {
+            DefaultTimeout = 1,
+        };
+        var connection = new SqliteConnection(builder.ToString());
+        connection.Open();
+        return connection;
+    }
+
     /// <summary>
     /// Opens a read-only connection to <c>otel.db</c>. Used by the
     /// <c>POST /otel/api/query</c> handler and by <c>mo otel query</c> so

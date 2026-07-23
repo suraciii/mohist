@@ -6,6 +6,7 @@ public interface IFileSystem
 {
     bool Exists(string path);
     string ReadAllText(string path);
+    long? GetFileLength(string path) => Exists(path) ? new FileInfo(path).Length : null;
 }
 
 public sealed record InstallDetectionResult(

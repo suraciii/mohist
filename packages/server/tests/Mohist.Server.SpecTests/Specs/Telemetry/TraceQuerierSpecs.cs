@@ -12,9 +12,14 @@ public class TraceQuerierSpecs : IDisposable
 {
     private readonly OtelDb _db;
     private readonly TraceQuerier _querier;
-    private readonly OtelCollectorStatus _status;
     private readonly TraceIngester _ingester;
     private readonly FakeTimeProvider _timeProvider;
+    private readonly TaskCompletionSource<bool> _readerStarted =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _queryInterrupted =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _connectionDisposed =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     // Keeper keeps the in-memory SQLite database alive for the test's lifetime.
     private readonly Microsoft.Data.Sqlite.SqliteConnection _keeper;
 
@@ -22,13 +27,13 @@ public class TraceQuerierSpecs : IDisposable
     {
         (_db, _keeper) = InMemoryOtelDb.Create();
         _ingester = new TraceIngester(_db, NullLogger<TraceIngester>.Instance);
-        _status = new OtelCollectorStatus();
         _timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 7, 21, 0, 0, 0, TimeSpan.Zero));
         _querier = new TraceQuerier(
             _db,
-            _status,
-            new InMemoryServerFileSystem(),
-            _timeProvider);
+            _timeProvider,
+            () => _readerStarted.TrySetResult(true),
+            () => _queryInterrupted.TrySetResult(true),
+            () => _connectionDisposed.TrySetResult(true));
     }
 
     public void Dispose()
@@ -149,44 +154,6 @@ public class TraceQuerierSpecs : IDisposable
         Assert.Equal(TraceQuerier.DefaultListLimit, nullRows.Count);
         Assert.Equal(TraceQuerier.DefaultListLimit, zeroRows.Count);
         Assert.Equal(TraceQuerier.DefaultListLimit, negativeRows.Count);
-    }
-
-    [Fact]
-    public async Task GetStatusAsync_ReportsCollectorOfflineState()
-    {
-        var snapshot = await _querier.GetStatusAsync();
-
-        Assert.False(snapshot.CollectorOnline);
-    }
-
-    [Fact]
-    public async Task GetStatusAsync_ReportsCollectorOnlineState()
-    {
-        _status.SetPortBound(true);
-
-        var snapshot = await _querier.GetStatusAsync();
-
-        Assert.True(snapshot.CollectorOnline);
-    }
-
-    [Fact]
-    public async Task GetStatusAsync_ReportsCounts()
-    {
-        // Count reporting is exercised against the in-memory db (the file-size
-        // portion of the former ReportsCountsAndFileSize spec was WAL-mode
-        // timing-dependent and is covered by OtelDbSpecs against a quiescent
-        // file-backed db).
-        SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
-        SeedTrace("t2", "svc", "2026-01-02T00:00:00Z", "2026-01-02T00:00:01Z", 1);
-        SeedTrace("t3", "svc", "2026-01-03T00:00:00Z", "2026-01-03T00:00:01Z", 1);
-        SeedSpan("t1", "s1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z");
-        SeedSpan("t1", "s2", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z");
-        SeedSpan("t2", "s1", "2026-01-02T00:00:00Z", "2026-01-02T00:00:01Z");
-
-        var snapshot = await _querier.GetStatusAsync();
-
-        Assert.Equal(3L, snapshot.TraceCount);
-        Assert.True(snapshot.SpanCount >= 3L);
     }
 
     [Fact]
@@ -343,18 +310,8 @@ public class TraceQuerierSpecs : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteBoundedQuery_ExecutionBudgetCancelsReaderAndDisposesConnection()
+    public async Task ExecuteBoundedQuery_ExecutionBudgetInterruptsRecursiveReader()
     {
-        var queryInterrupted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var connectionDisposed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var querier = new TraceQuerier(
-            _db,
-            _status,
-            new InMemoryServerFileSystem(),
-            _timeProvider,
-            () => _timeProvider.Advance(TimeSpan.FromSeconds(TraceQuerier.QueryExecutionBudgetSeconds)),
-            () => queryInterrupted.TrySetResult(true),
-            () => connectionDisposed.TrySetResult(true));
         var query = """
             WITH RECURSIVE numbers(value) AS (
                 SELECT 1
@@ -364,15 +321,19 @@ public class TraceQuerierSpecs : IDisposable
             SELECT value FROM numbers;
             """;
 
-        var exception = await Record.ExceptionAsync(() => querier.ExecuteBoundedQuery(query));
+        var execution = Task.Run(() => _querier.ExecuteBoundedQuery(query));
+        await _readerStarted.Task;
+        _timeProvider.Advance(TimeSpan.FromSeconds(TraceQuerier.QueryExecutionBudgetSeconds));
+
+        var exception = await Record.ExceptionAsync(() => execution);
 
         Assert.NotNull(exception);
         Assert.True(
             exception is OperationCanceledException
                 || exception is SqliteException { SqliteErrorCode: 9 },
             $"Expected cancellation or SQLITE_INTERRUPT (9), got {exception}");
-        Assert.True(queryInterrupted.Task.IsCompletedSuccessfully);
-        Assert.True(connectionDisposed.Task.IsCompletedSuccessfully);
+        Assert.True(_queryInterrupted.Task.IsCompletedSuccessfully);
+        Assert.True(_connectionDisposed.Task.IsCompletedSuccessfully);
     }
 
     [Fact]

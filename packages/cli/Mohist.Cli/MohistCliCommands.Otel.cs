@@ -290,6 +290,11 @@ internal static class OtelCommands
             await api.Error.WriteLineAsync(MohistCliApi.ServerUnavailableMessage).ConfigureAwait(false);
             return 1;
         }
+        catch (InvalidDataException ex)
+        {
+            await api.Error.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            return 1;
+        }
     }
 
     private static async Task RenderTableAsync(TextWriter output, string[] columns, IReadOnlyList<object?[]> rows)
@@ -372,15 +377,39 @@ internal static class OtelCommands
 
     private static async Task RenderStatusAsync(TextWriter output, JsonNode? data)
     {
-        var collectorOnline = data?["collector_online"]?.GetValue<bool>() ?? false;
-        var dbSize = data?["db_size_bytes"]?.GetValue<long>() ?? 0L;
-        var traceCount = data?["trace_count"]?.GetValue<long>() ?? 0L;
-        var spanCount = data?["span_count"]?.GetValue<long>() ?? 0L;
+        var status = data?["status"]?.GetValue<string>();
+        if (status is not ("off" or "healthy" or "degraded"))
+            throw new InvalidDataException("Server returned an invalid OTel status payload.");
 
-        await output.WriteLineAsync($"collector: {(collectorOnline ? "online" : "offline")}")
-            .ConfigureAwait(false);
-        await output.WriteLineAsync($"db_size_bytes: {dbSize}").ConfigureAwait(false);
-        await output.WriteLineAsync($"trace_count: {traceCount}").ConfigureAwait(false);
-        await output.WriteLineAsync($"span_count: {spanCount}").ConfigureAwait(false);
+        var storage = data?["storage"]?.AsObject()
+            ?? throw new InvalidDataException("Server returned an incomplete OTel status payload.");
+        var telemetry = data?["telemetry"]?.AsObject()
+            ?? throw new InvalidDataException("Server returned an incomplete OTel status payload.");
+        var process = data?["process"]?.AsObject()
+            ?? throw new InvalidDataException("Server returned an incomplete OTel status payload.");
+
+        await output.WriteLineAsync($"status: {status}").ConfigureAwait(false);
+        await output.WriteLineAsync($"collector_online: {data?["collector_online"]?.GetValue<bool>() ?? false}").ConfigureAwait(false);
+        await output.WriteLineAsync($"since: {data?["since"]?.GetValue<string>() ?? ""}").ConfigureAwait(false);
+        await output.WriteLineAsync("storage:").ConfigureAwait(false);
+        await output.WriteLineAsync($"  usage_bytes: {RenderJsonValue(storage["usage_bytes"])}").ConfigureAwait(false);
+        await output.WriteLineAsync($"  budget_bytes: {RenderJsonValue(storage["budget_bytes"])}").ConfigureAwait(false);
+        await output.WriteLineAsync($"  growth_bytes_per_second: {RenderJsonValue(storage["growth_bytes_per_second"])}").ConfigureAwait(false);
+        await output.WriteLineAsync($"  growth_window_seconds: {RenderJsonValue(storage["growth_window_seconds"])}").ConfigureAwait(false);
+        await output.WriteLineAsync("telemetry:").ConfigureAwait(false);
+        await output.WriteLineAsync($"  received_spans: {RenderJsonValue(telemetry["received_spans"])}").ConfigureAwait(false);
+        await output.WriteLineAsync($"  saved_spans: {RenderJsonValue(telemetry["saved_spans"])}").ConfigureAwait(false);
+        await output.WriteLineAsync($"  rejected_spans: {RenderJsonValue(telemetry["rejected_spans"])}").ConfigureAwait(false);
+        await output.WriteLineAsync($"  dropped_spans: {RenderJsonValue(telemetry["dropped_spans"])}").ConfigureAwait(false);
+        await output.WriteLineAsync("process:").ConfigureAwait(false);
+        await output.WriteLineAsync($"  cpu_utilization: {RenderJsonValue(process["cpu_utilization"])}").ConfigureAwait(false);
+        await output.WriteLineAsync($"  working_set_bytes: {RenderJsonValue(process["working_set_bytes"])}").ConfigureAwait(false);
+        await output.WriteLineAsync($"  gc_heap_bytes: {RenderJsonValue(process["gc_heap_bytes"])}").ConfigureAwait(false);
+        await output.WriteLineAsync($"latest_degradation: {RenderJsonValue(data?["latest_degradation"])}").ConfigureAwait(false);
+        await output.WriteLineAsync($"routes: {data?["routes"]?.AsArray().Count ?? 0}").ConfigureAwait(false);
     }
+
+    private static string RenderJsonValue(JsonNode? value) => value is null || value is JsonValue { } jsonValue && jsonValue.ToJsonString() == "null"
+        ? "null"
+        : value?.ToJsonString() ?? "null";
 }

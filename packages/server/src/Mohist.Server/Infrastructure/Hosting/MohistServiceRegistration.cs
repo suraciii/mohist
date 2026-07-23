@@ -177,6 +177,9 @@ public static class MohistServiceRegistration
                 sp.GetRequiredService<TimeProvider>());
         });
         services.AddSingleton<OtelDb>();
+        services.TryAddSingleton<IProcessResourceReader, ProcessResourceReader>();
+        services.TryAddSingleton<IOtelStorageProbe, OtelStorageProbe>();
+        services.AddHostedService<OtelDiagnosticsSampler>();
         services.AddSingleton<OtelCollectorStatus>();
         services.AddSingleton<IIngestProtectionDecision, AcceptAllIngestProtectionDecision>();
         services.AddSingleton<OtlpTraceResponseWriter>();
