@@ -32,17 +32,20 @@ public class AgentSessionStore : IAgentSessionStore
     private readonly IEventStore _eventStore;
     private readonly IGrainFactory _grainFactory;
     private readonly ILogger<AgentSessionStore> _log;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
 
     public AgentSessionStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
         IGrainFactory grainFactory,
-        ILogger<AgentSessionStore> log)
+        ILogger<AgentSessionStore> log,
+        IBackgroundTaskLauncher? backgroundTasks = null)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
         _grainFactory = grainFactory;
         _log = log;
+        _backgroundTasks = backgroundTasks ?? new BackgroundTaskLauncher();
     }
 
     public async Task<AgentSession?> LoadAsync(string key)
@@ -121,7 +124,7 @@ public class AgentSessionStore : IAgentSessionStore
     }
 
     private void PokeDispatcherBestEffort() =>
-        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(AgentSessionStore));
+        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(AgentSessionStore), _backgroundTasks);
 
     private async Task StageSessionAsync(MohistDbContext db, string key, AgentSession state, CancellationToken ct = default)
     {

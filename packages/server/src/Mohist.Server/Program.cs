@@ -67,6 +67,7 @@ await DatabaseInitializer.InitializeAsync(app.Services);
 app.UseOtelPortIsolation();
 app.UseResponseCompression();
 app.UseRouting();
+app.UseOtelSuppression();
 app.UseRuntimeRequestMetrics();
 
 app.MapMohistApi();
@@ -130,6 +131,7 @@ static async Task<WebApplication> BuildAlternateApp(string[] args)
     alt.UseResponseCompression();
     alt.UseOtelPortIsolation();
     alt.UseRouting();
+    alt.UseOtelSuppression();
     alt.UseRuntimeRequestMetrics();
     alt.MapMohistApi();
     alt.MapMohistWeb();

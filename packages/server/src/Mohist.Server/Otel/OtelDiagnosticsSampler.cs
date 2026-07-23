@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Mohist.Server.SystemInfo;
+using OpenTelemetry;
 
 namespace Mohist.Server.Otel;
 
@@ -31,6 +32,11 @@ public sealed class ProcessResourceReader : IProcessResourceReader
 public interface IOtelStorageProbe
 {
     StorageProbeMetadata Probe();
+}
+
+public interface IOtelMaintenanceCallback
+{
+    Task ExecuteAsync(CancellationToken cancellationToken);
 }
 
 public readonly record struct StorageProbeMetadata(long UsageBytes);
@@ -68,6 +74,7 @@ public sealed class OtelDiagnosticsSampler : IHostedService
     private readonly IOtelStorageProbe _storageProbe;
     private readonly TimeProvider _timeProvider;
     private readonly bool _enabled;
+    private readonly IReadOnlyList<IOtelMaintenanceCallback> _maintenanceCallbacks;
     private readonly object _gate = new();
     private Task? _loop;
     private CancellationTokenSource? _stop;
@@ -82,8 +89,9 @@ public sealed class OtelDiagnosticsSampler : IHostedService
         IProcessResourceReader processReader,
         IOtelStorageProbe storageProbe,
         TimeProvider timeProvider,
-        Microsoft.Extensions.Options.IOptions<OtelOptions> options)
-        : this(runtime, lifetime, processReader, storageProbe, timeProvider, options.Value.Enabled)
+        Microsoft.Extensions.Options.IOptions<OtelOptions> options,
+        IEnumerable<IOtelMaintenanceCallback> maintenanceCallbacks)
+        : this(runtime, lifetime, processReader, storageProbe, timeProvider, options.Value.Enabled, maintenanceCallbacks)
     {
     }
 
@@ -93,7 +101,8 @@ public sealed class OtelDiagnosticsSampler : IHostedService
         IProcessResourceReader processReader,
         IOtelStorageProbe storageProbe,
         TimeProvider timeProvider,
-        bool enabled)
+        bool enabled,
+        IEnumerable<IOtelMaintenanceCallback>? maintenanceCallbacks = null)
     {
         _runtime = runtime;
         _lifetime = lifetime;
@@ -101,6 +110,7 @@ public sealed class OtelDiagnosticsSampler : IHostedService
         _storageProbe = storageProbe;
         _timeProvider = timeProvider;
         _enabled = enabled;
+        _maintenanceCallbacks = maintenanceCallbacks?.ToArray() ?? [];
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -125,14 +135,20 @@ public sealed class OtelDiagnosticsSampler : IHostedService
         {
             await WaitForApplicationStartedAsync(stopping).ConfigureAwait(false);
             if (_enabled)
+            {
                 SampleStorage();
+                await RunMaintenanceAsync(stopping).ConfigureAwait(false);
+            }
 
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10), _timeProvider);
             while (await timer.WaitForNextTickAsync(stopping).ConfigureAwait(false))
             {
                 SampleProcess();
                 if (_enabled)
+                {
                     SampleStorage();
+                    await RunMaintenanceAsync(stopping).ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested)
@@ -191,7 +207,11 @@ public sealed class OtelDiagnosticsSampler : IHostedService
         try
         {
             var now = _timeProvider.GetTimestamp();
-            var sample = _storageProbe.Probe();
+            StorageProbeMetadata sample;
+            using (var suppression = SuppressInstrumentationScope.Begin())
+            {
+                sample = _storageProbe.Probe();
+            }
             lock (_gate)
             {
                 _growth.Enqueue((now, sample.UsageBytes));
@@ -221,6 +241,25 @@ public sealed class OtelDiagnosticsSampler : IHostedService
             lock (_gate)
                 _growth.Clear();
             _runtime.PublishStorage(StorageProbeResult.Failure(ex.Message));
+        }
+    }
+
+    private async Task RunMaintenanceAsync(CancellationToken stopping)
+    {
+        foreach (var callback in _maintenanceCallbacks)
+        {
+            try
+            {
+                using var suppression = SuppressInstrumentationScope.Begin();
+                await callback.ExecuteAsync(stopping).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+            }
         }
     }
 }

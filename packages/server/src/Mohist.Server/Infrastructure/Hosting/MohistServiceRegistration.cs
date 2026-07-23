@@ -60,6 +60,7 @@ public static class MohistServiceRegistration
     public static IServiceCollection ConfigureMohistServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddMohistConventionalServices();
+        services.TryAddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
 
         services.AddRouting(options =>
         {
