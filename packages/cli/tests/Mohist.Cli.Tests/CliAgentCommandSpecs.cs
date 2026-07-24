@@ -114,6 +114,82 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
+    public async Task AgentInstall_AgentCreateConflict_ResolvesExistingAndBindsRulesToIt()
+    {
+        // Concurrent-install race: the list-then-create window is crossed by
+        // another install, so POST /agents returns 409 AGENT_NAME_CONFLICT.
+        // Install must treat it as "exists, skipped", re-resolve the agent by
+        // name against the real project id, and bind both rules to that agent
+        // (rather than erroring out with a malformed re-resolve URL).
+        var fileSystem = FileSystemWithProject();
+        var agentListCalls = 0;
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (request.Method == HttpMethod.Get && path == "/api/projects/proj_123")
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        id = "proj_123",
+                        repositories = new[]
+                        {
+                            new { name = "default", gitUrl = "https://example.com/repo.git", baseBranch = "main", isDefault = true },
+                        },
+                    },
+                }));
+            }
+
+            if (request.Method == HttpMethod.Get && path == "/api/projects/proj_123/agents")
+            {
+                agentListCalls++;
+                // First list (EnsureAgentAsync existence check) sees no agent;
+                // the second list (ResolveAgentAsync after the 409) sees the
+                // agent the racing install just created. Exact-path match
+                // matters: the prior bug built a double-prefixed URL
+                // (/api/projects/%2Fapi%2F.../agents) which must NOT match
+                // here, so that bug fails this test rather than being hidden.
+                var agents = agentListCalls == 1
+                    ? Array.Empty<object>()
+                    : new[] { Agent("agent_supervisor", "supervisor") };
+                return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = agents }));
+            }
+
+            if (request.Method == HttpMethod.Get && path.EndsWith("/routing/rules", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() }));
+
+            if (request.Method == HttpMethod.Post && path.EndsWith("/agents", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.JsonError("Agent name 'supervisor' is already used", "AGENT_NAME_CONFLICT", HttpStatusCode.Conflict));
+
+            if (request.Method == HttpMethod.Post && path.EndsWith("/routing/rules", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { id = "rule_1", name = "rule" } }, HttpStatusCode.Created));
+
+            return Task.FromResult(RecordingHttpHandler.JsonError("unexpected"));
+        });
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("exists, skipped: agent supervisor", stdout);
+        Assert.DoesNotContain("Agent 'supervisor' not found", stdout);
+        // Request order: [0]=GET agents (empty), [1]=POST agents (409),
+        // [2]=GET agents (re-resolve), [3]=GET rules, [4]=POST approval rule,
+        // [5]=GET rules, [6]=POST failure rule.
+        // The re-resolve hit the project-scoped agents list, not a malformed
+        // double-prefixed URL.
+        Assert.Equal("/api/projects/proj_123/agents?all=true", handler.Requests[2].RequestUri?.PathAndQuery);
+        // Both rules still bind to the re-resolved supervisor agent.
+        var approvalAgentId = JsonNode.Parse(handler.Requests[4].Body!)!["agentId"]?.GetValue<string>();
+        var failureAgentId = JsonNode.Parse(handler.Requests[6].Body!)!["agentId"]?.GetValue<string>();
+        Assert.Equal("agent_supervisor", approvalAgentId);
+        Assert.Equal("agent_supervisor", failureAgentId);
+    }
+
+    [Fact]
     public async Task AgentInstall_RerunSkipsExistingResources()
     {
         var fileSystem = FileSystemWithProject();

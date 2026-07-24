@@ -1,202 +1,169 @@
-# Review — issue-488 (`mo agent install supervisor`)
+# Review — issue-488 (`mo agent install supervisor`) — re-review after fixes
 
-Reviewer role: critical review of the change as it sits in the tree, against
-`proposal.md`, `specs/agent-preset-install/spec.md`, `design.md`, `tasks.json`,
-and the issue acceptance. No file other than this one was modified. Findings are
-written so a separate fix task can act on each without re-investigation.
+Reviewer role: independent review of the change as it sits in the tree now,
+against `proposal.md`, `specs/agent-preset-install/spec.md`, `design.md`,
+`tasks.json`, and the issue acceptance. No file other than this one was
+modified. This re-review judges the current state after the prior round's
+fixes landed; each finding carries enough context for a separate fix task.
 
 ## How the change was verified
 
-- Read all changed product sources (`MohistCliCommands.Agent.cs`,
-  `PresetCatalog.cs`, `AgentInstallPreflight.cs`, `MohistCliApi.cs`), the preset
-  resources (`presets/manifest.json`, `presets/supervisor/*.md`), the csproj
-  Content entry, and the test files (`PresetCatalogTests.cs`,
-  `CliAgentCommandSpecs.cs`).
-- Traced the deployment path: how `mo update` lays the CLI out, how
-  `SkillAssetRootResolver` resolves the skill-data root, and how `PresetCatalog`
-  derives its own root from it.
-- Ran `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj` (clean,
-  TreatWarningsAsErrors satisfied) and `dotnet test packages/cli/tests/Mohist.Cli.Tests`
-  filtered to Preset/AgentInstall (1365 passed).
-- **Ran the built CLI against the real (non-overridden) `PresetCatalog` on this
-  machine**, which is in the post-`mo update` steady state (`~/.mohist/cli/skill-data`
-  present, `~/.mohist/cli/presets` absent):
+- Read the spec and every changed product source (`PresetCatalog.cs`,
+  `PresetAssetRootResolver.cs`, `ManagedAssetSynchronizer.cs`,
+  `MohistCliCommands.Agent.cs`, `AgentInstallPreflight.cs`,
+  `Update/UpdateOperations.cs`, `Mohist.Cli.csproj`), the preset resources
+  (`presets/manifest.json`, `presets/supervisor/*.md`), and the test files
+  (`CliAgentCommandSpecs.cs`, `ManagedAssetSynchronizerTests.cs`,
+  `PresetCatalogTests.cs`, `UpdateInstallSyncTests.cs`, `UpdateTestFactory.cs`).
+- `dotnet build Mohist.sln` clean (TreatWarningsAsErrors satisfied).
+- `dotnet test Mohist.sln` green: Workflow.Definition 175, Cli 1371,
+  Server.Unit 1346, Arch 32, Spec 3006.
+- Empirically ran the built CLI in a simulated post-`mo update` managed-cache
+  state: `mo agent install acme` prints
+  `Unknown preset 'acme'. Available presets: supervisor.` (catalog resolves
+  `supervisor` from `~/.mohist/cli/presets`). The prior round's headline
+  failure (`Available presets: .`, feature dead) is gone.
 
-  ```
-  $ dotnet run --project packages/cli/Mohist.Cli/Mohist.Cli.csproj -- agent install supervisor
-  Unknown preset 'supervisor'. Available presets: .
-  ```
+## Prior-round findings — resolution status
 
-  Exit 1, no HTTP sent. The feature is non-functional in this state.
+The critical blocker from the prior review is properly fixed and verified:
+
+- **F1 (deployment-path break) — FIXED.** `mo update` now syncs `presets/`
+  alongside `skill-data/` (`UpdateOperations.cs:150-152,164,239-244`), and
+  `PresetCatalog` resolves its root independently via `PresetAssetRootResolver`
+  (managed cache → sibling), no longer deriving it from the skill-data root.
+  Empirically confirmed above; covered by `PresetCatalogTests`
+  (`CreateDefault_ResolvesManagedCacheLayout…`,
+  `CreateDefault_WhenPresetsAbsentEverywhere_ListsNoPresets`),
+  `ManagedAssetSynchronizerPresetTests`, and the command-level
+  `AgentInstall_WhenManagedPresetsAbsent_ExitsNonZeroBeforeAnyHttp`.
+- **F2 (preflight probed CWD but called it "the workspace") — ADDRESSED.**
+  The project API exposes no per-repository workspace path (control/execution
+  plane separation), so the warning is now framed honestly as a CWD-as-proxy
+  check that names the resolved default repo (`AgentInstallPreflight.cs:17-48`,
+  `DefaultRepository` struct).
+- **F3 (rules' agentId binding untested) — ADDRESSED.**
+  `AgentInstall_CreatesAgentAndRulesInOrder` now asserts both rule POST bodies
+  bind `agentId` to `agent_supervisor`.
+- **F4 (static PresetCatalogOverride) — ADDRESSED.** Removed; the install
+  command builds the catalog from `api.FileSystem` + `api.GetUserHome`, and
+  specs seed the managed-cache path to exercise the real resolution.
 
 ## Findings
 
-### F1 — Feature is dead on the canonical deployment path (`mo update`) [Critical, must fix]
+### N1 — Agent 409-conflict safety net is broken (malformed re-resolve URL) [Medium, must fix]
 
-After `mo update`, the managed CLI lives at `~/.mohist/cli/mo`,
-`~/.mohist/cli/skill-data/` is populated, and `~/.mohist/cli/presets/` **does
-not exist**. Running `mo agent install supervisor` from that binary prints
-`Unknown preset 'supervisor'. Available presets: .` and exits 1 before any HTTP
-call. Every acceptance criterion of T-001/T-002/T-003 and the spec's "Known
-preset name proceeds to installation" scenario are violated in this state —
-which is the normal state on any machine that has run `mo update`.
+The spec's idempotency requirement and design D3 both mandate a 409 safety net
+for the concurrent-install race: if the list-then-create window is crossed by
+another install, the resulting `AGENT_NAME_CONFLICT` (409) must be caught and
+treated as "exists, skipped" — never as an error. The implementation catches
+the 409 but then fails to re-resolve the agent, so the race path errors out
+with contradictory output.
 
-Two layered defects cause it; both need fixing.
-
-**Defect 1a — `mo update` never syncs `presets/` to the managed cache.**
-`UpdateOperations.UpdateCliResolvedAsync` publishes to `.publish/cli/` (which
-*does* contain `presets/` as a sibling of `skill-data/`, courtesy of the new
-csproj Content entry), copies only the binary to the managed target, then syncs
-only `skill-data`:
-
-- `packages/cli/Mohist.Cli/Update/UpdateOperations.cs:149` —
-  `var sourceSkillData = Path.Combine(publishDir, "skill-data");` (no equivalent
-  for presets).
-- `packages/cli/Mohist.Cli/Update/UpdateOperations.cs:229` —
-  `await synchronizer.SyncAsync(sourceSkillData, managedSkillData);` (the one
-  and only sync; `SkillAssetSynchronizer.SyncAsync` copies a single source dir
-  to a single managed dir and validates `SKILL.md`, so it is not reusable as-is
-  for presets either).
-
-A grep of `packages/cli/Mohist.Cli/Update/` and `MohistCliCommands.Update*.cs`
-for `presets` returns nothing. `mo update` is the documented install mechanism
-(`AGENTS.md`: `mo update # 更新运行版本`), so this is the primary path, not an
-edge case.
-
-**Defect 1b — `PresetCatalog` derives its asset root from the skill-data root
-by string substitution, rather than resolving independently.**
-The default constructor runs the skill-data resolver and then substitutes the
-last path segment:
-
-- `packages/cli/Mohist.Cli/PresetCatalog.cs:21-22`:
-  ```csharp
-  _resolution = resolver.Resolve();
-  _assetRoot = _resolution.AssetRoot is null ? null
-      : Path.Combine(Path.GetDirectoryName(_resolution.AssetRoot) ?? _resolution.AssetRoot, "presets");
-  ```
-
-Because `SkillAssetRootResolver.Resolve()` checks **ManagedCache
-(`~/.mohist/cli/skill-data`) before the Sibling fallback**, on a post-`mo update`
-machine `_resolution.AssetRoot` is `~/.mohist/cli/skill-data`, so `_assetRoot`
-becomes `~/.mohist/cli/presets`. That directory is missing (defect 1a) →
-`ReadManifest()` returns null → `ListNames()` is empty → every name is unknown.
-
-This also contradicts the design. D2 states presets resolve **independently**
-("`AppContext.BaseDirectory/presets` 兜底，`MOHIST_SKILLS_DIR` 同源时不耦合——
-预设独立解析") and names `AppContext.BaseDirectory/presets` as the fallback. The
-implementation does the opposite: it couples to the skill-data root. Even if 1a
-were fixed by syncing `presets/` next to `skill-data/`, the substitution would
-still mis-resolve whenever `MOHIST_SKILLS_DIR` points at a custom location the
-user did not intend for presets.
-
-**Why tests did not catch it.** Every `PresetCatalogTests` and
-`CliAgentCommandSpecs` case injects the root via the
-`(IFileSystem, string assetRoot)` constructor or the `PresetCatalogOverride`
-static hook (`CliAgentCommandSpecs.cs:27-29`). The default constructor's
-derivation — the only path production code takes — has zero coverage. No test
-exercises a managed-cache layout (skill-data present, presets sibling absent or
-present).
-
-Recommended fix (for the fix task):
-1. Make `mo update` sync `presets/` alongside `skill-data/` to the managed cache
-   (generalize `SkillAssetSynchronizer` or add a presets sync in
-   `UpdateCliResolvedAsync`/`SyncSkillsAsync`).
-2. Either resolve the preset root independently (own resolver / env var /
-   `AppContext.BaseDirectory/presets` fallback, as D2 specifies) instead of
-   deriving it from the skill-data root, or document the coupling as intentional
-   and make both sync paths agree.
-3. Add a spec/unit that exercises the **default** `PresetCatalog()` constructor
-   against a fake managed-cache layout (skill-data present at
-   `~/.mohist/cli/skill-data`, presets at the expected sibling) and one that
-   proves `Resolve("supervisor")` succeeds post-update and fails clearly when
-   presets are missing.
-
-### F2 — Preflight skill-stub check probes the CLI's CWD, not the default repository's workspace [Medium, should fix]
-
-The spec (`### Requirement: Check-only preflight warnings`) says the check
-verifies whether "the default repository workspace exposes the `mohist` skill
-stub (`.agents/skills/mohist`)". The implementation probes the CLI process's
-current directory instead:
-
-- `packages/cli/Mohist.Cli/MohistCliCommands.Agent.cs:107`:
-  `preflight.Run(api.FileSystem.CurrentDirectory, defaultRepoResolved);`
-- `packages/cli/Mohist.Cli/AgentInstallPreflight.cs:30`:
-  `var skillStubPath = Path.Combine(workspacePath, ".agents", "skills", "mohist");`
-
-`TryResolveDefaultRepositoryAsync` (`MohistCliCommands.Agent.cs:119-151`) fetches
-the project, finds the `isDefault` repo, and returns only `(bool, repositoryName)`
-— it discards any workspace-path information. The check therefore inspects
-`<wherever the user ran mo>/.agents/skills/mohist`, which is unrelated to the
-runner checkout. False positives when `mo` is invoked outside a workspace; false
-negatives when it is invoked inside a tree that happens to have the stub but the
-runner workspace does not. The warning is non-blocking, but it does not meet the
-spec's "default repository workspace" framing.
-
-The project endpoint does not appear to expose a per-repo workspace path (the
-runtime `Workspace.Path` belongs to a `WorkflowRun`, not the repository), so a
-fully correct check may be infeasible today. The fix task should at minimum make
-`TryResolveDefaultRepositoryAsync` surface whatever location signal the repo
-object does carry (e.g. local checkout path) and fall back to a documented
-"unknown workspace, cannot check" notice rather than silently substituting CWD.
-
-The existing tests pass only by coincidence: `FakeFileSystem.CurrentDirectory` is
-hard-coded to `/repo` in `FileSystemWithProject()`, and the tests create/omit the
-stub under `/repo/.agents/skills/mohist`. They are asserting against the wrong
-path.
-
-### F3 — No test asserts the rules' `agentId` resolves to the supervisor Agent [Low, should fix]
-
-The spec's "Supervisor preset authoritative content" requirement fixes names,
-match expressions, prompts, and the agent's instructions, but never normatively
-states both rules' `agentId` SHALL resolve to the `supervisor` Agent (this is the
-self-review's F1, left unaddressed). The implementation does bind correctly —
-`EnsureRuleAsync` is passed `agent.Id` from `EnsureAgentAsync`
-(`MohistCliCommands.Agent.cs:86,92,231`). But `AgentInstall_CreatesAgentAndRulesInOrder`
-(`CliAgentCommandSpecs.cs:77-98`) only asserts `continue == null`; it never
-asserts `agentId` equals the supervisor agent's id. A regression that bound a
-rule to a wrong/stale/empty `agentId` would not be caught. Add an assertion on
-the POSTed rule body's `agentId` (and ideally a spec scenario) per the
-self-review's recommendation.
-
-### F4 — `PresetCatalog` default constructor hard-wires `RealFileSystem`, forcing a process-global static override [Low, nit]
-
-`PresetCatalog.cs:11-14`:
+Location: `packages/cli/Mohist.Cli/MohistCliCommands.Agent.cs:173-178`
 
 ```csharp
-public PresetCatalog()
-    : this(RealFileSystem.Instance, SkillAssetRootResolver.CreateDefault(RealFileSystem.Instance, SystemEnvironmentVariableProvider.Instance))
+if (response.StatusCode == HttpStatusCode.Conflict)
+{
+    api.Output.WriteLine($"exists, skipped: agent {preset.Name}");
+    return await ResolveAgentAsync(api, path[..path.LastIndexOf("/agents", StringComparison.Ordinal)], preset.Name);
+}
 ```
 
-Production code cannot inject a fake, so every test reaches in via
-`AgentCommands.PresetCatalogOverride` — a `static Func<IFileSystem, PresetCatalog>`
-that is process-global mutable state. This is the same anti-pattern that already
-forced the `NotifyCommands.ConfigPathOverride` non-parallel collection
-workaround in this very change (`CliAgentCommandSpecs.cs:14-17`,
-`CliNotifySetupCommandSpecs.cs:9`). Threading a `PresetCatalog` (or a factory)
-through `MohistCliApi` the same way `IFileSystem` already is would remove the
-override entirely and make the default-constructor path (the one F1 hides in)
-unit-testable.
+`EnsureAgentAsync` receives `path` = `ProjectAgentsPath(projectId, "/agents")`
+= `/api/projects/{projectId}/agents` (caller at line 73-74). The slice
+`path[..path.LastIndexOf("/agents")]` therefore yields `/api/projects/{projectId}`
+— a **URL path**, not a project id. That string is passed as the `projectId`
+argument to `ResolveAgentAsync`, which internally calls
+`ProjectAgentsPath(projectId, "/agents?all=true")`, building:
+
+```
+/api/projects/%2Fapi%2Fprojects%2FprojectId/agents?all=true
+```
+
+i.e. a double-prefixed, escaped, nonexistent endpoint. The GET 404s, the list
+is not a `JsonArray`, so `ResolveAgentAsync` prints `Agent 'supervisor' not
+found` and returns null. `EnsureAgentAsync` returns null, install exits 1.
+
+Net behavior under a concurrent-install race: the user sees
+`exists, skipped: agent supervisor` followed by `Agent 'supervisor' not found`
+and a non-zero exit — the safety net that D3 says must "捕获并按已存在跳过处理，
+不报错" (catch and treat as exists/skip, do not error) instead errors out.
+
+The rule-side 409 path (`EnsureRuleAsync`, line 229-233) is correct: it just
+prints "exists, skipped" and returns true without re-resolving. Only the agent
+side is broken, because it additionally tries to return the existing agent's
+`AgentRef` (needed so the rules can bind to its id).
+
+Coverage gap: there is **no test** for the agent 409-skip path. The existing
+409 tests (`AgentCreate_MissingFieldsAndConflictFailClearly`,
+`AgentUpdate_ConflictFailsClearly`) cover `create`/`update`, which correctly
+surface 409 as an error; none exercise install's skip-on-409 branch.
+
+Recommended fix (for the fix task):
+- Thread the real `projectId` into `EnsureAgentAsync` (the caller at line 73-76
+  already has `resolution.ProjectId`) and pass it to `ResolveAgentAsync`
+  instead of slicing the path. Drop the `path.LastIndexOf("/agents")` trick.
+- Add a spec: agent POST returns 409 Conflict (after the list returns empty,
+  simulating the race) → install exits 0, prints `exists, skipped: agent
+  supervisor`, and the subsequent rule POSTs bind `agentId` to the re-resolved
+  supervisor agent (so `ResolveAgentAsync` must be made to succeed — e.g. the
+  handler returns the agent on the list GET that follows the 409).
+
+### N2 — `ManagedAssetSynchronizer.TryValidatePrepared` hardcodes the error message by label [Low, nit]
+
+`ManagedAssetSynchronizer.cs:128-134` data-drives validation through the
+`ManagedAssetKind` descriptor (skill → `*/SKILL.md`, preset → `manifest.json`)
+but then picks the error string by comparing `kind.Label ==
+ManagedAssetKind.Skill.Label` rather than carrying the message on the kind.
+Works for the two current kinds; a third asset kind would get a wrong
+("manifest.json not found") error label. Move the validation-error noun onto
+`ManagedAssetKind` (next to `PreparedValidator`) so the descriptor stays the
+single source.
+
+### N3 — Three spec scenarios are covered only by composition, not pinned [Low, coverage]
+
+The implementation is correct for all three, but no test would catch a
+regression of the specific behavior:
+
+- **Partial pre-existence** ("an Agent named `supervisor` and a
+  `supervisor-approval` rule already exist, no `supervisor-failure`"): only
+  the all-pre-existing (`AgentInstall_RerunSkipsExistingResources`) and
+  none-pre-existing (`AgentInstall_CreatesAgentAndRulesInOrder`) ends are
+  tested. A test where the agent + approval pre-exist but failure does not
+  would pin "only the missing rule is created."
+- **Verbatim placeholders in the POST body**: `{{event.*}}` preservation is
+  asserted at the catalog level (`PresetCatalogTests`) but not on the
+  `responsePrompt` actually POSTed by the command. The command passes
+  `rule.ResponsePrompt` through verbatim (`MohistCliCommands.Agent.cs:220`), so
+  the property holds, but an accidental future sanitization step would not be
+  caught at the HTTP boundary.
+- **Tail-append without an anchor**: `AgentInstall_CreatesAgentAndRulesInOrder`
+  asserts request order and `continue == null` but not the **absence** of
+  `before`/`after` in the rule POST body. A regression that added an anchor
+  (and thus reordered rules) would slip through. Asserting the body has no
+  `before`/`after` keys would pin "append at tail, no anchor."
 
 ## Positive notes
 
-- Spec scenarios that *are* covered are covered well: idempotent re-run with
-  edit preservation, partial pre-existence, unknown-name listing, tail ordering,
-  exclusive (`continue` unset) rules, both preflight warning paths, the
-  no-default-repo note, and the notification clean/missing cases. These all pass.
-- The three shipped preset resources preserve `{{event.*}}` verbatim and carry
-  the fixed names/match expressions mandated by the spec
-  (`PresetCatalogTests.cs:11-27`).
-- The agent-then-rules ordering correctly satisfies the rule-create `agentId`
-  validation constraint the self-review called out.
-- `dotnet build` is clean under TreatWarningsAsErrors; the CLI test suite is
-  green (1365/1365 in the filtered run).
+- The headline deployment-path defect is properly fixed and verified
+  empirically; preset resolution is independent of skill-data per design D2,
+  and `mo update` keeps the managed preset cache in sync.
+- The generalized `ManagedAssetSynchronizer` is clean: the atomic temp+swap is
+  reused, validation is data-driven (modulo the N2 nit), and preset sync
+  aborts the update on a malformed bundle rather than shipping an empty cache.
+- Spec scenarios for name resolution, idempotent re-run, exclusivity
+  (`continue` unset), the rule→supervisor `agentId` binding, and both preflight
+  warning paths are well covered (12 install specs).
+- `dotnet build` clean under TreatWarningsAsErrors; full solution suite green
+  (5930 tests).
 
 ## Assessment
 
-F1 is a hard blocker: the feature does not work on any machine in the
-post-`mo update` steady state, demonstrated empirically above and traceable to
-two concrete code locations. It must be fixed (and regression-tested against the
-managed-cache layout) before merge. F2 is a spec-conformance gap that makes the
-headline safety check misleading; F3/F4 are testability/assertion improvements.
+N1 is a real correctness defect in a spec/design-mandated safety net: the
+agent 409-conflict re-resolve builds a malformed URL, so the documented
+concurrent-install race errors out with contradictory output instead of
+skipping. It is also untested. It must be fixed before merge. N2 and N3 are
+low-severity improvements a separate task can fold in.
 
 <promise>FAIL</promise>

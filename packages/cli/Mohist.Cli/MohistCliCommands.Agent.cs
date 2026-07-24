@@ -71,7 +71,7 @@ internal static class AgentCommands
                 return resolution.Exit;
 
             var projectPath = ProjectAgentsPath(resolution.ProjectId, "/agents");
-            var agent = await EnsureAgentAsync(api, projectPath, resolvedPreset.Preset);
+            var agent = await EnsureAgentAsync(api, projectPath, resolution.ProjectId, resolvedPreset.Preset);
             if (agent is null)
                 return 1;
 
@@ -138,7 +138,7 @@ internal static class AgentCommands
         return DefaultRepository.Unresolved;
     }
 
-    private static async Task<AgentRef?> EnsureAgentAsync(MohistCliApi api, string path, AgentPreset preset)
+    private static async Task<AgentRef?> EnsureAgentAsync(MohistCliApi api, string path, string projectId, AgentPreset preset)
     {
         try
         {
@@ -172,8 +172,12 @@ internal static class AgentCommands
             {
                 if (response.StatusCode == HttpStatusCode.Conflict)
                 {
+                    // Concurrent install won the create race (409 AGENT_NAME_CONFLICT).
+                    // Re-resolve by name against the real project id so the rules can
+                    // bind to the now-existing agent. (Previously this sliced the URL
+                    // path and passed it as projectId, producing a malformed URL.)
                     api.Output.WriteLine($"exists, skipped: agent {preset.Name}");
-                    return await ResolveAgentAsync(api, path[..path.LastIndexOf("/agents", StringComparison.Ordinal)], preset.Name);
+                    return await ResolveAgentAsync(api, projectId, preset.Name);
                 }
                 return null;
             }
