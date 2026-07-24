@@ -1,0 +1,482 @@
+# Issue #489 working memory
+
+## Codebase Patterns
+
+- **Domain model → Row → DbSet → EF config → migration**: WatchEntry /
+  WatchEntryRow / DbSet<WatchEntryRow> / modelBuilder.Entity<WatchEntryRow>(&#123;...&#125;)
+  / YYYYMMDDhhmmss_AddIssueWatchEntries are added in lockstep. The migration
+  timestamp sits at 20260724000000 (after the latest 20260722120000).
+- **Domain model conventions**: short POCO with `string Id`/ProjectId/AgentId,
+  String constants for statuses (e.g. `RoutingRuleStatus.Active`/`Archived`,
+  `WatchEntryState.Watching`/`Muted`). WatchEntry uses `(ProjectId, IssueNumber,
+  AgentId)` as the composite identity — there is no separate `Id`. This matches
+  `IssuePrerequisiteRow` (composite key).
+- **EF config**: `entity.ToTable("...")`, `entity.HasKey(...)`, max-length on
+  strings, mandatory columns marked `IsRequired()`, secondary indexes with
+  `HasDatabaseName(...)`. Designer file pattern = `BuildTargetModel` delegates
+  to `MohistDbContextModelSnapshot.BuildModelCore` (the existing snapshot
+  exposes `BuildModelCore` as `internal static`).
+- **Store shape**: `IScopedService` + `IDbContextFactory<MohistDbContext>` +
+  `AgentQuerier` + `TimeProvider`. Same constructor signature as
+  `RoutingRuleStore`. Add/Remove/List are pure data-shape methods that take
+  validated arguments; the validation is in a private `ValidateActiveAgentAsync`
+  helper that mirrors `RoutingRuleStore.ValidateAsync`'s agent_not_found /
+  agent_archived pattern.
+- **Spec tests**: Used `MohistDbFixture` (SpecTests/Support) + migrated SQLite
+  template. The fixture auto-registers `WatchEntryStore` via the
+  `IScopedService` conventional-registration scan, so no extra wiring is needed.
+  Tests use unique project IDs per scenario to avoid collisions across the
+  shared fixture.
+- **Migration generation gotcha**: `dotnet-ef migrations add` rewrites the
+  model snapshot wholesale (which would lose the `BuildModelCore` shared helper
+  pattern). The migration code + Designer are hand-written and the snapshot
+  is patched in place to add the new entity block (modeled on the
+  `RoutingRuleRow` block in the snapshot).
+
+## Conventions followed
+
+- Domain class in `Mohist.Server.Agent.Domain` (per FeatureDirectories rule).
+- Row class in `Mohist.Server.Infrastructure.Data.Agent` (per RowModels_AreInInfrastructureData).
+- Store class in `Mohist.Server.Agent.Services` (per FeatureDirectories rule).
+- Migration in `Mohist.Server.Infrastructure.Data.Migrations` (per Migrations_AreInInfrastructureData).
+- `TimeProvider` injected; no wall-clock reads in product code.
+- Test uses `IDbContextFactory<MohistDbContext>` (per design/testing.md DB row).
+- Tests use unique project IDs per fact to avoid IClassFixture<MohistDbFixture>
+  state collisions.
+
+## Gotchas
+
+- `dotnet-ef migrations add` runs web build by default — pass `-p:SkipWebBuild=true`
+  to skip the `npm run build -w packages/web` target. Without it the tool aborts
+  with `sh: 1: tsx: not found` because the workspace's deps aren't installed.
+- The convention outcome of `dotnet-ef migrations add` rewrites the model
+  snapshot to a non-`BuildModelCore` shape, breaking the existing Designer
+  files. So the migration is added by hand and the snapshot is patched instead.
+- MTP requires `--filter-method` (not VSTest's `--filter`) for `dotnet test`.
+- `dotnet ef migrations list` asks for `--no-build` after `dotnet build`; the
+  helper wants a fresh build artifact or finds a stale model and lists the
+  migration as Pending even though it has already compiled.
+
+## Files added
+
+- `packages/server/src/Mohist.Server/Agent/Domain/WatchEntry.cs`
+  (`WatchEntry` + `WatchEntryState` constants).
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Agent/WatchEntryRow.cs`
+  (flat columns mirroring `RoutingRuleRow` style).
+- `packages/server/src/Mohist.Server/Agent/Services/WatchEntryStore.cs`
+  (`WatchEntryStore`, `WatchEntryGroups`, `WatchEntryValidationException`).
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260724000000_AddIssueWatchEntries.cs`
+  + `.Designer.cs`.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Agent/Services/WatchEntryStoreSpecs.cs`
+  (9 facts covering every spec scenario + list grouping).
+
+## Files modified
+
+- `Mohist.Server/Infrastructure/Data/Db/MohistDbContext.cs` — added
+  `DbSet<WatchEntryRow> WatchEntries` + the WatchEntryRow EF config block
+  (unique index, two secondary indexes).
+- `Mohist.Server/Infrastructure/Data/Migrations/MohistDbContextModelSnapshot.cs`
+  — appended the WatchEntryRow entity block (modeled on the RoutingRuleRow
+  block). Tooling regenerates this file automatically on the next migration;
+  edits here only carry the current snapshot forward.
+
+## Open questions / follow-ups for later tasks
+
+- T-002 (route + read model) needs to surface `WatchEntryGroups` shaped as the
+  IssueReadModel's `Watching` and `Muted` collections. The current store
+  already exposes the two groups separately, so the projection is one row.
+- T-003 (dispatch) needs to seed watch entries directly via `WatchEntryStore`
+  in its spec tests — note that `WatchEntryStore.AddAsync` is now the documented
+  entry point and it throws `WatchEntryValidationException` on agent_not_found
+  / agent_archived (the dispatch path must not trigger this — it already has
+  fresh `AgentLookup` data).
+- The `WatchEntry` domain shape uses `(ProjectId, IssueNumber, AgentId)` as
+  identity. Future routes decode it from URL segments (`/projects/{projectId}/issues/{number}/watch`)
+  and pass the integer to the store. No string formatting is needed.
+- The `TriggerRuleId` "watch:{agentId}" convention (design D8) is a downstream
+  T-003 concern; this task deliberately does not touch `IAgentLauncher` or
+  `AgentJobGrain`.
+
+# T-002 — Watch command & projection surface (server)
+
+## Codebase Patterns (T-002)
+
+- **Route → store return shape**: `IssueRoutes.Prerequisites.cs` is the
+  reference shape for mutation routes that resolve the project + issue,
+  call the store/grain, and return `issuesQuery.GetAsync(...)` — the
+  re-enriched read model. The watch routes follow the same pattern but
+  call `WatchEntryStore` directly (not the grain) per design D2.
+- **DELETE with body**: ASP.NET Core minimal APIs do not allow inferred
+  body parameters on `MapDelete`. Use `[FromBody]` from
+  `Microsoft.AspNetCore.Mvc` explicitly on the request parameter.
+- **Read-model projection paths**: `IssueReadModel` is projected by two
+  independent paths — `EnrichAsync` (`GET /issues/{n}`) and
+  `ApplyRelationshipProjectionsAsync` (`GET /issues` list endpoint,
+  `IssueListItem`). Both paths go through the same shared
+  `MohistDbContext` so any new side-relation projection is added by
+  calling a shared helper from both paths (or invoking
+  `ApplyRelationshipProjectionsAsync` from the list path and the
+  equivalent enrichment block from the detail path).
+- **List-item shape**: `IssueListItem` is a flat projection from
+  `IssueReadModel` via `FromReadModel`. Adding a new field to the read
+  model requires adding the same field to `IssueListItem` and copying it
+  in `FromReadModel`.
+
+## Files added (T-002)
+
+- `packages/server/src/Mohist.Server/Api/IssueRoutes.Watch.cs`
+  (`MapIssueWatch` partial: POST add, DELETE remove; `AddWatchRequest` +
+  `DeleteWatchRequest` records; `MapWatchValidationError` private helper).
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Api/IssueWatchApiSpecs.cs`
+  (14 facts covering the full state machine + idempotency + projection
+  on detail + list + archived + unknown agent + nonexistent issue).
+
+## Files modified (T-002)
+
+- `packages/server/src/Mohist.Server/Issue/Services/IssueReadModel.cs` —
+  added `Watching` / `Muted` (`IssueWatchEntryDto[]`, default `[]`) at
+  the end of the read model to keep the projection block close to the
+  comments/attachments block; added the `IssueWatchEntryDto` record.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueListItem.cs` —
+  added `Watching` / `Muted` fields and copies them in `FromReadModel`.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs` —
+  imported `Mohist.Server.Agent.Domain` +
+  `Mohist.Server.Infrastructure.Data.Agent`; extracted the watch
+  projection into `ApplyWatchProjectionAsync(db, projectId, numbers,
+  issues)` and called it from both `EnrichAsync` (detail path) and
+  `ApplyRelationshipProjectionsAsync` (list path); added
+  `ToWatchEntryDto` static helper.
+- `packages/server/src/Mohist.Server/Api/IssueRoutes.cs` — added
+  `projectIssues.MapIssueWatch()` call.
+
+## Gotchas (T-002)
+
+- The list endpoint (`GET /issues?all=true`) projects to
+  `IssueListItem`, not `IssueReadModel` — adding a new field to the
+  detail read model alone does not surface it on the list. The
+  `IssueListItem` / `FromReadModel` pair must be updated in lockstep.
+- `ApiResults.NotFound`/`Conflict` hard-code the response code to
+  `"not_found"`/`"conflict"`. To preserve the machine codes
+  `agent_not_found` / `agent_archived` from `WatchEntryValidationException`,
+  map via `ApiResults.Fail(message, statusCode, code)` directly instead
+  of the convenience helpers.
+- `ProjectDomainMaxLength` is 63 chars (DNS label cap). Spec test
+  project names must be truncated; envelopes with names longer than that
+  get a 400 and the test fails with a confusing "EnsureSuccessStatusCode"
+  exception in `CreateProjectAsync`.
+
+## Validation matrix (T-002)
+
+- `POST /watch` body `{ agentId }` → re-enriched `IssueReadModel` on
+  state transition; `agent_not_found` / `agent_archived` codes on
+  validation failure; `404` on missing issue; `400 agentId_required` on
+  missing body field.
+- `DELETE /watch` body `{ agentId }` (with `[FromBody]`) → same return
+  shape; `agent_not_found` / `agent_archived` codes preserved.
+
+## T-003 — follow-ups
+
+- The dispatch path (`RoutingDispatchHandler`) reads watch entries at
+  event time. To stay inside the documented
+  `WatchEntryStore` validation contract, the dispatch path must
+  bypass validation (it already has fresh `AgentQuerier` data) — the
+  existing `WatchEntryValidationException` is for the user-facing API
+  only.
+- The launch-prompt composition for watch launches is its own
+  responsibility (design D8). The `watch:`-prefixed `TriggerRuleId`
+  convention is consumed by `AgentJobGrain.AdvancePreparedLaunchAsync`
+  for provenance labeling — no schema change needed.
+
+# T-003 — Watch dispatch behavior
+
+## Codebase Patterns (T-003)
+
+- **Dispatch handler shape**: the
+  `RoutingDispatchHandler.DispatchAsync` flow is now:
+  1. read projectId from envelope,
+  2. load active rules via `RoutingRuleStore.ListAsync(includeArchived: false)`,
+  3. evaluate rules via `RoutingTableEvaluator` (envelope-only),
+  4. resolve muted agents on the event's issue via
+     `WatchEntryStore.ListAsync`,
+  5. for each matched rule: skip-inactive-archived, skip-muted,
+     resolve execution context via `RoutedAgentLaunchContextResolver`,
+     handle preflight failures (record + advance), and launch via
+     `IAgentLauncher.LaunchRoutedAsync` while adding the agent to the
+     local `HashSet<string> launchedAgentIds`,
+  6. run the watching-launch pass guarded by
+     `evt.Type ∈ {StageApprovalRequested, WorkflowRunFailed}` and
+     issue presence, reusing the same routed launch path with a
+     `watch:{agentId}` TriggerRuleId and the built-in prompt.
+- **Dedup scope**: a single `HashSet<string>` (agentIds launched in
+  this delivery). The HashSet membership check is the single point of
+  cross-source dedup — routing hits and watch hits both consult it,
+  and a watch launch for an already-launched agent is skipped with a
+  debug log.
+- **No-rules early return removed**: `rules.Count == 0` no longer
+  short-circuits the handler. The watch pass guards on
+  `WatchEventTypes.Contains(evt.Type)` so unrelated event types remain
+  no-ops even with zero rules.
+- **Watch preflight helper**: `RecordWatchPreflightFailureAsync`
+  mirrors the routing-rule preflight failure helper (issue-449
+  pattern): it mints a stable session id / job key from
+  `(projectId, eventId, "watch:{agentId}")`, builds a
+  `RoutedAgentLaunchPlan` with disposition `PreflightFailed`, and
+  calls `EnsurePreparedAsync` + `AdvancePreparedLaunchAsync`. The
+  failure flow therefore reuses the durable terminal-delivery
+  protocol without a parallel implementation.
+- **Built-in prompt**: `RoutingDispatchHandler.BuildWatchPrompt`
+  composes `"Watch event {evt.Type} for issue #{n}. Act on your
+  identity instructions."` — no per-watch ResponsePrompt, the
+  Agent identity carries response discipline.
+- **TriggerRuleId convention**: `RoutingDispatchHandler.WatchRuleIdPrefix`
+  is `"watch:"`. Watch launches pass `watch:{agentId}` as the
+  `ruleId` to `LaunchRoutedAsync`; downstream consumers (e.g. the
+  `AgentJobGrain.AdvancePreparedLaunchAsync` label set) substring-match
+  the prefix to distinguish watch from routing sources per design D8.
+
+## Files modified (T-003)
+
+- `packages/server/src/Mohist.Server/Events/Subscriptions/RoutingDispatchHandler.cs`
+  — added `WatchRuleIdPrefix` constant, `WatchEventTypes` set,
+  muted-suppression gate inside the rule loop, `LaunchWatchingAgentsAsync`
+  private helper invoked after the rule loop, `BuildWatchPrompt`
+  internal helper, `RecordWatchPreflightFailureAsync` + trigger
+  identity helper, and the local `HashSet<string>` dedup scope.
+
+## Files added (T-003)
+
+- `packages/server/tests/Mohist.Server.SpecTests/Support/RoutingDispatchTestSupport.cs`
+  — minimal `IServiceScopeFactory` that wires the production
+  `RoutingDispatchHandler`'s scoped services (DB, agent querier,
+  routing rule + watch entry stores, evaluator, profile manager,
+  `RoutedAgentLaunchContextResolver`) around a fresh in-memory
+  SQLite; replaces the real `IAgentLauncher` with
+  `RecordingAgentLauncher`, a fake that captures every routed launch
+  (agent id, rule id, prompt, project id, issue number, event type /
+  id, workspace path, disposition). Adds seed helpers for Agent rows,
+  WorkflowRun rows, Issue rows (with WorkflowRunId), and a raw
+  `WatchEntryRow` inserter that bypasses the user-facing active-agent
+  validation (the dispatch path does not call `AddAsync`).
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Events/Subscriptions/IssueWatchDispatchSpecs.cs`
+  — 11 facts covering every `issue-watch-dispatch` spec scenario:
+  launch on approval-requested, launch on run-failed, no launch on
+  unrelated event types, no launch when the event carries no issue,
+  muted suppression of a routing-rule hit, no leak of the mute to
+  other issues, rule+watch single-launch (HashSet dedup), replay
+  under same configuration preserves the stable trigger identity,
+  built-in prompt regardless of the stored watch entry, watch launch
+  with zero routing rules, and watch launch skipped for an archived
+  Agent even when a WatchEntry row exists for it.
+
+## Gotchas (T-003)
+
+- The dispatch scope needs `WorkflowRunQuerier` registered
+  (transitively required by `RoutedAgentLaunchContextResolver`) and
+  `IActionCatalogSource` (transitively required by
+  `IssueWorkflowProfileManager`). The existing
+  `NullActionCatalogSource` instance covers the latter; the former
+  is registered as scoped just like in production.
+- The `WatchEntryStore.AddAsync` / `RemoveAsync` validation
+  (`agent_not_found` / `agent_archived`) must not run in the
+  dispatch path. The dispatch handler reads via `ListAsync` (no
+  validation), but tests that exercise the archived-Agent launch
+  gate need to seed the row directly — `SeedWatchEntryRawAsync`
+  inserts a `WatchEntryRow` via the test DB context to side-step
+  the store's `ValidateActiveAgentAsync`.
+- The preflight-failure path inside the watch pass still calls the
+  AgentJobGrain via `IGrainFactory`. The test scope provides a
+  `NullDispatchGrainFactory` that throws on `IAgentJobGrain`
+  resolution, so the spec suite can only exercise the watch path's
+  preflight failure handling when an active watch yields a ready
+  execution context. Replay / cross-delivery tests live in
+  `AgentJobGrain`'s own suite.
+- WatchEntry state projection on the issue read model is unchanged
+  from T-002; the dispatch handler is read-only on watch entries
+  (it never calls `AddAsync` / `RemoveAsync`).
+
+## Validation matrix (T-003)
+
+- `RoutingDispatchHandler.DispatchAsync` scenarios covered by the spec
+  suite: rule-only hit, watch-only hit, rule+watch coincidence
+  (dedup wins for the rule because it runs first), muted rule
+  suppression, muted rule no-leak to other issues, unrelated event
+  type (no launch), event without issue (no launch), zero rules +
+  watch hit (still fires), archived agent (still skipped), replay
+  under same configuration (stable trigger identity preserved so
+  grain first-writer per-source key collides).
+
+# T-004 — Watch human surface (CLI + Web)
+
+## Codebase Patterns (T-004)
+
+- **Shared agent resolution.** `MohistCliCommands.Agent.cs` exposes
+  `ResolveAgentAsync` and `AgentRef` as `internal` (was `private`).
+  `IssueCommands.Watch.cs` calls them directly. The promotion
+  pattern matches `VariableCommands` (a separate `internal static
+  class` shared across command groups).
+- **CLI command-group shape.** `BuildWatch(api)` returns a `Command`
+  with `add` / `remove` / `list` leaves, mirroring
+  `BuildPrereq(api)`. `add` and `remove` use
+  `PrintMutationResourceAsync(..., IssueDescriptor, ...)` to render
+  the re-enriched read model as `IssueShow` — the same idempotent
+  state-as-truth path used by `mo issue start` and the prerequisites
+  flow. `list` is a focused two-group render via
+  `PrintWithOutputAsync(..., IssueWatchList)`; it consumes the same
+  `GET /api/projects/{p}/issues/{n}` detail read model — no new
+  route, just a different `TableShape`.
+- **Mutation bodies.** POST/DELETE `/watch` both take a
+  `{ agentId }` body. `add` uses the same `agentId`-in-body shape
+  the server already documents (IssueRoutes.Watch.cs); `remove` does
+  the same — `DeleteWatchRequest` is `[FromBody]`-decorated on the
+  server side.
+- **Validation surfacing.** `agent_not_found` / `agent_archived` flow
+  through `CliResponseReader` as `code` in the failure envelope; the
+  CLI prints `error (code)` and exits non-zero. There is no
+  CLI-side code mapping — the server codes are the contract.
+- **Local missing-flag path.** `--agent` is required; the CLI exits 1
+  locally and never hits the server. The agent-name → id resolution
+  is a separate client-side step before the mutation POST/DELETE
+  (mirrors `mo agent update`).
+- **IssueShow rendering.** `TableRenderer.Issues.cs` grew a
+  `RenderWatchEntries(data)` private helper that emits two labelled
+  sections (`watching:` / `muted:`) listing
+  `agentId (state)` per entry. Both are omitted when their arrays
+  are empty, keeping the existing `mo issue show` output stable for
+  the common case. `RenderIssueWatchList` is the focused two-group
+  variant for `mo issue watch list` — issue number header + the same
+  helper, no workflow / decision / description clutter.
+- **Web shape.** The existing `Issue` TS interface grew
+  `watching?: IssueWatchEntry[]` and `muted?: IssueWatchEntry[]`,
+  where `IssueWatchEntry` is the four-field record the server
+  projects. The detail page renders two new
+  `CollapsibleRailCard` entries — one per group — gated on
+  `entries.length > 0` so issues with no declarations show no cards.
+  The body is the new `IssueWatchCard` (a thin `CardSection`
+  wrapper). No new read API, no in-page add/remove controls.
+
+## Files added (T-004)
+
+- `packages/cli/Mohist.Cli/MohistCliCommands.Issue.Watch.cs` —
+  `BuildWatch` + `BuildWatchAdd` + `BuildWatchRemove` +
+  `BuildWatchList` (partial `IssueCommands`).
+- `packages/cli/tests/Mohist.Cli.Tests/CliIssueWatchSpecs.cs` —
+  11 facts: POST/DELETE bodies, missing-flag local error, unknown
+  agent name (no server hit), `agent_not_found` / `agent_archived`
+  envelope codes, focused list render (with and without entries),
+  `issue show` rendering the watching/muted sections, help text,
+  project override.
+- `packages/web/src/pages/issue-detail/ui/cards/IssueWatchCard.tsx`
+  — `watching` / `muted` variant body, `unframed`-aware like the
+  prerequisites card.
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.reference-rail.watch.test.tsx`
+  — 3 facts: cards render with entries, cards are absent when no
+  entries, no in-page add/remove controls.
+
+## Files modified (T-004)
+
+- `packages/cli/Mohist.Cli/MohistCliCommands.Agent.cs` —
+  `ResolveAgentAsync` and `AgentRef` promoted from `private` to
+  `internal` so `IssueCommands` can call them.
+- `packages/cli/Mohist.Cli/MohistCliCommands.Issue.cs` —
+  registered `BuildWatch(api)` next to `BuildPrereq`.
+- `packages/cli/Mohist.Cli/MohistCliApi.cs` — added
+  `TableShape.IssueWatchList`.
+- `packages/cli/Mohist.Cli/ResourceOutput.cs` — added
+  `["number", "watching", "muted"]` field list for the new shape
+  (default `Single` cardinality; no list variant needed).
+- `packages/cli/Mohist.Cli/TableRenderer.cs` — added the dispatch
+  arm for `IssueWatchList`.
+- `packages/cli/Mohist.Cli/TableRenderer.Issues.cs` — `RenderIssueShow`
+  calls a new `RenderWatchEntries(data)` (gated on non-empty) and a
+  new `RenderIssueWatchList` implements the focused two-group view.
+- `packages/web/src/entities/issue/model/issue.ts` — added
+  `IssueWatchEntry` interface and `watching` / `muted` fields on
+  `Issue`.
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` —
+  imported `IssueWatchCard`; inserted two `CollapsibleRailCard`
+  entries in the reference rail, gated on non-empty arrays.
+
+## Gotchas (T-004)
+
+- **Server `code` propagation.** `agent_not_found` /
+  `agent_archived` are returned via `ApiResults.Fail(...,
+  statusCode, code)`, not the `ApiResults.NotFound` /
+  `ApiResults.Conflict` convenience helpers — the latter hard-code
+  the response `code` to `"not_found"` / `"conflict"` and would
+  silently strip the machine code the spec asserts. The
+  `MapWatchValidationError` private helper in
+  `IssueRoutes.Watch.cs` already routes both codes through
+  `ApiResults.Fail`. The CLI tests assert on the surfaced code
+  substring to lock the contract.
+- **No silent fallback on the `--agent` lookup.** `IssueWatchAdd`
+  / `IssueWatchRemove` resolve the agent by name (or treat the value
+  as an id when it starts with `agent_`) before any
+  POST/DELETE. When the lookup fails, the CLI writes a local error
+  and returns 1; it never sends a request with an unresolvable name.
+  This matches `mo agent update` / `mo agent archive`. Tests
+  `IssueWatchAdd_UnknownAgentName_DoesNotCallServer` locks the
+  contract.
+- **TableShape catalog discipline.** The new `IssueWatchList` shape
+  is `Single` cardinality (the GET detail response is one
+  object) — it does NOT need a `Collection` switch arm. Forgetting
+  to add the fields-list would have made the JSON `--json` selection
+  advertise the default fields, not the watch-specific ones.
+- **Web refactor risk.** `IssueDetailPage.reference-rail.contents.test.tsx`
+  has a "forbidden testids" block that asserts which cards are not
+  in the rail. The new `reference-rail-watching` /
+  `reference-rail-muted` cards are conditional on
+  `entries.length > 0`, so they only show when the test fixture
+  provides entries. The existing forbidden-list test passes
+  without modification (it uses the default empty `makeIssue()`,
+  which has no `watching` / `muted`).
+
+## Validation matrix (T-004)
+
+- CLI:
+  - `mo issue watch add <n> --agent <name>` POSTs
+    `{ "agentId": "<resolved id>" }` to
+    `/api/projects/{p}/issues/{n}/watch` and renders the re-enriched
+    `IssueShow` (state-as-truth).
+  - `mo issue watch remove <n> --agent <name>` DELETEs the same URL
+    with the same body and renders the re-enriched `IssueShow`.
+  - `mo issue watch list <n>` GETs
+    `/api/projects/{p}/issues/{n}` and renders the focused
+    two-group view (`watching:` + `muted:` headers, one
+    `agentId (state)` line per entry). Empty entries ⇒ no headers,
+    just the `issue:` line.
+  - `mo issue show <n>` includes the `watching:` / `muted:`
+    sections when entries exist; the sections are absent when both
+    arrays are empty so the common-case output is unchanged.
+  - Missing `--agent` flag ⇒ local `1` exit, no server hit.
+  - Unknown agent name ⇒ local "Agent '...' not found" + `1` exit,
+    no server hit.
+  - `agent_not_found` / `agent_archived` ⇒ server code surfaces in
+    the CLI stderr; `1` exit.
+- Web:
+  - `Issue` carries `watching` / `muted` arrays; issues without
+    declarations show no card.
+  - `reference-rail-watching` and `reference-rail-muted` cards
+    render when populated; both collapse on a narrow viewport and
+    expand on a deliberate click, mirroring the prerequisites
+    pattern.
+  - No in-page add/remove controls.
+
+## Verification repair
+
+- `npm run verify` initially failed during the Web workspace build because
+  `IssueDetailPage.reference-rail.watch.test.tsx` imported `fireEvent` without using it;
+  TypeScript reports TS6133 under the repository's no-unused check.
+- Removed only the unused import. The failure was a source-level test import defect, not a
+  generated build side effect; the worktree was clean before and after the failed verification.
+- The next full verification reached Web test-boundary checks and found two policy violations in
+  the same test: a redundant `@vitest-environment jsdom` directive and an `issue-489` ticket
+  identifier in the describe title. `.test.tsx` already selects jsdom through `vite.config.ts`;
+  removed the directive and renamed the behavior-only title.
+- A later full run had one unrelated Server spec timeout in
+  `AgentJobTerminalDeliverySpecs.ReportResultAsync_RunnerCategoryPrecedence_ErrorCodeUsedWhenOutputCategoryMissing`;
+  the exact filtered test passed, and the subsequent full verification passed unchanged.
+- Final `npm run verify`: server 6,088 tests passed, Web 5,130 tests passed (1 skipped), Runner
+  1,383 tests passed; build and boundary checks passed. Verification left no generated Git changes.
+- Rechecked from clean commit `c7543a65a`: `npm run verify` passed again without source changes,
+  confirming the prior repair is stable and no current verification failure remains.
+

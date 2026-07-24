@@ -57,7 +57,15 @@ public class IssueReadModel
     public ChildIssuesSummary? ChildIssuesSummary { get; set; }
     public IssueChildRef[] Children { get; set; } = [];
     public IssueFeedbackDto[] Feedback { get; set; } = [];
+    public IssueWatchEntryDto[] Watching { get; set; } = [];
+    public IssueWatchEntryDto[] Muted { get; set; } = [];
 }
+
+public sealed record IssueWatchEntryDto(
+    string AgentId,
+    string State,
+    string CreatedAt,
+    string UpdatedAt);
 
 public sealed record IssueFeedbackDto(
     string Id,

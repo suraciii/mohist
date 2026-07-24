@@ -87,6 +87,13 @@ export interface IssueChildRef {
   repositoryName: string | null
 }
 
+export interface IssueWatchEntry {
+  agentId: string
+  state: 'watching' | 'muted'
+  createdAt: string
+  updatedAt: string
+}
+
 export type IssueStartBlocker =
   | { kind: 'draft' }
   | { kind: 'waiting-for'; issue: { number: number; title: string; stage?: string; status?: string } }
@@ -145,6 +152,8 @@ export interface Issue {
   recovery?: RecoveryProjection | null
   convergence?: WorkflowConvergenceState | null
   feedback?: ApprovalFeedback[] | null
+  watching?: IssueWatchEntry[] | null
+  muted?: IssueWatchEntry[] | null
 }
 
 export interface IssueListItem extends Pick<Issue, 'number' | 'title' | 'status' | 'health' | 'projectId' | 'labels' | 'createdAt' | 'updatedAt' | 'isDraft' | 'canStart' | 'blocker'> {

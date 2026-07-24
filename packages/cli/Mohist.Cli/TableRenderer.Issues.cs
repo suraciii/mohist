@@ -99,6 +99,54 @@ internal sealed partial class TableRenderer
             }
         }
         _out.WriteLine($"state:    {FormatIssueState(data)}");
+        RenderWatchEntries(data);
+    }
+
+    private void RenderWatchEntries(JsonNode? data)
+    {
+        if (data is null) return;
+        var watching = data["watching"] as JsonArray;
+        var muted = data["muted"] as JsonArray;
+        var hasWatching = watching is { Count: > 0 };
+        var hasMuted = muted is { Count: > 0 };
+        if (!hasWatching && !hasMuted) return;
+
+        if (hasWatching)
+        {
+            _out.WriteLine("watching:");
+            foreach (var entry in watching!.OfType<JsonObject>())
+                _out.WriteLine($"  - {WatchEntryLine(entry)}");
+        }
+        if (hasMuted)
+        {
+            _out.WriteLine("muted:");
+            foreach (var entry in muted!.OfType<JsonObject>())
+                _out.WriteLine($"  - {WatchEntryLine(entry)}");
+        }
+    }
+
+    private static string WatchEntryLine(JsonObject entry)
+    {
+        var agentId = StringOf(entry, "agentId");
+        var state = StringOf(entry, "state");
+        if (string.IsNullOrEmpty(state)) return agentId;
+        if (string.IsNullOrEmpty(agentId)) return state;
+        return $"{agentId} ({state})";
+    }
+
+    private void RenderIssueWatchList(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var number = NumberOf(data, "number");
+        if (!string.IsNullOrEmpty(number))
+            _out.WriteLine($"issue:    #{number}");
+
+        RenderWatchEntries(data);
     }
 
     internal static string FormatIssueState(JsonNode? data)

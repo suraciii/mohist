@@ -174,6 +174,9 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.ActivityList:
                 RenderActivityList(data);
                 break;
+            case MohistCliApi.TableShape.IssueWatchList:
+                RenderIssueWatchList(data);
+                break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
                 break;

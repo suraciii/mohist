@@ -49,6 +49,7 @@ public class MohistDbContext : DbContext
     public DbSet<IssueRow> Issues { get; set; } = null!;
     public DbSet<AgentRow> Agents { get; set; } = null!;
     public DbSet<RoutingRuleRow> RoutingRules { get; set; } = null!;
+    public DbSet<WatchEntryRow> WatchEntries { get; set; } = null!;
     public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
     public DbSet<EpicEventRow> EpicEvents { get; set; } = null!;
     public DbSet<AgentSessionEventRow> AgentSessionEvents { get; set; } = null!;
@@ -375,6 +376,25 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_RoutingRules_ProjectId_Position");
             entity.HasIndex(e => e.ProjectId)
                 .HasDatabaseName("IX_RoutingRules_ProjectId");
+        });
+
+        modelBuilder.Entity<WatchEntryRow>(entity =>
+        {
+            entity.ToTable("WatchEntries");
+            entity.HasKey(e => new { e.ProjectId, e.IssueNumber, e.AgentId });
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.IssueNumber).IsRequired();
+            entity.Property(e => e.AgentId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.State).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.AgentId })
+                .IsUnique()
+                .HasDatabaseName("UX_WatchEntries_ProjectId_IssueNumber_AgentId");
+            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber })
+                .HasDatabaseName("IX_WatchEntries_ProjectId_IssueNumber");
+            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.State })
+                .HasDatabaseName("IX_WatchEntries_ProjectId_IssueNumber_State");
         });
 
         modelBuilder.Entity<IssueEventRow>(entity =>
