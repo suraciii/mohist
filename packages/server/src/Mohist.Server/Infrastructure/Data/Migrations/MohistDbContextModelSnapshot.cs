@@ -118,6 +118,21 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("RoutingRules", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.WatchEntryRow", b =>
+                {
+                    b.Property<string>("ProjectId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<int>("IssueNumber").HasColumnType("INTEGER");
+                    b.Property<string>("AgentId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("State").IsRequired().HasMaxLength(16).HasColumnType("TEXT");
+                    b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
+                    b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("TEXT");
+                    b.HasKey("ProjectId", "IssueNumber", "AgentId");
+                    b.HasIndex("ProjectId", "IssueNumber").HasDatabaseName("IX_WatchEntries_ProjectId_IssueNumber");
+                    b.HasIndex("ProjectId", "IssueNumber", "AgentId").IsUnique().HasDatabaseName("UX_WatchEntries_ProjectId_IssueNumber_AgentId");
+                    b.HasIndex("ProjectId", "IssueNumber", "State").HasDatabaseName("IX_WatchEntries_ProjectId_IssueNumber_State");
+                    b.ToTable("WatchEntries", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicCounterRow", b =>
                 {
                     b.Property<string>("ProjectId")

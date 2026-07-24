@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Agent.Domain;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain;
@@ -500,26 +502,36 @@ public class IssueQuerier : IScopedService
                 && row.EpicNumber != null)
             .Select(row => new { IssueNumber = row.Number!.Value, EpicNumber = row.EpicNumber!.Value })
             .ToListAsync();
-        if (issueEpicNumbers.Count == 0) return;
-
-        var epicNumbers = issueEpicNumbers.Select(link => link.EpicNumber).Distinct().ToArray();
-        var epics = await db.Epics.AsNoTracking()
-            .Where(epic => epic.ProjectId == projectId && epicNumbers.Contains(epic.Number))
-            .ToDictionaryAsync(e => e.Number);
-        foreach (var link in issueEpicNumbers)
+        if (issueEpicNumbers.Count > 0)
         {
-            if (byNumber.TryGetValue(link.IssueNumber, out var issue) && epics.TryGetValue(link.EpicNumber, out var epic)
-                && !EpicProgress.IsTerminal(epic.Status))
+            var epicNumbers = issueEpicNumbers.Select(link => link.EpicNumber).Distinct().ToArray();
+            var epics = await db.Epics.AsNoTracking()
+                .Where(epic => epic.ProjectId == projectId && epicNumbers.Contains(epic.Number))
+                .ToDictionaryAsync(e => e.Number);
+            foreach (var link in issueEpicNumbers)
             {
-                issue.PrimaryEpic = new IssuePrimaryEpic
+                if (byNumber.TryGetValue(link.IssueNumber, out var issue) && epics.TryGetValue(link.EpicNumber, out var epic))
                 {
-                    Number = epic.Number,
-                    Title = epic.Title,
-                    Status = epic.Status,
-                    Priority = epic.Priority,
-                };
+                    // Issue-179: primaryEpic reflects the issue's NON-TERMINAL
+                    // epic membership. After T-001, an issue may belong to at
+                    // most one non-terminal epic, so filtering terminal
+                    // owners leaves at most one candidate per issue. The
+                    // "last write wins" loop naturally resolves to that
+                    // single non-terminal epic; an issue with only terminal
+                    // memberships leaves PrimaryEpic null.
+                    if (EpicProgress.IsTerminal(epic.Status)) continue;
+                    issue.PrimaryEpic = new IssuePrimaryEpic
+                    {
+                        Number = epic.Number,
+                        Title = epic.Title,
+                        Status = epic.Status,
+                        Priority = epic.Priority,
+                    };
+                }
             }
         }
+
+        await ApplyWatchProjectionAsync(db, projectId, numbers, issues);
     }
 
     private async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)
@@ -584,6 +596,8 @@ public class IssueQuerier : IScopedService
                 issue.Comments = group.Select(comment => ToCommentDto(comment, commentAttachments)).ToArray();
             }
         }
+
+        await ApplyWatchProjectionAsync(db, projectId, numbers, issues);
 
         var profileRows = await db.IssueWorkflowProfiles.AsNoTracking()
             .Where(profile => profile.ProjectId == projectId && numbers.Contains(profile.IssueNumber))
@@ -721,6 +735,53 @@ public class IssueQuerier : IScopedService
         row.OriginalFileName,
         string.IsNullOrWhiteSpace(row.ContentType) ? "application/octet-stream" : row.ContentType,
         row.Size);
+
+    /// <summary>
+    /// Batched <c>WatchEntry</c> projection for the per-issue read surface.
+    /// Loads every <c>WatchEntryRow</c> scoped to <paramref name="projectId"/>
+    /// and the supplied <paramref name="numbers"/>, groups by
+    /// <c>IssueNumber</c>, then assigns the two ordered groups to each
+    /// issue's <c>Watching</c> / <c>Muted</c> arrays. Issues without
+    /// entries receive empty arrays so the field is always present on the
+    /// wire (matches every other projected relation convention).
+    /// </summary>
+    private static async Task ApplyWatchProjectionAsync(
+        MohistDbContext db,
+        string projectId,
+        int[] numbers,
+        List<IssueReadModel> issues)
+    {
+        if (issues.Count == 0) return;
+
+        var watchRows = await db.WatchEntries.AsNoTracking()
+            .Where(w => w.ProjectId == projectId && numbers.Contains(w.IssueNumber))
+            .ToListAsync();
+        var watchingByNumber = watchRows
+            .Where(w => w.State == WatchEntryState.Watching)
+            .GroupBy(w => w.IssueNumber)
+            .ToDictionary(g => g.Key, g => g
+                .OrderBy(w => w.CreatedAt)
+                .Select(ToWatchEntryDto)
+                .ToArray());
+        var mutedByNumber = watchRows
+            .Where(w => w.State == WatchEntryState.Muted)
+            .GroupBy(w => w.IssueNumber)
+            .ToDictionary(g => g.Key, g => g
+                .OrderBy(w => w.CreatedAt)
+                .Select(ToWatchEntryDto)
+                .ToArray());
+        foreach (var issue in issues)
+        {
+            issue.Watching = watchingByNumber.TryGetValue(issue.Number, out var entries) ? entries : [];
+            issue.Muted = mutedByNumber.TryGetValue(issue.Number, out var muted) ? muted : [];
+        }
+    }
+
+    private static IssueWatchEntryDto ToWatchEntryDto(WatchEntryRow row) => new(
+        row.AgentId,
+        row.State,
+        row.CreatedAt.ToString("o"),
+        row.UpdatedAt.ToString("o"));
 
     private static void ApplyIssueWorkflowVariables(
         IssueReadModel issue,

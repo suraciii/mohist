@@ -799,7 +799,11 @@ internal static class AgentCommands
         return parts.Count == 0 ? "" : "?" + string.Join("&", parts);
     }
 
-    private static async Task<AgentRef?> ResolveAgentAsync(MohistCliApi api, string projectId, string nameOrId)
+    // Shared across command groups (e.g. `mo issue watch add --agent <name>`),
+    // mirrors the agent-resolution shape every other command uses. Returns
+    // null and writes to Error on a missing agent or transport failure so the
+    // caller can return a non-zero exit code.
+    internal static async Task<AgentRef?> ResolveAgentAsync(MohistCliApi api, string projectId, string nameOrId)
     {
         try
         {
@@ -900,7 +904,7 @@ internal static class AgentCommands
         public sealed record Invalid : ResolveJsonResult;
     }
 
-    private sealed record AgentRef(string Id, string Name)
+    internal sealed record AgentRef(string Id, string Name)
     {
         public static AgentRef? From(JsonNode? node)
         {
