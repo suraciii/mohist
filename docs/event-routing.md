@@ -83,27 +83,9 @@ event.type == "com.mohist.issue.completed" && event.issue in ["42", "43"]
 
 ## 场景：让 Agent 监管一个 issue
 
-这是驱动本功能的核心场景：你启动一个 Agent 监管 issue 的推进，workflow 失败或
-等审批时它替你出手。这个场景有内置预设：`mo agent install supervisor` 一条命令
-装好下表全部内容（Agent、规则、提示词），见 [Agent 监管](agent-supervision.md)。
-下面是它的组成原理，理解之后你可以自由改造。
-
-配一个 Agent（写身份指令），加三条规则：
-
-| 顺序 | 匹配 | 响应提示词让 Agent 干什么 |
-|---|---|---|
-| 1 | `…approval-requested" && event.issue == "42"` | 用 `mo issue show` 读 proposal，review 产物；符合计划就 approve 附理由，存疑就 reject 说明疑点 |
-| 2 | `…run.failed" && event.issue == "42"` | 先读 issue comment 里自己之前的处理记录，拉日志分析根因；可修复且自动重试少于 2 次就修完 rerun，否则把结论写进 comment 升级给 owner |
-| 3 | `…issue.completed" && event.issue == "42"` | 写一段交付总结到 comment |
-
-两个工作方式上的要点：
-
-- **失败订终态**。系统自己有重试和修复机制，阶段失败可能自愈；`run.failed`
-  才是原本该 owner 出场的时刻，代理人接的就是这个位置。
-- **用 issue comment 当 Agent 的记忆**。每次触发都是一次独立执行，Agent 没有
-  跨次记忆。让它把「做了什么、为什么、第几次」写进 comment、下次先读——
-  处理记录同时就是给你看的审计线索，也是防止「失败→重试→再失败」无限循环的
-  计数器。
+核心场景：Agent 替你盯 issue 的推进——到达审批门它审批，终态失败它修，只有它
+停手时才轮到你。内置预设 `mo agent install supervisor` 一条命令装好（Agent、
+路由规则、提示词），行为细节见 [Agent 监管](agent-supervision.md)。
 
 ## 可见性：知道谁响应了什么
 
@@ -118,10 +100,10 @@ event.type == "com.mohist.issue.completed" && event.issue in ["42", "43"]
 
 ## 更多场景
 
+监管之外，同一张路由表还能表达：
+
 | 场景 | 匹配的事件 | 响应提示词让 Agent 干什么 |
 |---|---|---|
-| 代理审批 | 阶段等待审批 | review 产物，按规则 approve 或 reject |
-| 失败兜底分析 | workflow 终态失败 | 拉错误，分析根因，写进 issue comment |
 | 完成自动汇总 | issue 完成 | 汇总产物，写 release note |
 | 后续工作生成 | issue 完成 / review 发现风险 | 创建 follow-up issue |
 | 产线维护 | runner 掉线 / epic 无可推进 issue | 分析原因，通知 owner 或创建维护 issue |

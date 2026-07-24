@@ -170,11 +170,6 @@ skill 是普通文件（放在你外部 agent 的 skill 目录下）。看 `mo s
 
 分发自己的 skill 当前需要手动复制到外部 agent 目录（roadmap：通过 `mo skills` 统一管理）。
 
-## 参考
-
-- skill 源文件：`packages/cli/Mohist.Cli/skill-data/<skill-name>/SKILL.md`
-- 架构边界：[`design/architecture.md`](../design/architecture.md) 的 "Agent Skill Boundary" 章节
-
 ---
 
 对应源码：`packages/cli/Mohist.Cli/skill-data/`、`design/architecture.md`（Agent Skill Boundary）。

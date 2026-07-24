@@ -65,88 +65,27 @@ Action Input 展开后的值是本次执行的唯一配置事实。`mohist/pi` �
 
 ## Workflow Session
 
-`session` 标识 Workflow 来源的逻辑 AgentSession，语义与 `mohist/opencode` 一致：
-同一 WorkflowRun 中使用相同名称的 task 解析到同一个逻辑 AgentSession；只要当前物理
-绑定不变，它们共享对话上下文。Runtime 切换仍保留逻辑身份，但新物理 Session 从空上下文
-开始，不迁移旧 Runtime 对话，也不建立物理 Session 历史。不同名称相互隔离；省略时
-使用 Work ID。
-
-### 物理 Session 复用不变量
-
-同一 WorkflowRun 中，只要 task 指定同一个 `session` 名称，Mohist 就必须继续使用该
-AgentSession 当前绑定的同一个物理 Pi Session。task 变化、task 重试，以及
-`options.model` 或 `options.variant` 变化都不能替换这个物理 Session；模型选择只影响
-本次执行，并在原 Session 上生效。
-
-| 变化 | 物理 Pi Session |
-|---|---|
-| 后续 task 或重试继续使用同名 `session` | 保持不变 |
-| `options.model` 或 `options.variant` 变化 | 保持不变 |
-| Compact | 保持不变 |
-| Reset | 建立新的空 Session；AgentSession 保留已有会话内容 |
-| 提交新的独立输入前明确确认当前 Session 文件已不存在 | 自动建立新的空 Session |
-| 工作目录变化 | 拒绝执行；需要新的逻辑 `session` 名称 |
-| 执行后端变化 | 建立新的空物理 Session |
-
-自动恢复只处理负责当前绑定的 Runner 上，Pi 明确确认旧 Session 文件已不存在、且本次
-输入尚未被接受的情况。请求落到其它 Runner、Session 文件损坏、执行后端暂时不可用、
-响应无法判断，或 Prompt 可能已经提交时，Mohist 明确失败，不替换绑定或重放 Prompt。
-新 Session 没有旧上下文；同一 AgentSession 继续显示已有消息，并以“上下文已重置”说明
-后续从空上下文开始，不维护物理 Session 历史。不同 `session` 名称仍相互隔离，不能
-因为 prompt、模型或配置相同而合并。
-
-如果 task 已完成工作但还有改动需要提交或还原，Mohist 会在同一个 AgentSession 和
-物理 Pi Session 中继续这次收尾执行。这个收尾不会替换会话，也不要求用户先 Reset；
-完成后，后续使用同名 `session` 的 task 继续沿用原对话上下文。
-
-同一 AgentSession 同时只执行一个由 Workflow 发起的输入。不同 AgentSession 可以并行。
-用户在 Session 页面提交的 follow-up 是例外：Session 正在执行时，它会加入当前执行；
-Session 空闲时，它会开始新的执行。
+逻辑 `session` 名称语义、物理 Session 复用不变量、缺失自动恢复、收尾执行与并发
+规则与 `mohist/opencode` 共享，见
+[Action 契约](README.md#agent-执行类-action-的共享语义)。本 Action 的物理 Session
+是 Pi 的 session 文件；自动恢复以文件明确不存在为准，文件损坏或无法打开不算缺失。
 
 Session 用量分别记录 input、output、cache read、cache write 与 thought tokens（Pi 提供时）；
 cache write 不会并入 cache read，也不会因事件重投而重复累加。
 
 ## Pi Session 操作
 
-当 AgentSession 当前绑定 Pi 时，Session 页面和对应 CLI 命令按以下方式执行：
-
-| 操作 | 结果 |
-|---|---|
-| Follow-up | 把用户文本交给当前 Pi Session；确认 Pi 已接收后返回 |
-| Compact | 使用 Pi 原生压缩当前 Session；Runtime Session 身份不变 |
-| Reset | 在 Session 空闲时建立一个没有旧上下文的新 Pi Session；AgentSession 保留已有会话内容 |
-
-Compact 是用户在 Session 中发起的操作，不是 Workflow Action。Mohist 不生成一段假的
-摘要来模拟压缩，也不会在 Pi 压缩失败时静默降级。
-
-Runner 重启后，Mohist 仍使用 AgentSession 保存的 Pi Session 绑定继续这些操作。如果
-提交新的独立输入前确认对应的 Session 文件已不存在，Workflow task、AgentJob 或空闲
-Follow-up 会先自动建立并绑定新的空 Session。Compact 和针对执行中操作的命令不会这样
-恢复；Reset 即使在旧 Session 已不存在时仍可建立新的空 Session。
+Follow-up、Compact、Reset 的行为与恢复规则和 `mohist/opencode` 共享，见
+[Action 契约](README.md#agent-执行类-action-的共享语义)；操作对象是当前绑定的
+Pi Session。
 
 ## 完成与失败
 
-Pi 执行成功结束后，Workflow 才按 task 的 `expect`、`artifacts`、`failIf` 和 recovery
-规则判断后续流程。执行失败、取消或超时时，原始错误就是 task 结果，不再检查文件或
-marker。这些是 Workflow 的 task 完成要求，不是 `mohist/pi` 的 Action Input。
-Action Output 与 `mohist/opencode` 相同：只在命中 promise marker 时返回
-`{ "promise": "..." }`，否则为 `null`。
+完成判断、promise Action Output、执行期限、provider 额度耗尽与中断确认的共享语义
+见 [Action 契约](README.md#agent-执行类-action-的共享语义)。
 
-Pi 无人值守执行时不会被工具确认阻塞：Pi 不在单次工具执行前要求批准，已配置允许
-的操作直接执行。每次 Workflow Prompt 执行的期限默认固定为 60 分钟，可通过
-Action Input 的 `timeout` 字段覆盖，从向 Pi 提交 Prompt 前开始计时；绑定和审计
-输入准备不占用该预算，收尾 Prompt 是新的执行并获得新的 60 分钟。期限到达会中断
-当前执行。提交结果不确定时不会自动重放 Prompt，避免同一任务被执行两次。Runner
-主动触发的执行期限会明确报告 timeout；中断 Pi 只是收尾，不能用缺少 marker 覆盖
-timeout，也不会替换当前 Session 绑定或自动 Reset。
-
-provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohist 中断当前 Pi 执行并让
-本次 task 失败，不等待 provider 继续重试。AgentSession 与当前物理 Pi Session 的绑定
-保持不变；Session 回到空闲后，可以选择其他模型继续，无需 Reset。Reset 只表达用户
-明确要求清空上下文；物理 Session 缺失由下一条安全的独立输入自动恢复。
-
-如果 Mohist 无法确认当前执行已经停止，则明确报告中断未确认；不会把仍可能执行的
-Session 显示为已经安全空闲。
+Pi 无人值守执行时不会被工具确认阻塞：Pi 不在单次工具执行前要求批准，已配置允许的
+操作直接执行。
 
 ## Pi 责任边界
 
@@ -168,20 +107,8 @@ AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型�
 
 ## 错误码
 
-`mohist/pi` 的业务失败用以下稳定错误码标识，供 recovery `when: error.code=...`
-匹配；错误文案面向人，不用于匹配：
-
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、
-未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
-
-| 错误码 | 含义 |
-|---|---|
-| `runtime-unavailable` | Pi 执行能力尚未就绪或不可用 |
-| `session-workspace-mismatch` | Session 绑定的工作目录与本次执行不一致 |
-| `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
-| `runtime-session-missing` | Pi Session 已不存在，但当前操作无法安全地自动重建或重新投递 |
-| `unavailable-runtime` | Pi 报告不可用 |
-| `execution-failed` | 执行失败（含 provider 额度、余额或计费耗尽） |
+`mohist/pi` 的业务错误码即六个共享业务错误码，见
+[Action 契约](README.md#agent-执行类-action-的共享语义)；无 Pi 特有业务错误码。
 
 ## 实装差距
 

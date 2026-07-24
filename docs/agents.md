@@ -112,50 +112,19 @@ AgentSession 的会话内容按发生顺序连续展示。每次输入是这段�
 来源在 Session 整个生命周期内不改变。模型、prompt、执行后端配置相同，不会让两段
 Session 合并；当前 Runtime Session 更换也不会改变 AgentSession 来源。
 
-## 当前 Runtime Session
+## 当前 Runtime Session 与缺失恢复
 
-AgentSession ID 是 Mohist 的稳定身份。OpenCode Session 或 Pi Session 是执行后端的
-当前物理会话。AgentSession 只保存当前关联，不另外建立物理 Session 历史。
+AgentSession ID 是 Mohist 的稳定身份；OpenCode Session 或 Pi Session 是执行后端的
+当前物理会话。AgentSession 只保存当前关联，不建立物理 Session 历史。
 
-通常所有后续输入都复用当前 Runtime Session。task 变化、retry、模型变化、Compact、
-一次执行结束或 Runner 重启都不能替换它。以下情况可以建立新的物理 Session，并让
-AgentSession 改用新关联：
+通常所有后续输入都复用当前 Runtime Session：task 变化、retry、模型变化、Compact、
+执行结束或 Runner 重启都不能替换它。只有三种情况建立新的物理 Session——用户
+Reset、执行后端明确确认原 Session 已不存在（自动恢复）、明确切换执行后端。替换
+不改变 AgentSession ID、来源、工作目录或已记录的会话内容；新 Session 从空上下文
+开始，会话中以「上下文已重置」标注，旧消息不重放。
 
-- 用户在 Session 空闲时明确执行 Reset；
-- 当前执行后端明确确认原物理 Session 已不存在；
-- 同一 AgentSession 明确切换到另一执行后端。
-
-替换不会改变 AgentSession ID、来源、工作目录或已记录的会话内容，也不会把旧消息重新
-提交给新 Runtime Session。新物理 Session 从空上下文开始；会话中只需记录 Reset、恢复
-或后端切换造成的“上下文已重置”，不展示或维护一份物理 Session 沿革。
-
-旧物理 Session 是否仍保留、是否占用缓存或何时清理由执行后端决定，不属于
-AgentSession 生命周期。
-
-## Runtime Session 缺失恢复
-
-Runtime Session 可能被执行后端回收，也可能在 Runner 重启后无法恢复。这不应让仍可
-继续的 AgentSession 永久卡在失效关联上。
-
-Mohist 在提交一条新的独立输入前，通过负责当前关联的 Runner 检查 Runtime Session。
-执行后端明确确认它已经不存在时，Mohist 在同一 Runner 建立一个空 Runtime Session，
-替换当前关联，然后才接受本次输入。Workflow task、AgentJob 和 Session 空闲时发起的
-Follow-up 使用同一规则，用户不需要先 Reset 再重试。
-
-自动恢复遵守以下边界：
-
-- AgentSession ID、来源、工作目录和已记录内容保持不变。
-- 新 Runtime Session 从空上下文开始；Mohist 不重放旧 Prompt、消息或工具调用。
-- 只有“原 Runtime Session 明确不存在”可以触发自动恢复。执行后端暂时不可用、请求
-  超时、权限失败、响应无法判断或数据不兼容时，本次操作明确失败，当前关联保持不变。
-- 请求落到其它 Runner 时，不用该 Runner 的本地结果推断原 Session 已不存在，也不借
-  自动恢复迁移 Runner。
-- 输入可能已经被执行后端接受，或 AgentSession 为执行中或未知时，不替换关联，也不
-  重新投递。
-- 并发操作不能覆盖已经变化的当前关联。未能确认替换成功时，本次输入不会提交。
-
-Compact 和 Cancel 必须作用于当前 Runtime Session，不触发自动重建。Reset 表示用户
-主动丢弃 Runtime 上下文；原 Runtime Session 已不存在也不阻止 Reset 创建空 Session。
+复用不变量、自动恢复边界与并发规则见
+[Action 契约 · Agent 执行类 Action 的共享语义](actions/README.md#agent-执行类-action-的共享语义)。
 
 ## AgentSession 操作
 
@@ -172,18 +141,10 @@ Compact 或 Reset 也不会重新启动 Mohist Agent。
 
 ## 当前范围
 
-- `mohist/opencode`：直接通过 OpenCode 执行一次输入；Workflow 直接使用时形成 Inline Agent。
-- `mohist/pi`：直接通过 Pi 执行一次输入，和 `mohist/opencode` 处于同一层。
-- `mohist/agent`：引用预定义 Mohist Agent 的定义执行 task（定义引用，不创建 AgentJob），契约见 [`mohist/agent` Action](actions/agent.md)。
-
-`mohist/opencode` 与 `mohist/pi` 的 Workflow Action 均已实装；Mohist Agent 也可以按配置
-选择 OpenCode 或 Pi。`mohist/agent` 已定义契约，尚未实装。
-
-Mohist Agent 的配置中包含执行后端选择（OpenCode 或 Pi）；启动时后端随 Agent snapshot
-固定到 AgentJob，执行中编辑 Agent 不改变已经开始的工作。
-
-各 Action 的具体配置见 [`mohist/opencode`](actions/opencode.md) 与
-[`mohist/pi`](actions/pi.md)。Mohist Agent 事件响应见 [Agent 事件路由](event-routing.md)。
+`mohist/opencode` 与 `mohist/pi` 的 Workflow Action 均已实装，具体配置见各自
+Action 文档；Mohist Agent 按配置选择 OpenCode 或 Pi，后端随 snapshot 固定到
+AgentJob。`mohist/agent` 已定义契约，尚未实装。Mohist Agent 事件响应见
+[Agent 事件路由](event-routing.md)。
 
 ## 实装差距
 

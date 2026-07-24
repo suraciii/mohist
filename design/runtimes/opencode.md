@@ -145,30 +145,12 @@ CLI 精确匹配 SDK 版本；Server / SDK 不兼容必须形成可操作的 rea
 
 AgentSession 所有权与来源见 [`agent-execution.md`](../agent-execution.md)，Runtime 身份
 字段命名见 [`conventions.md`](../conventions.md)。`OpenCodeRuntime` 接收已经解析好的逻辑
-Session 目标，不能创建或改变其来源。首次绑定与缺失恢复的通用顺序、expected binding
-裁决和操作矩阵以 [`agent-execution.md`](../agent-execution.md#runtime-session-缺失恢复)
-为唯一权威。
-
-由 Workflow 拥有的工作从 WorkflowRun 与 session name 解析目标；省略 name 时使用
-Work ID。由 AgentJob 拥有的工作直接接收 dispatch 时创建的 AgentSession ID。
-
-逻辑 AgentSession 尚无物理绑定时，adapter 先请求 `OpenCodeRuntime` 创建物理 Session，
-把返回的 Session ID 持久化为当前绑定，再用该绑定执行首个 Prompt。持久化失败时不得
-提交 Prompt；否则一次已执行但未绑定的输入会让后续 task 无法证明应复用哪个上下文。
-重复持久化同一个 Session ID 必须幂等。
-
-物理 Session 的复用只由逻辑 AgentSession 的当前绑定、Runner、Runtime 和工作目录决定。同一
-WorkflowRun 中的同名 session 跨 task、retry 和 Runner 重启都必须解析到当前绑定，且
-工作目录必须相同。调用者请求了不同工作目录时，adapter 在提交 Prompt 前以可操作错误
-拒绝；不得静默采用旧目录，也不得在一次 open 中自动迁移或替换绑定。需要新目录的工作
-必须使用新的逻辑 Session 身份。
-
-Runtime 变化与 Reset 会创建新物理 Session，并原子替换 current binding，不迁移上下文；
-Compact 与 model / variant 变化必须保持同一物理 Session ID。
-
-Model 与 variant 是执行参数，不能进入 Session cache key，不能作为是否调用
-`resumeSession` 的门槛，也不能触发 binding replacement。复用已有 Session
-时，Runtime 在原物理 Session 上应用本次 model / variant 后执行 Prompt。
+Session 目标，不能创建或改变其来源。逻辑 Session 目标解析、绑定创建时序（先创建物理
+Session、持久化绑定成功后才提交首个 Prompt；持久化幂等）、复用不变量（跨 task、retry
+与 Runner 重启解析到当前绑定；工作目录不同则在提交 Prompt 前以可操作错误拒绝）以及
+缺失恢复的 expected binding 裁决与操作矩阵以
+[`agent-execution.md`](../agent-execution.md#runtime-session-缺失恢复) 为唯一权威，本节
+只定义 OpenCode 特有部分。
 
 提交新的独立输入前，只有 current binding 的 `runnerId` 对应的 `OpenCodeRuntime` 可以用
 `client.session.get()` 核对持久绑定。请求落在其它 Runner 时必须先路由回绑定所属 Runner
@@ -179,10 +161,12 @@ OpenCode 返回结构化 Session-not-found / HTTP 404，才产生 `definitely-mi
 
 收到 `definitely-missing` 后，Runtime 在同一 directory 调用 `client.session.create()`。
 创建时使用本次输入已解析的 model；本次没有显式 model 时使用 OpenCode 默认值，variant
-仍在 Prompt 上应用。Runner 必须把 expected 完整 binding、新 ID 和 `missing-recovery`
-原因交给 Session；replacement 保持原 `runnerId`、Runtime 与 directory。等待 binding
-持久化成功后才能记录输入或提交 Prompt。新 Session 立即再次 missing、创建失败或 binding
-被并发改变时，本次执行失败，不做第二轮 create。
+仍在 Prompt 上应用。新 Session 立即再次 missing、创建失败或 binding 被并发改变时，
+本次执行失败，不做第二轮 create。
+
+Model 与 variant 是执行参数，不能进入 Session cache key，不能作为是否调用
+`resumeSession` 的门槛，也不能触发 binding replacement。复用已有 Session 时，Runtime
+在原物理 Session 上应用本次 model / variant 后执行 Prompt。
 
 worktree cleanup follow-up 是原 task 的后续执行。executor 必须再次调用原 task 已解析的
 Action，并保留相同 WorkflowRun、session name、Work ID 与工作目录，让它走同一 Runtime

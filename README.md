@@ -6,23 +6,27 @@ Mohist 是面向个人开发者的 AI 软件生产线控制系统。
 
 ## 工作流
 
-Workflow profile 定义 issue 怎么进入生产线。阶段、任务、检查和审批点均可配置。默认 profile（`mohist/local`）：
+Workflow profile 定义 issue 怎么进入生产线，阶段、任务、检查和审批点均可配置。默认 profile（`mohist/local`）：
 
 ```
 Draft → Plan → Build → Check → Integrate → Done
 ```
 
-- **Draft** —— issue 创建后的初始状态，尚未进入生产线
-- **Plan** —— 理解需求，产出设计、规格、任务清单
-- **Build** —— 写代码、跑测试
-- **Check** —— 复核产出
-- **Integrate** —— 合并回主分支
-
-多个 issue 可以同时推进，各自独立。Plan / Check 等关键阶段会进入审批点，收到 approve / reject 决策后继续流动。详见 [Workflow Profile](docs/workflow-profiles.md)。
+多个 issue 同时推进、各自独立。Plan / Check 等关键阶段停在审批点，收到 approve / reject 后继续流动。详见 [Workflow Profile](docs/workflow-profiles.md)。
 
 ## 事件响应
 
-Mohist 的 workflow、issue、epic、runner 和 agent session 都会产生事件。Agent 事件路由让你配置 Agent 响应这些事件：代理审批、分析失败、汇总完成内容、生成后续 issue 或通知 owner。代理审批只是其中一个场景。
+workflow、issue、epic、runner、agent session 都产生事件。Agent 事件路由让你配置 Agent 自动响应：代理审批、分析失败、汇总进展、生成后续 issue、通知 owner。详见 [Agent 事件路由](docs/event-routing.md) 与 [Agent 监管](docs/agent-supervision.md)。
+
+## 实装状态
+
+| ✅ 可用 | 🚧 接线中 | 💭 方案（spec 已定稿） |
+|---|---|---|
+| 五阶段 Workflow、审批点、Epic 自动推进 | Agent 监管预设、评论 @提及、issue 关注 | 复合与子 issue |
+| Web UI、`mo` CLI、Hermes 通知、事件路由 | Profile collection 迁移 | 移动端 PWA |
+| OpenCode / Pi runtime、GitHub PR profile | | 可观测性 |
+
+🚧 / 💭 项由对应 issue 推进落地，见各篇「实装差距」。
 
 <!-- TODO: 补 Web UI 截图 -->
 

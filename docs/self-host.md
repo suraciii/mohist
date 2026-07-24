@@ -180,14 +180,17 @@ SERVER_URL=http://localhost:3456 RUNNER_ID=my-runner npm start
 
 ### Pi provider retry policy
 
-Runner validates these optional settings before it claims work. The default policy treats quota, credit, billing, and usage-limit messages as terminal and allows five consecutive provider retry attempts. Additional patterns are JSON regex sources and are appended to the defaults; the threshold must be a positive integer.
+Runner 在领取工作前校验这两个可选配置。默认策略把额度、余额、计费和 usage-limit 类
+消息视为终态失败，并允许 provider 连续重试 5 次。额外的匹配模式是 JSON 格式的正则
+字符串数组，追加到默认模式之后；阈值必须是正整数。
 
 ```bash
 MOHIST_PROVIDER_ERROR_PATTERNS='["account suspended","provider-specific limit"]'
 MOHIST_PROVIDER_RETRY_THRESHOLD=5
 ```
 
-Invalid JSON, regular expressions, or thresholds prevent Runner startup with a diagnostic. Credentials remain managed by Pi and are not copied into Mohist settings.
+JSON 非法、正则非法或阈值非法都会让 Runner 启动失败并给出诊断。凭证仍由 Pi 自己
+管理，不复制进 Mohist 配置。
 
 ---
 
@@ -286,12 +289,7 @@ cp ~/.mohist/mohist.db ~/.mohist/mohist.db.$(date +%Y%m%d).bak
 find ~/.mohist/ -name "mohist.db.*.bak" -mtime +30 -delete
 ```
 
-**Docker 模式**：备份命名卷：
-
-```bash
-docker run --rm -v mohist-data:/d -v "$PWD":/backup alpine \
-  tar czf /backup/mohist-data-$(date +%Y%m%d).tgz -C /d .
-```
+**Docker 模式**：备份命名卷，命令见上文「Docker 模式 → 数据持久化」。
 
 **严肃**（两种模式都适用）：用 restic / borg backup 增量备份到异地。systemd 模式备份 `~/.mohist/`，Docker 模式备份命名卷或绑定挂载的宿主目录：
 
@@ -356,7 +354,7 @@ Roadmap（已知不足）：
 - 没有 multi-user（单用户假设）
 - 数据库 schema 升级没自动化
 
-这些在 roadmap。当前**默认信任局域网**，远程访问必须自己加层。
+当前**默认信任局域网**，远程访问必须自己加层（见上「安全注意」）。
 
 ---
 

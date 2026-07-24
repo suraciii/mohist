@@ -320,8 +320,6 @@ checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自�
 4. **Action 越权访问**:`openspec-tasks` 直连 `serverConnection.addTasks`,
    `ActionContext` 全量暴露 server 连接与 runtime 句柄;目标收敛为默认 host + 声明式
    能力注入。
-5. **文档缺口**:已闭合——`docs/actions/` 中的契约页已按 manifest 编齐并保持一致（issue #448）。
-
 ### 现状补充
 
 - **Profile 保存期 Action 契约校验**（issue #446，closed）：保存入口
@@ -341,4 +339,3 @@ checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自�
   （`WorkflowProfilePersistence.Deserialize`）以及 `mo run validate` 保持
   Definition-only，不依赖 catalog。Runner 派发期校验（Runner 本地 manifest，
   fail-closed）仍是权威边界，不受保存期反馈影响。
-

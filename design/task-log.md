@@ -111,11 +111,3 @@ Capacity: cap per task (e.g. 256KB / 5000 lines). Truncate head, keep tail. Seq 
 | Transcript | what agent said | Session |
 | Artifact | what files were produced | Workflow |
 | task output | structured result | Workflow |
-
-## Roadmap
-
-| Phase | Scope | Change surface |
-|---|---|---|
-| 1 | onLine → log → batch POST → store → Web panel | executor + runCommand + 1 table + 1 endpoint + UI |
-| 2 | periodic flush + SignalR | streaming channel |
-| 3 | search, download, filter, error-jump | frontend only |
