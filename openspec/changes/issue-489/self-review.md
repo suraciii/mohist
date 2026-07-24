@@ -1,113 +1,97 @@
-# Self-Review — Issue #489 (Issue 关注 / watch)
+# Self-Review — Issue #489 (Issue 关注 / watch), round 2
 
 **Reviewer:** plan-stage self-review (reviewer, not fixer)
 **Artifacts reviewed:** `proposal.md`, `design.md`, `tasks.json`, `specs/issue-watch/spec.md`,
-`specs/issue-watch-dispatch/spec.md`, and the fixed contract `design/issue-watch.md`.
-**Verdict:** **FAIL** — one substantive correctness gap in the central mechanism must be
-resolved before/while building; the rest is consistent and well-scoped.
+`specs/issue-watch-dispatch/spec.md`, cross-checked against issue #489 and the fixed contract
+`design/issue-watch.md`.
+**Verdict:** **PASS** — the round-1 blocker is resolved cleanly and consistently; the plan is
+ready to build. A few low-severity informational notes remain (non-blocking).
 
-## Summary
+## Round-1 findings — resolution check
 
-The plan is internally coherent: proposal → design → tasks → specs align, the task DAG is
-valid, every issue acceptance criterion maps to a task, and each decision carries an
-alternative. The riskiest part of this change is the **per-event single-launch guarantee**
-(one Agent launched at most once when a routing rule and a watch coincide). The design's
-chosen mechanism (D7) is sound for the within-delivery collision and for same-configuration
-replay, but it does not fully cover the spec's explicit *"Event replay does not double-launch"*
-scenario under configuration change between deliveries. That gap must be closed explicitly —
-either by a durable `(eventId, agentId)` guard or by scoping the guarantee in writing and
-confirming the spec scenario is still met. This is the only blocker.
+- **F1 (single-launch idempotency scope) — RESOLVED.** The guarantee is now explicit and
+  consistent in three places: `specs/issue-watch-dispatch/spec.md` (*Per-agent launch
+  idempotency* + *Event replay does not double-launch* scenario scoped to "redelivered under
+  unchanged dispatch configuration", with cross-delivery source mutation called out as
+  out-of-scope + rationale), `design.md` D7 (guarantee scope + the cross-source edge + the
+  follow-up path if strict cross-source is ever needed), and `tasks.json` T-003 (criterion
+  sharpened to "within-delivery HashSet dedup … same-config replay via grain first-writer …
+  cross-delivery source mutation out of scope"). The carve-out is defensible: fully deduping
+  cross-delivery source mutation requires a per-`(eventId, agentId)` launch ledger on the
+  routing path, which conflicts with the issue's own Non-Goal ("touching routing-rule
+  semantics"). It is also consistent with issue #489's acceptance criterion #5, which only
+  requires the *simultaneous* rule+watch case ("同时命中时只启动一次") — exactly the
+  within-delivery case the HashSet guarantees.
+- **F2 (watch list mapping + render shape) — RESOLVED.** D9 pins `watch list` as a focused
+  two-group render (not full `IssueShow`); the open question is removed; T-004 references the
+  `watch list` requirement and has a dedicated acceptance criterion for the focused render.
+- **F3 (provenance is a prefix convention) — RESOLVED.** D8 and the T-003 criterion now
+  explicitly state `TriggerRuleId` carries a `watch:`-prefixed value as a string-prefix
+  convention, not a typed marker.
+- **F4 (end-to-end dispatch coverage) — RESOLVED.** T-003 acceptance now states the seeded
+  spec tests assert the full event→watch-launch behavior (rule+watch single-launch and
+  same-config replay), covering the dispatch capability end-to-end at the spec level despite
+  no single task owning the CLI→dispatch path.
 
-## Findings
+## Fresh re-review — no new blockers
 
-### F1 — Single-launch idempotency does not cover cross-source replay (Medium, must address)
+I re-checked the updated artifacts for contradictions introduced by the fixes and for anything
+missed in round 1:
 
-**Spec** (`specs/issue-watch-dispatch/spec.md`, requirement *Per-agent launch idempotency*):
-launch idempotency SHALL be normalized to `(projectId, eventId, agentId)`; scenario
-*"Event replay does not double-launch"* — *"the same event (same eventId) is processed more
-than once for the same Agent → launched at most once; no duplicate AgentJob."*
-
-**Design D7** enforces the collision with an **in-memory `HashSet<agentId>`** inside one
-`DispatchAsync` call, and delegates replay safety to grain first-writer keyed on
-`(projectId, eventId, ruleId)` — explicitly **per launch source**, not per agent. The design
-is honest about this ("protect against event replay for each distinct launch source") and
-D7 only quotes the within-event scenario.
-
-Coverage of the two real cases:
-- **Rule + watch on one event (same delivery):** covered by the `HashSet`. ✅
-- **Same-config replay (redelivery):** covered by grain first-writer per source. ✅
-- **Cross-delivery with source mutation:** *not covered.* If delivery 1 launches Agent X via
-  a routing rule (grain key `…rule_R`), the rule is then removed and a watch added, and the
-  event is redelivered, the watch pass launches X under a *different* grain key (`…watch:X`).
-  First-writer does not cross-dedupe → a **second AgentJob** is created. The spec's
-  *"at most once / no duplicate AgentJob"* scenario does not carve out configuration change.
-
-**Why it matters:** this is the heart of the change and an explicit, testable spec scenario.
-The realistic replay (no config change) is fine, but the plan currently neither guarantees
-cross-source at-most-once nor explicitly marks the cross-source case as an accepted exception.
-
-**Required resolution (pick one, then reflect it in T-003's acceptance criteria + tests):**
-- **(a)** Add a durable per-event launched-agent guard consulted before every
-  `LaunchRoutedAsync` (e.g. a `(projectId, eventId, agentId)` set persisted for the event
-  lifetime, or a single canonical grain key per `(eventId, agentId)` regardless of source); or
-- **(b)** Explicitly scope the guarantee in the design: *"at most once per event under
-  unchanged dispatch configuration; cross-delivery source mutation is out of scope,"* and
-  confirm that satisfies the spec's intent (the spec author should ratify this reading).
-
-Either closes the over-claim. T-003 today asserts "replaying the same eventId does not create a
-second AgentJob (grain first-writer)" — which is only true **per source**, so that criterion
-must be sharpened to match whichever resolution is chosen.
-
-### F2 — `watch list` requirement mapping and render shape (Low)
-
-The spec requirement *`watch list`* is delivered by T-004, but T-004's `spec` field cites only
-*Watch projection in issue detail*. `watch list` is also listed as an open question in the
-design (its render shape — full `IssueShow` vs a compact list — is undecided). Not blocking,
-but: (1) T-004 should reference the *`watch list`* requirement too; (2) the render-shape
-decision should be pinned in T-004 so it isn't left to the implementer's discretion at runtime.
-
-### F3 — Provenance is a string-prefix convention, not a typed marker (Low, informational)
-
-D8 records the watch source by stuffing a `watch:`-prefixed value into the existing
-`TriggerRuleId` label. This satisfies the spec's *"distinguishing it from a routing-rule
-launch"* only by convention; any downstream query/filter that keys on `TriggerRuleId` must
-know to substring-match the prefix. Acceptable for this issue (a dedicated `TriggerSourceKind`
-is a documented deferred open question) — no action required now, but worth a one-line note in
-T-003 so future tooling isn't surprised.
-
-### F4 — No single task owns the end-to-end watch→dispatch path (Low, informational)
-
-Issue acceptance criterion *"被关注 issue 到达审批点 / run 失败时该 Agent 被启动"* spans
-T-002 (add the watch) and T-003 (act on it). T-003's spec tests seed entries directly via
-`WatchEntryStore`, which is acceptable per `design/testing.md` (no real network/grain). Just
-confirm T-003's seeded tests are sufficient to prove the dispatch behavior end-to-end at the
-spec level; no new task needed.
+- **Mechanism correctness.** D5/D7's flow is sound: the rule loop runs to completion
+  (populating the launched-agent set, applying muted suppression per rule hit), then the watch
+  pass skips any agent already launched. There is no within-delivery ordering where a watch
+  launch would precede a rule launch for the same agent, so the set correctly prevents the
+  double-launch. Muted and watching cannot coexist on one `(issue, agent)` triple (D1 unique
+  index), so suppression and launch never conflict.
+- **`watch:` provenance collision.** Rule ids are `rule_{Guid:N}`; watch passes
+  `watch:{agentId}` (`agent_{Guid:N}`). Distinct namespaces — no collision. ✓
+- **Hot-path change (removing the `rules.Count == 0` early return).** Guarded by
+  `evt.Type ∈ fixed set` AND issue presence, so the common case exits early; backed by the
+  "Event without issue does not trigger watch" scenario. ✓
+- **DAG / dependencies.** T-001→{T-002, T-003}, T-002→T-004; valid, acyclic, all deps point
+  to strictly lower priorities. `tasks.json` is valid JSON. ✓
+- **Task split.** Capability-aligned (data layer / server command+projection / dispatch /
+  human surface); no over-granular technical-step tasks; every task carries test criteria. ✓
 
 ## Coverage check — issue acceptance criteria → tasks
 
-| Acceptance criterion | Covered by | Status |
-|---|---|---|
-| `watch add` → `issue view` / `watch list` show agent in 关注 | T-002 (projection), T-004 (render) | ✅ |
-| Watched issue at approval / run-failed → Agent launched (trigger label = watch) | T-003 (launch + D8 provenance) | ✅ (see F1 for the dedup caveat) |
-| `watch remove` stops launch; rule-covered issue shows 静音, others unaffected | T-002 (mute display), T-003 (suppression, issue-scoped) | ✅ |
-| Re-`watch add` on a muted issue lifts the mute | T-001 (state machine muted→watching) | ✅ |
-| Same event, same Agent via rule + watch → launched once | T-003 (D7 dedup) | ⚠️ see F1 |
+| # | Acceptance criterion | Covered by | Status |
+|---|---|---|---|
+| 1 | `watch add` → `issue view` / `watch list` show 关注 | T-002 (projection), T-004 (render) | ✅ |
+| 2 | Watched issue at approval / run-failed → launched (trigger label = watch) | T-003 + D8 | ✅ |
+| 3 | `watch remove` stops launch; rule-covered shows 静音, others unaffected | T-002 (mute), T-003 (issue-scoped suppression) | ✅ |
+| 4 | Re-`watch add` on muted lifts the mute | T-001 (muted→watching) | ✅ |
+| 5 | Same event, same Agent via rule + watch → launched once | T-003 (D7, within-delivery) | ✅ |
+
+All five criteria are covered; criterion #5 is satisfied within the scope the issue actually
+asks for (simultaneous coincidence).
+
+## Informational notes (non-blocking)
+
+- **Contract wording vs implementation.** The persistent contract `design/issue-watch.md:63`
+  states the idempotency key is literally `hash(projectId, eventId, agentId)`. The
+  implementation uses per-source grain keys `(projectId, eventId, ruleId)` plus handler-level
+  within-delivery dedup — equivalent *effect* within an event, but the contract's literal
+  "key = hash(…agentId)" is a simplification. Not a blocker: D7 is authoritative for this
+  change and the effect matches the contract's intent. Worth reconciling the (wip) contract
+  doc's wording later so future readers aren't misled.
+- **Goal/Constraint precision.** `design.md` line 35 ("at most once per event") and line 45
+  describe the within-delivery guarantee and are accurate for the in-scope cases; D7 is the
+  authoritative precise statement. Optional polish: append "within a single delivery" to line
+  35 for full consistency with D7's scoped wording.
+- **Replay testability.** Same-config replay dedup relies on grain first-writer (Orleans
+  infra). T-003's handler-level tests verify within-delivery dedup via a fake launcher; the
+  replay guarantee is trusted to grain-level coverage (or a fake `EnsurePreparedAsync`
+  simulating first-writer). This is a reasonable split, not a gap.
 
 ## Per-artifact notes
 
-- **proposal.md** — accurate impact map; capabilities (`issue-watch`, `issue-watch-dispatch`)
-  match the two spec dirs. No drift.
-- **design.md** — decisions are concrete with file:line anchors and real alternatives; the one
-  under-specified area is F1. D2's deliberate deviation from the prerequisites mirror
-  (WatchEntry is Agent-context-owned, so the route bypasses `IIssueGrain`) is correctly
-  justified. D5/D7/D8 are the load-bearing choices and are well-argued.
-- **tasks.json** — valid JSON, valid DAG (T-001→{T-002,T-003}, T-002→T-004), every dependency
-  points to a strictly lower priority. Split by capability is appropriate; no over-granular
-  technical-step tasks. Acceptance criteria include test verification throughout. Only gap is
-  F1's criterion needing sharpening in T-003.
-- **specs** — the two capability specs are complete and scenario-driven; the tension in F1 is
-  between the spec's replay scenario and the design contract's `design/issue-watch.md:63`
-  wording ("同一事件里…只启动一次", i.e. within-one-event), which scopes only the collision,
-  not cross-delivery replay. Reconciling these is part of F1's resolution.
+- **proposal.md** — unchanged; impact map still matches the two capability specs. No drift.
+- **design.md** — D7 now carries the explicit guarantee scope and rationale; D8/D9 reflect the
+  F2/F3 resolutions. Decisions remain concrete with file:line anchors and alternatives.
+- **tasks.json** — criteria sharpened; valid DAG; spec references point to real requirements.
+- **specs** — the dispatch spec's idempotency requirement is now precise and self-consistent;
+  the `issue-watch` spec is unchanged and complete.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
