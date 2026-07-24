@@ -9,7 +9,7 @@ public sealed class RuntimeRequestMetricsMiddleware(
 {
     public async Task InvokeAsync(HttpContext context)
     {
-        var agentPath = AgentPath(context.Request.Path);
+        var agentPath = AgentPath(context);
         var otelRequest = IsOtelRequest(context.Request.Path);
         var createScope = (runtime.Enabled && !otelRequest) || agentPath is not null;
         if (!createScope)
@@ -58,15 +58,11 @@ public sealed class RuntimeRequestMetricsMiddleware(
         path.StartsWithSegments("/otel/v1", StringComparison.OrdinalIgnoreCase)
         || path.StartsWithSegments("/otel/api", StringComparison.OrdinalIgnoreCase);
 
-    private static string? AgentPath(PathString path)
+    private static string? AgentPath(HttpContext context)
     {
-        if (path.StartsWithSegments("/api/agent/status", StringComparison.OrdinalIgnoreCase)
-            || path.Value?.Contains("/agent/status", StringComparison.OrdinalIgnoreCase) == true)
-            return "agent.status";
-        if (path.StartsWithSegments("/api/agent/activity", StringComparison.OrdinalIgnoreCase)
-            || path.Value?.Contains("/agent/activity", StringComparison.OrdinalIgnoreCase) == true)
-            return "agent.activity";
-        return null;
+        if (!HttpMethods.IsGet(context.Request.Method)) return null;
+        var metadata = context.GetEndpoint()?.Metadata.GetMetadata<AgentPathEndpointMetadata>();
+        return RuntimeObservability.NormalizeAgentPath(metadata?.Path);
     }
 }
 

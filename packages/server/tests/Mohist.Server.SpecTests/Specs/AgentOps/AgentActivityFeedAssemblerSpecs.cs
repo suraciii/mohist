@@ -62,6 +62,9 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.Equal(0, result.Summary.Failed);
         Assert.Empty(result.Sessions);
         Assert.Empty(result.Waiting);
+        Assert.Equal(0, result.Amplification.Candidates);
+        Assert.Equal(0, result.Amplification.Processed);
+        Assert.Equal(0, result.Amplification.TranscriptRecords);
     }
 
     [Fact]
@@ -85,6 +88,9 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.NotNull(card.Usage);
         Assert.Equal(1, result.Summary.Active);
         Assert.Empty(result.Waiting);
+        Assert.Equal(1, result.Amplification.Candidates);
+        Assert.Equal(1, result.Amplification.Processed);
+        Assert.Equal(0, result.Amplification.TranscriptRecords);
     }
 
     [Fact]
@@ -172,6 +178,8 @@ public class AgentActivityFeedAssemblerSpecs
         var result = await assembler.GetActivityAsync(project.Id, limit: 10);
 
         Assert.DoesNotContain(result.Sessions, c => c.SessionId == sessionId);
+        Assert.Equal(1, result.Amplification.Candidates);
+        Assert.Equal(0, result.Amplification.Processed);
     }
 
     [Fact]
@@ -190,6 +198,8 @@ public class AgentActivityFeedAssemblerSpecs
         var result = await assembler.GetActivityAsync(project.Id, limit: 10);
 
         Assert.NotNull(result.Sessions.SingleOrDefault(c => c.SessionId == sessionId));
+        Assert.Equal(1, result.Amplification.Candidates);
+        Assert.Equal(1, result.Amplification.Processed);
     }
 
     private const string AmbiguousLegacyWorkflowRunState = """

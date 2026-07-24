@@ -74,8 +74,6 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     /// one <see cref="ActivityCardDto"/> per session (with usage /
     /// event-summary / work-item / task-progress / last-activity
     /// projections), and the waiting cards passed in by the route.
-    /// Pure refactor: the response is byte-for-byte identical to the
-    /// pre-split core-querier implementation.
     /// </summary>
     public async Task<ActivityDto> GetActivityAsync(
         string projectId,
@@ -86,24 +84,25 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     {
         var take = Math.Clamp(limit ?? 50, 1, 200);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var sessions = await _sessionQuery.ListByLabelsAsync(
+        var candidates = await _sessionQuery.ListByLabelsAsync(
                 AgentSessionDtoMapper.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
                 AgentSessionQueryOrder.CreatedDescending,
                 take,
                 ct: ct);
-        sessions = await ActiveSessionReconciler.ReconcileAsync(db, sessions, _logger, ct);
+        var candidatesCount = candidates.Count;
+        var sessions = await ActiveSessionReconciler.ReconcileAsync(db, candidates, _logger, ct);
 
         var sessionIds = sessions.Select(s => s.Session.Id).ToArray();
-        var latestEvents = await LoadLatestEventsAsync(db, sessionIds, ct);
-        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessionIds, ct);
+        var latestEventsLoad = await LoadLatestEventsAsync(db, sessionIds, ct);
+        var eventSummariesLoad = await TranscriptReductions.LoadEventSummariesWithCountAsync(db, sessionIds, ct);
         var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
         var taskProgressMap = await BuildTaskProgressMapAsync(sessions, ct);
 
         var cards = sessions
             .Select(record => ToActivityCard(
                 record,
-                latestEvents.GetValueOrDefault(record.Session.Id),
-                eventSummaries.GetValueOrDefault(record.Session.Id),
+                latestEventsLoad.Projections.GetValueOrDefault(record.Session.Id),
+                eventSummariesLoad.Summaries.GetValueOrDefault(record.Session.Id),
                 IssueTitleLookup.Resolve(issueTitles, record.IssueNumber()),
                 taskProgressMap.GetValueOrDefault(record.Session.Id)))
             .ToList();
@@ -117,7 +116,14 @@ public sealed class AgentActivityFeedAssembler : IScopedService
             0,
             slots);
 
-        return new ActivityDto(summary, cards, waiting.ToList());
+        var amplification = new AgentAmplificationDto(
+            Candidates: candidatesCount,
+            Processed: cards.Count,
+            TranscriptRecords: latestEventsLoad.TranscriptRecords + eventSummariesLoad.TranscriptRecords,
+            DatabaseCalls: 0,
+            DownstreamCalls: 0);
+
+        return new ActivityDto(summary, cards, waiting.ToList(), amplification);
     }
 
     /// <summary>
@@ -254,22 +260,22 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     /// the pre-split core querier used). Returns an empty dictionary when
     /// no sessions are requested or no parts exist.
     /// </summary>
-    private static async Task<Dictionary<string, TranscriptEventProjection>> LoadLatestEventsAsync(
+    private static async Task<TranscriptProjectionLoad> LoadLatestEventsAsync(
         MohistDbContext db,
         string[] sessionIds,
         CancellationToken ct)
     {
-        if (sessionIds.Length == 0) return [];
+        if (sessionIds.Length == 0) return new([], 0);
 
         var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct: ct);
-        if (loaded.Parts.Count == 0) return [];
+        if (loaded.Parts.Count == 0) return new([], 0);
 
         var result = new Dictionary<string, TranscriptEventProjection>(StringComparer.Ordinal);
         foreach (var part in loaded.Parts.OrderBy(e => e.LastSeenAt).ThenBy(e => e.Id))
             if (loaded.SessionByTurnId.TryGetValue(part.TurnId, out var sessionId))
                 result[sessionId] = AgentSessionDtoMapper.ToProjection(sessionId, part);
 
-        return result;
+        return new(result, loaded.Parts.Count);
     }
 
     private static ActivityPreviewDto ToPreview(TranscriptEventProjection e)
@@ -307,4 +313,8 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "\u2026";
 
     private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
+
+    private readonly record struct TranscriptProjectionLoad(
+        Dictionary<string, TranscriptEventProjection> Projections,
+        long TranscriptRecords);
 }

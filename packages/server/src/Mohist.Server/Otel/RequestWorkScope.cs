@@ -119,3 +119,5 @@ public readonly record struct RequestWorkSnapshot(
     long Candidates,
     long Processed,
     long TranscriptRecords);
+
+public sealed record AgentPathEndpointMetadata(string Path);

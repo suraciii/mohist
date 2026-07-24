@@ -122,34 +122,117 @@ public sealed class RequestWorkScopeTests
     }
 
     [Fact]
-    public async Task Agent_scope_survives_when_otel_is_off_but_otel_endpoint_does_not_create_one()
+    public async Task Agent_scope_survives_when_otel_is_off_without_publishing()
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         using var runtime = new RuntimeObservability(false, time.GetUtcNow(), time);
-        RequestWorkSnapshot? agentSnapshot = null;
-        RequestWorkScope? otelScope = null;
-        var agent = new RuntimeRequestMetricsMiddleware(_ =>
+        var measurements = 0;
+        using var listener = new MeterListener
         {
-            RequestWorkScope.Current!.AddCandidates(3);
-            agentSnapshot = RequestWorkScope.Current.Snapshot();
+            InstrumentPublished = (instrument, current) =>
+            {
+                if (instrument.Meter == runtime.Meter)
+                    current.EnableMeasurementEvents(instrument);
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, _, _) => measurements++);
+        listener.SetMeasurementEventCallback<double>((_, _, _, _) => measurements++);
+        listener.Start();
+
+        RequestWorkSnapshot? snapshot = null;
+        var middleware = new RuntimeRequestMetricsMiddleware(_ =>
+        {
+            Assert.Equal("agent.status", RequestWorkScope.Current!.Snapshot().AgentPath);
+            RequestWorkScope.Current.AddCandidates(3);
+            RequestWorkScope.Current.AddProcessed(2);
+            snapshot = RequestWorkScope.Current.Snapshot();
             return Task.CompletedTask;
         }, runtime, time);
-        var agentContext = new DefaultHttpContext();
-        agentContext.Request.Path = "/api/agent/status";
-        await agent.InvokeAsync(agentContext);
+        var context = AgentContext("/api/agent/status", "agent.status");
 
-        var otel = new RuntimeRequestMetricsMiddleware(_ =>
-        {
-            otelScope = RequestWorkScope.Current;
-            return Task.CompletedTask;
-        }, runtime, time);
-        var otelContext = new DefaultHttpContext();
-        otelContext.Request.Path = "/otel/api/status";
-        await otel.InvokeAsync(otelContext);
+        await middleware.InvokeAsync(context);
+        listener.RecordObservableInstruments();
 
-        Assert.Equal(3, agentSnapshot!.Value.Candidates);
-        Assert.Null(otelScope);
+        Assert.Equal(3, snapshot!.Value.Candidates);
+        Assert.Equal(2, snapshot.Value.Processed);
+        Assert.Equal(0, measurements);
+        Assert.Empty(runtime.GetSnapshot().Routes);
     }
+
+    [Fact]
+    public async Task Enabled_agent_scope_publishes_response_local_path_counts()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        using var runtime = new RuntimeObservability(true, time.GetUtcNow(), time);
+        var measurements = new Dictionary<string, long>(StringComparer.Ordinal);
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, current) =>
+            {
+                if (instrument.Meter == runtime.Meter)
+                    current.EnableMeasurementEvents(instrument);
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, _, _) => measurements[instrument.Name] = value);
+        listener.Start();
+
+        var middleware = new RuntimeRequestMetricsMiddleware(_ =>
+        {
+            Assert.Equal("agent.activity", RequestWorkScope.Current!.Snapshot().AgentPath);
+            RequestWorkScope.Current.AddCandidates(5);
+            RequestWorkScope.Current.AddProcessed(4);
+            RequestWorkScope.Current.AddTranscriptRecords(6);
+            return Task.CompletedTask;
+        }, runtime, time);
+
+        await middleware.InvokeAsync(AgentContext("/api/agent/activity", "agent.activity"));
+
+        Assert.Equal(5, measurements[RuntimeMetricCatalog.PathCandidates]);
+        Assert.Equal(4, measurements[RuntimeMetricCatalog.PathProcessed]);
+        Assert.Equal(6, measurements[RuntimeMetricCatalog.PathTranscriptRecords]);
+    }
+
+    [Theory]
+    [InlineData("/api/agent/status/extra", "GET")]
+    [InlineData("/unrelated/agent/activity", "GET")]
+    [InlineData("/otel/api/status", "GET")]
+    [InlineData("/api/agent/status", "POST")]
+    public async Task Only_matched_get_agent_endpoints_create_off_state_scope(string path, string method)
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        using var runtime = new RuntimeObservability(false, time.GetUtcNow(), time);
+        RequestWorkScope? observed = null;
+        var middleware = new RuntimeRequestMetricsMiddleware(_ =>
+        {
+            observed = RequestWorkScope.Current;
+            return Task.CompletedTask;
+        }, runtime, time);
+        var context = new DefaultHttpContext();
+        context.Request.Path = path;
+        context.Request.Method = method;
+        if (method == "POST")
+            context.SetEndpoint(AgentEndpoint(path, "agent.status"));
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Null(observed);
+    }
+
+    private static DefaultHttpContext AgentContext(string pattern, string path)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = "GET";
+        context.Request.Path = pattern.Replace("{projectRef}", "proj_test", StringComparison.Ordinal);
+        context.SetEndpoint(AgentEndpoint(pattern, path));
+        return context;
+    }
+
+    private static RouteEndpoint AgentEndpoint(string pattern, string path) => new(
+        _ => Task.CompletedTask,
+        RoutePatternFactory.Parse(pattern),
+        0,
+        new EndpointMetadataCollection(new AgentPathEndpointMetadata(path)),
+        path);
 
     private sealed class DelegateHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
