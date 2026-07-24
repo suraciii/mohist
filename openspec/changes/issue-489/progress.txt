@@ -96,3 +96,93 @@
 - The `TriggerRuleId` "watch:{agentId}" convention (design D8) is a downstream
   T-003 concern; this task deliberately does not touch `IAgentLauncher` or
   `AgentJobGrain`.
+
+# T-002 — Watch command & projection surface (server)
+
+## Codebase Patterns (T-002)
+
+- **Route → store return shape**: `IssueRoutes.Prerequisites.cs` is the
+  reference shape for mutation routes that resolve the project + issue,
+  call the store/grain, and return `issuesQuery.GetAsync(...)` — the
+  re-enriched read model. The watch routes follow the same pattern but
+  call `WatchEntryStore` directly (not the grain) per design D2.
+- **DELETE with body**: ASP.NET Core minimal APIs do not allow inferred
+  body parameters on `MapDelete`. Use `[FromBody]` from
+  `Microsoft.AspNetCore.Mvc` explicitly on the request parameter.
+- **Read-model projection paths**: `IssueReadModel` is projected by two
+  independent paths — `EnrichAsync` (`GET /issues/{n}`) and
+  `ApplyRelationshipProjectionsAsync` (`GET /issues` list endpoint,
+  `IssueListItem`). Both paths go through the same shared
+  `MohistDbContext` so any new side-relation projection is added by
+  calling a shared helper from both paths (or invoking
+  `ApplyRelationshipProjectionsAsync` from the list path and the
+  equivalent enrichment block from the detail path).
+- **List-item shape**: `IssueListItem` is a flat projection from
+  `IssueReadModel` via `FromReadModel`. Adding a new field to the read
+  model requires adding the same field to `IssueListItem` and copying it
+  in `FromReadModel`.
+
+## Files added (T-002)
+
+- `packages/server/src/Mohist.Server/Api/IssueRoutes.Watch.cs`
+  (`MapIssueWatch` partial: POST add, DELETE remove; `AddWatchRequest` +
+  `DeleteWatchRequest` records; `MapWatchValidationError` private helper).
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Api/IssueWatchApiSpecs.cs`
+  (14 facts covering the full state machine + idempotency + projection
+  on detail + list + archived + unknown agent + nonexistent issue).
+
+## Files modified (T-002)
+
+- `packages/server/src/Mohist.Server/Issue/Services/IssueReadModel.cs` —
+  added `Watching` / `Muted` (`IssueWatchEntryDto[]`, default `[]`) at
+  the end of the read model to keep the projection block close to the
+  comments/attachments block; added the `IssueWatchEntryDto` record.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueListItem.cs` —
+  added `Watching` / `Muted` fields and copies them in `FromReadModel`.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs` —
+  imported `Mohist.Server.Agent.Domain` +
+  `Mohist.Server.Infrastructure.Data.Agent`; extracted the watch
+  projection into `ApplyWatchProjectionAsync(db, projectId, numbers,
+  issues)` and called it from both `EnrichAsync` (detail path) and
+  `ApplyRelationshipProjectionsAsync` (list path); added
+  `ToWatchEntryDto` static helper.
+- `packages/server/src/Mohist.Server/Api/IssueRoutes.cs` — added
+  `projectIssues.MapIssueWatch()` call.
+
+## Gotchas (T-002)
+
+- The list endpoint (`GET /issues?all=true`) projects to
+  `IssueListItem`, not `IssueReadModel` — adding a new field to the
+  detail read model alone does not surface it on the list. The
+  `IssueListItem` / `FromReadModel` pair must be updated in lockstep.
+- `ApiResults.NotFound`/`Conflict` hard-code the response code to
+  `"not_found"`/`"conflict"`. To preserve the machine codes
+  `agent_not_found` / `agent_archived` from `WatchEntryValidationException`,
+  map via `ApiResults.Fail(message, statusCode, code)` directly instead
+  of the convenience helpers.
+- `ProjectDomainMaxLength` is 63 chars (DNS label cap). Spec test
+  project names must be truncated; envelopes with names longer than that
+  get a 400 and the test fails with a confusing "EnsureSuccessStatusCode"
+  exception in `CreateProjectAsync`.
+
+## Validation matrix (T-002)
+
+- `POST /watch` body `{ agentId }` → re-enriched `IssueReadModel` on
+  state transition; `agent_not_found` / `agent_archived` codes on
+  validation failure; `404` on missing issue; `400 agentId_required` on
+  missing body field.
+- `DELETE /watch` body `{ agentId }` (with `[FromBody]`) → same return
+  shape; `agent_not_found` / `agent_archived` codes preserved.
+
+## T-003 — follow-ups
+
+- The dispatch path (`RoutingDispatchHandler`) reads watch entries at
+  event time. To stay inside the documented
+  `WatchEntryStore` validation contract, the dispatch path must
+  bypass validation (it already has fresh `AgentQuerier` data) — the
+  existing `WatchEntryValidationException` is for the user-facing API
+  only.
+- The launch-prompt composition for watch launches is its own
+  responsibility (design D8). The `watch:`-prefixed `TriggerRuleId`
+  convention is consumed by `AgentJobGrain.AdvancePreparedLaunchAsync`
+  for provenance labeling — no schema change needed.

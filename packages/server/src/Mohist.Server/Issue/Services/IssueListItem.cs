@@ -45,6 +45,8 @@ public sealed class IssueListItem
     public IssueParentRef? ParentIssueRef { get; set; }
     public ChildIssuesSummary? ChildIssuesSummary { get; set; }
     public IssueChildRef[] Children { get; set; } = [];
+    public IssueWatchEntryDto[] Watching { get; set; } = [];
+    public IssueWatchEntryDto[] Muted { get; set; } = [];
 
     public static IssueListItem FromReadModel(IssueReadModel issue) => new()
     {
@@ -81,6 +83,8 @@ public sealed class IssueListItem
         ParentIssueRef = issue.ParentIssueRef,
         ChildIssuesSummary = issue.ChildIssuesSummary,
         Children = issue.Children,
+        Watching = issue.Watching,
+        Muted = issue.Muted,
     };
 }
 
