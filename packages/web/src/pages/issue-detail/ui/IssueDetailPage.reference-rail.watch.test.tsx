@@ -1,6 +1,5 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import { DEFAULT_RECOVERY, mockMatchMedia, makeIssue, renderPage } from './_issueDetailReferenceRailTestUtils'
 import { mockIssue, mountIssueDetail } from './_issueDetailMsw'
 
@@ -15,7 +14,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('IssueDetailPage reference-rail — watching and muted read-only cards (issue-489)', () => {
+describe('IssueDetailPage reference-rail — watching and muted read-only cards', () => {
   it('renders the watching card when the issue has watching entries', async () => {
     mockIssue(makeIssue({
       watching: [

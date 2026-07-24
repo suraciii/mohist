@@ -461,3 +461,20 @@
     pattern.
   - No in-page add/remove controls.
 
+## Verification repair
+
+- `npm run verify` initially failed during the Web workspace build because
+  `IssueDetailPage.reference-rail.watch.test.tsx` imported `fireEvent` without using it;
+  TypeScript reports TS6133 under the repository's no-unused check.
+- Removed only the unused import. The failure was a source-level test import defect, not a
+  generated build side effect; the worktree was clean before and after the failed verification.
+- The next full verification reached Web test-boundary checks and found two policy violations in
+  the same test: a redundant `@vitest-environment jsdom` directive and an `issue-489` ticket
+  identifier in the describe title. `.test.tsx` already selects jsdom through `vite.config.ts`;
+  removed the directive and renamed the behavior-only title.
+- A later full run had one unrelated Server spec timeout in
+  `AgentJobTerminalDeliverySpecs.ReportResultAsync_RunnerCategoryPrecedence_ErrorCodeUsedWhenOutputCategoryMissing`;
+  the exact filtered test passed, and the subsequent full verification passed unchanged.
+- Final `npm run verify`: server 6,088 tests passed, Web 5,130 tests passed (1 skipped), Runner
+  1,383 tests passed; build and boundary checks passed. Verification left no generated Git changes.
+
