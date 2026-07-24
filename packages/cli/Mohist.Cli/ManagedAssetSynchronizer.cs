@@ -5,6 +5,7 @@ internal sealed record ManagedAssetKind(
     string DisplayName,
     string SourceDirectoryName,
     string SuccessMessageNoun,
+    string InvalidPreparedMessage,
     Func<IFileSystem, string, bool> PreparedValidator)
 {
     public static readonly ManagedAssetKind Skill = new(
@@ -12,6 +13,7 @@ internal sealed record ManagedAssetKind(
         "skill assets",
         "skill-data",
         "skill assets",
+        "no '*/SKILL.md' found",
         (fs, dir) => fs.EnumerateFiles(dir, "SKILL.md", SearchOption.AllDirectories).Any());
 
     public static readonly ManagedAssetKind Preset = new(
@@ -19,6 +21,7 @@ internal sealed record ManagedAssetKind(
         "preset assets",
         "presets",
         "preset assets",
+        "manifest.json not found",
         (fs, dir) => fs.Exists(Path.Combine(dir, "manifest.json")));
 }
 
@@ -73,7 +76,6 @@ internal sealed class ManagedAssetSynchronizer
                 _err.WriteLine($"Prepared {kind.SourceDirectoryName} at '{tempDir}' is invalid: {validationError}");
                 return 1;
             }
-
             if (_fileSystem.DirectoryExists(managedDir))
                 _fileSystem.DeleteDirectory(managedDir);
 
@@ -127,9 +129,7 @@ internal sealed class ManagedAssetSynchronizer
         {
             if (!kind.PreparedValidator(_fileSystem, preparedDir))
             {
-                error = kind.Label == ManagedAssetKind.Skill.Label
-                    ? "no '*/SKILL.md' found"
-                    : $"manifest.json not found";
+                error = kind.InvalidPreparedMessage;
                 return false;
             }
 

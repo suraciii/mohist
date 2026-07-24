@@ -50,3 +50,13 @@
 - **Tests:** added `ManagedAssetSynchronizerPresetTests` (sync + manifest validation), `PresetCatalogTests` cases for managed/sibling/absent resolution, and a command-level `AgentInstall_WhenManagedPresetsAbsent_ExitsNonZeroBeforeAnyHttp` regression for the F1 failure mode. Updated update-flow fixtures (`UpdateInstallSyncTests`, `UpdateTestFactory`) to seed a preset bundle since `mo update` now requires it.
 - Verified: `dotnet test Mohist.sln` green (Cli 1371 + Unit 1346 + Arch 32 + Spec 3006); `npm run build` clean.
 
+## Re-review fix pass (issue-488 review.md findings N1–N3)
+
+- **N1 (Medium) — agent 409-conflict re-resolve used a malformed project id:** `EnsureAgentAsync` sliced the agents URL path (`/api/projects/{id}`) and passed it as `projectId` to `ResolveAgentAsync`, which prepended `/api/projects/` again → a double-prefixed/escaped URL that 404s. Under the concurrent-install race (D3's 409 safety net) install printed `exists, skipped` then errored. Fix: thread the real `resolution.ProjectId` into `EnsureAgentAsync` and pass it to `ResolveAgentAsync`. Added `AgentInstall_AgentCreateConflict_ResolvesExistingAndBindsRulesToIt` — a stateful handler simulates the race (list empty → POST 409 → list returns the agent) and asserts install exits 0, re-resolves via the exact project-scoped agents URL, and both rules bind `agentId` to the re-resolved supervisor. Verified the test fails against the reverted bug and passes with the fix.
+- **N2 (nit) — `ManagedAssetKind` validation error was hardcoded by label compare:** `TryValidatePrepared` picked the error string via `kind.Label == Skill.Label` instead of data-driving it. Added `InvalidPreparedMessage` to the `ManagedAssetKind` descriptor (`"no '*/SKILL.md' found"` / `"manifest.json not found"`); `TryValidatePrepared` now reads `kind.InvalidPreparedMessage`. A future asset kind gets its own message for free.
+- **N3 (coverage) — three spec scenarios pinned at the narrowest level:**
+  - Tail-append: `AgentInstall_CreatesAgentAndRulesInOrder` now asserts the rule POST bodies carry no `before`/`after` keys (anchors would reorder rules).
+  - Verbatim placeholders at the HTTP boundary: new `AgentInstall_ResponsePromptPlaceholdersFlowThroughToRuleBodyVerbatim` seeds `{{event.*}}` prompt text and asserts the POSTed `responsePrompt` contains the tokens unchanged (catches accidental sanitization).
+  - Partial pre-existence: new `AgentInstall_PartialPreexistence_CreatesOnlyTheMissingRule` — agent + supervisor-approval pre-exist, failure missing → exactly one POST (the failure rule), agent and approval reused unmodified.
+- Verified: `dotnet test Mohist.sln` green (Cli 1374 + Unit 1346 + Arch 32 + Spec 3006 + Workflow.Definition 175); `dotnet build Mohist.sln` clean.
+

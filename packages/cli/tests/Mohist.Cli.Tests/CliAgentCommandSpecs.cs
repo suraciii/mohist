@@ -47,6 +47,31 @@ public class CliAgentCommandSpecs
         return root;
     }
 
+    private static string SeedManagedPresetsWithPlaceholders(FakeFileSystem fileSystem)
+    {
+        // Same layout as SeedManagedPresets but with real {{event.*}} prompt
+        // text, so the verbatim-preservation assertion runs against content
+        // that actually carries runtime placeholders.
+        var root = ManagedPresetRoot;
+        fileSystem.CreateDirectory(root);
+        fileSystem.CreateDirectory($"{root}/supervisor");
+        fileSystem.AddFile($"{root}/manifest.json", """
+            {
+              "supervisor": {
+                "instructions": "supervisor/instructions.md",
+                "rules": [
+                  { "name": "supervisor-approval", "match": "event.type == \"com.mohist.workflow.stage.approval-requested\"", "responsePrompt": "supervisor/approval.md" },
+                  { "name": "supervisor-failure", "match": "event.type == \"com.mohist.workflow.run.failed\"", "responsePrompt": "supervisor/failure.md" }
+                ]
+              }
+            }
+            """);
+        fileSystem.AddFile($"{root}/supervisor/instructions.md", "identity");
+        fileSystem.AddFile($"{root}/supervisor/approval.md", "Issue #{{event.issue}} at {{event.stage}} ({{event.workflowrunid}})");
+        fileSystem.AddFile($"{root}/supervisor/failure.md", "Run {{event.workflowrunid}} for #{{event.issue}} failed");
+        return root;
+    }
+
     [Fact]
     public async Task AgentInstall_UnknownPresetListsAvailableNames()
     {
@@ -105,6 +130,13 @@ public class CliAgentCommandSpecs
         Assert.Contains("created routing rule: supervisor-failure", output.ToString());
         Assert.Null(JsonNode.Parse(handler.Requests[3].Body!)!["continue"]);
         Assert.Null(JsonNode.Parse(handler.Requests[5].Body!)!["continue"]);
+        // Rules append at the table tail: the POST bodies carry no before/after
+        // anchor, so the server's default tail-append applies (spec: "without
+        // specifying a before/after anchor").
+        Assert.False(JsonNode.Parse(handler.Requests[3].Body!)!.AsObject().ContainsKey("before"));
+        Assert.False(JsonNode.Parse(handler.Requests[3].Body!)!.AsObject().ContainsKey("after"));
+        Assert.False(JsonNode.Parse(handler.Requests[5].Body!)!.AsObject().ContainsKey("before"));
+        Assert.False(JsonNode.Parse(handler.Requests[5].Body!)!.AsObject().ContainsKey("after"));
         // Both rules must bind to the supervisor Agent — that binding is what
         // actually makes events route to the supervisor (self-review F1).
         var approvalAgentId = JsonNode.Parse(handler.Requests[3].Body!)!["agentId"]?.GetValue<string>();
@@ -187,6 +219,60 @@ public class CliAgentCommandSpecs
         var failureAgentId = JsonNode.Parse(handler.Requests[6].Body!)!["agentId"]?.GetValue<string>();
         Assert.Equal("agent_supervisor", approvalAgentId);
         Assert.Equal("agent_supervisor", failureAgentId);
+    }
+
+    [Fact]
+    public async Task AgentInstall_ResponsePromptPlaceholdersFlowThroughToRuleBodyVerbatim()
+    {
+        // Pin "stored verbatim, including {{event.*}} placeholders" at the HTTP
+        // boundary: the shipped prompt text must reach the rule POST body with
+        // its runtime placeholders intact, not sanitized or rendered. Calls
+        // MohistCliCommands.RunAsync directly so it can seed placeholder prompt
+        // content (the shared RunAsync helper seeds dummy text).
+        var fileSystem = FileSystemWithProject();
+        SeedManagedPresetsWithPlaceholders(fileSystem);
+        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(ResolveRequest(request)));
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
+        var output = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "install", "supervisor"], output, new StringWriter(), fileSystem, new FakeCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var approvalPrompt = JsonNode.Parse(handler.Requests[3].Body!)!["responsePrompt"]?.GetValue<string>();
+        var failurePrompt = JsonNode.Parse(handler.Requests[5].Body!)!["responsePrompt"]?.GetValue<string>();
+        Assert.Contains("{{event.issue}}", approvalPrompt, StringComparison.Ordinal);
+        Assert.Contains("{{event.stage}}", approvalPrompt, StringComparison.Ordinal);
+        Assert.Contains("{{event.workflowrunid}}", approvalPrompt, StringComparison.Ordinal);
+        Assert.Contains("{{event.issue}}", failurePrompt, StringComparison.Ordinal);
+        Assert.Contains("{{event.workflowrunid}}", failurePrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AgentInstall_PartialPreexistence_CreatesOnlyTheMissingRule()
+    {
+        // Spec: "a project already has an Agent named `supervisor` and a
+        // `supervisor-approval` rule but no `supervisor-failure` rule" → install
+        // skips the agent and approval rule unmodified and creates only the
+        // missing failure rule.
+        var fileSystem = FileSystemWithProject();
+        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(ResolvePartialPreexistenceRequest(request)));
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("exists, skipped: agent supervisor", stdout);
+        Assert.Contains("exists, skipped: routing rule supervisor-approval", stdout);
+        Assert.Contains("created routing rule: supervisor-failure", stdout);
+        Assert.DoesNotContain("created agent: supervisor", stdout);
+        Assert.DoesNotContain("created routing rule: supervisor-approval", stdout);
+        // Exactly one POST: the missing failure rule. The agent and approval
+        // rule are reused, not recreated or patched.
+        var posts = handler.Requests.Where(r => r.Method == HttpMethod.Post).ToList();
+        Assert.Single(posts);
+        Assert.Equal("supervisor-failure", JsonNode.Parse(posts[0].Body!)!["name"]?.GetValue<string>());
     }
 
     [Fact]
@@ -475,6 +561,42 @@ public class CliAgentCommandSpecs
             if (path.EndsWith("/routing/rules", StringComparison.Ordinal))
                 return RecordingHttpHandler.Json(new { success = true, data = new { id = "rule_1", name = "rule" } }, HttpStatusCode.Created);
         }
+
+        return RecordingHttpHandler.JsonError("unexpected");
+    }
+
+    private static HttpResponseMessage ResolvePartialPreexistenceRequest(HttpRequestMessage request)
+    {
+        // Partial pre-existence: the supervisor Agent and the supervisor-approval
+        // rule already exist; only supervisor-failure is missing.
+        var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+        if (request.Method == HttpMethod.Get)
+        {
+            if (path == "/api/projects/proj_123")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        id = "proj_123",
+                        repositories = new[]
+                        {
+                            new { name = "default", gitUrl = "https://example.com/repo.git", baseBranch = "main", isDefault = true },
+                        },
+                    },
+                });
+            }
+
+            if (path.EndsWith("/agents", StringComparison.Ordinal))
+                return RecordingHttpHandler.Json(new { success = true, data = new[] { Agent("agent_supervisor", "supervisor") } });
+
+            if (path.EndsWith("/routing/rules", StringComparison.Ordinal))
+                return RecordingHttpHandler.Json(new { success = true, data = new[] { new { id = "rule_approval", name = "supervisor-approval" } } });
+        }
+
+        if (request.Method == HttpMethod.Post && path.EndsWith("/routing/rules", StringComparison.Ordinal))
+            return RecordingHttpHandler.Json(new { success = true, data = new { id = "rule_failure", name = "supervisor-failure" } }, HttpStatusCode.Created);
 
         return RecordingHttpHandler.JsonError("unexpected");
     }
