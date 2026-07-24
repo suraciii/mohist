@@ -19,8 +19,6 @@
 |---|---|
 | `loaded` | 加入本次运行的任务数量。 |
 
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
-
 ### 业务错误码
 
 | 错误码 | 含义 |
@@ -60,8 +58,6 @@
 | `present` | 所有必需产物是否存在。 |
 | `missing` | 缺失产物路径列表。 |
 
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
-
 ### 业务错误码
 
 | 错误码 | 含义 |
@@ -100,8 +96,6 @@
 | `commitSha` | 归档步骤修改仓库时产生的提交 SHA。 |
 | `commitOutput` | 原始 Git 提交输出。 |
 | `changedFiles` | 归档提交修改的文件。 |
-
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
 
 ### 业务错误码
 

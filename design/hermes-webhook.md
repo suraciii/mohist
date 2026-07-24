@@ -6,14 +6,18 @@ Mohist 通过出站 webhook 把 issue 工作流的关键事件推给 Hermes，�
 
 ## 事件类型
 
-四种时刻，三种默认开启：
+通知时刻的产品语义与默认开关见
+[`docs/hermes-notifications.md`](../docs/hermes-notifications.md)。wire 上的
+`notificationType` 与触发事件对应：
 
-| notificationType | 触发事件 | 默认 |
-|---|---|---|
-| `approval_requested` | `workflow.stage.approval-requested` | on |
-| `workflow_failed` | `workflow.run.failed` | on |
-| `issue_completed` | `issue.completed` | on |
-| `issue_started` | `issue.work-started` | **off**（刚亲手创建的 issue 的启动提醒是噪音） |
+| notificationType | 触发事件 |
+|---|---|
+| `approval_requested` | `workflow.stage.approval-requested` |
+| `workflow_failed` | `workflow.run.failed` |
+| `issue_completed` | `issue.completed` |
+| `issue_started` | `issue.work-started` |
+
+第五个时刻「Agent 响应失败」尚未实装，wire 形状随 Agent 事件响应落地。
 
 ## Mohist 配置
 
