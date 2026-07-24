@@ -198,9 +198,7 @@ exists, skipped: routing rule supervisor-failure
 
 ## Status
 
-全部未实装。当前代码中没有预设资源与 `mo agent install` 命令；监管场景只能
-手工组合 `mo agent create` 与 `mo routing rule create` 达成。实施 issue 待从
-本文创建。
+`mo agent install supervisor` 已实装，按名称幂等创建预设 Agent 与两条表尾路由规则。`mo issue watch` 关注与静音、「Agent 响应失败」通知、审批决议的操作者记录仍未实装。
 
 已实装、本文依赖的底座：路由表求值与路由启动（`RoutingDispatchHandler` 经
 `IAgentLauncher.LaunchRoutedAsync` 启动 AgentJob）、审批与失败事件、inbox 与

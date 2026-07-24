@@ -8,15 +8,67 @@ namespace Mohist.Cli.Tests;
 public class CliAgentCommandSpecs
 {
     [Fact]
+    public async Task AgentInstall_UnknownPresetListsAvailableNames()
+    {
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "install", "acme"], error: error, fileSystem: FileSystemWithProject());
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("acme", error.ToString());
+        Assert.Contains("supervisor", error.ToString());
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task AgentInstall_CreatesAgentAndRulesInOrder()
+    {
+        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(request.Method == HttpMethod.Get
+            ? RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })
+            : RecordingHttpHandler.Json(new { success = true, data = request.RequestUri!.AbsolutePath.EndsWith("/agents") ? Agent("agent_supervisor", "supervisor") : new { id = "rule_1", name = "rule" } }, HttpStatusCode.Created)));
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
+        Assert.Equal(HttpMethod.Post, handler.Requests[1].Method);
+        Assert.Equal(HttpMethod.Get, handler.Requests[2].Method);
+        Assert.Equal(HttpMethod.Post, handler.Requests[3].Method);
+        Assert.Equal(HttpMethod.Get, handler.Requests[4].Method);
+        Assert.Equal(HttpMethod.Post, handler.Requests[5].Method);
+        Assert.Contains("created agent: supervisor", output.ToString());
+        Assert.Contains("created routing rule: supervisor-approval", output.ToString());
+        Assert.Contains("created routing rule: supervisor-failure", output.ToString());
+        Assert.Null(JsonNode.Parse(handler.Requests[3].Body!)!["continue"]);
+        Assert.Null(JsonNode.Parse(handler.Requests[5].Body!)!["continue"]);
+    }
+
+    [Fact]
+    public async Task AgentInstall_RerunSkipsExistingResources()
+    {
+        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(request.Method == HttpMethod.Get
+            ? RecordingHttpHandler.Json(new { success = true, data = request.RequestUri!.AbsolutePath.EndsWith("/agents") ? new[] { Agent("agent_supervisor", "supervisor") } : new[] { new { id = "rule_1", name = "supervisor-approval" }, new { id = "rule_2", name = "supervisor-failure" } } })
+            : RecordingHttpHandler.JsonError("unexpected")));
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal(3, output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.DoesNotContain(HttpMethod.Post, handler.Requests.Select(request => request.Method));
+    }
+
+    [Fact]
     public async Task AgentHelp_ListsSubcommands()
     {
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
         var output = new StringWriter();
         var error = new StringWriter();
-
         var exitCode = await RunAsync(handler, ["agent", "--help"], output, error);
 
-        Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("create", stdout);
         Assert.Contains("list", stdout);

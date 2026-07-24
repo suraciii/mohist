@@ -8,4 +8,8 @@
 
 - Added supervisor instructions, approval, and failure resources plus `presets/manifest.json`.
 - Added the CLI content packaging entry and catalog loader/tests.
-- CLI unit tests pass. `npm run build` completes the .NET build but workspace TypeScript builds cannot run because `tsc` is unavailable in the existing environment.
+
+## T-002
+
+- Added `mo agent install <preset>` with catalog resolution, list-then-create idempotency, 409 conflict skipping, and ordered tail rule creation without Continue.
+- Updated agent supervision status footnotes to mark the install command implemented.

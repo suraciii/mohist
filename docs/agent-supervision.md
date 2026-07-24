@@ -90,4 +90,4 @@ workflow 终态失败（系统的自动恢复已耗尽）时，Agent 先读自�
 
 ## 实装差距
 
-`mo agent install supervisor` 预设、`mo issue watch` 关注与静音、「Agent 响应失败」通知、审批决议的操作者记录均尚未实装，实施 issue 待创建。当前可以手工达到近似效果：用 `mo agent create` 创建 Agent，再用 `mo routing rule create` 建立审批与失败两条规则，提示词写法见 [Agent 事件路由](event-routing.md) 的监管场景。路由表、Agent 启动、审批/失败事件和通知这些底座均已实装。
+`mo issue watch` 关注与静音、「Agent 响应失败」通知、审批决议的操作者记录均尚未实装，实施 issue 待创建。`mo agent install supervisor` 已实装；当前也可以手工达到近似效果：用 `mo agent create` 创建 Agent，再用 `mo routing rule create` 建立审批与失败两条规则，提示词写法见 [Agent 事件路由](event-routing.md) 的监管场景。路由表、Agent 启动、审批/失败事件和通知这些底座均已实装。
