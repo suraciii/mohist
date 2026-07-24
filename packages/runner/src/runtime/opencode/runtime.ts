@@ -132,15 +132,33 @@ export class OpenCodeRuntime {
     }
     try {
       const resolved = await this.state.server.client.session.get({
-        path: { id: request.target.runtimeSessionId },
-        query: { directory: request.target.workDir },
-      } as never)
-      const data = (resolved as { data?: { id?: string } } | undefined)?.data
+        sessionID: request.target.runtimeSessionId,
+        directory: request.target.workDir,
+      }, { throwOnError: true })
+      const data = resolved.data
       if (!data || data.id !== request.target.runtimeSessionId) {
         const error = normalizeMissingSession()
         return { ok: false, error, diagnostics: error.diagnostics }
       }
-      return { ok: true, value: { runtimeSessionId: data.id, workDir: request.target.workDir }, diagnostics: [] }
+      const statusResponse = await this.state.server.client.session.status(
+        { directory: request.target.workDir },
+        { throwOnError: true },
+      )
+      const statuses = statusResponse.data
+      if (!statuses || typeof statuses !== "object") {
+        const error = normalizeTurnFailed({ message: "session.status returned no status map" })
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+      const status = statuses[request.target.runtimeSessionId]
+      return {
+        ok: true,
+        value: {
+          runtimeSessionId: data.id,
+          workDir: request.target.workDir,
+          activeTurn: status !== undefined && status.type !== "idle",
+        },
+        diagnostics: [],
+      }
     } catch (cause) {
       if ((cause as { status?: number } | undefined)?.status === 404) {
         const error = normalizeMissingSession()
@@ -291,10 +309,10 @@ export class OpenCodeRuntime {
     const client = this.state.server.client
     try {
       const resolved = await client.session.get({
-        path: { id: request.target.runtimeSessionId },
-        query: { directory: request.target.workDir },
-      } as never)
-      const resolvedData = (resolved as { data?: { id?: string } } | undefined)?.data
+        sessionID: request.target.runtimeSessionId,
+        directory: request.target.workDir,
+      }, { throwOnError: true })
+      const resolvedData = resolved.data
       if (!resolvedData || resolvedData.id !== request.target.runtimeSessionId) {
         const error = normalizeMissingSession()
         return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
@@ -316,7 +334,7 @@ export class OpenCodeRuntime {
         parts: [{ type: "text", text: request.prompt }],
         ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),
         ...(variant ? { variant } : {}),
-      } as never)
+      }, { throwOnError: true })
       const facts: RuntimeFollowupFacts = {
         runtimeSessionId: request.target.runtimeSessionId,
         workDir: request.target.workDir,
@@ -369,7 +387,7 @@ export class OpenCodeRuntime {
       await client.session.abort({
         sessionID: request.target.runtimeSessionId,
         directory: request.target.workDir,
-      } as never)
+      }, { throwOnError: true })
       const facts: RuntimeCancelFacts = {
         runtimeSessionId: request.target.runtimeSessionId,
         workDir: request.target.workDir,

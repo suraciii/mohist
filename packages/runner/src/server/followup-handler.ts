@@ -144,7 +144,7 @@ async function handleFollowup(
         const result = handle.kind === "opencode"
           ? await handle.runtime.resolveSession({ target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
           : await handle.runtime.resolveSession({ target: { runtime: "pi", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
-        return result.ok ? { ok: true } : { ok: false, kind: result.error.kind, message: result.error.message }
+        return result.ok ? { ok: true, activeTurn: result.value.activeTurn } : { ok: false, kind: result.error.kind, message: result.error.message }
       },
       replace: async (current, replacement) => {
         const body = {

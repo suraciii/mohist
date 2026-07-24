@@ -136,7 +136,7 @@ export class AgentJobExecutor {
         runtime: { kind: "opencode", runtime },
         probe: async (candidate) => {
           const result = await runtime.resolveSession({ target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
-          return result.ok ? { ok: true } : { ok: false, kind: result.error.kind, message: result.error.message }
+          return result.ok ? { ok: true, activeTurn: result.value.activeTurn } : { ok: false, kind: result.error.kind, message: result.error.message }
         },
         replace: async (current, replacement) => {
           await this.connection.recoverMissingAgentSession(work.projectId!, binding.agentSessionId!, {
@@ -219,7 +219,7 @@ export class AgentJobExecutor {
         runtime: { kind: "pi", runtime },
         probe: async (candidate) => {
           const result = await runtime.resolveSession({ target: { runtime: "pi", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
-          return result.ok ? { ok: true } : { ok: false, kind: result.error.kind, message: result.error.message }
+          return result.ok ? { ok: true, activeTurn: result.value.activeTurn } : { ok: false, kind: result.error.kind, message: result.error.message }
         },
         replace: async (current, replacement) => {
           await this.connection.recoverMissingAgentSession(work.projectId!, binding.agentSessionId!, {

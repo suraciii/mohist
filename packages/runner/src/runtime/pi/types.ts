@@ -62,6 +62,10 @@ export interface PiSessionResult {
   readonly workDir: string
 }
 
+export interface PiSessionResolveResult extends PiSessionResult {
+  readonly activeTurn: boolean
+}
+
 export interface PiTurnOptions {
   readonly model?: string | null
   readonly variant?: string | null

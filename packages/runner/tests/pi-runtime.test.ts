@@ -86,6 +86,23 @@ describe("PiRuntime", () => {
     expect(empty.diagnostic()?.severity).toBe("warning")
   })
 
+  it.each([
+    [true, true],
+    [false, false],
+  ] as const)("reports Pi active-turn state %s from the cached session", async (isStreaming, activeTurn) => {
+    const session = new FakeSession()
+    session.isStreaming = isStreaming
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    await runtime.createSession({ target: { runtime: "pi", runtimeSessionId: null, workDir: "/workspace" } })
+
+    const result = await runtime.resolveSession({
+      target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" },
+    })
+
+    expect(result).toMatchObject({ ok: true, value: { activeTurn } })
+  })
+
   it("creates a physical binding and runs a literal prompt with per-turn selection", async () => {
     const session = new FakeSession()
     const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })

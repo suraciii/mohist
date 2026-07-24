@@ -370,7 +370,7 @@ export class WorkExecutor {
               const result = await runtime.resolveSession({
                 target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
               })
-              if (result.ok) return { ok: true }
+              if (result.ok) return { ok: true, activeTurn: result.value.activeTurn }
               return { ok: false, kind: result.error.kind, message: result.error.message }
             },
             replace: async (current, replacement) => {

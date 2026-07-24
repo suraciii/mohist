@@ -1,0 +1,9 @@
+## Codebase Patterns
+- OpenCode SDK session calls use `{ sessionID, directory }` plus `{ throwOnError: true }`, matching `runtime/opencode/turn.ts`.
+- Runtime resolve results carry the physical active-turn snapshot: OpenCode derives it from `session.status` (`undefined`/`idle` is idle), while Pi reads the cached handle's `isStreaming` getter.
+- `BindingProbeResult` represents presence as `{ ok: true, activeTurn }`; only a failed probe with `kind === "missing-session"` authorizes candidate creation.
+
+## T-001
+- Replaced all four `as never` OpenCode runtime calls (resolve, follow-up resolve, promptAsync, abort) with the typed SDK request contract.
+- Added focused typed-call and active/idle snapshot tests for OpenCode and Pi; existing resolve, follow-up, and cancel regressions pass.
+- Verification: `npm run test:ci -w packages/runner` and `npm run typecheck -w packages/runner` pass (118 files, 1387 tests).

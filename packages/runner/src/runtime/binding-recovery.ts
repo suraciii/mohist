@@ -13,7 +13,7 @@ export interface RuntimeBinding {
 }
 
 export type BindingProbeResult =
-  | { readonly ok: true }
+  | { readonly ok: true; readonly activeTurn: boolean }
   | { readonly ok: false; readonly kind: string; readonly message: string }
 
 export type BindingRecoveryResult =

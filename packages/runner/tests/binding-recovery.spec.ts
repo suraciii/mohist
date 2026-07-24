@@ -25,7 +25,7 @@ describe("resolveOrRecoverBinding", () => {
       runnerId: "runner-1",
       expected,
       runtime: { kind: "opencode", runtime: runtime(create) },
-      probe: async () => ({ ok: true }),
+      probe: async () => ({ ok: true, activeTurn: false }),
       replace,
     })
     expect(result).toEqual({ ok: true, binding: expected, recovered: false })
