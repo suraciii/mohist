@@ -6,9 +6,9 @@ using Mohist.Server.Otel;
 var epoch = RuntimeEpoch.Capture(TimeProvider.System);
 var factory = new MohistHostFactory(args, WebApplication.CreateBuilder(args));
 var primaryPlan = factory.CreatePrimaryPlan(epoch);
-var classifier = new OtelBindFailureClassifier();
+using var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
+var classifier = new OtelBindFailureClassifier(loggerFactory.CreateLogger<OtelBindFailureClassifier>());
 var initializer = new MohistDatabaseInitializer();
-var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
 var runnerLogger = loggerFactory.CreateLogger<MohistHostRunner>();
 var runner = new MohistHostRunner(factory, classifier, initializer, runnerLogger);
 

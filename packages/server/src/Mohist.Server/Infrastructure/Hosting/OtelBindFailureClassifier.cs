@@ -32,7 +32,7 @@ public sealed class OtelBindFailureClassifier : IOtelBindFailureClassifier
         if (exception is not IOException io)
             return new CollectorBindFailureDecision(null);
 
-        if (!OtelBindFailureDetector.IsOtlpPortBindFailure(io, listener.Port))
+        if (!OtelBindFailureDetector.IsOtlpPortBindFailure(io, listener.Port, listener.BindHost))
             return new CollectorBindFailureDecision(null);
 
         OtelPortBindingLog.WriteBindFailure(listener.Port, listener.BindHost, io);

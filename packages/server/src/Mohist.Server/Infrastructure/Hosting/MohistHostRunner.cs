@@ -95,6 +95,8 @@ public sealed class MohistHostRunner
 
         if (startup is null)
         {
+            _logger?.LogInformation("Mohist primary host started successfully");
+
             await OnPrimaryStartedAsync(primary, primaryPlan).ConfigureAwait(false);
             try
             {
@@ -115,6 +117,8 @@ public sealed class MohistHostRunner
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(startup).Throw();
             return;
         }
+
+        _logger?.LogInformation("Mohist primary host bind failure; starting alternate host");
 
         await RunAlternateAfterBindFailureAsync(primary, primaryPlan, startup, cancellationToken)
             .ConfigureAwait(false);

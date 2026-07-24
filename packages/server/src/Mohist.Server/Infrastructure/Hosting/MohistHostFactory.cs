@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -92,16 +93,12 @@ public sealed class MohistHostFactory : IMohistHostFactory
 
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
-            var mainAddress = mainUri.Host == "0.0.0.0" || mainUri.Host == "*"
-                ? System.Net.IPAddress.Any
-                : System.Net.IPAddress.Loopback;
+            var mainAddress = ResolveBindAddress(mainUri.Host);
             kestrel.Listen(mainAddress, mainUri.Port);
 
             if (plan.Enabled && plan.ListenerIntent is { } listener)
             {
-                var address = listener.BindHost == "0.0.0.0" || listener.BindHost == "*"
-                    ? System.Net.IPAddress.Any
-                    : System.Net.IPAddress.Loopback;
+                var address = ResolveBindAddress(listener.BindHost);
                 kestrel.Listen(address, listener.Port);
             }
         });
@@ -167,6 +164,17 @@ public sealed class MohistHostFactory : IMohistHostFactory
             RuntimeDegradationSeed.CollectorUnverified(),
             RuntimeDegradationSeed.StorageUnverified(),
         ];
+    }
+
+    private static IPAddress ResolveBindAddress(string host)
+    {
+        if (string.Equals(host, "*", StringComparison.Ordinal) || string.Equals(host, "0.0.0.0", StringComparison.Ordinal))
+            return IPAddress.Any;
+
+        if (IPAddress.TryParse(host, out var parsed))
+            return parsed;
+
+        return IPAddress.Loopback;
     }
 }
 

@@ -63,8 +63,12 @@ public sealed record MohistHostPlan
     public static MohistHostPlan Primary(
         RuntimeEpoch epoch,
         bool enabled,
-        OtelListenerIntent? listenerIntent) =>
-        new(epoch, enabled, listenerIntent, CollectorResult.Unverified());
+        OtelListenerIntent? listenerIntent)
+    {
+        if (enabled && listenerIntent is null)
+            throw new ArgumentNullException(nameof(listenerIntent), "A listener intent is required when OTel is enabled.");
+        return new(epoch, enabled, listenerIntent, CollectorResult.Unverified());
+    }
 
     /// <summary>
     /// Builds an alternate plan that mirrors the primary on epoch and

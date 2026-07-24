@@ -26,7 +26,7 @@ public static class OtelBindFailureDetector
     /// the operator bound the port explicitly to one of those or used
     /// the wildcard.
     /// </remarks>
-    public static bool IsOtlpPortBindFailure(IOException ex, int otlpPort)
+    public static bool IsOtlpPortBindFailure(IOException ex, int otlpPort, string bindHost)
     {
         ArgumentNullException.ThrowIfNull(ex);
         var msg = ex.Message ?? string.Empty;
@@ -35,6 +35,7 @@ public static class OtelBindFailureDetector
         return msg.Contains($"127.0.0.1:{otlpPort}", StringComparison.Ordinal)
             || msg.Contains($"0.0.0.0:{otlpPort}", StringComparison.Ordinal)
             || msg.Contains($"[::]:{otlpPort}", StringComparison.Ordinal)
-            || msg.Contains($"localhost:{otlpPort}", StringComparison.Ordinal);
+            || msg.Contains($"localhost:{otlpPort}", StringComparison.Ordinal)
+            || msg.Contains($"{bindHost}:{otlpPort}", StringComparison.Ordinal);
     }
 }
