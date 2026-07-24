@@ -257,16 +257,21 @@ public sealed class RuntimeObservability : IDisposable
     public void RecordAgentPath(RuntimeAgentPathFact fact)
     {
         var path = NormalizeAgentPath(fact.Path);
-        if (path is null || !_enabled || IsDisposed())
+        if (path is null || !_enabled)
             return;
 
         var candidates = RuntimeValueRules.NonNegative(fact.Candidates);
         var processed = RuntimeValueRules.NonNegative(fact.Processed);
         var transcriptRecords = RuntimeValueRules.NonNegative(fact.TranscriptRecords);
         var tags = new TagList { { "mohist.path", path } };
-        _pathCandidates.Record(candidates, tags);
-        _pathProcessed.Record(processed, tags);
-        _pathTranscriptRecords.Record(transcriptRecords, tags);
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+            _pathCandidates.Record(candidates, tags);
+            _pathProcessed.Record(processed, tags);
+            _pathTranscriptRecords.Record(transcriptRecords, tags);
+        }
     }
 
     public void RecordAgentPath(AgentPathFact fact) => RecordAgentPath(fact.ToRuntime());

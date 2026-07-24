@@ -286,6 +286,18 @@ public class RuntimeObservabilityTests
         Assert.Equal(first.Since, second.Since);
     }
 
+    [Fact]
+    public void RecordAgentPathAfterDisposeDoesNotThrow()
+    {
+        var time = new FakeTimeProvider(Start);
+        var runtime = HealthyRuntime(time);
+        runtime.Dispose();
+
+        var ex = Record.Exception(() => runtime.RecordAgentPath("agent.status", 1, 1, 0));
+
+        Assert.Null(ex);
+    }
+
     private static RuntimeObservability HealthyRuntime(
         FakeTimeProvider time,
         List<RuntimeStateTransition>? transitions = null,
