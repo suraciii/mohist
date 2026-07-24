@@ -42,6 +42,7 @@ import { registerWorkflowRunStatusHandler } from "./workflow-run-status-handler.
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "./runtime-event-outbox.js"
 import type { SessionCommandJournalStore } from "../runtime/session-command-journal.js"
 import type { FollowupOperationJournalStore } from "../runtime/followup-operation-journal.js"
+import type { BindingRecoveryCoordinator } from "../runtime/binding-recovery.js"
 import type { ServerConnection } from "./connection.js"
 import type { PiTurnObserver } from "../runtime/pi/index.js"
 import {
@@ -98,6 +99,7 @@ export interface RunnerSignalRClientOptions {
    */
   sessionCommandJournal?: SessionCommandJournalStore | null
   followupOperationJournal?: FollowupOperationJournalStore | null
+  bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
   allowUnverifiedWorkspaceQueriesForTest?: boolean
 }
 
@@ -114,6 +116,7 @@ export class RunnerSignalRClient {
   private readonly serverConnection: ServerConnection | null
   private readonly sessionCommandJournal: SessionCommandJournalStore | null
   private readonly followupOperationJournal: FollowupOperationJournalStore | null
+  private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null
   private readonly allowUnverifiedWorkspaceQueriesForTest: boolean
 
   constructor(
@@ -142,6 +145,7 @@ export class RunnerSignalRClient {
     this.serverConnection = options.serverConnection ?? null
     this.sessionCommandJournal = options.sessionCommandJournal ?? null
     this.followupOperationJournal = options.followupOperationJournal ?? null
+    this.bindingRecoveryCoordinator = options.bindingRecoveryCoordinator ?? null
     this.allowUnverifiedWorkspaceQueriesForTest = options.allowUnverifiedWorkspaceQueriesForTest === true
 
     this.registerHandlers()
@@ -221,6 +225,7 @@ export class RunnerSignalRClient {
       connection: this.serverConnection,
       runnerId: this.serverConnection?.runnerId ?? null,
       followupOperationJournal: this.followupOperationJournal,
+      bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
     })
 
     registerCancelHandler(this.connection, {

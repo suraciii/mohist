@@ -27,11 +27,30 @@ export interface ResolveOrRecoverBindingRequest {
   readonly probe: (binding: RuntimeBinding) => Promise<BindingProbeResult>
   readonly replace: (expected: RuntimeBinding, replacement: RuntimeBinding) => Promise<void>
   readonly model?: { readonly providerID: string; readonly modelID: string } | null
+  readonly recoveryKey?: string
+  readonly coordinator?: BindingRecoveryCoordinator
+}
+
+export class BindingRecoveryCoordinator {
+  private readonly inFlight = new Map<string, Promise<BindingRecoveryResult>>()
+
+  run(key: string, operation: () => Promise<BindingRecoveryResult>): Promise<BindingRecoveryResult> {
+    const existing = this.inFlight.get(key)
+    if (existing) return existing
+    const current = operation().finally(() => {
+      if (this.inFlight.get(key) === current) this.inFlight.delete(key)
+    })
+    this.inFlight.set(key, current)
+    return current
+  }
 }
 
 export async function resolveOrRecoverBinding(
   request: ResolveOrRecoverBindingRequest,
 ): Promise<BindingRecoveryResult> {
+  if (request.coordinator && request.recoveryKey) {
+    return request.coordinator.run(request.recoveryKey, () => resolveOrRecoverBinding({ ...request, coordinator: undefined, recoveryKey: undefined }))
+  }
   const expected = request.expected
   if (expected.runnerId !== request.runnerId) {
     return failure("different-runner", "The Runtime Session binding belongs to a different Runner")

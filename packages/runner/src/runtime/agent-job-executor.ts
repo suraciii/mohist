@@ -23,7 +23,7 @@ import type {
 } from "./pi/index.js"
 import { resolveAccessor, type RuntimeAccessor } from "../server/command-runtime.js"
 import type { ServerConnection } from "../server/connection.js"
-import { resolveOrRecoverBinding, type RuntimeBinding } from "./binding-recovery.js"
+import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from "./binding-recovery.js"
 
 /**
  * Agent-owned execution entry for `ownerKind === "agent-job"` work.
@@ -60,6 +60,7 @@ export class AgentJobExecutor {
   constructor(
     private readonly connection: ServerConnection,
     private readonly runtimes: AgentJobRuntimeAccessors,
+    private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
   ) {}
 
   async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -147,6 +148,8 @@ export class AgentJobExecutor {
           }, signal)
         },
         model: model.kind === "ok" ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
+        recoveryKey: expected.runtimeSessionId!,
+        coordinator: this.bindingRecoveryCoordinator ?? undefined,
       })
       if (!recovery.ok) return failureResult(recovery.kind, recovery.message, "opencode")
       selected = recovery.binding.runtimeSessionId
@@ -229,6 +232,8 @@ export class AgentJobExecutor {
             replacementRuntimeSessionId: replacement.runtimeSessionId,
           }, signal)
         },
+        recoveryKey: expected.runtimeSessionId!,
+        coordinator: this.bindingRecoveryCoordinator ?? undefined,
       })
       if (!recovery.ok) return failureResult(recovery.kind, recovery.message, "pi")
       runtimeSessionId = recovery.binding.runtimeSessionId

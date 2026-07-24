@@ -1,6 +1,6 @@
 import type { AgentSessionReconcileBinding, AgentSessionRuntimeEventReceipt } from "../server/connection.js"
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "../server/runtime-event-outbox.js"
-import { createEmptySession, type BindingProbeResult, type RecoverableRuntime, type RuntimeBinding } from "./binding-recovery.js"
+import { BindingRecoveryCoordinator, resolveOrRecoverBinding, type BindingProbeResult, type RecoverableRuntime, type RuntimeBinding } from "./binding-recovery.js"
 import type { OpenCodeRuntime } from "./opencode/index.js"
 import type { PiRuntime } from "./pi/index.js"
 
@@ -18,6 +18,7 @@ export interface BindingConvergenceOptions {
   readonly piRuntime: () => PiRuntime | null
   readonly now?: () => Date
   readonly randomId?: () => string
+  readonly recoveryCoordinator?: BindingRecoveryCoordinator
 }
 
 export class BindingConvergence {
@@ -60,21 +61,29 @@ export class BindingConvergence {
       runtimeSessionId: binding.runtimeSessionId,
       workDir: binding.workDir,
     }
-    const probe = await probeBinding(runtime, expected)
-    if (probe.ok) {
-      await this.recordActivity(binding, probe.activeTurn ? "active" : "idle")
+    const result = await resolveOrRecoverBinding({
+      runnerId: this.options.runnerId,
+      expected,
+      runtime,
+      probe: (candidate) => probeBinding(runtime, candidate),
+      replace: async (current, replacement) => {
+        await this.options.connection.reconcileMissingAgentSession(binding.sessionId, {
+          expectedRunnerId: current.runnerId,
+          expectedRuntime: current.runtime,
+          expectedRuntimeSessionId: current.runtimeSessionId,
+          replacementRuntimeSessionId: replacement.runtimeSessionId,
+        }, signal)
+      },
+      recoveryKey: expected.runtimeSessionId!,
+      coordinator: this.options.recoveryCoordinator,
+    })
+    if (!result.ok) {
+      if (result.kind === "candidate-unbound") throw new Error(result.message)
       return
     }
-    if (probe.kind !== "missing-session") return
-
-    const created = await createEmptySession(runtime, expected, null)
-    if (!created.ok) return
-    await this.options.connection.reconcileMissingAgentSession(binding.sessionId, {
-      expectedRunnerId: expected.runnerId,
-      expectedRuntime: expected.runtime,
-      expectedRuntimeSessionId: expected.runtimeSessionId,
-      replacementRuntimeSessionId: created.value.runtimeSessionId,
-    }, signal)
+    if (result.recovered) return
+    const probe = await probeBinding(runtime, result.binding)
+    if (probe.ok) await this.recordActivity(binding, probe.activeTurn ? "active" : "idle")
   }
 
   private runtime(runtime: "opencode" | "pi"): RecoverableRuntime | null {

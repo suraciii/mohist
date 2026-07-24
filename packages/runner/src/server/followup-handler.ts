@@ -44,7 +44,7 @@ import {
   type CommandRuntimeAccessors,
 } from "./command-runtime.js"
 import type { PiTurnObserver } from "../runtime/pi/index.js"
-import { resolveOrRecoverBinding } from "../runtime/binding-recovery.js"
+import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from "../runtime/binding-recovery.js"
 import type { FollowupOperationJournalStore } from "../runtime/followup-operation-journal.js"
 import type { ServerConnection } from "./connection.js"
 
@@ -57,6 +57,7 @@ export interface FollowupHandlerDeps {
   runnerId?: string | null
   followupOperationJournal?: FollowupOperationJournalStore | null
   randomId?: () => string
+  bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
 }
 
 export interface FollowupDeliveryResult {
@@ -153,12 +154,14 @@ async function handleFollowup(
           expectedRuntimeSessionId: current.runtimeSessionId,
           replacementRuntimeSessionId: replacement.runtimeSessionId,
         }
-        if (sessionTarget.kind === "workflow") {
+      if (sessionTarget.kind === "workflow") {
           await connection.recoverMissingWorkflowAgentSession(sessionTarget.projectId, sessionTarget.workflowRunId, sessionTarget.sessionName, body, new AbortController().signal)
         } else {
           await connection.recoverMissingAgentSession(sessionTarget.projectId, sessionTarget.sessionId, body, new AbortController().signal)
         }
       },
+      recoveryKey: expected.runtimeSessionId!,
+      coordinator: deps.bindingRecoveryCoordinator ?? undefined,
     })
     if (!recovery.ok) return unavailable()
     selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId! }

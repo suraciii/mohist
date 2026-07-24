@@ -167,6 +167,18 @@ describe("Runner reconnect AgentSession binding convergence", () => {
     expect(records).toEqual([])
   })
 
+  it("does not recover after an OpenCode probe returns malformed session data", async () => {
+    const records: RuntimeEventRecord[] = []
+    const handle = runtime({ resolve: () => ({ ok: false, kind: "turn-failed" }) })
+    const server = connection(() => [binding()])
+
+    await convergence(handle, server, records).runOnce(new AbortController().signal)
+
+    expect(handle.createSession).not.toHaveBeenCalled()
+    expect(server.reconcileMissingAgentSession).not.toHaveBeenCalled()
+    expect(records).toEqual([])
+  })
+
   it("preserves unknown when the runtime is unavailable", async () => {
     const records: RuntimeEventRecord[] = []
     const server = connection(() => [binding()])

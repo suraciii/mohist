@@ -253,6 +253,7 @@ describe("RunnerHost converges active workflow runs", () => {
     const run = host.run(controller.signal)
 
     expect(await waitForActiveStartup(events)).toEqual(["wr-1"])
+    expect(listAgentSessionsForReconcile).toHaveBeenCalledOnce()
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })

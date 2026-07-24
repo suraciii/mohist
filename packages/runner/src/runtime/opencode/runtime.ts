@@ -136,8 +136,8 @@ export class OpenCodeRuntime {
         directory: request.target.workDir,
       }, { throwOnError: true })
       const data = resolved.data
-      if (!data || data.id !== request.target.runtimeSessionId) {
-        const error = normalizeMissingSession()
+      if (!data || typeof data !== "object" || data.id !== request.target.runtimeSessionId) {
+        const error = normalizeTurnFailed({ message: "OpenCode session.get returned a malformed or mismatched Session" })
         return { ok: false, error, diagnostics: error.diagnostics }
       }
       const statusResponse = await this.state.server.client.session.status(

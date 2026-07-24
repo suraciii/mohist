@@ -14,6 +14,7 @@ import {
 import { createServerRuntimeEventDelivery } from "../server/runtime-event-delivery.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
 import { BindingConvergence } from "./binding-convergence.js"
+import { BindingRecoveryCoordinator } from "./binding-recovery.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
 import { AgentJobExecutor } from "./agent-job-executor.js"
@@ -108,6 +109,7 @@ export class RunnerHost {
   private readonly workspaceRegistry: WorkspaceRegistry
   private readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox
   private readonly bindingConvergence: BindingConvergence
+  private readonly bindingRecoveryCoordinator = new BindingRecoveryCoordinator()
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
   private readonly cleanupConvergenceIntervalMs: number
@@ -185,6 +187,7 @@ export class RunnerHost {
       outbox: this.agentSessionRuntimeEventOutbox,
       openCodeRuntime: () => this.openCodeRuntime,
       piRuntime: () => this.piRuntime,
+      recoveryCoordinator: this.bindingRecoveryCoordinator,
     })
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
@@ -213,6 +216,7 @@ export class RunnerHost {
         serverConnection: this.connection,
         sessionCommandJournal: this.sessionCommandJournal,
         followupOperationJournal: this.followupOperationJournal,
+        bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
       },
     )
   }
@@ -268,6 +272,7 @@ export class RunnerHost {
       // process was down). Runs immediately after SignalR is up so the
       // push channel is available in parallel.
       await this.runConvergenceOnce(signal)
+      await this.runBindingConvergenceOnce(signal)
       const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
       const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
       const convergenceTimer = setInterval(() => void this.runConvergenceOnce(signal), this.cleanupConvergenceIntervalMs)
@@ -428,10 +433,11 @@ export class RunnerHost {
       new AgentJobExecutor(this.connection, {
         openCode: () => this.openCodeRuntime,
         pi: () => this.piRuntime,
-      }),
+      }, this.bindingRecoveryCoordinator),
       this.agentSessionRuntimeEventOutbox,
       undefined,
       this.piRuntime,
+      this.bindingRecoveryCoordinator,
     )
   }
 

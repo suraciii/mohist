@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { resolveOrRecoverBinding, type RuntimeBinding } from "../src/runtime/binding-recovery.js"
+import { BindingRecoveryCoordinator, resolveOrRecoverBinding, type RuntimeBinding } from "../src/runtime/binding-recovery.js"
 import type { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
 
 const expected: RuntimeBinding = {
@@ -95,5 +95,35 @@ describe("resolveOrRecoverBinding", () => {
       message: "stale binding",
       candidateRuntimeSessionId: "session-new",
     })
+  })
+
+  it("coalesces concurrent recovery attempts before candidate creation", async () => {
+    const coordinator = new BindingRecoveryCoordinator()
+    let releaseCreate!: () => void
+    let markCreateStarted!: () => void
+    const createStarted = new Promise<void>((resolve) => { markCreateStarted = resolve })
+    const create = vi.fn(async () => {
+      markCreateStarted()
+      await new Promise<void>((resolve) => { releaseCreate = resolve })
+      return { ok: true as const, value: { runtimeSessionId: "session-new", workDir: expected.workDir }, diagnostics: [] }
+    })
+    const request = {
+      runnerId: "runner-1",
+      expected,
+      runtime: { kind: "opencode" as const, runtime: runtime(create) },
+      probe: async () => ({ ok: false as const, kind: "missing-session", message: "missing" }),
+      replace: async () => undefined,
+      recoveryKey: "session-1",
+      coordinator,
+    }
+    const first = resolveOrRecoverBinding(request)
+    const second = resolveOrRecoverBinding(request)
+    await createStarted
+    expect(create).toHaveBeenCalledOnce()
+    releaseCreate()
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { ok: true, binding: { ...expected, runtimeSessionId: "session-new" }, recovered: true },
+      { ok: true, binding: { ...expected, runtimeSessionId: "session-new" }, recovered: true },
+    ])
   })
 })
