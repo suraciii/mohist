@@ -1,35 +1,57 @@
 namespace Mohist.Cli;
 
-internal sealed class SkillAssetSynchronizer
+internal sealed record ManagedAssetKind(
+    string Label,
+    string DisplayName,
+    string SourceDirectoryName,
+    string SuccessMessageNoun,
+    Func<IFileSystem, string, bool> PreparedValidator)
+{
+    public static readonly ManagedAssetKind Skill = new(
+        "skill",
+        "skill assets",
+        "skill-data",
+        "skill assets",
+        (fs, dir) => fs.EnumerateFiles(dir, "SKILL.md", SearchOption.AllDirectories).Any());
+
+    public static readonly ManagedAssetKind Preset = new(
+        "preset",
+        "preset assets",
+        "presets",
+        "preset assets",
+        (fs, dir) => fs.Exists(Path.Combine(dir, "manifest.json")));
+}
+
+internal sealed class ManagedAssetSynchronizer
 {
     private readonly IFileSystem _fileSystem;
     private readonly TextWriter _out;
     private readonly TextWriter _err;
 
-    public SkillAssetSynchronizer(TextWriter output, TextWriter error, IFileSystem? fileSystem = null)
+    public ManagedAssetSynchronizer(TextWriter output, TextWriter error, IFileSystem? fileSystem = null)
     {
         _out = output;
         _err = error;
         _fileSystem = fileSystem ?? RealFileSystem.Instance;
     }
 
-    public async Task<int> SyncAsync(string sourceDir, string managedDir)
+    public async Task<int> SyncAsync(string sourceDir, string managedDir, ManagedAssetKind kind)
     {
         if (string.IsNullOrWhiteSpace(sourceDir))
         {
-            _err.WriteLine($"Source skill-data directory is not configured. Aborting managed asset sync.");
+            _err.WriteLine($"Source {kind.SourceDirectoryName} directory is not configured. Aborting managed asset sync.");
             return 1;
         }
 
         if (string.IsNullOrWhiteSpace(managedDir))
         {
-            _err.WriteLine($"Managed skill-data root is not configured. Aborting managed asset sync.");
+            _err.WriteLine($"Managed {kind.SourceDirectoryName} root is not configured. Aborting managed asset sync.");
             return 1;
         }
 
         if (!_fileSystem.DirectoryExists(sourceDir))
         {
-            _err.WriteLine($"Source skill-data directory '{sourceDir}' is missing. Aborting managed asset sync.");
+            _err.WriteLine($"Source {kind.SourceDirectoryName} directory '{sourceDir}' is missing. Aborting managed asset sync.");
             return 1;
         }
 
@@ -37,7 +59,7 @@ internal sealed class SkillAssetSynchronizer
         if (!string.IsNullOrWhiteSpace(parentDir))
             _fileSystem.CreateDirectory(parentDir);
 
-        var tempDir = Path.Combine(parentDir ?? string.Empty, $"skill-data.tmp-{Guid.NewGuid():N}");
+        var tempDir = Path.Combine(parentDir ?? string.Empty, $"{kind.SourceDirectoryName}.tmp-{Guid.NewGuid():N}");
         var tempDirCreated = false;
         try
         {
@@ -46,9 +68,9 @@ internal sealed class SkillAssetSynchronizer
 
             await CopyDirectoryAsync(sourceDir, tempDir);
 
-            if (!TryValidatePreparedSkills(tempDir, out var validationError))
+            if (!TryValidatePrepared(tempDir, kind, out var validationError))
             {
-                _err.WriteLine($"Prepared skill-data at '{tempDir}' is invalid: {validationError}");
+                _err.WriteLine($"Prepared {kind.SourceDirectoryName} at '{tempDir}' is invalid: {validationError}");
                 return 1;
             }
 
@@ -58,12 +80,12 @@ internal sealed class SkillAssetSynchronizer
             _fileSystem.Move(tempDir, managedDir);
             tempDirCreated = false;
 
-            _out.WriteLine($"Synchronized managed skill assets to {managedDir}");
+            _out.WriteLine($"Synchronized managed {kind.SuccessMessageNoun} to {managedDir}");
             return 0;
         }
         catch (Exception ex)
         {
-            _err.WriteLine($"Managed skill-data sync failed: {ex.Message}");
+            _err.WriteLine($"Managed {kind.SourceDirectoryName} sync failed: {ex.Message}");
             return 1;
         }
         finally
@@ -97,19 +119,17 @@ internal sealed class SkillAssetSynchronizer
         }
     }
 
-    private bool TryValidatePreparedSkills(string preparedDir, out string? error)
+    private bool TryValidatePrepared(string preparedDir, ManagedAssetKind kind, out string? error)
     {
         error = null;
 
         try
         {
-            var hasSkill = _fileSystem
-                .EnumerateFiles(preparedDir, "SKILL.md", SearchOption.AllDirectories)
-                .Any();
-
-            if (!hasSkill)
+            if (!kind.PreparedValidator(_fileSystem, preparedDir))
             {
-                error = "no '*/SKILL.md' found";
+                error = kind.Label == ManagedAssetKind.Skill.Label
+                    ? "no '*/SKILL.md' found"
+                    : $"manifest.json not found";
                 return false;
             }
 

@@ -15,18 +15,6 @@ internal static class AgentCommands
         WriteIndented = true,
     };
 
-    /// <summary>
-    /// Test seam: lets specs construct a <see cref="PresetCatalog"/> against
-    /// the active <see cref="IFileSystem"/> (typically a <c>FakeFileSystem</c>
-    /// holding a manifest + preset text) rather than reaching for
-    /// <c>RealFileSystem</c> through the default constructor. Production code
-    /// leaves this <c>null</c> and gets the real-filesystem catalog.
-    /// </summary>
-    internal static Func<IFileSystem, PresetCatalog>? PresetCatalogOverride { get; set; }
-
-    private static PresetCatalog CreateCatalog(IFileSystem fileSystem) =>
-        PresetCatalogOverride?.Invoke(fileSystem) ?? new PresetCatalog();
-
     public static Command Build(MohistCliApi api)
     {
         var agent = new Command("agent", "Agent management");
@@ -70,7 +58,7 @@ internal static class AgentCommands
 
         async Task<int> InstallAsync(ParseResult ctx)
         {
-            var catalog = CreateCatalog(api.FileSystem);
+            var catalog = PresetCatalog.CreateDefault(api.FileSystem, api.GetUserHome);
             var resolvedPreset = catalog.Resolve(ctx.GetValue(preset) ?? string.Empty);
             if (!resolvedPreset.Found || resolvedPreset.Preset is null)
             {

@@ -17,28 +17,17 @@ public sealed class NotifyCommandConfigPathCollectionDefinition
 }
 
 [Collection("NotifyCommandConfigPath")]
-public class CliAgentCommandSpecs : IDisposable
+public class CliAgentCommandSpecs
 {
-    private readonly Func<IFileSystem, PresetCatalog>? _previousCatalogOverride;
+    private const string ManagedPresetRoot = "/mohist-tests/user/.mohist/cli/presets";
 
-    public CliAgentCommandSpecs()
+    private static string SeedManagedPresets(FakeFileSystem fileSystem)
     {
-        _previousCatalogOverride = AgentCommands.PresetCatalogOverride;
-        AgentCommands.PresetCatalogOverride = fileSystem => new PresetCatalog(
-            fileSystem,
-            BuildDefaultCatalogRoot((FakeFileSystem)fileSystem));
-    }
-
-    public void Dispose()
-    {
-        AgentCommands.PresetCatalogOverride = _previousCatalogOverride;
-    }
-
-    private const string DefaultCatalogRoot = "/assets/presets";
-
-    private static string BuildDefaultCatalogRoot(FakeFileSystem fileSystem)
-    {
-        var root = DefaultCatalogRoot;
+        // The real production path resolves presets from the managed cache at
+        // <home>/.mohist/cli/presets (home is /mohist-tests/user for a fake
+        // file system). Seeding here exercises PresetCatalog.CreateDefault
+        // end-to-end instead of bypassing it via a static override.
+        var root = ManagedPresetRoot;
         fileSystem.CreateDirectory(root);
         fileSystem.CreateDirectory($"{root}/supervisor");
         fileSystem.AddFile($"{root}/manifest.json", """
@@ -791,13 +780,20 @@ public class CliAgentCommandSpecs : IDisposable
         FakeFileSystem? fileSystem = null,
         TextReader? standardInput = null)
     {
+        // `agent install` resolves presets from the managed cache
+        // (<home>/.mohist/cli/presets) via the real PresetCatalog.CreateDefault
+        // path — seeding here lets every install spec exercise that path
+        // without a static override. Harmless for non-install specs, which
+        // never read presets.
+        var fs = fileSystem ?? FileSystemWithProject();
+        SeedManagedPresets(fs);
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
         return MohistCliCommands.RunAsync(
             http,
             args,
             output ?? new StringWriter(),
             error ?? new StringWriter(),
-            fileSystem ?? FileSystemWithProject(),
+            fs,
             new FakeCommandExecutor(),
             standardInput: standardInput);
     }

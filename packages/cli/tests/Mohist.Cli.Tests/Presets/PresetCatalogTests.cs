@@ -46,12 +46,64 @@ public sealed class PresetCatalogTests
         Assert.Equal(new[] { "supervisor" }, catalog.ListNames());
     }
 
-    private static FakeFileSystem CreateFiles()
+    [Fact]
+    public void CreateDefault_ResolvesManagedCacheLayout_AndFindsSupervisor()
     {
-        var files = new FakeFileSystem();
-        files.CreateDirectory("/assets/presets");
-        files.CreateDirectory("/assets/presets/supervisor");
-        files.AddFile("/assets/presets/manifest.json", """
+        // Mirrors the post-`mo update` steady state: presets live under
+        // <home>/.mohist/cli/presets (managed cache), independent of skill-data.
+        var fs = new FakeFileSystem();
+        SeedManagedPresets(fs, home: "/home/test");
+
+        var catalog = PresetCatalog.CreateDefault(fs, () => "/home/test");
+
+        var result = catalog.Resolve("supervisor");
+        Assert.True(result.Found, result.Error);
+        Assert.NotNull(result.Preset);
+        Assert.Equal("supervisor", result.Preset!.Name);
+        Assert.Equal("identity", result.Preset.Instructions);
+    }
+
+    [Fact]
+    public void CreateDefault_WhenManagedCacheMissing_FallsBackToSiblingDirectory()
+    {
+        // Dev/source-build case: no managed cache, presets sit next to the
+        // binary at the sibling root the resolver is told about.
+        var fs = new FakeFileSystem();
+        var sibling = "/app/presets";
+        SeedPresetsAt(fs, sibling);
+
+        var catalog = new PresetCatalogFactory(fs, () => "/home/empty", sibling).Create();
+
+        var result = catalog.Resolve("supervisor");
+        Assert.True(result.Found, result.Error);
+        Assert.Equal("supervisor", result.Preset!.Name);
+    }
+
+    [Fact]
+    public void CreateDefault_WhenPresetsAbsentEverywhere_ListsNoPresets()
+    {
+        // The failure mode F1 reported: managed skill-data present but presets
+        // missing. The catalog must report an empty catalog (unknown preset)
+        // rather than throwing, so install surfaces a clean error.
+        var fs = new FakeFileSystem();
+        fs.CreateDirectory("/home/test/.mohist/cli/skill-data");
+
+        var catalog = PresetCatalog.CreateDefault(fs, () => "/home/test");
+
+        Assert.Empty(catalog.ListNames());
+        var result = catalog.Resolve("supervisor");
+        Assert.False(result.Found);
+        Assert.Empty(result.AvailableNames);
+    }
+
+    internal static void SeedManagedPresets(FakeFileSystem fs, string home) =>
+        SeedPresetsAt(fs, Path.Combine(home, ".mohist", "cli", "presets"));
+
+    internal static void SeedPresetsAt(FakeFileSystem fs, string root)
+    {
+        fs.CreateDirectory(root);
+        fs.CreateDirectory(Path.Combine(root, "supervisor"));
+        fs.AddFile(Path.Combine(root, "manifest.json"), """
             {
               "supervisor": {
                 "instructions": "supervisor/instructions.md",
@@ -62,9 +114,25 @@ public sealed class PresetCatalogTests
               }
             }
             """);
-        files.AddFile("/assets/presets/supervisor/instructions.md", "identity");
-        files.AddFile("/assets/presets/supervisor/approval.md", "Issue #{{event.issue}}");
-        files.AddFile("/assets/presets/supervisor/failure.md", "Run {{event.workflowrunid}}");
+        fs.AddFile(Path.Combine(root, "supervisor", "instructions.md"), "identity");
+        fs.AddFile(Path.Combine(root, "supervisor", "approval.md"), "Issue #{{event.issue}}");
+        fs.AddFile(Path.Combine(root, "supervisor", "failure.md"), "Run {{event.workflowrunid}}");
+    }
+
+    // Lets the sibling-fallback test point the resolver at a chosen sibling
+    // root without depending on AppContext.BaseDirectory.
+    internal sealed class PresetCatalogFactory(IFileSystem fs, Func<string?> home, string sibling)
+    {
+        public PresetCatalog Create() => new(
+            fs,
+            new PresetAssetRootResolver(fs, home, () => sibling).Resolve());
+    }
+
+    private static FakeFileSystem CreateFiles()
+    {
+        var files = new FakeFileSystem();
+        SeedPresetsAt(files, "/assets/presets");
         return files;
     }
 }
+

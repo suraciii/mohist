@@ -5,29 +5,20 @@ namespace Mohist.Cli;
 internal sealed class PresetCatalog
 {
     private readonly IFileSystem _fileSystem;
-    private readonly SkillAssetRootResolution _resolution;
     private readonly string? _assetRoot;
 
-    public PresetCatalog()
-        : this(RealFileSystem.Instance, SkillAssetRootResolver.CreateDefault(RealFileSystem.Instance, SystemEnvironmentVariableProvider.Instance))
-    {
-    }
+    // Production entry point: resolves the preset asset root independently of
+    // skill-data (design D2). Tests build the catalog against an explicit root
+    // via the (IFileSystem, string) constructor, or against the real resolution
+    // path via CreateDefault with a fake file system + home.
+    public static PresetCatalog CreateDefault(IFileSystem fileSystem, Func<string?> getUserHome) =>
+        new(fileSystem, new PresetAssetRootResolver(fileSystem, getUserHome).Resolve());
 
-    internal PresetCatalog(IFileSystem fileSystem, SkillAssetRootResolver resolver)
-    {
-        ArgumentNullException.ThrowIfNull(fileSystem);
-        ArgumentNullException.ThrowIfNull(resolver);
-        _fileSystem = fileSystem;
-        _resolution = resolver.Resolve();
-        _assetRoot = _resolution.AssetRoot is null ? null : Path.Combine(Path.GetDirectoryName(_resolution.AssetRoot) ?? _resolution.AssetRoot, "presets");
-    }
-
-    internal PresetCatalog(IFileSystem fileSystem, string assetRoot)
+    internal PresetCatalog(IFileSystem fileSystem, string? assetRoot)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         _fileSystem = fileSystem;
         _assetRoot = assetRoot;
-        _resolution = SkillAssetRootResolution.Selected(assetRoot, SkillAssetRootSource.Override);
     }
 
     public IReadOnlyList<string> ListNames()
