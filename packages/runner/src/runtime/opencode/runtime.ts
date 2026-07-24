@@ -130,6 +130,7 @@ export class OpenCodeRuntime {
       const error = normalizeMissingSession()
       return { ok: false, error, diagnostics: error.diagnostics }
     }
+    let sessionData: { id: string }
     try {
       const resolved = await this.state.server.client.session.get({
         sessionID: request.target.runtimeSessionId,
@@ -140,6 +141,16 @@ export class OpenCodeRuntime {
         const error = normalizeTurnFailed({ message: "OpenCode session.get returned a malformed or mismatched Session" })
         return { ok: false, error, diagnostics: error.diagnostics }
       }
+      sessionData = data
+    } catch (cause) {
+      if ((cause as { status?: number } | undefined)?.status === 404) {
+        const error = normalizeMissingSession()
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+      const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to resolve persisted Runtime Session") })
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    try {
       const statusResponse = await this.state.server.client.session.status(
         { directory: request.target.workDir },
         { throwOnError: true },
@@ -153,18 +164,14 @@ export class OpenCodeRuntime {
       return {
         ok: true,
         value: {
-          runtimeSessionId: data.id,
+          runtimeSessionId: sessionData.id,
           workDir: request.target.workDir,
           activeTurn: status !== undefined && status.type !== "idle",
         },
         diagnostics: [],
       }
     } catch (cause) {
-      if ((cause as { status?: number } | undefined)?.status === 404) {
-        const error = normalizeMissingSession()
-        return { ok: false, error, diagnostics: error.diagnostics }
-      }
-      const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to resolve persisted Runtime Session") })
+      const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to read Runtime Session active-turn status") })
       return { ok: false, error, diagnostics: error.diagnostics }
     }
   }

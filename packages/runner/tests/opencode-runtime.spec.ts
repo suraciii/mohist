@@ -47,6 +47,8 @@ class FakeSubscription implements RuntimeEventSubscription {
 interface FakeClientHandles {
   health: ReturnType<typeof vi.fn>
   sessionCreate: ReturnType<typeof vi.fn>
+  sessionGet: ReturnType<typeof vi.fn>
+  sessionStatus: ReturnType<typeof vi.fn>
 }
 
 interface BuildArgs {
@@ -54,6 +56,9 @@ interface BuildArgs {
   failHealth?: boolean
   failSessionCreate?: boolean
   rebuildDelayMs?: number
+  resolveSession?: { runtimeSessionId: string; activeTurn: boolean }
+  failSessionGet?: boolean
+  failSessionStatus?: boolean
 }
 
 interface BuildResult {
@@ -70,6 +75,20 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
   const sessionCreate = vi.fn(async (params: { directory?: string; model?: unknown }) => ({
     data: { id: `ses_${(params.directory ?? "default").replace(/[^a-z0-9]+/gi, "_")}` },
   }))
+  const resolved = args.resolveSession
+  const sessionGet = vi.fn(async (params: { sessionID: string }) => {
+    if (args.failSessionGet) {
+      throw Object.assign(new Error("session get boom"), { status: 500 })
+    }
+    return { data: { id: params.sessionID } }
+  })
+  const sessionStatus = vi.fn(async () => {
+    if (args.failSessionStatus) {
+      throw Object.assign(new Error("status endpoint missing"), { status: 404 })
+    }
+    const type = resolved?.activeTurn ? "streaming" : "idle"
+    return { data: { [resolved!.runtimeSessionId]: { type } } }
+  })
   if (args.failHealth) {
     health.mockRejectedValueOnce(new Error("health boom"))
   }
@@ -78,11 +97,13 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
   }
   const clientProxy = {
     global: { health },
-    session: { create: sessionCreate },
+    session: { create: sessionCreate, get: sessionGet, status: sessionStatus },
   }
   const clientHandles: FakeClientHandles = {
     health,
     sessionCreate,
+    sessionGet,
+    sessionStatus,
   }
   const server: OpencodeServerHandle = {
     url: "http://fake",
@@ -380,6 +401,103 @@ describe("OpenCodeRuntime.createSession", () => {
     })
     if (result.ok) throw new Error("expected createSession to fail")
     expect(result.error.kind).toBe("turn-failed")
+  })
+})
+
+describe("OpenCodeRuntime.resolveSession", () => {
+  it("preserves a still-queryable idle binding and reports the active-turn snapshot", async () => {
+    const { deps } = buildDeps({ resolveSession: { runtimeSessionId: "ses_existing", activeTurn: false } })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const result = await runtime.resolveSession({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    })
+    if (!result.ok) throw new Error(`expected resolveSession to succeed: ${result.error.kind}`)
+    expect(result.value).toEqual({ runtimeSessionId: "ses_existing", workDir: "/tmp/work", activeTurn: false })
+  })
+
+  it("reports activeTurn true for a streaming status", async () => {
+    const { deps } = buildDeps({ resolveSession: { runtimeSessionId: "ses_existing", activeTurn: true } })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const result = await runtime.resolveSession({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    })
+    if (!result.ok) throw new Error(`expected resolveSession to succeed: ${result.error.kind}`)
+    expect(result.value.activeTurn).toBe(true)
+  })
+
+  it("classifies a confirmed missing session.get (404) as missing-session", async () => {
+    const sessionGet = vi.fn(async () => {
+      throw Object.assign(new Error("not found"), { status: 404 })
+    })
+    const sessionStatus = vi.fn(async () => ({ data: {} }))
+    const subscription = new FakeSubscription()
+    const closed = { value: false }
+    const server: OpencodeServerHandle = {
+      url: "http://fake",
+      directory: "/tmp/work",
+      client: { global: { health: vi.fn(async () => ({ data: { ok: true } })) }, session: { create: vi.fn(), get: sessionGet, status: sessionStatus } } as unknown as OpencodeClient,
+      async close() { closed.value = true },
+    }
+    const deps: OpenCodeRuntimeDeps = {
+      directory: "/tmp/work",
+      serverFactory: async () => server,
+      eventSubscriptionFactory: () => subscription,
+    }
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const result = await runtime.resolveSession({
+      target: { runtime: "opencode", runtimeSessionId: "ses_gone", workDir: "/tmp/work" },
+    })
+    if (result.ok) throw new Error("expected resolveSession to fail")
+    expect(result.error.kind).toBe("missing-session")
+    expect(sessionStatus).not.toHaveBeenCalled()
+  })
+
+  it("does not classify a status-probe failure as missing-session (keeps the binding, no recovery)", async () => {
+    const { deps, client } = buildDeps({ resolveSession: { runtimeSessionId: "ses_existing", activeTurn: false } })
+    client.sessionStatus.mockRejectedValueOnce(Object.assign(new Error("status endpoint missing"), { status: 404 }))
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const result = await runtime.resolveSession({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    })
+    if (result.ok) throw new Error("expected resolveSession to fail")
+    expect(result.error.kind).not.toBe("missing-session")
+    expect(result.error.kind).toBe("turn-failed")
+  })
+
+  it("classifies a non-404 session.get failure as turn-failed, not missing-session", async () => {
+    const { deps } = buildDeps({ failSessionGet: true })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const result = await runtime.resolveSession({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    })
+    if (result.ok) throw new Error("expected resolveSession to fail")
+    expect(result.error.kind).toBe("turn-failed")
+  })
+
+  it("fails with unavailable-runtime when the runtime is not ready", async () => {
+    const { deps } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+    const result = await runtime.resolveSession({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    })
+    if (result.ok) throw new Error("expected resolveSession to fail")
+    expect(result.error.kind).toBe("unavailable-runtime")
+  })
+
+  it("fails with missing-session when no runtimeSessionId is bound", async () => {
+    const { deps } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const result = await runtime.resolveSession({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/work" },
+    })
+    if (result.ok) throw new Error("expected resolveSession to fail")
+    expect(result.error.kind).toBe("missing-session")
   })
 })
 
