@@ -66,6 +66,7 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
         }
 
         Factory.Services.GetRequiredService<RuntimeObservability>().PublishCollector(CollectorResult.Online());
+        Factory.Services.GetRequiredService<RuntimeObservability>().ResetTelemetryCountersForTesting();
         return Task.CompletedTask;
     }
 

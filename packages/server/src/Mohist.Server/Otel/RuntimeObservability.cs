@@ -828,6 +828,17 @@ public sealed class RuntimeObservability : IDisposable
                 ? RuntimeState.Healthy
                 : RuntimeState.Degraded;
 
+    internal void ResetTelemetryCountersForTesting()
+    {
+        lock (_gate)
+        {
+            _receivedSpans = 0;
+            _savedSpans = 0;
+            _rejectedSpans = 0;
+            _droppedSpans = 0;
+        }
+    }
+
     private bool IsDisposed()
     {
         lock (_gate)
