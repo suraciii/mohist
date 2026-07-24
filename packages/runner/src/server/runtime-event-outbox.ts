@@ -257,6 +257,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private networkRetry: { unref(): void } | null = null
   private localRetry: { unref(): void } | null = null
   private stopped = false
+  private snapshotWriteTail: Promise<void> = Promise.resolve()
   private snapshotInFlight: Promise<void> | null = null
   private recoveryInFlight: Promise<void> | null = null
   private readonly deliveryStop = new AbortController()
@@ -358,15 +359,12 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       enqueuedAt: this.now().toISOString(),
     }
     this.records.set(internal.id, internal)
-    try {
-      await this.persistSnapshot()
-    } catch (error) {
+    await this.enqueueSnapshotWrite((error) => {
       this.records.delete(internal.id)
       this.healthy = false
       this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
       this.scheduleLocalRetry()
-      throw error
-    }
+    })
     void this.kick()
   }
 
@@ -379,22 +377,17 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.requireLoaded("enqueueProducedFactBatch")
     if (records.length === 0) return
     const enqueuedAt = this.now().toISOString()
-    const staged: InternalRecord[] = []
     for (const record of records) {
       const sequence = this.monotonicSequence()
       const internal: InternalRecord = { ...record, sequence, enqueuedAt }
       this.records.set(internal.id, internal)
-      staged.push(internal)
     }
     this.enforceRetentionCap()
-    try {
-      await this.persistSnapshot()
-    } catch (error) {
+    await this.enqueueSnapshotWrite((error) => {
       this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
       this.healthy = false
       this.scheduleLocalRetry()
-      throw error
-    }
+    })
     void this.kick()
   }
 
@@ -448,6 +441,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     if (this.snapshotInFlight) {
       try { await this.snapshotInFlight } catch { /* best effort */ }
     }
+    await this.snapshotWriteTail
   }
 
   private lastLoadError: Error | null = null
@@ -550,13 +544,13 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     }
     if (removed.length === 0) return true
     try {
-      await this.persistSnapshot()
-    } catch (error) {
-      // Roll the removed records back so the next attempt retries them.
-      for (const record of removed) this.records.set(record.id, record)
-      this.healthy = false
-      this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
-      this.scheduleLocalRetry()
+      await this.enqueueSnapshotWrite((error) => {
+        for (const record of removed) this.records.set(record.id, record)
+        this.healthy = false
+        this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
+        this.scheduleLocalRetry()
+      })
+    } catch {
       return false
     }
     return true
@@ -624,7 +618,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     }
     this.snapshotInFlight = (async () => {
       try {
-        await this.persistSnapshot()
+        await this.enqueueSnapshotWrite()
         this.healthy = true
         this.recoveryRequiresLoad = false
         this.lastLoadError = null
@@ -645,6 +639,19 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private async persistSnapshot(): Promise<void> {
     const body = serializeSnapshot([...this.records.values()].sort(sortBySequence))
     await this.fileSystem.writeAtomicText(this.filePath, body)
+  }
+
+  private enqueueSnapshotWrite(onFailure?: (error: unknown) => void): Promise<void> {
+    const write = this.snapshotWriteTail.then(async () => {
+      try {
+        await this.persistSnapshot()
+      } catch (error) {
+        onFailure?.(error)
+        throw error
+      }
+    })
+    this.snapshotWriteTail = write.catch(() => undefined)
+    return write
   }
 
   private requireLoaded(op: string): void {
@@ -691,7 +698,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       })
       mutated = true
     }
-    if (mutated) await this.persistSnapshot()
+    if (mutated) await this.enqueueSnapshotWrite()
     try {
       await this.fileSystem.markMigrated(this.legacyFilePath)
     } catch {

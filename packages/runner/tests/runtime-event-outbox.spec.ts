@@ -55,6 +55,39 @@ class RecordingFileSystem implements RuntimeEventOutboxFileSystem {
   }
 }
 
+class BlockingWriteFileSystem extends RecordingFileSystem {
+  readonly bodies: string[] = []
+  writesStarted = 0
+  activeWrites = 0
+  maxConcurrentWrites = 0
+  private readonly startWaiters: Array<() => void> = []
+  private readonly releaseWaiters: Array<() => void> = []
+
+  waitForNextWrite(): Promise<void> {
+    return new Promise((resolve) => this.startWaiters.push(resolve))
+  }
+
+  releaseNextWrite(): void {
+    const release = this.releaseWaiters.shift()
+    if (!release) throw new Error("no blocked snapshot write")
+    release()
+  }
+
+  override async writeAtomicText(path: string, body: string): Promise<void> {
+    this.bodies.push(body)
+    this.writesStarted += 1
+    this.activeWrites += 1
+    this.maxConcurrentWrites = Math.max(this.maxConcurrentWrites, this.activeWrites)
+    this.startWaiters.shift()?.()
+    await new Promise<void>((resolve) => this.releaseWaiters.push(resolve))
+    try {
+      await super.writeAtomicText(path, body)
+    } finally {
+      this.activeWrites -= 1
+    }
+  }
+}
+
 function makeOutbox(options: {
   fileSystem?: RecordingFileSystem
   deliver?: RuntimeEventDelivery
@@ -169,6 +202,34 @@ describe("AgentSessionRuntimeEventOutbox — durable storage", () => {
     await outbox.load()
     await outbox.enqueueBeforeExecution(inputRecord())
     expect(outbox.snapshot()).toHaveLength(1)
+  })
+
+  it("serializes snapshot writes while preserving synchronous enqueue order", async () => {
+    const fileSystem = new BlockingWriteFileSystem()
+    const { outbox } = makeOutbox({
+      fileSystem,
+      deliver: { send: async () => [] },
+    })
+    await outbox.load()
+
+    const firstWriteStarted = fileSystem.waitForNextWrite()
+    const first = outbox.enqueueProducedFact(inputRecord({ id: "evt_1" }))
+    await firstWriteStarted
+
+    const secondWriteStarted = fileSystem.waitForNextWrite()
+    const second = outbox.enqueueProducedFact(inputRecord({ id: "evt_2" }))
+    await flushMicrotasks()
+    expect(fileSystem.writesStarted).toBe(1)
+    expect(outbox.snapshot().map((record) => record.id)).toEqual(["evt_1", "evt_2"])
+
+    fileSystem.releaseNextWrite()
+    await secondWriteStarted
+    expect(fileSystem.maxConcurrentWrites).toBe(1)
+    fileSystem.releaseNextWrite()
+    await Promise.all([first, second])
+
+    expect(fileSystem.bodies.map((body) => (JSON.parse(body) as { entries: unknown[] }).entries.length)).toEqual([1, 2])
+    await outbox.stop()
   })
 
   it("two real outbox instances sharing one recording filesystem restart with durable records", async () => {
