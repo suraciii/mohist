@@ -6,6 +6,7 @@
 
 ## 板块 1：入门
 
+- [产品愿景](vision.md) —— Mohist 要去哪里，三条产品原则
 - [快速上手](getting-started.md) —— 从零启动，看一个 issue 走完全流程
 - [核心概念](concepts.md) —— 理解 Mohist 的生产线模型
 - [Agent 与 AgentSession](agents.md) —— Inline Agent、Mohist Agent、AgentJob、AgentSession 的层次和关系
