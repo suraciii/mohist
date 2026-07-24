@@ -50,10 +50,22 @@ NOT affect routing-rule launches for that Agent on any other issue.
 
 ### Requirement: Per-agent launch idempotency
 
-Launch idempotency for a single event SHALL be normalized to `(projectId, eventId, agentId)`.
-When the same Agent is hit by both a routing rule and a watch declaration on the same event, the
-Agent MUST be launched at most once for that event. Replay of the same event (same `eventId`)
-MUST NOT produce a second launch or a second AgentJob for that Agent.
+Within a single delivery of an event, launch decisions SHALL be normalized to
+`(projectId, eventId, agentId)`: when the same Agent is hit by both a routing rule and a watch
+declaration on the same event, the Agent MUST be launched at most once for that event (a watch
+launch for an Agent already launched by a routing rule in the same delivery is suppressed).
+Replay of the same event (same `eventId`) under unchanged dispatch configuration MUST NOT
+produce a second launch or a second AgentJob for that Agent.
+
+Cross-delivery source mutation is out of scope for this requirement. That is the case where the
+dispatch configuration (routing rules or watch declarations) changes between two deliveries of
+the same event such that a *different* launch source fires for the same Agent (e.g. a routing
+rule launched the Agent on delivery 1, the rule is then removed and a watch added, and the
+event is redelivered so the watch fires). It cannot be deduped without a per-
+`(eventId, agentId)` launch ledger applied to the routing path, which would alter routing-rule
+launch semantics (an explicit Non-Goal of this change). Under realistic replay — redelivery
+with the same configuration — grain first-writer semantics per launch source provide the
+at-most-once guarantee.
 
 #### Scenario: Rule and watch on one event launch once
 
@@ -63,7 +75,8 @@ MUST NOT produce a second launch or a second AgentJob for that Agent.
 
 #### Scenario: Event replay does not double-launch
 
-- **WHEN** the same event (same `eventId`) is processed more than once for the same Agent
+- **WHEN** the same event (same `eventId`) is redelivered under unchanged dispatch
+  configuration for the same Agent
 - **THEN** the Agent is launched at most once; no duplicate AgentJob is created
 
 ### Requirement: Built-in watch response prompt

@@ -153,16 +153,31 @@ shared `MohistDbContext` — already the established pattern for every other pro
 
 Track launched `agentId`s for the current event in a local `HashSet<string>` within
 `DispatchAsync`. The routing loop adds each launched agent; the watch loop skips any agent
-already in the set. This satisfies the spec's *"same Agent hit by both a routing rule and a
-watch on one event launches only once"* without touching the launcher.
+already in the set. This satisfies the spec's *"rule and watch on one event launch once"*
+scenario without touching the launcher.
+
+**Guarantee scope (explicit):** the `(projectId, eventId, agentId)` normalization holds **within
+a single delivery** of an event. Across deliveries, grain first-writer semantics
+(`AgentJobGrain.EnsurePreparedAsync`, keyed per launch source `(projectId, eventId, ruleId)`)
+guarantee at-most-once **under unchanged dispatch configuration** — i.e. realistic replay
+(crash recovery / message redelivery with the same rules and watches).
+
+**Out of scope — cross-delivery source mutation:** if a rule launches Agent X on delivery 1
+(grain key `…rule_R`), the rule is then removed and a watch added, and the event is
+redelivered, the watch fires under a *different* grain key (`…watch:X`) and produces a second
+`AgentJob`. Fully deduping this requires a per-`(eventId, agentId)` launch ledger consulted by
+**both** the routing and watch paths — which would also suppress the second launch when two
+routing rules match the same agent on one event, altering routing-rule launch semantics. That
+is an explicit **Non-Goal** of this change. The spec's replay scenario is therefore scoped to
+redelivery under unchanged configuration (see `specs/issue-watch-dispatch/spec.md`, *Per-agent
+launch idempotency*). If strict cross-source at-most-once is later required, it is a follow-up
+that revisits the routing Non-Goal and adds the launch ledger.
 
 **Alternative considered — normalize the launcher's stable key from `ruleId` to `agentId`.**
 Rejected: routing legitimately allows the *same* agent to be matched by *multiple* rules on
 one event (different `ruleId`s), and that currently yields distinct launches. Normalizing to
 `agentId` would silently change routing semantics. Handler-level dedup leaves the launch
-contract and routing behavior untouched. Grain first-writer semantics
-(`AgentJobGrain.EnsurePreparedAsync`) still protect against event *replay* for each distinct
-launch source.
+contract and routing behavior untouched.
 
 ### D8 — Watch provenance via a `watch:`-prefixed `TriggerRuleId`; built-in prompt composed at launch
 
@@ -176,7 +191,11 @@ instructions"); no per-watch `ResponsePrompt`.
 **Alternative considered — a dedicated `TriggerSourceKind` label** (`routing | watch`) on
 `GenericAgentSessionMetadata`. More explicit, but ripples into the computed columns
 (`MohistDbContext.cs:181-183`) and `AgentSessionQuery` mapping. Deferred; the `watch:` prefix
-is sufficient for this issue and downstream filters can match it.
+is sufficient for this issue. Note this is a **string-prefix convention, not a typed marker**:
+the `TriggerRuleId` value for a watch launch is `watch:{agentId}` while a routing launch
+carries the rule id, so any downstream query/filter that distinguishes sources must
+substring-match the `watch:` prefix rather than reading a discrete field. Documented so future
+tooling is not surprised; revisit via the dedicated label if typed querying is needed.
 
 ### D9 — CLI: new command group; shared agent resolver; state-as-truth rendering
 
@@ -184,11 +203,14 @@ New `MohistCliCommands.Issue.Watch.cs` (partial `IssueCommands`) adds `BuildWatc
 `watch` Command with `add`/`remove`/`list` leaves, registered in `MohistCliCommands.Issue.cs`.
 Reuse `ResolveAgentAsync` + `AgentRef` by promoting them from `private` to a shared `internal`
 helper in `MohistCliCommands.Agent.cs:802` (precedent: `VariableCommands` is shared across
-command groups). Render via the newer `PrintMutationResourceAsync`/`PrintResourceAsync` path:
-`add`/`remove` render `IssueShow` (idempotent — the resulting state is the source of truth,
-matching `mo issue start` at `MohistCliCommands.Issue.Lifecycle.cs:35-41`); `list` renders the
-same detail with the watching/muted sections. `agent_not_found` / `agent_archived` need no
-CLI-side mapping — the server `code` flows through the response envelope via `CliResponseReader`.
+command groups). Render via the newer `PrintMutationResourceAsync`/`PrintResourceAsync` path.
+**`add`/`remove` render `IssueShow`** (idempotent — the resulting state is the source of truth,
+matching `mo issue start` at `MohistCliCommands.Issue.Lifecycle.cs:35-41`) and `RenderIssueShow`
+gains `watching:`/`muted:` sections. **`watch list` renders a focused two-group view**
+(watching agents / muted agents, each a compact list of names) consuming the same GET detail
+read model — not the full `IssueShow` — since listing watchers is a focused read, not a state
+mutation. `agent_not_found` / `agent_archived` need no CLI-side mapping — the server `code`
+flows through the response envelope via `CliResponseReader`.
 
 Note: `watch` is an overloaded term in this CLI (`mo run watch` = poll a run). Nesting under
 `issue` disambiguates it for the parser; documented for reviewers.
@@ -239,9 +261,6 @@ drop the table; nothing depends on WatchEntry existing.
 
 ## Open Questions
 
-- **`watch list` output shape:** reuse `IssueShow` rendering (consistent with `add`/`remove`)
-  or give `list` a compact dedicated renderer / `TableShape`? Lean: reuse `IssueShow` for
-  `add`/`remove`; decide `list` during implementation.
 - **Dedicated `TriggerSourceKind` label:** defer unless downstream querying needs to
   distinguish watch vs routing launches cleanly (D8). Track as a follow-up if a query use case
   appears.
