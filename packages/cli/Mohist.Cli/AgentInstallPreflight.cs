@@ -14,26 +14,36 @@ internal sealed class AgentInstallPreflight
         _configPathProvider = configPathProvider ?? throw new ArgumentNullException(nameof(configPathProvider));
     }
 
-    public PreflightResult Run(string workspacePath, bool defaultRepositoryResolved)
+    // The project API exposes no per-repository workspace path (control/execution
+    // plane separation: the runner checks repos out on its own host). The CLI can
+    // only inspect the directory the user invoked `mo` from as a *local proxy*
+    // for where the supervisor will actually run. `localProxyPath` is therefore
+    // the CLI's current directory, and the warning is framed as a best-effort
+    // signal, not a definitive statement about the runner workspace.
+    public PreflightResult Run(string localProxyPath, DefaultRepository defaultRepository)
     {
-        ArgumentNullException.ThrowIfNull(workspacePath);
+        ArgumentNullException.ThrowIfNull(localProxyPath);
 
         var warnings = new List<string>();
         var notices = new List<string>();
 
-        if (!defaultRepositoryResolved)
+        if (!defaultRepository.Resolved)
         {
             notices.Add("note: project has no default repository; skipping skill stub check");
         }
         else
         {
-            var skillStubPath = Path.Combine(workspacePath, ".agents", "skills", "mohist");
+            var skillStubPath = Path.Combine(localProxyPath, ".agents", "skills", "mohist");
             if (!_fileSystem.DirectoryExists(skillStubPath))
             {
+                var repo = string.IsNullOrWhiteSpace(defaultRepository.Name)
+                    ? "the default repository"
+                    : $"default repository '{defaultRepository.Name}'";
                 warnings.Add(
-                    $"warning: the local workspace '{workspacePath}' is missing the 'mohist' skill stub. " +
-                    "The supervisor Agent will not be able to discover the mo command surface at runtime. " +
-                    $"Repair: run `mo skills install --path {workspacePath}`.");
+                    $"warning: could not find the 'mohist' skill stub in the current directory '{localProxyPath}', " +
+                    $"which is being used as a local proxy for {repo}'s workspace (the CLI cannot inspect the runner's " +
+                    $"actual checkout). If the supervisor runs from a workspace without the stub, it will not discover " +
+                    $"the mo command surface. Repair in the repository checkout: run `mo skills install --path {localProxyPath}`.");
             }
         }
 
@@ -92,6 +102,12 @@ internal sealed class AgentInstallPreflight
             $"{string.Join(", ", missing)}. With notifications disabled, the owner can only " +
             "discover a stopped or failed supervisor by actively checking, not by being notified.";
     }
+}
+
+internal readonly record struct DefaultRepository(bool Resolved, string? Name)
+{
+    public static readonly DefaultRepository Unresolved = new(false, null);
+    public static DefaultRepository Named(string? name) => new(true, name);
 }
 
 internal sealed record PreflightResult(IReadOnlyList<string> Warnings, IReadOnlyList<string> Notices);

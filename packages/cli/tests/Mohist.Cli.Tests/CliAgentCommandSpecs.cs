@@ -63,6 +63,27 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
+    public async Task AgentInstall_WhenManagedPresetsAbsent_ExitsNonZeroBeforeAnyHttp()
+    {
+        // The F1 regression: managed skill-data present but presets missing
+        // (the post-mo-update steady state before presets were synced). Install
+        // must surface a clean unknown-preset error and never reach the server.
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })));
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
+        var error = new StringWriter();
+        var output = new StringWriter();
+        var fileSystem = FileSystemWithProject();
+        fileSystem.CreateDirectory("/mohist-tests/user/.mohist/cli/skill-data");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "install", "supervisor"], output, error, fileSystem, new FakeCommandExecutor());
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("Unknown preset 'supervisor'", error.ToString());
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task AgentInstall_CreatesAgentAndRulesInOrder()
     {
         var fileSystem = FileSystemWithProject();
@@ -84,6 +105,12 @@ public class CliAgentCommandSpecs
         Assert.Contains("created routing rule: supervisor-failure", output.ToString());
         Assert.Null(JsonNode.Parse(handler.Requests[3].Body!)!["continue"]);
         Assert.Null(JsonNode.Parse(handler.Requests[5].Body!)!["continue"]);
+        // Both rules must bind to the supervisor Agent — that binding is what
+        // actually makes events route to the supervisor (self-review F1).
+        var approvalAgentId = JsonNode.Parse(handler.Requests[3].Body!)!["agentId"]?.GetValue<string>();
+        var failureAgentId = JsonNode.Parse(handler.Requests[5].Body!)!["agentId"]?.GetValue<string>();
+        Assert.Equal("agent_supervisor", approvalAgentId);
+        Assert.Equal("agent_supervisor", failureAgentId);
     }
 
     [Fact]
@@ -115,7 +142,9 @@ public class CliAgentCommandSpecs
         Assert.Contains("created agent: supervisor", stdout);
         Assert.Contains("created routing rule: supervisor-approval", stdout);
         Assert.Contains("created routing rule: supervisor-failure", stdout);
-        Assert.Contains("warning: the local workspace", stdout);
+        Assert.Contains("warning: could not find the", stdout);
+        Assert.Contains("skill stub", stdout);
+        Assert.Contains("local proxy", stdout);
         Assert.Contains("mo skills install --path", stdout);
     }
 
@@ -131,7 +160,7 @@ public class CliAgentCommandSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.DoesNotContain("warning: the local workspace", stdout);
+        Assert.DoesNotContain("could not find the", stdout);
         Assert.DoesNotContain("mo skills install --path", stdout);
     }
 
@@ -162,7 +191,7 @@ public class CliAgentCommandSpecs
         Assert.Contains("created routing rule: supervisor-approval", stdout);
         Assert.Contains("created routing rule: supervisor-failure", stdout);
         Assert.Contains("note: project has no default repository; skipping skill stub check", stdout);
-        Assert.DoesNotContain("warning: the local workspace", stdout);
+        Assert.DoesNotContain("could not find the", stdout);
     }
 
     [Fact]
@@ -315,7 +344,8 @@ public class CliAgentCommandSpecs
             Assert.Equal(0, exitCode);
             var stdout = output.ToString();
             Assert.Contains("created agent: supervisor", stdout);
-            Assert.Contains("warning: the local workspace", stdout);
+            Assert.Contains("warning: could not find the", stdout);
+            Assert.Contains("skill stub", stdout);
             Assert.Contains("warning: Mohist:Notifications:Hermes:EnabledTypes is missing", stdout);
             Assert.Contains("workflow_failed", stdout);
             Assert.Contains("issue_completed", stdout);

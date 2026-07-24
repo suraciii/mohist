@@ -90,9 +90,9 @@ internal static class AgentCommands
 
     private static async Task RunPreflightAsync(MohistCliApi api, string projectId)
     {
-        var (defaultRepoResolved, _) = await TryResolveDefaultRepositoryAsync(api, projectId);
+        var defaultRepo = await TryResolveDefaultRepositoryAsync(api, projectId);
         var preflight = BuildPreflight(api);
-        var result = preflight.Run(api.FileSystem.CurrentDirectory, defaultRepoResolved);
+        var result = preflight.Run(api.FileSystem.CurrentDirectory, defaultRepo);
         foreach (var notice in result.Notices)
             await api.Output.WriteLineAsync(notice).ConfigureAwait(false);
         foreach (var warning in result.Warnings)
@@ -104,7 +104,7 @@ internal static class AgentCommands
         return new AgentInstallPreflight(api.FileSystem, NotifyCommands.ConfigPathOverride);
     }
 
-    internal static async Task<(bool DefaultRepositoryResolved, string? RepositoryName)> TryResolveDefaultRepositoryAsync(
+    internal static async Task<DefaultRepository> TryResolveDefaultRepositoryAsync(
         MohistCliApi api, string projectId)
     {
         JsonNode? projectInfo;
@@ -114,16 +114,16 @@ internal static class AgentCommands
         }
         catch (HttpRequestException)
         {
-            return (false, null);
+            return DefaultRepository.Unresolved;
         }
         catch (MohistCliApi.ApiResponseException)
         {
-            return (false, null);
+            return DefaultRepository.Unresolved;
         }
 
         var repositories = projectInfo?["repositories"] as JsonArray;
         if (repositories is null)
-            return (false, null);
+            return DefaultRepository.Unresolved;
 
         foreach (var entry in repositories)
         {
@@ -132,10 +132,10 @@ internal static class AgentCommands
             if (repository["isDefault"]?.GetValue<bool>() != true)
                 continue;
             var name = repository["name"]?.GetValue<string>();
-            return (true, string.IsNullOrWhiteSpace(name) ? null : name);
+            return DefaultRepository.Named(string.IsNullOrWhiteSpace(name) ? null : name);
         }
 
-        return (false, null);
+        return DefaultRepository.Unresolved;
     }
 
     private static async Task<AgentRef?> EnsureAgentAsync(MohistCliApi api, string path, AgentPreset preset)
