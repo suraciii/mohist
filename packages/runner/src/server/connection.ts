@@ -317,6 +317,50 @@ export class ServerConnection {
     return payload as AgentSessionRuntimeEventAcceptance[]
   }
 
+  async listAgentSessionsForReconcile(signal: AbortSignal): Promise<AgentSessionReconcileBinding[]> {
+    const response = await fetch(this.url("agent-sessions/reconcile"), { method: "GET", signal })
+    if (!response.ok) throw new Error(`agent session reconcile list failed: ${response.status} ${await response.text()}`)
+    const payload = await response.json() as unknown
+    if (!Array.isArray(payload)) throw new Error("agent session reconcile list returned a malformed response")
+    return payload.map((value) => {
+      if (!isObjectRecord(value)
+        || typeof value.sessionId !== "string" || value.sessionId.length === 0
+        || (value.runtime !== "opencode" && value.runtime !== "pi")
+        || typeof value.runtimeSessionId !== "string" || value.runtimeSessionId.length === 0
+        || typeof value.workDir !== "string" || value.workDir.length === 0) {
+        throw new Error("agent session reconcile list returned a malformed binding")
+      }
+      return {
+        sessionId: value.sessionId,
+        runtime: value.runtime,
+        runtimeSessionId: value.runtimeSessionId,
+        workDir: value.workDir,
+      }
+    })
+  }
+
+  async reconcileMissingAgentSession(sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSessionReconcileBinding> {
+    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(sessionId)}/reconcile-missing`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) throw new Error(`agent session reconcile missing failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<AgentSessionReconcileBinding>
+  }
+
+  async reconcileAgentSessionRuntimeEvents(sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {
+    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(sessionId)}/runtime-events`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) throw new Error(`agent session reconcile runtime events failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<AgentSessionRuntimeEventReceipt[]>
+  }
+
   async getAgentSession(projectId: string, sessionId: string, signal: AbortSignal): Promise<AgentSession | null> {
     const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`), { method: "GET", signal })
     if (response.status === 404) return null
@@ -372,6 +416,13 @@ export class ServerConnection {
   private url(path: string) {
     return `${this.options.serverUrl.replace(/\/$/, "")}/api/runner/${encodeURIComponent(this.options.runnerId)}/${path}`
   }
+}
+
+export interface AgentSessionReconcileBinding {
+  readonly sessionId: string
+  readonly runtime: "opencode" | "pi"
+  readonly runtimeSessionId: string
+  readonly workDir: string
 }
 
 export interface WorkflowAgentSession {

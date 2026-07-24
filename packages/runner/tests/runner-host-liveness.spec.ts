@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => ({
   report: vi.fn(),
   uploadTaskLog: vi.fn(),
   fetchConfig: vi.fn(async () => null),
+  listAgentSessionsForReconcile: vi.fn(async () => []),
+  reconcileMissingAgentSession: vi.fn(),
+  reconcileAgentSessionRuntimeEvents: vi.fn(async () => []),
   startSignalR: vi.fn(),
   stopSignalR: vi.fn(),
   getConnectionId: vi.fn(() => "conn-1"),
@@ -35,6 +38,9 @@ const {
   report,
   uploadTaskLog,
   fetchConfig,
+  listAgentSessionsForReconcile,
+  reconcileMissingAgentSession,
+  reconcileAgentSessionRuntimeEvents,
   startSignalR,
   stopSignalR,
   getConnectionId,
@@ -55,6 +61,9 @@ vi.mock("../src/server/connection.js", () => ({
     report = report
     uploadTaskLog = uploadTaskLog
     fetchConfig = fetchConfig
+    listAgentSessionsForReconcile = listAgentSessionsForReconcile
+    reconcileMissingAgentSession = reconcileMissingAgentSession
+    reconcileAgentSessionRuntimeEvents = reconcileAgentSessionRuntimeEvents
   },
 }))
 

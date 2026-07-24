@@ -112,6 +112,27 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         public Task<IReadOnlyList<AgentSession>> ListAsync() =>
             Task.FromResult<IReadOnlyList<AgentSession>>(State is null ? [] : [Clone(State)]);
 
+        public Task<IReadOnlyList<AgentSessionReconcileBinding>> ListByRunnerForReconcileAsync(
+            string runnerId,
+            CancellationToken ct = default)
+        {
+            if (State is null
+                || !string.Equals(State.Runtime.RunnerId, runnerId, StringComparison.Ordinal)
+                || State.Status.Activity == AgentSessionActivity.Idle
+                || string.IsNullOrWhiteSpace(State.Runtime.Runtime)
+                || string.IsNullOrWhiteSpace(State.Status.AgentRuntimeSessionId)
+                || string.IsNullOrWhiteSpace(State.Runtime.WorkDir))
+                return Task.FromResult<IReadOnlyList<AgentSessionReconcileBinding>>([]);
+
+            return Task.FromResult<IReadOnlyList<AgentSessionReconcileBinding>>([
+                new AgentSessionReconcileBinding(
+                    State.Id,
+                    State.Runtime.Runtime,
+                    State.Status.AgentRuntimeSessionId,
+                    State.Runtime.WorkDir)
+            ]);
+        }
+
         public Task SaveAsync(string key, AgentSession state)
         {
             ThrowIfPending(key);

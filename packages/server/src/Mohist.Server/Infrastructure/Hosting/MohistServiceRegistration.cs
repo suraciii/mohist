@@ -99,6 +99,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         services.AddScoped<WorkflowRunQuerier>();
         services.AddScoped<IAgentSessionStore, AgentSessionStore>();
+        services.AddScoped<AgentSessionReconcileQuerier>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();

@@ -13,6 +13,7 @@ import {
 } from "../server/runtime-event-outbox.js"
 import { createServerRuntimeEventDelivery } from "../server/runtime-event-delivery.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
+import { BindingConvergence } from "./binding-convergence.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
 import { AgentJobExecutor } from "./agent-job-executor.js"
@@ -106,6 +107,7 @@ export class RunnerHost {
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
   private readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox
+  private readonly bindingConvergence: BindingConvergence
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
   private readonly cleanupConvergenceIntervalMs: number
@@ -176,6 +178,13 @@ export class RunnerHost {
       filePath: `${options.runnerRoot}/${RUNTIME_EVENT_OUTBOX_FILE}`,
       legacyFilePath: `${options.runnerRoot}/${LEGACY_FOLLOWUP_FAILURE_FILE}`,
       deliver: createServerRuntimeEventDelivery({ connection: this.connection }),
+    })
+    this.bindingConvergence = new BindingConvergence({
+      runnerId: options.runnerId,
+      connection: this.connection,
+      outbox: this.agentSessionRuntimeEventOutbox,
+      openCodeRuntime: () => this.openCodeRuntime,
+      piRuntime: () => this.piRuntime,
     })
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
@@ -289,6 +298,14 @@ export class RunnerHost {
     }
   }
 
+  private async runBindingConvergenceOnce(signal: AbortSignal): Promise<void> {
+    try {
+      await this.bindingConvergence.runOnce(signal)
+    } catch (error) {
+      console.error("agent-session binding convergence pass failed:", error)
+    }
+  }
+
   private async runModelRediscoveryOnce(signal: AbortSignal): Promise<void> {
     const discovered = await this.discoverModels(signal)
     if (discovered.models.length === 0) return
@@ -357,6 +374,7 @@ export class RunnerHost {
     const signal = this.activeSignal
     if (signal) {
       void this.runConvergenceOnce(signal)
+      void this.runBindingConvergenceOnce(signal)
       void this.runCleanupOnce(signal)
     }
   }

@@ -72,7 +72,7 @@ export async function resolveOrRecoverBinding(
   return { ok: true, binding: replacement, recovered: expected.runtimeSessionId !== null }
 }
 
-async function createEmptySession(
+export async function createEmptySession(
   handle: RecoverableRuntime,
   binding: RuntimeBinding,
   model: { readonly providerID: string; readonly modelID: string } | null | undefined,

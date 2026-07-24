@@ -8,6 +8,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command);
     Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command);
     Task<AgentSessionInfo> RecoverMissingRuntimeSessionAsync(RecoverMissingRuntimeSessionCommand command);
+    Task<AgentSessionInfo> ReconcileMissingBindingAsync(ReconcileMissingBindingCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command);
 
@@ -77,6 +78,13 @@ public sealed record AttachPhysicalSessionCommand(
 
 [GenerateSerializer]
 public sealed record RecoverMissingRuntimeSessionCommand(
+    [property: Id(0)] string ExpectedRunnerId,
+    [property: Id(1)] string ExpectedRuntime,
+    [property: Id(2)] string ExpectedRuntimeSessionId,
+    [property: Id(3)] string ReplacementRuntimeSessionId);
+
+[GenerateSerializer]
+public sealed record ReconcileMissingBindingCommand(
     [property: Id(0)] string ExpectedRunnerId,
     [property: Id(1)] string ExpectedRuntime,
     [property: Id(2)] string ExpectedRuntimeSessionId,
