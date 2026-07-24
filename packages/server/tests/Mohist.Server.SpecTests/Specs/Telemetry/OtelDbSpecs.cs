@@ -260,6 +260,8 @@ public class OtelDbSpecs : IDisposable
 
         public string ReadAllText(string path) => throw new NotSupportedException();
 
+        public void CreateDirectory(string path) { }
+
         public long? GetFileLength(string path)
         {
             Reads[path] = Reads.TryGetValue(path, out var count) ? count + 1 : 1;

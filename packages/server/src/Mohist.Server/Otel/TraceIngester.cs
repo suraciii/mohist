@@ -298,28 +298,23 @@ public sealed class TraceIngester
         if (!long.TryParse(raw, out var nanos))
             return false;
 
-        // OTLP timestamps are signed int64; clamp to the .NET
-        // DateTimeOffset range so callers can't trip the
-        // ArgumentOutOfRangeException path with pathological inputs.
-        // DateTimeOffset ticks are 100ns units, so the corresponding
-        // nanosecond bounds are the tick range * 100.
-        const long minNanos = 0L;
-        const long maxNanos = unchecked(3_155_378_975_999_999_999L * 100L) + 99L;
-        if (nanos < minNanos || nanos > maxNanos)
-            return false;
-
         var seconds = nanos / 1_000_000_000L;
         var remainder = nanos % 1_000_000_000L;
         if (remainder < 0)
         {
-            // C# integer division rounds toward zero, so negative nanos
-            // (pre-1970) need a correction to land on a floor-rounded
-            // second.
             seconds -= 1;
             remainder += 1_000_000_000L;
         }
         var ticks = remainder / 100;
-        var instant = DateTimeOffset.FromUnixTimeSeconds(seconds).AddTicks(ticks);
+        DateTimeOffset instant;
+        try
+        {
+            instant = DateTimeOffset.FromUnixTimeSeconds(seconds).AddTicks(ticks);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
+        }
         iso = instant.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", System.Globalization.CultureInfo.InvariantCulture);
         return true;
     }

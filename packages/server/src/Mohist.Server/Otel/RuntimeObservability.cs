@@ -214,7 +214,7 @@ public sealed class RuntimeObservability : IDisposable
     public RuntimeRequestFact CompleteRequest(RuntimeRequestFact fact)
     {
         var normalized = Normalize(fact);
-        if (!_enabled || IsDisposed())
+        if (!_enabled)
             return normalized;
 
         var tags = new TagList
@@ -223,14 +223,15 @@ public sealed class RuntimeObservability : IDisposable
             { "http.request.method", normalized.Method! },
             { "http.response.status_code", normalized.StatusCode },
         };
-        _httpRequestCount.Add(1, tags);
-        _httpRequestDuration.Record(normalized.DurationMilliseconds, tags);
-        _httpRequestDatabaseCalls.Record(normalized.DatabaseCalls, tags);
-        _httpRequestDownstreamCalls.Record(normalized.DownstreamCalls, tags);
         lock (_gate)
         {
-            if (!_disposed)
-                RecordRouteLocked(normalized, _timeProvider.GetUtcNow().ToUnixTimeSeconds());
+            if (_disposed)
+                return normalized;
+            _httpRequestCount.Add(1, tags);
+            _httpRequestDuration.Record(normalized.DurationMilliseconds, tags);
+            _httpRequestDatabaseCalls.Record(normalized.DatabaseCalls, tags);
+            _httpRequestDownstreamCalls.Record(normalized.DownstreamCalls, tags);
+            RecordRouteLocked(normalized, _timeProvider.GetUtcNow().ToUnixTimeSeconds());
         }
         return normalized;
     }
@@ -319,14 +320,14 @@ public sealed class RuntimeObservability : IDisposable
                 }
                 return new MutationReason(activation, cleared);
             });
-        }
 
-        if (_enabled && !IsDisposed())
-        {
-            AddCounter(_spansReceived, outcome.Received);
-            AddCounter(_spansSaved, outcome.Saved);
-            AddCounter(_spansRejected, outcome.Rejected);
-            AddCounter(_spansDropped, outcome.Dropped);
+            if (_enabled && !_disposed)
+            {
+                AddCounter(_spansReceived, outcome.Received);
+                AddCounter(_spansSaved, outcome.Saved);
+                AddCounter(_spansRejected, outcome.Rejected);
+                AddCounter(_spansDropped, outcome.Dropped);
+            }
         }
         EmitTransitions(transitions);
         return outcome;

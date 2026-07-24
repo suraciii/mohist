@@ -288,7 +288,7 @@ public sealed class OtelDb
             return;
         if (fileSystem.Exists(dir))
             return;
-        Directory.CreateDirectory(dir);
+        fileSystem.CreateDirectory(dir);
     }
 
     private static string BuildConnectionString(string databasePath, bool readOnly)

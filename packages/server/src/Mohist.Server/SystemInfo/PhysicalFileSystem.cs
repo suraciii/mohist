@@ -6,5 +6,7 @@ public sealed class PhysicalFileSystem : IFileSystem
 
     public string ReadAllText(string path) => File.ReadAllText(path);
 
+    public void CreateDirectory(string path) => Directory.CreateDirectory(path);
+
     public long? GetFileLength(string path) => File.Exists(path) ? new FileInfo(path).Length : null;
 }

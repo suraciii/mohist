@@ -387,5 +387,10 @@ public class SystemInfoServiceTests
         public bool Exists(string path) => _files.ContainsKey(Path.GetFullPath(path, "/"));
 
         public string ReadAllText(string path) => _files[Path.GetFullPath(path, "/")];
+
+        public void CreateDirectory(string path) { }
+
+        public long? GetFileLength(string path) =>
+            _files.TryGetValue(Path.GetFullPath(path, "/"), out var content) ? (long?)System.Text.Encoding.UTF8.GetByteCount(content) : null;
     }
 }
