@@ -20,12 +20,12 @@ class FakeSession implements PiSdkSession {
   dispose(): void {}
 }
 
-function factory(session: FakeSession, validateSessionFile: () => Promise<void>): PiSdkFactory {
+function factory(session: FakeSession, validateSessionFile: () => Promise<void>, openSession: () => Promise<PiSdkSession> = async () => { throw new Error("cached session should not reopen") }): PiSdkFactory {
   return {
     create: async () => ({
       catalog: async () => [],
       createSession: async () => session,
-      openSession: async () => { throw new Error("cached session should not reopen") },
+      openSession,
       validateSessionFile,
       model: () => ({}),
       close: async () => {},
@@ -59,5 +59,24 @@ describe("PiRuntime cached session validation", () => {
 
     expect(result).toMatchObject({ ok: false, error: { kind: "missing-session" } })
     expect(validateSessionFile).toHaveBeenCalledWith(session.sessionFile, session.sessionId)
+  })
+
+  it("classifies only an ENOENT open failure as a missing binding", async () => {
+    const session = new FakeSession()
+    const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session, async () => {}, async () => { throw missing }) })
+    await runtime.start()
+
+    await expect(runtime.resolveSession({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } }))
+      .resolves.toMatchObject({ ok: false, error: { kind: "missing-session" } })
+  })
+
+  it("keeps corrupt open failures out of missing-session recovery", async () => {
+    const session = new FakeSession()
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session, async () => {}, async () => { throw new Error("session is corrupt") }) })
+    await runtime.start()
+
+    await expect(runtime.resolveSession({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } }))
+      .resolves.toMatchObject({ ok: false, error: { kind: "turn-failed" } })
   })
 })

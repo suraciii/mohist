@@ -361,6 +361,67 @@ public static class RunnerRoutes
             return Results.Ok(await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId)));
         });
 
+        group.MapGet("/agent-sessions/reconcile", async (
+            string runnerId,
+            AgentSessionReconcileQuerier sessions,
+            CancellationToken ct) =>
+        {
+            var bindings = await sessions.ListByRunnerAsync(runnerId, ct);
+            return Results.Ok(bindings.Select(binding => new RunnerAgentSessionReconcileResponse(
+                binding.SessionId,
+                binding.Runtime,
+                binding.RuntimeSessionId,
+                binding.WorkDir)));
+        });
+
+        group.MapPost("/agent-sessions/{sessionId}/reconcile-missing", async (
+            string runnerId, string sessionId,
+            MissingRuntimeSessionRecoveryRequest req,
+            AgentSessionResolver sessions) =>
+        {
+            if (!string.Equals(runnerId, req.ExpectedRunnerId, StringComparison.Ordinal))
+                return ApiResults.BadRequest("expectedRunnerId must match the route runnerId", "runner_mismatch");
+            var grain = sessions.GetGrain(sessionId);
+            if (await grain.GetAsync() is null)
+                return ApiResults.NotFound($"Agent session {sessionId} not found");
+            try
+            {
+                var session = await grain.ReconcileMissingBindingAsync(new ReconcileMissingBindingCommand(
+                    req.ExpectedRunnerId, req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.ReplacementRuntimeSessionId));
+                return Results.Ok(new RunnerAgentSessionReconcileResponse(
+                    session.Id,
+                    session.Runtime ?? string.Empty,
+                    session.AgentSessionId ?? string.Empty,
+                    session.WorkDir ?? string.Empty));
+            }
+            catch (StaleRuntimeSessionBindingException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "stale_binding", new { sessionId = ex.SessionId });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "agent_session_recovery_conflict");
+            }
+        });
+
+        group.MapPost("/agent-sessions/{sessionId}/runtime-events", async (
+            string runnerId, string sessionId,
+            AgentSessionRuntimeEventsRequest req,
+            AgentSessionResolver sessions) =>
+        {
+            var grain = sessions.GetGrain(sessionId);
+            var existing = await grain.GetAsync();
+            if (existing is null || !string.Equals(existing.RunnerId, runnerId, StringComparison.Ordinal))
+                return ApiResults.NotFound($"Agent session {sessionId} not found");
+            if (string.IsNullOrWhiteSpace(req.RuntimeSessionId))
+                return ApiResults.BadRequest("runtimeSessionId is required", "runtime_session_id_required");
+
+            var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
+                e.Type,
+                e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
+            return Results.Ok(await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId)));
+        });
+
         // Generic (non-workflow) AgentSession routes — used by the runner
         // when it executes an agent-job dispatch whose launch minted an
         // AgentSession id (issue-129 T-002/T-003). Identifies a session by
@@ -747,6 +808,11 @@ public record RunnerReportResponse(
     string? Reason = null,
     string? OwnerKind = null,
     string? OwnerId = null);
+public record RunnerAgentSessionReconcileResponse(
+    string SessionId,
+    string Runtime,
+    string RuntimeSessionId,
+    string WorkDir);
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
 public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null, string? Runtime = null);
 public record AgentSessionOpenRequest(

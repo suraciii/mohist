@@ -136,6 +136,47 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         Assert.Equal("hello world", part.Text);
     }
 
+    [Fact]
+    public async Task ListByRunnerForReconcile_ReturnsOnlyDurablyBoundNonIdleSessions()
+    {
+        var matching = CreateBoundSession("session-matching", "runner-1", AgentSessionActivity.Unknown);
+        var active = CreateBoundSession("session-active", "runner-1", AgentSessionActivity.Active);
+        var idle = CreateBoundSession("session-idle", "runner-1", AgentSessionActivity.Idle);
+        var otherRunner = CreateBoundSession("session-other", "runner-2", AgentSessionActivity.Unknown);
+        await _store.SaveAsync(matching.Id, matching);
+        await _store.SaveAsync(active.Id, active);
+        await _store.SaveAsync(idle.Id, idle);
+        await _store.SaveAsync(otherRunner.Id, otherRunner);
+
+        var bindings = await _store.ListByRunnerForReconcileAsync("runner-1");
+
+        Assert.Equal(["session-active", "session-matching"], bindings.Select(binding => binding.SessionId).Order().ToArray());
+        var projected = Assert.Single(bindings, binding => binding.SessionId == matching.Id);
+        Assert.Equal("opencode", projected.Runtime);
+        Assert.Equal("runtime-session-matching", projected.RuntimeSessionId);
+        Assert.Equal("/work/session-matching", projected.WorkDir);
+    }
+
+    private static AgentSession CreateBoundSession(string id, string runnerId, AgentSessionActivity activity)
+    {
+        var session = AgentSession.Create(
+            id,
+            runnerId,
+            $"/work/{id}",
+            metadata: WorkflowMetadata(),
+            now: TestTime.UtcDateTime,
+            runtime: "opencode");
+        session.AttachPhysicalSession(
+            $"runtime-{id}",
+            model: null,
+            workDir: $"/work/{id}",
+            changeDir: null,
+            processPid: null,
+            now: TestTime.UtcDateTime);
+        session.Status = session.Status with { Activity = activity };
+        return session;
+    }
+
     private static AgentSessionMetadata WorkflowMetadata() =>
         new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", "project-1")

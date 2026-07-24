@@ -34,7 +34,7 @@ import { capabilitySet } from "../actions/host.js"
 import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from "../actions/opencode.js"
 import { WorkflowAgentSessionReporter } from "../actions/workflow-agent-session-reporter.js"
 import { parseModelIdentifier } from "./opencode/index.js"
-import { resolveOrRecoverBinding } from "./binding-recovery.js"
+import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from "./binding-recovery.js"
 import { resolveIssueFields, type IssueFields } from "../actions/issue-fields.js"
 import { createHash } from "node:crypto"
 
@@ -61,6 +61,7 @@ export class WorkExecutor {
     private agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
     private readonly runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
     private piRuntime: PiRuntime | null = null,
+    private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -370,7 +371,7 @@ export class WorkExecutor {
               const result = await runtime.resolveSession({
                 target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
               })
-              if (result.ok) return { ok: true }
+              if (result.ok) return { ok: true, activeTurn: result.value.activeTurn }
               return { ok: false, kind: result.error.kind, message: result.error.message }
             },
             replace: async (current, replacement) => {
@@ -386,6 +387,8 @@ export class WorkExecutor {
               )
             },
             model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
+            recoveryKey: expected.runtimeSessionId!,
+            coordinator: self.bindingRecoveryCoordinator ?? undefined,
           })
           if (!recovery.ok) {
             return actionFail(recovery.kind, recovery.message, { exitCode: 1, turnFact: { finalAssistantText: null } })

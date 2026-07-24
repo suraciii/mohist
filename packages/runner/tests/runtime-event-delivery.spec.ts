@@ -58,6 +58,36 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
     expect(result).toEqual([{ type: "reasoning.delta" }])
   })
 
+  it("delivers binding reconciliation facts through the runner-scoped session endpoint", async () => {
+    const sendSpy = vi.fn(async (_sessionId: string, _body: unknown) => [{ type: "session.activity" }])
+    const connection = {
+      async reconcileAgentSessionRuntimeEvents(sessionId: string, body: unknown) {
+        return await sendSpy(sessionId, body)
+      },
+    } as unknown as ServerConnection
+    const delivery = createServerRuntimeEventDelivery({ connection })
+    const record: RuntimeEventRecord = {
+      id: "reconcile-1",
+      producerFamily: "binding-reconcile",
+      target: { kind: "session", sessionId: "session-1" },
+      runtimeSessionId: "runtime-1",
+      work: null,
+      event: { type: "session.activity", payload: { activity: "idle" } },
+      acknowledgementPolicy: "successful-response",
+    }
+
+    const result = await delivery.send(record, new AbortController().signal)
+
+    expect(sendSpy).toHaveBeenCalledWith("session-1", {
+      workId: null,
+      workType: null,
+      stage: null,
+      runtimeSessionId: "runtime-1",
+      runtimeEvents: [{ type: "session.activity", payload: { activity: "idle" } }],
+    })
+    expect(result).toEqual([{ type: "session.activity" }])
+  })
+
   it("returns an empty array for an empty batch without calling the server", async () => {
     const sendSpy = vi.fn(async () => [{ type: "reasoning.delta" }])
     const connection = {

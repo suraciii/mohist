@@ -34,6 +34,13 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
           signal,
         )
       }
+      if (record.producerFamily === "binding-reconcile" && record.target.kind === "session") {
+        return await connection.reconcileAgentSessionRuntimeEvents(
+          record.target.sessionId,
+          envelope(record),
+          signal,
+        )
+      }
       throw new Error("runtime-event delivery: target does not match producer family")
     },
     async sendBatch(records: readonly RuntimeEventRecord[], signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[][]> {
@@ -55,11 +62,18 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
       }
       if (head.producerFamily === "generic-followup" && head.target.kind === "generic") {
         const genericRecords = records as readonly (RuntimeEventRecord & { target: { kind: "generic"; projectId: string; sessionId: string } })[]
-        // The generic endpoint returns receipts per record directly.
         const accepted = await connection.agentSessionRuntimeEvents(
           head.target.projectId,
           head.target.sessionId,
           batchEnvelope(genericRecords),
+          signal,
+        )
+        return accepted.map<AgentSessionRuntimeEventReceipt[]>((a) => [{ type: a.type ?? "" }])
+      }
+      if (head.producerFamily === "binding-reconcile" && head.target.kind === "session") {
+        const accepted = await connection.reconcileAgentSessionRuntimeEvents(
+          head.target.sessionId,
+          batchEnvelope(records),
           signal,
         )
         return accepted.map<AgentSessionRuntimeEventReceipt[]>((a) => [{ type: a.type ?? "" }])

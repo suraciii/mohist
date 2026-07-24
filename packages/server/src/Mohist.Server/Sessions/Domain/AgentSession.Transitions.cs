@@ -177,6 +177,16 @@ public static partial class AgentSessionExtensions
             return [new AgentSessionUsageRecorded(session.Status.UsageSummary ?? new AgentUsageSummary())];
         }
 
+        public IReadOnlyList<AgentSessionEvent> ReconcileMissingBinding(
+            AgentRuntimeBinding expected,
+            AgentRuntimeBinding replacement,
+            DateTime now)
+        {
+            EnsureExpectedRuntimeBinding(session, expected, session.CurrentRuntimeBinding());
+            session.SetActivity(AgentSessionActivity.Idle, now);
+            return session.RebindRuntimeSession(expected, replacement, "missing-recovery", now);
+        }
+
         public IReadOnlyList<AgentSessionEvent> RebindRuntimeSession(
             AgentRuntimeBinding expected,
             AgentRuntimeBinding replacement,

@@ -24,6 +24,7 @@ import type {
   PiRuntimeEvent,
   PiSessionCreateRequest,
   PiSessionResolveRequest,
+  PiSessionResolveResult,
   PiSessionResult,
   PiTurnObserver,
   PiTurnRequest,
@@ -80,7 +81,7 @@ export class PiRuntime {
   diagnostic(): PiDiagnostic | null { return this.state.diagnostic }
   catalog(): PiCatalog | null { return this.state.catalog }
 
-  async resolveSession(request: PiSessionResolveRequest): Promise<PiResult<PiSessionResult>> {
+  async resolveSession(request: PiSessionResolveRequest): Promise<PiResult<PiSessionResolveResult>> {
     if (!this.state.ready || !this.state.services) return this.unavailable()
     const runtimeSessionId = request.target.runtimeSessionId
     if (!runtimeSessionId) return this.failure("missing-session", "Pi Session binding is missing")
@@ -89,9 +90,15 @@ export class PiRuntime {
     try {
       const session = this.sessions.get(path) ?? await this.state.services.openSession(path, request.target.workDir)
       this.sessions.set(path, session)
-      return { ok: true, value: { runtimeSessionId: path, workDir: request.target.workDir }, diagnostics: [] }
+      return {
+        ok: true,
+        value: { runtimeSessionId: path, workDir: request.target.workDir, activeTurn: session.isStreaming },
+        diagnostics: [],
+      }
     } catch (cause) {
-      return this.failure("missing-session", "The bound Pi Session is missing", [diagnostic("session-open-failed", this.mask(message(cause)))])
+      return isMissingSessionFile(cause)
+        ? this.failure("missing-session", "The bound Pi Session is missing", [diagnostic("session-open-failed", this.mask(message(cause)))])
+        : this.failure("turn-failed", "The bound Pi Session could not be opened", [diagnostic("session-open-failed", this.mask(message(cause)))])
     }
   }
 
@@ -525,6 +532,12 @@ export class PiRuntime {
   private unavailable(): PiResult<never> { return { ok: false, error: piError("unavailable-runtime", "Pi runtime is not ready", this.state.diagnostic ? [this.state.diagnostic] : []), diagnostics: this.state.diagnostic ? [this.state.diagnostic] : [] } }
   private failure(kind: "invalid-input" | "missing-session" | "incompatible-runtime" | "turn-failed" | "conflict", messageText: string, diagnostics: readonly PiDiagnostic[] = []): PiResult<never> { return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics } }
   private finishFailure(kind: "deadline-exceeded" | "interrupted" | "turn-failed", messageText: string, diagnostics: PiDiagnostic[] = []): PiResult<PiTurnResult> { return { ok: false, error: piError(kind, messageText, diagnostics), diagnostics } }
+}
+
+function isMissingSessionFile(cause: unknown): boolean {
+  if (!cause || typeof cause !== "object") return false
+  const value = cause as { code?: unknown; cause?: unknown }
+  return value.code === "ENOENT" || isMissingSessionFile(value.cause)
 }
 
 function normalizedPath(value: string | undefined): string | null { if (!value) return null; const path = value.replaceAll("\\", "/"); return path.startsWith("/") ? resolve(path) : null }

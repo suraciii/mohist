@@ -14,8 +14,15 @@ namespace Mohist.Server.Infrastructure.Data.Sessions;
 
 public interface IAgentSessionStore : IStateStore<AgentSession>
 {
+    Task<IReadOnlyList<AgentSessionReconcileBinding>> ListByRunnerForReconcileAsync(string runnerId, CancellationToken ct = default);
     Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default);
 }
+
+public sealed record AgentSessionReconcileBinding(
+    string SessionId,
+    string Runtime,
+    string RuntimeSessionId,
+    string WorkDir);
 
 public class AgentSessionStore : IAgentSessionStore
 {
@@ -50,6 +57,31 @@ public class AgentSessionStore : IAgentSessionStore
         await using var db = await _dbFactory.CreateDbContextAsync();
         var rows = await db.AgentSessions.AsNoTracking().ToListAsync();
         return rows.Select(AgentSessionJson.Deserialize).OfType<AgentSession>().ToList();
+    }
+
+    public async Task<IReadOnlyList<AgentSessionReconcileBinding>> ListByRunnerForReconcileAsync(
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.AgentSessions
+            .AsNoTracking()
+            .Where(row => row.RunnerId == runnerId && row.AgentSessionId != null)
+            .ToListAsync(ct);
+
+        return rows
+            .Select(AgentSessionJson.Deserialize)
+            .OfType<AgentSession>()
+            .Where(session => session.Status.Activity != AgentSessionActivity.Idle)
+            .Select(session => new AgentSessionReconcileBinding(
+                session.Id,
+                session.Runtime.Runtime ?? string.Empty,
+                session.Status.AgentRuntimeSessionId ?? string.Empty,
+                session.Runtime.WorkDir ?? string.Empty))
+            .Where(binding => binding.Runtime.Length > 0
+                && binding.RuntimeSessionId.Length > 0
+                && binding.WorkDir.Length > 0)
+            .ToArray();
     }
 
     public async Task SaveAsync(string key, AgentSession state)
