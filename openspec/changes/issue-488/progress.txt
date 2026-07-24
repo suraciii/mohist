@@ -28,3 +28,10 @@
 - Root cause of intermittent verify failure: `CliAgentCommandSpecs` and `CliNotifySetupCommandSpecs` both mutate the static `NotifyCommands.ConfigPathOverride` (per-test save/restore). xUnit v3 parallelizes test classes by default, so running them concurrently stomps the shared override right while `AgentInstallPreflight.CheckNotifications` re-reads it at runtime — `AgentInstall_BothChecksFail_EmitsBothWarningsAndInstalls` intermittently lost its `warning: Mohist:Notifications:Hermes:EnabledTypes is missing` line.
 - Fix: pin both classes to a new non-parallel `NotifyCommandConfigPath` collection (`[CollectionDefinition(DisableParallelization = true)]` + `[Collection]`), the established pattern in this repo (`VariableCommands`, `RunReads`) and the guidance in `design/testing.md` ("Collections express shared fixture lifetime and isolation needs only").
 - Verified: 20/20 green runs of the two classes in isolation (previously ~40% failed), 15/15 green full-suite runs at 1365/1365, `dotnet build` clean (TreatWarningsAsErrors).
+
+## Verify repair — round 2 (server spec test, IN PROGRESS)
+
+- After the CLI fix above, `npm test` still failed: 1 server spec test (`GenericLaunch_FollowUpRuntimeEvents_AppendNonEmptyTranscriptContent` in `GenericAgentSessionTranscriptAxisSpecs`) failed deterministically when run as part of the full 3006-test suite (even with `-parallel none`, 94s), but passed in isolation (6/6, ~4s).
+- Root cause: `AgentJobGrain.SubmitAsync` dispatches synchronously but can fail under full-suite SQLite contention; on failure it arms a grain-timer retry backed by `FakeTimeProvider`. `PollOnceAsync` never advances `FakeTimeProvider`, so the retry timer never fires and 50 empty polls return nothing.
+- Fix (test-only, no production code touched, no assertions weakened): advance `_fixture.TimeProvider` by 100ms after the first 5 empty polls in `PollOnceAsync` so the retry timer fires. Total worst-case advancement 4.5s, well under the 8s JobTimeout.
+- Status: fix applied and builds clean. **Not yet verified** — needs a full-suite SpecTests run to confirm the fix resolves the failure. Committing as WIP before interruption.

@@ -212,6 +212,9 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
             }
 
             if (match is not null) return match;
+
+            if (i >= 4)
+                _fixture.TimeProvider.Advance(TimeSpan.FromMilliseconds(100));
         }
 
         throw new InvalidOperationException($"No polled dispatch carrying AgentSessionId='{expectedSessionId}' after {attempts} attempts");
