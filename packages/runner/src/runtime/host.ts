@@ -304,6 +304,7 @@ export class RunnerHost {
   }
 
   private async runBindingConvergenceOnce(signal: AbortSignal): Promise<void> {
+    if (typeof (this.connection as { listAgentSessionsForReconcile?: unknown }).listAgentSessionsForReconcile !== "function") return
     try {
       await this.bindingConvergence.runOnce(signal)
     } catch (error) {
