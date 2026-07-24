@@ -1,0 +1,11 @@
+## Codebase Patterns
+
+- Preset resources use a separate `presets/` content root, while asset lookup reuses the packaged sibling-root fallback behavior from `SkillAssetRootResolver`.
+- `PresetCatalog` accepts an explicit root for FakeFileSystem tests and returns `PresetCatalogResult` with available names for unknown presets.
+- The manifest stores file references; response prompt files are read verbatim so `{{event.*}}` placeholders remain unrendered.
+
+## T-001
+
+- Added supervisor instructions, approval, and failure resources plus `presets/manifest.json`.
+- Added the CLI content packaging entry and catalog loader/tests.
+- CLI unit tests pass. `npm run build` completes the .NET build but workspace TypeScript builds cannot run because `tsc` is unavailable in the existing environment.

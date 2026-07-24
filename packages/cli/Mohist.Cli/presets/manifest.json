@@ -1,0 +1,17 @@
+{
+  "supervisor": {
+    "instructions": "supervisor/instructions.md",
+    "rules": [
+      {
+        "name": "supervisor-approval",
+        "match": "event.type == \"com.mohist.workflow.stage.approval-requested\"",
+        "responsePrompt": "supervisor/approval.md"
+      },
+      {
+        "name": "supervisor-failure",
+        "match": "event.type == \"com.mohist.workflow.run.failed\"",
+        "responsePrompt": "supervisor/failure.md"
+      }
+    ]
+  }
+}
