@@ -477,4 +477,6 @@
   the exact filtered test passed, and the subsequent full verification passed unchanged.
 - Final `npm run verify`: server 6,088 tests passed, Web 5,130 tests passed (1 skipped), Runner
   1,383 tests passed; build and boundary checks passed. Verification left no generated Git changes.
+- Rechecked from clean commit `c7543a65a`: `npm run verify` passed again without source changes,
+  confirming the prior repair is stable and no current verification failure remains.
 
