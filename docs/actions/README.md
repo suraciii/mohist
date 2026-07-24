@@ -14,6 +14,9 @@ Mohist Agent。
 - **错误码**:该 Action 全部业务失败的稳定标识目录,供 recovery
   `when: error.code=...` 匹配;错误文案面向人,不用于匹配。
 
+平台还可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、
+未预期平台故障和期限失败；它们不属于任何 Action 的业务错误。
+
 本目录保存需要独立说明的 Action 产品契约。Workflow 的阶段、task、`expect` 和恢复
 配置见 [Workflow Profile](../workflow-profiles.md);Action、Inline Agent 和 Mohist Agent
 的关系见 [Agent 与 AgentSession](../agents.md)。
@@ -136,9 +139,7 @@ Session 显示为已经安全空闲。
 
 ### 共享错误码
 
-平台可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、
-未预期平台故障和期限失败，不属于各 Action 的业务错误。两个执行类 Action 共享以下
-业务错误码，各篇只补充特有错误码：
+两个执行类 Action 共享以下业务错误码，各篇只补充特有错误码：
 
 | 错误码 | 含义 |
 |---|---|

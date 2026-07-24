@@ -27,8 +27,6 @@ Git Action 的仓库、分支和远程仓库都通过显式 `with` 输入确定�
 | `step` | 失败时产生快照的步骤。 |
 | `workDir` | 工作区目录。 |
 
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
-
 ### 业务错误码
 
 | 错误码 | 含义 |
@@ -77,8 +75,6 @@ Git Action 的仓库、分支和远程仓库都通过显式 `with` 输入确定�
 | `rebaseLeftInProgress` | 是否留下了进行中的变基。 |
 | `output` | 聚合后的 Git 输出。 |
 | `steps` | 每个步骤的 Git 命令结果。 |
-
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
 
 ### 业务错误码
 
@@ -130,8 +126,6 @@ Git Action 的仓库、分支和远程仓库都通过显式 `with` 输入确定�
 | `mergeBaseSha` | HEAD 与基础引用的合并基点 SHA。 |
 | `output` | 聚合后的 Git 输出。 |
 
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
-
 ### 业务错误码
 
 | 错误码 | 含义 |
@@ -173,8 +167,6 @@ Git Action 的仓库、分支和远程仓库都通过显式 `with` 输入确定�
 | `canMerge` | 是否可以合并。 |
 | `conflictFiles` | 尚未解决冲突的文件。 |
 | `checkedAt` | 检查时间的 ISO 时间戳。 |
-
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
 
 ### 业务错误码
 
@@ -224,8 +216,6 @@ Git Action 的仓库、分支和远程仓库都通过显式 `with` 输入确定�
 | `forceWithLease` | 是否使用了带租约的强制模式。 |
 | `output` | 聚合后的 Git 推送输出。 |
 | `steps` | 每个步骤的 Git 命令结果。 |
-
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
 
 ### 业务错误码
 

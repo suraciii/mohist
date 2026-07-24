@@ -18,8 +18,6 @@
 | `stdout` | 去除首尾空白后的命令标准输出。 |
 | `exitCode` | 进程退出码。 |
 
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
-
 ### 业务错误码
 
 | 错误码 | 含义 |
@@ -59,8 +57,6 @@
 | `stdout` | 截断后的标准输出。 |
 | `stderr` | 截断后的标准错误输出。 |
 
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
-
 ### 业务错误码
 
 | 错误码 | 含义 |
@@ -93,8 +89,6 @@
 | `kind` | 输出类型标识。 |
 | `path` | 解析后的路径。 |
 | `exists` | 路径是否存在。 |
-
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
 
 ### 业务错误码
 
@@ -131,8 +125,6 @@
 | `path` | 解析后的路径。 |
 | `marker` | 本次检查所匹配的标记文本。 |
 | `found` | 是否找到标记。 |
-
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
 
 ### 业务错误码
 

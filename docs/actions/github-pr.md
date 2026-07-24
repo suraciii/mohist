@@ -38,8 +38,6 @@ GitHub PR Action 的仓库、分支和 Pull Request 身份都通过显式 `with`
 | `output` | 聚合后的 `gh` 输出。 |
 | `steps` | 每个步骤的 `gh` 命令结果。 |
 
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
-
 ### 业务错误码
 
 | 错误码 | 含义 |
@@ -90,8 +88,6 @@ GitHub PR Action 的仓库、分支和 Pull Request 身份都通过显式 `with`
 | `output` | 聚合后的 `gh` 输出。 |
 | `steps` | 每个步骤的 `gh` 命令结果。 |
 
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
-
 ### 业务错误码
 
 | 错误码 | 含义 |
@@ -139,8 +135,6 @@ GitHub PR Action 的仓库、分支和 Pull Request 身份都通过显式 `with`
 | `method` | 实际使用的合并方式。 |
 | `output` | 聚合后的 `gh` 输出。 |
 | `steps` | 每个步骤的 `gh` 命令结果。 |
-
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
 
 ### 业务错误码
 
@@ -194,8 +188,6 @@ GitHub PR Action 的仓库、分支和 Pull Request 身份都通过显式 `with`
 | `output` | 聚合后的 `gh` 输出。 |
 | `steps` | 每个步骤的 `gh` 命令结果。 |
 
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
-
 ### 业务错误码
 
 | 错误码 | 含义 |
@@ -235,8 +227,6 @@ GitHub PR Action 的仓库、分支和 Pull Request 身份都通过显式 `with`
 | `message` | 面向使用者的检查结果。 |
 | `output` | 聚合后的 `gh` 输出。 |
 | `steps` | 每个步骤的 `gh` 命令结果。 |
-
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
 
 ### 业务错误码
 
