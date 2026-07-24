@@ -13,6 +13,14 @@ namespace Mohist.Server.Events.Subscriptions;
 [Subscription(Type = "*")]
 public sealed class RoutingDispatchHandler : ICloudEventHandler
 {
+    internal const string WatchRuleIdPrefix = "watch:";
+
+    private static readonly IReadOnlySet<string> WatchEventTypes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        EventCatalog.ReverseDns.StageApprovalRequested,
+        EventCatalog.ReverseDns.WorkflowRunFailed,
+    };
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<RoutingDispatchHandler> _log;
 
@@ -37,8 +45,6 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         await using var scope = _scopeFactory.CreateAsyncScope();
         var services = scope.ServiceProvider;
         var rules = await services.GetRequiredService<RoutingRuleStore>().ListAsync(projectId, includeArchived: false, ct);
-        if (rules.Count == 0)
-            return;
 
         var agentQuerier = services.GetRequiredService<AgentQuerier>();
         var evaluator = services.GetRequiredService<RoutingTableEvaluator>();
@@ -46,9 +52,18 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         // Envelope-only matching + prompt rendering: workspace / Workflow /
         // Issue state does not affect rule selection (issue-449 design
         // decision 4). The resolver runs AFTER the evaluator picks a hit.
-        var outcomes = evaluator.Evaluate(new CloudEventEventMatchInput(evt), rules, probe);
+        var outcomes = rules.Count == 0
+            ? (IReadOnlyList<RuleOutcome>)Array.Empty<RuleOutcome>()
+            : evaluator.Evaluate(new CloudEventEventMatchInput(evt), rules, probe);
         var launcher = services.GetRequiredService<IAgentLauncher>();
         var resolver = services.GetRequiredService<RoutedAgentLaunchContextResolver>();
+
+        var issueNumber = ResolveEventIssueNumber(evt);
+
+        var watchStore = services.GetRequiredService<WatchEntryStore>();
+        var mutedAgentIds = await ResolveMutedAgentsAsync(watchStore, projectId, issueNumber, ct);
+
+        var launchedAgentIds = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var outcome in outcomes)
         {
@@ -65,10 +80,19 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             if (agent is null || !string.Equals(agent.Status, AgentStatus.Active, StringComparison.Ordinal))
                 continue;
 
+            if (IsMutedForEvent(mutedAgentIds, issueNumber, agent.Id))
+            {
+                _log.LogWarning(
+                    "Routing rule {RuleId} hit suppressed by mute for event {EventId} issue {IssueNumber} agent {AgentId}",
+                    outcome.Rule.Id, evt.Id, issueNumber, agent.Id);
+                launchedAgentIds.Add(agent.Id);
+                continue;
+            }
+
             var execution = await resolver.ResolveAsync(evt, ct);
             if (!execution.IsReady)
             {
-                var (issueNumber, _) = PreflightLineage(evt, execution);
+                var (_, _) = PreflightLineage(evt, execution);
                 var issueRuntimeOverride = await ResolveIssueRuntimeOverrideAsync(
                     services,
                     projectId,
@@ -82,20 +106,14 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
                     execution,
                     issueRuntimeOverride,
                     ct);
+                launchedAgentIds.Add(agent.Id);
                 continue;
             }
 
-            var issueNumberForLaunch = execution.Context!.IssueNumber
-                ?? (CloudEventLineage.TryReadPositiveNumber(
-                    evt.Extensions,
-                    EventCatalog.Lineage.Issue,
-                    out var envelopeIssueNumber)
-                    ? envelopeIssueNumber
-                    : null);
             var runtimeOverride = await ResolveIssueRuntimeOverrideAsync(
                 services,
                 projectId,
-                issueNumberForLaunch,
+                issueNumber,
                 ct);
             await launcher.LaunchRoutedAsync(
                 agent,
@@ -105,7 +123,219 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
                 outcome.Rule.Id,
                 runtimeOverride,
                 ct);
+            launchedAgentIds.Add(agent.Id);
         }
+
+        await LaunchWatchingAgentsAsync(
+            services,
+            evt,
+            projectId,
+            issueNumber,
+            watchStore,
+            agentQuerier,
+            resolver,
+            launcher,
+            launchedAgentIds,
+            ct);
+    }
+
+    /// <summary>
+    /// Watch-launch pass (issue-489 design D5/D7/D8). Fires only on the
+    /// fixed event set (<c>stage.approval-requested</c>,
+    /// <c>run.failed</c>) and only when the event carries an issue. Each
+    /// watching Agent reuses the routed-launch path with a built-in
+    /// prompt and a <c>watch:</c>-prefixed TriggerRuleId (string-prefix
+    /// convention per design D8). The shared <paramref name="launchedAgentIds"/>
+    /// set enforces one launch per (event, agent) so a rule hit and a
+    /// watch for the same Agent collapse to a single launch (D7).
+    /// </summary>
+    private async Task LaunchWatchingAgentsAsync(
+        IServiceProvider services,
+        CloudEvent evt,
+        string projectId,
+        int? issueNumber,
+        WatchEntryStore watchStore,
+        AgentQuerier agentQuerier,
+        RoutedAgentLaunchContextResolver resolver,
+        IAgentLauncher launcher,
+        HashSet<string> launchedAgentIds,
+        CancellationToken ct)
+    {
+        if (issueNumber is not > 0)
+            return;
+        if (!WatchEventTypes.Contains(evt.Type))
+            return;
+
+        var groups = await watchStore.ListAsync(projectId, issueNumber.Value, ct);
+        if (groups.Watching.Count == 0)
+            return;
+
+        var prompt = BuildWatchPrompt(evt, issueNumber.Value);
+
+        foreach (var entry in groups.Watching)
+        {
+            if (!launchedAgentIds.Add(entry.AgentId))
+            {
+                _log.LogDebug(
+                    "Watch launch skipped for event {EventId} issue {IssueNumber} agent {AgentId}: already launched in this delivery",
+                    evt.Id, issueNumber, entry.AgentId);
+                continue;
+            }
+
+            var agent = await agentQuerier.GetByIdAsync(projectId, entry.AgentId);
+            if (agent is null || !string.Equals(agent.Status, AgentStatus.Active, StringComparison.Ordinal))
+                continue;
+
+            var execution = await resolver.ResolveAsync(evt, ct);
+            var ruleId = $"{WatchRuleIdPrefix}{agent.Id}";
+            if (!execution.IsReady)
+            {
+                var issueRuntimeOverride = await ResolveIssueRuntimeOverrideAsync(
+                    services,
+                    projectId,
+                    issueNumber,
+                    ct);
+                await RecordWatchPreflightFailureAsync(
+                    services,
+                    agent,
+                    evt,
+                    execution,
+                    ruleId,
+                    issueRuntimeOverride,
+                    ct);
+                continue;
+            }
+
+            var runtimeOverride = await ResolveIssueRuntimeOverrideAsync(
+                services,
+                projectId,
+                issueNumber,
+                ct);
+            await launcher.LaunchRoutedAsync(
+                agent,
+                prompt,
+                execution.Context!,
+                evt,
+                ruleId,
+                runtimeOverride,
+                ct);
+        }
+    }
+
+    /// <summary>
+    /// Built-in watch response prompt (issue-489 design D8). Conveys the
+    /// triggering event as a fact and instructs the Agent to act on its
+    /// own identity instructions. No per-watch ResponsePrompt.
+    /// </summary>
+    internal static string BuildWatchPrompt(CloudEvent evt, int issueNumber) =>
+        $"Watch event {evt.Type} for issue #{issueNumber}. " +
+        "Act on your identity instructions.";
+
+    /// <summary>
+    /// Returns a per-issue map of <c>(issueNumber -> muted agent ids)</c>.
+    /// Returns an empty map when the event carries no issue (the dispatch
+    /// path stays a no-op for the muted gate).
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<int, HashSet<string>>> ResolveMutedAgentsAsync(
+        WatchEntryStore watchStore,
+        string projectId,
+        int? issueNumber,
+        CancellationToken ct)
+    {
+        if (issueNumber is not > 0)
+            return new Dictionary<int, HashSet<string>>(0);
+        var groups = await watchStore.ListAsync(projectId, issueNumber.Value, ct);
+        var muted = new HashSet<string>(groups.Muted.Select(entry => entry.AgentId), StringComparer.Ordinal);
+        return new Dictionary<int, HashSet<string>>(1) { [issueNumber.Value] = muted };
+    }
+
+    private static bool IsMutedForEvent(
+        IReadOnlyDictionary<int, HashSet<string>> mutedByIssue,
+        int? issueNumber,
+        string agentId)
+    {
+        if (issueNumber is not > 0)
+            return false;
+        return mutedByIssue.TryGetValue(issueNumber.Value, out var mutedSet)
+            && mutedSet.Contains(agentId);
+    }
+
+    private static int? ResolveEventIssueNumber(CloudEvent evt) =>
+        CloudEventLineage.TryReadPositiveNumber(evt.Extensions, EventCatalog.Lineage.Issue, out var issueNumber)
+            ? issueNumber
+            : null;
+
+    /// <summary>
+    /// Record a watch-driven routed-launch preflight failure as a failed
+    /// AgentJob + AgentSession without dispatching a Runner. Mirrors the
+    /// routing-rule preflight failure helper (issue-489 design D5).
+    /// </summary>
+    private async Task RecordWatchPreflightFailureAsync(
+        IServiceProvider services,
+        AgentInfo agent,
+        CloudEvent evt,
+        RoutedExecutionContextResolution resolution,
+        string ruleId,
+        string? runtimeOverride,
+        CancellationToken ct)
+    {
+        var detail = resolution.FailureMessage ?? "watch launch preflight failed";
+        var reason = $"{AgentJobFailureReasons.WorkspaceUnavailable}: {detail}";
+        var category = AgentJobFailureReasons.WorkspaceUnavailable;
+
+        var triggerIdentity = ResolveWatchPreflightTriggerIdentity(evt, ruleId, services);
+        if (triggerIdentity is null)
+        {
+            _log.LogWarning(
+                "Watch launch preflight failure for event {EventId} agent {AgentId} could not mint trigger identity; outcome not recorded",
+                evt.Id, agent.Id);
+            return;
+        }
+
+        var (sessionId, jobKey) = triggerIdentity.Value;
+        var jobGrain = services.GetRequiredService<IGrainFactory>().GetGrain<IAgentJobGrain>(jobKey);
+        var (issueNumber, epicNumber) = PreflightLineage(evt, resolution);
+        var prompt = BuildWatchPrompt(evt, issueNumber ?? 0);
+        var preflightPlan = new RoutedAgentLaunchPlan(
+            ProjectId: CloudEventLineage.TryReadProjectId(evt.Extensions, out var pid) ? pid : string.Empty,
+            EventId: evt.Id,
+            RuleId: ruleId,
+            SessionId: sessionId,
+            JobKey: jobKey,
+            IssueNumber: issueNumber,
+            EpicNumber: epicNumber,
+            WorkspacePath: null,
+            Disposition: RoutedLaunchDisposition.PreflightFailed,
+            PreflightReason: reason,
+            PreflightCategory: category,
+            PreparedAt: services.GetRequiredService<TimeProvider>().GetUtcNow(),
+            AgentId: agent.Id,
+            AgentName: agent.Name,
+            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentConfigJson: agent.AgentConfig is { ValueKind: not System.Text.Json.JsonValueKind.Undefined } config ? config.GetRawText() : null,
+            Model: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Model,
+            Variant: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Variant,
+            Prompt: prompt,
+            Runtime: AgentLauncher.ResolveRuntime(agent.AgentConfig, runtimeOverride));
+        await jobGrain.EnsurePreparedAsync(preflightPlan);
+        await jobGrain.AdvancePreparedLaunchAsync();
+    }
+
+    private static (string SessionId, string JobKey)? ResolveWatchPreflightTriggerIdentity(
+        CloudEvent evt,
+        string ruleId,
+        IServiceProvider services)
+    {
+        if (!CloudEventLineage.TryReadProjectId(evt.Extensions, out var projectId)
+            || string.IsNullOrWhiteSpace(projectId))
+        {
+            return null;
+        }
+
+        var sessionResolver = services.GetRequiredService<AgentSessionResolver>();
+        var sessionId = sessionResolver.StableSessionId(projectId, evt.Id, ruleId);
+        var jobKey = sessionResolver.StableJobKey(projectId, evt.Id, ruleId);
+        return (sessionId, jobKey);
     }
 
     /// <summary>

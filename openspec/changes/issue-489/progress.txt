@@ -186,3 +186,121 @@
   responsibility (design D8). The `watch:`-prefixed `TriggerRuleId`
   convention is consumed by `AgentJobGrain.AdvancePreparedLaunchAsync`
   for provenance labeling — no schema change needed.
+
+# T-003 — Watch dispatch behavior
+
+## Codebase Patterns (T-003)
+
+- **Dispatch handler shape**: the
+  `RoutingDispatchHandler.DispatchAsync` flow is now:
+  1. read projectId from envelope,
+  2. load active rules via `RoutingRuleStore.ListAsync(includeArchived: false)`,
+  3. evaluate rules via `RoutingTableEvaluator` (envelope-only),
+  4. resolve muted agents on the event's issue via
+     `WatchEntryStore.ListAsync`,
+  5. for each matched rule: skip-inactive-archived, skip-muted,
+     resolve execution context via `RoutedAgentLaunchContextResolver`,
+     handle preflight failures (record + advance), and launch via
+     `IAgentLauncher.LaunchRoutedAsync` while adding the agent to the
+     local `HashSet<string> launchedAgentIds`,
+  6. run the watching-launch pass guarded by
+     `evt.Type ∈ {StageApprovalRequested, WorkflowRunFailed}` and
+     issue presence, reusing the same routed launch path with a
+     `watch:{agentId}` TriggerRuleId and the built-in prompt.
+- **Dedup scope**: a single `HashSet<string>` (agentIds launched in
+  this delivery). The HashSet membership check is the single point of
+  cross-source dedup — routing hits and watch hits both consult it,
+  and a watch launch for an already-launched agent is skipped with a
+  debug log.
+- **No-rules early return removed**: `rules.Count == 0` no longer
+  short-circuits the handler. The watch pass guards on
+  `WatchEventTypes.Contains(evt.Type)` so unrelated event types remain
+  no-ops even with zero rules.
+- **Watch preflight helper**: `RecordWatchPreflightFailureAsync`
+  mirrors the routing-rule preflight failure helper (issue-449
+  pattern): it mints a stable session id / job key from
+  `(projectId, eventId, "watch:{agentId}")`, builds a
+  `RoutedAgentLaunchPlan` with disposition `PreflightFailed`, and
+  calls `EnsurePreparedAsync` + `AdvancePreparedLaunchAsync`. The
+  failure flow therefore reuses the durable terminal-delivery
+  protocol without a parallel implementation.
+- **Built-in prompt**: `RoutingDispatchHandler.BuildWatchPrompt`
+  composes `"Watch event {evt.Type} for issue #{n}. Act on your
+  identity instructions."` — no per-watch ResponsePrompt, the
+  Agent identity carries response discipline.
+- **TriggerRuleId convention**: `RoutingDispatchHandler.WatchRuleIdPrefix`
+  is `"watch:"`. Watch launches pass `watch:{agentId}` as the
+  `ruleId` to `LaunchRoutedAsync`; downstream consumers (e.g. the
+  `AgentJobGrain.AdvancePreparedLaunchAsync` label set) substring-match
+  the prefix to distinguish watch from routing sources per design D8.
+
+## Files modified (T-003)
+
+- `packages/server/src/Mohist.Server/Events/Subscriptions/RoutingDispatchHandler.cs`
+  — added `WatchRuleIdPrefix` constant, `WatchEventTypes` set,
+  muted-suppression gate inside the rule loop, `LaunchWatchingAgentsAsync`
+  private helper invoked after the rule loop, `BuildWatchPrompt`
+  internal helper, `RecordWatchPreflightFailureAsync` + trigger
+  identity helper, and the local `HashSet<string>` dedup scope.
+
+## Files added (T-003)
+
+- `packages/server/tests/Mohist.Server.SpecTests/Support/RoutingDispatchTestSupport.cs`
+  — minimal `IServiceScopeFactory` that wires the production
+  `RoutingDispatchHandler`'s scoped services (DB, agent querier,
+  routing rule + watch entry stores, evaluator, profile manager,
+  `RoutedAgentLaunchContextResolver`) around a fresh in-memory
+  SQLite; replaces the real `IAgentLauncher` with
+  `RecordingAgentLauncher`, a fake that captures every routed launch
+  (agent id, rule id, prompt, project id, issue number, event type /
+  id, workspace path, disposition). Adds seed helpers for Agent rows,
+  WorkflowRun rows, Issue rows (with WorkflowRunId), and a raw
+  `WatchEntryRow` inserter that bypasses the user-facing active-agent
+  validation (the dispatch path does not call `AddAsync`).
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Events/Subscriptions/IssueWatchDispatchSpecs.cs`
+  — 11 facts covering every `issue-watch-dispatch` spec scenario:
+  launch on approval-requested, launch on run-failed, no launch on
+  unrelated event types, no launch when the event carries no issue,
+  muted suppression of a routing-rule hit, no leak of the mute to
+  other issues, rule+watch single-launch (HashSet dedup), replay
+  under same configuration preserves the stable trigger identity,
+  built-in prompt regardless of the stored watch entry, watch launch
+  with zero routing rules, and watch launch skipped for an archived
+  Agent even when a WatchEntry row exists for it.
+
+## Gotchas (T-003)
+
+- The dispatch scope needs `WorkflowRunQuerier` registered
+  (transitively required by `RoutedAgentLaunchContextResolver`) and
+  `IActionCatalogSource` (transitively required by
+  `IssueWorkflowProfileManager`). The existing
+  `NullActionCatalogSource` instance covers the latter; the former
+  is registered as scoped just like in production.
+- The `WatchEntryStore.AddAsync` / `RemoveAsync` validation
+  (`agent_not_found` / `agent_archived`) must not run in the
+  dispatch path. The dispatch handler reads via `ListAsync` (no
+  validation), but tests that exercise the archived-Agent launch
+  gate need to seed the row directly — `SeedWatchEntryRawAsync`
+  inserts a `WatchEntryRow` via the test DB context to side-step
+  the store's `ValidateActiveAgentAsync`.
+- The preflight-failure path inside the watch pass still calls the
+  AgentJobGrain via `IGrainFactory`. The test scope provides a
+  `NullDispatchGrainFactory` that throws on `IAgentJobGrain`
+  resolution, so the spec suite can only exercise the watch path's
+  preflight failure handling when an active watch yields a ready
+  execution context. Replay / cross-delivery tests live in
+  `AgentJobGrain`'s own suite.
+- WatchEntry state projection on the issue read model is unchanged
+  from T-002; the dispatch handler is read-only on watch entries
+  (it never calls `AddAsync` / `RemoveAsync`).
+
+## Validation matrix (T-003)
+
+- `RoutingDispatchHandler.DispatchAsync` scenarios covered by the spec
+  suite: rule-only hit, watch-only hit, rule+watch coincidence
+  (dedup wins for the rule because it runs first), muted rule
+  suppression, muted rule no-leak to other issues, unrelated event
+  type (no launch), event without issue (no launch), zero rules +
+  watch hit (still fires), archived agent (still skipped), replay
+  under same configuration (stable trigger identity preserved so
+  grain first-writer per-source key collides).
