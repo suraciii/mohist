@@ -1391,7 +1391,7 @@ internal sealed class MohistCliApi
         _err.WriteLine($"{failure.Message} (code={code}){details}");
     }
 
-    private sealed class ApiResponseException : Exception
+    internal sealed class ApiResponseException : Exception
     {
         public ApiResponseException(HttpStatusCode statusCode, string message, string? code = null, JsonNode? details = null) : base(message)
         {

@@ -15,6 +15,18 @@ internal static class AgentCommands
         WriteIndented = true,
     };
 
+    /// <summary>
+    /// Test seam: lets specs construct a <see cref="PresetCatalog"/> against
+    /// the active <see cref="IFileSystem"/> (typically a <c>FakeFileSystem</c>
+    /// holding a manifest + preset text) rather than reaching for
+    /// <c>RealFileSystem</c> through the default constructor. Production code
+    /// leaves this <c>null</c> and gets the real-filesystem catalog.
+    /// </summary>
+    internal static Func<IFileSystem, PresetCatalog>? PresetCatalogOverride { get; set; }
+
+    private static PresetCatalog CreateCatalog(IFileSystem fileSystem) =>
+        PresetCatalogOverride?.Invoke(fileSystem) ?? new PresetCatalog();
+
     public static Command Build(MohistCliApi api)
     {
         var agent = new Command("agent", "Agent management");
@@ -58,7 +70,7 @@ internal static class AgentCommands
 
         async Task<int> InstallAsync(ParseResult ctx)
         {
-            var catalog = new PresetCatalog();
+            var catalog = CreateCatalog(api.FileSystem);
             var resolvedPreset = catalog.Resolve(ctx.GetValue(preset) ?? string.Empty);
             if (!resolvedPreset.Found || resolvedPreset.Preset is null)
             {
@@ -81,10 +93,61 @@ internal static class AgentCommands
                     return 1;
             }
 
+            await RunPreflightAsync(api, resolution.ProjectId);
             return 0;
         }
 
         return command;
+    }
+
+    private static async Task RunPreflightAsync(MohistCliApi api, string projectId)
+    {
+        var (defaultRepoResolved, _) = await TryResolveDefaultRepositoryAsync(api, projectId);
+        var preflight = BuildPreflight(api);
+        var result = preflight.Run(api.FileSystem.CurrentDirectory, defaultRepoResolved);
+        foreach (var notice in result.Notices)
+            await api.Output.WriteLineAsync(notice).ConfigureAwait(false);
+        foreach (var warning in result.Warnings)
+            await api.Output.WriteLineAsync(warning).ConfigureAwait(false);
+    }
+
+    internal static AgentInstallPreflight BuildPreflight(MohistCliApi api)
+    {
+        return new AgentInstallPreflight(api.FileSystem, NotifyCommands.ConfigPathOverride);
+    }
+
+    internal static async Task<(bool DefaultRepositoryResolved, string? RepositoryName)> TryResolveDefaultRepositoryAsync(
+        MohistCliApi api, string projectId)
+    {
+        JsonNode? projectInfo;
+        try
+        {
+            projectInfo = await api.GetDataAsync($"/api/projects/{Uri.EscapeDataString(projectId)}");
+        }
+        catch (HttpRequestException)
+        {
+            return (false, null);
+        }
+        catch (MohistCliApi.ApiResponseException)
+        {
+            return (false, null);
+        }
+
+        var repositories = projectInfo?["repositories"] as JsonArray;
+        if (repositories is null)
+            return (false, null);
+
+        foreach (var entry in repositories)
+        {
+            if (entry is not JsonObject repository)
+                continue;
+            if (repository["isDefault"]?.GetValue<bool>() != true)
+                continue;
+            var name = repository["name"]?.GetValue<string>();
+            return (true, string.IsNullOrWhiteSpace(name) ? null : name);
+        }
+
+        return (false, null);
     }
 
     private static async Task<AgentRef?> EnsureAgentAsync(MohistCliApi api, string path, AgentPreset preset)

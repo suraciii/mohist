@@ -13,3 +13,12 @@
 
 - Added `mo agent install <preset>` with catalog resolution, list-then-create idempotency, 409 conflict skipping, and ordered tail rule creation without Continue.
 - Updated agent supervision status footnotes to mark the install command implemented.
+
+## T-003
+
+- Added `AgentInstallPreflight` (new file `Mohist.Cli/AgentInstallPreflight.cs`) that runs two best-effort checks: a skill-stub check at `<cwd>/.agents/skills/mohist` via `IFileSystem.DirectoryExists`, and a notification check that parses `~/.mohist/config.jsonc` (path through `NotifyCommands.ConfigPathOverride`) and flags any missing default EnabledTypes. Both produce a `warning:` line; an unresolvable default repo produces a `note:` line and skips the skill-stub check.
+- Wired preflight into `MohistCliCommands.Agent.InstallAsync` after the agent and rules are created. Project data is fetched via `api.GetDataAsync("/api/projects/{id}")`; default repo is detected from `repositories[].isDefault`. Project fetch failures (HttpRequestException / `MohistCliApi.ApiResponseException`) are swallowed — preflight is best-effort.
+- Made `ApiResponseException` internal so the preflight can catch server-error envelopes without string-matching exception names.
+- Added `AgentCommands.PresetCatalogOverride` factory (default null) so the install command can build a `PresetCatalog` against the active `IFileSystem`. Pre-existing tests were brittle: the default catalog reached for `RealFileSystem` and only worked in environments with `presets/` content files at the binary location. The factory + per-test FakeFileSystem setup fixes that.
+- Tests added in `CliAgentCommandSpecs`: missing-skill-stub warning, stub-present (no warning), missing-default-repo (note + no warning), notifications-disabled warning, notifications-enabled (no warning), no-config-file (no warning), project-fetch-fails (install unaffected, note printed), and both-checks-fail (both warnings). Existing `AgentInstall_CreatesAgentAndRulesInOrder` and `AgentInstall_RerunSkipsExistingResources` updated to expect the new GET `/api/projects/{id}` and the new shared `ResolveRequest` helper. `FileSystemWithProject` now defaults the FakeFileSystem `CurrentDirectory` to `/repo` so the preflight warning has a meaningful path.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests` green (1365/1365); `npm run build` clean.

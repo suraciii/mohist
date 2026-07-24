@@ -5,15 +5,55 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class CliAgentCommandSpecs
+public class CliAgentCommandSpecs : IDisposable
 {
+    private readonly Func<IFileSystem, PresetCatalog>? _previousCatalogOverride;
+
+    public CliAgentCommandSpecs()
+    {
+        _previousCatalogOverride = AgentCommands.PresetCatalogOverride;
+        AgentCommands.PresetCatalogOverride = fileSystem => new PresetCatalog(
+            fileSystem,
+            BuildDefaultCatalogRoot((FakeFileSystem)fileSystem));
+    }
+
+    public void Dispose()
+    {
+        AgentCommands.PresetCatalogOverride = _previousCatalogOverride;
+    }
+
+    private const string DefaultCatalogRoot = "/assets/presets";
+
+    private static string BuildDefaultCatalogRoot(FakeFileSystem fileSystem)
+    {
+        var root = DefaultCatalogRoot;
+        fileSystem.CreateDirectory(root);
+        fileSystem.CreateDirectory($"{root}/supervisor");
+        fileSystem.AddFile($"{root}/manifest.json", """
+            {
+              "supervisor": {
+                "instructions": "supervisor/instructions.md",
+                "rules": [
+                  { "name": "supervisor-approval", "match": "event.type == \"com.mohist.workflow.stage.approval-requested\"", "responsePrompt": "supervisor/approval.md" },
+                  { "name": "supervisor-failure", "match": "event.type == \"com.mohist.workflow.run.failed\"", "responsePrompt": "supervisor/failure.md" }
+                ]
+              }
+            }
+            """);
+        fileSystem.AddFile($"{root}/supervisor/instructions.md", "identity");
+        fileSystem.AddFile($"{root}/supervisor/approval.md", "approve response");
+        fileSystem.AddFile($"{root}/supervisor/failure.md", "failure response");
+        return root;
+    }
+
     [Fact]
     public async Task AgentInstall_UnknownPresetListsAvailableNames()
     {
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })));
         var error = new StringWriter();
+        var fileSystem = FileSystemWithProject();
 
-        var exitCode = await RunAsync(handler, ["agent", "install", "acme"], error: error, fileSystem: FileSystemWithProject());
+        var exitCode = await RunAsync(handler, ["agent", "install", "acme"], error: error, fileSystem: fileSystem);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("acme", error.ToString());
@@ -24,12 +64,11 @@ public class CliAgentCommandSpecs
     [Fact]
     public async Task AgentInstall_CreatesAgentAndRulesInOrder()
     {
-        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(request.Method == HttpMethod.Get
-            ? RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })
-            : RecordingHttpHandler.Json(new { success = true, data = request.RequestUri!.AbsolutePath.EndsWith("/agents") ? Agent("agent_supervisor", "supervisor") : new { id = "rule_1", name = "rule" } }, HttpStatusCode.Created)));
+        var fileSystem = FileSystemWithProject();
+        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(ResolveRequest(request)));
         var output = new StringWriter();
 
-        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: FileSystemWithProject());
+        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
@@ -38,6 +77,7 @@ public class CliAgentCommandSpecs
         Assert.Equal(HttpMethod.Post, handler.Requests[3].Method);
         Assert.Equal(HttpMethod.Get, handler.Requests[4].Method);
         Assert.Equal(HttpMethod.Post, handler.Requests[5].Method);
+        Assert.Equal(HttpMethod.Get, handler.Requests[6].Method);
         Assert.Contains("created agent: supervisor", output.ToString());
         Assert.Contains("created routing rule: supervisor-approval", output.ToString());
         Assert.Contains("created routing rule: supervisor-failure", output.ToString());
@@ -48,17 +88,288 @@ public class CliAgentCommandSpecs
     [Fact]
     public async Task AgentInstall_RerunSkipsExistingResources()
     {
-        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(request.Method == HttpMethod.Get
-            ? RecordingHttpHandler.Json(new { success = true, data = request.RequestUri!.AbsolutePath.EndsWith("/agents") ? new[] { Agent("agent_supervisor", "supervisor") } : new[] { new { id = "rule_1", name = "supervisor-approval" }, new { id = "rule_2", name = "supervisor-failure" } } })
-            : RecordingHttpHandler.JsonError("unexpected")));
+        var fileSystem = FileSystemWithProject();
+        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(ResolveRequest(request, includeExisting: true)));
         var output = new StringWriter();
 
-        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: FileSystemWithProject());
+        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(3, handler.Requests.Count);
-        Assert.Equal(3, output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.Equal(4, handler.Requests.Count);
+        Assert.Equal(4, output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
         Assert.DoesNotContain(HttpMethod.Post, handler.Requests.Select(request => request.Method));
+    }
+
+    [Fact]
+    public async Task AgentInstall_MissingSkillStub_EmitsWarningButInstallsResources()
+    {
+        var fileSystem = FileSystemWithProject();
+        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(ResolveRequest(request)));
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("created agent: supervisor", stdout);
+        Assert.Contains("created routing rule: supervisor-approval", stdout);
+        Assert.Contains("created routing rule: supervisor-failure", stdout);
+        Assert.Contains("warning: the local workspace", stdout);
+        Assert.Contains("mo skills install --path", stdout);
+    }
+
+    [Fact]
+    public async Task AgentInstall_SkillStubPresent_NoSkillStubWarning()
+    {
+        var fileSystem = FileSystemWithProject();
+        fileSystem.CreateDirectory("/repo/.agents/skills/mohist");
+        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(ResolveRequest(request)));
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.DoesNotContain("warning: the local workspace", stdout);
+        Assert.DoesNotContain("mo skills install --path", stdout);
+    }
+
+    [Fact]
+    public async Task AgentInstall_MissingDefaultRepo_SkipsSkillStubCheckWithNote()
+    {
+        var fileSystem = FileSystemWithProject();
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (request.Method == HttpMethod.Get && path == "/api/projects/proj_123")
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { id = "proj_123", repositories = Array.Empty<object>() },
+                }));
+            }
+            return Task.FromResult(ResolveRequest(request));
+        });
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("created agent: supervisor", stdout);
+        Assert.Contains("created routing rule: supervisor-approval", stdout);
+        Assert.Contains("created routing rule: supervisor-failure", stdout);
+        Assert.Contains("note: project has no default repository; skipping skill stub check", stdout);
+        Assert.DoesNotContain("warning: the local workspace", stdout);
+    }
+
+    [Fact]
+    public async Task AgentInstall_NotificationsDisabled_EmitsNotificationWarning()
+    {
+        var fileSystem = FileSystemWithProject();
+        var configPath = "/mohist-tests/user/.mohist/config.jsonc";
+        fileSystem.AddFile(configPath, """
+            {
+              "Mohist": {
+                "Notifications": {
+                  "Hermes": {
+                    "EnabledTypes": [ "approval_requested" ]
+                  }
+                }
+              }
+            }
+            """);
+        var previousConfigPath = NotifyCommands.ConfigPathOverride;
+        NotifyCommands.ConfigPathOverride = () => configPath;
+        try
+        {
+            var handler = new RecordingHttpHandler((request, _) => Task.FromResult(ResolveRequest(request)));
+            var output = new StringWriter();
+
+            var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
+
+            Assert.Equal(0, exitCode);
+            var stdout = output.ToString();
+            Assert.Contains("created agent: supervisor", stdout);
+            Assert.Contains("warning: Mohist:Notifications:Hermes:EnabledTypes is missing", stdout);
+            Assert.Contains("workflow_failed", stdout);
+            Assert.Contains("issue_completed", stdout);
+        }
+        finally
+        {
+            NotifyCommands.ConfigPathOverride = previousConfigPath;
+        }
+    }
+
+    [Fact]
+    public async Task AgentInstall_NotificationsEnabled_NoNotificationWarning()
+    {
+        var fileSystem = FileSystemWithProject();
+        var configPath = "/mohist-tests/user/.mohist/config.jsonc";
+        fileSystem.AddFile(configPath, """
+            {
+              "Mohist": {
+                "Notifications": {
+                  "Hermes": {
+                    "EnabledTypes": [ "approval_requested", "workflow_failed", "issue_completed" ]
+                  }
+                }
+              }
+            }
+            """);
+        var previousConfigPath = NotifyCommands.ConfigPathOverride;
+        NotifyCommands.ConfigPathOverride = () => configPath;
+        try
+        {
+            var handler = new RecordingHttpHandler((request, _) => Task.FromResult(ResolveRequest(request)));
+            var output = new StringWriter();
+
+            var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
+
+            Assert.Equal(0, exitCode);
+            var stdout = output.ToString();
+            Assert.DoesNotContain("warning: Mohist:Notifications:Hermes:EnabledTypes", stdout);
+        }
+        finally
+        {
+            NotifyCommands.ConfigPathOverride = previousConfigPath;
+        }
+    }
+
+    [Fact]
+    public async Task AgentInstall_NoConfigFile_NoNotificationWarning()
+    {
+        var fileSystem = FileSystemWithProject();
+        var configPath = "/mohist-tests/user/.mohist/config.jsonc";
+        var previousConfigPath = NotifyCommands.ConfigPathOverride;
+        NotifyCommands.ConfigPathOverride = () => configPath;
+        try
+        {
+            var handler = new RecordingHttpHandler((request, _) => Task.FromResult(ResolveRequest(request)));
+            var output = new StringWriter();
+
+            var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
+
+            Assert.Equal(0, exitCode);
+            var stdout = output.ToString();
+            Assert.DoesNotContain("warning: Mohist:Notifications:Hermes:EnabledTypes", stdout);
+        }
+        finally
+        {
+            NotifyCommands.ConfigPathOverride = previousConfigPath;
+        }
+    }
+
+    [Fact]
+    public async Task AgentInstall_ProjectFetchFails_InstallStillSucceeds()
+    {
+        var fileSystem = FileSystemWithProject();
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (request.Method == HttpMethod.Get && path == "/api/projects/proj_123")
+            {
+                return Task.FromResult(RecordingHttpHandler.JsonError("Project not found", "project_not_found", HttpStatusCode.NotFound));
+            }
+            return Task.FromResult(ResolveRequest(request));
+        });
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("created agent: supervisor", stdout);
+        Assert.Contains("created routing rule: supervisor-approval", stdout);
+        Assert.Contains("created routing rule: supervisor-failure", stdout);
+        Assert.Contains("note: project has no default repository; skipping skill stub check", stdout);
+    }
+
+    [Fact]
+    public async Task AgentInstall_BothChecksFail_EmitsBothWarningsAndInstalls()
+    {
+        var fileSystem = FileSystemWithProject();
+        var configPath = "/mohist-tests/user/.mohist/config.jsonc";
+        fileSystem.AddFile(configPath, """
+            {
+              "Mohist": {
+                "Notifications": {
+                  "Hermes": {
+                    "EnabledTypes": [ "approval_requested" ]
+                  }
+                }
+              }
+            }
+            """);
+        var previousConfigPath = NotifyCommands.ConfigPathOverride;
+        NotifyCommands.ConfigPathOverride = () => configPath;
+        try
+        {
+            var handler = new RecordingHttpHandler((request, _) => Task.FromResult(ResolveRequest(request)));
+            var output = new StringWriter();
+
+            var exitCode = await RunAsync(handler, ["agent", "install", "supervisor"], output, fileSystem: fileSystem);
+
+            Assert.Equal(0, exitCode);
+            var stdout = output.ToString();
+            Assert.Contains("created agent: supervisor", stdout);
+            Assert.Contains("warning: the local workspace", stdout);
+            Assert.Contains("warning: Mohist:Notifications:Hermes:EnabledTypes is missing", stdout);
+            Assert.Contains("workflow_failed", stdout);
+            Assert.Contains("issue_completed", stdout);
+        }
+        finally
+        {
+            NotifyCommands.ConfigPathOverride = previousConfigPath;
+        }
+    }
+
+    private static HttpResponseMessage ResolveRequest(HttpRequestMessage request, bool includeExisting = false)
+    {
+        var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+        if (request.Method == HttpMethod.Get)
+        {
+            if (path == "/api/projects/proj_123")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        id = "proj_123",
+                        repositories = new[]
+                        {
+                            new { name = "default", gitUrl = "https://example.com/repo.git", baseBranch = "main", isDefault = true },
+                        },
+                    },
+                });
+            }
+
+            if (path.EndsWith("/agents", StringComparison.Ordinal))
+            {
+                var agents = includeExisting ? new[] { Agent("agent_supervisor", "supervisor") } : Array.Empty<object>();
+                return RecordingHttpHandler.Json(new { success = true, data = agents });
+            }
+
+            if (path.EndsWith("/routing/rules", StringComparison.Ordinal))
+            {
+                var rules = includeExisting
+                    ? new[] { new { id = "rule_1", name = "supervisor-approval" }, new { id = "rule_2", name = "supervisor-failure" } }
+                    : Array.Empty<object>();
+                return RecordingHttpHandler.Json(new { success = true, data = rules });
+            }
+        }
+
+        if (request.Method == HttpMethod.Post)
+        {
+            if (path.EndsWith("/agents", StringComparison.Ordinal))
+                return RecordingHttpHandler.Json(new { success = true, data = Agent("agent_supervisor", "supervisor") }, HttpStatusCode.Created);
+            if (path.EndsWith("/routing/rules", StringComparison.Ordinal))
+                return RecordingHttpHandler.Json(new { success = true, data = new { id = "rule_1", name = "rule" } }, HttpStatusCode.Created);
+        }
+
+        return RecordingHttpHandler.JsonError("unexpected");
     }
 
     [Fact]
@@ -479,9 +790,12 @@ public class CliAgentCommandSpecs
             standardInput: standardInput);
     }
 
-    private static FakeFileSystem FileSystemWithProject()
+    private static FakeFileSystem FileSystemWithProject(string? currentDirectory = "/repo")
     {
-        var fileSystem = new FakeFileSystem();
+        var fileSystem = new FakeFileSystem
+        {
+            CurrentDirectory = currentDirectory ?? "/",
+        };
         fileSystem.AddFile(
             Path.Combine(CliTestFactory.UserHome, ".mohist", "cli-state.json"),
             "{\"activeProjectId\":\"proj_123\"}");
