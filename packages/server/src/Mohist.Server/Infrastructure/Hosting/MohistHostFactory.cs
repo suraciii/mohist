@@ -28,23 +28,46 @@ namespace Mohist.Server.Infrastructure.Hosting;
 public sealed class MohistHostFactory : IMohistHostFactory
 {
     private readonly string[] _args;
+    private WebApplicationBuilder? _primaryBuilder;
 
-    public MohistHostFactory(string[] args)
+    public MohistHostFactory(string[] args, WebApplicationBuilder primaryBuilder)
     {
         ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(primaryBuilder);
         _args = args;
+        _primaryBuilder = PrepareBuilder(primaryBuilder);
+    }
+
+    public MohistHostPlan CreatePrimaryPlan(RuntimeEpoch epoch)
+    {
+        ArgumentNullException.ThrowIfNull(epoch);
+        var configuration = (_primaryBuilder ?? throw new InvalidOperationException("Primary builder has already been consumed.")).Configuration;
+        var enabled = configuration.GetValue<bool>("Mohist:Otel:Enabled");
+        var bindHost = configuration["Mohist:Otel:BindHost"];
+        if (string.IsNullOrWhiteSpace(bindHost))
+            bindHost = "localhost";
+        var portValue = configuration["Mohist:Otel:Port"];
+        var port = int.TryParse(portValue, out var parsedPort)
+            ? parsedPort
+            : Mohist.Server.Otel.OtelOptions.DefaultPort;
+        var listenerIntent = enabled
+            ? new OtelListenerIntent(bindHost, port)
+            : null;
+        return MohistHostPlan.Primary(epoch, enabled, listenerIntent);
     }
 
     public IMohistHost CreatePrimary(MohistHostPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        return Build(plan);
+        var builder = Interlocked.Exchange(ref _primaryBuilder, null)
+            ?? throw new InvalidOperationException("Primary host has already been created.");
+        return Build(plan, builder);
     }
 
     public IMohistHost CreateAlternate(MohistHostPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        return Build(plan);
+        return Build(plan, PrepareBuilder(WebApplication.CreateBuilder(_args)));
     }
 
     /// <summary>
@@ -104,11 +127,15 @@ public sealed class MohistHostFactory : IMohistHostFactory
         builder.Services.AddMohistServerCore(builder.Configuration);
     }
 
-    private static WebApplicationMohistHost Build(MohistHostPlan plan)
+    private static WebApplicationBuilder PrepareBuilder(WebApplicationBuilder builder)
     {
-        var builder = WebApplication.CreateBuilder(Array.Empty<string>());
         builder.Configuration.AddMohistUserConfigFile(builder.Environment);
         builder.Logging.AddFileLogger();
+        return builder;
+    }
+
+    private static WebApplicationMohistHost Build(MohistHostPlan plan, WebApplicationBuilder builder)
+    {
         ApplyPlan(plan, builder);
 
         var app = builder.Build();

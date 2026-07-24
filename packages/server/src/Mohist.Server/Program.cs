@@ -1,19 +1,11 @@
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Otel;
 
 var epoch = RuntimeEpoch.Capture(TimeProvider.System);
-
-var otelSection = new ConfigurationBuilder()
-    .AddEnvironmentVariables()
-    .Build();
-
-var otelListenerIntent = ReadListenerIntent(otelSection);
-var otelEnabled = ReadOtelEnabled(otelSection);
-
-var primaryPlan = MohistHostPlan.Primary(epoch, otelEnabled, otelListenerIntent);
-
-var factory = new MohistHostFactory(args);
+var factory = new MohistHostFactory(args, WebApplication.CreateBuilder(args));
+var primaryPlan = factory.CreatePrimaryPlan(epoch);
 var classifier = new OtelBindFailureClassifier();
 var initializer = new MohistDatabaseInitializer();
 var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
@@ -28,27 +20,6 @@ catch (Exception ex)
 {
     OtelPortBindingLog.WriteGenericFailure(ex);
     throw;
-}
-
-static OtelListenerIntent? ReadListenerIntent(IConfiguration configuration)
-{
-    var enabled = ReadOtelEnabled(configuration);
-    if (!enabled)
-        return null;
-
-    var bindHost = configuration["Mohist:Otel:BindHost"];
-    if (string.IsNullOrWhiteSpace(bindHost))
-        bindHost = "localhost";
-
-    var portValue = configuration["Mohist:Otel:Port"];
-    var port = int.TryParse(portValue, out var parsed) ? parsed : OtelOptions.DefaultPort;
-    return new OtelListenerIntent(bindHost, port);
-}
-
-static bool ReadOtelEnabled(IConfiguration configuration)
-{
-    var value = configuration["Mohist:Otel:Enabled"];
-    return bool.TryParse(value, out var enabled) && enabled;
 }
 
 public partial class Program { }

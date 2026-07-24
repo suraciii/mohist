@@ -34,6 +34,22 @@ public class MohistHostPlanCompositionSpecs
     }
 
     [Fact]
+    public void CreatePrimaryPlan_ReadsPreparedBuilderConfiguration()
+    {
+        var builder = NewBuilder();
+        builder.Environment.EnvironmentName = MohistHostEnvironment.Testing;
+        builder.Configuration["Mohist:Otel:Enabled"] = "true";
+        builder.Configuration["Mohist:Otel:BindHost"] = "127.0.0.1";
+        builder.Configuration["Mohist:Otel:Port"] = "54321";
+        var factory = new MohistHostFactory([], builder);
+
+        var plan = factory.CreatePrimaryPlan(new RuntimeEpoch(Start));
+
+        Assert.True(plan.Enabled);
+        Assert.Equal(new OtelListenerIntent("127.0.0.1", 54321), plan.ListenerIntent);
+    }
+
+    [Fact]
     public void ApplyPlan_RegistersExactlyOneDiagnosticsSamplerPerPlan()
     {
         var primaryPlan = MohistHostPlan.Primary(
