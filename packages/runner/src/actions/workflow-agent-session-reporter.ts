@@ -8,13 +8,8 @@ export interface WorkflowAgentSessionWorkMetadata {
   readonly stage?: string | null
 }
 
-// Streaming token deltas arrive thousands-per-turn; each one is a tiny
-// increment of a larger reasoning/message the server rebuilds from later
-// deltas and the final assistant message. Buffering them here and
-// flushing once at turn end (before the close fact, or on settle) lets
-// the outbox persist the whole batch in one atomic write instead of one
-// write per token — which is what drove the runner out of memory.
 const STREAMING_DELTA_TYPES = new Set(["reasoning.delta", "message.delta"])
+const MAX_STREAMING_DELTAS_PER_BATCH = 256
 
 export interface WorkflowAgentSessionReporterOptions {
   readonly outbox: AgentSessionRuntimeEventOutbox
@@ -99,11 +94,8 @@ export class WorkflowAgentSessionReporter {
     if (this.closed) return
     if (this.inputRejected) return
     if (STREAMING_DELTA_TYPES.has(event.type)) {
-      // Buffer streaming deltas; flush once at turn end. Each buffered
-      // event is reconstructed as a produced fact in flush order, so the
-      // outbox sees the same sequence it would have seen under the old
-      // per-token enqueue, just batched into one persist write.
       this.deltaBuffer.push(event)
+      if (this.deltaBuffer.length >= MAX_STREAMING_DELTAS_PER_BATCH) this.flushDeltaBuffer()
       return
     }
     this.flushDeltaBuffer()
@@ -124,12 +116,6 @@ export class WorkflowAgentSessionReporter {
     promise.then(() => this.pendingPromises.delete(promise), () => this.pendingPromises.delete(promise))
   }
 
-  // Push every buffered delta through the outbox in one batch. Called
-  // before a non-delta fact (so the non-delta event enqueues after the
-  // deltas that precede it), before the close fact (so deltas are
-  // persisted before the terminal fact), and on settle (so a turn that
-  // ends without a close still flushes). Safe to call when the buffer
-  // is empty — it becomes a no-op.
   private flushDeltaBuffer(): void {
     if (this.deltaBuffer.length === 0) return
     const buffered = this.deltaBuffer.splice(0)
@@ -137,8 +123,7 @@ export class WorkflowAgentSessionReporter {
       type: event.type,
       payload: event.payload,
     }))
-    const promise = Promise.all(records.map((record) => this.outbox.enqueueProducedFact(record)))
-      .then(() => undefined)
+    const promise = this.outbox.enqueueProducedFactBatch(records)
       .catch((error) => {
         console.error(
           `workflow agent-session delta batch enqueue failed for workflow=${this.workflowRunId} work=${this.workMetadata.workId} session=${this.sessionName} count=${records.length}: ${errorMessage(error)}`,
