@@ -32,7 +32,7 @@ workflow、issue、epic、runner、agent session 都产生事件。Agent 事件�
 
 ## 文档
 
-从 [快速上手](docs/getting-started.md) 开始；完整阅读路径见 [文档索引](docs/README.md)。架构与设计文档在 [`design/`](design/README.md)。
+从 [快速上手](docs/getting-started.md) 开始；产品方向见 [产品愿景](docs/vision.md)；完整阅读路径见 [文档索引](docs/README.md)。架构与设计文档在 [`design/`](design/README.md)。
 
 ## 仓库结构
 

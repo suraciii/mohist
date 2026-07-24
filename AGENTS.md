@@ -59,6 +59,7 @@ npm test           -w packages/runner
 
 ## 改代码前必读
 
+- **产品愿景**：[`docs/vision.md`](docs/vision.md) —— 产品要去哪里、三条原则；判断改动是否对齐方向。
 - **边界与放置规则**：[`design/architecture.md`](design/architecture.md) —— 什么放 Server / Runner / CLI，执行事实与状态裁判分离。
 - **领域分解**：[`design/domain-analysis.md`](design/domain-analysis.md) —— 核心域（Workflow）与支撑子域，判断改动落在哪个域。
 - **约定**：[`design/conventions.md`](design/conventions.md)。
@@ -74,7 +75,7 @@ npm test           -w packages/runner
 
 ## Spec 先行与文档分工
 
-文档分两层，每层是一种 spec，都先于实现——**先确定方案落到文档，再去实现**：
+文档分两层，每层是一种 spec，都先于实现——**先确定方案落到文档，再去实现**。spec 只有这两层：issue 交付产生的需求增量直接更新 `docs/` 或 `design/` 的对应篇，不另建 spec 文件。
 
 * **产品 spec（`docs/`）** —— 产品该满足什么：用户需求、命令面、场景、心智模型、责任边界。用**产品语言 + 领域语言**，不用技术语言。面向使用者，假设读者不读代码。
 * **设计 spec（`design/`）** —— 系统该怎么实现：架构边界、数据模型、接口、技术选型与取舍。可以用**产品语言 + 领域语言 + 技术语言**。
