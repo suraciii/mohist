@@ -38,3 +38,15 @@
 - Reverted the round-2 `PollOnceAsync` time-advance hack from the prior WIP commit (it was treating a symptom of the wrong cause).
 - Verified: 4/4 green full-suite SpecTests runs at 3006/3006; full `dotnet test Mohist.sln` green (Unit 1346 + Arch 32 + Spec 3006 + Cli 1365 + Workflow.Definition 175); web typecheck + 5130 web tests green; runner typecheck + 1426 runner tests green.
 
+## Review-fix pass (issue-488 review.md findings F1–F4)
+
+- **F1 (Critical) — feature dead after `mo update`:** two layered defects.
+  - 1a: `UpdateOperations.UpdateCliResolvedAsync` synced only `skill-data`. Generalized `SkillAssetSynchronizer` → `ManagedAssetSynchronizer` with a `ManagedAssetKind` descriptor (skill validates `*/SKILL.md`, preset validates `manifest.json`); `UpdateCliResolvedAsync` now syncs presets alongside skill-data into `~/.mohist/cli/presets`. `ResolveManagedSkillAssetRoot` → `ResolveManagedAssetRoot(kind)`.
+  - 1b: `PresetCatalog` derived its root from the skill-data root by string substitution (coupling D2 forbids). New `PresetAssetRootResolver` resolves presets independently (managed cache → sibling). `PresetCatalog.CreateDefault(fs, getUserHome)` builds from it; the substitution ctor is gone.
+  - Empirically verified the F1 failure mode is gone: pre-fix `mo agent install` printed `Available presets: .`; post-fix with presets in the managed cache it lists `supervisor`. The `update --dry-run` output now shows both sync lines.
+- **F4 — static `PresetCatalogOverride`:** removed. The install command builds the catalog from `api.FileSystem` + `api.GetUserHome`; specs seed the managed-cache path so they exercise the real `PresetCatalog.CreateDefault` resolution. No more process-global mutable catalog seam.
+- **F2 — preflight probed CLI CWD but called it "the workspace":** the project API exposes no per-repo workspace path (control/execution plane separation), so the check can't see the runner's checkout. Reframed honestly: it inspects the current directory as a *local proxy*, names the resolved default repo, and says so. `TryResolveDefaultRepositoryAsync` returns a `DefaultRepository` struct carrying the repo name.
+- **F3 — rules' `agentId` binding untested:** `AgentInstall_CreatesAgentAndRulesInOrder` now asserts both rule POST bodies bind `agentId` to the created supervisor Agent.
+- **Tests:** added `ManagedAssetSynchronizerPresetTests` (sync + manifest validation), `PresetCatalogTests` cases for managed/sibling/absent resolution, and a command-level `AgentInstall_WhenManagedPresetsAbsent_ExitsNonZeroBeforeAnyHttp` regression for the F1 failure mode. Updated update-flow fixtures (`UpdateInstallSyncTests`, `UpdateTestFactory`) to seed a preset bundle since `mo update` now requires it.
+- Verified: `dotnet test Mohist.sln` green (Cli 1371 + Unit 1346 + Arch 32 + Spec 3006); `npm run build` clean.
+
