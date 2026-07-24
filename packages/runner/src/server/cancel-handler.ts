@@ -14,6 +14,17 @@
 // `stopConfirmed` field on the result); Pi's `cancel` reports
 // `stopConfirmed: false` exactly when the upper layers must surface
 // `interruptUnconfirmed: true`.
+//
+// Issue-492 T-002 / design D5: when a Cancel is confirmed, the handler
+// enqueues a binding-guarded `session.activity` fact through the host
+// runtime-event outbox so the grain's `ApplyRuntimeEventToDomain` →
+// `ParseActivity` path settles activity: confirmed → `idle`, unconfirmed
+// → `unknown` (the spec forbids reporting an unconfirmed stop as `idle`).
+// The grain's `AppendEventsAsync(..., requireCurrentRuntimeBinding: true)`
+// discards the fact if the binding has been superseded by a concurrent
+// Reset / recovery. The outbox is best-effort: if it is null or unhealthy
+// the cancel reply still flows to the caller, because cancel must remain
+// available while the durable snapshot is being recovered.
 
 import * as signalR from "@microsoft/signalr"
 import {
@@ -22,6 +33,7 @@ import {
   type CancelAgentSessionReply,
   type FollowupTargetResolution,
   type FollowupTargetResolver,
+  type SessionTarget,
 } from "./session-target.js"
 import {
   callCancel,
@@ -30,11 +42,16 @@ import {
   type CancelCallTarget,
   type CommandRuntimeAccessors,
 } from "./command-runtime.js"
+import type {
+  AgentSessionRuntimeEventOutbox,
+  RuntimeEventRecord,
+} from "./runtime-event-outbox.js"
 
 export interface CancelHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
   openCodeRuntime?: CommandRuntimeAccessors["openCode"]
   piRuntime?: CommandRuntimeAccessors["pi"]
+  agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
 }
 
 export function registerCancelHandler(
@@ -108,6 +125,12 @@ async function handleCancel(
     if (!facts || !facts.cancelled) {
       return { state: "not-cancellable" }
     }
+    recordCancelActivity(
+      deps.agentSessionRuntimeEventOutbox ?? null,
+      sessionTarget,
+      binding.runtimeSessionId,
+      facts,
+    )
     return facts.stopConfirmed === false
       ? { state: "cancelled", interruptUnconfirmed: true }
       : { state: "cancelled" }
@@ -115,6 +138,46 @@ async function handleCancel(
     console.error("cancel runtime.cancel threw:", error instanceof Error ? error.message : String(error))
     return { state: "not-cancellable" }
   }
+}
+
+function recordCancelActivity(
+  outbox: AgentSessionRuntimeEventOutbox | null,
+  sessionTarget: SessionTarget,
+  runtimeSessionId: string,
+  facts: { readonly cancelled: boolean; readonly stopConfirmed: boolean },
+): void {
+  if (!outbox) return
+  const activity = facts.stopConfirmed ? "idle" : "unknown"
+  const completedAt = new Date().toISOString()
+  const record: RuntimeEventRecord = {
+    id: `cancel-activity:${runtimeSessionId}:${activity}:${completedAt}:${Math.random().toString(36).slice(2, 10)}`,
+    producerFamily: sessionTarget.kind === "workflow" ? "workflow-session" : "generic-followup",
+    target: sessionTargetToRuntimeTarget(sessionTarget),
+    runtimeSessionId,
+    work: null,
+    event: {
+      type: "session.activity",
+      payload: {
+        activity,
+        status: facts.stopConfirmed ? "completed" : "failed",
+        source: "cancel",
+        stopConfirmed: facts.stopConfirmed,
+        runtimeSessionId,
+        completedAt,
+      },
+    },
+    acknowledgementPolicy: "successful-response",
+  }
+  outbox.enqueueProducedFact(record).catch((outboxError) => {
+    console.error("failed to persist cancel activity:", outboxError)
+  })
+}
+
+function sessionTargetToRuntimeTarget(target: SessionTarget): RuntimeEventRecord["target"] {
+  if (target.kind === "workflow") {
+    return { kind: "workflow", projectId: target.projectId, workflowRunId: target.workflowRunId, sessionName: target.sessionName }
+  }
+  return { kind: "generic", projectId: target.projectId, sessionId: target.sessionId }
 }
 
 function readErrorKind(result: { readonly error?: { readonly kind?: string } }): string {

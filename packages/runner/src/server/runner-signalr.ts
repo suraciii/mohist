@@ -227,6 +227,7 @@ export class RunnerSignalRClient {
       followupTargetResolver: this.followupTargetResolver,
       openCodeRuntime: this.openCodeRuntime,
       piRuntime: this.piRuntime,
+      agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
     })
 
     registerSessionCommandHandler(this.connection, {

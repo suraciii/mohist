@@ -2,8 +2,17 @@
 - OpenCode SDK session calls use `{ sessionID, directory }` plus `{ throwOnError: true }`, matching `runtime/opencode/turn.ts`.
 - Runtime resolve results carry the physical active-turn snapshot: OpenCode derives it from `session.status` (`undefined`/`idle` is idle), while Pi reads the cached handle's `isStreaming` getter.
 - `BindingProbeResult` represents presence as `{ ok: true, activeTurn }`; only a failed probe with `kind === "missing-session"` authorizes candidate creation.
+- The runtime-event outbox is the only activity-settlement channel for the runner side; the grain's `ApplyRuntimeEventToDomain → ParseActivity` path settles `active`/`unknown → idle` (and other transitions) when the fact carries a `runtimeSessionId` matching the current binding. `AppendEventsAsync(..., requireCurrentRuntimeBinding: true)` discards facts whose binding was superseded.
+- Cancel does NOT consult `outbox.ready()` — the comment on `registerCancelHandler` calls out the design rule that cancel must remain available while the durable snapshot is being recovered. Enqueue failures are logged via `console.error` and swallowed; the cancel reply always reflects what the runtime honestly reported.
 
 ## T-001
 - Replaced all four `as never` OpenCode runtime calls (resolve, follow-up resolve, promptAsync, abort) with the typed SDK request contract.
 - Added focused typed-call and active/idle snapshot tests for OpenCode and Pi; existing resolve, follow-up, and cancel regressions pass.
 - Verification: `npm run test:ci -w packages/runner` and `npm run typecheck -w packages/runner` pass (118 files, 1387 tests).
+
+## T-002
+- Added `agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null` to `CancelHandlerDeps`. After `callCancel` returns successfully, the handler enqueues a binding-guarded `session.activity` fact: `idle` when `stopConfirmed === true`, `unknown` when `stopConfirmed === false`. The grain's `ApplyRuntimeEventToDomain → ParseActivity` path settles activity; the binding guard discards superseded facts.
+- Wired the outbox through `runner-signalr.ts` `registerCancelHandler` call site.
+- The fact carries the binding's `runtimeSessionId` (not the resolver-projected one), so a fact for an old/reset binding is discarded by the grain's `requireCurrentRuntimeBinding: true` guard. No `createSession` / replacement / replay is performed by the cancel path.
+- Added 9 spec tests in `tests/runner-signalr-cancel.spec.ts` covering: confirmed cancel enqueues `idle`, unconfirmed enqueues `unknown` + `interruptUnconfirmed: true`, superseded binding carries the outbound `runtimeSessionId`, generic + workflow targets are projected correctly, no candidate creation, no outbox dependency, and enqueue failure does not break the reply.
+- Verification: `npm run test:run -w packages/runner` (118 files, 1396 tests) and `npm run typecheck -w packages/runner` pass.
