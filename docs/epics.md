@@ -178,16 +178,14 @@ Web UI 上对应 Epic 详情页的 **Mark Done** / **Close Epic** / **Reopen** �
 
 除了手动 Mark Done，系统在重新计算 linked issues 终态后，也会把符合条件的非 `paused`、非 `closed` Epic 自动转为 `done`。这表示你观察到的完成结果，不是一个需要额外触发的用户操作。
 
+进度中的已交付数只统计 done 的 issue；cancelled issue 是终态、满足完成条件，但不计入已交付。
+
 ## 推荐工作流
 
-1. **想法出现时**：先建 Epic，描述里写 Goal/Background/Non-goals（粗略即可）。新建的 Epic 默认 `idle`。
-2. **细化时**：在 Epic 下逐步创建 / link issue（每个 issue 一个清晰可交付的功能点）。
-3. **开始执行时**：`mo epic start <number>` 将 Epic 切换到 `running`。Epic 会自动推进第一个 startable linked issue。
-4. **推进中**：当一个 linked issue 到达终态，`running` 的 Epic 自动推进到下一个 startable issue。你可以用 `mo epic show <number>` 查看下一个待推进的 issue 和推进状态。
-5. **需暂停时**：`mo epic pause <number>` 暂停推进，当前 issue 不受影响。
-6. **恢复时**：`mo epic resume <number>` 恢复推进，Epic 重新评估并推进下一个 issue。
-7. **完成时**：没有 open linked issues 时 `mo epic done <number>`。进度里的已交付数只统计已 delivered 的 issue；cancelled issue 是终态，会满足完成条件，但不计入已交付。
-8. **重新规划时**：`mo epic reopen <number>` 把 `done` 或 `closed` Epic 恢复为 `idle`；之后再调整关联并 Start。
+1. 建 Epic，描述里写 Goal / Background / Non-goals（粗略即可），默认 `idle`。
+2. 在 Epic 下逐步创建 / link issue，每个 issue 一个清晰可交付的功能点。
+3. `mo epic start` 开始自动推进；`pause` / `resume` 随时调整。
+4. 没有 open linked issues 时 `mo epic done`；要重新规划就 `reopen` 再 Start。
 
 ## 和 workflow 的关系
 
@@ -217,8 +215,6 @@ Roadmap（已知不足）：
 - Epic 不能嵌套
 - 没有 epic 间的依赖图
 - 不能批量启动 epic 内所有 backlog issue
-
-如果你需要这些能力，欢迎贡献或提 issue。
 
 ---
 

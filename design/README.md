@@ -135,6 +135,7 @@
 - [prompt-management.md](prompt-management.md) — Project-scoped Prompt（**WIP**）、builtin fallback 和 Workflow key reference。
 - [runner.md](runner.md) — Runner 与调度：聚合信息结构、poll presence、level-triggered 对账（claim / dispatch / supervision）。
 - [task-log.md](task-log.md) — task 执行日志的采集管道、上报通道与存储归属。
+- [issue-list-read.md](issue-list-read.md) — Issue 列表低带宽读取与请求隔离：列表摘要模型、事件失效与冷传输。
 - [web-ui.md](web-ui.md) — Web UI 设计边界。
 
 ## 决策记录

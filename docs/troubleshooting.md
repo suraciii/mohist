@@ -187,56 +187,16 @@ mo issue rebase <n>     # 主动 rebase
 - **看板顶部 Needs attention 条**（Web UI）
 - **Issue card 上的 blocked pill**（红色）
 - **Issue 详情页的红色错误框**
-
-未来会有 push notification（roadmap）。当前需要主动查看。
+- **Hermes 推送**：审批点、失败、完成可推送到你的聊天工具，见 [Hermes 通知](hermes-notifications.md)
 
 ## 预防性建议
 
-### 1. Issue body 写清楚
-
-> 70% 的失败本质是 issue body 模糊导致 plan 错。花 5 分钟写好 body，省 30 分钟救火。
-
-参考 [Issue 管理](issues.md) 的 body 写法。
-
-### 2. 小步快跑
-
-不要一个 issue 干 5 件事。拆成 5 个 issue：
-- 失败好恢复
-- Plan 质量高
-- 能并行
-
-### 3. 别在 AI 跑的时候动 base branch
-
-会导致 drift / conflict。
-
-### 4. 监控 capacity
-
-别一次启动 20 个 issue 超过 capacity。会排队但你看不到。
-
-```bash
-mo server status   # 看 capacity 使用
-```
-
-### 5. 定期清理 worktree
-
-```bash
-# 列出所有 worktree（在 repo 根目录）
-git worktree list
-
-# 清理已完成 issue 的 worktree
-git worktree prune
-```
-
-### 6. 关注反复失败的模式
-
-如果多个 issue 反复在同一类任务上 blocked，不要只逐个 retry。常见原因是：
-
-- issue 输入不够清楚，Plan 经常跑偏
-- 测试慢、不稳定，Check 经常误伤
-- 模块边界混乱，Inline Agent 难以在短上下文里完成修改
-- workflow profile 不适合当前任务类型
-
-这类问题会拖慢整条生产线。优先修输入模板、测试、模块边界或 workflow profile，再继续扩大并发。
+- **Issue body 写清楚**：多数 plan 跑偏源于模糊的 body；写法见 [Issue 管理](issues.md#issue-body-怎么写)。
+- **小步快跑**：一个 issue 一件事——失败好恢复、plan 质量高、能并行。
+- **别在 AI 跑的时候动 base branch**：会导致 drift / conflict。
+- **监控 capacity**：`mo server status` 看使用量；超量启动只会排队，不报错。
+- **定期清理 worktree**：`git worktree list` 查看，`git worktree prune` 清理。
+- **关注反复失败的模式**：多个 issue 在同一类任务上反复 blocked 时，不要只逐个 retry。常见原因是输入模板不清、测试慢或不稳定、模块边界混乱、workflow profile 不适合任务类型——先修这些，再扩大并发。
 
 ## 找不到原因？
 
@@ -251,17 +211,7 @@ mo server logs
 # Web UI → Logs 页 → 找 error 级别日志
 ```
 
-如果是 Mohist 本身的 bug，提 issue：
-
-```
-https://github.com/<your-org>/mohist/issues
-```
-
-附上：
-- Issue number
-- Health / status / blockedReason
-- Logs 关键片段
-- 复现步骤
+如果是 Mohist 本身的 bug，提 issue 并附上：Issue number、health / status / blockedReason、logs 关键片段、复现步骤。
 
 ---
 

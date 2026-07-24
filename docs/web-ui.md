@@ -126,12 +126,10 @@ URL: `/issues/<number>/files`
 - Reset：让后续输入从空 Runtime 上下文继续，同时保留已记录的会话内容
 - 调试一次执行为什么产生当前结果
 
-Compact 不会创建一段伪装成原 Session 的新对话。Reset 会主动建立新的底层 Session；
-提交新的独立输入前确认原 Session 已不存在时，Mohist 也会自动建立新的底层 Session。
-两者都继续显示在同一个 AgentSession 下；页面以“上下文已重置”说明后续从空上下文开始，
-但不展示底层 Session 历史。Session 来源与身份见
-[Agent 与 AgentSession](agents.md)；OpenCode 操作语义见
-[`mohist/opencode` Action](actions/opencode.md)。
+Compact / Reset 与缺失自动恢复的语义见
+[Action 契约 · 共享语义](actions/README.md#agent-执行类-action-的共享语义)；两者都继续
+显示在同一个 AgentSession 下，页面以「上下文已重置」标注，不展示底层 Session 历史。
+Session 来源与身份见 [Agent 与 AgentSession](agents.md)。
 
 ### 实装差距
 
@@ -211,7 +209,7 @@ Web UI 在移动端有基本适配（看板有移动布局），但当前不是�
 - 长 body 在小屏阅读体验差
 - Settings 在移动端不友好
 
-需要严肃的移动端工作流，等 PWA + push notification 完工。
+需要严肃的移动端工作流，见 [移动端 PWA 与推送](mobile-pwa.md)（方案，未实装）。
 
 ---
 

@@ -2,18 +2,7 @@
 
 Mohist 默认的工作流由 5 个阶段组成。理解每个阶段做什么、产出什么、什么时候停，你才知道审批和恢复动作在哪里发生。issue 的完整操作命令（创建、启动、审批、恢复等）见 [Issue 管理](issues.md)；自定义阶段、任务、审批策略见 [Workflow Profile](workflow-profiles.md)。
 
-## 全景图
-
-```
-Draft ──start──▶ Plan ──approve──▶ Build ──auto──▶ Check ──approve──▶ Integrate ──▶ Done
-                    │                                 │
-                    │ reject                          │ reject
-                    ▼                                 ▼
-                  Plan                             Build
-                  (redo)                           (redo)
-```
-
-每个阶段的产物都留在 `openspec/changes/<issue-number>-<slug>/` 下，作为后续判断和追溯的证据。
+每个阶段的产物都留在 `openspec/changes/<issue-number>-<slug>/` 下，作为后续判断和追溯的证据。完整状态机见文末。
 
 ## Draft（草稿）
 
@@ -31,9 +20,8 @@ mo issue start <number>   # 启动 workflow，进入 Plan
 
 ## Plan（规划）
 
-Inline Agent 理解需求、规划怎么实现。这是**最重要的阶段**——规划错了后面全错。
-
-### Plan 阶段做的事
+Inline Agent 理解需求、规划怎么实现。这是发现方向错误成本最低的阶段——人工审批时
+重点看 `proposal.md` 和 `tasks.json`。
 
 按顺序产出 5 个 artifact：
 
@@ -45,12 +33,7 @@ Inline Agent 理解需求、规划怎么实现。这是**最重要的阶段**—
 | `tasks.json` | 接下来 Build 阶段要执行的步骤清单（含验收条件） |
 | `self-review.md` | Inline Agent 对 plan 的 self-review（"我考虑了 X、权衡了 Y、担心 Z"） |
 
-### Plan 阶段通常 5-20 分钟
-
-取决于：
-- Issue body 的清晰度
-- 项目代码库的复杂度
-- AI 模型的速度
+通常 5–20 分钟，取决于 issue body 清晰度、代码库复杂度与模型速度。
 
 ### Plan 完成后
 
@@ -61,7 +44,7 @@ mo run approve --issue <number>   # 通过 plan，进入 Build
 mo run reject --issue <number> --message "说明需要修改的内容"  # 打回，重新 plan
 ```
 
-审批者不限定是谁，见 [核心概念 · Approval](concepts.md#approval审批)。人工处理时，重点看 proposal.md 和 tasks.json；这是发现方向错误成本最低的位置。
+审批者不限定是谁，见 [核心概念 · Approval](concepts.md#approval审批)。
 
 ## Build（实现）
 
@@ -99,7 +82,7 @@ mo run approve --issue <number>   # 进入 Integrate
 mo run reject --issue <number> --message "说明需要修改的内容"  # 回到 Build 重做
 ```
 
-人工处理时读 `review.md`。Inline Agent 的 review 通常会暴露 Build 阶段没注意到的问题。
+人工处理时读 `review.md`。
 
 ## Integrate（合并）
 

@@ -68,90 +68,26 @@ Mohist 字段。Action Input 不需要 `agent`、`kind` 或 `type`；使用哪�
 
 ## Workflow Session
 
-`session` 标识 Workflow 来源的逻辑 AgentSession。同一 WorkflowRun 中使用相同名称
-的 task 共享对话上下文；不同名称相互隔离。省略 `session` 时使用 Work ID，避免
-无意间把两个 task 放进同一段对话。
-
-### 物理 Session 复用不变量
-
-同一 WorkflowRun 中，只要 task 指定同一个 `session` 名称，Mohist 就必须继续使用该
-AgentSession 当前绑定的同一个物理 OpenCode Session。task 变化、task 重试，以及
-`options.model` 或 `options.variant` 变化都不能替换这个物理 Session；模型选择只影响
-本次执行，并在原 Session 上生效。
-
-| 变化 | 物理 OpenCode Session |
-|---|---|
-| 后续 task 或重试继续使用同名 `session` | 保持不变 |
-| `options.model` 或 `options.variant` 变化 | 保持不变 |
-| Compact | 保持不变 |
-| Reset | 建立新的空 Session；AgentSession 保留已有会话内容 |
-| 提交新的独立输入前明确确认当前 Session 已不存在 | 自动建立新的空 Session |
-| 工作目录变化 | 拒绝执行；需要新的逻辑 `session` 名称 |
-| 执行后端变化 | 建立新的空物理 Session |
-
-自动恢复只处理负责当前绑定的 Runner 上，OpenCode 明确确认旧 Session 已不存在、且本次
-输入尚未被接受的情况。请求落到其它 Runner、OpenCode 暂时不可用、响应无法判断，或
-Prompt 可能已经提交时，Mohist 明确失败，不替换绑定或重放 Prompt。新 Session 没有旧
-上下文；同一 AgentSession 继续显示已有消息，并以“上下文已重置”说明后续从空上下文开始，
-不维护物理 Session 历史。不同 `session` 名称仍相互隔离，不能因为 prompt、模型或配置
-相同而合并。
-
-如果 task 已完成工作但还有改动需要提交或还原，Mohist 会在同一个 AgentSession 和
-物理 OpenCode Session 中继续这次收尾执行。这个收尾不会替换会话，也不要求用户先
-Reset；完成后，后续使用同名 `session` 的 task 继续沿用原对话上下文。
-
-同一 AgentSession 同时只执行一个由 Workflow 发起的输入。不同 AgentSession 可以并行。
-用户在 Session 页面提交的 follow-up 是例外：Session 正在执行时，它会加入当前执行；
-Session 空闲时，它会开始新的执行。
+逻辑 `session` 名称语义、物理 Session 复用不变量、缺失自动恢复、收尾执行与并发
+规则与 `mohist/pi` 共享，见
+[Action 契约](README.md#agent-执行类-action-的共享语义)。本 Action 的物理 Session
+是 OpenCode Session；自动恢复以 OpenCode 明确报告 Session 不存在为准。
 
 ## OpenCode Session 操作
 
-当 AgentSession 当前绑定 OpenCode 时，Session 页面和对应 CLI 命令按以下方式执行：
-
-| 操作 | 结果 |
-|---|---|
-| Follow-up | 把用户文本交给当前 OpenCode Session；确认 OpenCode 已接收后返回 |
-| Compact | 使用 OpenCode 原生压缩当前 Session；Runtime Session 身份不变 |
-| Reset | 在 Session 空闲时建立一个没有旧上下文的新 OpenCode Session；AgentSession 保留已有会话内容 |
-
-Compact 是用户在 Session 中发起的操作，不是 Workflow Action。Mohist 不生成一段
-假的摘要来模拟压缩，也不会在 OpenCode 压缩失败时静默降级。
-
-Runner 重启后，Mohist 仍使用 AgentSession 保存的 OpenCode Session 绑定继续这些
-操作。如果提交新的独立输入前确认该 Session 已不存在，Workflow task、AgentJob 或空闲
-Follow-up 会先自动建立并绑定新的空 Session。Compact 和针对执行中操作的命令不会这样
-恢复；Reset 即使在旧 Session 已不存在时仍可建立新的空 Session。
+Follow-up、Compact、Reset 的行为与恢复规则和 `mohist/pi` 共享，见
+[Action 契约](README.md#agent-执行类-action-的共享语义)；操作对象是当前绑定的
+OpenCode Session。
 
 ## 完成与失败
 
-OpenCode 执行成功结束后，Workflow 才按 task 的 `expect`、`artifacts`、`failIf` 和
-recovery 规则判断后续流程。执行失败、取消或超时时，原始错误就是 task 结果，不再检查
-文件或 marker。这些是 Workflow 的 task 完成要求，不是
-`mohist/opencode` 的 Action Input。Action Output 只在命中 promise marker 时返回：
+完成判断、promise Action Output、执行期限、provider 额度耗尽与中断确认的共享语义
+见 [Action 契约](README.md#agent-执行类-action-的共享语义)。
 
-```json
-{ "promise": "PASS" }
-```
-
-没有 promise marker 时，Action Output 为 `null`。Session ID、模型、用量、完整文本、
-校验明细和错误详情属于 Session 或任务状态，不重复塞进 Action Output。
-
-OpenCode 的权限配置仍是最终判断。它已经允许的操作直接执行，明确拒绝的操作仍然拒绝。
-当 OpenCode 只要求确认时，Mohist 的无人值守执行仅允许这一次操作，不保存为以后自动
-允许，也不会创建审批或要求用户介入。若这次回应无法完成，本次 task 立即失败并给出
-可操作的错误，不等待执行期限耗尽。执行超时会中断当前执行；提交结果不确定时不会
-自动重放 Prompt，避免同一任务被执行两次。Runner 主动触发的执行期限会明确报告 timeout；
-中断 OpenCode 只是收尾，不能用缺少 marker 覆盖 timeout，也不会替换当前 Session 绑定或
-自动 Reset。
-
-provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohist 中断当前 OpenCode
-执行并让本次 task 失败，不等待 provider 继续重试。AgentSession 与当前物理
-OpenCode Session 的绑定保持不变；Session 回到空闲后，可以选择其他模型继续，无需
-Reset。Reset 只表达用户明确要求清空上下文；物理 Session 缺失由下一条安全的独立输入
-自动恢复。
-
-如果 Mohist 无法确认当前执行已经停止，则明确报告中断未确认；不会把仍可能执行的
-Session 显示为已经安全空闲。
+OpenCode 的权限配置仍是最终判断。它已经允许的操作直接执行，明确拒绝的操作仍然
+拒绝。当 OpenCode 只要求确认时，Mohist 的无人值守执行仅允许这一次操作，不保存为
+以后自动允许，也不会创建审批或要求用户介入。若这次回应无法完成，本次 task 立即
+失败并给出可操作的错误，不等待执行期限耗尽。
 
 ## OpenCode 责任边界
 
@@ -167,23 +103,14 @@ OpenCode 判断。
 
 ## 错误码
 
-`mohist/opencode` 的业务失败用以下稳定错误码标识，供 recovery `when: error.code=...`
-匹配；错误文案面向人，不用于匹配：
-
-平台也可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、
-未预期平台故障和期限失败；它们不属于本 Action 的业务错误。
+六个共享业务错误码与平台错误见
+[Action 契约](README.md#agent-执行类-action-的共享语义)。`mohist/opencode` 另有：
 
 | 错误码 | 含义 |
 |---|---|
-| `runtime-unavailable` | OpenCode 执行能力尚未就绪或不可用 |
-| `session-workspace-mismatch` | Session 绑定的工作目录与本次执行不一致 |
-| `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
-| `runtime-session-missing` | OpenCode Session 已不存在，但当前操作无法安全地自动重建或重新投递 |
-| `unavailable-runtime` | OpenCode 报告不可用 |
 | `incompatible-runtime` | OpenCode 版本或数据与 Mohist 不兼容 |
 | `permission-required` | 需要权限才能继续 |
 | `interrupted` | 执行被 Runner 外部信号中断 |
-| `execution-failed` | 执行失败（含 provider 额度、余额或计费耗尽） |
 
 ## 实装差距
 

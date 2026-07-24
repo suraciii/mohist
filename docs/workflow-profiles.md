@@ -25,9 +25,8 @@ Mohist 默认提供：
 - `mohist/local`：本地合并，适合不依赖代码托管平台的项目；默认使用。
 - `mohist/github-pr`：通过一个 GitHub PR 完成交付。
 
-`mohist/*` Profile 随 Mohist 版本更新，不能直接编辑或删除。进行中的 Workflow 在之后
-进入 Stage 时使用更新后的 Definition；已经进入的 Stage 和已经开始的 task 不被追溯
-改变。需要修改内置流程时，创建一个新的 Project Profile。
+`mohist/*` Profile 随 Mohist 版本更新，不能直接编辑或删除；版本更新对进行中 Workflow
+的生效时机与上文编辑 Profile 相同。需要修改内置流程时，创建一个新的 Project Profile。
 
 ## Profile 包含什么
 

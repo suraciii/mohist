@@ -158,8 +158,6 @@ Mohist Skill -> root/group help -> leaf help -> result or actionable error
 | Executable | 示例可被当前命令树解析，hint 可以直接运行或补齐 |
 | Current | help 与二进制同版本；Skill 不冻结易变化的 flag 清单 |
 
-一个实用门槛是：如果删掉一句话不会改变 Agent 选择哪个命令、传什么参数或如何恢复，就不应把它放进默认上下文。
-
 ## Syntax authority
 
 [`docs/cli-reference.md`](../docs/cli-reference.md) 是目标产品语义和命令面的 spec。实装后，C# 的 `System.CommandLine` 命令树是该版本唯一的可执行语法权威：
@@ -353,20 +351,10 @@ Project / Issue / Run Variables 命令切片已经交付：三个 scope 都使�
 `variable list/get/set/unset`，位置值始终保存为 string，显式 JSON 类型只通过
 `--value-json <json>` 输入，Run 的 effective read 保持只读。
 
-当前实现与目标设计的主要差距记录在 [`docs/cli-reference.md`](../docs/cli-reference.md#实装差距)。落地按独立产品价值切片：
+当前实现与目标设计的主要差距记录在 [`docs/cli-reference.md`](../docs/cli-reference.md#实装差距)。
+落地先建立共享契约（字段选择式 JSON、统一 ProjectRef、stdout/stderr、退出码与非交互），
+各领域切片在其上并行；每个切片同时交付自己的 leaf help 和契约测试，保持当时的命令树、
+帮助和测试内部一致——不先发布一套命令、再靠 Skill 解释另一套语法。
 
-1. 先建立字段选择式 JSON、统一 ProjectRef、stdout/stderr、退出码与非交互契约。
-2. 在共享契约上分别迁移 Issue / WorkflowRun、Agent / AgentJob / AgentSession、
-   WorkflowProfile collection、Project / Issue / Run Variables，以及 Runner / Server / Service /
-   Activity / Event；每个切片同时交付自己的 leaf help 和契约测试。
-3. 把其余低成本动词、scope 和旧 alias 清理合并成一个 chore 批次，不为每个小命令单独建
-   issue。
-4. 命令面稳定后，最后收口 root/group help、help topics、Mohist Skill 和全部用户示例，删除
-   旧路径说明与测试。
-
-Agent 模型目录切片以前置产品能力为准；WorkflowProfile 与 Variables 切片必须建立在既有
-Definition / Variables 分离、attempt context snapshot 和权威校验链之上。多个领域切片可以
-在共享 CLI 契约完成后并行，不增加为了排序而存在的依赖。
-
-每一步都保持当时的命令树、帮助和测试内部一致；不能先发布一套命令、再靠 Skill 解释另一
-套语法。
+WorkflowProfile 与 Variables 切片必须建立在既有 Definition / Variables 分离、attempt
+context snapshot 和权威校验链之上。
