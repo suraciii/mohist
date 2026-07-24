@@ -132,7 +132,8 @@ public sealed class AgentPathAmplificationOtelEnabledSpecs : IClassFixture<OtelI
                     CreatedAt: now,
                     BoundAt: now,
                     LastDataAt: index < activeCount ? now : null,
-                    AgentRuntimeSessionId: id),
+                    AgentRuntimeSessionId: id,
+                    Activity: index < activeCount ? AgentSessionActivity.Active : AgentSessionActivity.Idle),
                 Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     [AgentSessionQueryMetadataKeys.ProjectId] = projectId,

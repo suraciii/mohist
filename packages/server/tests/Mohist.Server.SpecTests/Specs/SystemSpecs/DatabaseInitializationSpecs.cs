@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
 using Xunit;
@@ -132,6 +133,7 @@ public class DatabaseInitializationSpecs
 
         var services = new ServiceCollection()
             .AddDbContext<MohistDbContext>(options => options.UseSqlite(connection))
+            .AddSingleton<TimeProvider>(new FakeTimeProvider())
             .BuildServiceProvider();
 
         await using (services)
@@ -156,6 +158,7 @@ public class DatabaseInitializationSpecs
 
         var services = new ServiceCollection()
             .AddDbContext<MohistDbContext>(options => options.UseSqlite(connection))
+            .AddSingleton<TimeProvider>(new FakeTimeProvider())
             .BuildServiceProvider();
 
         await using (services)
