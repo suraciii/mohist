@@ -739,7 +739,11 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
   }
   if (record.producerFamily === "binding-reconcile") {
     if (record.target.kind !== "session") throw new Error("binding-reconcile family requires session target")
-    return { family: "binding-reconcile", sessionId: record.target.sessionId }
+    return {
+      family: "binding-reconcile",
+      sessionId: record.target.sessionId,
+      runtimeSessionId: record.runtimeSessionId,
+    }
   }
   if (record.target.kind !== "generic") throw new Error("generic-followup family requires generic target")
   return {
@@ -753,7 +757,9 @@ function sequenceKeyLabel(key: SequenceKey): string {
   if (key.family === "workflow-session") {
     return `workflow-session:${key.projectId}:${key.workflowRunId}:${key.sessionName}`
   }
-  if (key.family === "binding-reconcile") return `binding-reconcile:${key.sessionId}`
+  if (key.family === "binding-reconcile") {
+    return `binding-reconcile:${key.sessionId}:${key.runtimeSessionId}`
+  }
   return `generic-followup:${key.projectId}:${key.sessionId}`
 }
 
@@ -983,4 +989,5 @@ interface SequenceKey {
   readonly workflowRunId?: string
   readonly sessionName?: string
   readonly sessionId?: string
+  readonly runtimeSessionId?: string
 }
