@@ -48,6 +48,53 @@ public sealed class AgentSessionRecoveryDomainTests
     [Theory]
     [InlineData(AgentSessionActivity.Active)]
     [InlineData(AgentSessionActivity.Unknown)]
+    public void ReconcileMissingBinding_SettlesIdleAndRebinds(AgentSessionActivity activity)
+    {
+        var session = CreateSession();
+        session.Status = session.Status with
+        {
+            AgentRuntimeSessionId = "runtime-current",
+            Activity = activity,
+            UsageSummary = new AgentUsageSummary { InputTokens = 100, ContextWindowUsed = 90_000, ContextWindowSize = 200_000 }
+        };
+        var expected = session.CurrentRuntimeBinding();
+
+        var events = session.ReconcileMissingBinding(
+            expected,
+            expected with { RuntimeSessionId = "runtime-replacement" },
+            TestTime.UtcDateTime);
+
+        Assert.Equal(AgentSessionActivity.Idle, session.Status.Activity);
+        Assert.Equal("runtime-replacement", session.Status.AgentRuntimeSessionId);
+        Assert.Equal(100, session.Status.UsageSummary!.InputTokens);
+        Assert.Null(session.Status.UsageSummary.ContextWindowUsed);
+        Assert.Null(session.Status.UsageSummary.ContextWindowSize);
+        Assert.IsType<AgentSessionRuntimeBound>(Assert.Single(events).Value);
+    }
+
+    [Fact]
+    public void ReconcileMissingBinding_StaleExpectedBindingPreservesActivityAndUsage()
+    {
+        var session = CreateSession();
+        session.Status = session.Status with
+        {
+            AgentRuntimeSessionId = "runtime-current",
+            Activity = AgentSessionActivity.Unknown,
+            UsageSummary = new AgentUsageSummary { InputTokens = 100, ContextWindowUsed = 90_000, ContextWindowSize = 200_000 }
+        };
+        var before = session.Status;
+
+        Assert.Throws<StaleRuntimeSessionBindingException>(() => session.ReconcileMissingBinding(
+            new AgentRuntimeBinding("runner-1", "opencode", "runtime-stale"),
+            new AgentRuntimeBinding("runner-1", "opencode", "runtime-candidate"),
+            TestTime.UtcDateTime));
+
+        Assert.Equal(before, session.Status);
+    }
+
+    [Theory]
+    [InlineData(AgentSessionActivity.Active)]
+    [InlineData(AgentSessionActivity.Unknown)]
     public void RebindRuntimeSession_RequiresIdle(AgentSessionActivity activity)
     {
         var session = CreateSession();

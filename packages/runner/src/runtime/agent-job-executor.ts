@@ -23,7 +23,7 @@ import type {
 } from "./pi/index.js"
 import { resolveAccessor, type RuntimeAccessor } from "../server/command-runtime.js"
 import type { ServerConnection } from "../server/connection.js"
-import { resolveOrRecoverBinding, type RuntimeBinding } from "./binding-recovery.js"
+import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from "./binding-recovery.js"
 
 /**
  * Agent-owned execution entry for `ownerKind === "agent-job"` work.
@@ -60,6 +60,7 @@ export class AgentJobExecutor {
   constructor(
     private readonly connection: ServerConnection,
     private readonly runtimes: AgentJobRuntimeAccessors,
+    private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
   ) {}
 
   async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -136,7 +137,7 @@ export class AgentJobExecutor {
         runtime: { kind: "opencode", runtime },
         probe: async (candidate) => {
           const result = await runtime.resolveSession({ target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
-          return result.ok ? { ok: true } : { ok: false, kind: result.error.kind, message: result.error.message }
+          return result.ok ? { ok: true, activeTurn: result.value.activeTurn } : { ok: false, kind: result.error.kind, message: result.error.message }
         },
         replace: async (current, replacement) => {
           await this.connection.recoverMissingAgentSession(work.projectId!, binding.agentSessionId!, {
@@ -147,6 +148,8 @@ export class AgentJobExecutor {
           }, signal)
         },
         model: model.kind === "ok" ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
+        recoveryKey: expected.runtimeSessionId!,
+        coordinator: this.bindingRecoveryCoordinator ?? undefined,
       })
       if (!recovery.ok) return failureResult(recovery.kind, recovery.message, "opencode")
       selected = recovery.binding.runtimeSessionId
@@ -219,7 +222,7 @@ export class AgentJobExecutor {
         runtime: { kind: "pi", runtime },
         probe: async (candidate) => {
           const result = await runtime.resolveSession({ target: { runtime: "pi", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
-          return result.ok ? { ok: true } : { ok: false, kind: result.error.kind, message: result.error.message }
+          return result.ok ? { ok: true, activeTurn: result.value.activeTurn } : { ok: false, kind: result.error.kind, message: result.error.message }
         },
         replace: async (current, replacement) => {
           await this.connection.recoverMissingAgentSession(work.projectId!, binding.agentSessionId!, {
@@ -229,6 +232,8 @@ export class AgentJobExecutor {
             replacementRuntimeSessionId: replacement.runtimeSessionId,
           }, signal)
         },
+        recoveryKey: expected.runtimeSessionId!,
+        coordinator: this.bindingRecoveryCoordinator ?? undefined,
       })
       if (!recovery.ok) return failureResult(recovery.kind, recovery.message, "pi")
       runtimeSessionId = recovery.binding.runtimeSessionId

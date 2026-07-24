@@ -189,6 +189,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return await ToInfoAsync(session);
     }
 
+    public async Task<AgentSessionInfo> ReconcileMissingBindingAsync(ReconcileMissingBindingCommand command)
+    {
+        var session = await GetRequiredAsync();
+        var now = Now();
+        var events = session.ReconcileMissingBinding(
+            new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ExpectedRuntimeSessionId),
+            new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ReplacementRuntimeSessionId),
+            now);
+        await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "missing-recovery", now));
+        return await ToInfoAsync(session);
+    }
+
     public async Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();

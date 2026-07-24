@@ -29,6 +29,9 @@ const stopSignalR = vi.fn()
 const getConnectionId = vi.fn(() => "conn-1")
 const probeLiveness = vi.fn(async () => true)
 const workflowRunsStatus = vi.fn()
+const listAgentSessionsForReconcile = vi.fn(async () => [])
+const reconcileMissingAgentSession = vi.fn()
+const reconcileAgentSessionRuntimeEvents = vi.fn(async () => [])
 const fetchConfig = vi.fn(async () => null)
 const FIXED_TIME = "2026-07-01T00:00:00.000Z"
 
@@ -93,6 +96,9 @@ vi.mock("../src/server/connection.js", () => ({
     disconnect = disconnect
     poll = poll
     workflowRunsStatus = workflowRunsStatus
+    listAgentSessionsForReconcile = listAgentSessionsForReconcile
+    reconcileMissingAgentSession = reconcileMissingAgentSession
+    reconcileAgentSessionRuntimeEvents = reconcileAgentSessionRuntimeEvents
     fetchConfig = fetchConfig
   },
 }))
@@ -168,6 +174,9 @@ function configureHost(statusResponder: StatusResponder = async () => ({})): Hos
     events.statusQueries.push([...workflowRunIds])
     return await statusResponder([...workflowRunIds])
   })
+  listAgentSessionsForReconcile.mockReset().mockResolvedValue([])
+  reconcileMissingAgentSession.mockReset()
+  reconcileAgentSessionRuntimeEvents.mockReset().mockResolvedValue([])
   fetchConfig.mockReset().mockResolvedValue(null)
   forceReconnect.mockReset().mockResolvedValue(undefined)
   return events
@@ -244,6 +253,7 @@ describe("RunnerHost converges active workflow runs", () => {
     const run = host.run(controller.signal)
 
     expect(await waitForActiveStartup(events)).toEqual(["wr-1"])
+    expect(listAgentSessionsForReconcile).toHaveBeenCalledOnce()
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })

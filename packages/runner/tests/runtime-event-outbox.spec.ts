@@ -378,6 +378,41 @@ describe("AgentSessionRuntimeEventOutbox — managed-sequence FIFO", () => {
     expect(outbox.snapshot()).toHaveLength(1)
   })
 
+  it("delivers queued reconciliation facts separately for each runtime binding", async () => {
+    const batches: string[][] = []
+    const { outbox } = makeOutbox({
+      deliver: {
+        async send() {
+          throw new Error("single-record delivery should not be used")
+        },
+        async sendBatch(records) {
+          batches.push(records.map((record) => record.runtimeSessionId))
+          const runtimeSessionId = records[0]?.runtimeSessionId
+          return runtimeSessionId === "runtime-current"
+            ? records.map((record) => [{ type: record.event.type }])
+            : []
+        },
+      },
+    })
+    await outbox.load()
+    const reconciliationRecord = (id: string, runtimeSessionId: string): RuntimeEventRecord => ({
+      id,
+      producerFamily: "binding-reconcile",
+      target: { kind: "session", sessionId: "session-1" },
+      runtimeSessionId,
+      work: null,
+      event: { type: "session.activity", payload: { activity: "idle" } },
+      acknowledgementPolicy: "successful-response",
+    })
+
+    await outbox.enqueueProducedFact(reconciliationRecord("old", "runtime-old"))
+    await outbox.enqueueProducedFact(reconciliationRecord("current", "runtime-current"))
+    await outbox.kick()
+
+    expect(batches).toEqual([["runtime-old"], ["runtime-current"]])
+    expect(outbox.snapshot()).toHaveLength(0)
+  })
+
   it("successful-response consumes the operation lease; replay legitimately settles with []", async () => {
     let responses: AgentSessionRuntimeEventReceipt[][] = [[], []]
     const { outbox } = makeOutbox({

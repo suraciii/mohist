@@ -1,0 +1,70 @@
+{
+  "project": "mohist-local",
+  "description": "Runner reconnect reconciliation that preserves still-existing Runtime Sessions and settles AgentSession activity, plus binding-guarded cancel-settles-idle and typed SDK existence checks.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Route all physical-Session existence checks through the typed SDK contract and carry active-turn",
+      "spec": "specs/runtime-binding-recovery/spec.md#physical-session-existence-checks-use-the-type-checked-sdk-request-contract",
+      "description": "Replace every untyped `as never` OpenCode SDK call (resolve at opencode/runtime.ts:134-137, followup resolve at :293-296, followup promptAsync at :313-319, cancel abort at :369-372) with the typed `{ sessionID, directory }` request contract that turn.ts already uses. Capture the active-turn snapshot: OpenCode via `session.status({ directory }, { throwOnError: true })`, Pi via the existing `isStreaming` getter on the cached session handle (pi/runtime.ts:83-96). Enrich `BindingProbeResult` in binding-recovery.ts to carry `activeTurn: boolean` on the present branch so callers distinguish present+idle from present+active. Only `kind === \"missing-session\"` still authorizes recovery; `present` (any activeTurn) preserves the binding.",
+      "acceptanceCriteria": [
+        "Zero `as never` casts remain in opencode/runtime.ts existence/probe/promptAsync/abort call sites — verified by `npm run typecheck -w packages/runner` passing and a grep asserting no `as never` in those positions.",
+        "`BindingProbeResult` present branch carries `activeTurn: boolean`; binding-recovery.ts populates it from the runtime probe for both OpenCode (session.status) and Pi (isStreaming).",
+        "Unit tests verify the typed call shape is used (fake SDK asserts on the typed request object, not `as never`) and that `activeTurn` is correctly `true` for a streaming session and `false` for an idle session.",
+        "Existing resolve, followup, and cancel paths continue to pass their current unit tests with no behavioral regression."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated opencode/runtime.ts, pi/runtime.ts, and binding-recovery.ts with typed SDK calls and enriched BindingProbeResult; passing runner typecheck + unit tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design decision D6. Foundational refactor: the enriched active-turn probe is consumed by T-003 reconnect reconciliation. The cancel-abort call typing (opencode/runtime.ts:369-372) is included here so D6 is one coherent typed-contract migration, not split across tasks."
+    },
+    {
+      "id": "T-002",
+      "title": "Cancel settles AgentSession activity to idle through the binding-guarded runtime-events outbox",
+      "spec": "specs/agent-session-activity/spec.md#a-confirmed-cancel-settles-agent-session-activity-to-idle",
+      "description": "Add `AgentSessionRuntimeEventOutbox` to `CancelHandlerDeps` (cancel-handler.ts:34-38). After `callCancel` returns, enqueue a binding-guarded `session.activity` fact through the durable outbox: `{ idle }` when the stop is confirmed (`facts.cancelled && facts.stopConfirmed`), or `{ unknown }` when the stop is unconfirmed. The existing grain `ApplyRuntimeEventToDomain` → `ParseActivity` path settles activity, and `AppendEventsAsync(..., requireCurrentRuntimeBinding: true)` automatically discards facts whose runtimeSessionId is no longer the current binding. The SignalR reply continues to surface `interruptUnconfirmed: true` for unconfirmed stops.",
+      "acceptanceCriteria": [
+        "A confirmed Cancel against an `active` AgentSession transitions activity to `idle`; the next read through the normal API/CLI reports `idle` — verified by a spec test using injected fakes (no operator-written runtime event).",
+        "A confirmed Cancel against an `unknown` AgentSession (e.g. post-Runner-restart) whose stopped binding is still current settles activity to `idle` — verified by spec test.",
+        "An unconfirmed stop (`stopConfirmed === false`) enqueues `session.activity { unknown }` and surfaces `interruptUnconfirmed: true`; activity does NOT settle to `idle`.",
+        "A stop fact for a superseded binding is discarded by the binding guard; current binding, activity, transcript, and accumulated usage remain unchanged — verified by spec test.",
+        "Cancel does not create a candidate Session, replace the binding, or replay/re-submit input.",
+        "`npm run typecheck -w packages/runner` and runner unit tests pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated cancel-handler.ts with AgentSessionRuntimeEventOutbox in CancelHandlerDeps and the confirmed/unconfirmed activity-fact write; passing runner typecheck + unit/spec tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design decision D5. Independent of T-001: the cancel handler writes the outbox fact based on callCancel's reply, not on the existence probe. Touches cancel-handler.ts only (the cancel-abort call typing in opencode/runtime.ts belongs to T-001). OpenCode's stopConfirmed defaults to true (command-runtime.ts), so OpenCode cancels settle Idle; only Pi can produce a real unconfirmed stop."
+    },
+    {
+      "id": "T-003",
+      "title": "Runner-reconnect reconciliation: preserve still-existing sessions, settle idle, recover confirmed-missing",
+      "spec": "specs/runner-reconnect-reconciliation/spec.md#runner-reconnect-reconciles-each-bound-agentsession",
+      "description": "Add `IAgentSessionStore.ListByRunnerForReconcileAsync(runnerId)` returning non-Idle sessions bound to the Runner (filtered on the durable `AgentSessionRow.RunnerId` column), and expose it via `GET /api/runner/{runnerId}/agent-sessions/reconcile` projected to `{ sessionId, runtime, runtimeSessionId, workDir }`. Add a Runner-side reconciliation pass to `onDispatchReconnected` (host.ts:350-362, parallel to the WorkflowRun convergence in cleanup-convergence.ts) that pulls this list, probes each binding via the typed active-turn probe from T-001, and reports results through existing channels: present + no active-turn → enqueue binding-guarded `session.activity { idle }` via AgentSessionRuntimeEventOutbox (existing grain ParseActivity settles Unknown/Active → Idle); present + active → enqueue `session.activity { active }`; confirmed-missing → create at most one empty candidate Session locally (reusing createEmptySession) and call a new `POST .../reconcile-missing` endpoint backed by `IAgentSessionGrain.ReconcileMissingBindingAsync(expected, replacement)` which settles Activity=Idle and calls RebindRuntimeSession atomically under one CAS; transient/transport/unavailable/corrupt → keep binding, leave `unknown`. No input is submitted on bare reconnect.",
+      "acceptanceCriteria": [
+        "After Runner reconnect, a still-existing Session with no active turn keeps its current binding and settles to `idle`; the next task continues through the same binding with existing context — verified by spec test with injected fakes and no wall-clock timing.",
+        "A still-queryable Session is never classified as missing or replaced during reconnect — verified by spec test asserting no candidate creation and unchanged binding.",
+        "A confirmed-missing Session on reconnect creates at most one candidate, settles Idle + rebinds atomically under one CAS via ReconcileMissingBindingAsync; no input is submitted on bare reconnect — verified by spec test.",
+        "Repeated reconnect/retry attempts leave at most one candidate Session (a second reconnect probes the new binding → present → no second candidate) — verified by spec test.",
+        "Transient failure, transport failure, unavailable runtime, or corrupt response preserves the binding and leaves activity `unknown`; no recovery is authorized — verified by spec test.",
+        "A `present + activeTurn` result keeps the Session `active` (or promotes `unknown → active`); it is never classified as missing — verified by spec test.",
+        "A stale-binding reconciliation result (binding superseded by Reset or prior recovery) is ignored; current binding, activity, transcript, and accumulated usage are unchanged — verified by spec test.",
+        "The reconcile query filters on the durable `AgentSessionRow.RunnerId` column, not the in-memory RunnerConnectionTracker._sessions (which is empty after crash) — verified by unit test.",
+        "`npm test` (server, C#) and runner typecheck + tests pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server: ListByRunnerForReconcileAsync store query + GET .../reconcile endpoint + ReconcileMissingBindingAsync grain method + POST .../reconcile-missing endpoint. Runner: binding-convergence pass in onDispatchReconnected. Passing server + runner tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design decisions D1 (Runner-driven reconcile via existing convergence loop), D2 (durable query over AgentSessionRow.RunnerId, not in-memory tracker), D3 (happy-path settles via existing session.activity channel — zero new grain transition logic), D4 (confirmed-missing settles idle + rebinds atomically; no input on bare reconnect), D7 (superseded-binding safety is automatic via existing CAS). Depends on T-001 for the enriched BindingProbeResult with activeTurn to distinguish present+idle from present+active."
+    }
+  ]
+}

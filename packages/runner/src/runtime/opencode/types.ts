@@ -33,6 +33,7 @@ export interface RuntimeSessionResolveRequest {
 export interface RuntimeSessionResolveResult {
   readonly runtimeSessionId: string
   readonly workDir: string
+  readonly activeTurn: boolean
 }
 
 export interface RuntimeSessionCreateRequest {

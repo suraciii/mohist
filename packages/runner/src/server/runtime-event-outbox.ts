@@ -77,7 +77,7 @@ export type RuntimeEventAcknowledgementPolicy = "matching-receipt" | "successful
 
 export interface RuntimeEventRecord {
   readonly id: string
-  readonly producerFamily: "workflow-session" | "generic-followup"
+  readonly producerFamily: "workflow-session" | "generic-followup" | "binding-reconcile"
   readonly target: RuntimeEventTarget
   readonly runtimeSessionId: string
   readonly work: RuntimeEventWorkMetadata | null
@@ -88,6 +88,7 @@ export interface RuntimeEventRecord {
 export type RuntimeEventTarget =
   | { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string }
   | { kind: "generic"; projectId: string; sessionId: string }
+  | { kind: "session"; sessionId: string }
 
 export interface RuntimeEventWorkMetadata {
   readonly workId: string
@@ -736,6 +737,14 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
       sessionName: record.target.sessionName,
     }
   }
+  if (record.producerFamily === "binding-reconcile") {
+    if (record.target.kind !== "session") throw new Error("binding-reconcile family requires session target")
+    return {
+      family: "binding-reconcile",
+      sessionId: record.target.sessionId,
+      runtimeSessionId: record.runtimeSessionId,
+    }
+  }
   if (record.target.kind !== "generic") throw new Error("generic-followup family requires generic target")
   return {
     family: "generic-followup",
@@ -747,6 +756,9 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
 function sequenceKeyLabel(key: SequenceKey): string {
   if (key.family === "workflow-session") {
     return `workflow-session:${key.projectId}:${key.workflowRunId}:${key.sessionName}`
+  }
+  if (key.family === "binding-reconcile") {
+    return `binding-reconcile:${key.sessionId}:${key.runtimeSessionId}`
   }
   return `generic-followup:${key.projectId}:${key.sessionId}`
 }
@@ -799,7 +811,7 @@ function parseInternalRecord(value: unknown): InternalRecord | null {
   const sequence = value["sequence"]
   const enqueuedAt = value["enqueuedAt"]
   if (typeof id !== "string" || !isRuntimeTarget(target)
-    || (family !== "workflow-session" && family !== "generic-followup")
+    || (family !== "workflow-session" && family !== "generic-followup" && family !== "binding-reconcile")
     || typeof runtimeSessionId !== "string"
     || !isRuntimeEvent(event)
     || (policy !== "matching-receipt" && policy !== "successful-response")
@@ -848,6 +860,7 @@ function isRuntimeTarget(value: unknown): value is RuntimeEventTarget {
     return typeof value["projectId"] === "string"
       && typeof value["sessionId"] === "string"
   }
+  if (value["kind"] === "session") return typeof value["sessionId"] === "string"
   return false
 }
 
@@ -971,9 +984,10 @@ async function defaultDelivery(_record: RuntimeEventRecord, _signal: AbortSignal
 }
 
 interface SequenceKey {
-  readonly family: "workflow-session" | "generic-followup"
-  readonly projectId: string
+  readonly family: "workflow-session" | "generic-followup" | "binding-reconcile"
+  readonly projectId?: string
   readonly workflowRunId?: string
   readonly sessionName?: string
   readonly sessionId?: string
+  readonly runtimeSessionId?: string
 }

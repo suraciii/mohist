@@ -46,6 +46,7 @@ interface BuildResult {
   subscription: FakeSubscription
   client: {
     sessionGet: ReturnType<typeof vi.fn>
+    sessionStatus: ReturnType<typeof vi.fn>
     sessionPromptAsync: ReturnType<typeof vi.fn>
     sessionAbort: ReturnType<typeof vi.fn>
   }
@@ -54,15 +55,16 @@ interface BuildResult {
 function buildDeps(args: BuildArgs = {}): BuildResult {
   const subscription = new FakeSubscription()
   const closed = { value: false }
-  const sessionGet = vi.fn(async (params: { path: { id: string } }) => {
+  const sessionGet = vi.fn(async (params: { sessionID: string }) => {
     if (args.failSessionGet) throw new Error("session.get boom")
     if (args.missingSessionOnGet) {
       const error = new Error("not found") as Error & { status?: number }
       error.status = 404
       throw error
     }
-    return { data: { id: params.path.id } }
+    return { data: { id: params.sessionID } }
   })
+  const sessionStatus = vi.fn(async () => ({ data: {} }))
   const sessionPromptAsync = vi.fn(async (params: { sessionID: string }) => {
     if (args.failPromptAsync) throw new Error("promptAsync boom")
     if (args.missingSessionOnPrompt) {
@@ -88,6 +90,7 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
         data: { id: `ses_${(params.directory ?? "default").replace(/[^a-z0-9]+/gi, "_")}` },
       })),
       get: sessionGet,
+      status: sessionStatus,
       promptAsync: sessionPromptAsync,
       abort: sessionAbort,
     },
@@ -110,11 +113,38 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
     subscription,
     client: {
       sessionGet,
+      sessionStatus,
       sessionPromptAsync,
       sessionAbort,
     },
   }
 }
+
+describe("OpenCodeRuntime.resolveSession", () => {
+  it.each([
+    ["busy", true],
+    ["idle", false],
+  ] as const)("uses typed SDK requests and reports %s active-turn state", async (statusType, activeTurn) => {
+    const { deps, client } = buildDeps()
+    client.sessionStatus.mockResolvedValueOnce({ data: { ses_existing: { type: statusType } } })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.resolveSession({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    })
+
+    expect(result).toMatchObject({ ok: true, value: { activeTurn } })
+    expect(client.sessionGet).toHaveBeenCalledWith(
+      { sessionID: "ses_existing", directory: "/tmp/work" },
+      { throwOnError: true },
+    )
+    expect(client.sessionStatus).toHaveBeenCalledWith(
+      { directory: "/tmp/work" },
+      { throwOnError: true },
+    )
+  })
+})
 
 describe("OpenCodeRuntime.followup", () => {
   it("calls client.session.promptAsync and returns the resolved runtime session facts", async () => {
@@ -133,13 +163,14 @@ describe("OpenCodeRuntime.followup", () => {
     expect(result.value.facts.workDir).toBe("/tmp/work")
 
     expect(client.sessionGet).toHaveBeenCalledWith(
-      { path: { id: "ses_existing" }, query: { directory: "/tmp/work" } },
+      { sessionID: "ses_existing", directory: "/tmp/work" },
+      { throwOnError: true },
     )
     expect(client.sessionPromptAsync).toHaveBeenCalledWith({
       sessionID: "ses_existing",
       directory: "/tmp/work",
       parts: [{ type: "text", text: "continue the work" }],
-    })
+    }, { throwOnError: true })
   })
 
   it("applies model and variant on the prompt body without rotating the physical session", async () => {
@@ -160,7 +191,7 @@ describe("OpenCodeRuntime.followup", () => {
       parts: [{ type: "text", text: "continue the work" }],
       model: { providerID: "openai", modelID: "gpt-5" },
       variant: "high",
-    })
+    }, { throwOnError: true })
   })
 
   it("fails with unavailable-runtime when the runtime is not ready", async () => {
@@ -282,7 +313,7 @@ describe("OpenCodeRuntime.cancel", () => {
     expect(client.sessionAbort).toHaveBeenCalledWith({
       sessionID: "ses_existing",
       directory: "/tmp/work",
-    })
+    }, { throwOnError: true })
   })
 
   it("fails with unavailable-runtime when the runtime is not ready", async () => {

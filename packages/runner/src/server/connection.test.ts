@@ -12,6 +12,39 @@ const options = {
 
 const signal = new AbortController().signal
 
+describe("ServerConnection AgentSession reconciliation", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("reads the runner-scoped binding list", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify([{
+      sessionId: "session-1",
+      runtime: "opencode",
+      runtimeSessionId: "runtime-1",
+      workDir: "/work",
+    }]), { status: 200, headers: { "content-type": "application/json" } }))
+
+    const bindings = await new ServerConnection(options).listAgentSessionsForReconcile(signal)
+
+    expect(bindings).toEqual([{
+      sessionId: "session-1",
+      runtime: "opencode",
+      runtimeSessionId: "runtime-1",
+      workDir: "/work",
+    }])
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("http://server/api/runner/runner-1/agent-sessions/reconcile")
+  })
+
+  it.each([
+    {},
+    [{ sessionId: "session-1", runtime: "unknown", runtimeSessionId: "runtime-1", workDir: "/work" }],
+    [{ sessionId: "session-1", runtime: "opencode", runtimeSessionId: "", workDir: "/work" }],
+  ])("rejects corrupt reconcile responses", async (payload) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }))
+
+    await expect(new ServerConnection(options).listAgentSessionsForReconcile(signal)).rejects.toThrow("malformed")
+  })
+})
+
 describe("ServerConnection workflow runtime events", () => {
   afterEach(() => vi.restoreAllMocks())
 
