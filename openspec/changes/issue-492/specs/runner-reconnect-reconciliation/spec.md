@@ -33,7 +33,7 @@ On reconnect reconciliation, when the owning Runner confirms the AgentSession's 
 
 ### Requirement: A confirmed-missing Session authorizes recovery on reconnect
 
-On reconnect reconciliation, when the owning Runner confirms the AgentSession's current physical Runtime Session is missing, the Server SHALL authorize confirmed-missing recovery for that binding. Recovery SHALL require an `idle` AgentSession and an unchanged expected binding, SHALL create at most one candidate Runtime Session, SHALL confirm the replacement, and SHALL submit the current input exactly once.
+On reconnect reconciliation, when the owning Runner confirms the AgentSession's current physical Runtime Session is missing, the Server SHALL authorize confirmed-missing recovery for that binding. Recovery SHALL require an `idle` AgentSession and an unchanged expected binding, SHALL create at most one candidate Runtime Session, and SHALL confirm the replacement. A bare reconnect SHALL submit no input — there is no triggering input; when a task or Follow-up input is pending, that task or Follow-up SHALL submit it exactly once against the confirmed replacement, and it SHALL NEVER be replayed by reconnect or retry.
 
 #### Scenario: Confirmed-missing on reconnect triggers one-shot recovery
 
@@ -41,11 +41,12 @@ On reconnect reconciliation, when the owning Runner confirms the AgentSession's 
 - **THEN** the Server SHALL authorize confirmed-missing recovery
 - **AND** recovery SHALL create at most one candidate Runtime Session and confirm the replacement binding
 
-#### Scenario: Recovery submits the current input exactly once
+#### Scenario: Reconnect submits no input; a pending task input is submitted once by the task
 
 - **WHEN** confirmed-missing recovery runs on reconnect
-- **THEN** the triggering input SHALL be submitted exactly once against the confirmed replacement
-- **AND** SHALL NOT be replayed on a later retry or reconnect
+- **THEN** bare reconnect SHALL submit no input against the confirmed replacement
+- **AND** a pending task or Follow-up input SHALL be submitted exactly once by that task or Follow-up against the confirmed replacement
+- **AND** the input SHALL NOT be replayed by a later reconnect or retry
 
 ### Requirement: Transient or unclassifiable results preserve the binding and keep unknown
 
