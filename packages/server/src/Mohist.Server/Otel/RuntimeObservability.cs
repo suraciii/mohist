@@ -920,8 +920,9 @@ public sealed class RuntimeObservability : IDisposable
                     transition.Reason);
                 _transitionSink?.Invoke(transition);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger?.LogWarning(ex, "Failed to emit runtime state transition");
             }
         }
     }

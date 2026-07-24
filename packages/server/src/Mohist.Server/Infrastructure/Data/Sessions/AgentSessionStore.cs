@@ -59,7 +59,7 @@ public class AgentSessionStore : IAgentSessionStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var rows = await db.AgentSessions.AsNoTracking().ToListAsync();
-        return rows.Select(AgentSessionJson.Deserialize).OfType<AgentSession>().ToList();
+        return rows.Select(r => AgentSessionJson.Deserialize(r)).OfType<AgentSession>().ToList();
     }
 
     public async Task<IReadOnlyList<AgentSessionReconcileBinding>> ListByRunnerForReconcileAsync(
@@ -172,7 +172,7 @@ public static class AgentSessionJson
 {
     public static readonly JsonSerializerOptions JsonOptions = Mohist.Server.Infrastructure.JSON.Options;
 
-    public static AgentSession? Deserialize(AgentSessionRow row)
+    public static AgentSession? Deserialize(AgentSessionRow row, ILogger? logger = null)
     {
         try
         {
@@ -182,8 +182,9 @@ public static class AgentSessionJson
             session.ValidateState(allowLegacySource: true);
             return session;
         }
-        catch
+        catch (Exception ex)
         {
+            logger?.LogWarning(ex, "Failed to deserialize AgentSession row {AgentSessionId}; skipping row", row.Id);
             return null;
         }
     }

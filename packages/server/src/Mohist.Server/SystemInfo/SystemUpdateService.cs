@@ -25,8 +25,9 @@ public sealed class SystemUpdateService : ISingletonService
         ISystemReadinessProbe readinessProbe,
         IConfiguration configuration,
         IManagedAssetCatalog managedAssets,
-        ILogger<SystemUpdateService> logger)
-        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, managedAssets, logger, TimeProvider.System, new BackgroundTaskLauncher())
+        ILogger<SystemUpdateService> logger,
+        IBackgroundTaskLauncher backgroundTasks)
+        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, managedAssets, logger, TimeProvider.System, backgroundTasks)
     {
     }
 

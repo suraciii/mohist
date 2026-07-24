@@ -55,8 +55,7 @@ public sealed class RuntimeRequestMetricsMiddleware(
     }
 
     private static bool IsOtelRequest(PathString path) =>
-        path.StartsWithSegments("/otel/v1", StringComparison.OrdinalIgnoreCase)
-        || path.StartsWithSegments("/otel/api", StringComparison.OrdinalIgnoreCase);
+        OtelSuppressionMiddleware.IsOtelRequest(path);
 
     private static string? AgentPath(HttpContext context)
     {

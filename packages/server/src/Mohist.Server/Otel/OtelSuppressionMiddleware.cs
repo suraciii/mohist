@@ -17,7 +17,7 @@ public sealed class OtelSuppressionMiddleware(RequestDelegate next)
         await next(context);
     }
 
-    private static bool IsOtelRequest(PathString path) =>
+    internal static bool IsOtelRequest(PathString path) =>
         path.StartsWithSegments("/otel/v1", StringComparison.OrdinalIgnoreCase)
         || path.StartsWithSegments("/otel/api", StringComparison.OrdinalIgnoreCase);
 }
