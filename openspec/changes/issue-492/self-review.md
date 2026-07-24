@@ -1,130 +1,164 @@
 # Self-Review — Issue #492
 
-Reviewer verdict: **FAIL** — the buildable design is sound and well-grounded, but two
-plan artifacts contradict each other on the highest-risk property of this issue
-(exactly-once input on reconnect recovery), and the proposal Impact section is
-stale relative to the chosen design. Both must be reconciled before building.
+Reviewer verdict: **PASS** — the plan is ready to build. Every load-bearing factual
+claim in `design.md` was verified against the current source and is accurate, the
+two contradictions flagged by the prior review have both been resolved in the
+artifacts, and the three tasks implement a coherent, CAS-guarded design that
+satisfies every issue acceptance criterion. Three non-blocking observations are
+recorded below for optional cleanup.
 
 ## Verification method
 
-I cross-checked every load-bearing factual claim in `design.md` against the
-current source. All of them are accurate:
+I read the issue, then independently re-derived each factual claim in
+`design.md` against the source (not trusting the design's own citations). Every
+claim holds:
 
-- Disconnect is one-sided: `RunnerHub.OnDisconnectedAsync` (`RunnerHub.cs:36-45`)
-  calls `RunnerDisconnectedAsync` (`AgentSessionGrain.cs:1311-1319`), which flips
-  **only** `Active → Unknown` (`:1314` guards on `Activity == Active`).
-  `OnConnectedAsync` (`RunnerHub.cs:21-32`) only registers + updates the build
-  hash — no reconciliation. ✓
-- Cancel never settles activity: `AgentSessionCancelRoutes.cs:60-146` is a pure
-  SignalR invoke; `CancelHandlerDeps` (`cancel-handler.ts:34-38`) has no outbox;
-  `handleCancel` (`:49-118`) returns the reply and stops. ✓
-- Recovery requires idle: `EnsureSessionIdleForRecovery` (`AgentSessionGrain.cs:552-558`)
-  throws on non-idle, gating `RecoverMissingRuntimeSessionAsync` (`:177-190`) and
-  Compact/Reset. `RunnerRoutes.cs:344,473` return `agent_session_recovery_conflict`. ✓
-- `session.activity { idle }` already settles `Unknown → Idle` with no prior-state
-  guard: `ApplyRuntimeEventToDomain` (`:1459-1461`) → `ParseActivity` (`:1482-1488`).
-  Note the existing `Unknown`-drops-`session.input` rule (`:839-841`) does **not**
-  touch `session.activity`, so the chosen channel is correct. ✓
-- Binding guard discards superseded facts: `AppendEventsAsync(..., requireCurrentRuntimeBinding: true)`
-  (`:826-837`). ✓
-- `RebindRuntimeSession` (`AgentSession.Transitions.cs:180-208`) requires idle + CAS
-  via `EnsureExpectedRuntimeBinding` (`:213-220`); `"missing-recovery"` is a valid
-  reason (`:191`). ✓
-- Convergence is workflow-only: `onDispatchReconnected` (`host.ts:350-362`) runs
-  `runConvergenceOnce`/`runCleanupOnce`; no AgentSession-binding pass. ✓
-- `RunnerId` is a durable column (`AgentSessionRow.cs:7`, written at
-  `AgentSessionStore.cs:160`); in-memory `RunnerConnectionTracker._sessions` is
-  cleared on disconnect (`RunnerConnectionTracker.cs:29-36`); no runner-scoped
-  session query exists today. ✓
-- Existence-check drift confirmed: `opencode/runtime.ts:134-137,293-296,313-319,369-372`
-  use `as never`; the typed contract already exists in `turn.ts:264-267`
-  (`session.get({ sessionID, directory }, { throwOnError: true })`) and the
-  active-turn status map read in `turn.ts:347-357`. `readCancelFacts` defaults
-  `stopConfirmed` to `true` (`command-runtime.ts:145,152`). Pi's `isStreaming` is
-  the active-turn signal (`pi/runtime.ts:293,354`), and only Pi can report an
-  unconfirmed stop (`pi/runtime.ts:283-311`). ✓
-- `BindingProbeResult` is binary today (`binding-recovery.ts:15-17`); only
-  `kind === "missing-session"` authorizes recovery (`:50-51`); present → no
-  second candidate (`:50`). ✓
+- **Disconnect is one-sided.** `RunnerHub.OnDisconnectedAsync`
+  (`RunnerHub.cs:36-45`) calls `RunnerDisconnectedAsync` per session from
+  `UnregisterAndGetSessions`; `RunnerDisconnectedAsync`
+  (`AgentSessionGrain.cs:1311-1319`) guards `Activity != Active → return`, else
+  sets `Unknown`. `OnConnectedAsync` (`RunnerHub.cs:21-32`) only registers +
+  updates the build hash — no reconcile. ✓
+- **Cancel never settles activity.** `AgentSessionCancelRoutes.ExecuteCancelAsync`
+  (`AgentSessionCancelRoutes.cs:60-146`) resolves the target, calls
+  `EnsureRuntimeSessionPresentAsync` (a presence check, not an activity mutation),
+  invokes SignalR `CancelAgentSession`, and returns the reply (surfacing
+  `interruptUnconfirmed` at `:143-144`). `CancelHandlerDeps`
+  (`cancel-handler.ts:34-38`) has no outbox; `handleCancel` (`:49-118`) returns
+  the reply and stops. ✓
+- **Recovery requires Idle.** `EnsureSessionIdleForRecovery`
+  (`AgentSessionGrain.cs:552-558`) throws on non-Idle, gating
+  `RecoverMissingRuntimeSessionAsync` (`:177-190`);
+  `RunnerRoutes.cs:344,473` map the throw to `agent_session_recovery_conflict`. ✓
+- **`session.activity {idle}` settles Unknown→Idle with no prior-state guard.**
+  `ApplyRuntimeEventToDomain` (`:1459-1461`) → `ParseActivity` (`:1482-1488`)
+  maps `"idle"→Idle` unconditionally. The `SessionInput`+Unknown drop rule
+  (`:839-841`) does not touch `SessionActivity`, so the chosen channel is safe. ✓
+- **Binding guard discards superseded facts.** `AppendEventsAsync(...,
+  requireCurrentRuntimeBinding:true)` (`:826-837`) rejects any event whose
+  `runtimeSessionId` ≠ current binding. `AppendRuntimeEventsAsync` (`:790-791`)
+  uses it. ✓
+- **`RebindRuntimeSession` requires Idle + CAS.** `AgentSession.Transitions.cs:186`
+  throws on non-Idle; `:188` calls `EnsureExpectedRuntimeBinding` (`:213-220`)
+  which throws `StaleRuntimeSessionBindingException` on mismatch;
+  `"missing-recovery"` is a valid reason (`:191`). ✓
+- **Convergence is workflow-only.** `onDispatchReconnected` (`host.ts:350-362`)
+  runs `runConvergenceOnce`/`runCleanupOnce`; no AgentSession-binding pass. ✓
+- **Durable RunnerId; in-memory index cleared on crash; no runner-scoped query.**
+  `AgentSessionRow.RunnerId` (`AgentSessionRow.cs:7`), written at
+  `AgentSessionStore.cs:160`. `RunnerConnectionTracker.UnregisterAndGetSessions`
+  (`RunnerConnectionTracker.cs:29-36`) clears `_sessions`. No `ListByRunner`
+  method exists in `AgentSessionQuerier`/`AgentSessionQuery`/`AgentSessionStore`
+  (grep returned nothing). ✓
+- **Existence-check drift + typed contract.** `opencode/runtime.ts:134-137`
+  (resolve), `:293-296` (followup resolve), `:313-319` (promptAsync), `:369-372`
+  (abort) all use `as never`. The typed contract already exists in
+  `turn.ts:264-267` (`session.get({ sessionID, directory }, { throwOnError:true})`)
+  and the status map read at `turn.ts:347-357`. `readCancelFacts`
+  (`command-runtime.ts:139-156`) defaults `stopConfirmed` to `true` (`:145,152`);
+  only Pi reports unconfirmed (`pi/runtime.ts:283-311`, `watchPiStop`). ✓
+- **Binary probe; only missing authorizes recovery.** `BindingProbeResult`
+  (`binding-recovery.ts:15-17`) is `{ok:true} | {ok:false;kind;message}`;
+  `:50` present→no candidate; `:51` only `missing-session` proceeds. ✓
+- **The durable outbox the design reuses is real.**
+  `AgentSessionRuntimeEventOutbox` (`runtime-event-outbox.ts:1-7`) is the
+  RunnerHost-owned primitive; the followup handler already records activity
+  facts through it (`followup-handler.ts:211` `recordFollowupActivity(...,
+  "idle")`, `:215` `..."unknown"`). So D3/D5 extend a proven channel. ✓
+- **No conflicting pre-existing symbols.** `ReconcileMissingBinding`,
+  `ListByRunnerForReconcile`, `ReconcileAgentSession` do not exist (grep empty). ✓
 
-The architecture (Runner-driven reconcile reusing the convergence loop, durable
-runner-scoped query, happy-path settle via the existing `session.activity`
-channel with zero new grain logic, confirmed-missing settle+rebind under one CAS,
-binding-guarded cancel fact, typed-contract migration) is coherent and reuses
-existing machinery well. Issue acceptance criteria are all covered by the three
-specs + three tasks; task ordering (T-003 depends on T-001's enriched probe) is
-correct.
+The architecture (Runner-driven reconcile over the existing convergence loop,
+durable non-Idle runner-scoped query, happy-path settle via the existing
+`session.activity` channel with zero new grain transition, confirmed-missing
+settle+rebind under one CAS, binding-guarded cancel fact, typed-contract
+migration) is coherent and reuses existing machinery rather than inventing new
+state-transition paths. D4's settle-then-rebind ordering is sound:
+`RebindRuntimeSession` (`:186`) checks Idle, and the new grain method settles
+Idle first within the same single-threaded activation, so the CAS at `:188`
+sees the unchanged old binding.
 
-## Finding A (BLOCKER) — spec and task contradict on exactly-once input for reconnect recovery
+## Prior findings — both resolved
 
-`runner-reconnect-reconciliation/spec.md` mandates input submission on reconnect
-recovery, while `design.md` (D4) and `tasks.json` (T-003) explicitly forbid it.
+- **Finding A (input-on-reconnect contradiction) — FIXED.** The prior review
+  flagged `runner-reconnect-reconciliation/spec.md` mandating input submission
+  on reconnect recovery while design D4 / T-003 forbade it. The current spec
+  requirement (`:36`) now reads "A bare reconnect SHALL submit no input — there
+  is no triggering input; when a task or Follow-up input is pending, that task
+  or Follow-up SHALL submit it exactly once ... and it SHALL NEVER be replayed
+  by reconnect or retry," with a matching scenario (`:44-49`). This is now
+  fully consistent with D4 and T-003 ("No input is submitted on bare
+  reconnect"). The general `runtime-binding-recovery` "submit the triggering
+  input exactly once" (`:53`) is consistent because "the triggering input"
+  presupposes a triggering task/follow-up, which the reconnect spec carves out.
+- **Finding B (proposal Impact staleness) — FIXED.** The current proposal Impact
+  states "unchanged on reconnect — `OnConnectedAsync` is not modified.
+  Reconciliation is Runner-driven" and "the cancel route remains a pure SignalR
+  invoke ... it does not record the activity fact," matching D1/D5 exactly. The
+  stale hub-orchestrated / route-records-fact wording the prior review cited is
+  gone.
 
-- **Spec requirement** (`specs/runner-reconnect-reconciliation/spec.md:36`):
-  "Recovery SHALL ... **SHALL submit the current input exactly once**."
-- **Spec scenario** (`specs/runner-reconnect-reconciliation/spec.md:44-48`,
-  "Recovery submits the current input exactly once"): "WHEN confirmed-missing
-  recovery runs on reconnect THEN **the triggering input SHALL be submitted
-  exactly once** against the confirmed replacement".
-- **Design D4** (`design.md:62`): "**No input is submitted** on a bare reconnect
-  (there is no triggering input); the next task/follow-up submits input exactly
-  once ... via the unchanged `resolveOrRecoverBinding` path."
-- **Task T-003** (`tasks.json`): description "No input is submitted on bare
-  reconnect"; acceptance criterion "no input is submitted on bare reconnect —
-  **verified by spec test**."
+## Observations (non-blocking)
 
-This is a direct contradiction on a SHALL, on the single most safety-critical
-invariant of this high-risk issue. Both sides are written as spec-testable
-behavior, so they cannot both be built.
+These do not prevent a correct build — the tasks are the build contract and are
+unambiguous — but are recorded so a cleanup task may tighten the artifacts.
 
-The design is the correct side. The reconnect reconcile query (D2 / T-003)
-projects only `{ sessionId, runtime, runtimeSessionId, workDir }` — it carries
-**no input payload** — and reconcile is triggered by SignalR reconnect in
-`onDispatchReconnected`, independent of task/follow-up lifecycle. Submitting a
-task's input from the reconcile layer would require the Runner to reach into
-Workflow task state, which the issue's non-goals forbid ("do not change Workflow
-retry/rerun semantics"). So the literal spec requirement is unsatisfiable from
-the reconcile path; the exactly-once invariant is in fact preserved by the
-retrying task layer probing the rebound binding (present → submit once, no replay).
+### O1 — reconnect spec attributes enumeration/reconciliation to "the Server" and says "every"; design is Runner-driven over non-Idle sessions
 
-**Required fix (spec only):** bring `runner-reconnect-reconciliation/spec.md`
-into line with D4. The reconnect requirement/scenario should state that bare
-reconnect submits no input (there is none), and that when a task/follow-up input
-is pending it is submitted exactly once by that task/follow-up against the
-confirmed replacement, never replayed by reconnect or retry. The "create at most
-one candidate + confirm replacement" clauses are fine as-is.
+`runner-reconnect-reconciliation/spec.md:3` requirement 1 and its first scenario
+(`:8`) say "the Server SHALL enumerate **every** AgentSession bound to that
+Runner and reconcile each one ... using the owning Runner's ... existence
+check." The chosen mechanism (D1/D2, T-003) is Runner-driven — the Runner
+**pulls** the list via `GET .../reconcile`, probes locally, and reports facts
+back — and the query is filtered to `Activity != Idle` (D2 rationale: Idle
+sessions are already settled). 
 
-## Finding B (secondary) — proposal Impact section is stale vs the chosen design
+This is a wording/quantifier mismatch, not a behavioral one. The behavioral
+outcome is identical: every bound session ends up correctly reconciled (Idle
+ones are already in their target state; non-Idle ones are probed and settled),
+and the spec scenarios are outcome-based and satisfiable by the Runner-driven
+mechanism. A literal reading of "the Server SHALL enumerate ... using the owning
+Runner's check" actually describes the Server-orchestrated alternative D1
+explicitly rejected (D1 alt-a), but the tasks steer the builder to the correct
+Runner-driven path, so no wrong work results. Recommend rephrasing the
+requirement/scenario to be mechanism-agnostic ("reconciliation SHALL cover each
+... ") or to name the Runner as the reconciler, and to acknowledge the non-Idle
+filter.
 
-`proposal.md` Impact (lines 22-23) describes two mechanisms that the design
-explicitly considered and rejected. The tasks follow the design, not the
-proposal, so this is a coherence/clarity defect rather than a build conflict —
-but it will mislead a builder who reads the proposal first.
+### O2 — no dedicated scenario for "uncertain input acceptance"
 
-- **Reconcile trigger location.** Proposal: "`OnConnectedAsync` enumerates
-  sessions bound to the reconnecting Runner and triggers reconciliation."
-  Design D1 (`design.md:36-42`) rejects hub/`OnConnectedAsync`-orchestrated
-  reconcile and selects Runner-driven reconcile via the existing convergence loop
-  (`onDispatchReconnected`), with the Runner pulling the list (D2).
-  `OnConnectedAsync` is **not** modified. Tasks follow D1.
-- **Cancel fact recording.** Proposal: "the cancel route records the
-  confirmed-stopped activity fact." Design D5 (`design.md:68-78`) rejects
-  route-side settle (alternative (a)) and instead adds the outbox to the
-  Runner-side `CancelHandlerDeps` so the cancel-handler records the
-  binding-guarded fact. Tasks follow D5.
+The issue's enumerated non-recovery set includes "uncertain input acceptance,"
+and every sibling condition (timeout, transport failure, unavailable runtime,
+corrupt response, `active`, unresolved `unknown`) has a dedicated scenario in
+`runtime-binding-recovery/spec.md:73-111` — except this one. It is not a
+behavioral gap: this issue does not change the input-submission path, and
+"uncertain input acceptance → no replay" is already guaranteed by the existing
+outbox `matching-receipt` policy (the head is retained until a matching receipt
+confirms acceptance) plus the "unresolved unknown blocks recovery" scenario.
+Adding an explicit scenario would make the coverage symmetric with the issue
+wording.
 
-**Required fix (proposal only):** correct the Impact bullets to match D1/D5
-(Runner-driven reconnect pull; cancel-handler-side outbox fact, not the API
-route).
+### O3 — concurrent task + reconcile can orphan a candidate Session
 
-## Coverage note (positive)
+If a task's `resolveOrRecoverBinding` and a reconnect reconcile pass both probe
+the same stale binding as missing before either rebinds, each creates a local
+candidate; the grain CAS (`EnsureExpectedRuntimeBinding`) then lets only one
+rebind succeed, leaving the other candidate unbound. This is a pre-existing
+property of `resolveOrRecoverBinding` (not introduced here), does not violate
+binding correctness, and the issue's "no multiple empty candidates" criterion is
+about a *single* AgentSession accumulating rebound candidates — which the CAS
+prevents (the second attempt probes the new binding → present → no creation).
+The design's "either ordering is safe" claim is accurate for the binding; the
+orphaned-candidate edge is a minor resource observation, not a correctness risk.
 
-All eight issue acceptance criteria map cleanly onto the three specs and three
-tasks. The non-recovery failure set (timeout / transport / unavailable / corrupt
-/ uncertain-input / active / unresolved-unknown) is exhaustively enumerated in
-`runtime-binding-recovery/spec.md` and reflected in T-003 acceptance. The
-superseded-binding invariant is covered generically across all three specs and
-relies on already-verified CAS/outbox guards. No acceptance criterion is left
-without a spec scenario or a task.
+## Coverage
 
-<promise>FAIL</promise>
+All eight issue acceptance criteria map onto the three specs and three tasks:
+reconnect-keeps-binding (D3/T-003), cancel-settles-idle (D5/T-002),
+never-missing/replaced (D6/T-001 + T-003), confirmed-missing one-candidate +
+input-once (D4/T-003), non-recovery-failure-set (T-003 + existing infra),
+superseded-binding-invariant (D7, all specs), no-multiple-candidates (D4 CAS),
+and the #489 auto-recovery scenario (Migration §3). Task ordering (T-003
+depends on T-001's enriched active-turn probe; T-002 independent) is correct.
+
+<promise>PASS</promise>
