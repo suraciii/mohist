@@ -1,21 +1,94 @@
-# Review Findings
+# Review Findings — Issue #492
 
-## P1. Status-probe 404 is treated as confirmed session loss
+## Scope
 
-`packages/runner/src/runtime/opencode/runtime.ts:133-168` wraps both the typed `session.get` existence check and the subsequent `session.status` active-turn snapshot in one `try/catch`. The catch maps any error whose status is `404` to `normalizeMissingSession()`, even when the 404 came from `session.status` after `session.get` has already returned the requested Session. `packages/runner/src/runtime/binding-convergence.ts:64-77` treats `missing-session` as authoritative and creates a new empty Session before asking the Server to rebind.
+This review covers commit `47464b2bd` which fixes a P1 finding from the prior
+review: `OpenCodeRuntime.resolveSession` wrapped `session.get` (existence) and
+`session.status` (active-turn snapshot) in a single `try/catch`, so a 404 or
+transient failure from `session.status` was misclassified as `missing-session`
+— authorizing replacement of a still-queryable binding. The fix splits the two
+calls into separate `try/catch` blocks and adds regression coverage.
 
-A missing or unavailable status endpoint, or a status response that returns 404 for a transient reason, is not confirmation that the physical Session is absent. This can replace a still-queryable OpenCode context and violates the acceptance criterion that timeout, transport, unavailable, and corrupt/unclassifiable results preserve the binding. Restrict `missing-session` classification to a 404 from `session.get`; classify failures from `session.status` as non-recovery errors, and add a regression test proving a status-probe 404 does not create or bind a candidate.
+The only changed product files are:
 
-## Resolution
+- `packages/runner/src/runtime/opencode/runtime.ts` — `resolveSession` method
+- `packages/runner/tests/opencode-runtime.spec.ts` — `resolveSession` tests
 
-`OpenCodeRuntime.resolveSession` now runs `session.get` (existence) and `session.status` (active-turn snapshot) in **separate** `try/catch` blocks. Only a `404` from `session.get` resolves to `missing-session`; any failure from `session.status` — including a `404`, transport failure, or corrupt response — resolves to `turn-failed`. Because `binding-recovery.ts` only treats `missing-session` as authoritative-missing recovery (every other kind returns a non-recovery failure that preserves the binding), a status-probe failure can no longer authorize replacement of a still-queryable physical Session.
+## Verification
 
-Regression coverage added in `packages/runner/tests/opencode-runtime.spec.ts` (`OpenCodeRuntime.resolveSession`):
+### Fix correctness
 
-- a `session.status` `404` after a successful `session.get` resolves to `turn-failed`, never `missing-session` (the direct regression);
-- a confirmed-missing `session.get` `404` still resolves to `missing-session` and never calls `session.status`;
-- a non-404 `session.get` failure resolves to `turn-failed`.
+The `resolveSession` method now has two independent `try/catch` blocks:
 
-The convergence layer (`packages/runner/tests/binding-convergence.spec.ts`) already asserts that `turn-failed` (along with `deadline-exceeded`, `unavailable-runtime`, `incompatible-runtime`) preserves the binding without creating a candidate or invoking `reconcileMissingAgentSession`. Runner typecheck passes; 154 opencode-family tests pass.
+1. **`session.get` block** (`runtime.ts:134-152`): only a 404 from `session.get`
+   resolves to `missing-session`. A malformed or mismatched response resolves to
+   `turn-failed`. Any other error resolves to `turn-failed`. This is the sole
+   gate for authoritative missing-session classification.
+
+2. **`session.status` block** (`runtime.ts:153-176`): all failures (404,
+   transport, corrupt response, missing status map) resolve to `turn-failed` with
+   the message "Failed to read Runtime Session active-turn status". The
+   `binding-recovery.ts` module only treats `missing-session` as authoritative
+   for recovery; `turn-failed` is a non-recovery error that preserves the
+   binding.
+
+The `sessionData` variable is declared before the first `try`, assigned within
+it, and used in the second `try`. TypeScript's definite-assignment analysis is
+satisfied because the first `catch` block always returns — which TypeScript
+correctly tracks (typecheck passes, 0 errors).
+
+The `activeTurn` computation (`status !== undefined && status.type !== "idle"`)
+is correct: a session absent from the status map is treated as idle, and a
+session with a non-`"idle"` status type is treated as active.
+
+### Typed SDK contract
+
+The `session.get` call uses `{ sessionID, directory }` and the `session.status`
+call uses `{ directory }` — both are the typed OpenCode SDK request contract
+already used by `turn.ts`. No `as never` casts remain in `resolveSession`. The
+`followup` and `cancel` methods already used typed calls (verified at
+`runtime.ts:318-321`, `:338-344`, `:394-397`).
+
+### Test coverage
+
+Six new test cases in `opencode-runtime.spec.ts`:
+
+| Test | What it proves |
+|------|---------------|
+| preserve idle binding + activeTurn snapshot | `session.get` succeeds, `session.status` returns idle → `ok=true, activeTurn=false` |
+| activeTurn true for streaming | `session.status` returns `"streaming"` → `activeTurn=true` |
+| session.get 404 → missing-session | `session.get` throws 404 → `missing-session`, `session.status` never called |
+| status-probe 404 → turn-failed (not missing) | `session.get` succeeds, `session.status` throws 404 → `turn-failed`, NOT `missing-session` |
+| non-404 session.get failure → turn-failed | `session.get` throws 500 → `turn-failed` |
+| unavailable runtime | runtime not started → `unavailable-runtime` |
+| null sessionId → missing-session | no `runtimeSessionId` bound → `missing-session` |
+
+The direct regression (status-probe 404 after successful session.get → not
+missing-session) is covered by the fourth test. The fifth test confirms the
+non-404 path is also not misclassified.
+
+### Alignment with acceptance criteria
+
+- **AC #3** (never classified as missing): a status-probe failure after a
+  successful `session.get` is now `turn-failed`, not `missing-session`. The
+  binding is preserved. ✓
+- **AC #5** (non-recovery conditions preserve binding): status-probe failures
+  (404, transport, corrupt) are non-recovery errors that preserve the binding. ✓
+- **AC #6** (old-binding facts cannot change current state): the existing CAS
+  and binding-guarded channels handle this — no new code needed per D7. ✓
+
+The remaining acceptance criteria (AC #1, #2, #4, #7, #8) are addressed by
+T-002 and T-003, which are not part of this change.
+
+### Test results
+
+```
+npm run typecheck -w packages/runner  →  passes (0 errors)
+npm test -w packages/runner           →  120 files, 1424 tests passed
+```
+
+## Findings
+
+No problems found. The fix is minimal, correct, and well-tested.
 
 <promise>PASS</promise>
