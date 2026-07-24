@@ -304,3 +304,160 @@
   watch hit (still fires), archived agent (still skipped), replay
   under same configuration (stable trigger identity preserved so
   grain first-writer per-source key collides).
+
+# T-004 — Watch human surface (CLI + Web)
+
+## Codebase Patterns (T-004)
+
+- **Shared agent resolution.** `MohistCliCommands.Agent.cs` exposes
+  `ResolveAgentAsync` and `AgentRef` as `internal` (was `private`).
+  `IssueCommands.Watch.cs` calls them directly. The promotion
+  pattern matches `VariableCommands` (a separate `internal static
+  class` shared across command groups).
+- **CLI command-group shape.** `BuildWatch(api)` returns a `Command`
+  with `add` / `remove` / `list` leaves, mirroring
+  `BuildPrereq(api)`. `add` and `remove` use
+  `PrintMutationResourceAsync(..., IssueDescriptor, ...)` to render
+  the re-enriched read model as `IssueShow` — the same idempotent
+  state-as-truth path used by `mo issue start` and the prerequisites
+  flow. `list` is a focused two-group render via
+  `PrintWithOutputAsync(..., IssueWatchList)`; it consumes the same
+  `GET /api/projects/{p}/issues/{n}` detail read model — no new
+  route, just a different `TableShape`.
+- **Mutation bodies.** POST/DELETE `/watch` both take a
+  `{ agentId }` body. `add` uses the same `agentId`-in-body shape
+  the server already documents (IssueRoutes.Watch.cs); `remove` does
+  the same — `DeleteWatchRequest` is `[FromBody]`-decorated on the
+  server side.
+- **Validation surfacing.** `agent_not_found` / `agent_archived` flow
+  through `CliResponseReader` as `code` in the failure envelope; the
+  CLI prints `error (code)` and exits non-zero. There is no
+  CLI-side code mapping — the server codes are the contract.
+- **Local missing-flag path.** `--agent` is required; the CLI exits 1
+  locally and never hits the server. The agent-name → id resolution
+  is a separate client-side step before the mutation POST/DELETE
+  (mirrors `mo agent update`).
+- **IssueShow rendering.** `TableRenderer.Issues.cs` grew a
+  `RenderWatchEntries(data)` private helper that emits two labelled
+  sections (`watching:` / `muted:`) listing
+  `agentId (state)` per entry. Both are omitted when their arrays
+  are empty, keeping the existing `mo issue show` output stable for
+  the common case. `RenderIssueWatchList` is the focused two-group
+  variant for `mo issue watch list` — issue number header + the same
+  helper, no workflow / decision / description clutter.
+- **Web shape.** The existing `Issue` TS interface grew
+  `watching?: IssueWatchEntry[]` and `muted?: IssueWatchEntry[]`,
+  where `IssueWatchEntry` is the four-field record the server
+  projects. The detail page renders two new
+  `CollapsibleRailCard` entries — one per group — gated on
+  `entries.length > 0` so issues with no declarations show no cards.
+  The body is the new `IssueWatchCard` (a thin `CardSection`
+  wrapper). No new read API, no in-page add/remove controls.
+
+## Files added (T-004)
+
+- `packages/cli/Mohist.Cli/MohistCliCommands.Issue.Watch.cs` —
+  `BuildWatch` + `BuildWatchAdd` + `BuildWatchRemove` +
+  `BuildWatchList` (partial `IssueCommands`).
+- `packages/cli/tests/Mohist.Cli.Tests/CliIssueWatchSpecs.cs` —
+  11 facts: POST/DELETE bodies, missing-flag local error, unknown
+  agent name (no server hit), `agent_not_found` / `agent_archived`
+  envelope codes, focused list render (with and without entries),
+  `issue show` rendering the watching/muted sections, help text,
+  project override.
+- `packages/web/src/pages/issue-detail/ui/cards/IssueWatchCard.tsx`
+  — `watching` / `muted` variant body, `unframed`-aware like the
+  prerequisites card.
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.reference-rail.watch.test.tsx`
+  — 3 facts: cards render with entries, cards are absent when no
+  entries, no in-page add/remove controls.
+
+## Files modified (T-004)
+
+- `packages/cli/Mohist.Cli/MohistCliCommands.Agent.cs` —
+  `ResolveAgentAsync` and `AgentRef` promoted from `private` to
+  `internal` so `IssueCommands` can call them.
+- `packages/cli/Mohist.Cli/MohistCliCommands.Issue.cs` —
+  registered `BuildWatch(api)` next to `BuildPrereq`.
+- `packages/cli/Mohist.Cli/MohistCliApi.cs` — added
+  `TableShape.IssueWatchList`.
+- `packages/cli/Mohist.Cli/ResourceOutput.cs` — added
+  `["number", "watching", "muted"]` field list for the new shape
+  (default `Single` cardinality; no list variant needed).
+- `packages/cli/Mohist.Cli/TableRenderer.cs` — added the dispatch
+  arm for `IssueWatchList`.
+- `packages/cli/Mohist.Cli/TableRenderer.Issues.cs` — `RenderIssueShow`
+  calls a new `RenderWatchEntries(data)` (gated on non-empty) and a
+  new `RenderIssueWatchList` implements the focused two-group view.
+- `packages/web/src/entities/issue/model/issue.ts` — added
+  `IssueWatchEntry` interface and `watching` / `muted` fields on
+  `Issue`.
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` —
+  imported `IssueWatchCard`; inserted two `CollapsibleRailCard`
+  entries in the reference rail, gated on non-empty arrays.
+
+## Gotchas (T-004)
+
+- **Server `code` propagation.** `agent_not_found` /
+  `agent_archived` are returned via `ApiResults.Fail(...,
+  statusCode, code)`, not the `ApiResults.NotFound` /
+  `ApiResults.Conflict` convenience helpers — the latter hard-code
+  the response `code` to `"not_found"` / `"conflict"` and would
+  silently strip the machine code the spec asserts. The
+  `MapWatchValidationError` private helper in
+  `IssueRoutes.Watch.cs` already routes both codes through
+  `ApiResults.Fail`. The CLI tests assert on the surfaced code
+  substring to lock the contract.
+- **No silent fallback on the `--agent` lookup.** `IssueWatchAdd`
+  / `IssueWatchRemove` resolve the agent by name (or treat the value
+  as an id when it starts with `agent_`) before any
+  POST/DELETE. When the lookup fails, the CLI writes a local error
+  and returns 1; it never sends a request with an unresolvable name.
+  This matches `mo agent update` / `mo agent archive`. Tests
+  `IssueWatchAdd_UnknownAgentName_DoesNotCallServer` locks the
+  contract.
+- **TableShape catalog discipline.** The new `IssueWatchList` shape
+  is `Single` cardinality (the GET detail response is one
+  object) — it does NOT need a `Collection` switch arm. Forgetting
+  to add the fields-list would have made the JSON `--json` selection
+  advertise the default fields, not the watch-specific ones.
+- **Web refactor risk.** `IssueDetailPage.reference-rail.contents.test.tsx`
+  has a "forbidden testids" block that asserts which cards are not
+  in the rail. The new `reference-rail-watching` /
+  `reference-rail-muted` cards are conditional on
+  `entries.length > 0`, so they only show when the test fixture
+  provides entries. The existing forbidden-list test passes
+  without modification (it uses the default empty `makeIssue()`,
+  which has no `watching` / `muted`).
+
+## Validation matrix (T-004)
+
+- CLI:
+  - `mo issue watch add <n> --agent <name>` POSTs
+    `{ "agentId": "<resolved id>" }` to
+    `/api/projects/{p}/issues/{n}/watch` and renders the re-enriched
+    `IssueShow` (state-as-truth).
+  - `mo issue watch remove <n> --agent <name>` DELETEs the same URL
+    with the same body and renders the re-enriched `IssueShow`.
+  - `mo issue watch list <n>` GETs
+    `/api/projects/{p}/issues/{n}` and renders the focused
+    two-group view (`watching:` + `muted:` headers, one
+    `agentId (state)` line per entry). Empty entries ⇒ no headers,
+    just the `issue:` line.
+  - `mo issue show <n>` includes the `watching:` / `muted:`
+    sections when entries exist; the sections are absent when both
+    arrays are empty so the common-case output is unchanged.
+  - Missing `--agent` flag ⇒ local `1` exit, no server hit.
+  - Unknown agent name ⇒ local "Agent '...' not found" + `1` exit,
+    no server hit.
+  - `agent_not_found` / `agent_archived` ⇒ server code surfaces in
+    the CLI stderr; `1` exit.
+- Web:
+  - `Issue` carries `watching` / `muted` arrays; issues without
+    declarations show no card.
+  - `reference-rail-watching` and `reference-rail-muted` cards
+    render when populated; both collapse on a narrow viewport and
+    expand on a deliberate click, mirroring the prerequisites
+    pattern.
+  - No in-page add/remove controls.
+

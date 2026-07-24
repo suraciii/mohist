@@ -86,6 +86,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "name", "target", "priority", "enabled", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.DeadLetterList or MohistCliApi.TableShape.DeadLetterRedelivery => ["id", "eventId", "handler", "attempts", "status", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.ActivityList => ["id", "provenance", "scope", "kind", "time", "title", "description", "eventType", "issueNumber", "workflowRunId", "sessionId", "runnerId", "status"],
+            MohistCliApi.TableShape.IssueWatchList => ["number", "watching", "muted"],
             MohistCliApi.TableShape.OpencodeModels => ["id"],
             MohistCliApi.TableShape.RunnerList =>
                 ["id", "kind", "hostname", "scope", "status", "registeredAt", "lastHeartbeatAt", "connectionState", "capabilities", "coderModels", "coderModelCount", "capacity", "activeWork", "activeWorks"],

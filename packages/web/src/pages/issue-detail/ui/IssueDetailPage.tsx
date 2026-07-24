@@ -44,6 +44,7 @@ import { IssueDriftCard } from './cards/IssueDriftCard'
 import { IssueConfigurationCard } from './cards/IssueConfigurationCard'
 import { IssuePrerequisitesCard } from './cards/IssuePrerequisitesCard'
 import { IssueReadinessCard } from './cards/IssueReadinessCard'
+import { IssueWatchCard } from './cards/IssueWatchCard'
 import { CollapsibleRailCard } from './cards/CollapsibleRailCard'
 import { CompositeParentOverview } from './sections/CompositeParentOverview'
 import { IssueDescriptionSection } from './sections/IssueDescriptionSection'
@@ -659,6 +660,28 @@ export function IssueDetailPage({
                   summary={issue.canStart ? 'ready' : 'not ready'}
                 >
                   <IssueReadinessCard issue={issue} unframed />
+                </CollapsibleRailCard>
+              )}
+
+              {issue.watching && issue.watching.length > 0 && (
+                <CollapsibleRailCard
+                  testId="reference-rail-watching"
+                  title="Watching"
+                  forceCollapsed={isNarrowViewport}
+                  summary={`${issue.watching.length} agent${issue.watching.length === 1 ? '' : 's'}`}
+                >
+                  <IssueWatchCard entries={issue.watching} variant="watching" unframed />
+                </CollapsibleRailCard>
+              )}
+
+              {issue.muted && issue.muted.length > 0 && (
+                <CollapsibleRailCard
+                  testId="reference-rail-muted"
+                  title="Muted"
+                  forceCollapsed={isNarrowViewport}
+                  summary={`${issue.muted.length} agent${issue.muted.length === 1 ? '' : 's'}`}
+                >
+                  <IssueWatchCard entries={issue.muted} variant="muted" unframed />
                 </CollapsibleRailCard>
               )}
             </div>
