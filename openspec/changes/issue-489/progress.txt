@@ -1,0 +1,98 @@
+# Issue #489 working memory
+
+## Codebase Patterns
+
+- **Domain model → Row → DbSet → EF config → migration**: WatchEntry /
+  WatchEntryRow / DbSet<WatchEntryRow> / modelBuilder.Entity<WatchEntryRow>(&#123;...&#125;)
+  / YYYYMMDDhhmmss_AddIssueWatchEntries are added in lockstep. The migration
+  timestamp sits at 20260724000000 (after the latest 20260722120000).
+- **Domain model conventions**: short POCO with `string Id`/ProjectId/AgentId,
+  String constants for statuses (e.g. `RoutingRuleStatus.Active`/`Archived`,
+  `WatchEntryState.Watching`/`Muted`). WatchEntry uses `(ProjectId, IssueNumber,
+  AgentId)` as the composite identity — there is no separate `Id`. This matches
+  `IssuePrerequisiteRow` (composite key).
+- **EF config**: `entity.ToTable("...")`, `entity.HasKey(...)`, max-length on
+  strings, mandatory columns marked `IsRequired()`, secondary indexes with
+  `HasDatabaseName(...)`. Designer file pattern = `BuildTargetModel` delegates
+  to `MohistDbContextModelSnapshot.BuildModelCore` (the existing snapshot
+  exposes `BuildModelCore` as `internal static`).
+- **Store shape**: `IScopedService` + `IDbContextFactory<MohistDbContext>` +
+  `AgentQuerier` + `TimeProvider`. Same constructor signature as
+  `RoutingRuleStore`. Add/Remove/List are pure data-shape methods that take
+  validated arguments; the validation is in a private `ValidateActiveAgentAsync`
+  helper that mirrors `RoutingRuleStore.ValidateAsync`'s agent_not_found /
+  agent_archived pattern.
+- **Spec tests**: Used `MohistDbFixture` (SpecTests/Support) + migrated SQLite
+  template. The fixture auto-registers `WatchEntryStore` via the
+  `IScopedService` conventional-registration scan, so no extra wiring is needed.
+  Tests use unique project IDs per scenario to avoid collisions across the
+  shared fixture.
+- **Migration generation gotcha**: `dotnet-ef migrations add` rewrites the
+  model snapshot wholesale (which would lose the `BuildModelCore` shared helper
+  pattern). The migration code + Designer are hand-written and the snapshot
+  is patched in place to add the new entity block (modeled on the
+  `RoutingRuleRow` block in the snapshot).
+
+## Conventions followed
+
+- Domain class in `Mohist.Server.Agent.Domain` (per FeatureDirectories rule).
+- Row class in `Mohist.Server.Infrastructure.Data.Agent` (per RowModels_AreInInfrastructureData).
+- Store class in `Mohist.Server.Agent.Services` (per FeatureDirectories rule).
+- Migration in `Mohist.Server.Infrastructure.Data.Migrations` (per Migrations_AreInInfrastructureData).
+- `TimeProvider` injected; no wall-clock reads in product code.
+- Test uses `IDbContextFactory<MohistDbContext>` (per design/testing.md DB row).
+- Tests use unique project IDs per fact to avoid IClassFixture<MohistDbFixture>
+  state collisions.
+
+## Gotchas
+
+- `dotnet-ef migrations add` runs web build by default — pass `-p:SkipWebBuild=true`
+  to skip the `npm run build -w packages/web` target. Without it the tool aborts
+  with `sh: 1: tsx: not found` because the workspace's deps aren't installed.
+- The convention outcome of `dotnet-ef migrations add` rewrites the model
+  snapshot to a non-`BuildModelCore` shape, breaking the existing Designer
+  files. So the migration is added by hand and the snapshot is patched instead.
+- MTP requires `--filter-method` (not VSTest's `--filter`) for `dotnet test`.
+- `dotnet ef migrations list` asks for `--no-build` after `dotnet build`; the
+  helper wants a fresh build artifact or finds a stale model and lists the
+  migration as Pending even though it has already compiled.
+
+## Files added
+
+- `packages/server/src/Mohist.Server/Agent/Domain/WatchEntry.cs`
+  (`WatchEntry` + `WatchEntryState` constants).
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Agent/WatchEntryRow.cs`
+  (flat columns mirroring `RoutingRuleRow` style).
+- `packages/server/src/Mohist.Server/Agent/Services/WatchEntryStore.cs`
+  (`WatchEntryStore`, `WatchEntryGroups`, `WatchEntryValidationException`).
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260724000000_AddIssueWatchEntries.cs`
+  + `.Designer.cs`.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Agent/Services/WatchEntryStoreSpecs.cs`
+  (9 facts covering every spec scenario + list grouping).
+
+## Files modified
+
+- `Mohist.Server/Infrastructure/Data/Db/MohistDbContext.cs` — added
+  `DbSet<WatchEntryRow> WatchEntries` + the WatchEntryRow EF config block
+  (unique index, two secondary indexes).
+- `Mohist.Server/Infrastructure/Data/Migrations/MohistDbContextModelSnapshot.cs`
+  — appended the WatchEntryRow entity block (modeled on the RoutingRuleRow
+  block). Tooling regenerates this file automatically on the next migration;
+  edits here only carry the current snapshot forward.
+
+## Open questions / follow-ups for later tasks
+
+- T-002 (route + read model) needs to surface `WatchEntryGroups` shaped as the
+  IssueReadModel's `Watching` and `Muted` collections. The current store
+  already exposes the two groups separately, so the projection is one row.
+- T-003 (dispatch) needs to seed watch entries directly via `WatchEntryStore`
+  in its spec tests — note that `WatchEntryStore.AddAsync` is now the documented
+  entry point and it throws `WatchEntryValidationException` on agent_not_found
+  / agent_archived (the dispatch path must not trigger this — it already has
+  fresh `AgentLookup` data).
+- The `WatchEntry` domain shape uses `(ProjectId, IssueNumber, AgentId)` as
+  identity. Future routes decode it from URL segments (`/projects/{projectId}/issues/{number}/watch`)
+  and pass the integer to the store. No string formatting is needed.
+- The `TriggerRuleId` "watch:{agentId}" convention (design D8) is a downstream
+  T-003 concern; this task deliberately does not touch `IAgentLauncher` or
+  `AgentJobGrain`.
