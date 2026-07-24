@@ -1,0 +1,95 @@
+{
+  "project": "mohist-local",
+  "description": "Per-issue Agent watch (watching/muted): WatchEntry resource, command/projection surface, and dispatch integration (muted suppression + watch launches on the fixed event set).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "WatchEntry resource: domain model, persistence, store with state machine and active-Agent validation",
+      "spec": "specs/issue-watch/spec.md#WatchEntry resource",
+      "description": "Build the WatchEntry data layer in the Agent context. Add the WatchEntry domain model + WatchEntryState { watching, muted } (mirror Agent/Domain/RoutingRule.cs), a flat-column WatchEntryRow + DbSet + EF config + migration (mirror RoutingRuleRow / the RoutingRules config block / 20260718100000_AddRoutingRules.cs), and a WatchEntryStore : IScopedService (mirror RoutingRuleStore) implementing the add/remove/list state-machine transitions and idempotency with active-Agent validation (reuse RoutingRuleStore.ValidateAsync's agent_not_found / agent_archived pattern via a new WatchEntryValidationException). This is the foundation every other task consumes; it delivers no UI or dispatch behavior yet.",
+      "acceptanceCriteria": [
+        "WatchEntryRow is persisted with a unique index on (ProjectId, IssueNumber, AgentId) so watching and muted cannot coexist on the same triple; the EF migration applies cleanly (dotnet build + model snapshot compiles).",
+        "Unit tests against WatchEntryStore (using the project's IDbContextFactory fake per design/testing.md) verify the full state machine: add none->watching, add muted->watching, add watching->idempotent; remove watching->deleted, remove none->muted, remove muted->idempotent.",
+        "Unit tests verify active-Agent validation: unknown agent rejects with code agent_not_found and archived agent rejects with code agent_archived, neither mutating any WatchEntry.",
+        "ListAsync(projectId, issueNumber) returns the issue's watching and muted entries as two groups.",
+        "npm test (server) passes; C# build is warning-clean (TreatWarningsAsErrors)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WatchEntry + WatchEntryState domain model; WatchEntryRow + DbSet + EF config + <ts>_AddIssueWatchEntries migration; WatchEntryStore (add/remove/list + validation + WatchEntryValidationException); unit tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "See design D1 (flat-column side relation, not Issue-grain state) and D3 (remove creates muted unconditionally when no declaration exists — do NOT verify a covering routing rule). Unique key is (ProjectId, IssueNumber, AgentId); add secondary indexes on (ProjectId, IssueNumber) and (ProjectId, IssueNumber, State) for projection/dispatch queries."
+    },
+    {
+      "id": "T-002",
+      "title": "Watch command & projection surface (server): API routes + issue read-model projection",
+      "spec": "specs/issue-watch/spec.md#watch add state transitions",
+      "description": "Expose WatchEntry over HTTP and project it into the issue read model. Add Watching and Muted collections (default []) to IssueReadModel and a new batched projection block in IssueQuerier.EnrichAsync (beside the comments/attachments block) reading WatchEntry rows via the shared MohistDbContext. Add IssueRoutes.Watch.cs (POST add, DELETE remove) that resolve project + issue existence, call WatchEntryStore, and return issuesQuery.GetAsync (re-enriched model); mount it in IssueRoutes.cs. list needs no endpoint — it is the GET detail projection. Deliver the full server-side operable + readable surface.",
+      "acceptanceCriteria": [
+        "POST /api/projects/{projectRef}/issues/{number}/watch transitions the declaration per the state machine and returns the enriched IssueReadModel with the agent in the correct watching/muted group; idempotent add/remove report the current state without error.",
+        "DELETE .../watch removes a watching declaration (or records muted when none existed) and returns the re-enriched model.",
+        "agent_not_found / agent_archived outcomes are returned with their machine codes and do not mutate state.",
+        "Spec tests (high-integration, server fakes per design/testing.md) cover the issue-watch scenarios: unique state per pair, add/remove transitions + idempotency, list separates watching/muted, and watch projection appears in the issue detail read model.",
+        "GET issue detail lists and single-issue both carry Watching/Muted when entries exist and empty arrays otherwise.",
+        "npm test (server) passes; build is warning-clean."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "IssueRoutes.Watch.cs + IssueRoutes.cs mount; IssueReadModel Watching/Muted fields; IssueQuerier.EnrichAsync projection block; spec tests for the issue-watch command/projection scenarios.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "See design D2 (route calls WatchEntryStore directly, NOT IIssueGrain — watch is Agent-context-owned; deviates from the prerequisites mirror on purpose) and D6 (projection is a cross-context read through the shared DbContext). Mirror Api/IssueRoutes.Prerequisites.cs return-shape (re-query enriched model)."
+    },
+    {
+      "id": "T-003",
+      "title": "Watch dispatch behavior: muted suppression + watching launches on the fixed event set",
+      "spec": "specs/issue-watch-dispatch/spec.md#Muted suppression of routing-rule hits",
+      "description": "Implement the issue-watch-dispatch runtime in RoutingDispatchHandler. Add muted suppression after the issue number is resolved and before LaunchRoutedAsync (mirror the archived-skip disposition: continue + LogWarning). Add a watching-launch pass after the rule loop, guarded by evt.Type in {stage.approval-requested, run.failed} and the presence of an issue; for each watching entry reuse the routed launch path (RoutedAgentLaunchContextResolver + RecordPreflightFailureAsync + IAgentLauncher.LaunchRoutedAsync) with the built-in watch prompt. Remove the rules.Count==0 early return so watch fires with zero routing rules. Enforce one launch per (event, agent) via a local HashSet when a rule and a watch coincide.",
+      "acceptanceCriteria": [
+        "A muted agent's routing-rule hit is suppressed (no launch) with a structured log, and only on that issue — the same agent launches normally on other issues (spec scenario 'Mute does not leak to other issues').",
+        "A watching agent launches on stage.approval-requested and run.failed, and does NOT launch on any other event type or when the event carries no issue.",
+        "When one event both matches a routing rule for an agent and that agent is watching, the agent is launched exactly once; replaying the same eventId does not create a second AgentJob (grain first-writer).",
+        "Watch launches use the built-in prompt (event fact + identity directive), never a per-watch ResponsePrompt, and mark provenance (TriggerRuleId carries a watch:-prefixed value).",
+        "Watch launches reuse workspace resolution and preflight-failure handling identical to routing launches (a preflight failure records a failed AgentJob).",
+        "Spec tests (high-integration, injected fakes — no real network/grain/orleans per design/testing.md) cover all issue-watch-dispatch scenarios.",
+        "npm test (server) passes; build is warning-clean."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RoutingDispatchHandler muted-suppression gate + watching-launch pass; built-in watch prompt; per-event (eventId, agentId) dedup; spec tests for issue-watch-dispatch.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "See design D4 (suppression in the handler, not the envelope-only evaluator), D5 (fold watch-launch into RoutingDispatchHandler, not a separate handler, so suppression and launch share one dedup scope; remove the no-rules early return), D7 (handler-level HashSet dedup — do NOT normalize the launcher's stable key to agentId, that would change routing semantics), D8 (watch:-prefixed TriggerRuleId for provenance). Seed watch entries directly via WatchEntryStore in tests."
+    },
+    {
+      "id": "T-004",
+      "title": "Watch human surface: CLI command group + issue view rendering + Web read-only cards",
+      "spec": "specs/issue-watch/spec.md#Watch projection in issue detail",
+      "description": "Render watching/muted to humans. CLI: add MohistCliCommands.Issue.Watch.cs (BuildWatch -> watch add/remove/list leaves, registered in MohistCliCommands.Issue.cs); promote ResolveAgentAsync + AgentRef to a shared internal helper so watch add/remove reuse agent resolution; render add/remove via PrintMutationResourceAsync as IssueShow (idempotent state-as-truth) and add watching/muted sections to TableRenderer.Issues.cs RenderIssueShow. Web: add watching/muted to the Issue TS interface and two read-only CollapsibleRailCard entries in IssueDetailPage.tsx's reference rail (operations stay CLI-only this issue).",
+      "acceptanceCriteria": [
+        "'mo issue watch add <issue> --agent <name>' then 'mo issue view' and 'mo issue watch list' show the agent in the watching section; remove shows muted where applicable; idempotent re-runs report current state (rendered state is source of truth).",
+        "agent_not_found / agent_archived errors surface to the user via the server code flowing through the response envelope (no CLI-side code mapping).",
+        "Web issue detail renders watching and muted agents read-only from the existing read model (no new read API, no in-page add/remove controls).",
+        "CLI tests cover the watch command rendering paths; Web typecheck + tests pass.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass; CLI/server builds are warning-clean."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "MohistCliCommands.Issue.Watch.cs + shared ResolveAgentAsync/AgentRef; TableRenderer.Issues.cs watching/muted sections; Web Issue interface fields + CollapsibleRailCard entries; CLI/Web tests.",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "See design D9 (CLI conventions; 'watch' is overloaded — mo run watch polls a run, mo issue watch subscribes; nesting under issue disambiguates). Web rendering mirrors the prerequisites CollapsibleRailCard pattern (gated on non-empty). Read-only this issue per Non-Goals."
+    }
+  ]
+}
