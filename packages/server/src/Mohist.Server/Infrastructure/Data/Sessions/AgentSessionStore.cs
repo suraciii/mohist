@@ -73,7 +73,7 @@ public class AgentSessionStore : IAgentSessionStore
             .ToListAsync(ct);
 
         return rows
-            .Select(AgentSessionJson.Deserialize)
+            .Select(row => AgentSessionJson.Deserialize(row))
             .OfType<AgentSession>()
             .Where(session => session.Status.Activity != AgentSessionActivity.Idle)
             .Select(session => new AgentSessionReconcileBinding(
