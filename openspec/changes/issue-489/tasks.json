@@ -53,10 +53,10 @@
       "acceptanceCriteria": [
         "A muted agent's routing-rule hit is suppressed (no launch) with a structured log, and only on that issue — the same agent launches normally on other issues (spec scenario 'Mute does not leak to other issues').",
         "A watching agent launches on stage.approval-requested and run.failed, and does NOT launch on any other event type or when the event carries no issue.",
-        "When one event both matches a routing rule for an agent and that agent is watching, the agent is launched exactly once; replaying the same eventId does not create a second AgentJob (grain first-writer).",
-        "Watch launches use the built-in prompt (event fact + identity directive), never a per-watch ResponsePrompt, and mark provenance (TriggerRuleId carries a watch:-prefixed value).",
+        "When one event both matches a routing rule for an agent and that agent is watching, the agent is launched exactly once (within-delivery HashSet dedup). Under unchanged dispatch configuration, replaying the same eventId does not create a second AgentJob (grain first-writer per source); cross-delivery source mutation (config changed between deliveries) is explicitly out of scope per design D7 and the spec.",
+        "Watch launches use the built-in prompt (event fact + identity directive), never a per-watch ResponsePrompt, and mark provenance (TriggerRuleId carries a watch:-prefixed value — a string-prefix convention, not a typed marker, per design D8).",
         "Watch launches reuse workspace resolution and preflight-failure handling identical to routing launches (a preflight failure records a failed AgentJob).",
-        "Spec tests (high-integration, injected fakes — no real network/grain/orleans per design/testing.md) cover all issue-watch-dispatch scenarios.",
+        "Spec tests (high-integration, injected fakes — no real network/grain/orleans per design/testing.md) cover all issue-watch-dispatch scenarios. Because no single task owns the CLI->dispatch path, these tests seed watch entries directly via WatchEntryStore and assert the full event->watch-launch behavior (including the rule+watch single-launch and same-config replay cases), proving the dispatch capability end-to-end at the spec level.",
         "npm test (server) passes; build is warning-clean."
       ],
       "priority": 3,
@@ -67,15 +67,15 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "See design D4 (suppression in the handler, not the envelope-only evaluator), D5 (fold watch-launch into RoutingDispatchHandler, not a separate handler, so suppression and launch share one dedup scope; remove the no-rules early return), D7 (handler-level HashSet dedup — do NOT normalize the launcher's stable key to agentId, that would change routing semantics), D8 (watch:-prefixed TriggerRuleId for provenance). Seed watch entries directly via WatchEntryStore in tests."
+      "notes": "See design D4 (suppression in the handler, not the envelope-only evaluator), D5 (fold watch-launch into RoutingDispatchHandler, not a separate handler, so suppression and launch share one dedup scope; remove the no-rules early return), D7 (handler-level HashSet dedup — do NOT normalize the launcher's stable key to agentId, that would change routing semantics; the at-most-once guarantee is scoped to within-delivery + same-config replay, cross-delivery config drift is out of scope), D8 (watch:-prefixed TriggerRuleId for provenance). Seed watch entries directly via WatchEntryStore in tests."
     },
     {
       "id": "T-004",
       "title": "Watch human surface: CLI command group + issue view rendering + Web read-only cards",
-      "spec": "specs/issue-watch/spec.md#Watch projection in issue detail",
-      "description": "Render watching/muted to humans. CLI: add MohistCliCommands.Issue.Watch.cs (BuildWatch -> watch add/remove/list leaves, registered in MohistCliCommands.Issue.cs); promote ResolveAgentAsync + AgentRef to a shared internal helper so watch add/remove reuse agent resolution; render add/remove via PrintMutationResourceAsync as IssueShow (idempotent state-as-truth) and add watching/muted sections to TableRenderer.Issues.cs RenderIssueShow. Web: add watching/muted to the Issue TS interface and two read-only CollapsibleRailCard entries in IssueDetailPage.tsx's reference rail (operations stay CLI-only this issue).",
+      "spec": "specs/issue-watch/spec.md#watch list",
+      "description": "Render watching/muted to humans. CLI: add MohistCliCommands.Issue.Watch.cs (BuildWatch -> watch add/remove/list leaves, registered in MohistCliCommands.Issue.cs); promote ResolveAgentAsync + AgentRef to a shared internal helper so watch add/remove reuse agent resolution; render add/remove via PrintMutationResourceAsync as IssueShow (idempotent state-as-truth) and add watching/muted sections to TableRenderer.Issues.cs RenderIssueShow (covers the 'Watch projection in issue detail' scenarios for CLI view). watch list renders a focused two-group view (watching agents / muted agents) consuming the same GET detail read model — NOT the full IssueShow (design D9). Web: add watching/muted to the Issue TS interface and two read-only CollapsibleRailCard entries in IssueDetailPage.tsx's reference rail (covers the Web detail projection scenario; operations stay CLI-only this issue).",
       "acceptanceCriteria": [
-        "'mo issue watch add <issue> --agent <name>' then 'mo issue view' and 'mo issue watch list' show the agent in the watching section; remove shows muted where applicable; idempotent re-runs report current state (rendered state is source of truth).",
+        "'mo issue watch add <issue> --agent <name>' then 'mo issue view' shows the agent in the watching section; remove shows muted where applicable; idempotent re-runs report current state (add/remove render IssueShow — state-as-truth). 'mo issue watch list <issue>' renders a focused two-group view (watching / muted) distinct from the full IssueShow.",
         "agent_not_found / agent_archived errors surface to the user via the server code flowing through the response envelope (no CLI-side code mapping).",
         "Web issue detail renders watching and muted agents read-only from the existing read model (no new read API, no in-page add/remove controls).",
         "CLI tests cover the watch command rendering paths; Web typecheck + tests pass.",
