@@ -5,6 +5,18 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
+// Both this class and CliNotifySetupCommandSpecs mutate the static
+// NotifyCommands.ConfigPathOverride (per-test save/restore). xUnit v3
+// parallelizes test classes by default, so running them concurrently
+// stomps the shared override and intermittently breaks preflight
+// assertions that re-read the path at runtime. Pin them to a single
+// non-parallel collection per design/testing.md's collection guidance.
+[CollectionDefinition("NotifyCommandConfigPath", DisableParallelization = true)]
+public sealed class NotifyCommandConfigPathCollectionDefinition
+{
+}
+
+[Collection("NotifyCommandConfigPath")]
 public class CliAgentCommandSpecs : IDisposable
 {
     private readonly Func<IFileSystem, PresetCatalog>? _previousCatalogOverride;
