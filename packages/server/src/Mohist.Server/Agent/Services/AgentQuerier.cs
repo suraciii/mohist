@@ -30,12 +30,30 @@ public class AgentQuerier : IScopedService
             .FirstOrDefault();
     }
 
+    /// <summary>
+    /// Resolves an Agent by name within a project, case-insensitively.
+    /// Mention resolution (<c>@SuperVisor</c> → Agent named <c>supervisor</c>,
+    /// issue-490 spec <i>Mention matching is case-insensitive</i>) and the
+    /// Agent-name uniqueness check both go through this path, so both treat
+    /// name equality as ordinal-ignorecase. Matches the client-side filter
+    /// shape already used by <see cref="GetByIdAsync"/>: the rows are pulled
+    /// by project, deserialized, and filtered in memory, so the comparison
+    /// is the same on SQLite (default case-sensitive <c>=</c>) and Postgres.
+    /// </summary>
     public async Task<AgentInfo?> GetByNameAsync(string projectId, string name)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.Agents.AsNoTracking()
-            .FirstOrDefaultAsync(agent => agent.ProjectId == projectId && agent.Name == name);
-        return row is null ? null : ToInfo(AgentStore.Deserialize(row.State)!);
+        var rows = await db.Agents.AsNoTracking()
+            .Where(agent => agent.ProjectId == projectId)
+            .ToListAsync();
+        return rows
+            .Select(row => AgentStore.Deserialize(row.State))
+            .Where(agent => agent is not null)
+            .Cast<Domain.Agent>()
+            .Where(agent => agent.ProjectId == projectId
+                && string.Equals(agent.Name, name, StringComparison.OrdinalIgnoreCase))
+            .Select(ToInfo)
+            .FirstOrDefault();
     }
 
     public async Task<IReadOnlyList<AgentInfo>> ListAsync(string projectId, string? status = null, bool all = false)
