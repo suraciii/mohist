@@ -186,6 +186,7 @@ public class IssueWorkflowReadPathSpecs
             services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             services.GetRequiredService<IEventStore>(),
             services.GetRequiredService<IGrainFactory>(),
+            services.GetRequiredService<IBackgroundTaskLauncher>(),
             services.GetRequiredService<IssueRepositoryResolver>(),
             services.GetRequiredService<WorkflowProfileManager>(),
             services.GetRequiredService<ProjectWorkflowProfileManager>(),

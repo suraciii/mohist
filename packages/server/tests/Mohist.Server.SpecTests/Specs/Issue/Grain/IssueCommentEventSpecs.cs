@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -230,6 +231,7 @@ public class IssueCommentEventSpecs
             services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             services.GetRequiredService<IEventStore>(),
             services.GetRequiredService<IGrainFactory>(),
+            services.GetRequiredService<IBackgroundTaskLauncher>(),
             services.GetRequiredService<IssueRepositoryResolver>(),
             services.GetRequiredService<WorkflowProfileManager>(),
             services.GetRequiredService<ProjectWorkflowProfileManager>(),

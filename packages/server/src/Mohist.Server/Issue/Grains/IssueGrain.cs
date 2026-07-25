@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
@@ -36,6 +37,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventStore _eventStore;
     private readonly IGrainFactory _grainFactory;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IssueRepositoryResolver _repositoryResolver;
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
@@ -53,6 +55,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
         IGrainFactory grainFactory,
+        IBackgroundTaskLauncher backgroundTasks,
         IssueRepositoryResolver repositoryResolver,
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
@@ -71,6 +74,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _dbFactory = dbFactory;
         _eventStore = eventStore;
         _grainFactory = grainFactory;
+        _backgroundTasks = backgroundTasks;
         _repositoryResolver = repositoryResolver;
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
@@ -1447,7 +1451,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         db.IssueComments.Add(comment);
         await _eventStore.AppendAsync(db, envelope);
         await db.SaveChangesAsync();
-        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueGrain));
+        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueGrain), _backgroundTasks);
 
         await _attachmentService.BindCommentAsync(_issue.ProjectId, comment.Id, attachmentIds);
 
