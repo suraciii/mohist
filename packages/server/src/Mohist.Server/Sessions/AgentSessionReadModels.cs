@@ -282,6 +282,86 @@ public sealed record GenericAgentSessionSummaryContextRefsDto(
     string? Repository,
     string? WorkspacePath);
 
+/// <summary>
+/// Unified read shape for an AgentSession addressed by its stable
+/// <see cref="UnifiedSessionSummaryDto.Id"/>, regardless of whether the session
+/// originated from an Agent launch (<c>source = agent-launch</c>) or a Workflow
+/// run (<c>source = workflow</c>). Surfaced by the project-scoped
+/// <c>GET /api/projects/{projectRef}/sessions/{sessionId}</c> route
+/// (issue-479 T-004 / design D4), which resolves the row by id without the
+/// <c>source-kind == agent-launch</c> gate that the generic-session route
+/// applies.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The DTO carries the fields common to both sources and populates
+/// source-specific identity only for the resolved source, via the
+/// absent-when-empty idiom (<see cref="Infrastructure.JSON.Options"/> sets
+/// <c>DefaultIgnoreCondition = WhenWritingNull</c>):
+/// <list type="bullet">
+///   <item><term>agent-launch</term><description><see cref="UnifiedSessionSummaryDto.AgentId"/> /
+///   <see cref="UnifiedSessionSummaryDto.AgentName"/> populated;
+///   <see cref="UnifiedSessionSummaryDto.WorkflowRunId"/> /
+///   <see cref="UnifiedSessionSummaryDto.SessionName"/> absent.</description></item>
+///   <item><term>workflow</term><description><see cref="UnifiedSessionSummaryDto.WorkflowRunId"/> /
+///   <see cref="UnifiedSessionSummaryDto.SessionName"/> populated;
+///   <see cref="UnifiedSessionSummaryDto.AgentId"/> /
+///   <see cref="UnifiedSessionSummaryDto.AgentName"/> absent.</description></item>
+/// </list>
+/// </para>
+/// </remarks>
+public sealed record UnifiedSessionSummaryDto(
+    string Id,
+    string Source,
+    [property: JsonPropertyName("runtimeSessionId")] string? RuntimeSessionId,
+    [property: JsonPropertyName("runtime")] string? Runtime,
+    [property: JsonPropertyName("activity")] string Activity,
+    string CreatedAt,
+    string? LastActivityAt,
+    string? Model,
+    string? ResolvedModel,
+    string? AgentId,
+    string? AgentName,
+    string? WorkflowRunId,
+    string? SessionName,
+    [property: JsonPropertyName("contextRefs")] UnifiedSessionContextRefsDto? ContextRefs,
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
+
+/// <summary>
+/// Lightweight unified read shape for an AgentSession in the source-filtered
+/// list (<c>GET /api/projects/{projectRef}/sessions</c>, issue-479 T-004 /
+/// design D4). Carries the common list fields and populates source-specific
+/// identity only for the resolved source, mirroring
+/// <see cref="UnifiedSessionSummaryDto"/>'s absent-when-empty contract.
+/// </summary>
+public sealed record UnifiedSessionListItemDto(
+    string Id,
+    string Source,
+    [property: JsonPropertyName("runtimeSessionId")] string? RuntimeSessionId,
+    [property: JsonPropertyName("runtime")] string? Runtime,
+    [property: JsonPropertyName("activity")] string Activity,
+    string CreatedAt,
+    string? LastActivityAt,
+    string? Model,
+    string? AgentId,
+    string? AgentName,
+    string? WorkflowRunId,
+    string? SessionName,
+    [property: JsonPropertyName("contextRefs")] UnifiedSessionContextRefsDto? ContextRefs);
+
+/// <summary>
+/// Optional envelope of context references recorded on a session. Each field
+/// is null when the session carried no such reference; the envelope itself is
+/// null when the session had no context references at all. Reads both the
+/// agent-launch context labels and the workflow issue-number label so the
+/// unified list/show surfaces context consistently across sources.
+/// </summary>
+public sealed record UnifiedSessionContextRefsDto(
+    int? IssueNumber,
+    int? EpicNumber,
+    string? Repository,
+    string? WorkspacePath);
+
 public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);
 
 public sealed record AgentAmplificationDto(

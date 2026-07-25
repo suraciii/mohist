@@ -266,3 +266,110 @@ translation, by design D1).
   ignored by Microsoft.Testing.Platform; `--filter` runs the whole suite.
   When a test edit isn't picked up, rerun `dotnet test` WITHOUT
   `--no-build` to force a rebuild before re-reading the log.
+
+## T-004: Source-agnostic unified session read route
+
+### Summary
+
+Added a project-scoped route group `/api/projects/{projectRef}/sessions`
+with `GET /{sessionId}` (show) and `GET /{sessionId}/transcript` that
+resolve an AgentSession by id WITHOUT the `source-kind == agent-launch`
+gate that `FindGenericSessionAsync` applies — so an agent-launch session
+and a workflow-originated session resolve by the same stable id. Added
+`GET /` (list) accepting `?agent=`, `?issue=`, `?run=` filters that
+delegate to the existing querier methods
+(`ListAgentSessionsAsync` / `ListSummariesByIssueAsync` /
+`ListByWorkflowAsync`) and map each result to a unified list DTO. The
+older `agent-sessions/{id}` GET stays for the agent-launch transcript
+link until T-005 switches the CLI over.
+
+### Files Added
+
+- `Api/UnifiedSessionRoutes.cs` — `MapUnifiedSessionRoutes` + DTOs are
+  in AgentSessionReadModels.cs (see arch note below). Internal handlers
+  `HandleListAsync` / `HandleShowAsync` / `HandleTranscriptAsync`
+  (unit-testable without HTTP). List branches on which filter is present,
+  rejects no-filter with 400 `session_filter_required`. `?run=` is
+  project-scoped: post-filters `ListByWorkflowAsync` results by the
+  DTO's `ProjectId` so a run belonging to another project yields an
+  empty list (no cross-project leak).
+- `tests/.../Specs/Sessions/UnifiedSessionRoutesSpecs.cs` — 15 specs:
+  show by both sources + source-specific-field JSON contract (agent
+  fields absent for workflow and vice-versa), unknown-id 404,
+  cross-project 404; transcript by both sources + 404s; list by each
+  filter (`?agent=`, `?issue=`, `?run=`), unknown-agent 404, cross-
+  project-run empty, no-filter 400. All via injected fakes + in-memory
+  SQLite (handlers called directly, no HTTP, no real process).
+
+### Files Modified
+
+- `Sessions/AgentSessionReadModels.cs` — added `UnifiedSessionSummaryDto`,
+  `UnifiedSessionListItemDto`, `UnifiedSessionContextRefsDto`. Co-located
+  here (NOT a new root file) because the ArchTest
+  `FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices` only
+  allows `AgentSessionReadModels.cs` as a root file under `Sessions/`.
+- `Sessions/Services/AgentSessionQuerier.cs` — added
+  `GetUnifiedSessionSummaryAsync` / `GetUnifiedSessionTranscriptAsync`
+  + private `FindUnifiedSessionAsync` (reads row by id via
+  `ListByIdsAsync`, enforces project + known-source-kind). The unified
+  summary branches on `source-kind` to populate source-specific identity
+  only for its source (absent-when-empty via
+  `JSON.Options.DefaultIgnoreCondition = WhenWritingNull`).
+- `Infrastructure/Hosting/MohistApiRegistration.cs` — registered
+  `MapUnifiedSessionRoutes` next to `MapWorkflowSessionRoutes`.
+
+### Codebase Patterns (additions)
+
+- **Unified DTO placement**: the `Sessions/` feature root permits only
+  `AgentSessionReadModels.cs` as a non-Domain/Grains/Services file
+  (ArchTest `FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices`).
+  Put new session read-model DTOs in that file rather than a new root
+  file; do NOT widen the arch allowlist for a single DTO family.
+- **Source-specific identity via absent-when-empty**: the unified DTOs
+  declare agent fields (`agentId`/`agentName`) AND workflow fields
+  (`workflowRunId`/`sessionName`) as nullable strings; the builder
+  populates only the branch matching the resolved `source-kind`, and
+  `WhenWritingNull` omits the others from the wire. A contract spec
+  asserts the absent fields never appear in the JSON (not just null).
+- **Read-route testability**: handlers are `internal static` taking the
+  resolved `ProjectInfo` + queriers (mirrors T-002's
+  `AgentJobReadRoutes.HandleListAsync`/`HandleViewAsync`). The route
+  lambda only does filter wiring + `context.GetResolvedProject()`.
+- **`?run=` project scoping**: `ListByWorkflowAsync(workflowRunId)` is
+  NOT project-scoped, but every session row carries the `project-id`
+  label (projected onto `WorkflowSessionDto.ProjectId`). The handler
+  post-filters the returned DTOs by `ProjectId == project.Id` so a run
+  from another project yields an empty list — resolves the design open
+  question by resolving project from the route, not from the run.
+
+### Decisions / Gotchas
+
+- **Unified context-refs reads both label sets**: `BuildUnifiedContextRefs`
+  composes `AgentSessionContextRefs.TryBuild` (agent-launch labels) with
+  the workflow `issue-number` label (`record.IssueNumber()`) so a
+  workflow session surfaces its issue association too. Workflow sessions
+  have no agent-launch context labels, so their epic/repo/workspace are
+  null and the envelope carries just the issue number.
+- **List no-filter → 400**: the unified list requires exactly one of
+  `agent`/`issue`/`run`. An empty list with no filter would be a costly
+  project-wide scan, so it is rejected up-front with
+  `session_filter_required`.
+- **`?issue=` returns workflow sessions only**: `ListSummariesByIssueAsync`
+  filters by the workflow `mohist.io/issue-number` label (agent-launch
+  sessions use a distinct `mohist.io/agent-launch/issue-number` label).
+  This matches the existing per-source semantics; the unified route maps
+  the result to the unified DTO rather than merging sources here.
+- **Flaky pre-existing tests**:
+  `ReportResultAsync_TransitionsRunningToFailed_OnFailure`,
+  `RunningJob_WithoutReport_JobTimeout_TransitionsToFailed`, and
+  `Compact_PreservesBindingAndLineageAndRecordsOnlyCompaction` (same set
+  as T-003's note) still flake on cold runs with the runner-dispatch
+  "Timed out waiting for status == Running, Last value: Pending" race.
+  Unrelated to T-004 (no AgentJob grain / dispatch / report-result /
+  compact code touched); they pass on the next run.
+- **Verifying new tests actually run under MTP**: MTP ignores
+  `--filter`, so to confirm a new spec class isn't silently skipped,
+  temporarily add `Assert.Fail("SANITY...")` to one test, rebuild, and
+  confirm that test name appears in the UTF-16LE log's `failed ` lines.
+  Then revert. (The whole suite passing with 0 failures is insufficient
+  proof alone — a non-discovered class would just lower the total.)

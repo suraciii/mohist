@@ -487,6 +487,161 @@ public class AgentSessionQuerier : IScopedService
     }
 
     /// <summary>
+    /// Builds the unified source-agnostic session summary surfaced by
+    /// <c>GET /api/projects/{projectRef}/sessions/{sessionId}</c>
+    /// (issue-479 T-004 / design D4). Resolves the row by id WITHOUT the
+    /// <c>source-kind == agent-launch</c> gate applied by
+    /// <see cref="FindGenericSessionAsync"/> — a workflow-originated session
+    /// resolves here by the same stable id as an agent-launch session. The
+    /// cross-project guard matches <see cref="ResolveCanonicalFollowupTargetAsync"/>
+    /// so the caller never observes a session from a different project.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The summary branches internally on the resolved
+    /// <see cref="AgentSessionQueryMetadataKeys.SourceKind"/> to populate
+    /// source-specific identity only for its source: agent-launch sessions
+    /// carry <c>agentId</c> / <c>agentName</c>; workflow sessions carry
+    /// <c>workflowRunId</c> / <c>sessionName</c>. The absent-when-empty idiom
+    /// (<see cref="Infrastructure.JSON.Options"/>) omits the unused branch's
+    /// fields from the wire rather than nulling them.
+    /// </para>
+    /// <para>
+    /// Returns <c>null</c> when the session id does not resolve, when the
+    /// session belongs to a different project, or when the row carries an
+    /// unknown source kind — the caller maps null to 404.
+    /// </para>
+    /// </remarks>
+    public async Task<UnifiedSessionSummaryDto?> GetUnifiedSessionSummaryAsync(string projectId, string sessionId, CancellationToken ct = default)
+    {
+        var record = await FindUnifiedSessionAsync(projectId, sessionId, ct);
+        if (record is null) return null;
+
+        var session = record.Session;
+        var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
+        var isWorkflow = string.Equals(sourceKind, "workflow", StringComparison.Ordinal);
+        var isAgentLaunch = string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal);
+        if (!isWorkflow && !isAgentLaunch) return null;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var resolvedModel = await ResolveModelAsync(db, session.Id, session, ct);
+
+        var activity = ResolveAgentSessionActivity(record);
+        var usage = AgentSessionJsonHelper.Usage(session);
+
+        return new UnifiedSessionSummaryDto(
+            Id: session.Id,
+            Source: sourceKind!,
+            RuntimeSessionId: session.Status.AgentRuntimeSessionId,
+            Runtime: session.Runtime.Runtime,
+            Activity: activity,
+            CreatedAt: session.Status.CreatedAt.ToString("o"),
+            LastActivityAt: AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
+            Model: session.Settings.Model,
+            ResolvedModel: resolvedModel,
+            AgentId: isAgentLaunch ? record.Label(GenericAgentSessionMetadata.AgentId) : null,
+            AgentName: isAgentLaunch ? record.Label(GenericAgentSessionMetadata.AgentName) : null,
+            WorkflowRunId: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId) : null,
+            SessionName: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.SessionName) : null,
+            ContextRefs: BuildUnifiedContextRefs(record),
+            Usage: AgentSessionDtoMapper.ToUsageDto(usage));
+    }
+
+    /// <summary>
+    /// Builds the unified source-agnostic transcript surfaced by
+    /// <c>GET /api/projects/{projectRef}/sessions/{sessionId}/transcript</c>
+    /// (issue-479 T-004 / design D4). Resolves the row by id WITHOUT the
+    /// <c>source-kind == agent-launch</c> gate, so a workflow-originated
+    /// session's transcript resolves here by the same stable id as an
+    /// agent-launch session's. Returns <c>null</c> for an unknown id, a
+    /// cross-project session, or an unknown source kind.
+    /// </summary>
+    public async Task<AgentSessionTranscriptResponse?> GetUnifiedSessionTranscriptAsync(
+        string projectId,
+        string sessionId,
+        string? runtimeSessionId = null,
+        CancellationToken ct = default)
+    {
+        var record = await FindUnifiedSessionAsync(projectId, sessionId, ct);
+        if (record is null) return null;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var transcript = await LoadTranscriptAsync(db, record.Session.Id, runtimeSessionId, ct);
+        return SessionTranscriptBuilder.Build(transcript);
+    }
+
+    /// <summary>
+    /// Resolves a session row by id without the <c>source-kind</c> gate and
+    /// enforces project isolation. Returns <c>null</c> when the id does not
+    /// resolve, the session belongs to a different project, or the source
+    /// kind is neither <c>agent-launch</c> nor <c>workflow</c>.
+    /// </summary>
+    private async Task<AgentSessionRecord?> FindUnifiedSessionAsync(string projectId, string sessionId, CancellationToken ct)
+    {
+        var records = await _sessionQuery.ListByIdsAsync([sessionId], ct);
+        var record = records.FirstOrDefault();
+        if (record is null) return null;
+
+        if (!string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal))
+            return null;
+
+        var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
+        if (!string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal)
+            && !string.Equals(sourceKind, "workflow", StringComparison.Ordinal))
+            return null;
+
+        return record;
+    }
+
+    /// <summary>
+    /// Resolves the model name for a unified summary. For sessions with a
+    /// transcript-persisted resolved model, prefers the latest transcript
+    /// model event; otherwise falls back to the session's declared
+    /// <see cref="AgentSessionSettings.Model"/>.
+    /// </summary>
+    private async Task<string?> ResolveModelAsync(
+        MohistDbContext db,
+        string sessionId,
+        AgentSession session,
+        CancellationToken ct)
+    {
+        var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { sessionId }, ct: ct);
+        var projections = ToTranscriptProjectionsInSequenceOrder(loaded);
+        var summary = TranscriptEventSummaryProjector.Summarize(
+            projections.Select(e => new TranscriptSummaryEvent(
+                TurnSequence: 0,
+                Sequence: e.Sequence,
+                PartId: e.Id.ToString(),
+                Type: e.Type,
+                PayloadJson: e.PayloadJson)));
+        return summary.ResolvedModel ?? session.Settings.Model;
+    }
+
+    /// <summary>
+    /// Builds the optional <see cref="UnifiedSessionContextRefsDto"/>
+    /// envelope from the labels recorded on the session. Reads both the
+    /// agent-launch context labels and the workflow issue-number label so
+    /// the unified read surfaces context consistently across sources.
+    /// Returns <c>null</c> when the session carried no context reference.
+    /// </summary>
+    private static UnifiedSessionContextRefsDto? BuildUnifiedContextRefs(AgentSessionRecord record)
+    {
+        var agentRefs = AgentSessionContextRefs.TryBuild(record);
+        var workflowIssue = record.IssueNumber();
+
+        var issueNumber = agentRefs?.IssueNumber ?? (workflowIssue > 0 ? workflowIssue : null);
+        var epicNumber = agentRefs?.EpicNumber;
+        var repository = agentRefs?.Repository;
+        var workspacePath = agentRefs?.WorkspacePath;
+
+        if (issueNumber is null && epicNumber is null
+            && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
+            return null;
+
+        return new UnifiedSessionContextRefsDto(issueNumber, epicNumber, repository, workspacePath);
+    }
+
+    /// <summary>
     /// Builds the optional <see cref="GenericAgentSessionSummaryContextRefsDto"/>
     /// envelope from the labels stamped at launch.
     /// Returns <c>null</c> when the session carried no context references
