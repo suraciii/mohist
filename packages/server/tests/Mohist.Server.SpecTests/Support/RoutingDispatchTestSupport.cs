@@ -56,6 +56,9 @@ internal static class RoutingDispatchTestSupport
     public static RoutingDispatchHandler CreateHandler(IServiceScopeFactory scopeFactory) =>
         new(scopeFactory, NullLogger<RoutingDispatchHandler>.Instance);
 
+    public static MentionDispatchHandler CreateMentionHandler(IServiceScopeFactory scopeFactory) =>
+        new(scopeFactory, NullLogger<MentionDispatchHandler>.Instance);
+
     public static CloudEvent BuildEvent(
         string type,
         string projectId,
@@ -117,6 +120,79 @@ internal static class RoutingDispatchTestSupport
                 Mohist.Server.Infrastructure.JSON.Options),
         });
         await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Seeds an Agent row with an explicit name distinct from its id
+    /// (the existing <see cref="SeedAgentAsync(TestSqliteDatabase,string,string,string)"/>
+    /// overload sets <c>Name = Id</c>). Mention specs need a name that does
+    /// not colliding with the id, so <c>@supervisor</c> resolves to an Agent
+    /// whose id is e.g. <c>agent_supervisor</c> — mirroring how the
+    /// production Agent-create path stores them.
+    /// </summary>
+    public static async Task SeedNamedAgentAsync(
+        TestSqliteDatabase database,
+        string projectId,
+        string agentId,
+        string name,
+        string status = AgentStatus.Active)
+    {
+        await using var db = database.CreateContext();
+        db.Agents.Add(new AgentRow
+        {
+            Id = agentId,
+            State = System.Text.Json.JsonSerializer.Serialize(
+                new AgentDomain
+                {
+                    Id = agentId,
+                    ProjectId = projectId,
+                    Name = name,
+                    Status = status,
+                },
+                Mohist.Server.Infrastructure.JSON.Options),
+        });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Builds a <c>com.mohist.issue.comment-added</c> CloudEvent with the
+    /// lineage extensions and JSON payload shape the production
+    /// <see cref="IssueGrain.AddCommentAsync"/> emits. The handler reads
+    /// <c>commentId</c>/<c>author</c>/<c>body</c> out of <c>data</c> and the
+    /// project / issue / epic out of the lineage extensions, so the builder
+    /// must populate both exactly like the producer.
+    /// </summary>
+    public static CloudEvent BuildCommentAddedEvent(
+        string projectId,
+        int issueNumber,
+        string eventId,
+        string commentId,
+        string author,
+        string body,
+        int? epicNumber = null)
+    {
+        var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [EventCatalog.Lineage.ProjectId] = projectId,
+            [EventCatalog.Lineage.Issue] = issueNumber.ToString(),
+        };
+        if (epicNumber is > 0)
+        {
+            extensions[EventCatalog.Lineage.Epic] = epicNumber.Value.ToString();
+        }
+
+        var payload = System.Text.Json.JsonSerializer.SerializeToElement(
+            new { commentId, author, body },
+            Mohist.Server.Infrastructure.JSON.Options);
+
+        return new CloudEvent(
+            id: eventId,
+            source: new Uri($"/mohist/projects/{projectId}/issues/{issueNumber}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCommentAdded,
+            time: FixedEventTime,
+            data: payload,
+            subject: issueNumber.ToString(),
+            extensions: extensions);
     }
 
     public static async Task SeedWorkflowRunAsync(
@@ -320,11 +396,17 @@ internal static class RoutingDispatchTestSupport
 public sealed class RecordingAgentLauncher : IAgentLauncher
 {
     private readonly ConcurrentBag<RecordedRoutedLaunch> _routedLaunches = [];
+    private readonly ConcurrentBag<RecordedMentionLaunch> _mentionLaunches = [];
 
     public IReadOnlyList<RecordedRoutedLaunch> RoutedLaunches =>
         _routedLaunches.OrderBy(entry => entry.Sequence).ToArray();
 
     public int RoutedLaunchCount => _routedLaunches.Count;
+
+    public IReadOnlyList<RecordedMentionLaunch> MentionLaunches =>
+        _mentionLaunches.OrderBy(entry => entry.Sequence).ToArray();
+
+    public int MentionLaunchCount => _mentionLaunches.Count;
 
     public Task<RoutedAgentLaunchOutcome> LaunchRoutedAsync(
         AgentInfo agent,
@@ -365,7 +447,43 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         string? runtimeOverride = null,
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher captures routed launches only.");
+
+    public Task<AgentLaunchResult> LaunchMentionAsync(
+        AgentInfo agent,
+        string prompt,
+        AgentLaunchContext context,
+        string commentId,
+        string triggeringEventId,
+        CancellationToken ct = default)
+    {
+        var sequence = _mentionLaunches.Count;
+        _mentionLaunches.Add(new RecordedMentionLaunch(
+            Sequence: sequence,
+            AgentId: agent.Id,
+            AgentName: agent.Name,
+            Prompt: prompt,
+            CommentId: commentId,
+            TriggeringEventId: triggeringEventId,
+            ProjectId: context.ProjectId,
+            IssueNumber: context.IssueNumber,
+            EpicNumber: context.EpicNumber));
+        return Task.FromResult(new AgentLaunchResult(
+            SessionId: $"mention-session-{sequence}",
+            AgentId: agent.Id,
+            AgentName: agent.Name));
+    }
 }
+
+public sealed record RecordedMentionLaunch(
+    int Sequence,
+    string AgentId,
+    string AgentName,
+    string Prompt,
+    string CommentId,
+    string TriggeringEventId,
+    string ProjectId,
+    int? IssueNumber,
+    int? EpicNumber);
 
 public sealed record RecordedRoutedLaunch(
     int Sequence,

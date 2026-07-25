@@ -88,6 +88,27 @@ public interface IAgentLauncher
         string ruleId,
         string? runtimeOverride = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Mention-launch path (issue-490 T-002, design D1/D3/D6). Reuses the
+    /// shared manual-style launch pipeline — workspace-optional, so a
+    /// mention fires regardless of workflow-run state — but anchors the
+    /// session id and AgentJob grain key on the comment identity
+    /// (<paramref name="commentId"/>) instead of the delivering event
+    /// guid. Redelivery of the same comment's <c>comment-added</c> event
+    /// reuses one session grain and one AgentJob; different comments
+    /// launch independently. Trigger labels annotate the
+    /// <c>com.mohist.issue.comment-added</c> event id and the comment id
+    /// for bidirectional provenance so the launch is distinguishable
+    /// from routing-rule / watch launches.
+    /// </summary>
+    Task<AgentLaunchResult> LaunchMentionAsync(
+        AgentInfo agent,
+        string prompt,
+        AgentLaunchContext context,
+        string commentId,
+        string triggeringEventId,
+        CancellationToken ct = default);
 }
 
 /// <summary>

@@ -83,6 +83,18 @@ public static class GenericAgentSessionMetadata
     /// </summary>
     public const string TriggerRuleId = "mohist.io/trigger/rule-id";
 
+    /// <summary>
+    /// Comment identity for a mention-driven launch (issue-490 T-002).
+    /// Recorded by <see cref="Mohist.Server.Agent.Services.IAgentLauncher.LaunchMentionAsync"/>
+    /// alongside <see cref="TriggerEventId"/> (the
+    /// <c>com.mohist.issue.comment-added</c> event id) so the launch is
+    /// traceable back to the originating comment from the AgentJob side and
+    /// distinguishable from routing-rule / watch launches, which never set
+    /// this label. Absent on manually launched sessions and on every
+    /// non-mention subscription-driven launch.
+    /// </summary>
+    public const string TriggerCommentId = "mohist.io/trigger/comment-id";
+
     public static IReadOnlyDictionary<string, string> LookupLabels(GenericAgentSessionContext context) =>
         Labels(context);
 

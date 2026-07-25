@@ -41,8 +41,13 @@ MentionDispatchHandler（系统 handler，订阅该事件）:
     launch(agent, prompt = body, context = issue, key = hash(projectId, commentId, agentId))
 ```
 
-- 启动复用路由启动的解析管线：issue 上下文、workspace 解析、触发标签
-  （记 `comment-id` 与事件 id）与路由启动一致，从 comment 与 AgentJob 双向可查。
+- 启动走共享 launcher 的 manual（workspace-optional）路径，不复用路由启动
+  管线：issue 上下文作为 session metadata 记录，但不做 workspace 解析、不做
+  preflight。理由是提及的典型用例是在 backlog issue 上 `@supervisor` 推进它，
+  backlog issue 没有 workflow run 也没有 workspace —— 路由路径会 preflight
+  失败并把这条最该触发的提及变成失败 AgentJob。触发标签记 `comment-id` 与
+  `comment-added` 事件 id，从 comment 与 AgentJob 双向可查，且可区分于路由 /
+  watch 启动。
 - 幂等键含 commentId：同一评论的重复分发不会重复启动；一条评论 @ 同一个 Agent
   多次只启动一次；@ 多个不同 Agent 各启动各的。
 - 提及启动是一次性 AgentJob。owner 要求的是持续关注时（例如「监督并推进这个
@@ -81,11 +86,28 @@ author 是声明而非认证：人故意用 Agent 的名字署名，其评论同
 
 ## Status
 
-全部未实装。当前 comment 不产生事件，没有提及检测 handler；Agent 只能手动
-launch 或被路由规则触发。实施 issue 待从本文创建。
+issue-490 已落地本文描述的全部行为：
 
-开放问题：未被解析的提及是否需要显式反馈（系统评论 / inbox 条目），先以
-结构化日志与「没有动静」为现状，待真实使用数据决定。
+- `AddCommentAsync` 持久化评论后，在同一事务里发出 lineage-stamped
+  `com.mohist.issue.comment-added` CloudEvent（payload：`commentId` /
+  `author` / `body`；lineage：`projectid` + `issue`，`epic` 如有）。
+- `MentionDispatchHandler` 订阅该事件，按本文规则做防循环、token 解析、
+  名字解析（大小写不敏感，含 `AgentQuerier.GetByNameAsync` 已改为大小写
+  不敏感）、解析失败 no-op、comment-anchored 幂等启动。
+- `IAgentLauncher.LaunchMentionAsync` 是 manual 路径的 mention 入口，session
+  id / AgentJob key 由 `AgentSessionResolver.CommentSessionId` /
+  `CommentJobKey` 按 `hash(projectId, commentId, agentId)` 派生；trigger 标签
+  记 `mohist.io/trigger/event-id` + `mohist.io/trigger/comment-id`。
+- `muted` watch 不抑制提及启动（见上文「检测与启动」与 issue-490 design
+  Decision 7）：handler 不读 `WatchEntryStore`。
 
-已实装、本文依赖的底座：`IAgentLauncher` 双路径启动与幂等键、issue workspace
-解析、评论的 `author` 字段（`AddCommentAsync(author, body)`）。
+### 开放问题
+
+未被解析的提及是否需要显式反馈（系统评论 / inbox 条目），先以结构化日志与
+「没有动静」为现状，待真实使用数据决定。
+
+### 已实装、本文依赖的底座
+
+`IAgentLauncher` 双路径启动与幂等键、`AgentSessionResolver` 的 comment-anchored
+stable key、评论的 `author` 字段（`AddCommentAsync(author, body)`）、
+`design/event-response.md` 的 comment author 归属约定。
