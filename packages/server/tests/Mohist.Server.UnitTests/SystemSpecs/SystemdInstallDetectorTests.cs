@@ -274,6 +274,10 @@ public class SystemdInstallDetectorTests
 
         public long? GetFileLength(string path) => _files.TryGetValue(NormalizePath(path), out var content) ? (long?)System.Text.Encoding.UTF8.GetByteCount(content) : null;
 
+        public void WriteAllText(string path, string contents) => _files[NormalizePath(path)] = contents;
+
+        public void Delete(string path) => _files.Remove(NormalizePath(path));
+
         private static string NormalizePath(string path)
         {
             return path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);

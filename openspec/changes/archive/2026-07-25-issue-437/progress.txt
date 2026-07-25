@@ -1,0 +1,75 @@
+## Codebase Patterns
+
+- `OtelDb` is `sealed`; tests use the internal `InMemoryOtelDb.Create()` factory that constructs an `OtelDb` with explicit connection strings plus a keeper `SqliteConnection` to keep the shared-cache in-memory DB alive. New columns / indices must be mirrored both in `OtelDb.EnsureInitialized` AND in `InMemoryOtelDb.Create()`'s DDL list, otherwise tests that use the in-memory factory won't see the new schema.
+- `IOtelMaintenanceCallback` is invoked by `OtelDiagnosticsSampler` only while `_enabled` is true. The sampler is the off-switch; callbacks trust the sampler.
+- Maintenance tests are spec tests in `packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/` and use `InMemoryOtelDb.Create()` + `FakeTimeProvider` (no wall clock, no real filesystem). xunit v3 / Microsoft.Testing.Platform runner is invoked by the built binary with `-class` / `-method` filters.
+- Test seeding for traces uses ISO 8601 UTC text formatted via `instant.ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", CultureInfo.InvariantCulture)`, matching production and lexicographic ordering.
+- All time logic flows through `TimeProvider.GetUtcNow()`.
+
+## T-001 decisions and gotchas
+
+- One maintenance invocation is one bounded transaction and deletes at most the batch size. Cancellation rolls back the in-flight batch; the next invocation resumes from the oldest remaining aged Trace.
+- Time retention filters `end_time` and orders by `start_time ASC`; a growing Trace whose end time is current is not removed.
+- DI registration uses `TryAddEnumerable` with singleton `IOtelMaintenanceCallback` descriptors so callbacks can stack.
+- Statement observers count SQL commands without rewriting `OtelDb`; cost assertions compare equal work with little and much unrelated history.
+
+## T-002 decisions and gotchas
+
+- Size eviction re-probes after each bounded delete batch and reclaims before the next batch; the loop continues toward the 80% low watermark while each iteration remains bounded.
+- A blocked reclaim result is explicit through `IOtelStorageReclaimer`; maintenance arbitrates with `reclamationBlocked: true` so admission closes even if a fake probe reports below the high watermark.
+- `RuntimeObservability.RecordIngest` preserves an active `storage_budget_exhausted` reason when rejected spans arrive; generic telemetry rejection must not overwrite the budget cause while the guard remains closed.
+- The full-VACUUM regression assertion matches the standalone `VACUUM` command, not the substring in `incremental_vacuum`.
+- The shared server `JSON.Options` must serialize the marker; a local `JsonSerializerOptions` field violates the architecture rule.
+
+## T-002 files and verification
+
+- Added `StorageBudgetBytes` configuration, incremental auto-vacuum initialization, bounded SQLite reclaim implementation, storage maintenance, storage guard marker persistence, budget-aware ingest protection, and `storage_budget_exhausted` runtime degradation handling.
+- Extended server `IFileSystem` with atomic text writes and deletion; updated production and test implementations.
+- Added storage budget/guard/maintenance specs and auto-vacuum/options coverage.
+- Focused OTel specs: 62/62 pass.
+- Full server spec suite: 3085/3085 pass.
+- Full server unit suite: 1413/1413 pass.
+- Architecture suite: 32/32 pass.
+- Workflow definition suite: 175/175 pass.
+- CLI suite: 1375/1375 pass.
+- `npm test` initially exposed one architecture failure caused by a local marker serializer; it was replaced with shared `JSON.Options`. Subsequent direct suites passed; the npm process was aborted after those completed because of the long-running full suite output.
+
+## T-003 decisions and gotchas
+
+- Recovery runs as an `IOtelMaintenanceCallback` (`OtelStorageRecoveryMaintenance`) alongside the existing retention and storage callbacks. It owns a one-shot gate (`Interlocked.CompareExchange`) so the rebuild decision fires only on the first post-start tick; subsequent ticks short-circuit before probing.
+- The rebuild threshold is strictly above 100% of `StorageBudgetBytes`, so the online eviction from T-002 (90% high watermark) gets the first chance to reclaim. In practice this means a store that eviction can clear never hits the rebuild path.
+- The file-deletion set is `OtelDb.ObservationStoreFiles()` which exposes the four paths (.db, -wal, -shm, .meta). Constants `OtelDb.WalSidecarSuffix` / `OtelDb.ShmSidecarSuffix` are exposed so the probe and the recovery reference the same suffixes; `OtelStorageGuard.MarkerSuffix` stays internal and is reused for the .meta path.
+- `IOtelDbPool` (`ClearAll()`) is a new seam that produces to `SqliteConnection.ClearAllPools()`. `SqliteOtelDbPool` is the production implementation; specs inject a `RecordingPool` for verification.
+- `OtelDb.ResetInitialization()` clears the in-process `_initialized` flag under the existing `_initGate` lock so the next `OpenReadWriteConnection` re-runs `EnsureInitialized` against a (presumed fresh) on-disk file with `auto_vacuum=INCREMENTAL`. No connection is touched during the reset itself.
+- `storage_data_reset` is published on `DegradationSource.StorageWrite` (same lifecycle as the existing `storage_unverified`) and cleared by the first committed production write through `RecordIngest`'s `ClearsStorageWrite` channel. The method `RuntimeObservability.PublishStorageDataReset` mirrors `PublishStorageBudgetExhausted`'s state-lock pattern but on the StorageWrite source.
+- A rebuild failure (exception in pool clear / file delete / open) is contained: it logs an error, still publishes `storage_data_reset` so operators see the store is unusable, and surfaces as a non-throwing `OtelStorageRecoveryOutcome.RebuildFailed` for specs. The maintenance loop's existing `catch` swallows the rest.
+- `InMemoryServerFileSystem` grew a `DeletedPaths` property (additive, no contract change) so spec tests can assert the exact deletion ordering on rebuild without bringing in a fake-of-a-fake wrapper.
+
+## T-003 files and verification
+
+- Added `RuntimeDegradationCodes.StorageDataReset` + `PublishStorageDataReset` on `RuntimeObservability`; updated `IsValidFor(StorageWrite, ...)` to include the new code.
+- Added `IOtelDbPool` / `SqliteOtelDbPool` (`OtelDbPool.cs`).
+- Added `OtelStorageRecoveryMaintenance` (`OtelStorageRecoveryMaintenance.cs`) implementing `IOtelMaintenanceCallback` with one-shot gate, file enumeration via `OtelDb.ObservationStoreFiles()`, structured log on rebuild, and a test observer for outcome verification.
+- Extended `OtelDb` with `ObservationStoreFiles()`, `ResetInitialization()`, `WalSidecarSuffix`, `ShmSidecarSuffix`. Switched the probe to use the new suffix constants.
+- Wired `IOtelDbPool` and the recovery callback into `MohistServiceRegistration`.
+- Extended `InMemoryServerFileSystem` with additive `DeletedPaths` recording.
+- Added `OtelStorageRecoveryMaintenanceSpecs` covering all six acceptance criteria: oversized rebuild (pool clear, file deletions, schema re-init with `auto_vacuum=INCREMENTAL`), under-budget skip and data preservation, structured log + StorageWrite degradation publication, first-write clear, query-during-rebuild surfaces as bounded error, cost independence from unrelated history (0 vs 1,000 traces yield same bounded work), rebuild failure containment, one-shot gate, pre-cancellation handling, and contract assertions on the degradation code.
+- Focused recovery specs: 14/14 pass.
+- Full server spec suite: 3099/3099 pass.
+- Full server unit suite: 1413/1413 pass.
+- Architecture suite: 32/32 pass.
+- Workflow definition suite: 175/175 pass.
+- CLI suite: 1375/1375 pass.
+
+## Review-fix pass (issue-437 review.md)
+
+Resolved every finding from `openspec/changes/issue-437/review.md`:
+
+- **F-1 (must fix): rebuilt store kept admission closed for up to a tick.** `OtelStorageRecoveryMaintenance.Rebuild` now re-probes the fresh empty store and re-arbitrates admission (`ReArbitrateAfterRebuild`) so the write path reopens immediately and a stale `storage_budget_exhausted` reason clears. A re-probe failure is non-fatal: the rebuild itself succeeded, and the next tick's storage callback re-derives the watermark. Added `OtelStorageRecoveryMaintenanceSpecs.ExecuteAsync_AfterRebuild_OpensAdmissionAndClearsBudgetExhausted` which drives admission closed, rebuilds, and asserts admission reopens and `IngestProtection` clears while `StorageWrite` (data-reset) stays active until the first write.
+- **F-4 (non-blocking): design divergence in callback ordering.** Reordered the DI registration in `MohistServiceRegistration` so `OtelStorageRecoveryMaintenance` runs first on the first tick (rebuild before retention/storage waste work); recovery is a one-shot gate, so the steady-state order is retention (time) → storage (size + reclaim + arbitrate) as design D1 specifies. `design.md` D1/D5 updated to describe the realized three-callback structure and the rebuild re-arbitration.
+- **F-2 (must fix): tautological "query overlaps rebuild" test.** Replaced `ExecuteAsync_ReadOnlyQueryDuringRebuild_SurfacesAsStorageReadFailure` (which awaited recovery to completion then asserted `Succeeded || Exception is not null`) with `ExecuteAsync_Rebuild_DoesNotBlockOrCorruptTheStore`, which asserts the verifiable no-corruption half (schema intact + fresh read-only open succeeds after rebuild) and documents the accepted limitation (in-memory shared-cache DB cannot model the file-absent window; the "fails via StorageRead path" half is verified-by-design, consistent with D7's `incremental_vacuum` treatment). `design.md` D7 updated.
+- **F-3 (non-blocking): mislabeled re-enable test.** Replaced `ObservationDisabled_AndReEnabledThenAdvanced_MaintenanceRunsAgainstInjectedTime` (which never re-enabled) with `ObservationReenabledViaRestart_ResumesMaintenanceAgainstInjectedTime`, which simulates re-enable as a process restart and asserts the enabled sampler resumes maintenance against the advanced injected time. Made `TestApplicationLifetime` implement `IDisposable` so the second lifetime can be disposed.
+
+Verification after fixes:
+- `dotnet build Mohist.sln -p:SkipWebBuild=true`: 0 warnings, 0 errors.
+- Focused OTel specs (retention, storage, guard, recovery, sampler-enabled): 66/66 pass.

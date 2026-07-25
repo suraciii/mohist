@@ -117,6 +117,11 @@ public class GitSourceInspectorTests
         public void CreateDirectory(string path) { }
 
         public long? GetFileLength(string path) => null;
+
+        public void WriteAllText(string path, string contents)
+            => throw new NotSupportedException("FakeFileSystem is in-memory; only Exists is exercised by these tests");
+
+        public void Delete(string path) => _paths.Remove(path);
     }
 
     private sealed class FakeGitRunner

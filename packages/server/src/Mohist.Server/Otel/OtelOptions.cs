@@ -27,6 +27,23 @@ public sealed class OtelOptions
     public const int DefaultPort = 4318;
 
     /// <summary>
+    /// Default retention age for traces in the built-in observation
+    /// store. A trace whose latest Span activity is older than the
+    /// retention age is deleted by the maintenance loop.
+    /// </summary>
+    public static readonly TimeSpan DefaultRetentionMaxAge = TimeSpan.FromHours(72);
+
+    /// <summary>
+    /// Default storage budget for the built-in observation store in
+    /// bytes. Covers the combined <c>otel.db</c>, <c>-wal</c>, and
+    /// <c>-shm</c> file sizes. The default carries over the
+    /// pre-existing <see cref="RuntimeValueRules.StorageBudgetBytes"/>
+    /// value (1 GiB) so the budget reported by
+    /// <c>/otel/api/status</c> stays unchanged.
+    /// </summary>
+    public const long DefaultStorageBudgetBytes = RuntimeValueRules.StorageBudgetBytes;
+
+    /// <summary>
     /// OTLP HTTP ingestion port. The default matches
     /// <see cref="DefaultPort"/> (the OpenTelemetry spec's conventional
     /// HTTP port).
@@ -55,4 +72,27 @@ public sealed class OtelOptions
     /// limits and degradation reporting are complete.
     /// </summary>
     public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Maximum age a Trace may remain in the observation store before the
+    /// maintenance loop deletes it. Age is measured against a Trace's
+    /// <c>end_time</c> (the latest Span time), so a Trace still receiving
+    /// Spans is not aged out while it is growing. The default is the spec
+    /// default of 72 hours; this is the only retention knob exposed to
+    /// operators.
+    /// </summary>
+    public TimeSpan RetentionMaxAge { get; set; } = DefaultRetentionMaxAge;
+
+    /// <summary>
+    /// Hard storage budget in bytes for the observation store. Covers
+    /// the combined <c>otel.db</c>, <c>-wal</c>, and <c>-shm</c> files.
+    /// The maintenance loop evicts oldest complete Traces once usage
+    /// crosses 90% of this budget and stops once it drops below 80%; if
+    /// eviction cannot keep up, ingestion is closed via the
+    /// <c>storage_budget_exhausted</c> degradation reason until
+    /// reclamation recovers. The default matches the pre-existing
+    /// <see cref="RuntimeValueRules.StorageBudgetBytes"/> value (1 GiB)
+    /// so the budget reported by <c>/otel/api/status</c> stays unchanged.
+    /// </summary>
+    public long StorageBudgetBytes { get; set; } = DefaultStorageBudgetBytes;
 }

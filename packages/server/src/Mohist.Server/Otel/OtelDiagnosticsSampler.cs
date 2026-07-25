@@ -60,8 +60,8 @@ public sealed class OtelStorageProbe : IOtelStorageProbe
         _ = command.ExecuteScalar();
 
         var database = _fileSystem.GetFileLength(_db.DatabasePath) ?? 0;
-        var wal = _fileSystem.GetFileLength(_db.DatabasePath + "-wal") ?? 0;
-        var shm = _fileSystem.GetFileLength(_db.DatabasePath + "-shm") ?? 0;
+        var wal = _fileSystem.GetFileLength(_db.DatabasePath + OtelDb.WalSidecarSuffix) ?? 0;
+        var shm = _fileSystem.GetFileLength(_db.DatabasePath + OtelDb.ShmSidecarSuffix) ?? 0;
         return new StorageProbeMetadata(checked(database + wal + shm));
     }
 }
