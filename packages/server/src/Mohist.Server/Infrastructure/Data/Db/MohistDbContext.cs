@@ -1032,7 +1032,7 @@ public class MohistDbContext : DbContext
             {
                 table.HasCheckConstraint(
                     "CK_InboxItems_NotificationKind",
-                    "\"NotificationKind\" IN ('workflow_failed', 'approval_requested', 'issue_started', 'issue_completed')");
+                    "\"NotificationKind\" IN ('workflow_failed', 'approval_requested', 'issue_started', 'issue_completed', 'agent_response_failed')");
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
@@ -1066,6 +1066,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ApprovalRequestedEnabled).IsRequired();
             entity.Property(e => e.IssueStartedEnabled).IsRequired();
             entity.Property(e => e.IssueCompletedEnabled).IsRequired();
+            entity.Property(e => e.AgentResponseFailedEnabled).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.HasOne<ProjectRow>()
                 .WithOne()
