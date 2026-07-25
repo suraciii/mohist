@@ -19,4 +19,5 @@ public sealed class AgentJobState
     [Id(13)] public PendingSessionClose? PendingSessionClose { get; set; }
     [Id(14)] public RoutedAgentLaunchPlan? RoutedPlan { get; set; }
     [Id(15)] public bool LaunchReady { get; set; }
+    [Id(16)] public DateTimeOffset? TerminalAt { get; set; }
 }

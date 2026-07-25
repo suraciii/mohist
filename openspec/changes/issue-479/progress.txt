@@ -1,0 +1,91 @@
+## T-001: AgentJob relational read model and write-through grain persistence
+
+### Summary
+
+Added AgentJobRow (JSON State blob + stored computed columns) mirroring the
+AgentSession pattern, with a write-through mirror in AgentJobGrain.SaveAsync
+that keeps [PersistentState("agent-job")] as the authoritative load/recovery
+source.
+
+### Files Added
+
+- `Infrastructure/Data/AgentJobs/AgentJobRow.cs` — row with JobKey (PK),
+  State (JSON blob), and stored computed columns (ProjectId, AgentId, Status,
+  SubmittedAt, TerminalAt) projected from State via json_extract.
+- `Infrastructure/Data/AgentJobs/AgentJobStore.cs` — IAgentJobStore +
+  AgentJobStore (LoadAsync(key) returns JSON string, SaveAsync(key, json)
+  upserts the row). Works with JSON strings, NOT typed AgentJobState, to
+  avoid an Infrastructure.Data → Agent.Grains dependency (arch rule).
+- `Agent/Services/AgentJobQuerier.cs` — ListByAgentAsync(projectId, agentId,
+  statusSet?, limit) + GetByKeyAsync(jobKey). Returns AgentJobListItem records.
+- `Infrastructure/Data/Migrations/20260725122740_AddAgentJobsTable.cs` —
+  CreateTable AgentJobs with computed columns + composite index
+  IX_AgentJobs_AgentId_ProjectId_SubmittedAt.
+- Migration `.Designer.cs` delegating to MohistDbContextModelSnapshot.BuildModelCore.
+- `tests/.../Agent/Storage/AgentJobStoreSpecs.cs` — 11 specs covering store
+  upsert/load/computed-columns and querier list-by-agent (recency, status
+  filter, empty, cross-agent/project isolation) + get-by-key (hit/miss).
+- `tests/.../Agent/Grain/AgentJobWriteThroughMirrorSpecs.cs` — 5 specs
+  covering grain write-through mirror on submit, runner-acceptance, terminal
+  (completed + failed), and [PersistentState] remains authoritative.
+
+### Files Modified
+
+- `Agent/Grains/AgentJobState.cs` — added [Id(16)] TerminalAt field (set on
+  terminal transition, never cleared). Needed because PendingSessionClose is
+  cleared after delivery, which would null the computed column.
+- `Agent/Grains/AgentJobGrain.cs` — added optional IAgentJobStore constructor
+  param; SaveAsync now writes grain state THEN mirrors to AgentJobRow
+  (best-effort: log + swallow on failure). [PersistentState] retained
+  unchanged. EnterTerminalStateAsync sets State.TerminalAt.
+- `Infrastructure/Data/Db/MohistDbContext.cs` — added DbSet<AgentJobRow> +
+  OnModelCreating mapping with json_extract stored computed columns and
+  composite index (AgentId, ProjectId, SubmittedAt).
+- `Infrastructure/Data/Migrations/MohistDbContextModelSnapshot.cs` — added
+  AgentJobRow entity to BuildModelCore.
+- `Infrastructure/Hosting/MohistServiceRegistration.cs` — registered
+  IAgentJobStore → AgentJobStore (scoped).
+- `tests/.../Support/GrainTestConfig.cs` — registered IAgentJobStore in the
+  test silo so grain spec tests exercise the mirror write.
+
+### Codebase Patterns
+
+- **json_extract stored computed columns**: the State JSON is serialized with
+  `Infrastructure.JSON.Options` (camelCase Web defaults +
+  JsonStringEnumConverter(CamelCase)). json_extract paths:
+  `$.input.projectId`, `$.input.agentId`, `$.status`, `$.submittedAt`,
+  `$.terminalAt`.
+- **Migration designer delegation**: the project uses a custom
+  `MohistDbContextModelSnapshot.BuildModelCore` public static method that all
+  migration `.Designer.cs` files delegate to. Do NOT use `dotnet ef migrations
+  add` directly — it reformats the entire snapshot and removes BuildModelCore.
+  Instead, run it, then manually: (1) revert the snapshot, (2) add the new
+  entity to BuildModelCore, (3) create the designer file delegating to
+  BuildModelCore.
+- **Arch rule: Infrastructure.Data must not depend on Application Layer**
+  (Agent.Grains, Agent.Services). AgentJobStore works with JSON strings, not
+  typed AgentJobState, to avoid this dependency. The grain serializes the
+  state before calling the store.
+- **AgentJobGrainFixture** is in `[Collection("AgentJobGrain")]` and shares
+  an in-process Orleans cluster + in-memory SQLite across specs in the
+  collection. The fixture now registers IAgentJobStore so the mirror write
+  is exercised by all grain specs.
+- **Test file size ratchet**: ArchTests enforces a 24,000-byte limit on test
+  files. AgentJobGrainSpecs.cs was already near the limit; new mirror specs
+  are in a separate file (AgentJobWriteThroughMirrorSpecs.cs).
+
+### Decisions / Gotchas
+
+- **TerminalAt field**: initially used `$.pendingSessionClose.recordedAt` for
+  the TerminalAt computed column, but PendingSessionClose is cleared after
+  delivery (ClearPendingAndReminderAsync), which would null the column. Added
+  a dedicated [Id(16)] TerminalAt to AgentJobState, set in
+  EnterTerminalStateAsync and never cleared.
+- **Store interface uses JSON strings**: `IAgentJobStore.LoadAsync(key)`
+  returns `string?` (the State JSON), not `AgentJobState?`. The caller
+  deserializes if needed. This keeps Infrastructure.Data free of
+  Agent.Grains dependencies.
+- **Mirror write is best-effort**: failures are logged and swallowed so the
+  grain's authoritative [PersistentState] path is never blocked by a
+  relational write failure. The recovery reminder re-writes the row on the
+  next transition.
