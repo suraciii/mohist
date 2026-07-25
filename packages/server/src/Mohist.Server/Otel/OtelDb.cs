@@ -48,6 +48,7 @@ public sealed class OtelDb
 
     public const string TracesServiceStartIndex = "idx_traces_service_start";
     public const string TracesStartIndex = "idx_traces_start";
+    public const string TracesEndIndex = "idx_traces_end";
     public const string SpansTraceIndex = "idx_spans_trace";
 
     private const string CreateTracesTable = """
@@ -83,8 +84,34 @@ public sealed class OtelDb
     private const string CreateTracesStartIndex =
         "CREATE INDEX IF NOT EXISTS idx_traces_start ON traces(start_time DESC);";
 
+    private const string CreateTracesEndIndex =
+        "CREATE INDEX IF NOT EXISTS idx_traces_end ON traces(end_time);";
+
     private const string CreateSpansTraceIndex =
         "CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id);";
+
+    /// <summary>
+    /// Bounded <c>incremental_vacuum</c> page cap used by the online
+    /// maintenance loop. Bounds the per-tick reclamation cost; the loop
+    /// reissues the pragma on subsequent ticks to drain additional
+    /// pages. Internal constant; not user-tunable.
+    /// </summary>
+    public const int IncrementalVacuumPages = 256;
+
+    /// <summary>
+    /// Suffix for the <c>otel.db-wal</c> sidecar file. The recovery
+    /// callback enumerates and deletes this sidecar alongside the main
+    /// database file when rebuilding an oversized store.
+    /// </summary>
+    public const string WalSidecarSuffix = "-wal";
+
+    /// <summary>
+    /// Suffix for the <c>otel.db-shm</c> shared-memory sidecar file.
+    /// The recovery callback enumerates and deletes this sidecar
+    /// alongside the main database file when rebuilding an oversized
+    /// store.
+    /// </summary>
+    public const string ShmSidecarSuffix = "-shm";
 
     private readonly object _initGate = new();
     private bool _initialized;
@@ -271,14 +298,66 @@ public sealed class OtelDb
                 _ = pragma.ExecuteScalar();
             }
 
+            // auto_vacuum is a database-header flag that only takes
+            // effect when set before any schema object is created, so
+            // it must run before the CREATE TABLE statements below.
+            // INCREMENTAL turns the free pages left by deletion into
+            // reclaimable space that the maintenance loop drains via
+            // incremental_vacuum(); without it the main .db file
+            // would never shrink and the storage budget would be
+            // unreachable in steady state.
+            using (var pragma = connection.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA auto_vacuum=INCREMENTAL;";
+                _ = pragma.ExecuteScalar();
+            }
+
             ExecuteNonQuery(connection, CreateTracesTable);
             ExecuteNonQuery(connection, CreateSpansTable);
             ExecuteNonQuery(connection, CreateTracesServiceStartIndex);
             ExecuteNonQuery(connection, CreateTracesStartIndex);
+            ExecuteNonQuery(connection, CreateTracesEndIndex);
             ExecuteNonQuery(connection, CreateSpansTraceIndex);
 
             _initialized = true;
         }
+    }
+
+    /// <summary>
+    /// Every file backing the observation store on disk in the order
+    /// the recovery callback deletes them: the main database file,
+    /// its <c>-wal</c> and <c>-shm</c> sidecars, and the
+    /// <c>.meta</c> reclamation marker written by
+    /// <see cref="OtelStorageGuard"/>. Deleting the marker alongside
+    /// the database is required so a rebuilt store starts with no
+    /// stale admission state.
+    /// </summary>
+    public IReadOnlyList<string> ObservationStoreFiles()
+    {
+        return new[]
+        {
+            DatabasePath,
+            DatabasePath + WalSidecarSuffix,
+            DatabasePath + ShmSidecarSuffix,
+            DatabasePath + OtelStorageGuard.MarkerSuffix,
+        };
+    }
+
+    /// <summary>
+    /// Resets the in-process initialization flag so the next
+    /// <see cref="OpenReadWriteConnection"/> call re-runs
+    /// <see cref="EnsureInitialized"/> against a (presumed fresh)
+    /// on-disk file. The startup recovery callback invokes this after
+    /// clearing the connection pool and deleting the old files, so a
+    /// follow-up open recreates a fresh schema with
+    /// <c>auto_vacuum = INCREMENTAL</c>. The reset is bounded and
+    /// does not scan or iterate any Trace or Span rows because the
+    /// rebuild discards all observation data.
+    /// </summary>
+    public void ResetInitialization()
+    {
+        lock (_initGate)
+            _initialized = false;
     }
 
     private static void EnsureDirectoryExists(string databasePath, IFileSystem fileSystem)

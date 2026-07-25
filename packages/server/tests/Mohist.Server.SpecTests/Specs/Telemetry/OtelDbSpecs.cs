@@ -65,6 +65,7 @@ public class OtelDbSpecs : IDisposable
 
         Assert.True(IndexExists(connection, OtelDb.TracesServiceStartIndex));
         Assert.True(IndexExists(connection, OtelDb.TracesStartIndex));
+        Assert.True(IndexExists(connection, OtelDb.TracesEndIndex));
         Assert.True(IndexExists(connection, OtelDb.SpansTraceIndex));
     }
 
@@ -85,6 +86,17 @@ public class OtelDbSpecs : IDisposable
             cmd.CommandText = "SELECT COUNT(*) FROM traces;";
             Assert.Equal(1L, (long)cmd.ExecuteScalar()!);
         }
+    }
+
+    [Fact]
+    public void OpenReadWriteConnection_EnablesIncrementalAutoVacuum()
+    {
+        using var connection = _db.OpenReadWriteConnection();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "PRAGMA auto_vacuum;";
+        var value = (long)cmd.ExecuteScalar()!;
+        // 2 = INCREMENTAL; 1 = FULL; 0 = NONE.
+        Assert.Equal(2L, value);
     }
 
     [Fact]
@@ -267,5 +279,9 @@ public class OtelDbSpecs : IDisposable
             Reads[path] = Reads.TryGetValue(path, out var count) ? count + 1 : 1;
             return _lengths.TryGetValue(path, out var length) ? length : null;
         }
+
+        public void WriteAllText(string path, string contents) => throw new NotSupportedException();
+
+        public void Delete(string path) => _lengths.Remove(path);
     }
 }

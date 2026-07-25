@@ -394,5 +394,9 @@ public class SystemInfoServiceTests
 
         public long? GetFileLength(string path) =>
             _files.TryGetValue(Path.GetFullPath(path, "/"), out var content) ? (long?)System.Text.Encoding.UTF8.GetByteCount(content) : null;
+
+        public void WriteAllText(string path, string contents) => _files[Path.GetFullPath(path, "/")] = contents;
+
+        public void Delete(string path) => _files.Remove(Path.GetFullPath(path, "/"));
     }
 }
