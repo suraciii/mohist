@@ -1,0 +1,97 @@
+## Issue #490 T-001 — Comment-added event emission
+
+### Codebase Patterns
+
+- The IssueEvent union + IssueEventSerializer are intentionally bypassed for
+  the comment-added event per design D2 — comments are a side record, not a
+  state transition. The new payload lives at
+  `packages/server/src/Mohist.Server/Infrastructure/Events/IssueCommentAdded.cs`
+  as a standalone record `{ CommentId, Author, Body }` with its own helper
+  `IssueCommentAddedEventFactory.Build(owner, payload, now)` for envelope
+  construction. The factory stamps `IssueLineage.BuildExtensions(owner)` (same
+  lineage as every `issue.*` event) and uses
+  `IssueEventPersistence.IssueSource(owner.ProjectId, owner.Number)` so the
+  envelope is persisted in the `IssueEvents` table by the existing
+  `EventStore.AppendAsync(db, envelope)` dispatch.
+- The "direct CloudEvent, NOT an IssueEvent union variant" decision keeps the
+  state-transition event family clean — `IssueEvent.cs` and
+  `IssueEventSerializer.cs` are unchanged.
+- The EpicGrain direct-emit pattern in `PersistEpicEventsAsync` is the model:
+  `IEventStore.AppendAsync(db, envelope)` stages the event row on the same
+  `MohistDbContext` as the state write, then `db.SaveChangesAsync()` commits
+  both in one transaction. No explicit `BeginTransactionAsync` is needed —
+  EF Core's auto-transaction on SaveChanges is sufficient.
+
+### Implementation Notes
+
+- `IssueGrain` constructor takes both `IEventStore` and `IGrainFactory` (the
+  latter for the dispatcher poke). Pre-existing grain methods that already
+  use `GrainFactory.GetGrain<...>(...)` to talk to other grains keep doing so
+  — `IGrainFactory` is injected only for the new poke path so the test
+  fixtures can supply a `NullDispatchGrainFactory` instead of relying on the
+  Orleans-activated base-class property (which is null in manually
+  constructed test grains).
+- `AddCommentAsync` does not use `BeginTransactionAsync`/`CommitAsync`
+  explicitly — it relies on the same `SaveChangesAsync` auto-transaction
+  that EpicGrain uses. This is consistent with the EpicGrain pattern called
+  out in the design (Migration Plan step 1: "the `EpicGrain` direct-emit
+  pattern"). The comment row + event row commit atomically, satisfying the
+  "persistence-before-observable ordering" requirement.
+- `EventDispatcherPoke.PokeAfterCommit` is called after `SaveChangesAsync`,
+  matching `IssueStore.SaveAsync` (and unlike EpicGrain, which doesn't poke).
+  The poke is fire-and-forget; if lost, the reminder tick recovers.
+
+### Test Patterns
+
+- Unit tests for the standalone `IssueCommentAdded` payload + the
+  `IssueCommentAddedEventFactory.Build` lineage stamp live at
+  `packages/server/tests/Mohist.Server.UnitTests/Events/IssueCommentAddedTests.cs`.
+  The factory and `ToData` helper are `internal` and reachable from the
+  UnitTests project via the existing `[InternalsVisibleTo("Mohist.Server.UnitTests")]`
+  in `Mohist.Server/AssemblyInfo.cs`. `EventCatalogTests.All_ContainsEveryReverseDnsConstant`
+  auto-validates the new constant is in `EventCatalog.All`.
+- High-integration specs live at
+  `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Grain/IssueCommentEventSpecs.cs`
+  and use the existing `MohistDbFixture` (test-only in-memory SQLite +
+  real `EventStore` + `NullDispatchGrainFactory`). The grain is constructed
+  manually with services from the fixture's `Services` (same pattern as
+  `IssueGrainEventSaveFailureSpecs` / `IssueWorkflowReadPathSpecs`). The
+  spec covers all five WHEN/THEN scenarios in the spec:
+  * Scenario "Adding a comment emits the event" — payload contract
+  * Scenario "Comment is persisted before the event is observable" —
+    row + event in one SaveChanges, both readable after commit
+  * Scenario "Event carries project and issue" — extensions + subject + source
+  * Scenario "Epic is stamped when present"
+  * Scenario "Epic is omitted when absent"
+  * Scenario "Issue body edit does not emit comment-added" — covered via
+    `UpdateAsync("New title", "Pinging @supervisor...")` with `@` in body
+  * Scenario "Comment add is the sole source" — `CreateAsync` does not
+    emit comment-added
+
+### Gotchas
+
+- The MohistIntegrationFixture path was deliberately NOT used — it spins up
+  a full silo and an Orleans IGrainFactory. For grain-level event-emission
+  behavior (which is what T-001 needs), MohistDbFixture is sufficient and
+  faster, and matches the spec/test conventions in
+  `IssueTransactionalEventAppendSpecs.cs` (also test-only in-memory SQLite
+  with the real EventStore).
+- The pre-existing `IssueGrainEventSaveFailureSpecs` and
+  `IssueWorkflowReadPathSpecs` both construct `IssueGrain` manually — they
+  were updated to pass the new `IEventStore` and `IGrainFactory` arguments.
+- `npm test` runs the full dotnet test + vitest. The first invocation
+  surfaced a single SpecTest failure that did NOT reproduce on a second
+  run — looks like a shared-state flake in another test class, not anything
+  introduced by T-001. The T-001 tests (IssueCommentEventSpecs × 10,
+  IssueCommentAddedTests × 8) pass deterministically on every run.
+
+### Build Verification
+
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj -p:SkipWebBuild=true`:
+  succeeded, 0 warnings, 0 errors (TreatWarningsAsErrors is on).
+- `dotnet test Mohist.Server.UnitTests`: 1354 passed (includes 8 new
+  IssueCommentAddedTests).
+- `dotnet test Mohist.Server.SpecTests`: 3016 passed (includes 10 new
+  IssueCommentEventSpecs).
+- `dotnet build Mohist.sln -p:SkipWebBuild=true`: succeeded, 0 warnings,
+  0 errors.
