@@ -25,6 +25,6 @@ Mohist 当前完整保存所有已接收的 Trace，`otel.db` 会无限增长，
 - **Server 观测**（`packages/server/src/Mohist.Server/Otel/`）：在已预留但未注册的 `IOtelMaintenanceCallback`（`OtelDiagnosticsSampler.cs`）扩展点上实现时间与空间回收；用预算感知的写入准入替换 `AcceptAllIngestProtectionDecision`（`IngestPreparation.cs`）；扩展 `OtelStorageProbe` 复用已有 db+WAL+SHM 测量；为 `OtelDb` 增加有界删除与 `wal_checkpoint(TRUNCATE)`，以及必要时承载持久化水位的本地元数据。
 - **配置**（`packages/server/src/Mohist.Server/Otel/OtelOptions.cs`、`MohistServiceRegistration.cs`）：提升 `StorageBudgetBytes` 为配置项、新增 `RetentionMaxAge`；保留 `RuntimeValueRules.StorageBudgetBytes` 当前默认值（1 GiB）不变。
 - **状态面**（`OtelStatusDto.cs`、`RuntimeObservabilityContracts.cs`）：新增「存储预算超限」类降级原因（增量式，不改变 off / healthy / degraded 三态契约）；`/otel/api/status` 与 `mo otel status` 自动透出。
-- **Schema 契约**：删除走纯 `DELETE FROM traces / spans`，不改 `traces` / `spans` 表与索引名（稳定契约，CLI 直读依赖）；持久化水位放本地元数据，不触碰业务库。
+- **Schema 契约**：删除走纯 `DELETE FROM traces / spans`，不改 `traces` / `spans` 表与索引名（稳定契约，CLI 直读依赖）；唯一的 schema 增量是一个新索引 `idx_traces_end ON traces(end_time)`（追加、非改名，对 CLI 直读非破坏），用以支撑按 `end_time` 的时间删除并保持成本与批次成正比；持久化水位放本地 `.meta` 边车文件，不触碰业务库与 `otel.db` 表结构。
 - **测试**（`packages/server/tests/...`）：复用 `InMemoryOtelDb` 与 `FakeTimeProvider`；空间行为用 fake `IOtelStorageProbe` 验证，不依赖真实文件；按 operation 计数验证维护成本不随无关历史增长。
 - **不改**：核心业务库 `mohist.db`、`/api/health`、Runner、Web UI、默认 `OtelOptions.Enabled = false`。
