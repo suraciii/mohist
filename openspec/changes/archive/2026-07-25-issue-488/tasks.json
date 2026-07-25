@@ -1,0 +1,70 @@
+{
+  "project": "mohist-local",
+  "description": "Add `mo agent install supervisor` CLI preset: package the authoritative supervisor preset text as CLI resources, install the Agent plus approval/failure routing rules idempotently at the routing-table tail, and emit check-only preflight warnings.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Ship supervisor preset resources and name-keyed catalog loader",
+      "spec": "specs/agent-preset-install/spec.md#supervisor-preset-authoritative-content",
+      "description": "Add the authoritative preset text under `presets/supervisor/{instructions,approval,failure}.md` (placeholders preserved verbatim), a `presets/manifest.json` catalog, the `presets\\**` Content entry in `Mohist.Cli.csproj`, and a name-keyed loader that resolves a preset name to its install inputs (agent instructions; approval/failure rule with fixed name, match expression, response prompt) and lists available names. Reuse the skill-data asset-root resolution.",
+      "acceptanceCriteria": [
+        "`presets/supervisor/instructions.md`, `approval.md`, `failure.md` exist; content matches the design's preset text; `{{event.*}}` placeholders are present and unrendered.",
+        "`presets/manifest.json` declares `supervisor` mapping to the three files plus rule names and match expressions.",
+        "`Mohist.Cli.csproj` has a `presets\\**` Content entry with CopyToOutputDirectory and Pack, mirroring the existing `skill-data` entry.",
+        "The loader resolves `supervisor` to: non-empty agent instructions (no AgentConfig/Skills/MaxConcurrentRuns), an approval rule matching exactly `event.type == \"com.mohist.workflow.stage.approval-requested\"`, and a failure rule matching exactly `event.type == \"com.mohist.workflow.run.failed\"`.",
+        "The loader lists available preset names; an unknown name returns not-found carrying the available names.",
+        "Unit tests (FakeFileSystem) cover known-preset content/metadata, unknown-name listing, and placeholder preservation; `dotnet test packages/cli/tests/Mohist.Cli.Tests` is green and `npm run build` is clean (TreatWarningsAsErrors)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/presets/** + manifest.json, and the preset catalog/loader source with unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The shipped resource files are the single source of truth for preset text; the design doc's preset-text section is illustrative. The test csproj already embeds skill-data as EmbeddedResource; mirror that for presets if tests load shipped content directly, else drive via FakeFileSystem."
+    },
+    {
+      "id": "T-002",
+      "title": "Add `mo agent install <preset>` command with idempotent creation and tail append",
+      "spec": "specs/agent-preset-install/spec.md#idempotent-installation-by-name",
+      "description": "Wire an `install` subcommand into the `agent` command. Resolve the preset via T-001's catalog (unknown name -> non-zero exit that lists available presets). Create Agent `supervisor`, then rules `supervisor-approval` and `supervisor-failure` through the existing POST /agents and POST /routing/rules APIs, using list-then-create idempotency (skip-if-exists by name, never overwrite; treat a 409 name conflict as skip). Append rules at the table tail in order with Continue unset, and report each step (created / exists, skipped).",
+      "acceptanceCriteria": [
+        "`mo agent install supervisor` in a fresh project creates the agent and both rules; `supervisor-approval` lands immediately before `supervisor-failure` at the table tail; pre-existing user rules keep their order and precedence above them and are not moved or archived.",
+        "Created rules have Continue unset (exclusive response).",
+        "Re-running install after the user edits the supervisor agent's instructions does not recreate or overwrite any resource; the edited instructions are unchanged and every resource is reported as skipped (exists).",
+        "When only the agent and approval rule pre-exist, install skips them unmodified and creates only the missing failure rule.",
+        "An unknown preset name exits non-zero and prints an error listing the available names including `supervisor`.",
+        "CLI tests use a fake HTTP layer (no real server) and cover: fresh install, re-run skip, partial pre-existence, unknown-name rejection, and tail ordering/exclusivity; `dotnet test packages/cli/tests/Mohist.Cli.Tests` is green and `npm run build` is clean.",
+        "`docs/agent-supervision.md` (实装差距) and `design/agent-supervision.md` (Status) footnotes are updated to mark `mo agent install supervisor` as implemented."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "`mo agent install` subcommand in MohistCliCommands.Agent.cs plus orchestration and tests; doc footnote updates",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Also satisfies the Preset-name-resolution and Rules-appended-at-the-routing-table-tail spec requirements via the command surface. Reuse AgentCommands.ResolveAgentAsync-style name matching for the agent existence check and GET /routing/rules for the rule existence check."
+    },
+    {
+      "id": "T-003",
+      "title": "Add check-only preflight warnings to install",
+      "spec": "specs/agent-preset-install/spec.md#check-only-preflight-warnings",
+      "description": "Add two non-blocking preflight checks to the install flow: (1) the default repository workspace exposes `.agents/skills/mohist` (resolve project -> IsDefault repo -> local filesystem); (2) `~/.mohist/config.jsonc` `Mohist:Notifications:Hermes:EnabledTypes` includes the three default types. On failure, append a `warning:` line with specific remediation but never block install. Wire fakeable sources (IFileSystem and NotifyCommands.DefaultConfigPath/ConfigPathOverride).",
+      "acceptanceCriteria": [
+        "When the default repo workspace lacks `.agents/skills/mohist`, install still creates all resources (exit 0) and the output includes a warning naming the missing stub and directing `mo skills install --path <repo>`.",
+        "When any of `approval_requested`/`workflow_failed`/`issue_completed` is absent from the config's EnabledTypes, install completes and the output includes a warning that the owner can only discover a stopped/failed supervisor by actively checking.",
+        "When both checks pass, no warning is emitted.",
+        "The checks never block or fail installation; resources are still created when a check fails.",
+        "When the default repo is missing or unresolvable, the skill-stub check is skipped with a note and install is unaffected.",
+        "CLI tests use FakeFileSystem plus a fake config path (no real filesystem/server) and cover each warning path, the clean case, and the missing-default-repo case; `dotnet test packages/cli/tests/Mohist.Cli.Tests` is green and `npm run build` is clean."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Preflight check sources wired into the install command, with tests",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Only the `.agents/skills/mohist` variant is checked this round (design names it); the `.claude/skills/mohist` variant is a possible later refinement. The notification check is best-effort against the canonical config path; env overrides or a remote server host may diverge, which is acceptable for a non-blocking warning."
+    }
+  ]
+}

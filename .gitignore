@@ -70,6 +70,7 @@ tmp/
 temp/
 *.tmp
 packages/server/tests/*/TestResults/
+packages/cli/tests/*/detailed/
 
 # ZCode client session workspace
 .zcode/

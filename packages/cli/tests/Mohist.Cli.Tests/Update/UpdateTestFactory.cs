@@ -29,8 +29,15 @@ internal sealed class UpdateTestFactory
     public StringWriter Stderr { get; }
     public SystemdServiceInstaller Installer { get; }
 
-    public void SeedPackagedSkillAssets() =>
+    public void SeedPackagedSkillAssets()
+    {
         WritePackagedSkillAssets(Files, Path.Combine(RequireRoot(), ".publish", "cli", "skill-data"));
+        // `mo update` now syncs presets next to skill-data; seed a valid preset
+        // bundle in the publish dir so the preset sync step succeeds.
+        var presetsRoot = Path.Combine(RequireRoot(), ".publish", "cli", "presets");
+        Files.AddDirectory(presetsRoot);
+        Files.AddFile(Path.Combine(presetsRoot, "manifest.json"), "{\"supervisor\":{\"rules\":[]}}");
+    }
 
     public void SeedManagedSkillAssets() =>
         WritePackagedSkillAssets(Files, Path.Combine(RequireRoot(), ".mohist", "cli", "skill-data"));

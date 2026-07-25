@@ -3,18 +3,18 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class SkillAssetSynchronizerTests
+public class ManagedAssetSynchronizerTests
 {
     private const string SourceDir = "/repo/packages/cli/Mohist.Cli/skill-data";
     private const string ManagedDir = "/home/test/.mohist/cli/skill-data";
 
-    private static (SkillAssetSynchronizer sut, StringWriter output, StringWriter error, FakeFileSystem fs)
+    private static (ManagedAssetSynchronizer sut, StringWriter output, StringWriter error, FakeFileSystem fs)
         BuildSut()
     {
         var fs = new FakeFileSystem();
         var output = new StringWriter();
         var error = new StringWriter();
-        return (new SkillAssetSynchronizer(output, error, fs), output, error, fs);
+        return (new ManagedAssetSynchronizer(output, error, fs), output, error, fs);
     }
 
     private static void RegisterDirectory(FakeFileSystem fs, params string[] paths)
@@ -46,7 +46,7 @@ public class SkillAssetSynchronizerTests
         fs.AddFile(Path.Combine(SourceDir, "mohist-create-epic", "SKILL.md"), epicSource);
         RegisterDirectory(fs, SourceDir, Path.Combine(SourceDir, "mohist"), Path.Combine(SourceDir, "mohist-create-epic"));
 
-        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir);
+        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir, ManagedAssetKind.Skill);
 
         Assert.True(exitCode == 0, $"expected 0, got {exitCode}, stderr='{error}'");
         Assert.True(fs.DirectoryExists(ManagedDir));
@@ -71,7 +71,7 @@ public class SkillAssetSynchronizerTests
         fs.AddFile(Path.Combine(ManagedDir, "mohist", "SKILL.md"), staleDispatcher);
         RegisterDirectory(fs, SourceDir, Path.Combine(SourceDir, "mohist"), ManagedDir, Path.Combine(ManagedDir, "mohist"));
 
-        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir);
+        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir, ManagedAssetKind.Skill);
 
         Assert.True(exitCode == 0, $"expected 0, got {exitCode}, stderr='{error}'");
         Assert.Equal(freshDispatcher, fs.ReadAllText(Path.Combine(ManagedDir, "mohist", "SKILL.md")));
@@ -86,7 +86,7 @@ public class SkillAssetSynchronizerTests
         fs.AddFile(Path.Combine(ManagedDir, "mohist", "SKILL.md"), existingCacheContent);
         RegisterDirectory(fs, ManagedDir, Path.Combine(ManagedDir, "mohist"));
 
-        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir);
+        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir, ManagedAssetKind.Skill);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("source skill-data directory", error.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -102,7 +102,7 @@ public class SkillAssetSynchronizerTests
         fs.AddFile(Path.Combine(SourceDir, "mohist", "SKILL.md"), dispatcherSource);
         RegisterDirectory(fs, SourceDir, Path.Combine(SourceDir, "mohist"));
 
-        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir);
+        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir, ManagedAssetKind.Skill);
 
         Assert.True(exitCode == 0, $"expected 0, got {exitCode}, stderr='{error}'");
         Assert.Equal(dispatcherSource, fs.ReadAllText(Path.Combine(ManagedDir, "mohist", "SKILL.md")));
@@ -137,7 +137,7 @@ public class SkillAssetSynchronizerTests
         fs.AddFile(Path.Combine(SourceDir, "mohist-create-epic", "SKILL.md"), epicSource);
         RegisterDirectory(fs, SourceDir, Path.Combine(SourceDir, "mohist"), Path.Combine(SourceDir, "mohist-create-epic"));
 
-        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir);
+        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir, ManagedAssetKind.Skill);
         Assert.True(exitCode == 0, $"sync failed: {error}");
 
         var service = new SkillAssetService(fs, overrideAssetRoot: ManagedDir);
@@ -150,5 +150,75 @@ public class SkillAssetSynchronizerTests
 
         Assert.Equal(dispatcherSource, dispatcherRead.Skill!.SkillMarkdown);
         Assert.Equal(epicSource, epicRead.Skill!.SkillMarkdown);
+    }
+}
+
+public class ManagedAssetSynchronizerPresetTests
+{
+    private const string SourceDir = "/repo/.publish/cli/presets";
+    private const string ManagedDir = "/home/test/.mohist/cli/presets";
+
+    private static (ManagedAssetSynchronizer sut, StringWriter output, StringWriter error, FakeFileSystem fs)
+        BuildSut()
+    {
+        var fs = new FakeFileSystem();
+        var output = new StringWriter();
+        var error = new StringWriter();
+        return (new ManagedAssetSynchronizer(output, error, fs), output, error, fs);
+    }
+
+    private static void RegisterDirectory(FakeFileSystem fs, params string[] paths)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+        {
+            var current = path;
+            while (!string.IsNullOrEmpty(current))
+            {
+                if (seen.Add(current))
+                    fs.CreateDirectory(current);
+                var parent = Path.GetDirectoryName(current);
+                if (string.Equals(parent, current, StringComparison.Ordinal)) break;
+                current = parent ?? string.Empty;
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SyncAsync_PresetsCopiedToManagedRoot_AndManifestPreservedByteForByte()
+    {
+        var (sut, output, error, fs) = BuildSut();
+        var manifest = "{\"supervisor\":{\"rules\":[]}}";
+        var instructions = "# identity\n";
+        fs.AddFile(Path.Combine(SourceDir, "manifest.json"), manifest);
+        fs.AddFile(Path.Combine(SourceDir, "supervisor", "instructions.md"), instructions);
+        RegisterDirectory(fs, SourceDir, Path.Combine(SourceDir, "supervisor"));
+
+        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir, ManagedAssetKind.Preset);
+
+        Assert.True(exitCode == 0, $"expected 0, got {exitCode}, stderr='{error}'");
+        Assert.True(fs.DirectoryExists(ManagedDir));
+        Assert.Equal(manifest, fs.ReadAllText(Path.Combine(ManagedDir, "manifest.json")));
+        Assert.Equal(instructions, fs.ReadAllText(Path.Combine(ManagedDir, "supervisor", "instructions.md")));
+        Assert.Contains("Synchronized managed preset assets", output.ToString());
+    }
+
+    [Fact]
+    public async Task SyncAsync_PresetSourceMissingManifest_RejectedAndManagedDirUntouched()
+    {
+        var (sut, _, error, fs) = BuildSut();
+        // Source dir exists but has no manifest.json — an invalid preset bundle.
+        fs.AddFile(Path.Combine(SourceDir, "supervisor", "instructions.md"), "identity");
+        RegisterDirectory(fs, SourceDir, Path.Combine(SourceDir, "supervisor"));
+        const string staleManaged = "STALE";
+        fs.AddFile(Path.Combine(ManagedDir, "manifest.json"), staleManaged);
+        RegisterDirectory(fs, ManagedDir);
+
+        var exitCode = await sut.SyncAsync(SourceDir, ManagedDir, ManagedAssetKind.Preset);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("manifest.json not found", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        // Managed cache must not have been replaced by an invalid bundle.
+        Assert.Equal(staleManaged, fs.ReadAllText(Path.Combine(ManagedDir, "manifest.json")));
     }
 }

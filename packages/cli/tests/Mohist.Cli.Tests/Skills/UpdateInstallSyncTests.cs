@@ -197,6 +197,13 @@ public sealed class UpdateInstallSyncTests
         _files.AddFile(
             Path.Combine(publishSource, "mohist-explore", "SKILL.md"),
             BuildSkillMarkdown("mohist-explore"));
+
+        // `mo update` syncs presets alongside skill-data; the publish dir must
+        // carry a valid preset bundle (manifest.json) or the preset sync fails
+        // and aborts the whole update.
+        var publishPresets = Path.Combine(tempRoot, ".publish", "cli", "presets");
+        _files.AddDirectory(publishPresets);
+        _files.AddFile(Path.Combine(publishPresets, "manifest.json"), "{\"supervisor\":{\"rules\":[]}}");
     }
 
     private static string BuildSkillMarkdown(string name) =>

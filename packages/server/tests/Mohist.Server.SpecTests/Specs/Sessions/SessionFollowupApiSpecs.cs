@@ -19,7 +19,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 [Collection("IntegrationSessions")]
-public class SessionFollowupApiSpecs
+public class SessionFollowupApiSpecs : IAsyncDisposable
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
@@ -29,6 +29,27 @@ public class SessionFollowupApiSpecs
     {
         _fixture = fixture;
         _client = fixture.Client;
+    }
+
+    // The runner is registered into the collection-wide RunnerRegistryGrain
+    // (a single global grain shared by every class in IntegrationSessions).
+    // Leaving it registered leaks a live, idle runner that competes for
+    // AgentJob dispatch in later classes: ListEligibleRunnersAsync ignores
+    // project affinity and returns every registered runner, so a leaked
+    // followup-api runner can be assigned a later test's agent-job launch
+    // (the work then never reaches that test's own runner and its poll
+    // times out). Unregister on teardown so the registry reflects only
+    // the currently-running test's runners.
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            using var response = await _client.PostAsync($"/api/runner/{_runnerId}/unregister", content: null);
+            _ = response;
+        }
+        catch
+        {
+        }
     }
 
     [Fact]

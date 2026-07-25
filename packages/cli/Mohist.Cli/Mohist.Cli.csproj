@@ -23,6 +23,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <None Include="..\..\..\docs\README.md" Pack="true" PackagePath="\" />
     <Content Include="skill-data\**\*" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="skill-data/%(RecursiveDir)%(Filename)%(Extension)" />
+    <Content Include="presets\**\*" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="presets/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
