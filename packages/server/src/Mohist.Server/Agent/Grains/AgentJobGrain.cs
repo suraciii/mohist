@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
+using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
@@ -49,6 +51,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IPersistentState<AgentJobState> _state;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
     private readonly IAgentJobStore? _jobStore;
+    private readonly IEventStore _eventStore;
     private IDisposable? _dispatchTimer;
     private IDisposable? _jobTimeoutTimer;
 
@@ -57,6 +60,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         IOptions<AgentJobOptions> options,
         TimeProvider timeProvider,
         [PersistentState("agent-job")] IPersistentState<AgentJobState> state,
+        IEventStore eventStore,
         IAgentJobDispatchObserver? dispatchObserver = null,
         IAgentJobStore? jobStore = null)
     {
@@ -64,6 +68,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _options = options.Value;
         _timeProvider = timeProvider;
         _state = state;
+        _eventStore = eventStore;
         _dispatchObserver = dispatchObserver ?? NoopAgentJobDispatchObserver.Instance;
         _jobStore = jobStore;
         // The backoff schedule is captured at activation time from the current
@@ -490,7 +495,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 AgentInstructions: plan.AgentInstructions,
                 AgentConfig: null,
                 AgentSessionId: plan.SessionId,
-                Variant: plan.Variant);
+                Variant: plan.Variant,
+                IssueNumber: plan.IssueNumber,
+                EpicNumber: plan.EpicNumber,
+                WorkflowRunId: plan.WorkflowRunId);
             await SaveAsync();
 
             var reason = plan.PreflightReason ?? AgentJobFailureReasons.WorkspaceUnavailable;
@@ -520,7 +528,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 AgentInstructions: plan.AgentInstructions,
                 AgentConfig: DeserializeAgentConfig(plan.AgentConfigJson),
                 AgentSessionId: plan.SessionId,
-                Variant: plan.Variant);
+                Variant: plan.Variant,
+                IssueNumber: plan.IssueNumber,
+                EpicNumber: plan.EpicNumber,
+                WorkflowRunId: plan.WorkflowRunId);
             State.AgentConfigJson = plan.AgentConfigJson;
             State.Input = input with { AgentConfig = null };
             State.SubmittedAt = _timeProvider.GetUtcNow();
@@ -930,13 +941,17 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             // (preserving the original delivery id + recorded timestamp)
             // so a redelivered report, an activation loss, or a reminder
             // tick all retry the original delivery and converge on a
-            // single close fact.
+            // single close fact. The failure-event obligation is also
+            // re-attached on the same path so a freshly reactivated grain
+            // finishes both durable writes before returning.
             State.PendingSessionClose ??= pending;
-            if (State.PendingSessionClose is not null)
+            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null)
                 await EnsureRecoveryReminderAsync();
             await SaveAsync();
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
+            if (State.PendingFailureEvent is not null)
+                await EmitFailureEventAsync(State.PendingFailureEvent);
             return;
         }
 
@@ -952,6 +967,20 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             failureReason,
             terminalExitCode ?? exitCode);
         State.PendingSessionClose = pending;
+
+        if (terminalStatus == AgentJobStatus.Failed)
+        {
+            // Issue-491 D1: stage the durable failure-event obligation on
+            // every failed terminal transition. A redelivery from
+            // OnActivate / ReportResult retry / recovery-reminder tick
+            // reuses the original EventId and collapses at the store
+            // layer (source, eventId) uniqueness.
+            State.PendingFailureEvent = new PendingFailureEvent(
+                EventId: AgentJobSessionDeliveryIds.FailureEventId(Key),
+                FailureReason: failureReason ?? pendingReason,
+                FailureCategory: failureCategory,
+                RecordedAt: _timeProvider.GetUtcNow());
+        }
 
         DisposeDispatchTimer();
         DisposeJobTimeoutTimer();
@@ -970,6 +999,66 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.PendingSessionClose?.DeliveryId ?? "-");
 
         await DeliverTerminalToSessionAsync(pending);
+        if (State.PendingFailureEvent is not null)
+            await EmitFailureEventAsync(State.PendingFailureEvent);
+    }
+
+    private async Task EmitFailureEventAsync(PendingFailureEvent obligation)
+    {
+        var envelope = BuildFailureEnvelope(obligation);
+        try
+        {
+            await _eventStore.AppendAsync(envelope, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // Issue-491 D1: leave the obligation in place; the recovery
+            // reminder re-attempts on its next tick. Never surface a
+            // terminal-delivery failure as an unobserved exception — the
+            // Session-close delivery is the only consumer that must
+            // succeed synchronously.
+            _log.LogWarning(ex,
+                "AgentJob {Id} failed to append {Type} event (eventId={EventId}); reminder will retry",
+                Key, EventCatalog.ReverseDns.AgentJobFailed, obligation.EventId);
+            await EnsureRecoveryReminderAsync();
+            return;
+        }
+        State.PendingFailureEvent = null;
+        await SaveAsync();
+        _log.LogInformation(
+            "AgentJob {Id} emitted {Type} event (eventId={EventId}, reason={Reason}, category={Category})",
+            Key,
+            EventCatalog.ReverseDns.AgentJobFailed,
+            obligation.EventId,
+            obligation.FailureReason ?? "-",
+            obligation.FailureCategory ?? "-");
+    }
+
+    internal CloudEvent BuildFailureEnvelope(PendingFailureEvent obligation)
+    {
+        var extensions = AgentJobLineage.BuildExtensions(State.Input!, State.RoutedPlan);
+        var projectId = extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var pid) ? pid : null;
+        var issue = extensions.TryGetValue(EventCatalog.Lineage.Issue, out var iss) ? iss : null;
+        var epic = extensions.TryGetValue(EventCatalog.Lineage.Epic, out var epi) ? epi : null;
+        var workflowRunId = extensions.TryGetValue(EventCatalog.Lineage.WorkflowRunId, out var wri) ? wri : null;
+        var agentId = extensions.TryGetValue(EventCatalog.Lineage.AgentId, out var aid) ? aid : null;
+        ProducerConformance.Assert(EventProducerFamily.AgentJob, extensions, new ProducerLineageContext(
+            ProjectId: projectId,
+            Issue: issue,
+            Epic: epic,
+            WorkflowRunId: workflowRunId,
+            AgentId: agentId));
+        return AgentJobLineage.BuildFailureEnvelope(
+            Key,
+            obligation.RecordedAt,
+            new AgentJobLineage.FailurePayload(
+                JobKey: Key,
+                Status: State.Status,
+                FailureReason: obligation.FailureReason,
+                FailureCategory: obligation.FailureCategory,
+                ProjectId: projectId,
+                AgentId: agentId),
+            extensions);
     }
 
     private async Task EnsureRecoveryReminderAsync()
@@ -1070,15 +1159,16 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
-    /// <summary>
-    /// Durable reminder tick driving two recovery loops:
-    /// terminal-delivery retry and
-    /// prepared-launch advancement (design decisions 1-3). A single
-    /// reminder name covers both so the grain keeps a durable wake-up
-    /// until either Runner acceptance is persisted (preparation) or the
-    /// Session-close acknowledgement clears the pending payload
-    /// (terminal). The tick self-cleans when there is no recoverable
-    /// obligation left.
+    /// Durable reminder tick driving three recovery loops:
+    /// terminal-delivery retry (issue-449 design decision 2),
+    /// prepared-launch advancement (design decisions 1-3), and the
+    /// failure-event emission retry (issue-491 design D1). A single
+    /// reminder name covers all three so the grain keeps a durable
+    /// wake-up until either Runner acceptance is persisted (preparation)
+    /// or the Session-close acknowledgement clears the pending payload
+    /// (terminal). The tick self-cleans only when no recoverable
+    /// obligation is left — for failed agentless jobs that means waiting
+    /// for the failure-event append to succeed even when there is no
     /// </summary>
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
@@ -1093,12 +1183,15 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (IsTerminal)
         {
-            if (State.PendingSessionClose is null)
+            if (State.PendingSessionClose is not null)
+                await DeliverTerminalToSessionAsync(State.PendingSessionClose);
+            if (State.PendingFailureEvent is not null)
+                await EmitFailureEventAsync(State.PendingFailureEvent);
+            if (State.PendingSessionClose is null && State.PendingFailureEvent is null)
             {
                 await UnregisterSelfAsync(reminderName);
                 return;
             }
-            await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             return;
         }
 

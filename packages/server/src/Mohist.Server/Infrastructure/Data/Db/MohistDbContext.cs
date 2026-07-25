@@ -54,6 +54,7 @@ public class MohistDbContext : DbContext
     public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
     public DbSet<EpicEventRow> EpicEvents { get; set; } = null!;
     public DbSet<AgentSessionEventRow> AgentSessionEvents { get; set; } = null!;
+    public DbSet<AgentJobEventRow> AgentJobEvents { get; set; } = null!;
     public DbSet<DeadLetterRow> DeadLetters { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
@@ -588,6 +589,59 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.Source, e.Id })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_AgentSessionEvents_Undelivered");
+        });
+
+        modelBuilder.Entity<AgentJobEventRow>(entity =>
+        {
+            entity.ToTable("AgentJobEvents");
+            entity.HasKey(e => new { e.Source, e.Id });
+            entity.Property(e => e.Id).IsRequired();
+            entity.Property(e => e.Source)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.EventId)
+                .HasMaxLength(128)
+                .IsRequired();
+            entity.HasIndex(e => new { e.Source, e.EventId })
+                .IsUnique();
+            entity.Property(e => e.Type)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.SpecVersion)
+                .HasMaxLength(16)
+                .IsRequired();
+            entity.Property(e => e.Subject)
+                .HasMaxLength(256);
+            entity.Property(e => e.DataContentType)
+                .HasMaxLength(64)
+                .IsRequired();
+            entity.Property(e => e.Data)
+                .IsRequired()
+                .HasColumnType("JSON")
+                .HasConversion(
+                    data => data.GetRawText(),
+                    json => JsonDocument.Parse(json).RootElement.Clone());
+            entity.Property(e => e.ExtensionsJson)
+                .HasColumnType("JSON")
+                .HasConversion(
+                    json => json,
+                    raw => raw);
+            entity.Property(e => e.Time)
+                .IsRequired();
+            entity.Property(e => e.TimeSortKey)
+                .HasComputedColumnSql(EventReadKeys.TimeSortKeySql, stored: true);
+            entity.Property(e => e.DataStatus)
+                .HasComputedColumnSql(EventReadKeys.DataStatusSql, stored: true);
+            entity.Property(e => e.DispatchedAt);
+            entity.HasIndex(nameof(AgentJobEventRow.Type), nameof(AgentJobEventRow.Source), nameof(AgentJobEventRow.Id));
+            entity.HasIndex(e => new { e.Type, e.Time });
+            entity.HasIndex(e => new { e.TimeSortKey, e.Source, e.Id })
+                .HasDatabaseName("IX_AgentJobEvents_TimeSortKey_Source_Id");
+            entity.HasIndex(e => new { e.DataStatus, e.Type, e.TimeSortKey, e.Source, e.Id })
+                .HasDatabaseName("IX_AgentJobEvents_DataStatus_Type_TimeSortKey_Source_Id");
+            entity.HasIndex(e => new { e.Source, e.Id })
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_AgentJobEvents_Undelivered");
         });
 
         modelBuilder.Entity<DeadLetterRow>(entity =>

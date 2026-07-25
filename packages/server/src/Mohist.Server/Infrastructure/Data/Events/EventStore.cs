@@ -67,6 +67,32 @@ public class EventStore : IEventStore
             return;
         }
 
+        if (source.StartsWith(AgentJobEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        {
+            var existing = await db.AgentJobEvents
+                .AsNoTracking()
+                .Where(r => r.Source == source && r.EventId == envelope.Id)
+                .Select(r => (long?)r.Id)
+                .FirstOrDefaultAsync(ct);
+            if (existing is not null)
+                return;
+            var nextId = await NextAgentJobIdAsync(db, source, ct);
+            db.AgentJobEvents.Add(new AgentJobEventRow
+            {
+                Id = nextId,
+                Source = source,
+                EventId = envelope.Id,
+                Type = envelope.Type,
+                Time = envelope.Time,
+                SpecVersion = envelope.SpecVersion,
+                Subject = envelope.Subject,
+                DataContentType = envelope.DataContentType ?? "application/json",
+                Data = envelope.Data ?? JsonDocument.Parse("null").RootElement,
+                ExtensionsJson = SerializeExtensions(envelope.Extensions),
+            });
+            return;
+        }
+
         if (IssueEventPersistence.IsIssueSource(source))
         {
             var nextSequence = await NextIssueSequenceAsync(db, source, ct);
@@ -189,6 +215,20 @@ public class EventStore : IEventStore
         return rows.Select(ToAgentSessionStored).ToList();
     }
 
+    public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentJobEventsAsync(string agentJobId, int limit = 200, CancellationToken ct = default)
+    {
+        var source = AgentJobEventPersistence.AgentJobSource(agentJobId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.AgentJobEvents.AsNoTracking()
+            .Where(e => e.Source == source)
+            .OrderByDescending(e => e.Id)
+            .Take(limit)
+            .OrderBy(e => e.Id)
+            .ToListAsync(ct);
+
+        return rows.Select(ToAgentJobStored).ToList();
+    }
+
     public async Task MarkDispatchedAsync(
         EventOrigin origin,
         string source,
@@ -216,6 +256,14 @@ public class EventStore : IEventStore
                 var row = await db.AgentSessionEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
                 if (row is null)
                     throw new InvalidOperationException($"Agent session event '{source}'/{id} was not found.");
+                row.DispatchedAt = dispatchedAt;
+                break;
+            }
+            case EventOrigin.AgentJob:
+            {
+                var row = await db.AgentJobEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+                if (row is null)
+                    throw new InvalidOperationException($"Agent job event '{source}'/{id} was not found.");
                 row.DispatchedAt = dispatchedAt;
                 break;
             }
@@ -268,6 +316,10 @@ public class EventStore : IEventStore
             SELECT 'AgentSession' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
                    "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
             FROM "AgentSessionEvents" WHERE "DispatchedAt" IS NULL
+            UNION ALL
+            SELECT 'AgentJob' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
+                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
+            FROM "AgentJobEvents" WHERE "DispatchedAt" IS NULL
             ORDER BY "Source", "Id"
             LIMIT @limit
             """;
@@ -327,6 +379,18 @@ public class EventStore : IEventStore
             specVersion: row.SpecVersion,
             extensions: DeserializeExtensions(row.ExtensionsJson)));
 
+    private static StoredCloudEvent ToAgentJobStored(AgentJobEventRow row) =>
+        new(row.Id, new CloudEvent(
+            id: row.EventId,
+            source: new Uri(row.Source, UriKind.RelativeOrAbsolute),
+            type: row.Type,
+            time: row.Time,
+            data: row.Data,
+            dataContentType: row.DataContentType,
+            subject: row.Subject,
+            specVersion: row.SpecVersion,
+            extensions: DeserializeExtensions(row.ExtensionsJson)));
+
     private static string SerializeExtensions(IReadOnlyDictionary<string, string>? extensions) =>
         extensions is null ? "{}" : JsonSerializer.Serialize(extensions, CloudEvent.JsonOptions);
 
@@ -345,6 +409,9 @@ public class EventStore : IEventStore
 
     private static Task<long> NextAgentSessionIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
         NextIdAsync(db.AgentSessionEvents, source, ct);
+
+    private static Task<long> NextAgentJobIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
+        NextIdAsync(db.AgentJobEvents, source, ct);
 
     private static async Task<long> NextIdAsync<T>(DbSet<T> set, string source, CancellationToken ct)
         where T : class, IEventRow
@@ -395,6 +462,7 @@ private sealed class UndeliveredSqlRow
         "Issue" => EventOrigin.Issue,
         "Epic" => EventOrigin.Epic,
         "AgentSession" => EventOrigin.AgentSession,
+        "AgentJob" => EventOrigin.AgentJob,
         _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
     };
 
