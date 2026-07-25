@@ -80,7 +80,8 @@ public static partial class WorkflowRunExtensions
         public TaskRun? RunningTask =>
             stage.Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Running);
 
-        internal bool IsAwaitingApproval => stage.ApprovalStatus is { Result: null };
+        internal bool IsAwaitingApproval =>
+            stage.ApprovalStatus is { Result: null } && stage.ApprovalStatus.DecidedBy is null;
 
         /// <summary>
         /// True when the stage is part of an active approval feedback loop
@@ -112,11 +113,22 @@ public static partial class WorkflowRunExtensions
 
         private void TryRequestApproval(DateTimeOffset now)
         {
-            if (stage.RequiresApproval && stage.ApprovalStatus is null && stage.HasNoPendingTasksAndPassedChecks())
+            if (stage.RequiresApproval && stage.HasNoPendingTasksAndPassedChecks())
             {
-                stage.ApprovalStatus = new ApprovalStatus(null, now.ToString("O"), null);
-                stage.Status = StageRunStatus.AwaitingApproval;
-                return;
+                // The gate needs a fresh ApprovalStatus when the previous
+                // decision was an unresolved reject-via-changes (Result is
+                // null but DecidedBy is set, leaving feedback tasks behind).
+                // Skipping that branch when the prior decision was an
+                // approval guards against accidentally wiping the
+                // approved decision when advance fires after a follow-up
+                // task scheduled by the approval itself.
+                if (stage.ApprovalStatus is null
+                    || (stage.ApprovalStatus.Result is null && stage.ApprovalStatus.DecidedBy is not null))
+                {
+                    stage.ApprovalStatus = new ApprovalStatus(null, now.ToString("O"), null);
+                    stage.Status = StageRunStatus.AwaitingApproval;
+                    return;
+                }
             }
             if (stage.Failure is not null)
             {

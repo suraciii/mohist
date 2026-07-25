@@ -69,3 +69,78 @@
   delivery / dispatch / watch specs cover the existing paths but do not
   assert failure-event emission completion. The regression check is
   included (existing tests pass).
+
+## T-002 progress (decidedBy)
+
+### Codebase Patterns
+
+- `ApprovalOperatorValidation.Normalize` (server) + the `IssueComment`
+  template at `MohistCliCommands.Issue.Comment.cs:18` are the only
+  declarative-author validation paths — `decidedBy` on approve/reject
+  mirrors them: required, trim, ≤100 chars.
+- `StageRun.IsAwaitingApproval` (now also `&& DecidedBy is null`) gates
+  the gate opening; without that, `RequestChanges` clearing `Result`
+  would be re-opened by a later `TryRequestApproval` tick.
+- `TryRequestApproval` (in `WorkflowRun.Stage.cs`) reopens the gate when
+  `ApprovalStatus is null` OR `(Result is null && DecidedBy is not null)`
+  — the second arm covers the reject-via-changes case where `Result` is
+  already null but `DecidedBy` was stamped by `RequestChanges`.
+
+### Decisions
+
+- `WorkflowRun.RequestChanges` (the feedback-loop path that maps to the
+  HTTP `POST /feedback` and CLI `mo issue ... feedback`) now `with`s
+  the existing `ApprovalStatus` to set `DecidedBy` and `RespondedAt`
+  while keeping `Result = null`. The gate is reopened by the new
+  `TryRequestApproval` arm when the feedback tasks all complete.
+- `StageApprovalResolved` is emitted from `RequestChanges` with
+  `Result = ApprovalResult.Rejected` and `DecidedBy` set — even though
+  the gate is being routed through the feedback loop, the resolution
+  event is the durable record that the operator took the action.
+- `Reject` (the legacy path that the CLI `mo run reject` no longer
+  invokes but that the grain still exposes) marks the run as
+  `WorkflowRunStatus.Failed` and stamps `Failure.Reason = ApprovalRejected`.
+- CLI `mo run approve` and `mo run reject` use `exit 1` for the
+  `--author` validation rejection (matches the comment author exit
+  code), not the `exit 2` used for the target-shape rejections.
+- HTTP DTOs: `ApproveRequest(string Author)` and
+  `RejectWithAuthorRequest(string Author, string Message)` replace
+  the old `RejectRequest(string? Message)`. The issue-scoped
+  `POST /feedback` (different surface from `mo run reject`) accepts
+  `Author` as an optional `string?` on `CreateFeedbackRequest` so
+  that the legacy callers continue to work while the new
+  approve/reject path enforces it.
+
+### Gotchas
+
+- `WorkflowRun.Stage.cs` has two separate `IsAwaitingApproval` checks
+  inside `Shared.cs` and `Stage.cs`; both must be updated together so
+  the gate reopen logic remains consistent.
+- The `ApprovalFeedback` integration test was checking
+  `Assert.Null(current.ApprovalStatus)` after `RequestChanges` — that
+  is no longer true because `RequestChanges` now `with`s the status
+  with `DecidedBy`. The assertion must check the new state
+  (`Result == null && DecidedBy == "operator-1"`).
+- The `CreateFeedback` API at `POST /api/projects/{id}/issues/{n}/feedback`
+  was made `Author` optional on the request body (default null) so
+  legacy callers continue to work; the new approve/reject path is the
+  one that enforces the required operator. Tests that previously
+  asserted on the response shape are updated to pass
+  `author = "supervisor"`.
+- `ArchTests` size ratchet baseline needed bumping for
+  `WorkflowRunControlApiSpecs.cs` (grew with the new
+  decidedBy-specific cases), `IssueArchivedDetailApiSpecs.cs`,
+  `DispatcherFixture.cs`, and adding `EpicEventPublishTestSupport.cs`
+  which was added by T-001 without a baseline entry.
+- CLI approve/reject calls in `CliRunControlSpecs.cs` and the
+  CrossPath_admit tests in `WorkflowRunControlApiSpecs.cs` were
+  updated to thread `--author` (and to make the `author` field appear
+  in the JSON body for the new test asserting it travels through).
+
+### Pre-existing failure (out of scope for T-002)
+
+- `RunnerWorkLedgerSpecs.RunnerLoss_SynthesizesAgentJobFailure_AndUpdatesLedgerRow`
+  fails on the T-001 baseline before any T-002 changes are applied
+  (verified by stashing the T-002 work tree and re-running the test).
+  This is a T-001 follow-up item, not a T-002 regression.
+
