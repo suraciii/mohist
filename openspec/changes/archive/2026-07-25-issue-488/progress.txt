@@ -1,0 +1,62 @@
+## Codebase Patterns
+
+- Preset resources use a separate `presets/` content root, while asset lookup reuses the packaged sibling-root fallback behavior from `SkillAssetRootResolver`.
+- `PresetCatalog` accepts an explicit root for FakeFileSystem tests and returns `PresetCatalogResult` with available names for unknown presets.
+- The manifest stores file references; response prompt files are read verbatim so `{{event.*}}` placeholders remain unrendered.
+
+## T-001
+
+- Added supervisor instructions, approval, and failure resources plus `presets/manifest.json`.
+- Added the CLI content packaging entry and catalog loader/tests.
+
+## T-002
+
+- Added `mo agent install <preset>` with catalog resolution, list-then-create idempotency, 409 conflict skipping, and ordered tail rule creation without Continue.
+- Updated agent supervision status footnotes to mark the install command implemented.
+
+## T-003
+
+- Added `AgentInstallPreflight` (new file `Mohist.Cli/AgentInstallPreflight.cs`) that runs two best-effort checks: a skill-stub check at `<cwd>/.agents/skills/mohist` via `IFileSystem.DirectoryExists`, and a notification check that parses `~/.mohist/config.jsonc` (path through `NotifyCommands.ConfigPathOverride`) and flags any missing default EnabledTypes. Both produce a `warning:` line; an unresolvable default repo produces a `note:` line and skips the skill-stub check.
+- Wired preflight into `MohistCliCommands.Agent.InstallAsync` after the agent and rules are created. Project data is fetched via `api.GetDataAsync("/api/projects/{id}")`; default repo is detected from `repositories[].isDefault`. Project fetch failures (HttpRequestException / `MohistCliApi.ApiResponseException`) are swallowed — preflight is best-effort.
+- Made `ApiResponseException` internal so the preflight can catch server-error envelopes without string-matching exception names.
+- Added `AgentCommands.PresetCatalogOverride` factory (default null) so the install command can build a `PresetCatalog` against the active `IFileSystem`. Pre-existing tests were brittle: the default catalog reached for `RealFileSystem` and only worked in environments with `presets/` content files at the binary location. The factory + per-test FakeFileSystem setup fixes that.
+- Tests added in `CliAgentCommandSpecs`: missing-skill-stub warning, stub-present (no warning), missing-default-repo (note + no warning), notifications-disabled warning, notifications-enabled (no warning), no-config-file (no warning), project-fetch-fails (install unaffected, note printed), and both-checks-fail (both warnings). Existing `AgentInstall_CreatesAgentAndRulesInOrder` and `AgentInstall_RerunSkipsExistingResources` updated to expect the new GET `/api/projects/{id}` and the new shared `ResolveRequest` helper. `FileSystemWithProject` now defaults the FakeFileSystem `CurrentDirectory` to `/repo` so the preflight warning has a meaningful path.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests` green (1365/1365); `npm run build` clean.
+
+## Verify repair (fix-ci)
+
+- Root cause of intermittent verify failure: `CliAgentCommandSpecs` and `CliNotifySetupCommandSpecs` both mutate the static `NotifyCommands.ConfigPathOverride` (per-test save/restore). xUnit v3 parallelizes test classes by default, so running them concurrently stomps the shared override right while `AgentInstallPreflight.CheckNotifications` re-reads it at runtime — `AgentInstall_BothChecksFail_EmitsBothWarningsAndInstalls` intermittently lost its `warning: Mohist:Notifications:Hermes:EnabledTypes is missing` line.
+- Fix: pin both classes to a new non-parallel `NotifyCommandConfigPath` collection (`[CollectionDefinition(DisableParallelization = true)]` + `[Collection]`), the established pattern in this repo (`VariableCommands`, `RunReads`) and the guidance in `design/testing.md` ("Collections express shared fixture lifetime and isolation needs only").
+- Verified: 20/20 green runs of the two classes in isolation (previously ~40% failed), 15/15 green full-suite runs at 1365/1365, `dotnet build` clean (TreatWarningsAsErrors).
+
+## Verify repair — round 2 (server spec test)
+
+- After the CLI fix above, `npm test` still failed: 1 server spec test (`GenericLaunch_FollowUpRuntimeEvents_AppendNonEmptyTranscriptContent` in `GenericAgentSessionTranscriptAxisSpecs`) failed deterministically when run as part of the full 3006-test suite, but passed in isolation.
+- Earlier round-2 hypothesis (dispatch retry grain-timer never fires because `PollOnceAsync` does not advance `FakeTimeProvider`) was wrong — advancing time did not fix it. Re-diagnosed against live grain state.
+- Actual root cause: `SessionFollowupApiSpecs` registers a runner (`followup-api-{guid}`) into the collection-wide `RunnerRegistryGrain` but never unregisters it (no `IAsyncDisposable`). The registry is a single global grain shared by every class in the `IntegrationSessions` collection, and `ListEligibleRunnersAsync` ignores project affinity — it returns every registered runner. The leaked `followup-api` runner stays live and idle, so when a later `GenericAgentSessionTranscriptAxisSpecs` test launches an agent job, `AgentJobGrain.TryDispatchAsync` assigns the work to the leaked runner instead of the launching test's own runner. The launching test then polls its own runner, never sees the dispatch, and times out after 50 polls.
+- Fix (test-only, no production code touched): make `SessionFollowupApiSpecs` implement `IAsyncDisposable` and unregister its runner on teardown, mirroring the sibling classes `GenericAgentSessionFollowupApiTestSupport` and `GenericAgentSessionCancelApiTestSupport`. The registry now reflects only the currently-running test's runners.
+- Reverted the round-2 `PollOnceAsync` time-advance hack from the prior WIP commit (it was treating a symptom of the wrong cause).
+- Verified: 4/4 green full-suite SpecTests runs at 3006/3006; full `dotnet test Mohist.sln` green (Unit 1346 + Arch 32 + Spec 3006 + Cli 1365 + Workflow.Definition 175); web typecheck + 5130 web tests green; runner typecheck + 1426 runner tests green.
+
+## Review-fix pass (issue-488 review.md findings F1–F4)
+
+- **F1 (Critical) — feature dead after `mo update`:** two layered defects.
+  - 1a: `UpdateOperations.UpdateCliResolvedAsync` synced only `skill-data`. Generalized `SkillAssetSynchronizer` → `ManagedAssetSynchronizer` with a `ManagedAssetKind` descriptor (skill validates `*/SKILL.md`, preset validates `manifest.json`); `UpdateCliResolvedAsync` now syncs presets alongside skill-data into `~/.mohist/cli/presets`. `ResolveManagedSkillAssetRoot` → `ResolveManagedAssetRoot(kind)`.
+  - 1b: `PresetCatalog` derived its root from the skill-data root by string substitution (coupling D2 forbids). New `PresetAssetRootResolver` resolves presets independently (managed cache → sibling). `PresetCatalog.CreateDefault(fs, getUserHome)` builds from it; the substitution ctor is gone.
+  - Empirically verified the F1 failure mode is gone: pre-fix `mo agent install` printed `Available presets: .`; post-fix with presets in the managed cache it lists `supervisor`. The `update --dry-run` output now shows both sync lines.
+- **F4 — static `PresetCatalogOverride`:** removed. The install command builds the catalog from `api.FileSystem` + `api.GetUserHome`; specs seed the managed-cache path so they exercise the real `PresetCatalog.CreateDefault` resolution. No more process-global mutable catalog seam.
+- **F2 — preflight probed CLI CWD but called it "the workspace":** the project API exposes no per-repo workspace path (control/execution plane separation), so the check can't see the runner's checkout. Reframed honestly: it inspects the current directory as a *local proxy*, names the resolved default repo, and says so. `TryResolveDefaultRepositoryAsync` returns a `DefaultRepository` struct carrying the repo name.
+- **F3 — rules' `agentId` binding untested:** `AgentInstall_CreatesAgentAndRulesInOrder` now asserts both rule POST bodies bind `agentId` to the created supervisor Agent.
+- **Tests:** added `ManagedAssetSynchronizerPresetTests` (sync + manifest validation), `PresetCatalogTests` cases for managed/sibling/absent resolution, and a command-level `AgentInstall_WhenManagedPresetsAbsent_ExitsNonZeroBeforeAnyHttp` regression for the F1 failure mode. Updated update-flow fixtures (`UpdateInstallSyncTests`, `UpdateTestFactory`) to seed a preset bundle since `mo update` now requires it.
+- Verified: `dotnet test Mohist.sln` green (Cli 1371 + Unit 1346 + Arch 32 + Spec 3006); `npm run build` clean.
+
+## Re-review fix pass (issue-488 review.md findings N1–N3)
+
+- **N1 (Medium) — agent 409-conflict re-resolve used a malformed project id:** `EnsureAgentAsync` sliced the agents URL path (`/api/projects/{id}`) and passed it as `projectId` to `ResolveAgentAsync`, which prepended `/api/projects/` again → a double-prefixed/escaped URL that 404s. Under the concurrent-install race (D3's 409 safety net) install printed `exists, skipped` then errored. Fix: thread the real `resolution.ProjectId` into `EnsureAgentAsync` and pass it to `ResolveAgentAsync`. Added `AgentInstall_AgentCreateConflict_ResolvesExistingAndBindsRulesToIt` — a stateful handler simulates the race (list empty → POST 409 → list returns the agent) and asserts install exits 0, re-resolves via the exact project-scoped agents URL, and both rules bind `agentId` to the re-resolved supervisor. Verified the test fails against the reverted bug and passes with the fix.
+- **N2 (nit) — `ManagedAssetKind` validation error was hardcoded by label compare:** `TryValidatePrepared` picked the error string via `kind.Label == Skill.Label` instead of data-driving it. Added `InvalidPreparedMessage` to the `ManagedAssetKind` descriptor (`"no '*/SKILL.md' found"` / `"manifest.json not found"`); `TryValidatePrepared` now reads `kind.InvalidPreparedMessage`. A future asset kind gets its own message for free.
+- **N3 (coverage) — three spec scenarios pinned at the narrowest level:**
+  - Tail-append: `AgentInstall_CreatesAgentAndRulesInOrder` now asserts the rule POST bodies carry no `before`/`after` keys (anchors would reorder rules).
+  - Verbatim placeholders at the HTTP boundary: new `AgentInstall_ResponsePromptPlaceholdersFlowThroughToRuleBodyVerbatim` seeds `{{event.*}}` prompt text and asserts the POSTed `responsePrompt` contains the tokens unchanged (catches accidental sanitization).
+  - Partial pre-existence: new `AgentInstall_PartialPreexistence_CreatesOnlyTheMissingRule` — agent + supervisor-approval pre-exist, failure missing → exactly one POST (the failure rule), agent and approval reused unmodified.
+- Verified: `dotnet test Mohist.sln` green (Cli 1374 + Unit 1346 + Arch 32 + Spec 3006 + Workflow.Definition 175); `dotnet build Mohist.sln` clean.
+

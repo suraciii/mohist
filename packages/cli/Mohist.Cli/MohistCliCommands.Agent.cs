@@ -25,6 +25,7 @@ internal static class AgentCommands
         agent.Subcommands.Add(BuildUpdate(api));
         agent.Subcommands.Add(BuildArchive(api));
         agent.Subcommands.Add(BuildSession(api));
+        agent.Subcommands.Add(BuildInstall(api));
 
         return agent;
     }
@@ -43,6 +44,208 @@ internal static class AgentCommands
         if (string.IsNullOrWhiteSpace(projectId))
             throw new InvalidOperationException(MohistCliCommands.NoActiveProjectMessage);
         return $"/api/projects/{MohistCliCommands.Escape(projectId)}{(path.StartsWith('/') ? path : "/" + path)}";
+    }
+
+    private static Command BuildInstall(MohistCliApi api)
+    {
+        var command = new Command("install", "Install a built-in agent preset.");
+        var preset = new Argument<string>("preset") { Description = "Built-in preset name." };
+        var (project, projectId) = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(preset);
+        command.Options.Add(project);
+        command.Options.Add(projectId);
+        command.SetAction(ctx => InstallAsync(ctx));
+
+        async Task<int> InstallAsync(ParseResult ctx)
+        {
+            var catalog = PresetCatalog.CreateDefault(api.FileSystem, api.GetUserHome);
+            var resolvedPreset = catalog.Resolve(ctx.GetValue(preset) ?? string.Empty);
+            if (!resolvedPreset.Found || resolvedPreset.Preset is null)
+            {
+                api.Error.WriteLine(resolvedPreset.Error);
+                return 1;
+            }
+
+            var resolution = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));
+            if (resolution.Exit != 0)
+                return resolution.Exit;
+
+            var projectPath = ProjectAgentsPath(resolution.ProjectId, "/agents");
+            var agent = await EnsureAgentAsync(api, projectPath, resolution.ProjectId, resolvedPreset.Preset);
+            if (agent is null)
+                return 1;
+
+            foreach (var rule in resolvedPreset.Preset.Rules)
+            {
+                if (!await EnsureRuleAsync(api, resolution.ProjectId, agent.Id, rule))
+                    return 1;
+            }
+
+            await RunPreflightAsync(api, resolution.ProjectId);
+            return 0;
+        }
+
+        return command;
+    }
+
+    private static async Task RunPreflightAsync(MohistCliApi api, string projectId)
+    {
+        var defaultRepo = await TryResolveDefaultRepositoryAsync(api, projectId);
+        var preflight = BuildPreflight(api);
+        var result = preflight.Run(api.FileSystem.CurrentDirectory, defaultRepo);
+        foreach (var notice in result.Notices)
+            await api.Output.WriteLineAsync(notice).ConfigureAwait(false);
+        foreach (var warning in result.Warnings)
+            await api.Output.WriteLineAsync(warning).ConfigureAwait(false);
+    }
+
+    internal static AgentInstallPreflight BuildPreflight(MohistCliApi api)
+    {
+        return new AgentInstallPreflight(api.FileSystem, NotifyCommands.ConfigPathOverride);
+    }
+
+    internal static async Task<DefaultRepository> TryResolveDefaultRepositoryAsync(
+        MohistCliApi api, string projectId)
+    {
+        JsonNode? projectInfo;
+        try
+        {
+            projectInfo = await api.GetDataAsync($"/api/projects/{Uri.EscapeDataString(projectId)}");
+        }
+        catch (HttpRequestException)
+        {
+            return DefaultRepository.Unresolved;
+        }
+        catch (MohistCliApi.ApiResponseException)
+        {
+            return DefaultRepository.Unresolved;
+        }
+
+        var repositories = projectInfo?["repositories"] as JsonArray;
+        if (repositories is null)
+            return DefaultRepository.Unresolved;
+
+        foreach (var entry in repositories)
+        {
+            if (entry is not JsonObject repository)
+                continue;
+            if (repository["isDefault"]?.GetValue<bool>() != true)
+                continue;
+            var name = repository["name"]?.GetValue<string>();
+            return DefaultRepository.Named(string.IsNullOrWhiteSpace(name) ? null : name);
+        }
+
+        return DefaultRepository.Unresolved;
+    }
+
+    private static async Task<AgentRef?> EnsureAgentAsync(MohistCliApi api, string path, string projectId, AgentPreset preset)
+    {
+        try
+        {
+            var existing = await api.GetDataAsync(path + "?all=true");
+            if (existing is JsonArray agents)
+            {
+                foreach (var item in agents)
+                {
+                    var agent = AgentRef.From(item);
+                    if (agent is not null && string.Equals(agent.Name, preset.Name, StringComparison.Ordinal))
+                    {
+                        api.Output.WriteLine($"exists, skipped: agent {preset.Name}");
+                        return agent;
+                    }
+                }
+            }
+
+            using var response = await api.SendAsync(HttpMethod.Post, path, new
+            {
+                name = preset.Name,
+                instructions = preset.Instructions,
+                agentConfig = (object?)null,
+                skills = (string[]?)null,
+                maxConcurrentRuns = (int?)null,
+            }, printServerUnavailable: false);
+            if (response is null)
+                return null;
+
+            var data = await ReadDataOrPrintErrorAsync(api, response);
+            if (data is null)
+            {
+                if (response.StatusCode == HttpStatusCode.Conflict)
+                {
+                    // Concurrent install won the create race (409 AGENT_NAME_CONFLICT).
+                    // Re-resolve by name against the real project id so the rules can
+                    // bind to the now-existing agent. (Previously this sliced the URL
+                    // path and passed it as projectId, producing a malformed URL.)
+                    api.Output.WriteLine($"exists, skipped: agent {preset.Name}");
+                    return await ResolveAgentAsync(api, projectId, preset.Name);
+                }
+                return null;
+            }
+
+            var created = AgentRef.From(data);
+            if (created is null)
+            {
+                api.Error.WriteLine("Server returned an invalid agent response");
+                return null;
+            }
+            api.Output.WriteLine($"created agent: {preset.Name}");
+            return created;
+        }
+        catch (HttpRequestException)
+        {
+            api.Error.WriteLine(MohistCliApi.ServerUnavailableMessage);
+            return null;
+        }
+    }
+
+    private static async Task<bool> EnsureRuleAsync(MohistCliApi api, string projectId, string agentId, PresetRule rule)
+    {
+        var path = $"/api/projects/{Uri.EscapeDataString(projectId)}/routing/rules";
+        try
+        {
+            var existing = await api.GetDataAsync(path);
+            if (existing is JsonArray rules)
+            {
+                foreach (var item in rules)
+                {
+                    if (string.Equals(item?["name"]?.GetValue<string>(), rule.Name, StringComparison.Ordinal))
+                    {
+                        api.Output.WriteLine($"exists, skipped: routing rule {rule.Name}");
+                        return true;
+                    }
+                }
+            }
+
+            using var response = await api.SendAsync(HttpMethod.Post, path, new
+            {
+                name = rule.Name,
+                match = rule.Match,
+                agentId,
+                responsePrompt = rule.ResponsePrompt,
+                @continue = (bool?)null,
+            }, printServerUnavailable: false);
+            if (response is null)
+                return false;
+
+            var data = await ReadDataOrPrintErrorAsync(api, response);
+            if (data is null)
+            {
+                if (response.StatusCode == HttpStatusCode.Conflict)
+                {
+                    api.Output.WriteLine($"exists, skipped: routing rule {rule.Name}");
+                    return true;
+                }
+                return false;
+            }
+
+            api.Output.WriteLine($"created routing rule: {rule.Name}");
+            return true;
+        }
+        catch (HttpRequestException)
+        {
+            api.Error.WriteLine(MohistCliApi.ServerUnavailableMessage);
+            return false;
+        }
     }
 
     private static Command BuildCreate(MohistCliApi api)

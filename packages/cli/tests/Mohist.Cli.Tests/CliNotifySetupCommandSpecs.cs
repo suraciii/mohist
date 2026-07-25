@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
+[Collection("NotifyCommandConfigPath")]
 public class CliNotifySetupCommandSpecs : IDisposable
 {
     private readonly string _configPath;

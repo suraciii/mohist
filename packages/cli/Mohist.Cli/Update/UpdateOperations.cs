@@ -147,7 +147,9 @@ internal sealed class UpdateOperations
         var binary = Path.Combine(publishDir, "Mohist.Cli");
         var tempTarget = $"{target}.tmp";
         var sourceSkillData = Path.Combine(publishDir, "skill-data");
-        var managedSkillData = ResolveManagedSkillAssetRoot();
+        var sourcePresets = Path.Combine(publishDir, "presets");
+        var managedSkillData = ResolveManagedAssetRoot(ManagedAssetKind.Skill);
+        var managedPresets = ResolveManagedAssetRoot(ManagedAssetKind.Preset);
 
         _out.WriteLine($"Updating CLI from source: {root}");
 
@@ -159,6 +161,7 @@ internal sealed class UpdateOperations
             _out.WriteLine($"  chmod +x {tempTarget}");
             _out.WriteLine($"  mv {tempTarget} {target}");
             _out.WriteLine($"  synchronize {sourceSkillData} into {managedSkillData} (prepare temp dir, replace managed root)");
+            _out.WriteLine($"  synchronize {sourcePresets} into {managedPresets} (prepare temp dir, replace managed root)");
             if (target == primaryTarget || target == alternateTarget)
             {
                 var wrapper = ResolveCliWrapperPath(home);
@@ -225,12 +228,19 @@ internal sealed class UpdateOperations
             }
         }
 
-        var synchronizer = new SkillAssetSynchronizer(_out, _err, _fileSystem);
-        var syncExitCode = await synchronizer.SyncAsync(sourceSkillData, managedSkillData);
+        var synchronizer = new ManagedAssetSynchronizer(_out, _err, _fileSystem);
+        var syncExitCode = await synchronizer.SyncAsync(sourceSkillData, managedSkillData, ManagedAssetKind.Skill);
         if (syncExitCode != 0)
         {
             _err.WriteLine("Managed skill asset sync failed. Aborting update.");
             return syncExitCode;
+        }
+
+        var presetSyncExitCode = await synchronizer.SyncAsync(sourcePresets, managedPresets, ManagedAssetKind.Preset);
+        if (presetSyncExitCode != 0)
+        {
+            _err.WriteLine("Managed preset asset sync failed. Aborting update.");
+            return presetSyncExitCode;
         }
 
         _out.WriteLine($"CLI updated: {target}");
@@ -239,7 +249,7 @@ internal sealed class UpdateOperations
 
     public async Task<int> SyncSkillsAsync(string? repoRoot, string? sourceSkillData, bool dryRun, CancellationToken cancellationToken = default)
     {
-        var managedSkillData = ResolveManagedSkillAssetRoot();
+        var managedSkillData = ResolveManagedAssetRoot(ManagedAssetKind.Skill);
 
         string sourceSkillDataDir;
         if (!string.IsNullOrWhiteSpace(sourceSkillData))
@@ -260,8 +270,8 @@ internal sealed class UpdateOperations
             return 0;
         }
 
-        var synchronizer = new SkillAssetSynchronizer(_out, _err, _fileSystem);
-        return await synchronizer.SyncAsync(sourceSkillDataDir, managedSkillData);
+        var synchronizer = new ManagedAssetSynchronizer(_out, _err, _fileSystem);
+        return await synchronizer.SyncAsync(sourceSkillDataDir, managedSkillData, ManagedAssetKind.Skill);
     }
 
     public async Task<int> BuildAndRestartServerAsync(string root, CancellationToken cancellationToken)
@@ -343,14 +353,14 @@ internal sealed class UpdateOperations
         }
     }
 
-    internal string ResolveManagedSkillAssetRoot()
+    internal string ResolveManagedAssetRoot(ManagedAssetKind kind)
     {
         var home = _getUserHome?.Invoke();
         if (string.IsNullOrWhiteSpace(home))
             home = _environment.GetEnvironmentVariable(SkillAssetRootResolver.HomeEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(home))
-            return Path.Combine(home, ".mohist", "cli", "skill-data");
-        return Path.Combine(AppContext.BaseDirectory, "skill-data");
+            return Path.Combine(home, ".mohist", "cli", kind.SourceDirectoryName);
+        return Path.Combine(AppContext.BaseDirectory, kind.SourceDirectoryName);
     }
 
     public string ResolveRepoRoot(string? explicitRoot)
