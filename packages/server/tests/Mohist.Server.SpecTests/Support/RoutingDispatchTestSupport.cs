@@ -365,6 +365,15 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         string? runtimeOverride = null,
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher captures routed launches only.");
+
+    public Task<AgentLaunchResult> LaunchMentionAsync(
+        AgentInfo agent,
+        string prompt,
+        AgentLaunchContext context,
+        string commentId,
+        string triggeringEventId,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("RecordingAgentLauncher captures routed launches only.");
 }
 
 public sealed record RecordedRoutedLaunch(

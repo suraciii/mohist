@@ -95,3 +95,28 @@
   IssueCommentEventSpecs).
 - `dotnet build Mohist.sln -p:SkipWebBuild=true`: succeeded, 0 warnings,
   0 errors.
+
+### Verify-check fix (T-002 launcher foundation)
+
+- `npm run build` failed with `CS0535`: `RecordingAgentLauncher` in
+  `packages/server/tests/Mohist.Server.SpecTests/Support/RoutingDispatchTestSupport.cs`
+  did not implement the new `IAgentLauncher.LaunchMentionAsync` interface
+  member added by commit `ca4fab5db` (T-002 launcher foundation). The
+  SpecTests project is the only other implementer of `IAgentLauncher`
+  (verified via grep across `packages/`).
+- Fix: add a `LaunchMentionAsync` stub to `RecordingAgentLauncher` that
+  throws `NotSupportedException`, matching the existing `LaunchAsync`
+  (manual path) stub — the fake deliberately captures routed launches
+  only. The new method's parameters (`commentId`, `triggeringEventId`)
+  are accepted but unused.
+- After the fix: `npm run build` succeeds (0 warnings, 0 errors) and
+  `npm test` passes end-to-end:
+  - Mohist.Workflow.Definition.Tests 175/175
+  - Mohist.Server.UnitTests 1354/1354
+  - Mohist.Cli.Tests 1374/1374
+  - Mohist.Server.ArchTests 32/32
+  - Mohist.Server.SpecTests 3016/3016
+  - Web Vitest 5130/5130
+  - Runner Vitest 1426/1426
+- Working tree change is limited to the test fake (9 lines added) — no
+  verification side effects, no build artifacts.
