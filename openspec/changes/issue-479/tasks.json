@@ -1,0 +1,123 @@
+{
+  "project": "mohist-local",
+  "description": "Make mo agent launch expose both the AgentJob result and the AgentSession conversation: add an AgentJob read surface, return both identities at launch, and unify the session conversation under a source-independent top-level mo session.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "AgentJob relational read model and write-through grain persistence",
+      "spec": "specs/agent-job-read/spec.md",
+      "description": "Give AgentJob a queryable relational read model mirroring the AgentSession pattern, so jobs can be listed by agent and viewed by id. Add AgentJobRow (Infrastructure/Data/AgentJobs/AgentJobRow.cs) as a JSON State blob plus indexed columns (JobKey PK, ProjectId, AgentId, Status, SubmittedAt, TerminalAt), mirroring AgentSessionRow (Infrastructure/Data/Sessions/AgentSessionRow.cs). Register DbSet<AgentJobRow> on MohistDbContext (MohistDbContext.cs:37-74) with an OnModelCreating mapping using json_extract stored computed columns and a composite index on (AgentId, ProjectId, SubmittedAt), mirroring the AgentSessions mapping (MohistDbContext.cs:137-206), and add the EF migration. Add IAgentJobStore/AgentJobStore (LoadAsync(key) + SaveAsync(key, state) upsert) mirroring AgentSessionStore (Infrastructure/Data/Sessions/AgentSessionStore.cs), and AgentJobQuerier (Agent/Services/AgentJobQuerier.cs) with ListByAgentAsync(projectId, agentId, statusSet, limit) and GetByKeyAsync(jobKey), mirroring AgentSessionQuerier.ListAgentSessionsAsync. Migrate AgentJobGrain (Agent/Grains/AgentJobGrain.cs) to relational-authoritative persistence: inject IAgentJobStore, drop [PersistentState(\"agent-job\")] (AgentJobGrain.cs:57), load state from the store on activation, and write the row on each persisted transition through the existing SaveAsync funnel (AgentJobGrain.cs:1151) — exactly as AgentSessionGrain does (AgentSessionGrain.cs:114). The grain string key (D1: agent-job-launch-{guid} / StableJobKey / CommentJobKey) is the row primary key. Register services in MohistServiceRegistration.cs (~line 105). This task delivers storage/queryability only; no HTTP or CLI surface yet.",
+      "acceptanceCriteria": [
+        "AgentJobState persists to a new AgentJobs relational table; the grain string key is the row primary key.",
+        "AgentJobGrain no longer uses [PersistentState]; it loads from IAgentJobStore on activation and writes the row synchronously on submit, runner-acceptance, and terminal transitions (one write per transition, no dual-write).",
+        "AgentJobQuerier.ListByAgentAsync returns jobs for (projectId, agentId) ordered most-recent-first with an optional status filter and limit; GetByKeyAsync returns the job for a key or null.",
+        "The full AgentJob lifecycle is unchanged: submit → running → completed|failed, dispatch retry/backoff, reminder-based recovery, terminal result reporting via ReportResultAsync still behave as before.",
+        "The AgentJobTerminalResult is reachable from the persisted row (status, message, output, artifactUploadIds, failureReason, exitCode).",
+        "server unit tests cover: AgentJobStore load/upsert, AgentJobQuerier list-by-agent (recency, status filter, empty) and view-by-key (hit/miss), and grain load-on-activate + write-on-transition — using injected fakes and no real DB or wall-clock.",
+        "Existing AgentJob spec tests (recovery, terminal transition, runner report, dispatch retry) still pass after the persistence migration.",
+        "npm run build (dotnet build) succeeds and npm test passes for the server."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentJobRow + DbSet + migration + AgentJobStore + AgentJobQuerier + DI registration; AgentJobGrain migrated to relational-authoritative write-through persistence.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D1 (grain key = product job id / row PK) and D2 (read model mirroring AgentSession). The grain persistence migration is the top risk; mirror AgentSessionGrain's load-on-activate + write-on-transition exactly. If review finds the migration too risky, the documented fallback is a best-effort mirror write alongside [PersistentState] (D2 alternative a), accepted only with a follow-up to harden terminal-write consistency."
+    },
+    {
+      "id": "T-002",
+      "title": "AgentJob read API surface and mo agent job CLI",
+      "spec": "specs/agent-job-read/spec.md#View a single AgentJob by id",
+      "description": "Expose the AgentJob status and terminal result over HTTP and the CLI. Add GET /api/projects/{projectRef}/agents/{agentRef}/jobs (list, mirroring AgentSessionListRoutes.cs) and GET /api/projects/{projectRef}/agent-jobs/{jobId} (view) reading AgentJobQuerier; register both in MohistApiRegistration.cs (~line 39). Add AgentJobListItemDto (jobId, agentId, agentName, status, submittedAt, terminalAt) and AgentJobViewDto carrying the AgentJobTerminalResult fields (status, message, output, artifactUploadIds, failureReason, exitCode); fields with no value are absent (null), never fabricated. Add the CLI agent job subgroup via BuildJob under agent (MohistCliCommands.Agent.cs:18): list <agent> → the list route, and view <job-id> → the view route, resolving the agent ref client-side like the existing session list. Add AgentJobList and AgentJobView to the TableShape enum (MohistCliApi.cs:1068), the cardinality switch, and the fields arms (ResourceOutput.cs:23-97). Return 404 for an unknown agent and an unknown job id; show current status for pending/running jobs without asserting a terminal result.",
+      "acceptanceCriteria": [
+        "GET .../agents/{agentRef}/jobs returns the agent's jobs (id + status) most-recent-first; an agent with no jobs returns an empty list; an unknown agent returns 404.",
+        "GET .../agent-jobs/{jobId} returns the job's current status and, when terminal, its terminal result; an unknown job id returns 404.",
+        "A pending/running job view shows the current status and does not assert a terminal result.",
+        "The terminal result exposes status, message, output, artifactUploadIds, failureReason, and exitCode; absent values are null, not fabricated.",
+        "mo agent job list <agent> prints each job's id and status; mo agent job view <job-id> prints status and terminal result fields.",
+        "server spec tests cover: list-by-agent (jobs, empty, unknown-agent 404), view (completed, failed with failure reason, non-terminal, unknown-id 404), and terminal-result field completeness — via injected fakes, no real process/DB.",
+        "CLI spec tests cover: agent job list table output, agent job view output, unknown-agent and unknown-job error paths.",
+        "npm run build succeeds and npm test passes for server and cli."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentJob list/view HTTP routes + DTOs + DI/route registration; mo agent job list/view CLI commands and table shapes.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D1 (job id = grain key, accepted by view) and the read-surface half of D2. The job id used by view is exactly the grain key / row PK. This is the sole CLI read path for a job's terminal outcome (spec: AgentJob is the sole work-result read path)."
+    },
+    {
+      "id": "T-003",
+      "title": "Launch returns both identities and mo agent launch CLI",
+      "spec": "specs/agent-launch/spec.md#Launch returns both the AgentJob and AgentSession identities",
+      "description": "Surface the AgentJob identity the launcher already mints, and relocate the launch command. Add JobKey to AgentLaunchResult (IAgentLauncher.cs:121); LaunchAsync (AgentLauncher.cs:111) and LaunchMentionAsync (AgentLauncher.cs:292) return the key they already compute (AgentLauncher.cs:124 and :256); the routed path already returns it (RoutedAgentLaunchOutcome.JobKey). Add JobId (and a job-result link) to AgentSessionLaunchResponse (AgentSessionLaunchRoutes.cs:203) and compose it from AgentLaunchResult.JobKey in the 201 handler (AgentSessionLaunchRoutes.cs:117). Relocate the CLI launch command: register BuildSessionLaunch directly under agent (MohistCliCommands.Agent.cs:18) instead of under the session subgroup, rename the user path to mo agent launch <agent>, and print both the job id and the session id; add jobId to the AgentSessionLaunch table shape (ResourceOutput.cs:68). Preserve the existing domain gates verbatim (whitespace prompt → 400 before any entity; unknown agent → 404; archived agent → 409; invalid context ref → error). No launch pipeline behaviour changes — only the returned identity and the command location. Close the launch gap note in docs/cli-reference.md:352.",
+      "acceptanceCriteria": [
+        "AgentLaunchResult carries a non-empty JobKey for manual and mention launches; the routed path continues to return its key.",
+        "The launch 201 response includes a non-empty jobId alongside sessionId, agentId, agentName, and a transcript URL.",
+        "The jobId returned at launch is accepted verbatim by the T-002 view route (no id translation).",
+        "A launch still creates exactly one AgentJob and exactly one AgentSession and issues exactly one dispatch; submit/open ordering is unchanged.",
+        "mo agent launch <agent> prints both a job id and a session id; the command lives directly under agent (no intermediate session subcommand).",
+        "Domain gates are preserved: whitespace prompt → 400 with no session/job created; unknown agent → 404; archived agent → 409.",
+        "server spec tests cover: launch response carries jobId + sessionId, launched jobId is queryable via the job view route, exactly-one-job-and-one-session, and the three domain gates.",
+        "CLI spec tests cover: mo agent launch prints both ids; the relocated command path resolves the agent and posts to the launch route.",
+        "docs/cli-reference.md:352 gap note is closed; design/cli.md:67 (agent launch returns Job + Session) is aligned.",
+        "npm run build succeeds and npm test passes for server and cli."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentLaunchResult.JobKey; launch 201 carries jobId; mo agent launch CLI printing both ids; AgentSessionLaunch table shape includes jobId; launch gap note closed.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Design D3 plus the launch half of D5. Depends on T-002 so the 'launched jobId is accepted by the read surface' acceptance is verifiable. Relocating launch out of the agent session subgroup is a prerequisite for T-005 removing that subgroup."
+    },
+    {
+      "id": "T-004",
+      "title": "Source-agnostic unified session read route",
+      "spec": "specs/session-command-unification/spec.md#Top-level session command addressed by stable Session ID",
+      "description": "Add a project-scoped route group /api/projects/{projectRef}/sessions with GET /{sessionId} and GET /{sessionId}/transcript that resolve an AgentSession by id WITHOUT the source-kind == 'agent-launch' gate (contrast FindGenericSessionAsync, AgentSessionQuerier.cs:601-611, which 404s workflow sessions). The handlers read the session row by id and return a unified summary/transcript DTO carrying the fields common to both sources (id, source, activity, created/last-activity, model, usage, context refs), branching internally on the resolved source-kind to populate source-specific identity (agentId/agentName for agent-launch; workflowRunId/sessionName for workflow) via the absent-when-empty idiom. Add a unified list GET /api/projects/{projectRef}/sessions accepting ?agent=, ?issue=, ?run= filters that delegate to the existing querier methods (ListAgentSessionsAsync, ListSummariesByIssueAsync, ListByWorkflowAsync). Follow-up/cancel already accept an id for both sources and are not changed here. The older agent-sessions/{id} GET remains for the agent-launch transcript link until T-005 switches the CLI over.",
+      "acceptanceCriteria": [
+        "GET .../sessions/{sessionId} returns the summary for an agent-launch session AND a workflow-originated session by the same stable id (no source-kind gate).",
+        "GET .../sessions/{sessionId}/transcript returns the transcript for both sources by id.",
+        "GET .../sessions with ?agent=, ?issue=, or ?run= returns sessions from the matching source; the filters delegate to the existing querier methods.",
+        "The unified summary DTO carries common fields and populates source-specific identity only for its source (workflow-only fields absent for agent-launch and vice-versa).",
+        "An unknown session id returns 404; a session belonging to a different project returns 404.",
+        "server spec tests cover: show/transcript by id for both sources, list by each filter, unknown-id 404, cross-project 404, and the source-specific-field contract — via injected fakes, no real DB.",
+        "npm run build succeeds and npm test passes for the server."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Unified project-scoped /sessions route group (show, transcript, source-filtered list) + unified DTO; no source-kind gate on id-keyed reads.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D4. Independent of the AgentJob work (T-001..T-003), so it can run in parallel. The existing follow-up/cancel routes already resolve canonically by id for both sources, so only the read (show/transcript/list) routes need unifying. Resolves the --run project-scoping open question by making the unified list project-scoped (resolves project from the route, not from the run)."
+    },
+    {
+      "id": "T-005",
+      "title": "Top-level mo session CLI and retirement of duplicate session groups",
+      "spec": "specs/session-command-unification/spec.md#Top-level session command addressed by stable Session ID",
+      "description": "Add the top-level mo session command group and retire the duplicate source-specific groups. Add SessionCommands.Build(api) to the root command list (MohistCliCommands.Build): list (--agent/--issue/--run filters), show, transcript, followup, compact, reset, cancel — each taking a Session ID argument. show and transcript hit the T-004 unified /sessions routes; list hits the unified source-filtered route; followup/compact/reset/cancel hit the existing id-keyed action routes (which already accept an id for both sources). Remove the agent session subgroup (MohistCliCommands.Agent.cs:553, minus launch which T-003 already relocated) and the issue session / issue sessions groups (MohistCliCommands.Issue.Session.cs); mo issue sessions <num> is replaced by mo session list --issue <num>. mo session cancel requests runtime interruption only and must not cancel or rewrite the owning AgentJob lifecycle (the job remains the sole terminal authority). Close the session-unification gap note in docs/cli-reference.md:346 and align docs/agents.md (AgentJob/AgentSession ownership table).",
+      "acceptanceCriteria": [
+        "mo session is a top-level command group; show/transcript/followup/compact/reset/cancel each take a Session ID and work for both agent-launch- and workflow-originated sessions.",
+        "mo session list accepts --agent, --issue, and --run; mo session list --issue <num> replaces mo issue sessions <num>.",
+        "mo session followup delivers a follow-up without creating a TaskRun or AgentJob.",
+        "mo session cancel requests runtime interruption only and does not transition the owning AgentJob to a terminal state.",
+        "The mo agent session and mo issue session(/sessions) command groups are removed; running them is command-not-found.",
+        "There is exactly one session command set; source is only a list filter, not a parallel capability.",
+        "CLI spec tests cover: session show/transcript by id for both sources, list by each filter, followup-no-job, cancel-runtime-only, and command-not-found for the retired agent session / issue session paths.",
+        "docs/cli-reference.md:346 gap note is closed; docs/agents.md ownership table is aligned.",
+        "npm run build succeeds and npm test passes for cli (CliAgentSessionCommandSpecs, CliIssueSessionSpecs updated)."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Top-level mo session command group (list/show/transcript/followup/compact/reset/cancel by Session ID); agent session and issue session groups removed; session-unification gap note closed.",
+      "dependsOn": ["T-003", "T-004"],
+      "passes": false,
+      "notes": "Design D5 (session half) and D6. Depends on T-003 (launch already relocated out of the agent session subgroup before that subgroup is removed) and T-004 (unified read route the CLI targets). No aliases are kept (active-dev convention). Session archive/delete is explicitly out of scope (deferred to a follow-up)."
+    }
+  ]
+}
