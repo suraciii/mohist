@@ -63,8 +63,34 @@ public sealed class AgentSessionResolver : IScopedService
     public string StableJobKey(string projectId, string eventId, string ruleId) =>
         StableId("agent-job-trigger", BuildTriggerIdentity(projectId, eventId, ruleId));
 
+    /// <summary>
+    /// Stable AgentSession id anchored on a comment mention
+    /// (<paramref name="projectId"/>, <paramref name="commentId"/>,
+    /// <paramref name="agentId"/>). Used by the mention launch path
+    /// (issue-490 T-002, design D3) so the comment (not the delivering
+    /// event's GUID) is the durable anchor — reprocessing the same
+    /// comment reuses the session grain and the AgentJob grain,
+    /// different comments launch independently.
+    /// </summary>
+    public string CommentSessionId(string projectId, string commentId, string agentId) =>
+        StableId("agent-session", BuildCommentTriggerIdentity(projectId, commentId, agentId));
+
+    /// <summary>
+    /// Stable AgentJob grain key anchored on the same comment-mention
+    /// identity as <see cref="CommentSessionId"/>. Counterpart to
+    /// <see cref="StableJobKey"/> for the mention launch path; redelivery
+    /// of the same <c>comment-added</c> event reuses the same AgentJob
+    /// grain and the same canonical plan (launcher's
+    /// <c>EnsureSubmittedAsync</c> first-writer semantics).
+    /// </summary>
+    public string CommentJobKey(string projectId, string commentId, string agentId) =>
+        StableId("agent-job-trigger", BuildCommentTriggerIdentity(projectId, commentId, agentId));
+
     private static string BuildTriggerIdentity(string projectId, string eventId, string ruleId) =>
         $"{projectId}\n{eventId}\n{ruleId}";
+
+    private static string BuildCommentTriggerIdentity(string projectId, string commentId, string agentId) =>
+        $"{projectId}\n{commentId}\n{agentId}";
 
     private static string StableId(string prefix, string identity)
     {
