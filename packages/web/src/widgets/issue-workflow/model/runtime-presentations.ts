@@ -229,7 +229,8 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
       if (issue?.convergence?.blockedReason) return issue.convergence.blockedReason
       const recovery = issue?.recovery
       if (recovery?.latestAttemptState === 'interrupted'
-        || issue?.workflowStatus?.toLowerCase() === 'interrupted') {
+        || issue?.workflowStatus?.toLowerCase() === 'interrupted'
+        || issue?.workflowStatus?.toLowerCase() === 'stopped') {
         return 'Execution stopped manually. Resume or rerun to continue.'
       }
       return 'The workflow is blocked and needs an action to continue.'
@@ -264,6 +265,12 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
     headline: () => 'Workflow done',
     rationale: () => 'The workflow has completed.',
     nextAction: () => 'No further action required.',
+    actions: buildDoneActions,
+  },
+  cancelled: {
+    headline: () => 'Issue cancelled',
+    rationale: () => 'This issue was cancelled and will not be delivered. Reopen it to resume work.',
+    nextAction: () => 'Reopen the issue if it should be worked on again.',
     actions: buildDoneActions,
   },
 }

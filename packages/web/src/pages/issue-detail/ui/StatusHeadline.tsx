@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   AlertCircleIcon,
+  BanIcon,
   CheckCircle2Icon,
   ClockIcon,
   PauseCircleIcon,
@@ -73,6 +74,13 @@ const SUMMARY_PRESENTATION: Record<RuntimeSummary, SummaryPresentation> = {
     borderClassName: 'border-success-border',
     iconClassName: 'text-success',
     icon: CheckCircle2Icon,
+  },
+  'cancelled': {
+    label: 'Cancelled',
+    fillClassName: 'bg-muted/40',
+    borderClassName: 'border-border',
+    iconClassName: 'text-muted-foreground',
+    icon: BanIcon,
   },
 }
 

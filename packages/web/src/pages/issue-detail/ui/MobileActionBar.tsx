@@ -55,7 +55,7 @@ export interface MobileActionBarProps {
   rationale: string
   nextAction: string
   controller: IssueDecisionActionController
-  summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'done-no-action' | 'terminal-no-action'
+  summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'cancelled' | 'done-no-action' | 'terminal-no-action'
 }
 
 export function MobileActionBar({
