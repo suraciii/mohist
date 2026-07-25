@@ -1,128 +1,64 @@
-# Self-Review — issue-437 (otel.db 自动轮转)
+# Self-Review — issue-437 (otel.db 自动轮转) — re-review after fixes
 
-Reviewer mode. Artifacts reviewed against the issue body: `proposal.md`, `specs/*`,
-`design.md`, `tasks.json`. Coverage of the issue's seven acceptance criteria is complete
-(see matrix below); the problems below are about internal consistency and technical
-soundness, not missing scope.
+Second pass. The first review reported FAIL with two blocking (B-1, B-2) and six
+non-blocking (B-3…B-8) findings. This pass verifies each was resolved, then sweeps
+for anything newly introduced or previously missed.
 
-## Acceptance-criteria coverage
+## Prior findings — resolution check
+
+| # | Finding | Status | Evidence |
+|---|---|---|---|
+| B-1 | Persisted-watermark contradiction (proposal/spec/issue say persisted; design said not) | Resolved | D6 now persists a minimal `.meta` sidecar (via `IFileSystem`, not the business DB, not inside `otel.db`), seeds admission from it, and falls back conservative if missing/corrupt. Spec `otel-storage-budget` and proposal Impact now match (persisted marker + conservative fallback). All four agree. |
+| B-2 | Design D1 wrongly claimed `idx_traces_start` serves the `end_time` filter; no `end_time` index exists | Resolved | D1 corrected: states no `end_time` index exists today and adds `idx_traces_end ON traces(end_time)` as an additive, non-breaking extension. Reflected in risks, migration step 2, proposal schema-contract bullet, and T-001 (description + an AC that deletion is index-served with batch-proportional cost). Verified against `OtelDb.cs:80-87`. |
+| B-3 | "Internal write block" undefined/unbounded until #471 | Resolved | Defined in `otel-storage-budget` (in-flight write bounded by the OTLP request body limit until #471, then the bounded chunk) and D2. |
+| B-4 | Rebuild ignored concurrent readers | Resolved | D5 adds the reader-fail paragraph; `otel-storage-recovery` adds the "query overlaps rebuild" scenario; T-003 adds an AC. |
+| B-5 | Data-reset degradation source/code under-specified | Resolved | D5 + migration step 3 + T-003 specify `storage_data_reset` on the `StorageWrite` source, cleared by the first committed production write (same lifecycle as `storage_unverified`). |
+| B-6 | "Safe budget" threshold undefined | Resolved | Defined as 100% of `StorageBudgetBytes` (strictly above the 90% high watermark) in `otel-storage-recovery`, D5, and T-003. |
+| B-7 | `incremental_vacuum` efficacy asserted not verified | Resolved | D7 states the accepted limitation explicitly (command-issuance + `auto_vacuum=INCREMENTAL` at init, not observed shrinkage; strongest verification under the no-real-FS constraint). |
+| B-8 | Cross-thread reason dominance not deterministic | Resolved | D3 + risks state `storage_budget_exhausted` is published/cleared under the shared state lock so it deterministically dominates `latest_degradation` while admission is closed. |
+
+No regression from the fixes: `tasks.json` is still valid JSON with an intact DAG
+(T-001 → T-002 → T-003), all `passes=false`, every task has test-backed acceptance
+criteria; all four specs retain valid 4-hashtag scenario formatting with a WHEN/THEN
+per scenario and ≥1 scenario per requirement.
+
+## Acceptance-criteria coverage (unchanged, complete)
 
 | Issue AC | Covered by |
 |---|---|
-| 1. 72h 有界批次删除 / Span 同步 / 可中断续跑 | `otel-trace-retention` |
-| 2. db+WAL+SHM 高水位 / ≤1GiB + 一个写入块 | `otel-storage-budget` (see B-3 on "写入块" definition) |
-| 3. checkpoint 阻塞或无法回收 → 停写 / 拒绝计数 / 降级原因 | `otel-ingest-admission` |
-| 4. 空闲页复用 / WAL 硬边界 / 不做 full VACUUM | `otel-storage-budget` (D2) |
-| 5. 关闭观测不清理；重启/重启用安全继续 | `otel-storage-budget` + `otel-trace-retention` (see B-1 on "持久化") |
-| 6. 超大库升级路径 / 重建 / 日志 / 状态原因 | `otel-storage-recovery` |
-| 7. 测试覆盖（时间、空间、WAL/SHM、阻塞 reader、重启、完整 Trace、可注入时钟） | scenarios across all four specs (see B-6 on incremental_vacuum efficacy) |
+| 1. 72h bounded-batch / Span-sync / interruptible | `otel-trace-retention` (D1, T-001) |
+| 2. db+WAL+SHM high watermark / ≤1GiB + one block | `otel-storage-budget` (D2, T-002) |
+| 3. checkpoint blocked / can't reclaim → stop writes + reject count + reason | `otel-ingest-admission` (D3, T-002) |
+| 4. free-page reuse / WAL hard boundary / no full VACUUM | `otel-storage-budget` (D2, T-002) |
+| 5. no cleanup when off; resume from persisted watermark | `otel-storage-budget` + `otel-trace-retention` (D6, T-002) |
+| 6. oversized-DB upgrade path / rebuild / log / reason | `otel-storage-recovery` (D5, T-003) |
+| 7. test coverage (time, size, WAL/SHM, blocked reader, restart, complete Trace, injectable clock) | scenarios across all four specs + D7 |
 
-## Blocking findings
+## New observations (non-blocking)
 
-### B-1. Design D6 unilaterally reverses a "persisted watermark" decision stated in proposal, spec, AND issue
+These do not block building; the behavior is correct regardless and a builder
+resolves them during implementation.
 
-The issue AC5 says *"重新启用后从持久化水位安全继续"*. The proposal (Impact) says
-*"持久化水位放本地元数据"*. The `otel-storage-budget` spec says reclamation state
-*"SHALL be recovered ... from ... persisted reclamation state"*. Design D6 explicitly
-chooses **not** to persist anything and to re-derive from the probe with a conservative
-admission-closed-until-first-probe rule.
-
-D6's argument (re-derivation is a *stronger* safety guarantee than a persisted marker)
-is reasonable on its merits, but it contradicts a SHALL in the spec, a statement in the
-proposal, and the wording of the issue. A builder following the spec will persist a
-marker; a builder following the design will not. This must be reconciled before build:
-either (a) soften the spec's "persisted" language to "re-derived/conservative" and note
-the deviation from the issue wording, or (b) add a minimal persisted marker in the design
-(local metadata, not the business DB). As written, the plan contradicts itself on a
-normative requirement.
-
-### B-2. Design D1's index claim is factually wrong and yields a spec violation
-
-D1 states the time-eviction cutoff *"is a lexicographic comparison served by the existing
-`idx_traces_start` index."* It is not. `OtelDb.cs:80-87` defines only:
-
-- `idx_traces_service_start ON traces(service_name, start_time DESC)`
-- `idx_traces_start ON traces(start_time DESC)`
-- `idx_spans_trace ON spans(trace_id)`
-
-There is **no index on `end_time`**, and the retention deletion filters on `end_time`
-(the spec correctly mandates `end_time` so a still-growing Trace is not aged out). With
-no supporting index, the batched `DELETE ... WHERE end_time < $cutoff ORDER BY start_time`
-must scan and filter the `traces` table, so per-tick cost scales with the number of traces
-— a direct violation of the `otel-trace-retention` requirement that *"Per-pass database
-statement count ... does not grow with unrelated history"* and of `design/testing.md`'s
-cost-independence constraint. D1 must be corrected to add an index that serves `end_time`
-(e.g. `idx_traces_end ON traces(end_time)` or a composite), and the schema-contract note
-updated (a new index is an extension, not a rename; CLI readers do not depend on indexes,
-so this is non-breaking). Without this, the plan as written leads a builder to ship a
-cost regression.
-
-## Non-blocking findings
-
-### B-3. "一个内部写入块" is undefined/unbounded until #471
-
-`otel-storage-budget` promises the store *"SHALL NOT grow beyond the budget plus a single
-internal write block, where an internal write block is one bounded ingest transaction."*
-No ingest transaction is bounded today (write chunking is #471, explicitly out of scope).
-D2 admits the dependency, but the spec states the bound as a hard SHALL with no definition
-of the block size. Either define the block against the current request-body limit
-explicitly, or mark this bound as best-effort pending #471. Affects testability of AC2.
-
-### B-4. Rebuild does not address concurrent readers (D5)
-
-D5 handles ingest during rebuild via admission-closed, but `/otel/api/query` opens
-read-only connections that may be live when the rebuild deletes the file. The design
-should state that queries during the (startup-time) rebuild fail or are best-effort, or
-that the rebuild excludes readers. Low real-world impact at startup, but the gap should
-be explicit.
-
-### B-5. Data-reset degradation source/code is under-specified
-
-D5 says the data-reset reason is published *"on a source consistent with the existing
-contract"* but does not name which of the five sources (`Collector`/`ProcessRead`/
-`StorageRead`/`StorageWrite`/`IngestProtection`) or the code string. `storage_budget_exhausted`
-(D3) is cleanly mapped to `IngestProtection`; the data-reset reason (T-003) is not. The
-builder needs the source + code. (T-002's `storage_budget_exhausted` is fine.)
-
-### B-6. "Safe budget" threshold for recovery is not numerically defined in the spec
-
-`otel-storage-recovery` says *"exceeds the safe budget"* without a value; D5 defines it as
-100% of `StorageBudgetBytes` (vs. the 90% eviction high watermark). The spec should state
-the threshold crisply so the 90%-vs-100% boundary between eviction and rebuild is
-unambiguous.
-
-### B-7. incremental_vacuum efficacy is asserted, not verified
-
-Per the no-real-filesystem constraint, the central claim (delete → `incremental_vacuum` →
-file shrinks) is tested only by asserting the command is issued, not by observing
-shrinkage. Acceptable given the constraint, but it should be acknowledged as an accepted
-limitation rather than implied as verified. The risks section partially covers it.
-
-### B-8. Degradation-reason dominance is cross-thread (D3)
-
-`storage_budget_exhausted` is published on the maintenance thread; `TelemetryRejected`
-flows from `RecordIngest` on the request thread; both target `IngestProtection`. D3's
-"publish after the ingest outcome so the more specific reason dominates" is not
-deterministic across threads. Minor — the builder should sequence the specific publication
-under the existing state lock.
-
-## Notes
-
-- Spec format is sound: every requirement has ≥1 scenario, scenarios use exactly four
-  hashtags, every WHEN has a THEN, no delta headers, SHALL/MUST used normatively.
-- `tasks.json` is valid JSON, acyclic DAG, every `dependsOn` points to a strictly lower
-  priority, every task has acceptance criteria with test verification, all `passes=false`.
-- T-002 deliberately merges `otel-storage-budget` + `otel-ingest-admission` (shared guard
-  = interface/state; budget-aware decision = call-site switchover); this matches the
-  "merge interface + impl + call-site" split principle. Its `spec` field references only
-  the storage-budget spec; acceptable since the notes and criteria cover admission, but
-  could reference both.
+- **N-1. Size-eviction "removable" proxy is nearly vacuous.** D1's "removable excludes
+  traces with `end_time >= now`" rarely triggers, because Span timestamps record when a
+  Span ended (in the past relative to export arrival), so `end_time < now` for essentially
+  all real telemetry. In practice size eviction treats all traces as removable and evicts
+  oldest-by-`start_time`. This is correct and consistent with the issue's non-goal (space
+  preempts full 72h coverage); the real "cannot reclaim" triggers are the blocked
+  checkpoint and the cannot-shrink (pre-`auto_vacuum`) file, both covered. Prose precision
+  only — a builder may treat "no removable trace" as "store empty or cannot shrink".
+- **N-2. First-tick rebuild-vs-eviction ordering is not explicit.** D1 lists the normal
+  tick order (time → size → reclaim → arbitrate); D5 says rebuild runs "on the first tick"
+  without stating it precedes eviction. Ordering is correctness-neutral (rebuild dominates
+  and the store self-corrects to a fresh empty DB either way), but stating rebuild-first on
+  the first tick would avoid a small amount of wasted eviction work on a doomed oversized
+  database.
 
 ## Verdict
 
-Two blocking findings — a self-contradiction on a normative ("persisted") requirement
-(B-1) and a factual design error that produces a spec violation (B-2) — must be fixed
-before build. The non-blocking findings should be addressed in the same pass but do not
-alone block.
+All prior blocking and non-blocking findings are resolved without introducing new
+inconsistencies; the plan is internally consistent, technically sound, every spec
+requirement has design support and task coverage with test verification, and the two new
+observations are non-blocking clarity notes. The plan is ready to build.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
