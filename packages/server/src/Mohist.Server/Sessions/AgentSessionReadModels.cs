@@ -284,10 +284,18 @@ public sealed record GenericAgentSessionSummaryContextRefsDto(
 
 public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);
 
+public sealed record AgentAmplificationDto(
+    long Candidates,
+    long Processed,
+    long TranscriptRecords,
+    long DatabaseCalls,
+    long DownstreamCalls);
+
 public sealed record ActivityDto(
     ActivitySummaryDto Summary,
     IReadOnlyList<ActivityCardDto> Sessions,
-    IReadOnlyList<ActivityWaitingCardDto> Waiting);
+    IReadOnlyList<ActivityWaitingCardDto> Waiting,
+    AgentAmplificationDto Amplification);
 
 public sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, ActivitySlotUsageDto Slots);
 

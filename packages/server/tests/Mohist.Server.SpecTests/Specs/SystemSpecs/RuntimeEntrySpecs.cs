@@ -9,6 +9,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain.Run;
@@ -239,7 +240,8 @@ public class RuntimeEntrySpecs
         var status = AgentStatusResponse.Create(
             activeAgents: [],
             runners: Array.Empty<RunnerStatusView>(),
-            capacity: new RunnerCapacityView(0, 0));
+            capacity: new RunnerCapacityView(0, 0),
+            amplification: new AgentAmplificationDto(0, 0, 0, 0, 0));
 
         Assert.False(status.Running);
         Assert.False(status.RunnerAvailable);
@@ -366,11 +368,11 @@ public class RuntimeEntrySpecs
     }
 
     [Fact]
-    public async Task AgentStatus_OnLegacyRoute_ReturnsNotFound()
+    public async Task AgentStatus_OnLegacyRoute_WithoutSelectorReturnsBadRequest()
     {
         using var response = await _fixture.Client.GetAsync("/api/agent/status");
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]

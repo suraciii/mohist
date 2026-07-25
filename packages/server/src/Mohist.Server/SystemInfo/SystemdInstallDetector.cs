@@ -6,6 +6,8 @@ public interface IFileSystem
 {
     bool Exists(string path);
     string ReadAllText(string path);
+    void CreateDirectory(string path);
+    long? GetFileLength(string path);
 }
 
 public sealed record InstallDetectionResult(
@@ -24,11 +26,13 @@ public sealed class SystemdInstallDetector : ISingletonService
     private const string ProjectFile = "Mohist.Server.csproj";
 
     private readonly IFileSystem _fileSystem;
+    private readonly IEnvironmentVariableProvider _environment;
     private readonly string? _unitDir;
 
-    public SystemdInstallDetector(IFileSystem fileSystem, string? unitDir = null)
+    public SystemdInstallDetector(IFileSystem fileSystem, IEnvironmentVariableProvider environment, string? unitDir = null)
     {
         _fileSystem = fileSystem;
+        _environment = environment;
         _unitDir = unitDir;
     }
 
@@ -108,7 +112,9 @@ public sealed class SystemdInstallDetector : ISingletonService
         if (!string.IsNullOrWhiteSpace(_unitDir))
             return _unitDir;
 
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var home = _environment.GetEnvironmentVariable("HOME");
+        if (string.IsNullOrWhiteSpace(home))
+            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(home))
             return null;
 

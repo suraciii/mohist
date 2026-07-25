@@ -65,7 +65,8 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
             cmd.ExecuteNonQuery();
         }
 
-        Factory.Services.GetRequiredService<OtelCollectorStatus>().SetPortBound(true);
+        Factory.Services.GetRequiredService<RuntimeObservability>().PublishCollector(CollectorResult.Online());
+        Factory.Services.GetRequiredService<RuntimeObservability>().ResetTelemetryCountersForTesting();
         return Task.CompletedTask;
     }
 

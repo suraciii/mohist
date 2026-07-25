@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Events.Grains;
+using Mohist.Server.Otel;
 using Orleans.Configuration;
 using Orleans.Hosting;
 
@@ -18,6 +19,8 @@ public static class MohistSiloRegistration
         var gatewayPort = configuration.GetValue<int?>("Mohist:Silo:GatewayPort") ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
         silo.UseLocalhostClustering(siloPort, gatewayPort);
         silo.AddActivityPropagation();
+        silo.AddIncomingGrainCallFilter<RequestWorkIncomingGrainCallFilter>();
+        silo.AddOutgoingGrainCallFilter<RequestWorkOutgoingGrainCallFilter>();
         silo.UseAdoNetReminderService(options =>
         {
             options.Invariant = "System.Data.SQLite";

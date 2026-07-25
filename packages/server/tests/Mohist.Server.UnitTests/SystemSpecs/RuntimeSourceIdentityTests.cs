@@ -43,5 +43,10 @@ public class RuntimeSourceIdentityTests
         public bool Exists(string path) => _files.ContainsKey(path);
 
         public string ReadAllText(string path) => _files[path];
+
+        public void CreateDirectory(string path) { }
+
+        public long? GetFileLength(string path) =>
+            _files.TryGetValue(path, out var content) ? (long?)System.Text.Encoding.UTF8.GetByteCount(content) : null;
     }
 }
