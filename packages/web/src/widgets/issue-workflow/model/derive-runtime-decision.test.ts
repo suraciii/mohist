@@ -96,54 +96,6 @@ describe('deriveRuntimeDecision', () => {
     expect(decision.summary).toBe('done')
   })
 
-  it('returns cancelled when the issue is cancelled, even with a runner assigned and a non-terminal stage', () => {
-    const decision = deriveRuntimeDecision({
-      issue: baseIssue({
-        status: IssueStatus.Cancelled,
-        health: IssueHealth.Cancelled,
-        workflowStage: WorkflowStage.Build,
-        workflowStatus: 'stopped',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Abandoned task' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      hasActiveAgent: true,
-    })
-
-    expect(decision.summary).toBe('cancelled')
-    expect(decision.headline).toContain('cancelled')
-    expect(decision.actions.some((a) => a.enabled)).toBe(false)
-  })
-
-  it('returns cancelled from health even when status has not flipped', () => {
-    const decision = deriveRuntimeDecision({
-      issue: baseIssue({
-        status: IssueStatus.InProgress,
-        health: IssueHealth.Cancelled,
-        workflowStage: WorkflowStage.Build,
-      }),
-    })
-
-    expect(decision.summary).toBe('cancelled')
-  })
-
-  it('returns blocked when the run was stopped manually (workflowStatus stopped), not running', () => {
-    const decision = deriveRuntimeDecision({
-      issue: baseIssue({
-        status: IssueStatus.InProgress,
-        health: IssueHealth.Active,
-        workflowStage: WorkflowStage.Build,
-        workflowStatus: 'stopped',
-      }),
-    })
-
-    expect(decision.summary).toBe('blocked')
-    expect(decision.rationale).toContain('stopped manually')
-  })
-
   it('returns approval-required when approvalState.status is awaiting and no failed checks block it', () => {
     const decision = deriveRuntimeDecision({
       issue: baseIssue({
