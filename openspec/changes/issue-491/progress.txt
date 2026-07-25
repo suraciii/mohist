@@ -144,3 +144,59 @@
   (verified by stashing the T-002 work tree and re-running the test).
   This is a T-001 follow-up item, not a T-002 regression.
 
+### CI fix (resolve-ci check)
+
+Three independent defects prevented `verify` from succeeding:
+
+1. **EF model drift from T-003 (T-001 follow-up).** `MohistDbContext`
+   (commit `41d9aa6f5`) added an `AgentResponseFailedEnabled` column to
+   `InboxSubscriptionRow` and a new `agent_response_failed` value to the
+   `CK_InboxItems_NotificationKind` check constraint. The
+   `MohistDbContextModelSnapshot` was not regenerated and no new
+   migration was added, so `Database.Migrate()` aborted with
+   `PendingModelChangesWarning` for specs that exercised the full
+   chain (DatabaseInitializationSpecs, InboxItemsMigrationSpecs,
+   BackfillIssueCompletedAtMigrationSpecs, EpicIdleRenameMigrationSpecs,
+   DatabaseInitializerRepositoryUpgradeSpecs) and SQLite threw
+   `no such column: i.AgentResponseFailedEnabled` for every
+   `InboxSubscriptionStoreSpecs` case. Fix: ran
+   `dotnet ef migrations add AddAgentResponseFailedNotification`
+   (output the new
+   `20260725155928_AddAgentResponseFailedNotification.cs/.Designer.cs`
+   pair) and restored the `BuildModelCore` wrapper that
+   `dotnet ef` strips from the snapshot on every regen (the seven
+   existing Designers that delegate through it would not compile
+   without it).
+
+2. **Contextless-jobs NRE in `AgentJobLineage.BuildExtensions`.** The
+   new T-001 emission path calls
+   `AgentJobLineage.BuildExtensions(State.Input!, State.RoutedPlan)`,
+   but `BuildExtensions` dereferenced `input.AgentId` unguarded. When
+   `RunnerGrain.CloseoutLostAsync` synthesizes a failure for an
+   `AssignAgentJobAsync` work that never flowed through
+   `AgentJobGrain.SubmitAsync`, both `State.Input` and `State.RoutedPlan`
+   are null. The exception propagates out of the `EmitFailureEventAsync`
+   helper before its try/catch, gets swallowed by the runner's
+   per-entry try/catch in `CloseoutLostAsync`, and the
+   `MarkRunnerWorkTerminalAsync(LedgerRunnerWorkStatus.Failed, ...)`
+   after it never runs — leaving `RunnerWorks.Status` "outstanding"
+   and tripping `RunnerLoss_SynthesizesAgentJobFailure_AndUpdatesLedgerRow`.
+   Fix: relax `BuildExtensions` to take `AgentJobInput?` and dereference
+   through `?.` / `!` so contextless jobs (raw AgentJobGrain activation
+   from RunnerLoss) emit an empty-lineage envelope rather than crashing.
+
+3. **Spec-file-size baseline drift (T-002 follow-up).** The T-002 commit
+   bumped `WorkflowRunControlApiSpecs.cs` to `34831` bytes in
+   `spec-file-size-baseline.json` while the actual file grew to
+   `35136` bytes, tripping `CSharpTestFiles_MustStayWithinSizeRatchet`.
+   Bumped to `35136` to match reality.
+
+After all three fixes, `npm test` is green:
+- `Mohist.Workflow.Definition.Tests`: 175 passed.
+- `Mohist.Server.UnitTests`: 1478 passed.
+- `Mohist.Server.ArchTests`: 32 passed.
+- `Mohist.Server.SpecTests`: 3068 passed.
+- `Mohist.Cli.Tests`: 1381 passed.
+- `runner` vitest: 1426 passed (120 files).
+- `web` vitest: 5130 passed, 1 skipped (388 files).
+

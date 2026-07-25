@@ -36,28 +36,28 @@ public static class AgentJobLineage
         string? AgentId);
 
     public static IReadOnlyDictionary<string, string> BuildExtensions(
-        AgentJobInput input,
+        AgentJobInput? input,
         RoutedAgentLaunchPlan? routedPlan = null)
     {
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal);
-        var agentId = !string.IsNullOrWhiteSpace(input.AgentId)
-            ? input.AgentId
+        var agentId = !string.IsNullOrWhiteSpace(input?.AgentId)
+            ? input!.AgentId
             : routedPlan?.AgentId;
         if (!string.IsNullOrWhiteSpace(agentId))
             extensions[EventCatalog.Lineage.AgentId] = agentId!;
-        var projectId = !string.IsNullOrWhiteSpace(input.ProjectId)
-            ? input.ProjectId
+        var projectId = !string.IsNullOrWhiteSpace(input?.ProjectId)
+            ? input!.ProjectId
             : routedPlan?.ProjectId;
         if (!string.IsNullOrWhiteSpace(projectId))
             extensions[EventCatalog.Lineage.ProjectId] = projectId!;
-        var issueNumber = input.IssueNumber ?? routedPlan?.IssueNumber;
+        var issueNumber = input?.IssueNumber ?? routedPlan?.IssueNumber;
         if (issueNumber is > 0)
             extensions[EventCatalog.Lineage.Issue] = issueNumber!.Value.ToString();
-        var epicNumber = input.EpicNumber ?? routedPlan?.EpicNumber;
+        var epicNumber = input?.EpicNumber ?? routedPlan?.EpicNumber;
         if (epicNumber is > 0)
             extensions[EventCatalog.Lineage.Epic] = epicNumber!.Value.ToString();
-        var workflowRunId = !string.IsNullOrWhiteSpace(input.WorkflowRunId)
-            ? input.WorkflowRunId
+        var workflowRunId = !string.IsNullOrWhiteSpace(input?.WorkflowRunId)
+            ? input!.WorkflowRunId
             : routedPlan?.WorkflowRunId;
         if (!string.IsNullOrWhiteSpace(workflowRunId))
             extensions[EventCatalog.Lineage.WorkflowRunId] = workflowRunId!;
