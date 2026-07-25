@@ -1,0 +1,110 @@
+## Codebase Patterns
+
+- `OtelDb` is `sealed`; tests use the internal `InMemoryOtelDb.Create()` factory
+  that constructs an `OtelDb` with explicit connection strings plus a
+  keeper `SqliteConnection` to keep the shared-cache in-memory DB alive.
+  New columns / indices must be mirrored both in `OtelDb.EnsureInitialized`
+  AND in `InMemoryOtelDb.Create()`'s DDL list, otherwise tests that use
+  the in-memory factory won't see the new schema.
+- `IOtelMaintenanceCallback` is invoked by `OtelDiagnosticsSampler` only
+  while `_enabled` is true (gated by the `if (_enabled)` branch in
+  `RunAsync`). The sampler is the off-switch; the callback itself is
+  unconditional and trusts the sampler.
+- Maintenance tests are written as spec tests in
+  `packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/` and
+  use `InMemoryOtelDb.Create()` + `FakeTimeProvider` (no wall clock, no
+  real filesystem). xunit v3 / Microsoft.Testing.Platform runner — invoke
+  per-class or per-method by passing `-class` / `-method` to the built
+  binary; `dotnet test --filter` does not work for this runner.
+- Test seeding for traces uses ISO 8601 UTC text formatted via
+  `instant.ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ",
+  CultureInfo.InvariantCulture)` — same as `TraceIngester` and the
+  retention cutoff — so lexicographic comparison matches chronological.
+- All time logic flows through `TimeProvider.GetUtcNow()`. The retention
+  cutoff is `now - RetentionMaxAge` formatted as ISO 8601 UTC; the SELECT
+  uses `end_time < $cutoff` so traces whose `end_time` equals the cutoff
+  remain in window.
+
+## T-001 decisions and gotchas
+
+- **Why one batch per invocation:** the AC explicitly states "a single
+  maintenance invocation SHALL delete at most the batch size of complete
+  Traces", so each invocation is one bounded transaction. Cancellation
+  mid-invocation rolls back the in-flight batch; the next invocation
+  resumes from the oldest remaining aged Trace.
+- **Why `ORDER BY start_time ASC` for batching:** the AC says "oldest
+  first" without specifying which clock. `start_time` is monotonic per
+  Trace and stable across Span arrivals, while `end_time` advances as
+  new Spans arrive (a still-growing Trace's `end_time` would move). The
+  filter is on `end_time` (the spec requirement), but the order is on
+  `start_time`.
+- **Seeding gotcha:** `HoursAgo(n)` returns the time n hours BEFORE
+  `Now`. So `hourOffset = i` and `start_time = HoursAgo(200 + i)` means
+  larger `i` is OLDER. The test asserts are written against that
+  ordering — the BatchSize oldest (largest hourOffset) get deleted, the
+  remainder (smallest hourOffset) stay. The first batch of test failures
+  was because the assertions assumed hourOffset 0 = oldest, but it
+  actually equals most recent.
+- **`idx_traces_end` is index-served for `WHERE end_time < $cutoff`**;
+  SQLite's EXPLAIN for the empty/small in-memory test table sometimes
+  picks `idx_traces_start` because of stats (a few rows scan cheaper than
+  two index hits). The "index-served" guarantee is therefore asserted
+  by index existence + bounded statement count, not by EXPLAIN. Production
+  tables (post-ANALYZE) use the end-time index.
+- **`OtelRetentionMaintenance` exposes an internal `Action<string>?
+  statementObserver`** constructor so tests can count SQL statements
+  without rewriting OtelDb. The observer fires before each
+  `ExecuteReader` / `ExecuteNonQuery`. The hook is a constructor
+  parameter (default null) and is unused in production.
+- **DI registration uses `TryAddEnumerable` with
+  `ServiceDescriptor.Singleton<IOtelMaintenanceCallback, ...>`** so
+  future callbacks can be added without replacing the retention one,
+  matching the seam already used in `OtelDiagnosticsSampler`
+  (constructor takes `IEnumerable<IOtelMaintenanceCallback>`).
+- **Off-state test approach:** the off-gating lives in
+  `OtelDiagnosticsSampler.RunAsync`, not in the maintenance callback
+  itself. The disabled test drives the sampler directly with a
+  `TestApplicationLifetime` that exposes `FireStarted()` to flip the
+  token; the recording callback asserts zero invocations.
+- **Statement count assertion:** the empty-batch path issues exactly
+  one SELECT (no DELETE). The non-empty-batch path issues 3 statements
+  (SELECT + DELETE spans + DELETE traces). The cost-independence test
+  constructs a fresh in-memory DB per scenario and asserts equal counts
+  regardless of unrelated trace count.
+
+## Files touched
+
+- `packages/server/src/Mohist.Server/Otel/OtelOptions.cs` — added
+  `DefaultRetentionMaxAge` constant (72h) and `RetentionMaxAge` property.
+- `packages/server/src/Mohist.Server/Otel/OtelDb.cs` — added
+  `TracesEndIndex` constant, `CreateTracesEndIndex` DDL, and the
+  ExecuteNonQuery call in `EnsureInitialized`.
+- `packages/server/src/Mohist.Server/Otel/OtelRetentionMaintenance.cs` —
+  new file: the IOtelMaintenanceCallback with bounded batch deletion,
+  one transaction per invocation, optional statement observer for tests.
+- `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs` —
+  registered `OtelRetentionMaintenance` as
+  `IOtelMaintenanceCallback` via `TryAddEnumerable` before the
+  `OtelDiagnosticsSampler` hosted service.
+- `packages/server/tests/Mohist.Server.SpecTests/Support/InMemoryOtelDb.cs` —
+  mirrored the `idx_traces_end` DDL.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/OtelDbSpecs.cs` —
+  added `TracesEndIndex` to the index-existence assertion.
+- `packages/server/tests/Mohist.Server.UnitTests/Telemetry/OtelOptionsTests.cs` —
+  added 72h default assertions to defaults/binding tests.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/OtelRetentionMaintenanceSpecs.cs` —
+  new: 18 specs covering all retention scenarios (aged/in-window,
+  batch bounding, resume after cancellation, statement-count bounds,
+  index-served, no COUNT(*)).
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/OtelDiagnosticsSamplerEnabledSpecs.cs` —
+  new: 3 specs covering the disabled/enabled gating of the maintenance
+  loop.
+
+## Verification
+
+- `dotnet build` clean (0 warnings, 0 errors).
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests` → 3054/3054 pass.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests` → 1413/1413 pass.
+- `dotnet test packages/server/tests/Mohist.Server.ArchTests` → 32/32 pass.
+- `dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests` → 175/175 pass.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests` → 1375/1375 pass.

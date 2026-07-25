@@ -27,6 +27,13 @@ public sealed class OtelOptions
     public const int DefaultPort = 4318;
 
     /// <summary>
+    /// Default retention age for traces in the built-in observation
+    /// store. A trace whose latest Span activity is older than the
+    /// retention age is deleted by the maintenance loop.
+    /// </summary>
+    public static readonly TimeSpan DefaultRetentionMaxAge = TimeSpan.FromHours(72);
+
+    /// <summary>
     /// OTLP HTTP ingestion port. The default matches
     /// <see cref="DefaultPort"/> (the OpenTelemetry spec's conventional
     /// HTTP port).
@@ -55,4 +62,14 @@ public sealed class OtelOptions
     /// limits and degradation reporting are complete.
     /// </summary>
     public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Maximum age a Trace may remain in the observation store before the
+    /// maintenance loop deletes it. Age is measured against a Trace's
+    /// <c>end_time</c> (the latest Span time), so a Trace still receiving
+    /// Spans is not aged out while it is growing. The default is the spec
+    /// default of 72 hours; this is the only retention knob exposed to
+    /// operators.
+    /// </summary>
+    public TimeSpan RetentionMaxAge { get; set; } = DefaultRetentionMaxAge;
 }

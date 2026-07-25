@@ -65,6 +65,7 @@ public class OtelDbSpecs : IDisposable
 
         Assert.True(IndexExists(connection, OtelDb.TracesServiceStartIndex));
         Assert.True(IndexExists(connection, OtelDb.TracesStartIndex));
+        Assert.True(IndexExists(connection, OtelDb.TracesEndIndex));
         Assert.True(IndexExists(connection, OtelDb.SpansTraceIndex));
     }
 

@@ -48,6 +48,7 @@ public sealed class OtelDb
 
     public const string TracesServiceStartIndex = "idx_traces_service_start";
     public const string TracesStartIndex = "idx_traces_start";
+    public const string TracesEndIndex = "idx_traces_end";
     public const string SpansTraceIndex = "idx_spans_trace";
 
     private const string CreateTracesTable = """
@@ -82,6 +83,9 @@ public sealed class OtelDb
 
     private const string CreateTracesStartIndex =
         "CREATE INDEX IF NOT EXISTS idx_traces_start ON traces(start_time DESC);";
+
+    private const string CreateTracesEndIndex =
+        "CREATE INDEX IF NOT EXISTS idx_traces_end ON traces(end_time);";
 
     private const string CreateSpansTraceIndex =
         "CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id);";
@@ -275,6 +279,7 @@ public sealed class OtelDb
             ExecuteNonQuery(connection, CreateSpansTable);
             ExecuteNonQuery(connection, CreateTracesServiceStartIndex);
             ExecuteNonQuery(connection, CreateTracesStartIndex);
+            ExecuteNonQuery(connection, CreateTracesEndIndex);
             ExecuteNonQuery(connection, CreateSpansTraceIndex);
 
             _initialized = true;

@@ -18,6 +18,7 @@ public class OtelOptionsTests
         Assert.Null(options.DbPath);
         Assert.Equal("Mohist:Otel", OtelOptions.SectionName);
         Assert.Equal("MOHIST_OTEL_DB_PATH", OtelOptions.DbPathEnvironmentVariable);
+        Assert.Equal(TimeSpan.FromHours(72), options.RetentionMaxAge);
     }
 
     [Fact]
@@ -61,5 +62,6 @@ public class OtelOptionsTests
         Assert.Equal(4318, bound.Port);
         Assert.False(bound.Enabled);
         Assert.Null(bound.DbPath);
+        Assert.Equal(TimeSpan.FromHours(72), bound.RetentionMaxAge);
     }
 }
