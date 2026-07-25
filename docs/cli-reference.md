@@ -349,8 +349,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - 当前根帮助、叶子帮助和 Mohist Skill 含有重复信息及部分内部实现描述。目标按本文的渐进披露边界重写。
 - 当前部分未知 area 或 action 会回退到根帮助并以 `0` 退出；目标是返回 `2`，只展示最近
   一级的相关 usage。
-- 当前 Agent launch 只返回 Session，CLI 也没有 AgentJob read surface；目标同时暴露 Job
-  与 Session 的稳定身份和各自事实。
 - 当前 `opencode` 和根级 `config` 是实现或配置容器导向的入口；目标把模型目录放到 Agent
   配置辅助命令，并删除没有明确资源所有者的泛化 config 命令。
 - 其它用户指南在迁移期间仍可能展示当前可运行的旧路径；完成命令迁移后再一次性更新示例。
@@ -358,5 +356,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 ### 已闭合
 
 - `runner` / `server` / `service` 三层职责：`runner` 只表示 Server 已注册的远程执行资源（`list`/`view`/`status`），`server` 只表示当前连接的 Mohist Server 应用（`status`/`health`/`info`/`logs`，其中 `logs` 是应用日志）；本机受管进程统一为 `mo service <verb> server|runner`。`project status` 已迁移到 `server status`；`system logs` 已合并到 `server logs`，`system` 命令组整体退役。
+- Agent launch 同时暴露 Job 与 Session 的稳定身份：`mo agent launch <agent>` 直接挂在 `agent` 下（不再经过 `agent session launch`），打印 `jobId` 与 `sessionId`；HTTP 201 同样同时返回 `jobId`、`sessionId` 与各自读取链接，`jobId` 被 `agent job view` 原样接受（无 id 翻译）。
 
 对应源码：`packages/cli/`。

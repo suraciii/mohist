@@ -24,8 +24,9 @@ namespace Mohist.Server.Api;
 /// <see cref="IAgentLauncher"/>. The route keeps its three domain-level
 /// gates (whitespace prompt → 400; unresolved agent → 404; archived agent
 /// → 409) and composes the 201 response from
-/// <see cref="AgentLaunchResult"/> + the project-scoped transcript URL
-/// (a product surface owned by the API layer, not the launcher).
+/// <see cref="AgentLaunchResult"/> (carrying both the AgentJob key and the
+/// AgentSession id) plus the project-scoped transcript URL and job-result
+/// URL (product surfaces owned by the API layer, not the launcher).
 /// </para>
 /// <para>
 /// Empty/whitespace prompt is rejected with 400 before any session or job
@@ -118,11 +119,13 @@ public static class AgentSessionLaunchRoutes
                 new ApiResponse<AgentSessionLaunchResponse>(
                     true,
                     new AgentSessionLaunchResponse(
+                        JobId: result.JobKey,
                         SessionId: result.SessionId,
                         AgentId: result.AgentId,
                         AgentName: result.AgentName,
                         Status: "inactive",
-                        TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-sessions/{Uri.EscapeDataString(result.SessionId)}/transcript")),
+                        TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-sessions/{Uri.EscapeDataString(result.SessionId)}/transcript",
+                        JobUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}")),
                 statusCode: 201);
         });
 
@@ -193,16 +196,23 @@ public sealed record AgentSessionLaunchContextRef(
     string? WorkspacePath = null);
 
 /// <summary>
-/// Response body for a successful generic AgentSession launch. The session
-/// id is the caller-observable identity (matches the runtime-event
-/// identity on the runner side); the agent id and name echo the resolved
-/// profile; the status reflects the initial state immediately after
-/// dispatch; transcriptUrl points at the product read path for the generic
-/// session transcript.
+/// Response body for a successful generic AgentSession launch. A launch
+/// creates two entities atomically — an <c>AgentJob</c> (the work owner)
+/// and an <c>AgentSession</c> (the conversation owner) — so the response
+/// surfaces both identities: <see cref="JobId"/> is the AgentJob grain
+/// key the launcher minted (the same id the AgentJob read surface
+/// accepts — there is no translation gap between launch and read), and
+/// <see cref="SessionId"/> is the conversation owner. The agent id and
+/// name echo the resolved profile; the status reflects the initial state
+/// immediately after dispatch; <see cref="TranscriptUrl"/> points at the
+/// product read path for the generic session transcript, and
+/// <see cref="JobUrl"/> points at the AgentJob read surface.
 /// </summary>
 public sealed record AgentSessionLaunchResponse(
+    string JobId,
     string SessionId,
     string AgentId,
     string AgentName,
     string Status,
-    string TranscriptUrl);
+    string TranscriptUrl,
+    string JobUrl);

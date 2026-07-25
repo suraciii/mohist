@@ -168,3 +168,101 @@ mirror; view reads the grain directly so detail is authoritative) and added the
   forwarded as a VSTest filter and IGNORED by Microsoft.Testing.Platform (runs
   the whole suite). Test names are in the UTF-16LE log at
   `TestResults/*.log` (convert with `iconv -f UTF-16LE -t UTF-8`).
+
+## T-003: Launch returns both identities and mo agent launch CLI
+
+### Summary
+
+Surfaced the AgentJob identity the launcher already mints (manual-launch
+`agent-job-launch-{guid}`, mention `CommentJobKey`) by adding `JobKey` to
+`AgentLaunchResult`, propagating it through `LaunchAsync` /
+`LaunchMentionAsync`, and exposing it as `jobId` (+ `jobUrl`) in the launch
+HTTP 201 response. Relocated the CLI launch command from
+`mo agent session launch <agent>` to `mo agent launch <agent>` and updated
+the table shape to print both the job id and the session id. No launch
+pipeline behaviour changes — only the returned identity + the command
+location. The T-002 view route accepts the launched jobId verbatim (no id
+translation, by design D1).
+
+### Files Added
+
+- `tests/.../Specs/Agent/Api/AgentSessionLaunchJobIdentitySpecs.cs` — 2 specs:
+  launched jobId round-trips through the view route (no id translation),
+  and exactly-one-job + exactly-one-session + one dispatch per launch.
+
+### Files Modified
+
+- `Agent/Services/IAgentLauncher.cs` — added `JobKey` to `AgentLaunchResult`
+  (between SessionId and AgentId). Routed path already returned its key via
+  `RoutedAgentLaunchOutcome.JobKey`, unchanged.
+- `Agent/Services/AgentLauncher.cs` — `LaunchAsync` and `LaunchMentionAsync`
+  return the `jobKey` they already compute. The manual-launch key
+  `agent-job-launch-{guid}` was minted in `ResolveSessionAndJobKeys` and
+  discarded; now it is propagated.
+- `Api/AgentSessionLaunchRoutes.cs` — `AgentSessionLaunchResponse` gains
+  `JobId` + `JobUrl` (project-scoped `/agent-jobs/{jobId}`); 201 handler
+  composes them from `AgentLaunchResult.JobKey`. Domain gates unchanged
+  (whitespace prompt → 400 before any entity; unknown agent → 404;
+  archived agent → 409; invalid context ref → error).
+- CLI: `MohistCliCommands.Agent.cs` (BuildSessionLaunch renamed to
+  BuildLaunch, registered directly under `agent`; removed from the session
+  subgroup; description updated to mention both identities),
+  `ResourceOutput.cs` (AgentSessionLaunch fields now include `jobId`),
+  `TableRenderer.Entities.cs` (RenderAgentSessionLaunch prints
+  `job id:`, `session id:`, `agent id:`, `agent name:`, `status:`).
+- `tests/.../Support/RoutingDispatchTestSupport.cs` — RecordingAgentLauncher
+  fake returns a deterministic `mention-job-{sequence}` JobKey.
+- `tests/.../Agent/Api/AgentSessionLaunchRoutesSpecs.cs` — existing 201 spec
+  extended to assert `jobId` non-empty + `agent-job-launch-` prefix + the
+  `jobUrl` link; the session-record probe was removed (the identity +
+  snapshot assertions are enough and keep the file under the size ratchet).
+- `tests/Mohist.Cli.Tests/CliAgentSessionCommandSpecs.cs` — renamed all
+  `SessionLaunch_*` tests to `Launch_*`; updated command path from
+  `["agent", "session", "launch", ...]` to `["agent", "launch", ...]`;
+  added `jobId` to responder payloads; new assertions for `job id:` output;
+  added `AgentHelp_ListsLaunchDirectlyUnderAgent` and
+  `SessionHelp_DoesNotListLaunchAsASubcommand`.
+- `docs/cli-reference.md` — removed the "Agent launch 只返回 Session" gap
+  note (line 352 area); added a closed entry describing the relocated
+  `mo agent launch` + jobId/sessionId surface.
+
+### Codebase Patterns (additions)
+
+- **Identity propagation over re-derivation**: the launcher mints the
+  AgentJob key once and propagates it through `AgentLaunchResult.JobKey`
+  rather than having the HTTP layer re-derive it from session labels. The
+  spec forbids an id-translation gap; the same `jobId` is accepted verbatim
+  by the T-002 view route.
+- **Test file size ratchet workaround**: adding 2 new server specs to
+  `AgentSessionLaunchRoutesSpecs.cs` pushed it past the 24,000-byte ArchTest
+  ratchet. Pattern from T-001/T-002: extract new specs into a sibling file
+  (`AgentSessionLaunchJobIdentitySpecs.cs`) extending the same
+  `AgentSessionLaunchRoutesTestSupport` base. The original 201 spec stays
+  in place; only the new identity + exactly-once specs move out.
+- **Substring matches in help tests**: when asserting a subcommand is NOT
+  listed, match the subcommand's distinct description text
+  (`"Launch a generic AgentSession"`) rather than the bare command word,
+  because the parent group's own description may contain the word as a
+  substring (`session`'s description says "launched from an Agent profile").
+
+### Decisions / Gotchas
+
+- **JobUrl format**: chose `/api/projects/{projectId}/agent-jobs/{jobId}`
+  to match the T-002 view route. Manual-launch keys are global GUIDs, but
+  the URL still scopes by project for consistency with the rest of the
+  product surface (the view route enforces project isolation from grain
+  state).
+- **AgentLaunchResult field order**: inserted `JobKey` between `SessionId`
+  and `AgentId` to keep "identity first" grouping (SessionId, JobKey are
+  the two minted ids; AgentId/AgentName echo the resolved profile).
+- **Flaky pre-existing tests**: `RunningJob_WithoutReport_JobTimeout_TransitionsToFailed`,
+  `ReportResultAsync_TransitionsRunningToFailed_OnFailure`, and
+  `Compact_PreservesBindingAndLineageAndRecordsOnlyCompaction` flake on
+  cold runs with "Timed out waiting for status == Running, Last value:
+  Pending" (runner dispatch pickup race) or recovery-grain GUID mismatch.
+  They pass on the next run and are unrelated to T-003 (no recovery /
+  report-result code touched).
+- **Stale test logs after editing test files**: MTP VSTest filters are
+  ignored by Microsoft.Testing.Platform; `--filter` runs the whole suite.
+  When a test edit isn't picked up, rerun `dotnet test` WITHOUT
+  `--no-build` to force a rebuild before re-reading the log.

@@ -17,20 +17,7 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task AgentHelp_ListsSessionSubcommand()
-    {
-        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
-            throw new InvalidOperationException("API must not be called for help"));
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "--help"], output, error, fileSystem, executor);
-
-        Assert.Equal(0, exitCode);
-        Assert.Contains("session", output.ToString(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task SessionHelp_ListsAllEightSubcommands()
+    public async Task SessionHelp_ListsSessionSubcommands()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called for help"));
@@ -43,7 +30,6 @@ public class CliAgentSessionCommandSpecs
         Assert.Contains("list", stdout, StringComparison.Ordinal);
         Assert.Contains("show", stdout, StringComparison.Ordinal);
         Assert.Contains("transcript", stdout, StringComparison.Ordinal);
-        Assert.Contains("launch", stdout, StringComparison.Ordinal);
         Assert.Contains("compact", stdout, StringComparison.Ordinal);
         Assert.Contains("reset", stdout, StringComparison.Ordinal);
         Assert.Contains("followup", stdout, StringComparison.Ordinal);
@@ -51,13 +37,48 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunchHelp_ListsPromptInputFlags()
+    public async Task SessionHelp_DoesNotListLaunchAsASubcommand()
+    {
+        // launch has been relocated directly under `agent` (mo agent launch),
+        // so it must not appear as a session subcommand line. Use the
+        // subcommand-line shape rather than the bare word because the
+        // session group's own description contains "launched".
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called for help"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "--help"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        // The relocated launch command's description starts with "Launch a generic AgentSession".
+        // Assert it does not appear as a subcommand entry under session.
+        Assert.DoesNotContain("Launch a generic AgentSession", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AgentHelp_ListsLaunchDirectlyUnderAgent()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called for help"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "--help"], output, error, fileSystem, executor);
+            http, ["agent", "--help"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("launch", stdout, StringComparison.Ordinal);
+        Assert.Contains("session", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LaunchHelp_ListsPromptInputFlags()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called for help"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "launch", "--help"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -86,7 +107,7 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_Table_ResolvesAgentAndPrintsSessionIdentity()
+    public async Task Launch_Table_ResolvesAgentAndPrintsBothJobAndSessionIdentity()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
         {
@@ -104,6 +125,7 @@ public class CliAgentSessionCommandSpecs
                 success = true,
                 data = new
                 {
+                    jobId = "agent-job-launch-abc",
                     sessionId = "sess_new_1",
                     agentId = "agent_123",
                     agentName = "reviewer",
@@ -113,7 +135,7 @@ public class CliAgentSessionCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt", "Audit the auth flow"],
+            http, ["agent", "launch", "reviewer", "--prompt", "Audit the auth flow"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
@@ -125,6 +147,7 @@ public class CliAgentSessionCommandSpecs
         Assert.Equal("Audit the auth flow", launchBody["prompt"]?.GetValue<string>());
 
         var stdout = output.ToString();
+        Assert.Contains("job id:     agent-job-launch-abc", stdout, StringComparison.Ordinal);
         Assert.Contains("session id: sess_new_1", stdout, StringComparison.Ordinal);
         Assert.Contains("agent id:   agent_123", stdout, StringComparison.Ordinal);
         Assert.Contains("agent name: reviewer", stdout, StringComparison.Ordinal);
@@ -132,7 +155,7 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_SelectedJson_ProjectsRequestedFields()
+    public async Task Launch_SelectedJson_ProjectsRequestedFields()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
         {
@@ -150,6 +173,7 @@ public class CliAgentSessionCommandSpecs
                 success = true,
                 data = new
                 {
+                    jobId = "agent-job-launch-abc",
                     sessionId = "sess_new_1",
                     agentId = "agent_123",
                     agentName = "reviewer",
@@ -159,17 +183,17 @@ public class CliAgentSessionCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt", "Hi", "--json", "sessionId,agentName"],
+            http, ["agent", "launch", "reviewer", "--prompt", "Hi", "--json", "jobId,sessionId"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
+        Assert.Contains("\"jobId\": \"agent-job-launch-abc\"", stdout, StringComparison.Ordinal);
         Assert.Contains("\"sessionId\": \"sess_new_1\"", stdout, StringComparison.Ordinal);
-        Assert.Contains("\"agentName\": \"reviewer\"", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task SessionLaunch_PromptFile_ReadsFileAndSendsContents()
+    public async Task Launch_PromptFile_ReadsFileAndSendsContents()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
         {
@@ -185,7 +209,7 @@ public class CliAgentSessionCommandSpecs
             return Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { sessionId = "sess_new_1", agentId = "agent_123", agentName = "reviewer", status = "inactive" },
+                data = new { jobId = "agent-job-launch-abc", sessionId = "sess_new_1", agentId = "agent_123", agentName = "reviewer", status = "inactive" },
             }, HttpStatusCode.Created));
         });
 
@@ -193,7 +217,7 @@ public class CliAgentSessionCommandSpecs
         fileSystem.AddFile(promptPath, "Long markdown body from file");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt-file", promptPath],
+            http, ["agent", "launch", "reviewer", "--prompt-file", promptPath],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
@@ -203,7 +227,7 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_PromptStdin_ReadsFromStdin()
+    public async Task Launch_PromptStdin_ReadsFromStdin()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
         {
@@ -219,14 +243,14 @@ public class CliAgentSessionCommandSpecs
             return Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { sessionId = "sess_new_1", agentId = "agent_123", agentName = "reviewer", status = "inactive" },
+                data = new { jobId = "agent-job-launch-abc", sessionId = "sess_new_1", agentId = "agent_123", agentName = "reviewer", status = "inactive" },
             }, HttpStatusCode.Created));
         });
 
         var stdin = new StringReader("summarize this PR");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt-stdin"],
+            http, ["agent", "launch", "reviewer", "--prompt-stdin"],
             output, error, fileSystem, executor,
             standardInput: stdin);
 
@@ -237,13 +261,13 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_MissingAllPromptSources_FailsClearlyWithExitOne()
+    public async Task Launch_MissingAllPromptSources_FailsClearlyWithExitOne()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer"],
+            http, ["agent", "launch", "reviewer"],
             output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
@@ -252,13 +276,13 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_EmptyPrompt_FailsClearly()
+    public async Task Launch_EmptyPrompt_FailsClearly()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt", "   "],
+            http, ["agent", "launch", "reviewer", "--prompt", "   "],
             output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
@@ -267,14 +291,14 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_MultiplePromptSources_FailsClearly()
+    public async Task Launch_MultiplePromptSources_FailsClearly()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
         fileSystem.AddFile("/tmp/p", "x");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt", "p", "--prompt-file", "/tmp/p"],
+            http, ["agent", "launch", "reviewer", "--prompt", "p", "--prompt-file", "/tmp/p"],
             output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
@@ -283,14 +307,14 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_BlankInlinePromptWithFile_StillFailsMutualExclusion()
+    public async Task Launch_BlankInlinePromptWithFile_StillFailsMutualExclusion()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
         fileSystem.AddFile("/tmp/p", "from file");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt", "", "--prompt-file", "/tmp/p"],
+            http, ["agent", "launch", "reviewer", "--prompt", "", "--prompt-file", "/tmp/p"],
             output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
@@ -299,13 +323,13 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_BlankInlinePromptWithStdin_StillFailsMutualExclusion()
+    public async Task Launch_BlankInlinePromptWithStdin_StillFailsMutualExclusion()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt", " ", "--prompt-stdin"],
+            http, ["agent", "launch", "reviewer", "--prompt", " ", "--prompt-stdin"],
             output, error, fileSystem, executor,
             standardInput: new StringReader("from stdin"));
 
@@ -315,14 +339,14 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_UnknownAgentByName_SurfacesErrorWithoutSilentSuccess()
+    public async Task Launch_UnknownAgentByName_SurfacesErrorWithoutSilentSuccess()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.JsonError(
                 "server says agent nope is missing", "agent_not_found", HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "nope", "--prompt", "Hi"],
+            http, ["agent", "launch", "nope", "--prompt", "Hi"],
             output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
@@ -332,14 +356,14 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_UnknownAgentById_SurfacesServer404Error()
+    public async Task Launch_UnknownAgentById_SurfacesServer404Error()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.JsonError(
                 "Agent 'agent_missing' not found", "agent_not_found", HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "agent_missing", "--prompt", "Hi"],
+            http, ["agent", "launch", "agent_missing", "--prompt", "Hi"],
             output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
@@ -349,7 +373,7 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_EmptyPromptRejectedByServer_SurfacesServerMessage()
+    public async Task Launch_EmptyPromptRejectedByServer_SurfacesServerMessage()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
         {
@@ -370,7 +394,7 @@ public class CliAgentSessionCommandSpecs
         fileSystem.AddFile("/tmp/blank", "");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt-file", "/tmp/blank"],
+            http, ["agent", "launch", "reviewer", "--prompt-file", "/tmp/blank"],
             output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
@@ -380,7 +404,7 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_WithContextRefs_SendsContextInBody()
+    public async Task Launch_WithContextRefs_SendsContextInBody()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
         {
@@ -396,13 +420,13 @@ public class CliAgentSessionCommandSpecs
             return Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { sessionId = "sess_new_1", agentId = "agent_123", agentName = "reviewer", status = "inactive" },
+                data = new { jobId = "agent-job-launch-abc", sessionId = "sess_new_1", agentId = "agent_123", agentName = "reviewer", status = "inactive" },
             }, HttpStatusCode.Created));
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["agent", "session", "launch", "reviewer", "--prompt", "Hi", "--issue", "42", "--repository", "core", "--workspace-path", "/tmp/ws"],
+            ["agent", "launch", "reviewer", "--prompt", "Hi", "--issue", "42", "--repository", "core", "--workspace-path", "/tmp/ws"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
@@ -417,7 +441,7 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_RespectsProjectIdOption()
+    public async Task Launch_RespectsProjectIdOption()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
         {
@@ -433,12 +457,12 @@ public class CliAgentSessionCommandSpecs
             return Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { sessionId = "sess_new_1", agentId = "agent_123", agentName = "reviewer", status = "inactive" },
+                data = new { jobId = "agent-job-launch-abc", sessionId = "sess_new_1", agentId = "agent_123", agentName = "reviewer", status = "inactive" },
             }, HttpStatusCode.Created));
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt", "Hi", "--project", "proj_other"],
+            http, ["agent", "launch", "reviewer", "--prompt", "Hi", "--project", "proj_other"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
@@ -753,13 +777,13 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionLaunch_LegacyOutputOption_ReturnsUsageError()
+    public async Task Launch_LegacyOutputOption_ReturnsUsageError()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt", "Hi", "--output", "json"],
+            http, ["agent", "launch", "reviewer", "--prompt", "Hi", "--output", "json"],
             output, error, fileSystem, executor);
 
         Assert.Equal(2, exitCode);

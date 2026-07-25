@@ -126,6 +126,7 @@ internal sealed partial class TableRenderer
             return;
         }
 
+        _out.WriteLine($"job id:     {StringOf(data, "jobId")}");
         _out.WriteLine($"session id: {StringOf(data, "sessionId")}");
         _out.WriteLine($"agent id:   {StringOf(data, "agentId")}");
         _out.WriteLine($"agent name: {StringOf(data, "agentName")}");

@@ -66,7 +66,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.AgentSessionShow =>
                 ["sessionId", "agentId", "agentName", "status", "createdAt", "lastActivityAt", "resolvedModel", "failureReason", "failureCategory", "toolCallCount", "toolErrorCount", "contextRefs", "usage"],
             MohistCliApi.TableShape.AgentSessionTranscript => ["turns", "partCount", "firstActivityAt", "lastActivityAt"],
-            MohistCliApi.TableShape.AgentSessionLaunch => ["sessionId", "agentId", "agentName", "status"],
+            MohistCliApi.TableShape.AgentSessionLaunch => ["jobId", "sessionId", "agentId", "agentName", "status"],
             MohistCliApi.TableShape.AgentJobList => ["jobId", "agentId", "agentName", "status", "submittedAt", "terminalAt"],
             MohistCliApi.TableShape.AgentJobView => ["jobId", "status", "message", "output", "artifactUploadIds", "failureReason", "exitCode"],
             MohistCliApi.TableShape.AgentSessionFollowup => ["status"],

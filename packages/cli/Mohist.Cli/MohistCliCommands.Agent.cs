@@ -24,6 +24,7 @@ internal static class AgentCommands
         agent.Subcommands.Add(BuildShow(api));
         agent.Subcommands.Add(BuildUpdate(api));
         agent.Subcommands.Add(BuildArchive(api));
+        agent.Subcommands.Add(BuildLaunch(api));
         agent.Subcommands.Add(BuildSession(api));
         agent.Subcommands.Add(BuildJob(api));
         agent.Subcommands.Add(BuildInstall(api));
@@ -555,12 +556,11 @@ internal static class AgentCommands
     {
         var session = new Command(
             "session",
-            "Manage a generic AgentSession launched from an Agent profile. Subcommands: list <agent>, show <sessionId>, transcript <sessionId>, launch <agent>, compact <sessionId>, reset <sessionId>, followup <sessionId>, cancel <sessionId>.");
+            "Manage a generic AgentSession launched from an Agent profile. Subcommands: list <agent>, show <sessionId>, transcript <sessionId>, compact <sessionId>, reset <sessionId>, followup <sessionId>, cancel <sessionId>.");
 
         session.Subcommands.Add(BuildSessionList(api));
         session.Subcommands.Add(BuildSessionShow(api));
         session.Subcommands.Add(BuildSessionTranscript(api));
-        session.Subcommands.Add(BuildSessionLaunch(api));
         session.Subcommands.Add(BuildSessionCompact(api));
         session.Subcommands.Add(BuildSessionReset(api));
         session.Subcommands.Add(BuildSessionFollowup(api));
@@ -569,11 +569,11 @@ internal static class AgentCommands
         return session;
     }
 
-    private static Command BuildSessionLaunch(MohistCliApi api)
+    private static Command BuildLaunch(MohistCliApi api)
     {
         var cmd = new Command(
             "launch",
-            "Launch a generic AgentSession from an Agent profile. Sends POST /api/projects/:projectId/agents/:agentId/sessions.");
+            "Launch a generic AgentSession from an Agent profile. Returns both the AgentJob id (the work owner) and the AgentSession id (the conversation owner). Sends POST /api/projects/:projectId/agents/:agentId/sessions.");
         var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
         var promptOpt = new Option<string?>("--prompt") { Description = "Prompt text (mutually exclusive with --prompt-file and --prompt-stdin)" };
         var promptFileOpt = new Option<string?>("--prompt-file") { Description = "Read prompt from a UTF-8 file path (recommended for long prompts; mutually exclusive with --prompt and --prompt-stdin)" };
