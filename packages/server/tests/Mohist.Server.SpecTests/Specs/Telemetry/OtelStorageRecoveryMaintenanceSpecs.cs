@@ -156,6 +156,46 @@ public class OtelStorageRecoveryMaintenanceSpecs : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_AfterRebuild_OpensAdmissionAndClearsBudgetExhausted()
+    {
+        // Mirrors the production first-tick interaction: by the time
+        // recovery runs the store is oversized and unreclaimable, so
+        // admission is closed and storage_budget_exhausted is active.
+        // Recovery must re-arbitrate against the fresh empty store so
+        // admission opens immediately and the stale budget-exhausted
+        // reason clears — otherwise the first post-rebuild write is
+        // refused and storage_data_reset cannot clear.
+        using var runtime = new RuntimeObservability(
+            enabled: true,
+            new RuntimeEpoch(Now),
+            _timeProvider,
+            initialDegradations: Array.Empty<RuntimeDegradationSeed>(),
+            storageBudgetBytes: _budgetBytes);
+
+        var guard = new OtelStorageGuard(_db, _fileSystem, _timeProvider, _budgetBytes, runtime);
+
+        // Simulate the storage callback arbitrating the oversized
+        // store: admission closes and storage_budget_exhausted is
+        // published on the shared runtime.
+        guard.Arbitrate(_budgetBytes + 500);
+        Assert.True(guard.AdmissionClosed);
+        Assert.True(runtime.HasActiveDegradation(DegradationSource.IngestProtection));
+
+        // First probe reports oversized (triggers rebuild); the second
+        // reports the fresh empty store (drives re-arbitration open).
+        var probe = new ScriptedProbe(usageByCall: new Queue<long>(new long[] { _budgetBytes + 500, 0 }));
+        var recovery = NewRecoveryWithRuntime(probe, guard, runtime);
+
+        await recovery.ExecuteAsync(CancellationToken.None);
+
+        Assert.False(guard.AdmissionClosed);
+        Assert.False(runtime.HasActiveDegradation(DegradationSource.IngestProtection));
+        Assert.Equal(OtelStorageRecoveryDecision.Rebuilt, _outcomes.Single().Decision);
+        // storage_data_reset stays active until the first write commits.
+        Assert.True(runtime.HasActiveDegradation(DegradationSource.StorageWrite));
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RebuildFailure_PublishesDataResetAndDoesNotThrow()
     {
         var probe = new ScriptedProbe(usageByCall: new Queue<long>(new long[] { 1_500 }));
@@ -174,56 +214,39 @@ public class OtelStorageRecoveryMaintenanceSpecs : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_ReadOnlyQueryDuringRebuild_SurfacesAsStorageReadFailure()
+    public async Task ExecuteAsync_Rebuild_DoesNotBlockOrCorruptTheStore()
     {
-        // The probe reports over-budget, so the rebuild path runs.
-        // While it runs, a read-only query opens a connection; that
-        // open must fail rather than block or corrupt the rebuild.
-        var probe = new ScriptedProbe(usageByCall: new Queue<long>(new long[] { 1_500 }));
+        // Accepted limitation (consistent with design D7's treatment of
+        // incremental_vacuum efficacy): the in-memory shared-cache test
+        // database is kept alive by a keeper connection and cannot
+        // model the real on-disk file-absent window during which a
+        // concurrent read-only query would fail with a bounded
+        // SqliteException. The "query overlapping the rebuild window
+        // fails and surfaces through the existing StorageRead
+        // degradation path" half of the acceptance criterion therefore
+        // relies on SQLite file locking and is accepted as
+        // verified-by-design under the no-real-filesystem constraint.
+        //
+        // The half that IS verifiable here: the rebuild neither blocks
+        // nor corrupts the store — after it completes the schema is
+        // intact and a fresh read-only open succeeds against the
+        // rebuilt store. (The in-memory shared-cache DB is kept alive
+        // by a keeper connection, so the discard of prior rows is not
+        // observable here; it is verified-by-design through the file
+        // deletion + fresh schema init that the production path runs.)
+        var probe = new ScriptedProbe(usageByCall: new Queue<long>(new long[] { 1_500, 0 }));
         var guard = NewGuard();
         var recovery = NewRecovery(probe, guard);
 
-        // The recovery runs to completion on its own. A read-only
-        // open that starts after the rebuild is finished either
-        // succeeds (the schema is reinitialized cleanly) or throws a
-        // SQLite error; both outcomes are bounded — neither hangs
-        // nor corrupts the rebuild. The wall-clock guarantee comes
-        // from the recovery path's bounded work, not from a
-        // real-time deadline.
         await recovery.ExecuteAsync(CancellationToken.None);
 
         Assert.True(recovery.HasRun);
         Assert.Equal(OtelStorageRecoveryDecision.Rebuilt, _outcomes.Single().Decision);
 
-        var readOutcome = SafeOpenReadOnly();
-        Assert.True(
-            readOutcome.Succeeded || readOutcome.Exception is not null,
-            "Read-only open must either succeed or throw — not hang.");
-
-        // The rebuild's bounded work must not have left shared state
-        // in a corrupt shape: any in-flight open that runs after the
-        // rebuild is observable as a bounded error or a fresh
-        // successful open. The acceptance criterion is that this
-        // failure surfaces through the storage-read path —
-        // exercised in production by an exception flowing up through
-        // TraceQuerier and into the runtime's StorageRead
-        // degradation.
-        if (!readOutcome.Succeeded)
-            Assert.IsType<Microsoft.Data.Sqlite.SqliteException>(readOutcome.Exception);
-    }
-
-    private sealed record ReadOnlyOpenResult(bool Succeeded, Exception? Exception);
-
-    private ReadOnlyOpenResult SafeOpenReadOnly()
-    {
-        try
+        using (var connection = _db.OpenReadOnlyConnection())
         {
-            using var connection = _db.OpenReadOnlyConnection();
-            return new ReadOnlyOpenResult(true, null);
-        }
-        catch (Exception ex)
-        {
-            return new ReadOnlyOpenResult(false, ex);
+            Assert.True(IndexExists(connection, OtelDb.TracesEndIndex));
+            Assert.True(IndexExists(connection, OtelDb.SpansTraceIndex));
         }
     }
 

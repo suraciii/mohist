@@ -24,7 +24,10 @@ namespace Mohist.Server.Otel;
 ///   <item>delete the old <c>.db</c>, <c>-wal</c>, <c>-shm</c>, and
 ///     <c>.meta</c> files through <see cref="IFileSystem"/>,</item>
 ///   <item>open a fresh read-write connection (which recreates the
-///     schema with <c>auto_vacuum = INCREMENTAL</c>), and</item>
+///     schema with <c>auto_vacuum = INCREMENTAL</c>),</item>
+///   <item>re-arbitrate admission against the fresh empty store so the
+///     write path reopens and a stale <c>storage_budget_exhausted</c>
+///     reason clears, and</item>
 ///   <item>publish the <c>storage_data_reset</c> degradation code on
 ///     the <c>StorageWrite</c> source plus one structured log.</item>
 /// </list>
@@ -136,6 +139,17 @@ public sealed class OtelStorageRecoveryMaintenance : IOtelMaintenanceCallback
 
             using var connection = _db.OpenReadWriteConnection();
 
+            // The rebuild replaced an oversized, unreclaimable store
+            // with a fresh empty one. Re-arbitrate admission against
+            // the new store so the write path opens immediately and a
+            // stale storage_budget_exhausted reason clears — otherwise
+            // the store is reported over-budget for up to a tick
+            // despite being empty, and the first post-rebuild write is
+            // refused. A probe failure here is non-fatal: the rebuild
+            // itself succeeded, and the next maintenance tick
+            // re-derives the watermark from the storage callback.
+            ReArbitrateAfterRebuild();
+
             _logger?.LogWarning(
                 DataResetEvent,
                 "OTel observation data reset at startup: combined usage {UsageBytes}B exceeded the {BudgetBytes}B storage budget; the prior store was discarded.",
@@ -154,6 +168,20 @@ public sealed class OtelStorageRecoveryMaintenance : IOtelMaintenanceCallback
                 OtelStorageRecoveryDecision.RebuildFailed,
                 usageBytes,
                 Failure: ex));
+        }
+    }
+
+    private void ReArbitrateAfterRebuild()
+    {
+        try
+        {
+            _guard.Arbitrate(_probe.Probe().UsageBytes);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(
+                ex,
+                "OTel storage recovery could not re-probe after rebuild; admission will be re-derived on the next maintenance tick.");
         }
     }
 

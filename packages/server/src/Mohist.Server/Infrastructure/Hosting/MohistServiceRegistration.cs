@@ -187,9 +187,16 @@ public static class MohistServiceRegistration
         services.TryAddSingleton<OtelStorageGuard>();
         services.TryAddSingleton<IOtelStorageReclaimer, SqliteOtelStorageReclaimer>();
         services.TryAddSingleton<IOtelDbPool, SqliteOtelDbPool>();
+        // Maintenance callbacks run in registration order on every
+        // enabled tick. Recovery is registered first so an oversized
+        // database is rebuilt on the first tick before retention and
+        // storage eviction waste work on a store that is about to be
+        // discarded; recovery is a one-shot gate, so on subsequent
+        // ticks the effective order is retention (time) -> storage
+        // (size + reclaim + arbitrate), matching design D1.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelStorageRecoveryMaintenance>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelRetentionMaintenance>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelStorageMaintenance>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelStorageRecoveryMaintenance>());
         services.AddHostedService<OtelDiagnosticsSampler>();
         services.AddSingleton<OtelCollectorStatus>();
         services.AddSingleton<IIngestProtectionDecision, BudgetAwareIngestProtectionDecision>();
