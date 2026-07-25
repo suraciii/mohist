@@ -70,14 +70,14 @@ Add `DecidedBy` to `ApprovalStatus` (`StageRun`); `WorkflowRun.Approve/Reject` t
 - [Grain-state save and event append are not atomic] -> Idempotent append by `(source, id)` plus recovery-reminder retry; a duplicate on replay is deduped by the store. Worst case the terminal state persists before the event, and the reminder emits it on the next tick.
 - [Agentless failed jobs could let the reminder self-clean before the event is appended] -> D1 widens the reminder cleanup condition so the failure-event obligation keeps the reminder alive independently until emitted.
 - [Self-response guard blocks only A→A, not A→B→A loops] -> Accepted Non-Goal; mitigated by a documentation warning and dry-run/routing visibility. No silent data corruption — at worst noise, which the owner sees.
-- [BREAKING approve/reject displaces existing callers] -> Active development, no version compat (AGENTS.md); the supervisor/agent presets that drive approvals ship in the same change. No external third-party callers are expected.
+- [BREAKING approve/reject displaces existing callers] -> Active development, no version compat (AGENTS.md). The supervisor preset already declares `--author` on approve/reject (`presets/supervisor/instructions.md:24`), so it keeps working once the CLI accepts the flag; the only doc fix is the generic `skill-data/mohist/SKILL.md` command reference, which omits the now-required `--author`. No external third-party callers are expected.
 - [Notification spam on a flapping agent] -> Out of scope (no cooldown by design); the owner disabling the kind is the escape hatch, and the default-on choice is intentional so silence is never mistaken for "handled".
 
 ## Migration Plan
 
 Single coordinated deploy (no version compatibility to preserve):
 
-1. Ship server changes (failure event + lineage + self-response guard + notification kind + approval `decidedBy` plumbing) together with the agent/supervisor preset updates that now pass `--author` on approve/reject.
+1. Ship server changes (failure event + lineage + self-response guard + notification kind + approval `decidedBy` plumbing) together with the CLI `--author` support and the generic `skill-data/mohist/SKILL.md` command-reference update. The supervisor preset already passes `--author` (`presets/supervisor/instructions.md:24`) and needs no text change — it has been expecting this flag.
 2. No schema migration: the new event type is additive; approval `decidedBy` is nullable so existing rows read as empty.
 3. Rollback is a plain revert — historical approval reads remain compatible, and any already-emitted `agent.job.failed` events are harmless (they project into an inbox kind that simply stops existing on rollback; clean up those inbox rows if desired, or leave them).
 

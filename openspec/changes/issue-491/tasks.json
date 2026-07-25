@@ -20,19 +20,20 @@
       "output": "Event catalog + producer conformance + AgentJobGrain emission + RoutingDispatchHandler guard, with passing spec/unit tests",
       "dependsOn": [],
       "passes": false,
-      "notes": "Reuse the no-DbContext IEventStore.AppendAsync(CloudEvent, ct) overload so the grain keeps its grain-storage persistence story. Widen ReceiveReminder self-clean condition so agentless failed jobs keep the reminder alive until the event is emitted. Mirror issue-449's PendingSessionClose obligation pattern."
+      "notes": "Reuse the no-DbContext IEventStore.AppendAsync(CloudEvent, ct) overload so the grain keeps its grain-storage persistence story. Widen ReceiveReminder self-clean condition so agentless failed jobs keep the reminder alive until the event is emitted. Mirror issue-449's PendingSessionClose obligation pattern. Confirm at build that the watch-launch / @mention AgentJob Input retains the originating issue id (the routed path already carries it via RoutedAgentLaunchPlan.IssueNumber) so issue-scoped failures project into the inbox rather than being dropped as contextless."
     },
     {
       "id": "T-002",
       "title": "Thread declarative decidedBy through approve/reject end-to-end",
       "spec": "specs/approval-attribution/spec.md#Every approval decision records a declarative operator",
-      "description": "Add a declarative decidedBy operator to approve/reject, copying the comment-author model: ApprovalStatus/StageRun, WorkflowRun.Approve/Reject, StageApprovalResolved event, WorkflowGrain.ApproveAsync/RequestChangesAsync, ApprovalStatusView + WorkflowStatusMapper, CLI --author on mo run approve/reject, and the run-scoped + issue-scoped HTTP DTOs. Validate identically to comment author (required, trim, reject blank or >100 chars). BREAKING: author is now required; historical rows read back with empty decidedBy.",
+      "description": "Add a declarative decidedBy operator to approve/reject, copying the comment-author model: ApprovalStatus/StageRun, WorkflowRun.Approve/Reject, StageApprovalResolved event, WorkflowGrain.ApproveAsync/RequestChangesAsync, ApprovalStatusView + WorkflowStatusMapper, CLI --author on mo run approve/reject, and the run-scoped + issue-scoped HTTP DTOs. Update the generic agent command reference (packages/cli/Mohist.Cli/skill-data/mohist/SKILL.md approve/reject rows + options table) to document the now-required --author. Validate identically to comment author (required, trim, reject blank or >100 chars). BREAKING: author is now required; historical rows read back with empty decidedBy.",
       "acceptanceCriteria": [
         "`mo run approve --author supervisor` and `mo run reject --author supervisor -m ...` record decidedBy and the approval read model exposes it — covered by a spec test.",
         "Missing, blank, or >100-char author is rejected with no state change; surrounding whitespace is trimmed — covered by unit tests mirroring the existing comment-author validation cases.",
         "StageApprovalResolved event and ApprovalStatusView both carry decidedBy set to the recorded operator.",
         "Historical approval rows without decidedBy read back successfully with empty decidedBy (nullable), no error.",
         "Both run-scoped and issue-scoped approve/reject HTTP endpoints accept the author field and forward it as decidedBy.",
+        "The generic agent command reference (packages/cli/Mohist.Cli/skill-data/mohist/SKILL.md approve/reject rows + options table) documents approve/reject with the required --author; the supervisor preset (packages/cli/Mohist.Cli/presets/supervisor/instructions.md) already declares --author on approve/reject and needs no change.",
         "Server builds with TreatWarningsAsErrors; `npm test` (server) and the CLI build are green; web typecheck is unaffected (read-model field is additive)."
       ],
       "priority": 1,
@@ -41,7 +42,7 @@
       "output": "Approval domain + grain + API + CLI decidedBy plumbing, with passing spec/unit tests",
       "dependsOn": [],
       "passes": false,
-      "notes": "Independent of T-001/T-003 (issue states the two changes are each independently usable). Template to copy end-to-end: comment author at packages/cli/Mohist.Cli/MohistCliCommands.Issue.Comment.cs:18 -> IssueRoutes.Dtos.cs AddCommentRequest -> IssueGrain.AddCommentAsync -> IssueCommentAdded -> IssueCommentDto."
+      "notes": "Independent of T-001/T-003 (issue states the two changes are each independently usable). Template to copy end-to-end: comment author at packages/cli/Mohist.Cli/MohistCliCommands.Issue.Comment.cs:18 -> IssueRoutes.Dtos.cs AddCommentRequest -> IssueGrain.AddCommentAsync -> IssueCommentAdded -> IssueCommentDto. The supervisor preset already declares --author on approve/reject (presets/supervisor/instructions.md:24), mirroring its comment --author; T-002 lands the CLI/API support that preset has been expecting, so the supervisor needs no text change — only the generic skill-data/mohist/SKILL.md command reference is incomplete and must be updated."
     },
     {
       "id": "T-003",

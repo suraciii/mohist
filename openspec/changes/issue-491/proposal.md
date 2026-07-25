@@ -39,5 +39,5 @@
   - approve/reject 请求体增加必填 `author`，镜像 comment 的 `AddCommentRequest`。
 - **CLI** (`packages/cli/Mohist.Cli/MohistCliCommands.Run.cs`):
   - `BuildApprove`/`BuildReject` 增加 `--author` 选项，复用 comment 的本地校验（`MohistCliCommands.Issue.Comment.cs:18` 为模板）。
-- **Web**：审批历史展示需呈现 `decidedBy`（读取模型已携带）。
+- **Web**（后续，不在本 issue 验收内）：审批历史展示可呈现 `decidedBy`；读取模型已携带该字段，UI 渲染为可选增强，本 issue 的验收以读取结果携带 `decidedBy` 为准。
 - 测试：fake 轨道覆盖（a）AgentJob 失败 → inbox + Hermes；（b）防自响应；（c）approve/reject 带 author → 决议与读取模型携带；（d）历史数据无 decidedBy 的兼容读取。
