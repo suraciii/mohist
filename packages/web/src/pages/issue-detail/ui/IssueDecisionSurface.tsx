@@ -12,7 +12,7 @@ import type { IssueDecisionActionController } from '../model/useIssueDecisionAct
 
 export interface IssueDecisionSurfaceProps {
   actions: ReadonlyArray<IssueDecisionAction>
-  summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'done-no-action' | 'terminal-no-action'
+  summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'cancelled' | 'done-no-action' | 'terminal-no-action'
   rationale: string
   nextAction: string
   controller: IssueDecisionActionController
@@ -36,6 +36,7 @@ const SUMMARY_PRESENTATION: Record<IssueDecisionSurfaceProps['summary'], Summary
   'blocked': { label: 'Blocked', tone: 'orange' },
   'failed': { label: 'Failed', tone: 'red' },
   'done': { label: 'Done', tone: 'green' },
+  'cancelled': { label: 'Cancelled', tone: 'gray' },
   'done-no-action': { label: 'Done', tone: 'green' },
   'terminal-no-action': { label: 'No action available', tone: 'gray' },
 }

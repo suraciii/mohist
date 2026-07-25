@@ -63,9 +63,9 @@ export interface IssueDetailPageProps {
   mutationDependencies?: Partial<IssueDetailMutationDependencies>
 }
 
-type DecisionSummary = 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'done-no-action' | 'terminal-no-action'
+type DecisionSummary = 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'cancelled' | 'done-no-action' | 'terminal-no-action'
 
-function decisionSummaryFromRuntime(summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | undefined): DecisionSummary {
+function decisionSummaryFromRuntime(summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'cancelled' | undefined): DecisionSummary {
   if (!summary) return 'terminal-no-action'
   return summary
 }

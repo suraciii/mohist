@@ -1,4 +1,4 @@
-import { IssueHealth, WorkflowStage, type RecoveryProjection } from '../../../entities/issue'
+import { IssueHealth, IssueStatus, WorkflowStage, type RecoveryProjection } from '../../../entities/issue'
 import {
   findFailedCheck,
   findFailedScriptHealthCheck,
@@ -69,6 +69,13 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
     return 'done'
   }
 
+  const isCancelled =
+    issue.status === IssueStatus.Cancelled
+    || health === IssueHealth.Cancelled
+  if (isCancelled) {
+    return 'cancelled'
+  }
+
   const recovery = issue.recovery
   const failedScriptHealthCheck = findFailedScriptHealthCheck(input.timeline)
 
@@ -90,6 +97,7 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
   if (
     recovery?.latestAttemptState === 'interrupted'
     || status === 'interrupted'
+    || status === 'stopped'
   ) {
     return 'blocked'
   }

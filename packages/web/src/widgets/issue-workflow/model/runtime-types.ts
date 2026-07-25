@@ -8,6 +8,7 @@ export type RuntimeSummary =
   | 'blocked'
   | 'failed'
   | 'done'
+  | 'cancelled'
 
 export type RuntimeActionKind =
   | 'approve'
