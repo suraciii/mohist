@@ -46,10 +46,10 @@ The AgentJob terminal result SHALL expose: status (`completed` or `failed`), mes
 - **WHEN** a failed job is viewed
 - **THEN** the result includes status `failed`, the failure reason, and the exit code when one is available
 
-### Requirement: AgentJob is the sole work-result read path
+### Requirement: AgentJob is the canonical work-result read path
 
-A launch's work outcome MUST be read from `agent job`, not inferred from any AgentSession field. The CLI SHALL NOT present a competing terminal verdict on the AgentSession read surface.
+A launch's work outcome MUST be read from `agent job`: the AgentJob terminal result is the authoritative source a caller uses to learn whether a launch's work succeeded or failed. The CLI's result read path is `mo agent job view <job-id>`, not the AgentSession conversation surface. (Removing any legacy result fields still carried on the AgentSession DTO is a separate, tracked concern outside this change.)
 
-#### Scenario: Result read from the job, not the session
+#### Scenario: Result read from the job
 - **WHEN** a caller wants to know whether a launch's work succeeded or failed
-- **THEN** it reads `mo agent job view <job-id>`, and the session read surface does not present a separate job-result verdict
+- **THEN** it reads `mo agent job view <job-id>` for the authoritative terminal result

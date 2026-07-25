@@ -86,13 +86,18 @@ Add a project-scoped route group `/api/projects/{projectRef}/sessions` with `GET
 
 ## Migration Plan
 
-1. **Server — AgentJob read model (D2):** add `AgentJobRow` + `DbSet` + migration + `AgentJobStore` + `AgentJobQuerier` + DI; migrate `AgentJobGrain` to write-through store persistence; register in `MohistServiceRegistration` and `MohistApiRegistration`.
-2. **Server — launch identity (D3):** add `JobKey` to `AgentLaunchResult`; propagate in `LaunchAsync`/`LaunchMentionAsync`; add `JobId` to the launch `201`.
-3. **Server — routes:** add `GET .../agents/{agentId}/jobs` and `GET .../agent-jobs/{jobId}` (D1 keys); add the unified `/sessions` route group (D4).
-4. **CLI (D5):** relocate `agent launch`; add `agent job`; add top-level `session`; remove `agent session` and `issue session(*,s)`; update table shapes.
-5. **Tests & docs:** update CLI/server spec tests; close the gap notes in `docs/cli-reference.md:346,352`; align `docs/agents.md`, `design/cli.md:67`, and the `design/agent-execution.md` 实装差距 section.
+1. **Server — AgentJob read model (D2):** add `AgentJobRow` + `DbSet` + migration + `AgentJobStore` + `AgentJobQuerier` + DI; migrate `AgentJobGrain` to write-through store persistence; register in `MohistServiceRegistration`.
+2. **Server — AgentJob read routes (D1):** add `GET .../agents/{agentId}/jobs` and `GET .../agent-jobs/{jobId}` (the job routes land before the launch identity so the "launched jobId is accepted by the read surface" assertion is verifiable when launch follows).
+3. **Server — launch identity (D3):** add `JobKey` to `AgentLaunchResult`; propagate in `LaunchAsync`/`LaunchMentionAsync`; add `JobId` to the launch `201`.
+4. **Server — unified session route (D4):** add the source-agnostic `/sessions` route group.
+5. **CLI (D5):** add `agent job`; relocate `agent launch`; add top-level `session`; remove `agent session` and `issue session(*,s)`; update table shapes.
+6. **Tests & docs:** update CLI/server spec tests; close the gap notes in `docs/cli-reference.md:346,352`; align `docs/agents.md`, `design/cli.md:67`, and the `design/agent-execution.md` 实装差距 section.
+
+This step order mirrors the `tasks.json` dependency graph (T-001 → T-002 → T-003 → T-005, with T-004 parallel). A launch identity that surfaces a `jobId` is only meaningful once the job read surface exists, so the read routes precede the launch identity.
 
 **Rollback.** Each layer is independently revertible. The AgentJob read model is additive (new table/routes); reverting the grain persistence strategy is the only state-affecting step and is safe because the relational row is a strict superset of the prior grain state. No stored-data rewrite is required for existing AgentJobs/Sessions — they remain addressable by their existing stable ids; the read model populates going forward.
+
+**Historical / in-flight jobs at cutover.** The read model is populated only as the grain transitions (going forward). A job that is running or already terminal at deployment has no row until its grain next activates and writes, so it would be absent from `list` and `view`. To keep every job addressable, the `view` route falls back to the grain (`GetStatusAsync` / `GetTerminalResultAsync`, already on `IAgentJobGrain.cs:10,18`) when no read-model row exists for the id; `list` returns only projected jobs and is not expected to enumerate pre-cutover jobs. This makes `view` always-authoritative without a one-time backfill.
 
 ## Open Questions
 
