@@ -2,7 +2,7 @@
 
 Issue #490 adds the third Agent launch trigger promised in `docs/agents.md`: writing `@<agent>` in an
 issue comment launches that Agent with the comment as input. The product/design contract is fixed in
-[`design/agent-mentions.md`](../../design/agent-mentions.md); this document resolves the implementation
+[`design/agent-mentions.md`](../../../design/agent-mentions.md); this document resolves the implementation
 seams and one contradiction in that contract (see Decision 1).
 
 The foundation is already built by earlier issues:
@@ -125,6 +125,21 @@ Mention launches record `mohist.io/trigger/event-id` = the `comment-added` event
 event↔session link works) and a new label `mohist.io/trigger/comment-id` = the comment id (so the
 launch is findable from the comment side and distinguishable from routing/watch launches).
 
+### Decision 7: An explicit `@` mention overrides `muted` watch declarations
+
+`mute` (issue #489) is enforced inside `RoutingDispatchHandler` and governs the *automatic* launch
+paths — routing-rule hits and watch launches. A mention is a different kind of trigger: a direct,
+explicit human directive in a comment. **Decision:** `MentionDispatchHandler` SHALL NOT consult
+`WatchEntryStore`; a `muted` Agent on an issue is still launched when a human explicitly `@`-mentions
+it. Mute continues to suppress only automatic paths. This keeps the explicit-directive path
+unconditional and predictable, and avoids coupling the mention handler to the watch data layer.
+
+**Alternative considered — mute suppresses mentions too:** would let an operator fully silence an
+Agent on an issue. Rejected: an explicit `@` is an intentional human action, and silently dropping it
+(a comment that names an Agent yet nothing happens, with no rule to point at) is more confusing than
+honoring it. If full silencing is ever needed, a dedicated "ignore mentions" control would be clearer
+than overloading mute.
+
 ## Risks / Trade-offs
 
 - [Author spoofing disables loop prevention] -> Accepted. A human (or a misconfigured Agent) signing
@@ -166,9 +181,3 @@ need no cleanup.
 - **Typo feedback for unresolved mentions.** Today the only signal is a structured log + "nothing
   happens". A system reply comment or an inbox entry would close the loop. Deferred per
   `design/agent-mentions.md` until real usage shows the need.
-- **Interaction with `muted` watch declarations (issue #489).** `mute` is enforced inside
-  `RoutingDispatchHandler` and does not currently reach a separate `MentionDispatchHandler`. Should a
-  `muted` Agent on an issue still launch when explicitly `@`-mentioned? Recommended default: **yes** —
-  a mention is an explicit human directive and should override mute (mute governs *automatic* paths
-  only: routing-rule hits and watch launches). Needs confirmation before build; if "no", the mention
-  handler must consult `WatchEntryStore` for muted entries and skip them.

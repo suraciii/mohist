@@ -4,11 +4,11 @@ Mohist Agents can be started two ways today — manual launch and project-level 
 need configuration before they fire: a rule has to be written, a name has to be picked in the UI. For
 the common, ad-hoc case ("hey supervisor, push this issue forward") there is no zero-config path. Issue
 #490 adds the missing third launch trigger already promised in
-[`docs/agents.md`](../../docs/agents.md): write `@<agent>` in an issue comment and that Agent starts with
+[`docs/agents.md`](../../../docs/agents.md): write `@<agent>` in an issue comment and that Agent starts with
 the comment as its input. The design contract is fixed in
-[`design/agent-mentions.md`](../../design/agent-mentions.md); the foundation it depends on
-(`IAgentLauncher` dual-path launch + idempotency keys, issue workspace resolution, the comment
-`author` field) is already built by issues #489 / #449.
+[`design/agent-mentions.md`](../../../design/agent-mentions.md); the foundation it depends on
+(`IAgentLauncher` dual-path launch + idempotency keys, the comment `author` field) is already built by
+issues #489 / #449.
 
 ## What Changes
 
@@ -18,8 +18,8 @@ the comment as its input. The design contract is fixed in
 - A new system handler (`MentionDispatchHandler`, subscribing to `comment-added`) scans the comment
   body for `@<token>` mentions, resolves each token to an active Agent **by name** (case-insensitive,
   whitespace/punctuation-delimited, no id lookup), and launches each resolved Agent once via the
-  shared routed-launch path — `prompt` is the full comment body verbatim (the `@` token is left in),
-  context is the issue.
+  shared launcher's manual path (workspace-optional, so a mention fires even on a backlog issue) —
+  `prompt` is the full comment body verbatim (the `@` token is left in), context is the issue.
 - **Loop prevention**: a comment whose `author` matches the name of any active Agent in the project is
   never scanned for mentions. Agent-authored comments therefore neither trigger other Agents nor
   re-trigger themselves; the mention chain can only start from a human comment. The convention that
@@ -43,19 +43,22 @@ the comment as its input. The design contract is fixed in
   consumer.
 - `comment-mention`: The mention-triggered launch behavior at comment time — `@<token>` parsing,
   active-Agent-by-name resolution, loop prevention (author ≠ active Agent name), resolution-failure
-  no-op, idempotency `hash(projectId, commentId, agentId)`, prompt = comment body verbatim, and reuse
-  of the routed launch path (workspace resolution, preflight, trigger-label provenance).
+  no-op, idempotency `hash(projectId, commentId, agentId)`, prompt = comment body verbatim, and a
+  workspace-optional launch via the shared launcher (no preflight gate, so mentions fire regardless of
+  workflow-run state) plus trigger-label provenance.
 
 ## Impact
 
 - **Server — Issue aggregate** (`packages/server/src/Mohist.Server/Issue/`): `IssueGrain.AddCommentAsync`
-  records/emits the new `IssueCommentAdded` domain event; the issue event family + serializer
-  (`Issue.Domain.Events.IssueEvent`, `Infrastructure/Events/IssueEventSerializer.cs`,
-  `EventCatalog.cs`) gains `comment-added`.
+  appends a standalone `com.mohist.issue.comment-added` CloudEvent inside its existing save transaction
+  (the `EpicGrain` direct-emit pattern, stamped via `IssueLineage`). The `IssueEvent` union and
+  `IssueEventSerializer` are unchanged (a comment is a side record, not an aggregate state transition);
+  `EventCatalog.cs` gains the new type constant.
 - **Server — dispatch** (`packages/server/src/Mohist.Server/Events/Subscriptions/`): new
-  `MentionDispatchHandler` system handler subscribing to `comment-added`; reuses
-  `IAgentLauncher.LaunchRoutedAsync`, `AgentQuerier.GetByNameAsync` / `ListAsync` (active set for
-  loop-prevention), and the issue workspace resolver — same collaborators as `RoutingDispatchHandler`.
+  `MentionDispatchHandler` system handler subscribing to `comment-added`; reuses the shared launcher's
+  manual path (`IAgentLauncher.LaunchAsync`, workspace-optional) and `AgentQuerier.GetByNameAsync` /
+  `ListAsync` (active set for loop-prevention). It does NOT use `RoutedAgentLaunchContextResolver` /
+  `LaunchRoutedAsync`, which would preflight-fail backlog issues.
 - **Server — no new resource / no persistence migration**: mentions introduce no new aggregate or
   table (idempotency is keyed off the comment id, which already exists in `IssueComments`).
 - **CLI / Web / API**: no new commands or routes. The user-facing surface is unchanged — write a

@@ -118,19 +118,32 @@ ongoing-state semantics.
 - **THEN** exactly one AgentJob is created for that (comment, Agent), with no watch or subscription
   created as a side effect
 
-### Requirement: Launch-path reuse and provenance
+### Requirement: Workspace-optional launch, regardless of run state
 
-A mention launch SHALL reuse the routed launch pipeline: issue context resolution, workspace
-resolution, preflight validation, and preflight-failure handling (a preflight failure records a failed
-AgentJob) SHALL behave identically to a routing-rule launch. The launch SHALL annotate its trigger
-labels with the `commentId` and the `comment-added` event id, so the launch is traceable back to the
-originating comment from both the AgentJob side and the comment side.
+A mention launch SHALL use the shared launcher's manual (workspace-optional) path — NOT the routed
+path — so that a mention fires regardless of the issue's workflow-run state. The launch SHALL record
+issue/epic context as session metadata and MUST NOT apply a workspace/preflight gate: there SHALL be
+no preflight failure and no failed AgentJob when the issue has no active workflow run or its run is
+terminal. (The routed path requires a nonterminal run with a persisted workspace, which would
+preflight-fail a mention on a backlog issue — the case the feature exists to serve.)
 
-#### Scenario: Mention reuses workspace and preflight handling
+#### Scenario: Mention launches on a backlog issue
 
-- **WHEN** a mention launch is dispatched
-- **THEN** workspace resolution, preflight validation, and preflight-failure recording behave the same
-  as a routing-rule launch
+- **WHEN** a comment mentions an active Agent on an issue that has no workflow run (backlog)
+- **THEN** the Agent is launched successfully with issue context as session metadata and no preflight
+  failure is recorded
+
+#### Scenario: Mention launches on a terminal-run issue
+
+- **WHEN** a comment mentions an active Agent on an issue whose workflow run is in a terminal status
+- **THEN** the Agent is launched successfully (an explicit human directive is not gated on run state)
+  and no preflight failure is recorded
+
+### Requirement: Launch provenance
+
+A mention launch SHALL annotate its trigger labels with the `commentId` and the `comment-added` event
+id, so the launch is traceable back to the originating comment from both the AgentJob side and the
+comment side.
 
 #### Scenario: Mention provenance is recorded
 

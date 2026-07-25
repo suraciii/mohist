@@ -37,17 +37,19 @@
         "A mention produces exactly one AgentJob and creates no WatchEntry, routing subscription, or other persistent declaration.",
         "The launched AgentJob's trigger labels carry the comment-added event id and the comment id, distinguishing a mention launch from routing/watch launches.",
         "Spec tests (high-integration, injected fakes — no real network/grain/runner per design/testing.md) seed an Agent + comment and assert the full comment->launch behavior: backlog-issue launch, parsing/case/dedup, loop prevention, resolution-failure no-op, redelivery dedup, one-shot, and provenance labels. Unit tests cover the token parser and the comment-anchored stable-key derivation.",
+        "A muted Agent (WatchEntry muted on the issue) is still launched when explicitly @-mentioned — MentionDispatchHandler does not consult WatchEntryStore (Decision 7).",
+        "The upstream design/agent-mentions.md is reconciled to the workspace-optional decision: the 'reuse routed pipeline / workspace resolution / preflight' wording and the Status底座 no longer contradict the implemented manual-path behavior (差距 footnote per AGENTS.md).",
         "npm test (server) passes; C# build is warning-clean."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "MentionDispatchHandler (subscription + parsing + loop prevention + resolution + launch); AgentSessionResolver comment-anchored stable-key entry; IAgentLauncher mention launch path + mohist.io/trigger/comment-id metadata constant; spec + unit tests.",
+      "output": "MentionDispatchHandler (subscription + parsing + loop prevention + resolution + launch); AgentSessionResolver comment-anchored stable-key entry; IAgentLauncher mention launch path + mohist.io/trigger/comment-id metadata constant; reconciled design/agent-mentions.md; spec + unit tests.",
       "dependsOn": [
         "T-001"
       ],
       "passes": false,
-      "notes": "See design D1 (manual-style LaunchAsync, NOT LaunchRoutedAsync — the routed path's run+workspace requirement breaks the backlog headline use case; this reconciles the wording in design/agent-mentions.md), D3 (comment-anchored idempotency via AgentSessionResolver.StableId), D4 (regex token parser, name-only), D5 (declaration-based loop prevention), D6 (event-id + comment-id trigger labels). Open Question — mute interaction: implement the recommended default (an explicit @ overrides mute; MentionDispatchHandler does NOT consult WatchEntryStore). If the human decides mute should suppress mentions, add a WatchEntryStore muted-check in the handler before launching. Typo feedback (system reply/inbox) is out of scope — structured log only."
+      "notes": "See design D1 (manual-style LaunchAsync, NOT LaunchRoutedAsync — the routed path's run+workspace requirement breaks the backlog headline use case), D3 (comment-anchored idempotency via AgentSessionResolver.StableId), D4 (regex token parser, name-only), D5 (declaration-based loop prevention), D6 (event-id + comment-id trigger labels), D7 (firm decision: an explicit @ overrides mute; MentionDispatchHandler does NOT consult WatchEntryStore). Typo feedback (system reply/inbox) is out of scope — structured log only. DELIVERABLE: also reconcile the upstream design/agent-mentions.md wording (the '复用路由启动的解析管线 … workspace 解析 … preflight' sentence and the Status底座) to the workspace-optional Decision 1, per AGENTS.md's差距-footnote convention — the plan deviates from that doc's literal wording and the doc must match the implemented behavior."
     }
   ]
 }
