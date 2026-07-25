@@ -5,12 +5,14 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Otel;
+using Mohist.Server.Otel.OtlpJson;
 using Mohist.Server.Otel.OtlpProtobuf;
+using Google.Protobuf;
 
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// OTLP HTTP/JSON ingestion endpoint. Only mounted on the OTLP port
+/// OTLP HTTP ingestion endpoint. Only mounted on the OTLP port
 /// (the route group is filtered by <c>RequireHost</c>) so the main
 /// API port never exposes this surface.
 /// </summary>
@@ -35,7 +37,7 @@ public static class OtlpRoutes
 
         var group = app.MapGroup("");
 
-        group.MapPost(OtlpTracesPath, async (HttpContext context, TraceIngester ingester, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        group.MapPost(OtlpTracesPath, async (HttpContext context, TraceIngester ingester, OtlpTraceResponseWriter writer, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("Mohist.Server.Api.OtlpRoutes");
 
@@ -51,10 +53,10 @@ public static class OtlpRoutes
                 logger.LogDebug(
                     "Rejecting OTLP request with unsupported Content-Type: {ContentType}.",
                     request.ContentType);
-                return Results.Json(
-                    OtlpError.NotAcceptable(request.ContentType),
-                    statusCode: StatusCodes.Status415UnsupportedMediaType,
-                    contentType: "application/json");
+                await writer.WriteUnsupportedMediaAsync(
+                    context.Response,
+                    $"Unsupported Content-Type '{request.ContentType ?? "<missing>"}'.");
+                return Results.Empty;
             }
 
             string? body = null;
@@ -76,36 +78,46 @@ public static class OtlpRoutes
             catch (IOException ex)
             {
                 logger.LogDebug(ex, "Failed to read OTLP request body.");
-                return Results.Json(
-                    OtlpError.BadBody("Failed to read request body."),
-                    statusCode: StatusCodes.Status400BadRequest,
-                    contentType: "application/json");
+                await writer.WriteInvalidArgumentAsync(
+                    context.Response,
+                    contentType,
+                    "Failed to read request body.");
+                return Results.Empty;
             }
 
-            int spansWritten;
+            IngestOutcome outcome;
             try
             {
-                spansWritten = isProtobuf
-                    ? ingester.Ingest(OtlpProtobufTraceParser.Parse(protobufBody!), ct)
-                    : ingester.IngestJson(body!, ct);
+                if (isProtobuf)
+                {
+                    outcome = ingester.IngestBatch(OtlpProtobufTraceParser.Parse(protobufBody!), ct);
+                }
+                else
+                {
+                    var parsed = JsonSerializer.Deserialize<OtlpTraceRequest>(body!, OtlpJsonSerializer.Options())
+                        ?? throw new JsonException("The OTLP request must be a JSON object.");
+                    outcome = ingester.IngestBatch(parsed, ct);
+                }
             }
             catch (JsonException ex)
             {
                 logger.LogDebug(ex, "OTLP request body is not valid JSON.");
-                return Results.Json(
-                    OtlpError.BadBody(ex.Message),
-                    statusCode: StatusCodes.Status400BadRequest,
-                    contentType: "application/json");
+                await writer.WriteInvalidArgumentAsync(context.Response, contentType, ex.Message);
+                return Results.Empty;
+            }
+            catch (InvalidProtocolBufferException ex)
+            {
+                logger.LogDebug(ex, "OTLP request body is not valid protobuf.");
+                await writer.WriteInvalidArgumentAsync(context.Response, contentType, ex.Message);
+                return Results.Empty;
             }
 
             logger.LogDebug(
-                "OTLP ingest accepted {SpanCount} span(s); responding with empty JSON object.",
-                spansWritten);
-
-            return Results.Json(
-                OtlpSuccess.Empty,
-                statusCode: StatusCodes.Status200OK,
-                contentType: "application/json");
+                "OTLP ingest classified {SpanCount} parsed span(s); responding with {Disposition}.",
+                outcome.Received,
+                outcome.ResponseDisposition);
+            await writer.WriteOutcomeAsync(context.Response, contentType, outcome);
+            return Results.Empty;
         });
 
         return app;
@@ -119,29 +131,4 @@ public static class OtlpRoutes
         return semi < 0 ? raw.Trim() : raw[..semi].Trim();
     }
 
-}
-
-/// <summary>
-/// Minimal OTLP success envelope. Per the OTel spec the response body
-/// must be an empty JSON object (<c>{}</c>) — no <c>partialSuccess</c>
-/// field is needed because we never apply server-side filtering.
-/// </summary>
-internal static class OtlpSuccess
-{
-    public static readonly object Empty = new { };
-}
-
-/// <summary>
-/// OTLP error envelope. The OTel spec is permissive about error shape;
-/// we emit a JSON object with a stable <c>error</c> message so
-/// HTTP-aware clients can debug without parsing status text.
-/// </summary>
-internal static class OtlpError
-{
-    public static object BadBody(string message) => new { error = message };
-
-    public static object NotAcceptable(string? contentType) => new
-    {
-        error = $"Unsupported Content-Type '{contentType ?? "<missing>"}'. Only application/json is supported.",
-    };
 }

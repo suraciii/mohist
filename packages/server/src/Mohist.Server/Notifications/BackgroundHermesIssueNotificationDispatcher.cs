@@ -1,21 +1,26 @@
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Notifications;
 
 public sealed class BackgroundHermesIssueNotificationDispatcher : IHermesIssueNotificationDispatcher
 {
     private readonly ILogger<BackgroundHermesIssueNotificationDispatcher> _log;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
 
-    public BackgroundHermesIssueNotificationDispatcher(ILogger<BackgroundHermesIssueNotificationDispatcher> log)
+    public BackgroundHermesIssueNotificationDispatcher(
+        ILogger<BackgroundHermesIssueNotificationDispatcher> log,
+        IBackgroundTaskLauncher? backgroundTasks = null)
     {
         _log = log;
+        _backgroundTasks = backgroundTasks ?? new BackgroundTaskLauncher();
     }
 
     public void Dispatch(Func<CancellationToken, Task> work)
     {
         ArgumentNullException.ThrowIfNull(work);
 
-        _ = Task.Run(async () =>
+        _backgroundTasks.Launch(async _ =>
         {
             try
             {
@@ -25,6 +30,6 @@ public sealed class BackgroundHermesIssueNotificationDispatcher : IHermesIssueNo
             {
                 _log.LogError(ex, "Unhandled Hermes issue notification background task failure");
             }
-        }, CancellationToken.None);
+        });
     }
 }

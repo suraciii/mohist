@@ -262,7 +262,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IDbContextFactory<MohistDbContext>>();
             services.AddDbContextFactory<MohistDbContext>(options =>
                 options
-                    .UseSqlite(_connectionString));
+                    .UseSqlite(_connectionString)
+                    .AddInterceptors(new RequestWorkDbCommandInterceptor()));
             // Replace the file-backed production OtelDb (which would otherwise
             // resolve to $HOME/.mohist/otel.db) with an in-memory instance so
             // the integration factory never creates a real otel.db file

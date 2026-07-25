@@ -9,14 +9,19 @@ internal static class TranscriptReductions
     internal static async Task<Dictionary<string, AgentSessionTranscriptSummary>> LoadEventSummariesAsync(
         MohistDbContext db,
         IEnumerable<string> sessionIds,
+        CancellationToken ct) =>
+        (await LoadEventSummariesWithCountAsync(db, sessionIds, ct)).Summaries;
+
+    internal static async Task<TranscriptSummaryLoad> LoadEventSummariesWithCountAsync(
+        MohistDbContext db,
+        IEnumerable<string> sessionIds,
         CancellationToken ct)
     {
         var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct: ct);
-        if (loaded.Parts.Count == 0) return [];
+        if (loaded.Parts.Count == 0) return new([], 0);
 
         var turnSequenceByTurnId = loaded.Turns.ToDictionary(t => t.Id, t => t.Sequence);
-
-        return loaded.Parts
+        var summaries = loaded.Parts
             .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
             .Select(part => AgentSessionDtoMapper.ToProjection(loaded.SessionByTurnId[part.TurnId], part))
             .OrderBy(e => e.Sequence)
@@ -31,5 +36,11 @@ internal static class TranscriptReductions
                         Type: e.Type,
                         PayloadJson: e.PayloadJson))),
                 StringComparer.Ordinal);
+
+        return new(summaries, loaded.Parts.Count);
     }
 }
+
+internal readonly record struct TranscriptSummaryLoad(
+    Dictionary<string, AgentSessionTranscriptSummary> Summaries,
+    long TranscriptRecords);

@@ -14,6 +14,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Otel;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -36,6 +37,7 @@ public static class GrainTestConfig
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connectionString)
+            .AddInterceptors(new RequestWorkDbCommandInterceptor())
             // Issue-318 T-002 + T-004: see ConfigureSilo for context. The
             // raw context builder used outside the silo (e.g. in
             // BacklogFixture, MohistDbFixture) needs the same
@@ -203,9 +205,12 @@ public static class GrainTestConfig
             options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100);
         });
         siloBuilder.AddMemoryGrainStorageAsDefault();
+        siloBuilder.AddIncomingGrainCallFilter<RequestWorkIncomingGrainCallFilter>();
+        siloBuilder.AddOutgoingGrainCallFilter<RequestWorkOutgoingGrainCallFilter>();
         siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options =>
         {
             options.UseSqlite(connectionString);
+            options.AddInterceptors(new RequestWorkDbCommandInterceptor());
             // Issue-318 T-002 + T-004: the DbContext model now declares
             // the WorkflowRuns STORED status computed column and the
             // IX_WorkflowRuns_Status index. T-004

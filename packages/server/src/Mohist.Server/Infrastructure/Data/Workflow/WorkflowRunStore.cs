@@ -27,17 +27,20 @@ public class WorkflowRunStore : IWorkflowRunStore
     private readonly IEventStore _eventStore;
     private readonly IGrainFactory _grainFactory;
     private readonly ILogger<WorkflowRunStore> _log;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
 
     public WorkflowRunStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
         IGrainFactory grainFactory,
-        ILogger<WorkflowRunStore> log)
+        ILogger<WorkflowRunStore> log,
+        IBackgroundTaskLauncher? backgroundTasks = null)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
         _grainFactory = grainFactory;
         _log = log;
+        _backgroundTasks = backgroundTasks ?? new BackgroundTaskLauncher();
     }
 
     public async Task SaveAsync(WorkflowRun run, CancellationToken ct = default)
@@ -82,7 +85,7 @@ public class WorkflowRunStore : IWorkflowRunStore
     }
 
     private void PokeDispatcherBestEffort() =>
-        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(WorkflowRunStore));
+        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(WorkflowRunStore), _backgroundTasks);
 
     /// <summary>
     /// Build the CloudEvent envelope for a workflow domain event, stamping its

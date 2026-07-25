@@ -1,4 +1,5 @@
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.SystemInfo;
 
@@ -15,6 +16,7 @@ public sealed class SystemUpdateService : ISingletonService
     private readonly IManagedAssetCatalog _managedAssets;
     private readonly ILogger<SystemUpdateService> _logger;
     private readonly TimeProvider _time;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
 
     public SystemUpdateService(
         SystemInfoService systemInfoService,
@@ -23,8 +25,9 @@ public sealed class SystemUpdateService : ISingletonService
         ISystemReadinessProbe readinessProbe,
         IConfiguration configuration,
         IManagedAssetCatalog managedAssets,
-        ILogger<SystemUpdateService> logger)
-        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, managedAssets, logger, TimeProvider.System)
+        ILogger<SystemUpdateService> logger,
+        IBackgroundTaskLauncher backgroundTasks)
+        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, managedAssets, logger, TimeProvider.System, backgroundTasks)
     {
     }
 
@@ -36,7 +39,8 @@ public sealed class SystemUpdateService : ISingletonService
         IConfiguration configuration,
         IManagedAssetCatalog managedAssets,
         ILogger<SystemUpdateService> logger,
-        TimeProvider time)
+        TimeProvider time,
+        IBackgroundTaskLauncher? backgroundTasks = null)
     {
         _getSystemInfo = getSystemInfo;
         _store = store;
@@ -46,6 +50,7 @@ public sealed class SystemUpdateService : ISingletonService
         _managedAssets = managedAssets;
         _logger = logger;
         _time = time;
+        _backgroundTasks = backgroundTasks ?? new BackgroundTaskLauncher();
     }
 
     public async Task<(bool Started, string? Error, string? Code, SystemUpdateStatusResponse? Status)> StartAsync(SystemUpdateRequest request, CancellationToken cancellationToken = default)
@@ -83,7 +88,7 @@ public sealed class SystemUpdateService : ISingletonService
                 null);
             await _store.SaveAsync(startedState, cancellationToken);
 
-            _ = Task.Run(() => RunUpdateAsync(startedState, CancellationToken.None), CancellationToken.None);
+            _backgroundTasks.Launch(_ => RunUpdateAsync(startedState, CancellationToken.None));
 
             return (true, null, null, ToResponse(startedState));
         }

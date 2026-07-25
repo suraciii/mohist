@@ -32,17 +32,20 @@ public class AgentSessionStore : IAgentSessionStore
     private readonly IEventStore _eventStore;
     private readonly IGrainFactory _grainFactory;
     private readonly ILogger<AgentSessionStore> _log;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
 
     public AgentSessionStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
         IGrainFactory grainFactory,
-        ILogger<AgentSessionStore> log)
+        ILogger<AgentSessionStore> log,
+        IBackgroundTaskLauncher? backgroundTasks = null)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
         _grainFactory = grainFactory;
         _log = log;
+        _backgroundTasks = backgroundTasks ?? new BackgroundTaskLauncher();
     }
 
     public async Task<AgentSession?> LoadAsync(string key)
@@ -56,7 +59,7 @@ public class AgentSessionStore : IAgentSessionStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var rows = await db.AgentSessions.AsNoTracking().ToListAsync();
-        return rows.Select(AgentSessionJson.Deserialize).OfType<AgentSession>().ToList();
+        return rows.Select(r => AgentSessionJson.Deserialize(r)).OfType<AgentSession>().ToList();
     }
 
     public async Task<IReadOnlyList<AgentSessionReconcileBinding>> ListByRunnerForReconcileAsync(
@@ -70,7 +73,7 @@ public class AgentSessionStore : IAgentSessionStore
             .ToListAsync(ct);
 
         return rows
-            .Select(AgentSessionJson.Deserialize)
+            .Select(row => AgentSessionJson.Deserialize(row))
             .OfType<AgentSession>()
             .Where(session => session.Status.Activity != AgentSessionActivity.Idle)
             .Select(session => new AgentSessionReconcileBinding(
@@ -121,7 +124,7 @@ public class AgentSessionStore : IAgentSessionStore
     }
 
     private void PokeDispatcherBestEffort() =>
-        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(AgentSessionStore));
+        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(AgentSessionStore), _backgroundTasks);
 
     private async Task StageSessionAsync(MohistDbContext db, string key, AgentSession state, CancellationToken ct = default)
     {
@@ -169,7 +172,7 @@ public static class AgentSessionJson
 {
     public static readonly JsonSerializerOptions JsonOptions = Mohist.Server.Infrastructure.JSON.Options;
 
-    public static AgentSession? Deserialize(AgentSessionRow row)
+    public static AgentSession? Deserialize(AgentSessionRow row, ILogger? logger = null)
     {
         try
         {
@@ -179,8 +182,9 @@ public static class AgentSessionJson
             session.ValidateState(allowLegacySource: true);
             return session;
         }
-        catch
+        catch (Exception ex)
         {
+            logger?.LogWarning(ex, "Failed to deserialize AgentSession row {AgentSessionId}; skipping row", row.Id);
             return null;
         }
     }

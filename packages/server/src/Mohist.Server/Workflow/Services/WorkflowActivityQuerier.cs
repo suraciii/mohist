@@ -26,6 +26,12 @@ public class WorkflowActivityQuerier : IScopedService
 
     public async Task<IReadOnlyList<ActiveAgentDto>> ListActiveAgentsAsync(string? projectId = null, CancellationToken ct = default)
     {
+        var result = await ListActiveAgentsResultAsync(projectId, ct);
+        return result.ActiveAgents;
+    }
+
+    public async Task<ActiveAgentsListResult> ListActiveAgentsResultAsync(string? projectId = null, CancellationToken ct = default)
+    {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var sessions = string.IsNullOrWhiteSpace(projectId)
             ? await ListAllSessionsAsync(db, ct)
@@ -36,6 +42,7 @@ public class WorkflowActivityQuerier : IScopedService
                 },
                 AgentSessionQueryOrder.CreatedDescending,
                 ct: ct);
+        var candidatesCount = sessions.Count;
         var workflowStatuses = await LoadRunningWorkflowStatusesAsync(db, sessions, projectId, ct);
         var result = new List<ActiveAgentDto>();
 
@@ -114,7 +121,7 @@ public class WorkflowActivityQuerier : IScopedService
                 null));
         }
 
-        return result;
+        return new ActiveAgentsListResult(candidatesCount, result);
     }
 
     private async Task<IReadOnlyDictionary<string, WorkflowStatusView>> LoadRunningWorkflowStatusesAsync(
@@ -179,3 +186,5 @@ public sealed record ActiveAgentDto(string RunnerId, int IssueNumber, string Pro
 public sealed record ActiveAgentProgressDto(string? Stage, ActiveWorkItemDto CurrentWorkItem, TaskProgressDto? TaskProgress, string LastActivityAt);
 public sealed record ActiveWorkItemDto(string Type, string Id, string Title);
 public sealed record TaskProgressDto(int Completed, int Total);
+
+public sealed record ActiveAgentsListResult(long Candidates, IReadOnlyList<ActiveAgentDto> ActiveAgents);

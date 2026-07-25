@@ -22,7 +22,7 @@ public class SystemInfoServiceTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project {repoDir}/Mohist.Server.csproj\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var git = new FakeGitSourceInspector(repoDir, "main", "def456", dirty: false);
         var services = new FakeServiceStatusChecker();
         var config = new ConfigurationBuilder().Build();
@@ -55,7 +55,7 @@ public class SystemInfoServiceTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project {repoDir}/Mohist.Server.csproj\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var git = new FakeGitSourceInspector(repoDir, "main", "def456", dirty: false);
         var services = new FakeServiceStatusChecker();
         var config = new ConfigurationBuilder().Build();
@@ -84,7 +84,7 @@ public class SystemInfoServiceTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project {repoDir}/Mohist.Server.csproj\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var git = new FakeGitSourceInspector(repoDir, "main", "def456", dirty: false);
         var services = new FakeServiceStatusChecker();
         var config = new ConfigurationBuilder()
@@ -117,7 +117,7 @@ public class SystemInfoServiceTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project {repoDir}/Mohist.Server.csproj\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var git = new FakeGitSourceInspector(repoDir, "main", "def456", dirty: true);
         var services = new FakeServiceStatusChecker();
         var config = new ConfigurationBuilder().Build();
@@ -146,7 +146,7 @@ public class SystemInfoServiceTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project {repoDir}/Mohist.Server.csproj\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var git = new FakeGitSourceInspector(repoDir, "main", "abc123", dirty: false);
         var services = new FakeServiceStatusChecker();
         var config = new ConfigurationBuilder().Build();
@@ -166,7 +166,8 @@ public class SystemInfoServiceTests
     {
         var runtime = new FakeRuntimeBuildInfo("1.0.0", "abc123");
         var fs = new FakeFileSystem();
-        var detector = new SystemdInstallDetector(fs, "/units");
+        var env = new MockEnvironmentVariableProvider();
+        var detector = new SystemdInstallDetector(fs, env, "/units");
         var git = new FakeGitSourceInspector("/repo", "main", "def456", dirty: false);
         var services = new FakeServiceStatusChecker();
         var config = new ConfigurationBuilder().Build();
@@ -196,7 +197,7 @@ public class SystemInfoServiceTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project {repoDir}/Mohist.Server.csproj\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var git = new FakeGitSourceInspector(repoDir, "main", "def456", dirty: false);
         var services = new FakeServiceStatusChecker();
         var config = new ConfigurationBuilder().Build();
@@ -224,7 +225,7 @@ public class SystemInfoServiceTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project {repoDir}/Mohist.Server.csproj\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var git = new FakeGitSourceInspector(repoDir, "main", null, dirty: false);
         var services = new FakeServiceStatusChecker();
         var config = new ConfigurationBuilder().Build();
@@ -253,7 +254,7 @@ public class SystemInfoServiceTests
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
         fs.Write(Path.Combine(unitDir, "mohist-runner.service"), "[Service]\nExecStart=node runner\n");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var git = new FakeGitSourceInspector(repoDir, "main", "abc123", dirty: false);
         var services = new FakeServiceStatusChecker();
         services.SetStatus("mohist.service", "active");
@@ -274,7 +275,8 @@ public class SystemInfoServiceTests
     {
         var runtime = new FakeRuntimeBuildInfo("1.0.0", "abc123");
         var fs = new FakeFileSystem();
-        var detector = new SystemdInstallDetector(fs, "/units");
+        var env = new MockEnvironmentVariableProvider();
+        var detector = new SystemdInstallDetector(fs, env, "/units");
         var git = new FakeGitSourceInspector("/repo", "main", "def456", dirty: false);
         var services = new FakeServiceStatusChecker();
         var config = new ConfigurationBuilder().Build();
@@ -303,7 +305,7 @@ public class SystemInfoServiceTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project {repoDir}/Mohist.Server.csproj\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var git = new FakeGitSourceInspector(repoDir, "main", "def456", dirty: false);
         var services = new FakeServiceStatusChecker();
         var config = new ConfigurationBuilder()
@@ -387,5 +389,10 @@ public class SystemInfoServiceTests
         public bool Exists(string path) => _files.ContainsKey(Path.GetFullPath(path, "/"));
 
         public string ReadAllText(string path) => _files[Path.GetFullPath(path, "/")];
+
+        public void CreateDirectory(string path) { }
+
+        public long? GetFileLength(string path) =>
+            _files.TryGetValue(Path.GetFullPath(path, "/"), out var content) ? (long?)System.Text.Encoding.UTF8.GetByteCount(content) : null;
     }
 }

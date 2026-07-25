@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.SystemInfo;
 using static SQLitePCL.raw;
 
 namespace Mohist.Server.Otel;
@@ -53,8 +52,6 @@ public sealed class TraceQuerier : IOtelQueryExecutor
     public static readonly TimeSpan QueryCommandTimeout = TimeSpan.FromSeconds(5);
 
     private readonly OtelDb _db;
-    private readonly OtelCollectorStatus _collectorStatus;
-    private readonly IFileSystem _fileSystem;
     private readonly TimeProvider _timeProvider;
     private readonly Action? _readerStarted;
     private readonly Action? _queryInterrupted;
@@ -62,20 +59,14 @@ public sealed class TraceQuerier : IOtelQueryExecutor
 
     public TraceQuerier(
         OtelDb db,
-        OtelCollectorStatus collectorStatus,
-        IFileSystem fileSystem,
         TimeProvider timeProvider,
         Action? readerStarted = null,
         Action? queryInterrupted = null,
         Action? connectionDisposed = null)
     {
         ArgumentNullException.ThrowIfNull(db);
-        ArgumentNullException.ThrowIfNull(collectorStatus);
-        ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(timeProvider);
         _db = db;
-        _collectorStatus = collectorStatus;
-        _fileSystem = fileSystem;
         _timeProvider = timeProvider;
         _readerStarted = readerStarted;
         _queryInterrupted = queryInterrupted;
@@ -122,49 +113,6 @@ public sealed class TraceQuerier : IOtelQueryExecutor
                 SpanCount: reader.GetInt64(4)));
         }
         return results;
-    }
-
-    /// <summary>
-    /// Aggregate status snapshot. The collector flag is read from the
-    /// process-wide <see cref="OtelCollectorStatus"/> singleton; the
-    /// database fields are computed against the live <c>otel.db</c>.
-    /// </summary>
-    public async Task<CollectorStatusSnapshot> GetStatusAsync(CancellationToken ct = default)
-    {
-        var dbSize = ResolveDatabaseSizeBytes();
-
-        long traceCount = 0;
-        long spanCount = 0;
-        try
-        {
-            await using var connection = _db.OpenReadOnlyConnection();
-            await using (var traceCmd = connection.CreateCommand())
-            {
-                traceCmd.CommandText = $"SELECT COUNT(*) FROM {OtelDb.TracesTable};";
-                var raw = await traceCmd.ExecuteScalarAsync(ct);
-                traceCount = raw is null or DBNull ? 0L : Convert.ToInt64(raw);
-            }
-            await using (var spanCmd = connection.CreateCommand())
-            {
-                spanCmd.CommandText = $"SELECT COUNT(*) FROM {OtelDb.SpansTable};";
-                var raw = await spanCmd.ExecuteScalarAsync(ct);
-                spanCount = raw is null or DBNull ? 0L : Convert.ToInt64(raw);
-            }
-        }
-        catch
-        {
-            // The status endpoint must always answer; surface zeros
-            // rather than 500 if the DB is unreachable. The size field
-            // stays at the resolved value (0 if the file is missing).
-            traceCount = 0;
-            spanCount = 0;
-        }
-
-        return new CollectorStatusSnapshot(
-            CollectorOnline: _collectorStatus.IsPortBound,
-            DbSizeBytes: dbSize,
-            TraceCount: traceCount,
-            SpanCount: spanCount);
     }
 
     /// <summary>
@@ -336,38 +284,6 @@ public sealed class TraceQuerier : IOtelQueryExecutor
         return Math.Min(limit.Value, MaxListLimit);
     }
 
-    private long ResolveDatabaseSizeBytes()
-    {
-        if (string.IsNullOrWhiteSpace(_db.DatabasePath))
-            return 0L;
-        if (!_fileSystem.Exists(_db.DatabasePath))
-            return 0L;
-
-        // SQLite WAL mode keeps data in the main file, the
-        // -wal sidecar, and the -shm sidecar. For a meaningful "how
-        // much disk space is otel.db using" answer we sum all three.
-        long total = 0;
-        total += SafeLength(_db.DatabasePath);
-        total += SafeLength(_db.DatabasePath + "-wal");
-        total += SafeLength(_db.DatabasePath + "-shm");
-        total += SafeLength(_db.DatabasePath + "-journal");
-        return total;
-    }
-
-    private long SafeLength(string path)
-    {
-        try
-        {
-            if (!_fileSystem.Exists(path))
-                return 0L;
-            return new FileInfo(path).Length;
-        }
-        catch
-        {
-            return 0L;
-        }
-    }
-
     private static long ComputeRowBytes(string[] fieldNames)
     {
         long total = 2;
@@ -503,11 +419,4 @@ public sealed record TraceSummary(
     [property: JsonPropertyName("service_name")] string ServiceName,
     [property: JsonPropertyName("start_time")] string StartTime,
     [property: JsonPropertyName("end_time")] string EndTime,
-    [property: JsonPropertyName("span_count")] long SpanCount);
-
-/// <summary>Aggregate snapshot for <see cref="TraceQuerier.GetStatusAsync"/>.</summary>
-public sealed record CollectorStatusSnapshot(
-    [property: JsonPropertyName("collector_online")] bool CollectorOnline,
-    [property: JsonPropertyName("db_size_bytes")] long DbSizeBytes,
-    [property: JsonPropertyName("trace_count")] long TraceCount,
     [property: JsonPropertyName("span_count")] long SpanCount);

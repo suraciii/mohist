@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
@@ -157,7 +158,9 @@ public class OtlpRoutesIntegrationSpecs : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("error", body, StringComparison.OrdinalIgnoreCase);
+        using var document = JsonDocument.Parse(body);
+        Assert.Equal(3, document.RootElement.GetProperty("code").GetInt32());
+        Assert.False(document.RootElement.TryGetProperty("details", out _));
     }
 
     [Fact]

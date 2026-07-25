@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Otel;
+using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Services;
@@ -15,15 +17,16 @@ public static class AgentRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/agent")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        group.MapGet("/status", async (HttpContext context, RunnerStatusService runnerStatus, WorkflowActivityQuerier projection) =>
+        group.MapGet("/status", async (
+            HttpContext context,
+            RunnerStatusService runnerStatus,
+            WorkflowActivityQuerier projection,
+            CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            var runners = await runnerStatus.GetOnlineRunnersAsync(project.Id);
-            var activeAgents = await projection.ListActiveAgentsAsync(project.Id);
-            var capacity = SumCapacity(runners);
-
-            return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runners, capacity));
-        });
+            return await AgentStatusHandlers.GetStatusAsync(project, runnerStatus, projection, ct);
+        })
+        .WithMetadata(new AgentPathEndpointMetadata("agent.status"));
 
         group.MapGet("/sessions", async (HttpContext context, string? status, int? limit, AgentSessionListAssembler sessions) =>
         {
@@ -31,13 +34,18 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.ListCurrentAsync(project.Id, status, limit ?? 50));
         });
 
-        group.MapGet("/activity", async (HttpContext context, int? limit, AgentActivityFeedAssembler activityFeed, ActivityWaitingProjection waitingProjection, RunnerStatusService runnerStatus, CancellationToken ct) =>
+        group.MapGet("/activity", async (
+            HttpContext context,
+            int? limit,
+            AgentActivityFeedAssembler activityFeed,
+            IssueQuerier issues,
+            RunnerStatusService runnerStatus,
+            CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            var capacity = await runnerStatus.GetCapacityAsync(project.Id);
-            var waiting = await waitingProjection.ListAsync(project.Id, ct);
-            return ApiResults.Ok(await activityFeed.GetActivityAsync(project.Id, limit, waiting: waiting, capacity: capacity, ct: ct));
-        });
+            return await AgentStatusHandlers.GetActivityAsync(project, limit, activityFeed, issues, runnerStatus, ct);
+        })
+        .WithMetadata(new AgentPathEndpointMetadata("agent.activity"));
 
         group.MapGet("/usage", async (HttpContext context, string? range, AgentUsageReporter usage, CancellationToken ct) =>
         {
@@ -70,6 +78,34 @@ public static class AgentRoutes
                 windowed.CurrentWindow,
                 windowed.PreviousWindow));
         });
+
+        app.MapGet("/api/agent/status", async (
+            HttpContext context,
+            ProjectRefResolver resolver,
+            RunnerStatusService runnerStatus,
+            WorkflowActivityQuerier projection,
+            CancellationToken ct) =>
+        {
+            var (error, project) = await AgentStatusHandlers.ResolveAliasedProjectAsync(context, resolver);
+            if (error is not null || project is null) return error!;
+            return await AgentStatusHandlers.GetStatusAsync(project, runnerStatus, projection, ct);
+        })
+        .WithMetadata(new AgentPathEndpointMetadata("agent.status"));
+
+        app.MapGet("/api/agent/activity", async (
+            HttpContext context,
+            int? limit,
+            ProjectRefResolver resolver,
+            AgentActivityFeedAssembler activityFeed,
+            IssueQuerier issues,
+            RunnerStatusService runnerStatus,
+            CancellationToken ct) =>
+        {
+            var (error, project) = await AgentStatusHandlers.ResolveAliasedProjectAsync(context, resolver);
+            if (error is not null || project is null) return error!;
+            return await AgentStatusHandlers.GetActivityAsync(project, limit, activityFeed, issues, runnerStatus, ct);
+        })
+        .WithMetadata(new AgentPathEndpointMetadata("agent.activity"));
 
         return app;
     }
@@ -104,22 +140,6 @@ public static class AgentRoutes
         if (totalCost.Amount is null) return new AgentCostMetricDto(null, totalCost.Currency, 0);
         return new AgentCostMetricDto(totalCost.Amount.Value / doneIssuesCount, totalCost.Currency, 1);
     }
-
-    private static RunnerCapacityView SumCapacity(IReadOnlyList<RunnerStatusView> runners)
-    {
-        var used = 0;
-        var total = 0;
-        foreach (var runner in runners)
-        {
-            var capacity = runner.Capacity;
-            if (capacity is null)
-                continue;
-
-            used += capacity.UsedSlots;
-            total += capacity.TotalSlots;
-        }
-        return new RunnerCapacityView(used, total);
-    }
 }
 
 public sealed record AgentStatusResponse(
@@ -130,12 +150,14 @@ public sealed record AgentStatusResponse(
     bool RunnerAvailable,
     bool EmbeddedRunnerEnabled,
     string? RunnerMessage,
-    IReadOnlyList<RunnerStatusResponse> Runners)
+    IReadOnlyList<RunnerStatusResponse> Runners,
+    AgentAmplificationDto Amplification)
 {
     public static AgentStatusResponse Create(
         IReadOnlyList<ActiveAgentDto> activeAgents,
         IReadOnlyList<RunnerStatusView> runners,
-        RunnerCapacityView capacity)
+        RunnerCapacityView capacity,
+        AgentAmplificationDto amplification)
     {
         var runnerAvailable = runners.Count > 0;
         var runnerResponses = runners
@@ -157,7 +179,8 @@ public sealed record AgentStatusResponse(
             RunnerAvailable: runnerAvailable,
             EmbeddedRunnerEnabled: false,
             RunnerMessage: runnerAvailable ? null : "No runner is connected. Start the Mohist runner process.",
-            Runners: runnerResponses);
+            Runners: runnerResponses,
+            Amplification: amplification);
     }
 }
 

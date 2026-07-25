@@ -57,10 +57,9 @@ public static class OtelQueryRoutes
             return ApiResults.Ok(rows);
         });
 
-        group.MapGet("/status", async (TraceQuerier querier, CancellationToken ct) =>
+        group.MapGet("/status", (RuntimeObservability runtime) =>
         {
-            var snapshot = await querier.GetStatusAsync(ct);
-            return ApiResults.Ok(snapshot);
+            return ApiResults.Ok(OtelStatusDto.From(runtime.GetSnapshot()));
         });
 
         group.MapPost("/query", async (

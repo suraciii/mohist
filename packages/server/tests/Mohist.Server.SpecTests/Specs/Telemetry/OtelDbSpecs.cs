@@ -95,6 +95,41 @@ public class OtelDbSpecs : IDisposable
         Assert.True(TableExists(readOnly, OtelDb.SpansTable));
     }
 
+    [Fact]
+    public void OpenReadinessConnection_DoesNotInitializeSchema()
+    {
+        var name = $"readiness-{Guid.NewGuid():N}";
+        var connectionString = $"Data Source={name};Mode=Memory;Cache=Shared";
+        using var keeper = new SqliteConnection(connectionString);
+        keeper.Open();
+        var db = new OtelDb(connectionString, connectionString);
+        using var connection = db.OpenReadinessConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table';";
+
+        Assert.Equal(0L, (long)command.ExecuteScalar()!);
+        Assert.Contains("Default Timeout=1", connection.ConnectionString, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void OtelStorageProbe_ReadsSchemaAndEachSidecarOnce()
+    {
+        var fileSystem = new LengthFileSystem
+        {
+            ["<in-memory>"] = 11,
+            ["<in-memory>-wal"] = 13,
+            ["<in-memory>-shm"] = 17,
+        };
+        var probe = new OtelStorageProbe(_db, fileSystem);
+
+        var result = probe.Probe();
+
+        Assert.Equal(41, result.UsageBytes);
+        Assert.Equal(1, fileSystem.Reads["<in-memory>"]);
+        Assert.Equal(1, fileSystem.Reads["<in-memory>-wal"]);
+        Assert.Equal(1, fileSystem.Reads["<in-memory>-shm"]);
+    }
+
     // ---- Path resolution (pure static functions — no filesystem I/O) ----
 
     [Fact]
@@ -208,5 +243,29 @@ public class OtelDbSpecs : IDisposable
         public string ExpandEnvironmentVariables(string name) => name;
         public void SetEnvironmentVariable(string variable, string? value) => this[variable] = value;
         public void SetEnvironmentVariable(string variable, string? value, EnvironmentVariableTarget target) => this[variable] = value;
+    }
+
+    private sealed class LengthFileSystem : IFileSystem
+    {
+        private readonly Dictionary<string, long> _lengths = new(StringComparer.Ordinal);
+
+        public Dictionary<string, int> Reads { get; } = new(StringComparer.Ordinal);
+
+        public long this[string path]
+        {
+            set => _lengths[path] = value;
+        }
+
+        public bool Exists(string path) => _lengths.ContainsKey(path);
+
+        public string ReadAllText(string path) => throw new NotSupportedException();
+
+        public void CreateDirectory(string path) { }
+
+        public long? GetFileLength(string path)
+        {
+            Reads[path] = Reads.TryGetValue(path, out var count) ? count + 1 : 1;
+            return _lengths.TryGetValue(path, out var length) ? length : null;
+        }
     }
 }

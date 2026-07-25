@@ -1,5 +1,6 @@
 using Mohist.Server.SystemInfo;
 using Xunit;
+using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
@@ -87,7 +88,7 @@ public class SystemdInstallDetectorTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project {repoDir}/packages/server/src/Mohist.Server/Mohist.Server.csproj\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var result = detector.Detect();
 
         Assert.Equal("local-source", result.Mode);
@@ -110,7 +111,7 @@ public class SystemdInstallDetectorTests
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
         fs.Write(Path.Combine(unitDir, "mohist-runner.service"), "[Service]\nExecStart=node packages/runner/dist/cli.js\n");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var result = detector.Detect();
 
         Assert.Equal("local-source", result.Mode);
@@ -121,7 +122,7 @@ public class SystemdInstallDetectorTests
     public void Detect_MissingUnit_ReturnsUnknown()
     {
         var fs = new FakeFileSystem();
-        var detector = new SystemdInstallDetector(fs, "/units");
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), "/units");
         var result = detector.Detect();
 
         Assert.Equal("unknown", result.Mode);
@@ -138,7 +139,7 @@ public class SystemdInstallDetectorTests
             Path.Combine(unitDir, "mohist.service"),
             "[Service]\nExecStart=dotnet run --project Mohist.Server.csproj\n");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var result = detector.Detect();
 
         Assert.Equal("unknown", result.Mode);
@@ -156,7 +157,7 @@ public class SystemdInstallDetectorTests
             Path.Combine(unitDir, "mohist.service"),
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project Mohist.Server.csproj\n");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var result = detector.Detect();
 
         Assert.Equal("unknown", result.Mode);
@@ -175,7 +176,7 @@ public class SystemdInstallDetectorTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=/usr/bin/mohist-server\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var result = detector.Detect();
 
         Assert.Equal("binary", result.Mode);
@@ -195,7 +196,7 @@ public class SystemdInstallDetectorTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var result = detector.Detect();
 
         Assert.Equal("unknown", result.Mode);
@@ -214,7 +215,7 @@ public class SystemdInstallDetectorTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=dotnet run --project SomeOther.csproj\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var result = detector.Detect();
 
         Assert.Equal("unknown", result.Mode);
@@ -231,7 +232,7 @@ public class SystemdInstallDetectorTests
             Path.Combine(unitDir, "mohist.service"),
             "not a valid unit file at all just garbage");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var result = detector.Detect();
 
         Assert.Equal("unknown", result.Mode);
@@ -249,7 +250,7 @@ public class SystemdInstallDetectorTests
             $"[Service]\nWorkingDirectory={repoDir}\nExecStart=\n");
         fs.Write(Path.Combine(repoDir, "Mohist.sln"), "");
 
-        var detector = new SystemdInstallDetector(fs, unitDir);
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
         var result = detector.Detect();
 
         Assert.Equal("unknown", result.Mode);
@@ -268,6 +269,10 @@ public class SystemdInstallDetectorTests
         public bool Exists(string path) => _files.ContainsKey(NormalizePath(path));
 
         public string ReadAllText(string path) => _files[NormalizePath(path)];
+
+        public void CreateDirectory(string path) { }
+
+        public long? GetFileLength(string path) => _files.TryGetValue(NormalizePath(path), out var content) ? (long?)System.Text.Encoding.UTF8.GetByteCount(content) : null;
 
         private static string NormalizePath(string path)
         {

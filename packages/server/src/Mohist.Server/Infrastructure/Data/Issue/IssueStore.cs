@@ -28,17 +28,20 @@ public class IssueStore : IIssueStore
     private readonly IEventStore _eventStore;
     private readonly IGrainFactory _grainFactory;
     private readonly ILogger<IssueStore> _log;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
 
     public IssueStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
         IGrainFactory grainFactory,
-        ILogger<IssueStore> log)
+        ILogger<IssueStore> log,
+        IBackgroundTaskLauncher? backgroundTasks = null)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
         _grainFactory = grainFactory;
         _log = log;
+        _backgroundTasks = backgroundTasks ?? new BackgroundTaskLauncher();
     }
 
     public async Task<DomainIssue?> LoadAsync(string key)
@@ -95,7 +98,7 @@ public class IssueStore : IIssueStore
     }
 
     private void PokeDispatcherBestEffort() =>
-        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueStore));
+        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueStore), _backgroundTasks);
 
     /// <summary>
     /// issue-477: when a Profile deletion commits between the Issue participant's

@@ -88,7 +88,17 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 
     public sealed class FakeAgentSessionStore : IAgentSessionStore
     {
-        public AgentSession? State { get; private set; }
+        // State is keyed by session so a lingering grain (the test cluster is
+        // shared across tests) flushing on its real-time persist timer cannot
+        // clobber another session's persisted state and break reactivation.
+        private readonly Dictionary<string, AgentSession> _states = new(StringComparer.Ordinal);
+        private string? _lastSavedKey;
+
+        // Most-recently-saved state, for synchronous test assertions. Kept as
+        // last-write-wins to preserve the existing single-slot semantics.
+        public AgentSession? State =>
+            _lastSavedKey is not null && _states.TryGetValue(_lastSavedKey, out var state) ? state : null;
+
         public List<AgentSessionEvent> Events { get; } = [];
         public int SaveCount { get; private set; }
         private (string Key, Exception Error)? _nextFailure;
@@ -102,42 +112,48 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         {
             _nextFailure = null;
             SaveCount = 0;
-            State = null;
+            _states.Clear();
+            _lastSavedKey = null;
             Events.Clear();
             _commitThenThrowNextKey = null;
         }
 
-        public Task<AgentSession?> LoadAsync(string key) => Task.FromResult(State is null ? null : Clone(State));
+        public Task<AgentSession?> LoadAsync(string key) =>
+            Task.FromResult(_states.TryGetValue(key, out var state) ? Clone(state) : null);
 
         public Task<IReadOnlyList<AgentSession>> ListAsync() =>
-            Task.FromResult<IReadOnlyList<AgentSession>>(State is null ? [] : [Clone(State)]);
+            Task.FromResult<IReadOnlyList<AgentSession>>(_states.Values.Select(Clone).ToArray());
 
         public Task<IReadOnlyList<AgentSessionReconcileBinding>> ListByRunnerForReconcileAsync(
             string runnerId,
             CancellationToken ct = default)
         {
-            if (State is null
-                || !string.Equals(State.Runtime.RunnerId, runnerId, StringComparison.Ordinal)
-                || State.Status.Activity == AgentSessionActivity.Idle
-                || string.IsNullOrWhiteSpace(State.Runtime.Runtime)
-                || string.IsNullOrWhiteSpace(State.Status.AgentRuntimeSessionId)
-                || string.IsNullOrWhiteSpace(State.Runtime.WorkDir))
-                return Task.FromResult<IReadOnlyList<AgentSessionReconcileBinding>>([]);
+            var matches = new List<AgentSessionReconcileBinding>();
+            foreach (var state in _states.Values)
+            {
+                if (!string.Equals(state.Runtime.RunnerId, runnerId, StringComparison.Ordinal)
+                    || state.Status.Activity == AgentSessionActivity.Idle
+                    || string.IsNullOrWhiteSpace(state.Runtime.Runtime)
+                    || string.IsNullOrWhiteSpace(state.Status.AgentRuntimeSessionId)
+                    || string.IsNullOrWhiteSpace(state.Runtime.WorkDir))
+                    continue;
 
-            return Task.FromResult<IReadOnlyList<AgentSessionReconcileBinding>>([
-                new AgentSessionReconcileBinding(
-                    State.Id,
-                    State.Runtime.Runtime,
-                    State.Status.AgentRuntimeSessionId,
-                    State.Runtime.WorkDir)
-            ]);
+                matches.Add(new AgentSessionReconcileBinding(
+                    state.Id,
+                    state.Runtime.Runtime!,
+                    state.Status.AgentRuntimeSessionId,
+                    state.Runtime.WorkDir));
+            }
+
+            return Task.FromResult<IReadOnlyList<AgentSessionReconcileBinding>>(matches);
         }
 
         public Task SaveAsync(string key, AgentSession state)
         {
             ThrowIfPending(key);
             SaveCount++;
-            State = Clone(state);
+            _states[key] = Clone(state);
+            _lastSavedKey = key;
             return Task.CompletedTask;
         }
 
@@ -147,7 +163,8 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             if (!commitThenThrow)
                 ThrowIfPending(key);
             SaveCount++;
-            State = Clone(state);
+            _states[key] = Clone(state);
+            _lastSavedKey = key;
             Events.AddRange(events);
             if (commitThenThrow)
             {
@@ -157,26 +174,28 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             return Task.CompletedTask;
         }
 
-    public Task DeleteAsync(string key)
-    {
-        State = null;
-        return Task.CompletedTask;
+        public Task DeleteAsync(string key)
+        {
+            _states.Remove(key);
+            if (string.Equals(_lastSavedKey, key, StringComparison.Ordinal))
+                _lastSavedKey = null;
+            return Task.CompletedTask;
+        }
+
+        private void ThrowIfPending(string key)
+        {
+            if (_nextFailure is not { } failure ||
+                !string.Equals(failure.Key, key, StringComparison.Ordinal))
+                return;
+
+            _nextFailure = null;
+            throw failure.Error;
+        }
+
+        private static AgentSession Clone(AgentSession state) =>
+            JSON.Deserialize<AgentSession>(JSON.Serialize(state))
+            ?? throw new InvalidOperationException("Failed to clone AgentSession state.");
     }
-
-    private void ThrowIfPending(string key)
-    {
-        if (_nextFailure is not { } failure ||
-            !string.Equals(failure.Key, key, StringComparison.Ordinal))
-            return;
-
-        _nextFailure = null;
-        throw failure.Error;
-    }
-
-    private static AgentSession Clone(AgentSession state) =>
-        JSON.Deserialize<AgentSession>(JSON.Serialize(state))
-        ?? throw new InvalidOperationException("Failed to clone AgentSession state.");
-}
 
 public sealed class FakeAgentSessionTranscriptStore : IAgentSessionTranscriptStore
 {

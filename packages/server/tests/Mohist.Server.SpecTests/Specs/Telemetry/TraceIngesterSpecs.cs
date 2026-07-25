@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Otel;
 using Mohist.Server.Otel.OtlpJson;
 using Mohist.Server.SpecTests.Support;
@@ -164,6 +166,77 @@ public class TraceIngesterSpecs : IDisposable
     }
 
     [Fact]
+    public void Prepare_ProtectionRejectsParsedSpansWithoutWritingOrCountingAsDropped()
+    {
+        var (db, keeper) = InMemoryOtelDb.Create();
+        using var keeperLifetime = keeper;
+        using var runtime = new RuntimeObservability(
+            true,
+            new RuntimeEpoch(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+            new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
+        var ingester = new TraceIngester(
+            db,
+            NullLogger<TraceIngester>.Instance,
+            runtime,
+            new RejectAllProtectionDecision());
+
+        var request = JsonSerializer.Deserialize<OtlpTraceRequest>(
+            SingleSpanTemplate
+                .Replace("__SVC__", "svc")
+                .Replace("__TRACE__", TraceId1)
+                .Replace("__SPAN__", SpanId1)
+                .Replace("__NAME__", "rejected")
+                .Replace("__START__", StartNanos)
+                .Replace("__END__", EndNanos),
+            OtlpJsonSerializer.Options());
+
+        var outcome = ingester.IngestBatch(request);
+
+        Assert.Equal(IngestResponseDisposition.PartialSuccess, outcome.ResponseDisposition);
+        Assert.Equal(1, outcome.Received);
+        Assert.Equal(1, outcome.Rejected);
+        Assert.Equal(0, outcome.Saved);
+        Assert.Equal(1, runtime.GetSnapshot().RejectedSpans);
+        using var connection = db.OpenReadOnlyConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM {OtelDb.SpansTable}";
+        Assert.Equal(0L, (long)command.ExecuteScalar()!);
+    }
+
+    [Fact]
+    public void IngestBatch_CancelledAfterBeginPublishesReceivedOnlyAndRethrows()
+    {
+        var (db, keeper) = InMemoryOtelDb.Create();
+        using var keeperLifetime = keeper;
+        using var runtime = new RuntimeObservability(
+            true,
+            new RuntimeEpoch(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+            new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
+        using var cancellation = new CancellationTokenSource();
+        var ingester = new TraceIngester(
+            db,
+            NullLogger<TraceIngester>.Instance,
+            runtime,
+            transactionStarted: cancellation.Cancel);
+        var request = JsonSerializer.Deserialize<OtlpTraceRequest>(
+            SingleSpanTemplate
+                .Replace("__SVC__", "svc")
+                .Replace("__TRACE__", TraceId1)
+                .Replace("__SPAN__", SpanId1)
+                .Replace("__NAME__", "cancelled")
+                .Replace("__START__", StartNanos)
+                .Replace("__END__", EndNanos),
+            OtlpJsonSerializer.Options());
+
+        Assert.Throws<OperationCanceledException>(() => ingester.IngestBatch(request, cancellation.Token));
+        var snapshot = runtime.GetSnapshot();
+        Assert.Equal(1, snapshot.ReceivedSpans);
+        Assert.Equal(0, snapshot.SavedSpans);
+        Assert.Equal(0, snapshot.RejectedSpans);
+        Assert.Equal(0, snapshot.DroppedSpans);
+    }
+
+    [Fact]
     public void IngestJson_NullOrEmptyResourceSpans_ReturnsZero()
     {
         Assert.Equal(0, _ingester.IngestJson("""{"resourceSpans":null}"""));
@@ -325,5 +398,11 @@ public class TraceIngesterSpecs : IDisposable
     public void TryConvertUnixNanoToUtcIso_RejectsBadInputs(string? raw)
     {
         Assert.False(TraceIngester.TryConvertUnixNanoToUtcIso(raw, out _));
+    }
+
+    private sealed class RejectAllProtectionDecision : IIngestProtectionDecision
+    {
+        public IngestProtectionDecision Decide(PreparedIngestSpan span) =>
+            IngestProtectionDecision.Reject();
     }
 }

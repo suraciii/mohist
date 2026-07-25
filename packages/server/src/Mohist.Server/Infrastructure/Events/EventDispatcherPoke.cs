@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Events.Grains;
+using Mohist.Server.Otel;
 using Orleans;
 
 namespace Mohist.Server.Infrastructure.Events;
@@ -24,19 +25,27 @@ public static class EventDispatcherPoke
     public static void PokeAfterCommit(
         IGrainFactory grainFactory,
         ILogger log,
-        string storeName)
+        string storeName,
+        IBackgroundTaskLauncher launcher)
     {
+        ArgumentNullException.ThrowIfNull(launcher);
         try
         {
-            var dispatcher = grainFactory
-                .GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global);
-            var task = dispatcher.DispatchNowAsync();
-            task.ContinueWith(
-                t => log.LogDebug(
-                    t.Exception,
-                    "{StoreName} immediate-trigger poke to EventDispatcherGrain faulted; reminder tick will recover",
-                    storeName),
-                TaskContinuationOptions.OnlyOnFaulted);
+            launcher.Launch(async _ =>
+            {
+                try
+                {
+                    var dispatcher = grainFactory
+                        .GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global);
+                    await dispatcher.DispatchNowAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    log.LogDebug(ex,
+                        "{StoreName} immediate-trigger poke to EventDispatcherGrain failed; reminder tick will recover",
+                        storeName);
+                }
+            });
         }
         catch (Exception ex)
         {

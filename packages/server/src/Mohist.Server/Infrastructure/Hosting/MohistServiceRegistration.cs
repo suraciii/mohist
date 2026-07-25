@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Hosting;
@@ -59,6 +60,7 @@ public static class MohistServiceRegistration
     public static IServiceCollection ConfigureMohistServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddMohistConventionalServices();
+        services.TryAddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
 
         services.AddRouting(options =>
         {
@@ -91,7 +93,9 @@ public static class MohistServiceRegistration
         services.AddMohistOpenTelemetry(configuration);
 
         services.AddDbContextFactory<MohistDbContext>(options =>
-            options.UseSqlite(connectionString));
+            options.UseSqlite(connectionString)
+                .AddInterceptors(new RequestWorkDbCommandInterceptor()));
+        services.AddTransient<IHttpMessageHandlerBuilderFilter, RequestWorkHttpMessageHandlerBuilderFilter>();
 
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>>(sp => sp.GetRequiredService<IIssueStore>());
         services.AddScoped<IIssueStore, IssueStore>();
@@ -166,8 +170,23 @@ public static class MohistServiceRegistration
             if (!string.IsNullOrWhiteSpace(mainDbDirectory))
                 options.DbPath = Path.Combine(mainDbDirectory, OtelDb.DefaultDatabaseFileName);
         });
+        services.TryAddSingleton<RuntimeEpoch>(sp =>
+            RuntimeEpoch.Capture(sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<RuntimeObservability>(sp =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Mohist.Server.Otel.OtelOptions>>().Value;
+            return new RuntimeObservability(
+                options.Enabled,
+                sp.GetRequiredService<RuntimeEpoch>(),
+                sp.GetRequiredService<TimeProvider>());
+        });
         services.AddSingleton<OtelDb>();
+        services.TryAddSingleton<IProcessResourceReader, ProcessResourceReader>();
+        services.TryAddSingleton<IOtelStorageProbe, OtelStorageProbe>();
+        services.AddHostedService<OtelDiagnosticsSampler>();
         services.AddSingleton<OtelCollectorStatus>();
+        services.AddSingleton<IIngestProtectionDecision, AcceptAllIngestProtectionDecision>();
+        services.AddSingleton<OtlpTraceResponseWriter>();
         services.AddSingleton<TraceIngester>();
         services.AddSingleton<TraceQuerier>();
         services.AddSingleton<IOtelQueryExecutor>(provider => provider.GetRequiredService<TraceQuerier>());
