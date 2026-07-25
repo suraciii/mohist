@@ -8,6 +8,21 @@ public interface IFileSystem
     string ReadAllText(string path);
     void CreateDirectory(string path);
     long? GetFileLength(string path);
+
+    /// <summary>
+    /// Writes <paramref name="contents"/> to <paramref name="path"/>
+    /// atomically. The implementation MUST ensure that a concurrent
+    /// reader either observes the previous contents or the new contents
+    /// in full — never a partial write. The default contract used here
+    /// is the canonical "write to a sibling temp file, then rename".
+    /// </summary>
+    void WriteAllText(string path, string contents);
+
+    /// <summary>
+    /// Deletes <paramref name="path"/> if it exists. Missing files are
+    /// not an error.
+    /// </summary>
+    void Delete(string path);
 }
 
 public sealed record InstallDetectionResult(

@@ -89,6 +89,17 @@ public class OtelDbSpecs : IDisposable
     }
 
     [Fact]
+    public void OpenReadWriteConnection_EnablesIncrementalAutoVacuum()
+    {
+        using var connection = _db.OpenReadWriteConnection();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "PRAGMA auto_vacuum;";
+        var value = (long)cmd.ExecuteScalar()!;
+        // 2 = INCREMENTAL; 1 = FULL; 0 = NONE.
+        Assert.Equal(2L, value);
+    }
+
+    [Fact]
     public void OpenReadOnlyConnection_OpensAndExposesSchema()
     {
         using var readOnly = _db.OpenReadOnlyConnection();
@@ -268,5 +279,9 @@ public class OtelDbSpecs : IDisposable
             Reads[path] = Reads.TryGetValue(path, out var count) ? count + 1 : 1;
             return _lengths.TryGetValue(path, out var length) ? length : null;
         }
+
+        public void WriteAllText(string path, string contents) => throw new NotSupportedException();
+
+        public void Delete(string path) => _lengths.Remove(path);
     }
 }

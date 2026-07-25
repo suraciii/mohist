@@ -90,6 +90,14 @@ public sealed class OtelDb
     private const string CreateSpansTraceIndex =
         "CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id);";
 
+    /// <summary>
+    /// Bounded <c>incremental_vacuum</c> page cap used by the online
+    /// maintenance loop. Bounds the per-tick reclamation cost; the loop
+    /// reissues the pragma on subsequent ticks to drain additional
+    /// pages. Internal constant; not user-tunable.
+    /// </summary>
+    public const int IncrementalVacuumPages = 256;
+
     private readonly object _initGate = new();
     private bool _initialized;
 
@@ -272,6 +280,20 @@ public sealed class OtelDb
             using (var pragma = connection.CreateCommand())
             {
                 pragma.CommandText = "PRAGMA journal_mode=WAL;";
+                _ = pragma.ExecuteScalar();
+            }
+
+            // auto_vacuum is a database-header flag that only takes
+            // effect when set before any schema object is created, so
+            // it must run before the CREATE TABLE statements below.
+            // INCREMENTAL turns the free pages left by deletion into
+            // reclaimable space that the maintenance loop drains via
+            // incremental_vacuum(); without it the main .db file
+            // would never shrink and the storage budget would be
+            // unreachable in steady state.
+            using (var pragma = connection.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA auto_vacuum=INCREMENTAL;";
                 _ = pragma.ExecuteScalar();
             }
 

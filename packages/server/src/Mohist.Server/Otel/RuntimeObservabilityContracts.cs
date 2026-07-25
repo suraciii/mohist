@@ -61,6 +61,7 @@ public static class RuntimeDegradationCodes
     public const string StorageWriteFailed = "storage_write_failed";
     public const string TelemetryRejected = "telemetry_rejected";
     public const string TelemetryDropped = "telemetry_dropped";
+    public const string StorageBudgetExhausted = "storage_budget_exhausted";
 
     public static string DefaultMessage(string code) => code switch
     {
@@ -72,6 +73,7 @@ public static class RuntimeDegradationCodes
         StorageWriteFailed => "OTel storage write failed",
         TelemetryRejected => "Telemetry is being rejected",
         TelemetryDropped => "Telemetry is being dropped",
+        StorageBudgetExhausted => "OTel storage budget is exhausted; ingestion is being refused",
         _ => "Runtime observability is degraded",
     };
 
@@ -91,7 +93,7 @@ public static class RuntimeDegradationCodes
         DegradationSource.ProcessRead => code == ProcessReadFailed,
         DegradationSource.StorageRead => code == StorageReadFailed,
         DegradationSource.StorageWrite => code is StorageUnverified or StorageWriteFailed,
-        DegradationSource.IngestProtection => code is TelemetryRejected or TelemetryDropped,
+        DegradationSource.IngestProtection => code is TelemetryRejected or TelemetryDropped or StorageBudgetExhausted,
         _ => false,
     };
 }

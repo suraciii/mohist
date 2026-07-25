@@ -19,5 +19,9 @@ public sealed class InMemoryServerFileSystem : IFileSystem
     public long? GetFileLength(string path) =>
         _files.TryGetValue(path, out var content) ? Encoding.UTF8.GetByteCount(content) : null;
 
+    public void WriteAllText(string path, string contents) => _files[path] = contents;
+
+    public void Delete(string path) => _files.Remove(path);
+
     public void Add(string path, string content) => _files[path] = content;
 }

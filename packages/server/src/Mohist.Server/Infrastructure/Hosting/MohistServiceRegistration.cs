@@ -178,15 +178,19 @@ public static class MohistServiceRegistration
             return new RuntimeObservability(
                 options.Enabled,
                 sp.GetRequiredService<RuntimeEpoch>(),
-                sp.GetRequiredService<TimeProvider>());
+                sp.GetRequiredService<TimeProvider>(),
+                storageBudgetBytes: options.StorageBudgetBytes);
         });
         services.AddSingleton<OtelDb>();
         services.TryAddSingleton<IProcessResourceReader, ProcessResourceReader>();
         services.TryAddSingleton<IOtelStorageProbe, OtelStorageProbe>();
+        services.TryAddSingleton<OtelStorageGuard>();
+        services.TryAddSingleton<IOtelStorageReclaimer, SqliteOtelStorageReclaimer>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelRetentionMaintenance>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelStorageMaintenance>());
         services.AddHostedService<OtelDiagnosticsSampler>();
         services.AddSingleton<OtelCollectorStatus>();
-        services.AddSingleton<IIngestProtectionDecision, AcceptAllIngestProtectionDecision>();
+        services.AddSingleton<IIngestProtectionDecision, BudgetAwareIngestProtectionDecision>();
         services.AddSingleton<OtlpTraceResponseWriter>();
         services.AddSingleton<TraceIngester>();
         services.AddSingleton<TraceQuerier>();

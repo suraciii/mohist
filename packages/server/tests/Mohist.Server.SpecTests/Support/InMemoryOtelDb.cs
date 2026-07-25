@@ -16,6 +16,16 @@ public static class InMemoryOtelDb
         var keeper = new SqliteConnection(readWriteConnectionString);
         keeper.Open();
 
+        // PRAGMA auto_vacuum must run before any schema object is
+        // created; the OtelDb production path sets it for fresh
+        // databases and we mirror that here so the in-memory test
+        // factories exercise the same shape.
+        using (var pragma = keeper.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA auto_vacuum=INCREMENTAL;";
+            pragma.ExecuteNonQuery();
+        }
+
         foreach (var ddl in new[]
         {
             "CREATE TABLE IF NOT EXISTS traces (trace_id TEXT PRIMARY KEY, service_name TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL, span_count INTEGER NOT NULL DEFAULT 0);",

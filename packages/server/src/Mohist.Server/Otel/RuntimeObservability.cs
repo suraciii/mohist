@@ -316,12 +316,25 @@ public sealed class RuntimeObservability : IDisposable
                 }
                 if (outcome.ActivatesProtection)
                 {
-                    activation = ActivateLocked(
-                        DegradationSource.IngestProtection,
-                        outcome.ProtectionCode ?? RuntimeDegradationCodes.TelemetryRejected,
-                        outcome.ProtectionReason,
-                        now,
-                        now.Add(ProtectionWindow));
+                    if (_activeDegradations.TryGetValue(DegradationSource.IngestProtection, out var existing)
+                        && existing.Code == RuntimeDegradationCodes.StorageBudgetExhausted)
+                    {
+                        activation = ActivateLocked(
+                            DegradationSource.IngestProtection,
+                            RuntimeDegradationCodes.StorageBudgetExhausted,
+                            existing.Message,
+                            now,
+                            now.Add(ProtectionWindow));
+                    }
+                    else
+                    {
+                        activation = ActivateLocked(
+                            DegradationSource.IngestProtection,
+                            outcome.ProtectionCode ?? RuntimeDegradationCodes.TelemetryRejected,
+                            outcome.ProtectionReason,
+                            now,
+                            now.Add(ProtectionWindow));
+                    }
                 }
                 return new MutationReason(activation, cleared);
             });
@@ -438,6 +451,48 @@ public sealed class RuntimeObservability : IDisposable
                         now,
                         null),
                     null);
+            });
+        }
+        EmitTransitions(transitions);
+    }
+
+    /// <summary>
+    /// Publishes or clears the <c>storage_budget_exhausted</c>
+    /// degradation reason on the <c>IngestProtection</c> source under
+    /// the same state lock as <see cref="RecordIngest"/>, so the more
+    /// specific reason deterministically dominates
+    /// <c>latest_degradation</c> while admission is closed and the
+    /// off/healthy/degraded tri-state contract is preserved.
+    /// </summary>
+    public void PublishStorageBudgetExhausted(bool exhausted, DateTimeOffset? at = null, string? message = null)
+    {
+        List<RuntimeStateTransition> transitions;
+        var now = at ?? _timeProvider.GetUtcNow();
+        lock (_gate)
+        {
+            transitions = EvaluateAndApplyLocked(now, () =>
+            {
+                if (exhausted)
+                {
+                    return new MutationReason(
+                        ActivateLocked(
+                            DegradationSource.IngestProtection,
+                            RuntimeDegradationCodes.StorageBudgetExhausted,
+                            message,
+                            now,
+                            now.Add(ProtectionWindow)),
+                        null);
+                }
+
+                if (_activeDegradations.TryGetValue(DegradationSource.IngestProtection, out var existing)
+                    && existing.Code == RuntimeDegradationCodes.StorageBudgetExhausted)
+                {
+                    return new MutationReason(
+                        null,
+                        ClearLocked(DegradationSource.IngestProtection));
+                }
+
+                return MutationReason.None;
             });
         }
         EmitTransitions(transitions);

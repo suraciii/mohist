@@ -48,5 +48,9 @@ public class RuntimeSourceIdentityTests
 
         public long? GetFileLength(string path) =>
             _files.TryGetValue(path, out var content) ? (long?)System.Text.Encoding.UTF8.GetByteCount(content) : null;
+
+        public void WriteAllText(string path, string contents) => _files[path] = contents;
+
+        public void Delete(string path) => _files.Remove(path);
     }
 }

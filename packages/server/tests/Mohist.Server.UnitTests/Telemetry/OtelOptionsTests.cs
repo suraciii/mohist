@@ -19,6 +19,8 @@ public class OtelOptionsTests
         Assert.Equal("Mohist:Otel", OtelOptions.SectionName);
         Assert.Equal("MOHIST_OTEL_DB_PATH", OtelOptions.DbPathEnvironmentVariable);
         Assert.Equal(TimeSpan.FromHours(72), options.RetentionMaxAge);
+        Assert.Equal(RuntimeValueRules.StorageBudgetBytes, options.StorageBudgetBytes);
+        Assert.Equal(1_073_741_824L, options.StorageBudgetBytes);
     }
 
     [Fact]
@@ -30,6 +32,7 @@ public class OtelOptionsTests
                 ["Mohist:Otel:Port"] = "14318",
                 ["Mohist:Otel:Enabled"] = "false",
                 ["Mohist:Otel:DbPath"] = "/tmp/custom-otel.db",
+                ["Mohist:Otel:StorageBudgetBytes"] = "2147483648",
             })
             .Build();
 
@@ -43,6 +46,7 @@ public class OtelOptionsTests
         Assert.Equal(14318, bound.Port);
         Assert.False(bound.Enabled);
         Assert.Equal("/tmp/custom-otel.db", bound.DbPath);
+        Assert.Equal(2_147_483_648L, bound.StorageBudgetBytes);
     }
 
     [Fact]
@@ -63,5 +67,6 @@ public class OtelOptionsTests
         Assert.False(bound.Enabled);
         Assert.Null(bound.DbPath);
         Assert.Equal(TimeSpan.FromHours(72), bound.RetentionMaxAge);
+        Assert.Equal(RuntimeValueRules.StorageBudgetBytes, bound.StorageBudgetBytes);
     }
 }
