@@ -1,6 +1,6 @@
 ### Requirement: An oversized existing observation database is recovered by rebuild
 
-At Server startup, if the existing observation database's combined size (`.db` plus `-wal` plus `-shm`) exceeds the safe budget, the Server SHALL recover the store by rebuilding an empty observation database rather than attempting slow online reclamation on the startup path. The rebuild SHALL stop observation connections to the oversized database before replacing it, SHALL create a fresh schema-initialized observation database, and SHALL treat the prior observation data as discarded. Because observation data is lossy by design, the rebuild SHALL NOT touch, lock, or otherwise affect the core business database, and a rebuild failure SHALL NOT prevent the core Server from becoming reachable.
+At Server startup, if the existing observation database's combined size (`.db` plus `-wal` plus `-shm`) exceeds the safe budget — defined as 100% of the configured storage budget, strictly above the 90% eviction high watermark so that online eviction always gets the first chance to reclaim — the Server SHALL recover the store by rebuilding an empty observation database rather than attempting slow online reclamation on the startup path. The rebuild SHALL stop observation connections to the oversized database before replacing it, SHALL create a fresh schema-initialized observation database, and SHALL treat the prior observation data as discarded. Because observation data is lossy by design, the rebuild SHALL NOT touch, lock, or otherwise affect the core business database, and a rebuild failure SHALL NOT prevent the core Server from becoming reachable.
 
 #### Scenario: An oversized database is detected at startup
 
@@ -20,6 +20,13 @@ At Server startup, if the existing observation database's combined size (`.db` p
 - **WHEN** a rebuild is performed or fails
 - **THEN** the core business database SHALL NOT be touched, locked, or affected
 - **AND** a rebuild failure SHALL NOT prevent the core Server from becoming reachable
+
+#### Scenario: A query overlaps the brief rebuild window
+
+- **WHEN** a read-only observation query is in flight during the bounded rebuild window in which the old file is replaced
+- **THEN** that query SHALL fail rather than block or corrupt the rebuild
+- **AND** the failure SHALL surface through the existing storage-read degradation path
+- **AND** the rebuild window SHALL remain bounded so the failure exposure is short
 
 ### Requirement: Rebuild is reported with a clear status reason and log
 
