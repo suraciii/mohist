@@ -98,6 +98,21 @@ public sealed class OtelDb
     /// </summary>
     public const int IncrementalVacuumPages = 256;
 
+    /// <summary>
+    /// Suffix for the <c>otel.db-wal</c> sidecar file. The recovery
+    /// callback enumerates and deletes this sidecar alongside the main
+    /// database file when rebuilding an oversized store.
+    /// </summary>
+    public const string WalSidecarSuffix = "-wal";
+
+    /// <summary>
+    /// Suffix for the <c>otel.db-shm</c> shared-memory sidecar file.
+    /// The recovery callback enumerates and deletes this sidecar
+    /// alongside the main database file when rebuilding an oversized
+    /// store.
+    /// </summary>
+    public const string ShmSidecarSuffix = "-shm";
+
     private readonly object _initGate = new();
     private bool _initialized;
 
@@ -306,6 +321,43 @@ public sealed class OtelDb
 
             _initialized = true;
         }
+    }
+
+    /// <summary>
+    /// Every file backing the observation store on disk in the order
+    /// the recovery callback deletes them: the main database file,
+    /// its <c>-wal</c> and <c>-shm</c> sidecars, and the
+    /// <c>.meta</c> reclamation marker written by
+    /// <see cref="OtelStorageGuard"/>. Deleting the marker alongside
+    /// the database is required so a rebuilt store starts with no
+    /// stale admission state.
+    /// </summary>
+    public IReadOnlyList<string> ObservationStoreFiles()
+    {
+        return new[]
+        {
+            DatabasePath,
+            DatabasePath + WalSidecarSuffix,
+            DatabasePath + ShmSidecarSuffix,
+            DatabasePath + OtelStorageGuard.MarkerSuffix,
+        };
+    }
+
+    /// <summary>
+    /// Resets the in-process initialization flag so the next
+    /// <see cref="OpenReadWriteConnection"/> call re-runs
+    /// <see cref="EnsureInitialized"/> against a (presumed fresh)
+    /// on-disk file. The startup recovery callback invokes this after
+    /// clearing the connection pool and deleting the old files, so a
+    /// follow-up open recreates a fresh schema with
+    /// <c>auto_vacuum = INCREMENTAL</c>. The reset is bounded and
+    /// does not scan or iterate any Trace or Span rows because the
+    /// rebuild discards all observation data.
+    /// </summary>
+    public void ResetInitialization()
+    {
+        lock (_initGate)
+            _initialized = false;
     }
 
     private static void EnsureDirectoryExists(string databasePath, IFileSystem fileSystem)

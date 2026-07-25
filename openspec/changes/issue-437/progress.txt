@@ -33,3 +33,30 @@
 - Workflow definition suite: 175/175 pass.
 - CLI suite: 1375/1375 pass.
 - `npm test` initially exposed one architecture failure caused by a local marker serializer; it was replaced with shared `JSON.Options`. Subsequent direct suites passed; the npm process was aborted after those completed because of the long-running full suite output.
+
+## T-003 decisions and gotchas
+
+- Recovery runs as an `IOtelMaintenanceCallback` (`OtelStorageRecoveryMaintenance`) alongside the existing retention and storage callbacks. It owns a one-shot gate (`Interlocked.CompareExchange`) so the rebuild decision fires only on the first post-start tick; subsequent ticks short-circuit before probing.
+- The rebuild threshold is strictly above 100% of `StorageBudgetBytes`, so the online eviction from T-002 (90% high watermark) gets the first chance to reclaim. In practice this means a store that eviction can clear never hits the rebuild path.
+- The file-deletion set is `OtelDb.ObservationStoreFiles()` which exposes the four paths (.db, -wal, -shm, .meta). Constants `OtelDb.WalSidecarSuffix` / `OtelDb.ShmSidecarSuffix` are exposed so the probe and the recovery reference the same suffixes; `OtelStorageGuard.MarkerSuffix` stays internal and is reused for the .meta path.
+- `IOtelDbPool` (`ClearAll()`) is a new seam that produces to `SqliteConnection.ClearAllPools()`. `SqliteOtelDbPool` is the production implementation; specs inject a `RecordingPool` for verification.
+- `OtelDb.ResetInitialization()` clears the in-process `_initialized` flag under the existing `_initGate` lock so the next `OpenReadWriteConnection` re-runs `EnsureInitialized` against a (presumed fresh) on-disk file with `auto_vacuum=INCREMENTAL`. No connection is touched during the reset itself.
+- `storage_data_reset` is published on `DegradationSource.StorageWrite` (same lifecycle as the existing `storage_unverified`) and cleared by the first committed production write through `RecordIngest`'s `ClearsStorageWrite` channel. The method `RuntimeObservability.PublishStorageDataReset` mirrors `PublishStorageBudgetExhausted`'s state-lock pattern but on the StorageWrite source.
+- A rebuild failure (exception in pool clear / file delete / open) is contained: it logs an error, still publishes `storage_data_reset` so operators see the store is unusable, and surfaces as a non-throwing `OtelStorageRecoveryOutcome.RebuildFailed` for specs. The maintenance loop's existing `catch` swallows the rest.
+- `InMemoryServerFileSystem` grew a `DeletedPaths` property (additive, no contract change) so spec tests can assert the exact deletion ordering on rebuild without bringing in a fake-of-a-fake wrapper.
+
+## T-003 files and verification
+
+- Added `RuntimeDegradationCodes.StorageDataReset` + `PublishStorageDataReset` on `RuntimeObservability`; updated `IsValidFor(StorageWrite, ...)` to include the new code.
+- Added `IOtelDbPool` / `SqliteOtelDbPool` (`OtelDbPool.cs`).
+- Added `OtelStorageRecoveryMaintenance` (`OtelStorageRecoveryMaintenance.cs`) implementing `IOtelMaintenanceCallback` with one-shot gate, file enumeration via `OtelDb.ObservationStoreFiles()`, structured log on rebuild, and a test observer for outcome verification.
+- Extended `OtelDb` with `ObservationStoreFiles()`, `ResetInitialization()`, `WalSidecarSuffix`, `ShmSidecarSuffix`. Switched the probe to use the new suffix constants.
+- Wired `IOtelDbPool` and the recovery callback into `MohistServiceRegistration`.
+- Extended `InMemoryServerFileSystem` with additive `DeletedPaths` recording.
+- Added `OtelStorageRecoveryMaintenanceSpecs` covering all six acceptance criteria: oversized rebuild (pool clear, file deletions, schema re-init with `auto_vacuum=INCREMENTAL`), under-budget skip and data preservation, structured log + StorageWrite degradation publication, first-write clear, query-during-rebuild surfaces as bounded error, cost independence from unrelated history (0 vs 1,000 traces yield same bounded work), rebuild failure containment, one-shot gate, pre-cancellation handling, and contract assertions on the degradation code.
+- Focused recovery specs: 14/14 pass.
+- Full server spec suite: 3099/3099 pass.
+- Full server unit suite: 1413/1413 pass.
+- Architecture suite: 32/32 pass.
+- Workflow definition suite: 175/175 pass.
+- CLI suite: 1375/1375 pass.

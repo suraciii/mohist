@@ -498,6 +498,51 @@ public sealed class RuntimeObservability : IDisposable
         EmitTransitions(transitions);
     }
 
+    /// <summary>
+    /// Publishes or clears the <c>storage_data_reset</c> degradation
+    /// reason on the <c>StorageWrite</c> source under the same state
+    /// lock as <see cref="RecordIngest"/>. The data-reset reason is
+    /// "write-unverified until the first committed production write"
+    /// and is cleared by the existing
+    /// <see cref="IngestOutcome.ClearsStorageWrite"/> channel when a
+    /// real write commits, so the off/healthy/degraded tri-state
+    /// contract is preserved and the reason does not linger after
+    /// the rebuilt store has actually served traffic.
+    /// </summary>
+    public void PublishStorageDataReset(bool reset, DateTimeOffset? at = null, string? message = null)
+    {
+        List<RuntimeStateTransition> transitions;
+        var now = at ?? _timeProvider.GetUtcNow();
+        lock (_gate)
+        {
+            transitions = EvaluateAndApplyLocked(now, () =>
+            {
+                if (reset)
+                {
+                    return new MutationReason(
+                        ActivateLocked(
+                            DegradationSource.StorageWrite,
+                            RuntimeDegradationCodes.StorageDataReset,
+                            message,
+                            now,
+                            null),
+                        null);
+                }
+
+                if (_activeDegradations.TryGetValue(DegradationSource.StorageWrite, out var existing)
+                    && existing.Code == RuntimeDegradationCodes.StorageDataReset)
+                {
+                    return new MutationReason(
+                        null,
+                        ClearLocked(DegradationSource.StorageWrite));
+                }
+
+                return MutationReason.None;
+            });
+        }
+        EmitTransitions(transitions);
+    }
+
     public RuntimeObservabilitySnapshot GetSnapshot()
     {
         List<RuntimeStateTransition> transitions;

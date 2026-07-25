@@ -186,8 +186,10 @@ public static class MohistServiceRegistration
         services.TryAddSingleton<IOtelStorageProbe, OtelStorageProbe>();
         services.TryAddSingleton<OtelStorageGuard>();
         services.TryAddSingleton<IOtelStorageReclaimer, SqliteOtelStorageReclaimer>();
+        services.TryAddSingleton<IOtelDbPool, SqliteOtelDbPool>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelRetentionMaintenance>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelStorageMaintenance>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelStorageRecoveryMaintenance>());
         services.AddHostedService<OtelDiagnosticsSampler>();
         services.AddSingleton<OtelCollectorStatus>();
         services.AddSingleton<IIngestProtectionDecision, BudgetAwareIngestProtectionDecision>();

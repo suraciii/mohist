@@ -59,6 +59,7 @@ public static class RuntimeDegradationCodes
     public const string StorageUnverified = "storage_unverified";
     public const string StorageReadFailed = "storage_read_failed";
     public const string StorageWriteFailed = "storage_write_failed";
+    public const string StorageDataReset = "storage_data_reset";
     public const string TelemetryRejected = "telemetry_rejected";
     public const string TelemetryDropped = "telemetry_dropped";
     public const string StorageBudgetExhausted = "storage_budget_exhausted";
@@ -71,6 +72,7 @@ public static class RuntimeDegradationCodes
         StorageUnverified => "OTel storage write readiness has not been verified",
         StorageReadFailed => "OTel storage metadata could not be read",
         StorageWriteFailed => "OTel storage write failed",
+        StorageDataReset => "Observation data was reset at startup",
         TelemetryRejected => "Telemetry is being rejected",
         TelemetryDropped => "Telemetry is being dropped",
         StorageBudgetExhausted => "OTel storage budget is exhausted; ingestion is being refused",
@@ -92,7 +94,7 @@ public static class RuntimeDegradationCodes
         DegradationSource.Collector => code is CollectorUnverified or CollectorBindFailed,
         DegradationSource.ProcessRead => code == ProcessReadFailed,
         DegradationSource.StorageRead => code == StorageReadFailed,
-        DegradationSource.StorageWrite => code is StorageUnverified or StorageWriteFailed,
+        DegradationSource.StorageWrite => code is StorageUnverified or StorageWriteFailed or StorageDataReset,
         DegradationSource.IngestProtection => code is TelemetryRejected or TelemetryDropped or StorageBudgetExhausted,
         _ => false,
     };
