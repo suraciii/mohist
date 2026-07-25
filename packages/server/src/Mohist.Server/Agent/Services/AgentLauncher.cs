@@ -218,6 +218,83 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             PreflightCategory: canonical.PreflightCategory);
     }
 
+    /// <summary>
+    /// Mention-launch path (issue-490 T-002, design D1/D3/D6). Reuses the
+    /// manual-style <see cref="LaunchAsync"/> pipeline (workspace-optional,
+    /// no preflight gate) but derives the session id + AgentJob key from
+    /// the comment identity via
+    /// <see cref="AgentSessionResolver.CommentSessionId"/> /
+    /// <see cref="AgentSessionResolver.CommentJobKey"/>, so redelivery of
+    /// the same <c>comment-added</c> event reuses one session grain and
+    /// one AgentJob — distinct from routing/watch launches (which key on
+    /// <c>(projectId, eventId, ruleId)</c>). The trigger labels include
+    /// both the event id and the new <c>mohist.io/trigger/comment-id</c>
+    /// constant so the launch is findable from the comment side and
+    /// distinguishable as a mention launch.
+    /// </summary>
+    public async Task<AgentLaunchResult> LaunchMentionAsync(
+        AgentInfo agent,
+        string prompt,
+        AgentLaunchContext context,
+        string commentId,
+        string triggeringEventId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commentId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(triggeringEventId);
+
+        var trimmedPrompt = prompt?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedPrompt))
+        {
+            throw new ArgumentException(
+                "Prompt must not be empty or whitespace.",
+                nameof(prompt));
+        }
+
+        var sessionId = _sessions.CommentSessionId(context.ProjectId, commentId, agent.Id);
+        var jobKey = _sessions.CommentJobKey(context.ProjectId, commentId, agent.Id);
+
+        var sessionContext = BuildContext(context, agent);
+        var metadata = GenericAgentSessionMetadata.Metadata(sessionContext);
+        var triggerLabels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerEventId] = triggeringEventId,
+            [GenericAgentSessionMetadata.TriggerCommentId] = commentId,
+        };
+        var durableMetadata = WithTriggerLabels(metadata, triggerLabels);
+
+        var resolvedRuntime = ResolveRuntime(agent.AgentConfig, launchOverride: null);
+
+        var sessionGrain = _sessions.GetGrain(sessionId);
+        await sessionGrain.OpenAsync(
+            new OpenAgentSessionCommand(
+                RunnerId: string.Empty,
+                AgentRuntime: resolvedRuntime,
+                WorkDir: context.WorkspacePath,
+                Metadata: durableMetadata));
+
+        var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
+        var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
+        var jobInput = new AgentJobInput(
+            Prompt: trimmedPrompt,
+            Model: resolvedModel,
+            WorkspacePath: context.WorkspacePath,
+            ProjectId: context.ProjectId,
+            Runtime: resolvedRuntime,
+            AgentId: agent.Id,
+            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentConfig: agent.AgentConfig?.Clone(),
+            AgentSessionId: sessionId,
+            Variant: resolvedVariant);
+        await jobGrain.EnsureSubmittedAsync(jobInput);
+
+        return new AgentLaunchResult(
+            SessionId: sessionId,
+            AgentId: agent.Id,
+            AgentName: agent.Name);
+    }
+
     private static GenericAgentSessionContext BuildContext(AgentLaunchContext context, AgentInfo agent) =>
         new(
             ProjectId: context.ProjectId,

@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
@@ -8,6 +9,7 @@ using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
@@ -33,6 +35,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly IWorkflowProfileProvider? _profileProvider;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly IEventStore _eventStore;
+    private readonly IGrainFactory _grainFactory;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IssueRepositoryResolver _repositoryResolver;
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
@@ -48,6 +53,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IssueWorkflowProfileRegistry profiles,
         WorkflowQuerier workflowQuerier,
         IDbContextFactory<MohistDbContext> dbFactory,
+        IEventStore eventStore,
+        IGrainFactory grainFactory,
+        IBackgroundTaskLauncher backgroundTasks,
         IssueRepositoryResolver repositoryResolver,
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
@@ -64,6 +72,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _profileProvider = profileProvider;
         _workflowQuerier = workflowQuerier;
         _dbFactory = dbFactory;
+        _eventStore = eventStore;
+        _grainFactory = grainFactory;
+        _backgroundTasks = backgroundTasks;
         _repositoryResolver = repositoryResolver;
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
@@ -1426,9 +1437,22 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         };
 
         await _attachmentService.ValidateCommentBindAsync(_issue.ProjectId, comment.Id, attachmentIds);
+
+        // Comment row + comment-added CloudEvent share one transaction so the
+        // event is observable only after the row is durable (issue-490 T-001,
+        // design D2 — direct CloudEvent, EpicGrain-style emit pattern, NOT an
+        // IssueEvent union variant). The dispatcher poke fires only after the
+        // commit succeeds; the reminder tick recovers if the poke is lost.
+        var envelope = IssueCommentAddedEventFactory.Build(
+            _issue,
+            new IssueCommentAdded(comment.Id, normalizedAuthor, body),
+            _timeProvider.GetUtcNow());
         await using var db = await _dbFactory.CreateDbContextAsync();
         db.IssueComments.Add(comment);
+        await _eventStore.AppendAsync(db, envelope);
         await db.SaveChangesAsync();
+        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueGrain), _backgroundTasks);
+
         await _attachmentService.BindCommentAsync(_issue.ProjectId, comment.Id, attachmentIds);
 
         return new IssueCommentResult(comment.Id, comment.Body, comment.Author);

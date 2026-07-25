@@ -1,0 +1,229 @@
+## Issue #490 T-001 — Comment-added event emission
+
+### Codebase Patterns
+
+- The IssueEvent union + IssueEventSerializer are intentionally bypassed for
+  the comment-added event per design D2 — comments are a side record, not a
+  state transition. The new payload lives at
+  `packages/server/src/Mohist.Server/Infrastructure/Events/IssueCommentAdded.cs`
+  as a standalone record `{ CommentId, Author, Body }` with its own helper
+  `IssueCommentAddedEventFactory.Build(owner, payload, now)` for envelope
+  construction. The factory stamps `IssueLineage.BuildExtensions(owner)` (same
+  lineage as every `issue.*` event) and uses
+  `IssueEventPersistence.IssueSource(owner.ProjectId, owner.Number)` so the
+  envelope is persisted in the `IssueEvents` table by the existing
+  `EventStore.AppendAsync(db, envelope)` dispatch.
+- The "direct CloudEvent, NOT an IssueEvent union variant" decision keeps the
+  state-transition event family clean — `IssueEvent.cs` and
+  `IssueEventSerializer.cs` are unchanged.
+- The EpicGrain direct-emit pattern in `PersistEpicEventsAsync` is the model:
+  `IEventStore.AppendAsync(db, envelope)` stages the event row on the same
+  `MohistDbContext` as the state write, then `db.SaveChangesAsync()` commits
+  both in one transaction. No explicit `BeginTransactionAsync` is needed —
+  EF Core's auto-transaction on SaveChanges is sufficient.
+
+### Implementation Notes
+
+- `IssueGrain` constructor takes both `IEventStore` and `IGrainFactory` (the
+  latter for the dispatcher poke). Pre-existing grain methods that already
+  use `GrainFactory.GetGrain<...>(...)` to talk to other grains keep doing so
+  — `IGrainFactory` is injected only for the new poke path so the test
+  fixtures can supply a `NullDispatchGrainFactory` instead of relying on the
+  Orleans-activated base-class property (which is null in manually
+  constructed test grains).
+- `AddCommentAsync` does not use `BeginTransactionAsync`/`CommitAsync`
+  explicitly — it relies on the same `SaveChangesAsync` auto-transaction
+  that EpicGrain uses. This is consistent with the EpicGrain pattern called
+  out in the design (Migration Plan step 1: "the `EpicGrain` direct-emit
+  pattern"). The comment row + event row commit atomically, satisfying the
+  "persistence-before-observable ordering" requirement.
+- `EventDispatcherPoke.PokeAfterCommit` is called after `SaveChangesAsync`,
+  matching `IssueStore.SaveAsync` (and unlike EpicGrain, which doesn't poke).
+  The poke is fire-and-forget; if lost, the reminder tick recovers.
+
+### Test Patterns
+
+- Unit tests for the standalone `IssueCommentAdded` payload + the
+  `IssueCommentAddedEventFactory.Build` lineage stamp live at
+  `packages/server/tests/Mohist.Server.UnitTests/Events/IssueCommentAddedTests.cs`.
+  The factory and `ToData` helper are `internal` and reachable from the
+  UnitTests project via the existing `[InternalsVisibleTo("Mohist.Server.UnitTests")]`
+  in `Mohist.Server/AssemblyInfo.cs`. `EventCatalogTests.All_ContainsEveryReverseDnsConstant`
+  auto-validates the new constant is in `EventCatalog.All`.
+- High-integration specs live at
+  `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Grain/IssueCommentEventSpecs.cs`
+  and use the existing `MohistDbFixture` (test-only in-memory SQLite +
+  real `EventStore` + `NullDispatchGrainFactory`). The grain is constructed
+  manually with services from the fixture's `Services` (same pattern as
+  `IssueGrainEventSaveFailureSpecs` / `IssueWorkflowReadPathSpecs`). The
+  spec covers all five WHEN/THEN scenarios in the spec:
+  * Scenario "Adding a comment emits the event" — payload contract
+  * Scenario "Comment is persisted before the event is observable" —
+    row + event in one SaveChanges, both readable after commit
+  * Scenario "Event carries project and issue" — extensions + subject + source
+  * Scenario "Epic is stamped when present"
+  * Scenario "Epic is omitted when absent"
+  * Scenario "Issue body edit does not emit comment-added" — covered via
+    `UpdateAsync("New title", "Pinging @supervisor...")` with `@` in body
+  * Scenario "Comment add is the sole source" — `CreateAsync` does not
+    emit comment-added
+
+### Gotchas
+
+- The MohistIntegrationFixture path was deliberately NOT used — it spins up
+  a full silo and an Orleans IGrainFactory. For grain-level event-emission
+  behavior (which is what T-001 needs), MohistDbFixture is sufficient and
+  faster, and matches the spec/test conventions in
+  `IssueTransactionalEventAppendSpecs.cs` (also test-only in-memory SQLite
+  with the real EventStore).
+- The pre-existing `IssueGrainEventSaveFailureSpecs` and
+  `IssueWorkflowReadPathSpecs` both construct `IssueGrain` manually — they
+  were updated to pass the new `IEventStore` and `IGrainFactory` arguments.
+- `npm test` runs the full dotnet test + vitest. The first invocation
+  surfaced a single SpecTest failure that did NOT reproduce on a second
+  run — looks like a shared-state flake in another test class, not anything
+  introduced by T-001. The T-001 tests (IssueCommentEventSpecs × 10,
+  IssueCommentAddedTests × 8) pass deterministically on every run.
+
+### Build Verification
+
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj -p:SkipWebBuild=true`:
+  succeeded, 0 warnings, 0 errors (TreatWarningsAsErrors is on).
+- `dotnet test Mohist.Server.UnitTests`: 1354 passed (includes 8 new
+  IssueCommentAddedTests).
+- `dotnet test Mohist.Server.SpecTests`: 3016 passed (includes 10 new
+  IssueCommentEventSpecs).
+- `dotnet build Mohist.sln -p:SkipWebBuild=true`: succeeded, 0 warnings,
+  0 errors.
+
+### Verify-check fix (T-002 launcher foundation)
+
+- `npm run build` failed with `CS0535`: `RecordingAgentLauncher` in
+  `packages/server/tests/Mohist.Server.SpecTests/Support/RoutingDispatchTestSupport.cs`
+  did not implement the new `IAgentLauncher.LaunchMentionAsync` interface
+  member added by commit `ca4fab5db` (T-002 launcher foundation). The
+  SpecTests project is the only other implementer of `IAgentLauncher`
+  (verified via grep across `packages/`).
+- Fix: add a `LaunchMentionAsync` stub to `RecordingAgentLauncher` that
+  throws `NotSupportedException`, matching the existing `LaunchAsync`
+  (manual path) stub — the fake deliberately captures routed launches
+  only. The new method's parameters (`commentId`, `triggeringEventId`)
+  are accepted but unused.
+- After the fix: `npm run build` succeeds (0 warnings, 0 errors) and
+  `npm test` passes end-to-end:
+  - Mohist.Workflow.Definition.Tests 175/175
+  - Mohist.Server.UnitTests 1354/1354
+  - Mohist.Cli.Tests 1374/1374
+  - Mohist.Server.ArchTests 32/32
+  - Mohist.Server.SpecTests 3016/3016
+  - Web Vitest 5130/5130
+  - Runner Vitest 1426/1426
+- Working tree change is limited to the test fake (9 lines added) — no
+  verification side effects, no build artifacts.
+
+## Issue #490 T-002 — Mention dispatch handler (review-fix pass)
+
+The first review (`openspec/changes/issue-490/review.md`) found that T-002
+delivered only the launcher foundation (`LaunchMentionAsync`,
+`CommentSessionId/JobKey`, `TriggerCommentId`) and left the headline
+`MentionDispatchHandler` unbuilt, the upstream `design/agent-mentions.md`
+unreconciled, and `AgentQuerier.GetByNameAsync` case-sensitive. This pass
+closes all three blockers (review F1 + F2 + F3) and the test-fake note (N1).
+
+### F3 — `AgentQuerier.GetByNameAsync` is now case-insensitive
+
+- Rewritten to pull rows by project, deserialize, and filter client-side
+  with `StringComparison.OrdinalIgnoreCase` — same shape as the existing
+  `GetByIdAsync`. The Agent-name uniqueness check
+  (`AgentGrain.EnsureNameAvailableAsync`) inherits the case-insensitive
+  semantic, which is more correct (you shouldn't have both `Supervisor`
+  and `supervisor`) and consistent with the spec's case-insensitive
+  resolution requirement.
+
+### F1 — `MentionDispatchHandler` + token parser
+
+- New `MentionTokenParser` (`packages/server/src/Mohist.Server/Events/
+  Subscriptions/MentionTokenParser.cs`): regex-based, source-generated
+  (`[GeneratedRegex]`), case-insensitive dedup at the token level. Token
+  charset is `[A-Za-z0-9_.-]` but must start AND end with `[A-Za-z0-9_]`,
+  so `@supervisor.` (end-of-sentence period) parses as `supervisor` while
+  `@supervisor.io` (dot in the middle) stays as `supervisor.io`. The
+  boundary prefix requires start-of-string or whitespace/punctuation
+  before the `@`, so `foo@bar` (email-style) is not a mention.
+- New `MentionDispatchHandler`
+  (`packages/server/src/Mohist.Server/Events/Subscriptions/
+  MentionDispatchHandler.cs`): subscribes to
+  `EventCatalog.ReverseDns.IssueCommentAdded`; loads the project's active
+  Agents once; skips scanning when the comment author matches an active
+  Agent name case-insensitively (loop prevention, design D5); parses
+  tokens; resolves each against a case-insensitive name index built from
+  the active Agents (no extra DB hit per token); dedupes by resolved
+  Agent id; calls `LaunchMentionAsync` with the full comment body as
+  prompt and the issue context (project / issue / epic, no workspace —
+  workspace-optional manual path, design D1); structured log on
+  unresolved tokens (spec <i>Resolution failure is a no-op</i>). Does
+  NOT consult `WatchEntryStore` (design D7 — explicit `@` overrides
+  `muted`).
+
+### N1 — `RecordingAgentLauncher` captures mention launches
+
+- The T-001-pass stub threw `NotSupportedException` for
+  `LaunchMentionAsync`. Replaced with a recording implementation that
+  captures `RecordedMentionLaunch` entries (Sequence / AgentId /
+  AgentName / Prompt / CommentId / TriggeringEventId / ProjectId /
+  IssueNumber / EpicNumber) so the spec suite can assert the full
+  comment→launch chain end-to-end.
+- Added two helpers to `RoutingDispatchTestSupport`:
+  `SeedNamedAgentAsync` (Agent row with name != id, mirroring production
+  Agent-create) and `BuildCommentAddedEvent` (constructs a
+  `com.mohist.issue.comment-added` CloudEvent with the lineage
+  extensions + JSON payload shape the production `AddCommentAsync`
+  emits). Plus `CreateMentionHandler` for the production
+  `MentionDispatchHandler` constructor.
+
+### F2 — `design/agent-mentions.md` reconciled
+
+- The "启动复用路由启动的解析管线 … workspace 解析 … preflight" sentence
+  (line 44-45) is rewritten to state the manual, workspace-optional path
+  with rationale (backlog-issue headline use case). The Status section
+  no longer says "全部未实装"; it now lists what issue-490 landed and
+  points at the open question (typo feedback). Frontmatter stays `wip`
+  to match sibling docs (`issue-watch.md`, `agent-supervision.md`) that
+  keep `wip` post-实装.
+
+### Tests added
+
+- `CommentMentionDispatchSpecs` (17 specs): covers every scenario in
+  `specs/comment-mention/spec.md` — single-mention launch, verbatim
+  prompt, no-mention no-launch, punctuation delimiter, case-insensitive
+  match, repeated-mention dedup, distinct-mentions independent launch,
+  loop prevention (active Agent author + case-insensitive author),
+  human-authored triggers normally, unknown name no-op, archived Agent
+  not resolved, redelivery anchored on comment identity, distinct
+  comments each launch, backlog-issue launch (no preflight), epic
+  lineage stamping, muted-Agent-still-launches (Decision 7).
+- `MentionTokenParserTests` (15 tests): null/empty, single mention,
+  trailing punctuation, dot/hyphen inside name, trailing period as
+  delimiter, distinct mentions in order, case-insensitive dedup with
+  first-occurrence casing preserved, multiline, `@@supervisor`,
+  at-sign-only, at-followed-by-punctuation-only.
+- `MentionDispatchHandlerUnitTests` (11 tests): `CommentSessionId` /
+  `CommentJobKey` stability + distinctness (same inputs, different
+  comments, different agents, different projects, session vs job key
+  shape, comment-anchored vs routed-anchored non-collision),
+  `IsAuthoredByActiveAgent` (empty author, empty list, case-insensitive
+  match), `BuildActiveAgentNameIndex` (case-insensitive map).
+
+### Build verification
+
+- `npm run build`: succeeded, 0 warnings, 0 errors.
+- `npm test`:
+  - Mohist.Workflow.Definition.Tests 175/175
+  - Mohist.Server.UnitTests 1388/1388 (was 1354; +34 new)
+  - Mohist.Cli.Tests 1374/1374
+  - Mohist.Server.ArchTests 32/32
+  - Mohist.Server.SpecTests 3033/3033 (was 3016; +17 new)
+  - Web Vitest 5130/5130
+  - Runner Vitest 1426/1426
+- Working tree change is scoped to the fix (3 modified + 5 new files);
+  no verification side effects, no build artifacts.
