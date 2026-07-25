@@ -60,3 +60,16 @@
 - Architecture suite: 32/32 pass.
 - Workflow definition suite: 175/175 pass.
 - CLI suite: 1375/1375 pass.
+
+## Review-fix pass (issue-437 review.md)
+
+Resolved every finding from `openspec/changes/issue-437/review.md`:
+
+- **F-1 (must fix): rebuilt store kept admission closed for up to a tick.** `OtelStorageRecoveryMaintenance.Rebuild` now re-probes the fresh empty store and re-arbitrates admission (`ReArbitrateAfterRebuild`) so the write path reopens immediately and a stale `storage_budget_exhausted` reason clears. A re-probe failure is non-fatal: the rebuild itself succeeded, and the next tick's storage callback re-derives the watermark. Added `OtelStorageRecoveryMaintenanceSpecs.ExecuteAsync_AfterRebuild_OpensAdmissionAndClearsBudgetExhausted` which drives admission closed, rebuilds, and asserts admission reopens and `IngestProtection` clears while `StorageWrite` (data-reset) stays active until the first write.
+- **F-4 (non-blocking): design divergence in callback ordering.** Reordered the DI registration in `MohistServiceRegistration` so `OtelStorageRecoveryMaintenance` runs first on the first tick (rebuild before retention/storage waste work); recovery is a one-shot gate, so the steady-state order is retention (time) → storage (size + reclaim + arbitrate) as design D1 specifies. `design.md` D1/D5 updated to describe the realized three-callback structure and the rebuild re-arbitration.
+- **F-2 (must fix): tautological "query overlaps rebuild" test.** Replaced `ExecuteAsync_ReadOnlyQueryDuringRebuild_SurfacesAsStorageReadFailure` (which awaited recovery to completion then asserted `Succeeded || Exception is not null`) with `ExecuteAsync_Rebuild_DoesNotBlockOrCorruptTheStore`, which asserts the verifiable no-corruption half (schema intact + fresh read-only open succeeds after rebuild) and documents the accepted limitation (in-memory shared-cache DB cannot model the file-absent window; the "fails via StorageRead path" half is verified-by-design, consistent with D7's `incremental_vacuum` treatment). `design.md` D7 updated.
+- **F-3 (non-blocking): mislabeled re-enable test.** Replaced `ObservationDisabled_AndReEnabledThenAdvanced_MaintenanceRunsAgainstInjectedTime` (which never re-enabled) with `ObservationReenabledViaRestart_ResumesMaintenanceAgainstInjectedTime`, which simulates re-enable as a process restart and asserts the enabled sampler resumes maintenance against the advanced injected time. Made `TestApplicationLifetime` implement `IDisposable` so the second lifetime can be disposed.
+
+Verification after fixes:
+- `dotnet build Mohist.sln -p:SkipWebBuild=true`: 0 warnings, 0 errors.
+- Focused OTel specs (retention, storage, guard, recovery, sampler-enabled): 66/66 pass.

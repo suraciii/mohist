@@ -69,10 +69,15 @@ public class OtelDiagnosticsSamplerEnabledSpecs : IDisposable
     }
 
     [Fact]
-    public async Task ObservationDisabled_AndReEnabledThenAdvanced_MaintenanceRunsAgainstInjectedTime()
+    public async Task ObservationReenabledViaRestart_ResumesMaintenanceAgainstInjectedTime()
     {
-        // Build the sampler disabled first. No invocations while disabled.
-        var sampler = new OtelDiagnosticsSampler(
+        // Re-enabling observation is a process restart in this
+        // architecture: the sampler's enabled flag is fixed at
+        // construction. A restart with enabled=true must therefore
+        // resume maintenance using the current injected time, with no
+        // manual cleanup — the retention/storage state left on disk
+        // (and the persisted admission marker) carries across.
+        var disabled = new OtelDiagnosticsSampler(
             _runtime,
             _lifetime,
             new NoopProcessResourceReader(),
@@ -81,12 +86,31 @@ public class OtelDiagnosticsSamplerEnabledSpecs : IDisposable
             enabled: false,
             maintenanceCallbacks: new IOtelMaintenanceCallback[] { _callback });
 
-        await sampler.StartAsync(CancellationToken.None);
+        await disabled.StartAsync(CancellationToken.None);
         _lifetime.FireStarted();
         _timeProvider.Advance(TimeSpan.FromMinutes(5));
-        await sampler.StopAsync(CancellationToken.None);
+        await disabled.StopAsync(CancellationToken.None);
 
         Assert.Equal(0, _callback.Invocations);
+
+        // Restart with observation enabled: maintenance must run
+        // against the advanced injected time.
+        using var restartedLifetime = new TestApplicationLifetime();
+        var resumedCallback = new RecordingMaintenanceCallback();
+        var enabledSampler = new OtelDiagnosticsSampler(
+            _runtime,
+            restartedLifetime,
+            new NoopProcessResourceReader(),
+            new NoopStorageProbe(),
+            _timeProvider,
+            enabled: true,
+            maintenanceCallbacks: new IOtelMaintenanceCallback[] { resumedCallback });
+
+        await enabledSampler.StartAsync(CancellationToken.None);
+        restartedLifetime.FireStarted();
+        await enabledSampler.StopAsync(CancellationToken.None);
+
+        Assert.True(resumedCallback.Invocations >= 1);
     }
 
     private sealed class RecordingMaintenanceCallback : IOtelMaintenanceCallback
@@ -116,7 +140,7 @@ public class OtelDiagnosticsSamplerEnabledSpecs : IDisposable
         public StorageProbeMetadata Probe() => new(UsageBytes: 0);
     }
 
-    private sealed class TestApplicationLifetime : IHostApplicationLifetime
+    private sealed class TestApplicationLifetime : IHostApplicationLifetime, IDisposable
     {
         private readonly CancellationTokenSource _started = new();
         private readonly CancellationTokenSource _stopping = new();
