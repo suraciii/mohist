@@ -312,13 +312,19 @@ public class TraceQuerierSpecs : IDisposable
     [Fact]
     public async Task ExecuteBoundedQuery_ExecutionBudgetInterruptsRecursiveReader()
     {
+        // Each recursive iteration generates a large random blob so the query
+        // stays CPU-bound per row and never reaches the row/byte caps before
+        // the execution budget fires; only the small `value` column is emitted.
+        // The blob is large enough that even the first row is still being
+        // computed when the budget interrupt lands, keeping the assertion off
+        // the row-cap fast path.
         var query = """
-            WITH RECURSIVE numbers(value) AS (
-                SELECT 1
+            WITH RECURSIVE busy(value, filler) AS (
+                SELECT 1, randomblob(16777216)
                 UNION ALL
-                SELECT value + 1 FROM numbers WHERE value < 100000000
+                SELECT value + 1, randomblob(16777216) FROM busy WHERE value < 100000000
             )
-            SELECT value FROM numbers;
+            SELECT value FROM busy;
             """;
 
         var execution = Task.Run(() => _querier.ExecuteBoundedQuery(query));
