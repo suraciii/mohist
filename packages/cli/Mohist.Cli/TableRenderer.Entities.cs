@@ -267,4 +267,57 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"last activity:  {lastActivity}");
     }
 
+    private void RenderAgentJobList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No agent jobs");
+            return;
+        }
+
+        var headers = new[] { "job id", "status", "submitted", "terminal" };
+        var widths = new[] { IdSoftCap, 12, 24, 24 };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            cells.Add(new[]
+            {
+                Truncate(StringOf(row, "jobId"), IdSoftCap),
+                Truncate(StringOf(row, "status"), 12),
+                Truncate(StringOf(row, "submittedAt"), 24),
+                Truncate(StringOf(row, "terminalAt"), 24),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
+    }
+
+    private void RenderAgentJobView(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"job id:          {StringOf(data, "jobId")}");
+        _out.WriteLine($"status:          {StringOf(data, "status")}");
+        var message = StringOf(data, "message");
+        if (!string.IsNullOrEmpty(message))
+            _out.WriteLine($"message:         {Truncate(message, BodySoftCap)}");
+        var output = StringOf(data, "output");
+        if (!string.IsNullOrEmpty(output))
+            _out.WriteLine($"output:          {Truncate(output, BodySoftCap)}");
+        if (data["artifactUploadIds"] is JsonArray artifacts && artifacts.Count > 0)
+            _out.WriteLine($"artifacts:       {string.Join(",", artifacts.Select(a => a?.GetValue<string>() ?? ""))}");
+        var failureReason = StringOf(data, "failureReason");
+        if (!string.IsNullOrEmpty(failureReason))
+            _out.WriteLine($"failure reason:  {failureReason}");
+        var exitCode = NumberOf(data, "exitCode");
+        if (!string.IsNullOrEmpty(exitCode))
+            _out.WriteLine($"exit code:       {exitCode}");
+    }
+
 }

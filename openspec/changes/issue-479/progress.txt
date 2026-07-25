@@ -89,3 +89,82 @@ source.
   grain's authoritative [PersistentState] path is never blocked by a
   relational write failure. The recovery reminder re-writes the row on the
   next transition.
+
+## T-002: AgentJob read API surface and mo agent job CLI
+
+### Summary
+
+Exposed AgentJob status + terminal result over HTTP (list reads the relational
+mirror; view reads the grain directly so detail is authoritative) and added the
+`mo agent job list <agent>` / `mo agent job view <job-id>` CLI subgroup.
+
+### Files Added
+
+- `Api/AgentJobReadRoutes.cs` — `MapAgentJobReadRoutes` + DTOs
+  (`AgentJobListItemDto`, `AgentJobViewDto`) + internal handlers
+  `HandleListAsync` / `HandleViewAsync` (unit-testable without HTTP). View
+  enforces project isolation from `snapshot.ProjectId`; non-terminal jobs show
+  status without asserting a terminal result.
+- `tests/.../Agent/Api/AgentJobReadRoutesSpecs.cs` — 10 specs: list (recency +
+  fields, empty, unknown-agent 404, status filter), view (completed, failed,
+  non-terminal, unknown-id 404, cross-project 404, pre-cutover real-state) via
+  injected fakes (in-memory SQLite querier + fake grain + SingleAgentJobGrainFactory).
+- `packages/cli/tests/.../CliAgentJobCommandSpecs.cs` — 7 specs: list table,
+  empty notice, unknown-agent error, view table (terminal fields), view
+  non-terminal, unknown-job 404, --json projection.
+
+### Files Modified
+
+- `Agent/Grains/IAgentJobGrain.cs` — added append-only `[Id(7)] string? ProjectId`
+  to `AgentJobRuntimeSnapshot` (backward-compatible; existing 4-arg fake
+  constructors still compile). Needed for view-route project isolation.
+- `Agent/Grains/AgentJobGrain.cs` — `GetRuntimeSnapshotAsync` populates
+  ProjectId from `State.Input?.ProjectId ?? State.RoutedPlan?.ProjectId`.
+- `Infrastructure/Hosting/MohistApiRegistration.cs` — registered
+  `MapAgentJobReadRoutes` next to `MapAgentJobRoutes`.
+- CLI: `MohistCliApi.cs` (TableShape: AgentJobList, AgentJobView),
+  `ResourceOutput.cs` (cardinality + field arms), `TableRenderer.cs` +
+  `TableRenderer.Entities.cs` (RenderAgentJobList/View + dispatch),
+  `MohistCliCommands.Agent.cs` (BuildJob subgroup + list/view commands).
+
+### Codebase Patterns (additions)
+
+- **Read-route testability**: extract handler logic into `internal static
+  HandleListAsync/HandleViewAsync` taking resolved `ProjectInfo` (+ queriers /
+  IGrainFactory). The route lambda only does filter wiring +
+  `context.GetResolvedProject()`. Handlers are tested directly — no HTTP, no
+  real process. Mirrors the existing `AgentJobController.HandleValidateAsync`
+  pattern.
+- **Project isolation on view**: the grain key is a global GUID for manual
+  launches, so isolation is enforced at the handler from grain state, not the
+  route. An unknown job id → empty grain → `snapshot.ProjectId == null` → 404.
+  No separate "exists" probe needed.
+- **Non-terminal view does not assert a terminal result**: terminal-result
+  fields are populated ONLY when `GetStatusAsync()` returns Completed/Failed;
+  pending/running leaves them null (never fabricated). `GetTerminalResultAsync`
+  alone is insufficient because it synthesises a result mirroring current
+  status (and copies FailureReason) for non-terminal jobs.
+- **list DTO agentName**: the row carries only AgentId; agentName is filled
+  from the already-resolved `AgentInfo.Name` (constant across the
+  agent-scoped list — the query filters by that agentId).
+
+### Decisions / Gotchas
+
+- **AgentJobRuntimeSnapshot ProjectId**: chose to extend the existing snapshot
+  (append-only `[Id(7)]`) rather than add a new grain method. Backward-
+  compatible with all existing fake-grain constructors; the snapshot is the
+  natural "read view" of job state. `GetStatusAsync`+`GetTerminalResultAsync`
+  remain the status/result reads; the snapshot supplies the project id.
+- **`submittedAt` wire format**: `DateTimeOffset` with `+00:00` offset
+  serializes via JSON.Options (Web defaults) as `2026-07-25T12:00:00+00:00`,
+  NOT `...Z`. Assert with `Contains("2026-07-25T12:00:00")` (mirrors T-001).
+- **Running this workspace's .NET builds/tests**: the server csproj has a
+  post-build Target that runs `npm run build -w packages/web` UNLESS
+  `-p:SkipWebBuild=true` is passed. Building a server test project
+  transitively rebuilds the server → must use `-p:SkipWebBuild=true` (the repo
+  `npm run build`/`npm test` scripts already do). A fresh workspace also needs
+  `npm ci` before `npm run build`/`npm test` resolve web/runner deps.
+- **MTP test filtering**: `dotnet test --filter "FullyQualifiedName~X"` is
+  forwarded as a VSTest filter and IGNORED by Microsoft.Testing.Platform (runs
+  the whole suite). Test names are in the UTF-16LE log at
+  `TestResults/*.log` (convert with `iconv -f UTF-16LE -t UTF-8`).

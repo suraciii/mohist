@@ -25,6 +25,7 @@ internal static class AgentCommands
         agent.Subcommands.Add(BuildUpdate(api));
         agent.Subcommands.Add(BuildArchive(api));
         agent.Subcommands.Add(BuildSession(api));
+        agent.Subcommands.Add(BuildJob(api));
         agent.Subcommands.Add(BuildInstall(api));
 
         return agent;
@@ -1000,6 +1001,105 @@ internal static class AgentCommands
         if (!string.IsNullOrWhiteSpace(status))
             parts.Add($"status={Uri.EscapeDataString(status)}");
         return parts.Count == 0 ? "" : "?" + string.Join("&", parts);
+    }
+
+    private static Command BuildJob(MohistCliApi api)
+    {
+        var job = new Command(
+            "job",
+            "Read an Agent's work-result owner (issue-479). Subcommands: list <agent>, view <job-id>.");
+
+        job.Subcommands.Add(BuildJobList(api));
+        job.Subcommands.Add(BuildJobView(api));
+
+        return job;
+    }
+
+    private static Command BuildJobList(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "list",
+            "List AgentJobs for a given Agent profile. Resolves the agent ref client-side, then GETs .../agents/{agentId}/jobs.");
+        cmd.Aliases.Add("ls");
+        var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
+        var statusOpt = new Option<string?>("--status") { Description = "Filter by job status (pending, running, completed, failed)" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+
+        cmd.Arguments.Add(agentRefArg);
+        cmd.Options.Add(statusOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var agentRef = ctx.GetValue(agentRefArg);
+            var status = ctx.GetValue(statusOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return ListAsync();
+
+            async Task<int> ListAsync()
+            {
+                var (mode, exit) = api.ResolveOutputMode(output);
+                if (exit != 0) return exit;
+
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
+
+                var agent = await ResolveAgentAsync(api, resolvedProjectId, agentRef!);
+                if (agent is null)
+                    return 1;
+
+                var query = string.IsNullOrWhiteSpace(status)
+                    ? ""
+                    : $"?status={Uri.EscapeDataString(status)}";
+                return await api.PrintWithOutputAsync(
+                    ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}/jobs") + query,
+                    mode,
+                    nameof(MohistCliApi.TableShape.AgentJobList));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildJobView(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "view",
+            "Show an AgentJob's current status and terminal result. GETs .../agent-jobs/{jobId}.");
+        var jobIdArg = new Argument<string>("job-id") { Description = "Agent job id returned by launch" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+
+        cmd.Arguments.Add(jobIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var jobId = ctx.GetValue(jobIdArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return ViewAsync();
+
+            async Task<int> ViewAsync()
+            {
+                var (mode, exit) = api.ResolveOutputMode(output);
+                if (exit != 0) return exit;
+
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
+
+                return await api.PrintWithOutputAsync(
+                    ProjectAgentsPath(resolvedProjectId, $"/agent-jobs/{MohistCliCommands.Escape(jobId!)}"),
+                    mode,
+                    nameof(MohistCliApi.TableShape.AgentJobView));
+            }
+        });
+        return cmd;
     }
 
     // Shared across command groups (e.g. `mo issue watch add --agent <name>`),

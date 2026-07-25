@@ -150,7 +150,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.FailureReason,
             State.DispatchAttempts,
             State.RunnerAccepted,
-            State.PendingSessionClose is not null));
+            State.PendingSessionClose is not null,
+            State.Input?.ProjectId ?? State.RoutedPlan?.ProjectId));
 
     /// <summary>
     /// Returns the job's terminal result. Before the job has reached a terminal
