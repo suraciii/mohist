@@ -1,118 +1,120 @@
-# Self-Review — issue-479
+# Self-Review — issue-479 (pass 2)
 
-Reviewer: self (author pass). Artifacts reviewed: `proposal.md`, `design.md`,
-`tasks.json`, `specs/{agent-launch,agent-job-read,session-command-unification}/spec.md`.
+Reviewer: self, fresh pass after the pass-1 fixes. Artifacts reviewed:
+`proposal.md`, `design.md`, `tasks.json`, `specs/{agent-launch,agent-job-read,
+session-command-unification}/spec.md`.
 
-## Summary
+## Previous findings — status
 
-The plan is coherent in shape: three capabilities map cleanly to five vertical
-tasks, the dependency graph is a valid acyclic DAG with strictly-ordered
-priorities, every task carries a spec reference and test-backed acceptance
-criteria, and there is no standalone test task. Factual claims spot-checked
-against the codebase are correct (the `source-kind == "agent-launch"` gate is at
-`AgentSessionQuerier.cs:608`; `AgentSessionShow` renders `failureReason`/
-`failureCategory` at `ResourceOutput.cs:65-66`; the launch response drops the job
-key at `IAgentLauncher.cs:121`).
+Pass-1 findings are resolved:
 
-However, one spec/plan coherence defect must be fixed before building.
+- **F1 (spec over-claim)** — FIXED. `agent-job-read` requirement #4 is now
+  "AgentJob is the canonical work-result read path", scoped to the CLI reading
+  the result from `mo agent job view`; the #484-owned "session presents no
+  verdict" clause is removed and explicitly marked a separate concern. The
+  scenario is now deliverable by T-002.
+- **N1 (migration order)** — FIXED. Design Migration Plan reordered to match the
+  task graph (read model → job routes → launch identity → session route → CLI).
+- **N2 (cross-project isolation)** — FIXED. T-002 has an AC asserting
+  `agent-jobs/{jobId}` returns 404 when the job's `ProjectId` differs from the
+  route.
+- **N3 (historical jobs)** — ADDRESSED, but the chosen fix introduces a new
+  blocker (B1 below).
+- **N4 (T-001 spec fragment)** — FIXED. T-001 now references
+  `#List AgentJobs for an Agent`.
+
+DAG re-verified acyclic; priorities strictly ordered; all tasks carry spec refs
++ test-backed ACs; no standalone test task.
 
 ## Blocking finding
 
-### F1. `agent-job-read` spec requirement #4 over-claims what this issue delivers
+### B1. The grain-fallback for historical jobs cannot work once `[PersistentState]` is dropped
 
-`specs/agent-job-read/spec.md` requirement **"AgentJob is the sole work-result
-read path"** asserts:
+The N3 fix says `agent job view` "falls back to the grain" when no read-model
+row exists, and the design asserts this "makes view always-authoritative
+without a one-time backfill" (`design.md`, "Historical / in-flight jobs at
+cutover") and that "existing AgentJobs remain addressable by their existing
+stable ids" (`design.md`, "Rollback"). T-002 has an AC to the same effect.
 
-> "The CLI SHALL NOT present a competing terminal verdict on the AgentSession
-> read surface."
+These claims are **inconsistent with the chosen persistence migration.** D2/T-001
+make the relational store authoritative and **drop `[PersistentState("agent-job")]`**
+(`AgentJobGrain.cs:57`), loading state from `IAgentJobStore` on activation. But
+today `OnActivateAsync` reads the *old* Orleans grain storage
+(`AgentJobGrain.cs:75-76`), and every recovery path — terminal-close delivery,
+routed-launch advance, dispatch retry — branches on `State.Input` /
+`State.RoutedPlan` (`AgentJobGrain.cs:81-113`).
 
-with scenario:
+For a job that was running or already terminal at cutover, its state lives only
+in the old Orleans grain-storage blob. After `[PersistentState]` is dropped:
 
-> "the session read surface does not present a separate job-result verdict"
+- The grain activates, `IAgentJobStore.LoadAsync(jobKey)` finds **no row** (it
+  was never written), and loads default/empty state.
+- `State.Input is null && State.RoutedPlan is null` (`:81`) → the grain returns
+  early; recovery does not fire; a terminal job's `PendingSessionClose` is never
+  delivered.
+- The T-002 "grain fallback" then reads that **empty** grain, not the real
+  orphaned state.
 
-This is **not deliverable by issue-479 alone.** The proposal and design
-Non-Goals explicitly defer removal of `failureReason`/`failureCategory` from the
-Session DTO to **#484** ("No removal of Session terminal-state fields from DTOs
-— that is #484"), and no task in `tasks.json` removes them. Today the CLI
-`mo ... session show` table shape renders both fields
-(`ResourceOutput.cs:65-66`), and nothing in T-002/T-005/T-003 removes them. So
-after this issue lands, `mo session show` still emits a competing verdict, and a
-test written for that scenario would fail.
+So the fallback does not recover pre-cutover / in-flight jobs, and the plan's
+"remain addressable" / "always-authoritative without backfill" claims are false
+under the primary migration path. Worse, an in-flight job re-activating to empty
+state is a correctness hazard (lost runner assignment, lost terminal-close
+obligation), not merely a stale read.
 
-The spec therefore asserts a MUST that the plan does not deliver, and silently
-depends on #484 — contradicting the proposal's "interlocking, not blocking"
-framing. This will surface as a failing scenario during implementation.
+**Fix (pick one and make all artifacts consistent):**
+- Retain `[PersistentState]` as an activation load source and write-through to
+  the relational row (the D2 "alternative (a)" mirror), so grains always load
+  their real state and the fallback works — accepting the documented dual-write
+  caveat; or
+- Add a one-time backfill that reads each in-flight/terminal job from Orleans
+  grain storage and writes its `AgentJobRow` before the new load path takes over
+  (then the "no backfill" claim must be removed); or
+- Explicitly document that in-flight jobs at cutover are **not** preserved and
+  require a deploy-time drain (and delete the "remain addressable" /
+  "always-authoritative" claims plus the T-002 grain-fallback AC, since those
+  jobs are intentionally lost).
 
-**Fix (one of):**
-- Scope the requirement to what this issue owns — "the CLI reads a launch's
-  terminal outcome from `mo agent job view`, the canonical result path" — and
-  drop the "session presents no verdict" clause (move that assertion into #484's
-  spec, which owns the DTO cleanup); or
-- Make the dependency explicit: declare a hard ordering on #484 in the proposal
-  and `tasks.json` (e.g. a predecessor or a note that the scenario is satisfied
-  once #484 lands in the same release).
+Until one of these is chosen, the persistence section of the plan is
+self-contradictory and not safely buildable.
 
-Either way, the spec and the plan's non-goals/sequencing must agree before a
-builder starts.
+## Non-blocking findings
 
-## Non-blocking findings (should fix, do not block PASS on their own)
+### N1'. Design D6 prose is looser than what is delivered
 
-### N1. Design migration-plan ordering contradicts the task dependency order
+D6 says "the CLI stops reading result from it [the Session DTO]." No task
+removes `failureReason`/`failureCategory` from the `mo session show` table shape
+(that is #484-owned), so after this issue `mo session show` still renders those
+columns. The **spec** is correct (it no longer asserts the session presents no
+verdict), so no test fails; but the D6 sentence should be softened to "the
+canonical result read path becomes `agent job`; the residual session columns are
+removed by #484."
 
-`design.md` "Migration Plan" lists **step 2 = launch identity (D3)** *before*
-**step 3 = job routes**. But `tasks.json` makes **T-003 (launch identity)
-depend on T-002 (job routes + CLI)** (T-003 AC: "jobId returned at launch is
-accepted verbatim by the T-002 view route"). A builder following the design's
-sequence vs the tasks' `dependsOn` gets conflicting signals. Reconcile: either
-rewrite the design migration-plan step order to match the tasks (routes before
-launch), or relax T-003 → T-002 and move the "jobId accepted by view route"
-check into a later integration verification.
+### N2'. `mo session list --run` does not validate the run belongs to the project
 
-### N2. No cross-project isolation assertion for `agent job view`
-
-T-004 asserts a cross-project 404 for sessions, but T-002
-(`GET /api/projects/{projectRef}/agent-jobs/{jobId}`) has no acceptance
-criterion that a job whose `ProjectId` differs from the route's project returns
-404. Manual-launch job keys are global GUIDs (`agent-job-launch-{guid}`), so the
-view handler must verify the row's `ProjectId` against the route. Add an AC to
-T-002 mirroring T-004's cross-project isolation.
-
-### N3. Historical / in-flight jobs at cutover are not listable
-
-T-001 populates the `AgentJobs` read model only on grain transitions going
-forward. A job that is running or already terminal at deployment has no row
-until its grain next activates and writes, so `mo agent job list/view` returns
-empty / 404 for it. The design "Rollback" acknowledges the read model "populates
-going forward" but no task addresses backfill or a fallback. Recommend either a
-documented `agent job view` fallback to the grain (`GetTerminalResultAsync`,
-already on `IAgentJobGrain.cs:18`) when the row is absent, or a one-time
-backfill; at minimum state the limitation explicitly in T-001.
-
-### N4. T-001 `spec` field has no requirement fragment
-
-T-001 is the only task whose `spec` is a bare capability path
-(`specs/agent-job-read/spec.md`) with no `#requirement` fragment; every other
-task references a concrete requirement. Acceptable for an infrastructure task,
-but for consistency either point it at a concrete requirement or note that it is
-foundational storage only.
+T-004 asserts cross-project 404 for `show`/`transcript` by id, and its note
+claims the unified list "resolves project from the route, not from the run." But
+the `?run=` filter delegates to `ListByWorkflowAsync(runId)`, which is not
+project-scoped, and no AC asserts a run belonging to a different project is
+rejected or empty. Either add an AC (the run must belong to the route's project)
+or note that `--run` is project-validated. (Already half-listed under design
+Open Questions; promote it to an AC so it is not dropped at build time.)
 
 ## What is solid
 
-- Capability → task coverage is complete: `agent-launch` → T-003;
-  `agent-job-read` → T-001 + T-002; `session-command-unification` → T-004 +
-  T-005.
-- DAG verified acyclic; every `dependsOn` points to a strictly-lower-priority
-  task; two parallel foundations (T-001, T-004) correctly fan into T-005.
-- Each task has verifiable acceptance criteria with explicit test-coverage
-  statements and a build/test pass clause; no standalone test task.
-- Design decisions each carry rationale + rejected alternatives; the top risk
-  (AgentJob grain persistence migration) is flagged with a documented fallback.
-- Specs are well-formed (4-hashtag scenarios, SHALL/MUST language, every
-  requirement has ≥1 scenario).
+- Capability → task coverage complete; DAG acyclic with strict priority
+  ordering; every task has spec ref + test-backed ACs.
+- F1/N1/N2/N4 from pass 1 are genuinely resolved; spot-checks against the
+  codebase still hold (`OnActivateAsync` reads `[PersistentState]` at
+  `AgentJobGrain.cs:75-76`; recovery branches on `State` at `:81-113`;
+  `FindGenericSessionAsync` source-kind gate at `AgentSessionQuerier.cs:608`).
+- Decisions carry rationale + rejected alternatives; the top risk (grain
+  persistence migration) is flagged — B1 is precisely the unresolved detail
+  inside that risk.
 
 ## Verdict
 
-F1 is a must-fix: the `agent-job-read` spec asserts a requirement the plan
-defers to #484, so the plan is not buildable as written.
+B1 is a must-fix: the persistence-migration path contradicts the plan's own
+"jobs remain addressable / view is always-authoritative" claims, so the plan is
+not safely buildable as written.
 
 <promise>FAIL</promise>
