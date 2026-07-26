@@ -157,8 +157,11 @@ public class NoActiveProjectMessageTests
     }
 
     [Fact]
-    public async Task IssueSessions_NoProjectAndNoActiveProject_DiagnosticMatchesHelper()
+    public async Task SessionList_ByIssue_NoProjectAndNoActiveProject_DiagnosticMatchesHelper()
     {
+        // `mo issue sessions <num>` was retired by issue-479 T-005; the
+        // unified list is `mo session list --issue <num>`. The no-project
+        // diagnostic must still match the canonical helper.
         var files = new FakeFileSystem();
         var http = new RecordingHttpHandler();
         var output = new StringWriter();
@@ -166,7 +169,7 @@ public class NoActiveProjectMessageTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "sessions", "83"],
+            ["session", "list", "--issue", "83"],
             output,
             error,
             files,

@@ -1121,6 +1121,11 @@ internal sealed class MohistCliApi
         IssueWatchList,
         AgentJobList,
         AgentJobView,
+        SessionList,
+        SessionShow,
+        SessionTranscript,
+        SessionFollowup,
+        SessionCancel,
     }
 
     internal static TableShape ParseTableShape(string? shape)

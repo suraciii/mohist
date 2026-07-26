@@ -343,7 +343,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `workflow` 当前主要表示 WorkflowRun；Workflow Profile 位于更深的 Project 子命令。目标是 `workflow` 管 Profile、`run` 管执行。
 - Run 控制目前同时出现在 workflow 和 issue 下。目标只保留 `run` 的规范入口，Issue 号作为 `--issue` 选择器。
-- AgentSession 目前按 Issue 与 Agent 来源分散在不同路径。目标统一到 `session`。
 - 资源读取和修改混用 `show`、`get`、`update` 等词。目标统一为 `view`、`edit`。
 - 项目作用域、输出模式和默认输出尚未统一。目标只保留 `--project` 与字段选择式 `--json`。
 - 当前根帮助、叶子帮助和 Mohist Skill 含有重复信息及部分内部实现描述。目标按本文的渐进披露边界重写。
@@ -357,5 +356,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `runner` / `server` / `service` 三层职责：`runner` 只表示 Server 已注册的远程执行资源（`list`/`view`/`status`），`server` 只表示当前连接的 Mohist Server 应用（`status`/`health`/`info`/`logs`，其中 `logs` 是应用日志）；本机受管进程统一为 `mo service <verb> server|runner`。`project status` 已迁移到 `server status`；`system logs` 已合并到 `server logs`，`system` 命令组整体退役。
 - Agent launch 同时暴露 Job 与 Session 的稳定身份：`mo agent launch <agent>` 直接挂在 `agent` 下（不再经过 `agent session launch`），打印 `jobId` 与 `sessionId`；HTTP 201 同样同时返回 `jobId`、`sessionId` 与各自读取链接，`jobId` 被 `agent job view` 原样接受（无 id 翻译）。
+- AgentSession 对话统一到顶层 `mo session`：`mo session` 直接挂在根下，`show` / `transcript` / `followup` / `compact` / `reset` / `cancel` 都以稳定 Session ID 寻址，不论该 Session 来自 Agent launch 还是 Workflow run；`list` 通过 `--agent <agent>` / `--issue <number>` / `--run <run-id>` 之一筛选，不创建 `mo issue session` 与 `mo agent session` 两套重复能力。`mo issue sessions <number>` 与 `mo agent session …` 已退役，运行返回 command-not-found。
 
 对应源码：`packages/cli/`。

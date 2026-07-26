@@ -401,3 +401,165 @@ link until T-005 switches the CLI over.
 - Workflow list projections now include issue context references for both `?issue=` and `?run=`; source-specific fields remain absent for the opposite source.
 - Added assertions for workflow run identity, session name, and context references on both workflow list paths.
 - Regression verification passed: server specs 3108/3108 and `npm run build` passed with zero .NET warnings/errors. The first baseline suite run had one unrelated runner-dispatch pickup race; the immediate rerun passed.
+
+## T-005: Top-level mo session CLI and retirement of duplicate session groups
+
+### Summary
+
+Added the top-level `mo session` command group (list / show / transcript /
+followup / compact / reset / cancel), retired the source-specific
+`mo agent session` and `mo issue session` subgroups, and aligned docs and
+ownership tables. Source is now a discovery filter (`list --agent |
+--issue | --run`), not a separate capability set. `session cancel`
+requests runtime interruption only and never touches the owning AgentJob
+lifecycle (the job remains the sole terminal authority — design D6).
+
+### Files Added
+
+- `Mohist.Cli/MohistCliCommands.Session.cs` — `SessionCommands.Build(api)`
+  with the seven subcommands. `show` / `transcript` hit the T-004
+  unified `/api/projects/{projectRef}/sessions/{sessionId}[/transcript]`
+  routes. `followup` / `compact` / `reset` / `cancel` hit the existing
+  id-keyed `/api/projects/{projectRef}/agent-sessions/{sessionId}/…`
+  routes (which already resolve canonically by id for both sources).
+  `list` requires exactly one of `--agent` / `--issue` / `--run` and
+  forwards a project-scoped query to the unified list route.
+- `packages/cli/tests/Mohist.Cli.Tests/CliSessionCommandSpecs.cs` — 41
+  specs covering help, command-not-found for the retired subgroups, show
+  and transcript for both sources, list by each filter (incl. no-filter
+  400 and multi-filter 400), followup (text/file/stdin, mutual
+  exclusion, unknown session, terminal-session conflict,
+  no-touch-AgentJob-routes), cancel (state honestly, no-touch-job,
+  unknown session, project override, server-unavailable), and recovery
+  (compact/reset, not-found).
+
+### Files Modified
+
+- `Mohist.Cli/MohistCliApi.cs` — added `TableShape.SessionList`,
+  `SessionShow`, `SessionTranscript`, `SessionFollowup`, `SessionCancel`
+  to the public enum.
+- `Mohist.Cli/ResourceOutput.cs` — registered the new shapes
+  (Collection cardinality for `SessionList`; per-shape field lists).
+- `Mohist.Cli/TableRenderer.cs` — dispatch cases for the five new
+  shapes.
+- `Mohist.Cli/TableRenderer.Entities.cs` — `RenderSessionList`,
+  `RenderSessionShow`, `RenderSessionTranscript`, `RenderSessionFollowup`,
+  `RenderSessionCancel`, plus a `FormatSessionOwner` helper that picks
+  `agentName (agentId)` for agent-launch rows and `workflowRunId/name`
+  for workflow rows. Reused the existing `FormatTokenUsage` helper in
+  `TableRenderer.Issues.cs` (no duplicate added).
+- `Mohist.Cli/MohistCliCommands.cs` — `root.Subcommands.Add(SessionCommands.Build(api));`
+  registered directly under root.
+- `Mohist.Cli/MohistCliCommands.Agent.cs` — removed
+  `BuildSession` and the seven `BuildSession{List,Show,Transcript,
+  Compact,Reset,Followup,Cancel}` helpers. Also removed the now-orphaned
+  `ProjectAgentSessionsPath` helper.
+- `Mohist.Cli/MohistCliCommands.Issue.cs` — removed
+  `BuildSessions` and `BuildSession` registrations.
+- `Mohist.Cli/MohistCliCommands.Issue.Session.cs` — DELETED (whole
+  file retired; the per-issue session commands are now top-level
+  `mo session <verb> <session-id>`).
+- `packages/cli/tests/Mohist.Cli.Tests/CliAgentSessionCommandSpecs.cs` —
+  DELETED. Its scenarios are covered by the new top-level
+  `CliSessionCommandSpecs`.
+- `packages/cli/tests/Mohist.Cli.Tests/CliIssueSessionSpecs.cs` —
+  DELETED. Same as above; top-level tests cover both sources via the
+  unified route.
+- `packages/cli/tests/Mohist.Cli.Tests/CliAgentSessionRecoverySpecs.cs` —
+  renamed test paths from `["agent", "session", "compact|reset", …]`
+  to `["session", "compact|reset", …]` (the route URLs and stable
+  session-id assertions are unchanged — the same id-keyed
+  `agent-sessions/{id}/…` action routes are hit either way).
+- `packages/cli/tests/Mohist.Cli.Tests/CliRootCommandShapeTests.cs` —
+  added `session` to the required top-level resource groups
+  (`Root_Help_ListsResourceGroupsAndInfoOnly_NoBareVerbs`).
+- `packages/cli/tests/Mohist.Cli.Tests/Api/IssueCliProjectRefAndOutputTests.cs`
+  — replaced the two `mo issue sessions` tests with
+  `SessionList_Help_…` and `SessionList_ByIssue_ByProjectName_…`
+  asserting the new unified route shape
+  (`/api/projects/{projectRef}/sessions?issue={n}`).
+- `packages/cli/tests/Mohist.Cli.Tests/Project/Api/NoActiveProjectMessageTests.cs`
+  — replaced `IssueSessions_NoProjectAndNoActiveProject_…` with
+  `SessionList_ByIssue_NoProjectAndNoActiveProject_…` (same diagnostic,
+  new command path).
+- `docs/cli-reference.md` — closed the line-346 gap note
+  ("AgentSession currently scattered across Issue and Agent paths…")
+  and added a closed entry under "已闭合" describing the unified
+  top-level `mo session` group.
+- `docs/agents.md` — `## AgentSession 来源` section now documents the
+  `mo session …` addressing surface (show/transcript/followup/compact/
+  reset/cancel/list) and the cancel-only-runtime guarantee.
+
+### Codebase Patterns (additions)
+
+- **URL construction in helpers**: `MohistCliCommands.Agent.cs` has a
+  `ProjectAgentsPath(projectId, path)` helper that adds a leading
+  `/` if `path` is non-empty but ALSO when `path == ""` — the helper
+  returns `/api/projects/{id}/sessions` only if you pass a non-`"/"`
+  prefix. The first attempt at `ProjectSessionsPath(id, "")` returned
+  `/api/projects/{id}/sessions/` (trailing slash) because the
+  conditional added the leading `/`. For the list path the
+  test-only URL is built directly as
+  `$"/api/projects/{…}/sessions{query}"` to keep the trailing-slash
+  out (the server's `MapGet("/")` normalizes either form). Keep this
+  pattern in mind for any future top-level list commands.
+- **Unified show-render owner**: `RenderSessionShow` branches on
+  `data["source"]` to render either `agent: <id> (<name>)` (agent-launch)
+  or `workflow run: <id>` + `session name: <name>` (workflow). The
+  `FormatSessionOwner` helper applies the same branching to the list
+  table. Absent-when-empty from the server side keeps the wire shape
+  clean — the renderer just checks for the present field.
+- **Test file size**: CLI tests have no 24KB ratchet (that's a
+  server-side ArchTest). Deleting `CliAgentSessionCommandSpecs.cs`
+  (60KB) + `CliIssueSessionSpecs.cs` (37KB) and adding a focused
+  40-spec `CliSessionCommandSpecs.cs` actually shrinks the CLI test
+  suite while exercising the new contract end-to-end.
+- **Mutual-exclusion shared helper**: `BodyInputResolver.SourceFlags`
+  is the canonical pattern for `--text | --text-file | --text-stdin`
+  mutual-exclusion. The new top-level followup uses the same helper,
+  so the existing mutual-exclusion / empty-text / blank-inline-with-
+  file cases are all test-covered by their existing assertions.
+
+### Decisions / Gotchas
+
+- **Server URL handling**: the T-004 unified list is registered as
+  `MapGet("/", ...)` under `/api/projects/{projectRef}/sessions`.
+  Either `/sessions` or `/sessions/` hits the same route, but the
+  HttpClient preserves whatever the CLI sends. Build the URL without
+  a trailing slash to match the agent's `mo session list --issue 42`
+  expectation (and the agent's mental model). The test expectations
+  in `IssueCliProjectRefAndOutputTests` and `CliSessionCommandSpecs`
+  were updated to match.
+- **No filter → 400 in CLI**: the server's T-004 route also rejects
+  no-filter with `session_filter_required`. The CLI short-circuits
+  the same way (with a clearer "one of --agent, --issue, --run is
+  required" message) and returns exit code 1 with no HTTP call. This
+  is consistent with the existing pattern in `MohistCliCommands`
+  (e.g. `--output json` validation).
+- **Cancel-only-runtime assertion**: the test
+  `SessionCancel_OnlyHitsCancelRoute_DoesNotTouchAgentJobRoutes`
+  asserts the single request path is the `/agent-sessions/{id}/cancel`
+  POST and explicitly checks the path does NOT contain `/agent-jobs/`,
+  `/jobs/`, `/dispatch`, or `/runs`. This pins the D6 invariant at
+  the CLI boundary (the server already enforces job-lifecycle
+  ownership separately).
+- **Existing recovery tests**: the compact/reset tests in
+  `CliAgentSessionRecoverySpecs` were renamed to use the new top-level
+  `session compact|reset` path. The HTTP route URL
+  (`/api/projects/{projectRef}/agent-sessions/{id}/compact|reset`)
+  is unchanged because followup/compact/reset/cancel already resolved
+  canonically by id for both sources.
+- **Pre-existing flaky test (re-confirmed)**: the first full-suite
+  run hit the documented
+  `SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch`
+  race; the immediate rerun passed with 3108/3108 server specs.
+
+### Verification
+
+- `npm run build` passed with zero .NET warnings/errors.
+- `npm test` passed end-to-end after a documented pre-existing runner
+  race retry: 175 workflow-definition, 1321 CLI (incl. 41 new
+  CliSessionCommandSpecs, the renamed CliAgentSessionRecoverySpecs, and
+  the updated CliRootCommandShapeTests / IssueCliProjectRefAndOutputTests
+  / NoActiveProjectMessageTests), 1455 server unit, 3108 server spec,
+  32 arch, 5130 web (1 skipped), 1426 runner.

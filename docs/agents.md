@@ -112,6 +112,14 @@ AgentSession 的会话内容按发生顺序连续展示。每次输入是这段�
 来源在 Session 整个生命周期内不改变。模型、prompt、执行后端配置相同，不会让两段
 Session 合并；当前 Runtime Session 更换也不会改变 AgentSession 来源。
 
+无论来源，CLI 通过顶层 `mo session` 寻址：
+
+- `mo session show <session-id>` / `mo session transcript <session-id>` 通过
+  `/api/projects/{projectRef}/sessions/{sessionId}` 路由按 ID 读取（不再按来源分两套命令）。
+- `mo session followup` / `compact` / `reset` / `cancel` 同样只接 Session ID。
+- `mo session list` 通过 `--agent <agent>` / `--issue <number>` / `--run <run-id>` 之一筛选，来源只是发现条件。
+- `mo session cancel` 只中断当前 Runtime 执行；不重写或不推进 AgentJob 生命周期，AgentJob 仍是工作结果的唯一终裁者。
+
 ## 当前 Runtime Session 与缺失恢复
 
 AgentSession ID 是 Mohist 的稳定身份；OpenCode Session 或 Pi Session 是执行后端的

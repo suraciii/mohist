@@ -321,4 +321,166 @@ internal sealed partial class TableRenderer
             _out.WriteLine($"exit code:       {exitCode}");
     }
 
+    private void RenderSessionList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No sessions");
+            return;
+        }
+
+        var headers = new[] { "session id", "source", "owner", "last activity" };
+        var widths = new[] { IdSoftCap, 14, TitleSoftCap, 24 };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            if (row is not JsonObject obj) continue;
+            var id = StringOf(obj, "id");
+            var source = StringOf(obj, "source");
+            var owner = FormatSessionOwner(obj);
+            var lastActivity = StringOf(obj, "lastActivityAt");
+            cells.Add(new[]
+            {
+                Truncate(id, IdSoftCap),
+                Truncate(source, 14),
+                Truncate(owner, TitleSoftCap),
+                Truncate(lastActivity, 24),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
+    }
+
+    private void RenderSessionShow(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var id = StringOf(data, "id");
+        var source = StringOf(data, "source");
+        var activity = StringOf(data, "activity");
+        var createdAt = StringOf(data, "createdAt");
+        var lastActivityAt = StringOf(data, "lastActivityAt");
+        var model = StringOf(data, "model") ?? StringOf(data, "resolvedModel");
+
+        _out.WriteLine($"session id:     {id}");
+        _out.WriteLine($"source:         {source}");
+        _out.WriteLine($"activity:       {activity}");
+        if (string.Equals(source, "agent-launch", StringComparison.Ordinal))
+        {
+            _out.WriteLine($"agent:          {StringOf(data, "agentId")} ({StringOf(data, "agentName")})");
+        }
+        else if (string.Equals(source, "workflow", StringComparison.Ordinal))
+        {
+            _out.WriteLine($"workflow run:   {StringOf(data, "workflowRunId")}");
+            _out.WriteLine($"session name:   {StringOf(data, "sessionName")}");
+        }
+        _out.WriteLine($"created:        {createdAt}");
+        _out.WriteLine($"last active:    {lastActivityAt}");
+        if (!string.IsNullOrEmpty(model))
+            _out.WriteLine($"model:          {model}");
+
+        var contextRefs = data["contextRefs"] as JsonObject;
+        if (contextRefs is not null)
+        {
+            var issueNumber = NumberOf(contextRefs, "issueNumber");
+            var epicNumber = StringOf(contextRefs, "epicNumber");
+            var repository = StringOf(contextRefs, "repository");
+            var workspacePath = StringOf(contextRefs, "workspacePath");
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(issueNumber))
+                parts.Add($"issue #{issueNumber}");
+            if (!string.IsNullOrEmpty(epicNumber))
+                parts.Add($"epic #{epicNumber}");
+            if (!string.IsNullOrEmpty(repository))
+                parts.Add($"repo: {repository}");
+            if (!string.IsNullOrEmpty(workspacePath))
+                parts.Add($"ws: {workspacePath}");
+            if (parts.Count > 0)
+                _out.WriteLine($"context:        {string.Join(", ", parts)}");
+        }
+
+        var usage = data["usage"] as JsonObject;
+        if (usage is not null)
+        {
+            var totalTokens = NumberOf(usage, "totalTokens");
+            var inputTokens = NumberOf(usage, "inputTokens");
+            var outputTokens = NumberOf(usage, "outputTokens");
+            var costAmount = NumberOf(usage, "costAmount");
+            var costCurrency = StringOf(usage, "costCurrency");
+            var costText = string.IsNullOrEmpty(costAmount) ? "" : $"{costAmount} {costCurrency}".Trim();
+            var tokenText = FormatTokenUsage(inputTokens, outputTokens, totalTokens);
+            if (!string.IsNullOrEmpty(tokenText))
+                _out.WriteLine($"tokens:         {tokenText}");
+            if (!string.IsNullOrEmpty(costText))
+                _out.WriteLine($"cost:           {costText}");
+        }
+    }
+
+    private void RenderSessionTranscript(JsonNode? data)
+    {
+        var turns = data?["turns"] as JsonArray ?? new JsonArray();
+        var partCount = data is null ? "" : NumberOf(data, "partCount");
+        var firstActivity = turns.Count > 0 ? StringOf(turns[0], "startedAt") : "";
+        var lastActivity = data is null ? "" : StringOf(data, "lastActivityAt");
+
+        _out.WriteLine($"turns:          {turns.Count}");
+        _out.WriteLine($"parts:          {partCount}");
+        _out.WriteLine($"first activity: {firstActivity}");
+        _out.WriteLine($"last activity:  {lastActivity}");
+    }
+
+    private void RenderSessionFollowup(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var status = StringOf(data, "status");
+        var statusText = string.IsNullOrEmpty(status) ? "(no status returned)" : status;
+        _out.WriteLine($"delivery: {statusText}");
+    }
+
+    private void RenderSessionCancel(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var state = StringOf(data, "state");
+        var stateText = string.IsNullOrEmpty(state) ? "(no state returned)" : state;
+        _out.WriteLine($"state: {stateText}");
+    }
+
+    private static string FormatSessionOwner(JsonObject obj)
+    {
+        var source = StringOf(obj, "source");
+        if (string.Equals(source, "agent-launch", StringComparison.Ordinal))
+        {
+            var agentId = StringOf(obj, "agentId");
+            var agentName = StringOf(obj, "agentName");
+            if (!string.IsNullOrEmpty(agentName))
+                return $"{agentName} ({agentId})";
+            return agentId;
+        }
+        if (string.Equals(source, "workflow", StringComparison.Ordinal))
+        {
+            var run = StringOf(obj, "workflowRunId");
+            var name = StringOf(obj, "sessionName");
+            if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(run))
+                return $"{run}/{name}";
+            return !string.IsNullOrEmpty(run) ? run : name;
+        }
+        return source;
+    }
+
 }

@@ -42,6 +42,7 @@ public class CliRootCommandShapeTests
             "notification",
             "activity",
             "event",
+            "session",
         ];
         foreach (var name in requiredResourceGroups)
             Assert.Contains($"\n  {name} ", stdout);
