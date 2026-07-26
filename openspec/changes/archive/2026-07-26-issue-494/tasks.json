@@ -1,0 +1,45 @@
+{
+  "project": "mohist-local",
+  "description": "Move Web and runner lifecycle push delivery out of durable CloudEvent dispatch while preserving authoritative state reconciliation.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Deliver bounded best-effort Web event push",
+      "spec": "specs/event-ui-push-isolation/spec.md#push-delivery-is-isolated-from-durable-event-delivery",
+      "description": "Add the bounded in-process event-push queue, worker, and distinct push-handler registration path. Migrate the Web EventBridge to this path while preserving subscriber filtering and its existing CloudEvent envelope, and remove it from durable subscription/dead-letter participation.",
+      "acceptanceCriteria": [
+        "A persisted domain event is non-blockingly offered to the bounded push queue without awaiting Web connection lookup or SignalR delivery from EventDispatcherService.",
+        "Queue saturation, connection lookup failure, handler failure, and send timeout are logged as best-effort outcomes and cannot retry, block source ordering, or create a durable-dispatch dead letter.",
+        "The push worker receives TimeProvider and applies the configured delivery timeout through a TimeProvider-backed cancellation token passed to each handler.",
+        "Subscribed Web connections continue to receive the existing OnEvent CloudEvent envelope and unsubscribed connections receive no event.",
+        "Focused server tests cover queue admission/drop, worker failure containment, FakeTimeProvider-driven timeout cancellation with an awaitable worker signal, Web fan-out preservation, and the absence of EventBridge from the durable subscription collection; the relevant SpecTests project passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Bounded event-push infrastructure and Web EventBridge migration with focused server tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the queue process-local and non-persistent. Do not use the unbounded IBackgroundTaskLauncher for per-event push work or wall-clock/scheduler waits for timeout behavior."
+    },
+    {
+      "id": "T-002",
+      "title": "Route runner terminal status through event push",
+      "spec": "specs/event-ui-push-isolation/spec.md#terminal-workflow-status-notifications-retain-their-lifecycle-meaning",
+      "description": "Migrate runner terminal workflow-status delivery from its durable subscription to the event-push handler path introduced by T-001. Preserve the existing runner lookup and ReceiveWorkflowRunStatus payload for Completed and Stopped only, while retaining runner polling as recovery for dropped pushes.",
+      "acceptanceCriteria": [
+        "Completed and Stopped workflow events attempt the existing runner status notification only when an assigned runner is connected, without participating in durable retry or dead-letter handling.",
+        "Failed workflow events do not emit a terminal runner notification or make a recoverable workspace cleanup-eligible.",
+        "Disconnected runners, router errors, SignalR failures, and FakeTimeProvider-driven timeout cancellation are contained as best-effort outcomes and do not delay or retry the source workflow event.",
+        "Focused server tests cover connected delivery payloads, offline and send-failure isolation, Failed exclusion, removal of the legacy durable handler expectation, and runner status-poll reconciliation; the relevant SpecTests project passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner terminal-status push migration with regression coverage for lifecycle and reconciliation behavior.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Do not change the status polling endpoint, runner workspace policy, or SignalR wire payload."
+    }
+  ]
+}

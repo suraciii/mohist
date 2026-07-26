@@ -11,23 +11,32 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Subscriptions;
 public class RunnerWorkflowTerminalStatusHandlerSpecs
 {
     [Fact]
-    public async Task HandleAsync_RouterThrows_ExceptionPropagates()
+    public async Task HandleAsync_RouterThrows_ExceptionPropagatesToPushWorkerBoundary()
     {
-        // issue-363 T-002: the handler awaits the router call on the
-        // dispatch stack. Any exception escaping RouteAsync must reach
-        // the durable dispatcher so it can retry/dead-letter the event
-        // for this handler — the handler MUST NOT detach the router
-        // invocation or swallow the exception.
         var observed = new List<string>();
         var router = new ThrowingStatusRouter(observed, new InvalidOperationException("router unavailable"));
         var handler = new RunnerWorkflowTerminalStatusHandler(router, NullLogger<RunnerWorkflowTerminalStatusHandler>.Instance);
 
         var evt = BuildTerminalEvent("wr_propagate", EventCatalog.ReverseDns.WorkflowRunCompleted);
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
             handler.HandleAsync(evt, CancellationToken.None));
-        Assert.Equal("router unavailable", ex.Message);
         Assert.Equal(new[] { "wr_propagate:Completed" }, observed);
+    }
+
+    [Fact]
+    public async Task HandleAsync_FailedEvent_IsFilteredOut()
+    {
+        var observed = new List<string>();
+        var handler = new RunnerWorkflowTerminalStatusHandler(
+            new RecordingStatusRouter(observed),
+            NullLogger<RunnerWorkflowTerminalStatusHandler>.Instance);
+        var evt = BuildTerminalEvent("wr_failed", EventCatalog.ReverseDns.WorkflowRunFailed);
+
+        Assert.False(handler.Filter(evt));
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        Assert.Empty(observed);
     }
 
     [Fact]

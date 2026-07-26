@@ -984,6 +984,8 @@ public class EventDispatcherSpecs
         Assert.Equal(5, options.MaxAttempts);
         Assert.Equal(TimeSpan.FromSeconds(1), options.BaseBackoff);
         Assert.Equal(TimeSpan.FromSeconds(30), options.MaxBackoff);
+        Assert.Equal(256, options.PushQueueCapacity);
+        Assert.Equal(TimeSpan.FromSeconds(5), options.PushDeliveryTimeout);
     }
 
     [Fact]

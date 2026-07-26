@@ -1,0 +1,26 @@
+## Codebase Patterns
+
+- Durable event handlers are discovered from `ICloudEventHandler` plus `SubscriptionAttribute` and exposed as `IEnumerable<Subscription>`.
+- Web EventBridge now uses the separate `ICloudEventPushHandler` plus `EventPushAttribute`; it remains responsible for subscriber filtering and the existing CloudEvent envelope.
+- Push delivery is process-local: `EventPushQueue.TryEnqueue` is synchronous and bounded, while `EventPushWorker` owns handler matching, TimeProvider-backed cancellation, and failure containment.
+
+## T-001
+
+- Added the bounded event push queue, hosted worker, independent push registration collection, and dispatcher enqueue hook.
+- Removed EventBridge from durable subscriptions and updated dead-letter coverage to assert it cannot be redelivered as a durable handler.
+- Added focused queue admission, handler failure containment, FakeTimeProvider timeout cancellation, Web fan-out, and registration tests.
+- The server build must use `-p:SkipWebBuild=true` in this workspace because the web workspace dependencies are not installed; the direct SpecTests assembly runner supports class filters when `dotnet test` ignores VSTest filters under Microsoft Testing Platform.
+
+## T-002
+
+- Converted `RunnerWorkflowTerminalStatusHandler` from durable `ICloudEventHandler` registration to `ICloudEventPushHandler` and `EventPushAttribute`; it still resolves lineage and routes only Completed/Stopped.
+- The runner router now rejects non-terminal statuses, so Failed cannot produce a status push even if called directly; assignment lookup, connected-runner filtering, payload, and failure containment remain unchanged.
+- Added registration, Failed exclusion, and missed-Stopped polling reconciliation coverage. Focused runner/event-push coverage passes (15 tests).
+
+## Review fixes
+
+- Runner status routing now passes the event-push worker cancellation token directly to SignalR, so the configured TimeProvider-backed delivery timeout is the only timeout for this path.
+- Added FakeTimeProvider coverage that drives a real runner SignalR send through the push worker and observes cancellation at the transport boundary.
+- Moved dispatcher push coverage into `EventPushDispatcherSpecs`; it drives a failing push handler through the bounded worker and verifies the same-source next event settles without a durable retry or dead letter.
+- Restored the existing `EventDispatcherSpecs.cs` size baseline after removing the added test from that over-budget file.
+- Verification: all UnitTests (1490) and ArchTests (33) pass; focused runner router (7) and dispatcher push (2) tests pass. The full SpecTests run retains the previously recorded unrelated `AgentJobTerminalDeliverySpecs.ReportResultAsync_RunnerCategoryPrecedence_StatusUsedWhenOutputAndCodeMissing` parallel timeout; its other 3224 tests passed.

@@ -9,7 +9,7 @@ namespace Mohist.Server.Runner.Services.SignalR;
 
 /// <summary>
 /// Server-side router that delivers workflow terminal lifecycle events
-/// (<c>WorkflowRunCompleted</c>, <c>WorkflowRunStopped</c>, <c>WorkflowRunFailed</c>)
+/// (<c>WorkflowRunCompleted</c>, <c>WorkflowRunStopped</c>)
 /// to the runner currently mapped to the workflow worker via the SignalR method
 /// <c>ReceiveWorkflowRunStatus({ workflowRunId, status })</c>.
 ///
@@ -38,8 +38,6 @@ public interface IRunnerWorkflowStatusRouter
 
 public sealed class RunnerWorkflowStatusRouter : IRunnerWorkflowStatusRouter
 {
-    private static readonly TimeSpan PushTimeout = TimeSpan.FromSeconds(5);
-
     private readonly IHubContext<RunnerHub> _hub;
     private readonly RunnerConnectionTracker _connections;
     private readonly IGrainFactory _grains;
@@ -59,7 +57,7 @@ public sealed class RunnerWorkflowStatusRouter : IRunnerWorkflowStatusRouter
 
     public async Task RouteAsync(string workflowRunId, WorkflowRunStatus status, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(workflowRunId))
+        if (string.IsNullOrWhiteSpace(workflowRunId) || !status.IsTerminal())
             return;
 
         IWorkflowGrain workflow;
@@ -108,11 +106,9 @@ public sealed class RunnerWorkflowStatusRouter : IRunnerWorkflowStatusRouter
         var payload = new WorkflowRunStatusNotification(workflowRunId, status.ToString());
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(PushTimeout);
             await _hub.Clients
                 .Client(connectionId)
-                .SendCoreAsync("ReceiveWorkflowRunStatus", new object?[] { payload }, timeout.Token);
+                .SendCoreAsync("ReceiveWorkflowRunStatus", new object?[] { payload }, ct);
         }
         catch (Exception ex)
         {
@@ -126,8 +122,8 @@ public sealed class RunnerWorkflowStatusRouter : IRunnerWorkflowStatusRouter
 /// <summary>
 /// Wire payload for the runner-side SignalR method
 /// <c>ReceiveWorkflowRunStatus</c>. The status string is the canonical
-/// <see cref="WorkflowRunStatus"/> name (<c>Completed</c>, <c>Stopped</c>,
-/// <c>Failed</c>) and is distinguishable from any non-terminal state
+/// <see cref="WorkflowRunStatus"/> name (<c>Completed</c> or <c>Stopped</c>)
+/// and is distinguishable from any non-terminal state
 /// (e.g. <c>Running</c>, <c>Paused</c>, <c>AwaitingApproval</c>) by the
 /// runner. The runner never receives <c>null</c> in this channel: the
 /// router only fires on terminal events.

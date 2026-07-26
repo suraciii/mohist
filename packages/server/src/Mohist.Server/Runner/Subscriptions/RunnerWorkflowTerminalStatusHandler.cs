@@ -6,7 +6,7 @@ using Mohist.Server.Workflow.Domain.Run;
 namespace Mohist.Server.Runner.Subscriptions;
 
 /// <summary>
-/// Server-side subscriber to workflow terminal lifecycle events. When a
+/// Server-side push handler for workflow terminal lifecycle events. When a
 /// workflow run reaches <see cref="WorkflowRunStatus.Completed"/> or
 /// <see cref="WorkflowRunStatus.Stopped"/>, this handler asks the runner
 /// that owns the workspace to flip its local registry entry to
@@ -24,19 +24,13 @@ namespace Mohist.Server.Runner.Subscriptions;
 /// events when the SignalR push cannot be delivered (runner offline at
 /// terminal moment, transient SignalR failure, etc.).
 ///
-/// Subscriptions for the two terminal event types are registered as a
-/// pipe-separated pattern so a single handler instance serves both
-/// types — the public CloudEvents bus wildcard syntax does not match
-/// these two names with a single <c>.*</c> suffix.
-///
-/// The router call is awaited. Delivery failures propagate to the durable
-/// dispatcher, which retries without affecting the workflow transaction that
-/// already committed the source event.
+/// Push subscriptions for the two terminal event types are registered as a
+/// pipe-separated pattern so a single handler instance serves both types.
 /// </summary>
-[Subscription(
+[EventPush(
     Type = "com.mohist.workflow.run.completed|com.mohist.workflow.run.stopped",
     Identity = "Mohist.Server.Events.Subscriptions.RunnerWorkflowTerminalStatusHandler")]
-public sealed class RunnerWorkflowTerminalStatusHandler : ICloudEventHandler
+public sealed class RunnerWorkflowTerminalStatusHandler : ICloudEventPushHandler
 {
     private readonly IRunnerWorkflowStatusRouter _router;
     private readonly ILogger<RunnerWorkflowTerminalStatusHandler> _log;

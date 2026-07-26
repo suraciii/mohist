@@ -1,5 +1,9 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Events.Grains;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
@@ -69,7 +73,7 @@ public class RunnerWorkflowStatusRouterSpecs
     }
 
     [Fact]
-    public async Task RouteAsync_FailedStatus_PushesFailedStatusName()
+    public async Task RouteAsync_FailedStatus_DoesNotPush()
     {
         var tracker = new RunnerConnectionTracker();
         tracker.Register(RunnerId, "conn-failed");
@@ -81,9 +85,7 @@ public class RunnerWorkflowStatusRouterSpecs
 
         await router.RouteAsync(WorkflowRunId, WorkflowRunStatus.Failed);
 
-        var message = Assert.Single(hub.SentMessages);
-        var payload = Assert.IsType<WorkflowRunStatusNotification>(Assert.Single(message.Arguments));
-        Assert.Equal("Failed", payload.Status);
+        Assert.Empty(hub.SentMessages);
     }
 
     [Fact]
@@ -113,6 +115,44 @@ public class RunnerWorkflowStatusRouterSpecs
         await router.RouteAsync(string.Empty, WorkflowRunStatus.Completed);
 
         Assert.Empty(hub.SentMessages);
+    }
+
+    [Fact]
+    public async Task RouteAsync_UsesPushWorkerFakeTimeCancellationForSignalRSend()
+    {
+        var time = new FakeTimeProvider();
+        var options = Options.Create(new EventDispatcherOptions
+        {
+            PushQueueCapacity = 1,
+            PushDeliveryTimeout = TimeSpan.FromMinutes(1),
+        });
+        var tracker = new RunnerConnectionTracker();
+        tracker.Register(RunnerId, "conn-timeout");
+        var hub = new BlockingHubContext();
+        var router = new RunnerWorkflowStatusRouter(
+            hub,
+            tracker,
+            new StubGrainFactory(new StubWorkflowGrain { AssignedWorkerId = RunnerId }),
+            NullLogger<RunnerWorkflowStatusRouter>.Instance);
+        var worker = new EventPushWorker(
+            new EventPushQueue(options, NullLogger<EventPushQueue>.Instance),
+            [new EventPushSubscription(
+                "com.mohist.*",
+                router,
+                static (handler, _, ct) => ((IRunnerWorkflowStatusRouter)handler)
+                    .RouteAsync(WorkflowRunId, WorkflowRunStatus.Completed, ct),
+                "runner-status")],
+            time,
+            options,
+            NullLogger<EventPushWorker>.Instance);
+        var delivery = worker.DeliverAsync(
+            new CloudEvent("evt-timeout", new Uri("/mohist/test", UriKind.Relative), "com.mohist.test", DateTimeOffset.UnixEpoch, null),
+            CancellationToken.None);
+
+        await hub.SendStarted.Task;
+        time.Advance(TimeSpan.FromMinutes(1));
+        await hub.SendCancelled.Task;
+        await delivery;
     }
 
     private sealed class StubWorkflowGrain : IWorkflowGrain
@@ -238,6 +278,46 @@ public class RunnerWorkflowStatusRouterSpecs
         {
             public Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default) =>
                 throw new InvalidOperationException("signalR transport failure (test simulation)");
+        }
+    }
+
+    private sealed class BlockingHubContext : IHubContext<RunnerHub>
+    {
+        public TaskCompletionSource SendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource SendCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IHubClients Clients => new BlockingClients(this);
+        public IGroupManager Groups => throw new NotSupportedException();
+
+        private sealed class BlockingClients(BlockingHubContext context) : IHubClients
+        {
+            public IClientProxy All => throw new NotSupportedException();
+            public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => throw new NotSupportedException();
+            public IClientProxy Client(string connectionId) => new BlockingClientProxy(context);
+            public IClientProxy Clients(IReadOnlyList<string> connectionIds) => throw new NotSupportedException();
+            public IClientProxy Group(string groupName) => throw new NotSupportedException();
+            public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => throw new NotSupportedException();
+            public IClientProxy Groups(IReadOnlyList<string> groupNames) => throw new NotSupportedException();
+            public IClientProxy User(string userId) => throw new NotSupportedException();
+            public IClientProxy Users(IReadOnlyList<string> userIds) => throw new NotSupportedException();
+        }
+
+        private sealed class BlockingClientProxy(BlockingHubContext context) : IClientProxy
+        {
+            public async Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default)
+            {
+                context.SendStarted.TrySetResult();
+                try
+                {
+                    await new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+                        .Task.WaitAsync(cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    context.SendCancelled.TrySetResult();
+                    throw;
+                }
+            }
         }
     }
 }

@@ -13,4 +13,8 @@ public sealed class EventDispatcherOptions
     public TimeSpan BaseBackoff { get; set; } = TimeSpan.FromSeconds(1);
 
     public TimeSpan MaxBackoff { get; set; } = TimeSpan.FromSeconds(30);
+
+    public int PushQueueCapacity { get; set; } = 256;
+
+    public TimeSpan PushDeliveryTimeout { get; set; } = TimeSpan.FromSeconds(5);
 }

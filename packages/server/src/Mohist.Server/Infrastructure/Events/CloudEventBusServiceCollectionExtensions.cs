@@ -17,6 +17,10 @@ public static class CloudEventBusServiceCollectionExtensions
         this IServiceCollection services, Assembly assembly)
         => services.AddCloudEventHandlers(assembly.GetTypes());
 
+    public static IServiceCollection AddCloudEventPushHandlersFromAssembly(
+        this IServiceCollection services, Assembly assembly)
+        => services.AddCloudEventPushHandlers(assembly.GetTypes());
+
     internal static IServiceCollection AddCloudEventHandlers(
         this IServiceCollection services,
         IEnumerable<Type> discoveredTypes)
@@ -67,6 +71,50 @@ public static class CloudEventBusServiceCollectionExtensions
                 subs.Add(new Subscription(attr.Type, handler, dispatch, identity));
             }
             return subs;
+        });
+
+        return services;
+    }
+
+    internal static IServiceCollection AddCloudEventPushHandlers(
+        this IServiceCollection services,
+        IEnumerable<Type> discoveredTypes)
+    {
+        var handlerTypes = discoveredTypes
+            .Where(t => !t.IsAbstract && !t.IsInterface)
+            .Where(t => typeof(ICloudEventPushHandler).IsAssignableFrom(t))
+            .ToList();
+
+        foreach (var handlerType in handlerTypes)
+        {
+            var attr = handlerType.GetCustomAttribute<EventPushAttribute>()
+                ?? throw new InvalidOperationException(
+                    $"Push handler {handlerType.FullName} must have [{nameof(EventPushAttribute)}] attribute");
+            CloudEventTypeMatcher.ValidatePattern(attr.Type);
+            services.AddSingleton(handlerType);
+        }
+
+        services.AddSingleton<IEnumerable<EventPushSubscription>>(sp =>
+        {
+            var subscriptions = new List<EventPushSubscription>();
+            foreach (var handlerType in handlerTypes)
+            {
+                var handler = sp.GetRequiredService(handlerType);
+                var attr = handlerType.GetCustomAttribute<EventPushAttribute>()!;
+                var identity = attr.Identity ?? handlerType.FullName ?? handlerType.Name;
+                subscriptions.Add(new EventPushSubscription(
+                    attr.Type,
+                    handler,
+                    (instance, evt, ct) =>
+                    {
+                        var pushHandler = (ICloudEventPushHandler)instance;
+                        return pushHandler.Filter(evt)
+                            ? pushHandler.HandleAsync(evt, ct)
+                            : Task.CompletedTask;
+                    },
+                    identity));
+            }
+            return subscriptions;
         });
 
         return services;
