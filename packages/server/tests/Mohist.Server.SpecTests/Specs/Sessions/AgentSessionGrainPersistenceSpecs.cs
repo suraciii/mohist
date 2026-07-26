@@ -80,6 +80,83 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
     }
 }
 
+public class AgentSessionGrainPersistSummarySpecs : AgentSessionGrainPersistenceSpecsBase
+{
+    public AgentSessionGrainPersistSummarySpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
+
+    [Fact]
+    public async Task OpenBoundGrainAsync_WithoutObservations_PersistsEmptySummary()
+    {
+        await OpenBoundGrainAsync();
+
+        var saved = Fixture.StateStore.State;
+        Assert.NotNull(saved);
+        Assert.Equal(AgentSessionTranscriptSummary.Empty, saved!.ActivitySummary);
+    }
+
+    [Fact]
+    public async Task FlushForTestAsync_PersistsSummaryAndReloadsIt()
+    {
+        var grain = await OpenBoundGrainAsync();
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"run\"}"),
+                new AgentSessionRuntimeEventInput("model.resolved", "{\"resolvedModel\":\"model-v1\"}"),
+                new AgentSessionRuntimeEventInput("tool_call.updated", "{\"toolCallId\":\"tool-1\",\"status\":\"failed\"}"),
+                new AgentSessionRuntimeEventInput("session.activity", "{\"failureCategory\":\"tool_failure\",\"failureReason\":\"failed\"}")
+            },
+            "runtime-1"));
+        await grain.FlushForTestAsync();
+
+        var saved = Fixture.StateStore.State;
+        Assert.NotNull(saved);
+        Assert.Equal("model-v1", saved!.ActivitySummary.ResolvedModel);
+        Assert.Equal("tool_failure", saved.ActivitySummary.FailureCategory);
+        Assert.Equal("failed", saved.ActivitySummary.FailureReason);
+        Assert.Equal(1, saved.ActivitySummary.ToolCallCount);
+        Assert.Equal(1, saved.ActivitySummary.ToolErrorCount);
+
+        await DeactivateAsync(grain);
+
+        var reloaded = await grain.GetAsync();
+        Assert.NotNull(reloaded);
+        Assert.Equal(saved.ActivitySummary.ResolvedModel, reloaded!.ResolvedModel);
+        Assert.Equal(saved.ActivitySummary.FailureCategory, reloaded.FailureCategory);
+        Assert.Equal(saved.ActivitySummary.ToolCallCount, reloaded.ToolCallCount);
+        Assert.Equal(saved.ActivitySummary.ToolErrorCount, reloaded.ToolErrorCount);
+    }
+
+    [Fact]
+    public async Task AppendRuntimeEventsAsync_StaleBinding_DoesNotChangePersistedSummary()
+    {
+        var grain = await OpenBoundGrainAsync();
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput("model.resolved", "{\"resolvedModel\":\"current\"}")
+            },
+            "runtime-1"));
+        await grain.FlushForTestAsync();
+
+        var before = Fixture.StateStore.State;
+        Assert.NotNull(before);
+        var saveCount = Fixture.StateStore.SaveCount;
+        var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput("model.resolved", "{\"resolvedModel\":\"stale\"}"),
+                new AgentSessionRuntimeEventInput("session.activity", "{\"failureCategory\":\"stale\"}")
+            },
+            "runtime-stale"));
+
+        Assert.Empty(result);
+        Assert.Equal(saveCount, Fixture.StateStore.SaveCount);
+        Assert.Equal(before.ActivitySummary, Fixture.StateStore.State!.ActivitySummary);
+    }
+}
+
 public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainPersistStateFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }

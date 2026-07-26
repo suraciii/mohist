@@ -1,0 +1,13 @@
+## Codebase Patterns
+
+- AgentSession state is serialized as one JSON document by `AgentSessionJson`; the grain saves accepted runtime state and domain events first, then retries transcript persistence independently.
+- `TranscriptAccumulator` normalizes runtime events into `AgentSessionTranscriptPartDelta` mutations keyed by `(type, correlationKey)`; transcript storage assigns per-turn sequences and replaces matching parts.
+- Grain specs use `AgentSessionGrainFixture` with fake state/transcript stores and `FakeTimeProvider`; no host filesystem or wall-clock assertions.
+
+## T-001
+
+- Baseline Session tests pass when run with `-p:SkipWebBuild=true`; the test platform ignored the requested filter and ran the full SpecTests assembly.
+- Implement the persisted summary in Session state and reduce normalized transcript mutations before the existing state save; leave activity-feed read-side transcript reduction for T-002.
+- The persisted JSON member is private to the domain model through an included `activitySummary` state property; `AgentSession.ActivitySummary` is the read-only five-field projection used by later read-side work.
+- Reducer state keeps final model/tool parts for the open turn, sealed tool/failure identifiers, and an ordered latest activity candidate keyed by turn, part sequence, and part identifier. Same-turn tool replacements preserve the original part sequence; `session.input` seals the previous turn.
+- Full SpecTests pass after adding empty-summary, reducer, persistence/reload, and stale-binding coverage; grain tests use `List<T>` inputs because Orleans cannot deep-copy collection-expression runtime event lists.
