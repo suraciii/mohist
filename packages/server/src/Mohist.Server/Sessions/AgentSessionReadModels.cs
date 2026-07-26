@@ -130,7 +130,8 @@ public sealed record AgentSessionSummaryDto(
     string? ProbeDeadlineAt,
     string? FailureReason,
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
-    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage,
+    [property: JsonPropertyName("workflowRunId")] string? WorkflowRunId = null);
 
 public sealed record AgentSessionInfoDto(
     int IssueNumber,

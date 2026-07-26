@@ -207,6 +207,7 @@ public class UnifiedSessionRoutesSpecs
         var item = items.First(i => i.GetProperty("id").GetString() == AgentLaunchSession);
         Assert.Equal("agent-launch", item.GetProperty("source").GetString());
         Assert.Equal(AgentId, item.GetProperty("agentId").GetString());
+        Assert.Equal(AgentName, item.GetProperty("agentName").GetString());
         Assert.False(item.TryGetProperty("workflowRunId", out _));
     }
 
@@ -238,7 +239,9 @@ public class UnifiedSessionRoutesSpecs
         Assert.True(items.Count >= 1);
         var item = items.First(i => i.GetProperty("id").GetString() == WorkflowSession);
         Assert.Equal("workflow", item.GetProperty("source").GetString());
+        Assert.Equal(WorkflowRunId, item.GetProperty("workflowRunId").GetString());
         Assert.Equal(WorkflowSessionName, item.GetProperty("sessionName").GetString());
+        Assert.Equal(WorkflowIssueNumber, item.GetProperty("contextRefs").GetProperty("issueNumber").GetInt32());
         Assert.False(item.TryGetProperty("agentId", out _));
     }
 
@@ -253,8 +256,10 @@ public class UnifiedSessionRoutesSpecs
             ProjectAInfo, agent: null, issue: null, run: WorkflowRunId, limit: null, agentQuerier, querier, CancellationToken.None);
 
         var data = await OkDataAsync(result);
-        var ids = data.EnumerateArray().Select(i => i.GetProperty("id").GetString()).ToHashSet();
-        Assert.Contains(WorkflowSession, ids);
+        var item = Assert.Single(data.EnumerateArray());
+        Assert.Equal(WorkflowRunId, item.GetProperty("workflowRunId").GetString());
+        Assert.Equal(WorkflowSessionName, item.GetProperty("sessionName").GetString());
+        Assert.Equal(WorkflowIssueNumber, item.GetProperty("contextRefs").GetProperty("issueNumber").GetInt32());
     }
 
     [Fact]

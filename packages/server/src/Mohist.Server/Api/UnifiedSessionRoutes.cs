@@ -175,9 +175,9 @@ public static class UnifiedSessionRoutes
                 Model: item.Model,
                 AgentId: null,
                 AgentName: null,
-                WorkflowRunId: null,
+                WorkflowRunId: item.WorkflowRunId,
                 SessionName: item.SessionName,
-                ContextRefs: null))
+                ContextRefs: MapWorkflowContextRefs(issueNumber)))
             .ToList();
         return ApiResults.Ok(unified);
     }
@@ -204,10 +204,15 @@ public static class UnifiedSessionRoutes
                 AgentName: null,
                 WorkflowRunId: item.WorkflowRunId,
                 SessionName: item.SessionName,
-                ContextRefs: null))
+                ContextRefs: MapWorkflowContextRefs(item.IssueNumber)))
             .ToList();
         return ApiResults.Ok(unified);
     }
+
+    private static UnifiedSessionContextRefsDto? MapWorkflowContextRefs(int? issueNumber) =>
+        issueNumber is > 0
+            ? new UnifiedSessionContextRefsDto(issueNumber, null, null, null)
+            : null;
 
     private static UnifiedSessionContextRefsDto? MapListContextRefs(AgentSessionListContextRefsDto? refs) =>
         refs is null

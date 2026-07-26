@@ -815,7 +815,8 @@ public class AgentSessionQuerier : IScopedService
             s.Settings.Model, s.Runtime.Runtime, record.Label(AgentSessionQueryMetadataKeys.Stage), s.Metadata.Annotation(AgentSessionQueryMetadataKeys.Title),
             s.Status.LastDataAt?.ToString("o"), null, null, null,
             new AgentEventSummaryDto(null, null, null, null, null, null),
-            AgentSessionDtoMapper.ToUsageDto(s));
+            AgentSessionDtoMapper.ToUsageDto(s),
+            record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId));
     }
 
     private static async Task<AgentSessionTranscriptData> LoadTranscriptAsync(

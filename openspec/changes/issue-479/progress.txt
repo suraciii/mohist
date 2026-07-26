@@ -394,3 +394,10 @@ link until T-005 switches the CLI over.
 - Added direct launcher coverage for non-empty manual/trigger JobKey values and the comment-anchored mention JobKey; no launch pipeline code changed.
 - Focused verification passed after one documented pre-existing server dispatch-pickup retry: 3108/3108 server specs and 1383/1383 CLI tests.
 - `npm run build` passed with 0 .NET warnings/errors. `npm test` passed: 175 workflow-definition tests, 1383 CLI tests, 1455 server unit tests, 32 architecture tests, 3108 server specs, 5130 Web tests (1 skipped), and 1426 Runner tests.
+
+### T-004 list-contract repair
+
+- The issue-filtered unified list continues to delegate to `ListSummariesByIssueAsync` as required by D4; `AgentSessionSummaryDto` now carries the workflow run identity so the unified projection does not drop `workflowRunId`.
+- Workflow list projections now include issue context references for both `?issue=` and `?run=`; source-specific fields remain absent for the opposite source.
+- Added assertions for workflow run identity, session name, and context references on both workflow list paths.
+- Regression verification passed: server specs 3108/3108 and `npm run build` passed with zero .NET warnings/errors. The first baseline suite run had one unrelated runner-dispatch pickup race; the immediate rerun passed.
