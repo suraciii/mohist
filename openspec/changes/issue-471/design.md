@@ -25,7 +25,7 @@ Constraints:
 - Add tail sampling, user-configurable ingest budgets, a queue, a broker, or another telemetry database.
 - Change retention, storage-budget arbitration, runtime-status schema, or the core health endpoint.
 - Guarantee lossless telemetry after storage protection or an unexpected write failure.
-- Change the stable `traces` or `spans` schema used by `mo otel` readers.
+- Change the stable `traces` or `spans` table and column schema used by `mo otel` readers.
 
 ## Decisions
 
@@ -51,19 +51,19 @@ The byte budget deliberately measures the normalized stored representation rathe
 
 Alternative considered: use SQLite file growth as the block meter. Rejected because WAL/page allocation is not attributable to one row or transaction and cannot prevent an oversized transaction. Alternative considered: allow one oversized Span as an exception. Rejected because it breaks the only hard per-transaction memory/work bound.
 
-### D4. First-write-wins Span rows allow incremental Trace summaries
+### D4. Replace Span rows and refresh each affected Trace through indexed block-local work
 
-Within each writer lease, a block inserts Span rows with `ON CONFLICT DO NOTHING`. The transaction records only newly inserted Spans in a per-block dictionary keyed by trace ID, containing insert count, earliest start, latest end, and first encountered service name. After the Span inserts, it performs one Trace-header upsert per dictionary entry: new headers receive that first service name; existing headers preserve their service name, extend their time bounds, and increment `span_count` by the block's inserted count. Because a completed OTLP Span is immutable and retries reuse its `(trace_id, span_id)`, duplicate exports require no replacement or summary rewrite.
+Within each writer lease, a block preserves the current `INSERT OR REPLACE` behavior. The block first groups duplicate identities so its last received row wins, reads existing identities in trace-scoped batches, and records the count of identities that are new before replacing every grouped Span row. It then updates each affected Trace header once: a new header receives the first encountered service name, an existing header preserves it, and `span_count` increases only by the number of new identities. The replacement therefore continues to self-heal corrected attributes and time bounds without inflating count.
 
-This changes the current replacement-based self-healing behavior to first-write-wins for an existing Span identity. A repeated exporter attempt remains idempotent, while the write cost is proportional to incoming Spans and distinct affected Traces rather than historical Span count. It requires no schema migration.
+`OtelDb` adds two additive indexes, `(trace_id, start_time)` and `(trace_id, end_time)`. After the row replacements, each affected Trace obtains its earliest start and latest end through indexed `ORDER BY ... LIMIT 1` reads, rather than a `MIN`/`MAX`/`COUNT` scan for every input Span. The resulting work is bounded by the block's input identities and affected Traces, not by repeated full-Trace scans. The tables, columns, primary key, existing index names, and CLI reader contract remain unchanged; `CREATE INDEX IF NOT EXISTS` materializes the new indexes for existing stores without a data migration.
 
-Alternative considered: preserve `INSERT OR REPLACE` and recompute `COUNT`/`MIN`/`MAX` after every Span. Rejected because it retains the observed quadratic Trace scan. Alternative considered: recompute once per Trace per block. Rejected because its cost still grows with unrelated historical Spans of that Trace and does not meet the linear work requirement.
+Alternative considered: preserve `INSERT OR REPLACE` and recompute `COUNT`/`MIN`/`MAX` after every Span. Rejected because it retains the observed quadratic Trace scan. Alternative considered: first-write-wins insertion. Rejected because it silently removes the existing correction/self-healing behavior for a repeated Span identity.
 
 ### D5. A request attempt publishes one outcome after all blocks reach a terminal result
 
-If every block commits, `TraceIngester` builds one committed outcome from the final classifications: saved equals every accepted parsed attempt, including a duplicate that commits as a no-op, and protection rejections/drops yield `partial_success`. If a storage-protection decision closes admission before a Span is planned, that Span remains a rejected classification and no write is attempted for it. If a write block throws or the request is cancelled, the active block rolls back and the request publishes the existing retryable or cancelled outcome semantics. Earlier blocks can already be committed; the response still asks retry on an unexpected write failure, and first-write-wins makes the retry safely complete the missing blocks. A retryable failed attempt does not publish saved/rejected/dropped counts, preserving the existing request-attempt accounting rule.
+If every block commits, `TraceIngester` builds one committed outcome from the final classifications: saved equals every accepted parsed attempt, including a duplicate that replaces an existing row, and protection rejections/drops yield `partial_success`. If a storage-protection decision closes admission before a Span is planned, that Span remains a rejected classification and no write is attempted for it. If a write block throws or the request is cancelled, the active block rolls back and the request publishes the existing retryable or cancelled outcome semantics. Earlier blocks can already be committed; the response still asks retry on an unexpected write failure, and replacement-based replay safely completes the missing blocks. A retryable failed attempt does not publish saved/rejected/dropped counts, preserving the existing request-attempt accounting rule.
 
-`OtlpTraceResponseWriter` remains the sole response encoder. Extend its status writer for `413` and `429`, including `Retry-After` for the latter, while retaining request-encoding selection for JSON, canonical protobuf, success, partial success, invalid input, and retryable storage errors. The route and storage path remain inside the current suppression scope, so no new instrumentation path is added.
+`OtlpTraceResponseWriter` remains the sole response encoder. Add explicit overload writers for decoded-size and temporary-admission rejection. They encode `google.rpc.Status` code `8` (`RESOURCE_EXHAUSTED`) with no details and bounded fixed messages: `Decoded telemetry request exceeds 16 MiB.` for HTTP `413`, and `Telemetry receiver is at capacity.` for HTTP `429`. The `429` writer sets the delay-seconds header `Retry-After: 1`. Both select JSON or canonical protobuf from the normalized request content type; `Accept` cannot change them. Existing full-success, partial-success, invalid-input, and retryable-storage paths retain their current encoding rules. The route and storage path remain inside the current suppression scope, so no new instrumentation path is added.
 
 Alternative considered: add a multi-block aggregate outcome model that reports partial commits as saved on a `503`. Rejected because it would make exporter retry accounting and runtime counters ambiguous; idempotent replay gives a simpler, already-supported convergence path.
 
@@ -76,18 +76,18 @@ Alternative considered: test capacity with real concurrent HTTP timing and inspe
 ## Risks / Trade-offs
 
 - [An admitted request can wait for the writer while holding a request slot] -> The wait is bounded by four slots, and the writer itself is bounded by the block caps; a fifth request receives immediate `429` rather than unbounded retention.
-- [A storage failure can occur after earlier blocks commit] -> Return the established retryable response and rely on first-write-wins replay; runtime counts only final successful attempts as saved.
-- [First-write-wins does not revise an existing Span with a changed payload] -> Completed OTLP Span retries are expected to be immutable; preserving the first record maintains idempotency and removes historical rescans.
+- [A storage failure can occur after earlier blocks commit] -> Return the established retryable response and rely on replacement-based replay; runtime counts only final successful attempts as saved.
+- [Correcting a replaced Span can move a Trace boundary] -> Refresh only that Trace's two boundaries through the additive composite indexes after the block, rather than rescanning it for every replaced Span.
 - [Decoded-size enforcement cannot avoid all parser allocations below 16 MiB] -> The capped reader prevents unbounded body buffering; normal parsing remains bounded by the same fixed maximum.
 - [Fixed budgets may reject a legitimate exporter burst] -> `429` is explicit and retryable, while storage-budget rejection uses `partial_success` so senders do not amplify permanent pressure.
 
 ## Migration Plan
 
-1. Add the gate, limited reader, block planner, and incremental block writer behind the existing OTLP route and DI registration.
+1. Add the gate, limited reader, block planner, additive Trace-boundary indexes, and replacement-preserving block writer behind the existing OTLP route and DI registration.
 2. Add deterministic unit and integration coverage for all resource, persistence, outcome, encoding, and suppression requirements.
-3. Deploy with the collector still following its existing enabled setting; no schema or data migration is required.
+3. Deploy with the collector still following its existing enabled setting; no table/column or data migration is required, and existing `OtelDb` initialization creates the additive indexes.
 4. Monitor existing runtime observability rejected/dropped and storage-write degradation fields after enabling collection.
-5. Roll back by reverting the Server deployment. Existing `traces` and `spans` rows remain readable because the schema is unchanged; first-write-wins behavior applies only to new ingestion attempts after deployment.
+5. Roll back by reverting the Server deployment. Existing `traces` and `spans` rows remain readable because tables and columns are unchanged; the additive indexes are harmless if retained.
 
 ## Open Questions
 

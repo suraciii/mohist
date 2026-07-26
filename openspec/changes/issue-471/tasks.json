@@ -9,9 +9,9 @@
       "description": "Deliver the OTLP request lease gate, decoded-body limit, and route integration as one usable ingress module. Register request decompression, read JSON and protobuf through the capped reader after a recognized request acquires a lease, and extend the sole OTLP response writer for encoding-aware 413 and 429 responses with Retry-After.",
       "acceptanceCriteria": [
         "OtlpIngestGate is a singleton with four non-waiting request leases; OtlpRoutes acquires a lease after recognizing Content-Type and before the first body read, releases it in finally on every completion path, and retains no background queue or deferred payload.",
-        "The fifth recognized request returns HTTP 429 with Retry-After before its body is read; controlled lease/body test support proves this without scheduler or wall-clock waits.",
+        "The fifth recognized request returns HTTP 429 with Retry-After: 1 before its body is read; controlled lease/body test support proves this without scheduler or wall-clock waits.",
         "Request decompression is enabled before the OTLP route consumes the body, and LimitedOtlpBodyReader rejects decoded JSON or protobuf content over 16 MiB before full buffering, parsing, storage, or ingest-outcome publication.",
-        "Recognized JSON and protobuf over-limit requests return encoding-matched HTTP 413; temporary-admission JSON and protobuf requests return encoding-matched HTTP 429, and protobuf responses decode without a JSON fallback regardless of Accept.",
+        "Recognized JSON and protobuf over-limit requests return encoding-matched HTTP 413 google.rpc.Status code 8 with no details and message Decoded telemetry request exceeds 16 MiB.; temporary-admission JSON and protobuf requests return encoding-matched HTTP 429 google.rpc.Status code 8 with no details, message Telemetry receiver is at capacity., and Retry-After: 1. Protobuf responses decode without a JSON fallback regardless of Accept.",
         "Malformed decoded content remains an encoding-aware invalid-argument response, unsupported media remains JSON 415, and existing successful JSON/protobuf OTLP responses retain their wire contract.",
         "Integration and unit tests cover JSON/protobuf decoded limits, first-read ordering, four-slot exhaustion, cancellation lease release, Retry-After, response wire decoding, no persisted rows, and no RuntimeObservability outcome for rejected bodies using TestServer, controlled streams, and awaitable signals.",
         "Focused server telemetry tests and npm test pass without real sockets, filesystem access, external services, or wall-clock waits."
@@ -28,12 +28,12 @@
       "id": "T-002",
       "title": "Persist OTLP traces in linear bounded write blocks",
       "spec": "specs/otlp-trace-ingestion/spec.md#otlp-persistence-uses-serialized-bounded-write-blocks",
-      "description": "Extend the admitted ingestion path with the gate's writer lease, normalized-data block planning, and first-write-wins incremental Trace summaries. Preserve the existing final outcome boundary while classifying oversized normalized Spans and storage-protection refusals as non-retryable partial success, and retain retryable/cancelled semantics for failed active blocks.",
+      "description": "Extend the admitted ingestion path with the gate's writer lease, normalized-data block planning, replacement-preserving Span writes, and indexed incremental Trace summaries. Preserve the existing final outcome boundary while classifying oversized normalized Spans and storage-protection refusals as non-retryable partial success, and retain retryable/cancelled semantics for failed active blocks.",
       "acceptanceCriteria": [
         "At most one admitted OTLP request executes a database write at a time, and every accepted request sends its final response only after all blocks have committed or reached a final non-retryable classification; no post-response persistence worker exists.",
         "The planner partitions accepted normalized Spans in arrival order into transactions of no more than 4 MiB of deterministic persisted-data weight or 512 Spans, whichever comes first, and drops a single over-limit normalized Span non-retryably with bounded diagnostic text.",
-        "Span insertion uses first-write-wins identity semantics; each block updates a Trace header once per affected Trace with inserted count, earliest start, latest end, and preserved first service name, without changing the traces/spans schema.",
-        "Cross-block and duplicate exports preserve exact Trace count, bounds, and first service name; saved outcome accounting still includes accepted duplicate attempts whose no-op write commits.",
+        "Span insertion preserves INSERT OR REPLACE semantics, so a corrected duplicate updates its stored row; each block reads prior identities in batches, adjusts count only for new identities, and refreshes each affected Trace's earliest/latest bounds through additive trace-time indexes while preserving first service name.",
+        "Cross-block and corrected duplicate exports preserve exact Trace count, bounds, and first service name; saved outcome accounting still includes accepted duplicate attempts whose replacement write commits.",
         "Storage-budget refusals return HTTP 200 OTLP partial_success with the exact combined rejected/dropped count in the request encoding, publish the corresponding RuntimeObservability result, request no exporter retry, and retain no payload for later persistence.",
         "An unexpected active-block failure or cancellation preserves the established retryable/cancelled outcome semantics even if earlier blocks committed; idempotent replay completes missing blocks without double-counting final rejected or dropped outcomes.",
         "Operation-count tests prove aggregate maintenance grows with incoming Spans/distinct affected Traces rather than rescanning persisted Spans per input Span; block, writer-exclusion, protection, duplicate, rollback, cancellation, response-encoding, and self-observation regression tests use in-memory SQLite and awaitable signals only.",
@@ -42,7 +42,7 @@
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Serialized OTLP writer lease use, normalized block planner, first-write-wins incremental Trace aggregation, final outcome integration, and deterministic persistence/protocol regression tests.",
+      "output": "Serialized OTLP writer lease use, normalized block planner, additive trace-time indexes, replacement-preserving indexed Trace aggregation, final outcome integration, and deterministic persistence/protocol regression tests.",
       "dependsOn": [
         "T-001"
       ],
