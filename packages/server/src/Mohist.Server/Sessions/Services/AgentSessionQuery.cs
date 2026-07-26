@@ -13,7 +13,7 @@ public enum AgentSessionQueryOrder
     CreatedDescending,
 }
 
-public sealed class AgentSessionQuery : IScopedService
+public class AgentSessionQuery : IScopedService
 {
     private const string DirectSourceKind = "agent-launch";
     private const string ActiveActivityValue = "active";
@@ -98,7 +98,7 @@ public sealed class AgentSessionQuery : IScopedService
     /// Runs are not selected and their <c>State</c> JSON is not
     /// deserialized (issue-467).
     /// </summary>
-    public async Task<IReadOnlyList<AgentSessionRecord>> ListStatusCandidatesAsync(
+    public virtual async Task<IReadOnlyList<AgentSessionRecord>> ListStatusCandidatesAsync(
         string projectId,
         CancellationToken ct = default)
     {
@@ -115,7 +115,7 @@ public sealed class AgentSessionQuery : IScopedService
             join workflow in db.WorkflowRuns.AsNoTracking()
                 on session.LabelSourceId equals workflow.WorkflowRunId
             where session.LabelProjectId == projectId
-                && session.LabelSourceKind != DirectSourceKind
+                && (session.LabelSourceKind == null || session.LabelSourceKind != DirectSourceKind)
                 && session.LabelWorkId != null
                 && session.LabelWorkId.Trim() != string.Empty
                 && workflow.MetadataProjectId == projectId

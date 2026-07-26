@@ -60,21 +60,27 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
     {
         var project = await CreateProjectAsync("status-history-bounded");
         await InsertActiveDirectSessionsAsync(project, count: 2);
-        var small = (await GetStatusDataAsync(project))
-            .GetProperty("amplification");
+        using var scope = _fixture.Services.CreateScope();
+        var sessionQuery = scope.ServiceProvider.GetRequiredService<AgentSessionQuery>();
+        var small = await GetStatusDataAsync(project);
+        var smallAmplification = small.GetProperty("amplification");
+        var smallMaterializedRows = await CountMaterializedRowsAsync(sessionQuery, project);
 
         await InsertInactiveHistoricalSessionsAsync(project, count: 1500);
 
         var status = await GetStatusDataAsync(project);
         var amplification = status.GetProperty("amplification");
+        var materializedRows = await CountMaterializedRowsAsync(sessionQuery, project);
 
-        Assert.Equal(2, amplification.GetProperty("candidates").GetInt64());
-        Assert.Equal(2, amplification.GetProperty("processed").GetInt64());
+        Assert.True(JsonElement.DeepEquals(small.GetProperty("activeAgents"), status.GetProperty("activeAgents")));
+        Assert.Equal(smallAmplification.GetProperty("candidates").GetInt64(), amplification.GetProperty("candidates").GetInt64());
+        Assert.Equal(smallAmplification.GetProperty("processed").GetInt64(), amplification.GetProperty("processed").GetInt64());
+        Assert.Equal(smallMaterializedRows, materializedRows);
         Assert.Equal(
-            small.GetProperty("databaseCalls").GetInt64(),
+            smallAmplification.GetProperty("databaseCalls").GetInt64(),
             amplification.GetProperty("databaseCalls").GetInt64());
         Assert.Equal(
-            small.GetProperty("downstreamCalls").GetInt64(),
+            smallAmplification.GetProperty("downstreamCalls").GetInt64(),
             amplification.GetProperty("downstreamCalls").GetInt64());
     }
 
@@ -144,32 +150,54 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
     }
 
     [Fact]
+    public async Task Status_LegacyWorkflowSessionWithoutSourceKind_RemainsVisible()
+    {
+        var project = await CreateProjectAsync("status-legacy-workflow");
+        var workflowRunId = $"wf-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        await InsertWorkflowRunRowAsync(workflowRunId, project, status: "running");
+        var sessionId = await InsertWorkflowSessionAsync(
+            project,
+            workflowRunId,
+            issueNumber: 10,
+            workId: workId,
+            sourceKind: null);
+
+        using var scope = _fixture.Services.CreateScope();
+        var stubQuerier = scope.ServiceProvider.GetRequiredService<CountingWorkflowQuerier>();
+        stubQuerier.SetStatus(workflowRunId, BuildRunningViewWithPendingWork(workflowRunId, workId));
+
+        var status = await GetStatusDataAsync(project);
+
+        Assert.Equal(1, status.GetProperty("amplification").GetProperty("candidates").GetInt64());
+        Assert.Contains(status.GetProperty("activeAgents").EnumerateArray(),
+            agent => agent.GetProperty("sessionId").GetString() == sessionId);
+    }
+
+    [Fact]
     public async Task Status_SessionForTerminalizedWorkflow_IsExcludedByCurrentStatusCheck()
     {
         var project = await CreateProjectAsync("status-workflow-terminalized");
         var workflowRunId = $"wf-{Guid.NewGuid():N}";
-        var sessionId = await InsertWorkflowSessionAsync(project, workflowRunId, issueNumber: 11);
-        // Persist a Workflow Run that the selection phase accepts (its
-        // projected Status is "running"), then terminalize it via State
-        // JSON before the Workflow status read so the Querier returns
-        // no matching pending work. The current-status check must drop
-        // the session from activeAgents even though the candidate
-        // query already selected it.
+        var workId = $"work-{Guid.NewGuid():N}";
+        await InsertWorkflowSessionAsync(project, workflowRunId, issueNumber: 11, workId: workId);
         await InsertWorkflowRunRowAsync(workflowRunId, project, status: "running");
-        await TerminalizeWorkflowAsync(workflowRunId);
 
         using var scope = _fixture.Services.CreateScope();
         var stubQuerier = scope.ServiceProvider.GetRequiredService<CountingWorkflowQuerier>();
-        stubQuerier.SetStatus(workflowRunId, BuildRunningViewWithPendingWork(workflowRunId, workId: GetSessionWorkId(sessionId)));
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        var sessionQuery = new TerminalizingAgentSessionQuery(
+            dbFactory,
+            _fixture.TimeProvider,
+            () => TerminalizeWorkflowAsync(workflowRunId));
+        var projection = new WorkflowActivityQuerier(dbFactory, stubQuerier, sessionQuery);
 
-        var status = await GetStatusDataAsync(project);
-        var activeAgents = status.GetProperty("activeAgents").EnumerateArray().ToList();
+        var status = await projection.ListActiveAgentsResultAsync(project);
 
-        // The Session was selected as a candidate (its Workflow Run row
-        // reads as "running" to the predicate), but the post-selection
-        // status read sees a terminal state with no pending work, so
-        // the Session is excluded.
-        Assert.DoesNotContain(activeAgents, a => a.GetProperty("sessionId").GetString() == sessionId);
+        Assert.True(sessionQuery.SelectedCandidates);
+        Assert.Equal(1, status.Candidates);
+        Assert.Empty(status.ActiveAgents);
+        Assert.Equal(0, stubQuerier.GetStatusCallCount(workflowRunId));
     }
 
     [Fact]
@@ -427,11 +455,24 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         string projectId,
         string workflowRunId,
         int issueNumber,
-        string? workId = null)
+        string? workId = null,
+        string? sourceKind = "workflow")
     {
         var workIdValue = workId ?? $"work-{Guid.NewGuid():N}";
         var sessionId = $"session-{Guid.NewGuid():N}";
         var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+            [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
+            [AgentSessionQueryMetadataKeys.WorkId] = workIdValue,
+            [AgentSessionQueryMetadataKeys.WorkType] = "task",
+            [AgentSessionQueryMetadataKeys.Stage] = "Build",
+            [AgentSessionQueryMetadataKeys.IssueNumber] = issueNumber.ToString(),
+            [AgentSessionQueryMetadataKeys.SessionName] = $"task-{issueNumber}",
+        };
+        if (sourceKind is not null)
+            labels[AgentSessionQueryMetadataKeys.SourceKind] = sourceKind;
         var session = new AgentSession
         {
             Id = sessionId,
@@ -441,17 +482,7 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
                 CreatedAt: now,
                 BoundAt: now,
                 AgentRuntimeSessionId: sessionId),
-            Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-                [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
-                [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
-                [AgentSessionQueryMetadataKeys.WorkId] = workIdValue,
-                [AgentSessionQueryMetadataKeys.WorkType] = "task",
-                [AgentSessionQueryMetadataKeys.Stage] = "Build",
-                [AgentSessionQueryMetadataKeys.IssueNumber] = issueNumber.ToString(),
-                [AgentSessionQueryMetadataKeys.SessionName] = $"task-{issueNumber}",
-            }),
+            Metadata = new AgentSessionMetadata(labels),
         };
         await using var db = await _fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
@@ -554,16 +585,6 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
         return string.Empty;
     }
 
-    private static string GetSessionWorkId(string sessionId)
-    {
-        // The Workflow stub returns a synthetic view keyed on the
-        // session id; Session rows encode workId in metadata.labels so
-        // the pending-work match naturally falls back to the row's
-        // own value. Returning a single placeholder works because
-        // CountingWorkflowQuerier matches the workId verbatim.
-        return $"work-{sessionId}";
-    }
-
     private static string BuildWorkflowRunStateJson(string workflowRunId, string projectId, string status) =>
         $$"""
         {
@@ -587,4 +608,30 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
             PendingWork: new PendingWorkView(WorkId: workId, WorkType: "task", Stage: null, Title: null, Uses: null),
             Failure: null,
             AvailableActions: []);
+
+    private sealed class TerminalizingAgentSessionQuery : AgentSessionQuery
+    {
+        private readonly Func<Task> _terminalize;
+
+        public TerminalizingAgentSessionQuery(
+            IDbContextFactory<MohistDbContext> dbFactory,
+            TimeProvider timeProvider,
+            Func<Task> terminalize)
+            : base(dbFactory, timeProvider)
+        {
+            _terminalize = terminalize;
+        }
+
+        public bool SelectedCandidates { get; private set; }
+
+        public override async Task<IReadOnlyList<AgentSessionRecord>> ListStatusCandidatesAsync(
+            string projectId,
+            CancellationToken ct = default)
+        {
+            var candidates = await base.ListStatusCandidatesAsync(projectId, ct);
+            SelectedCandidates = candidates.Count > 0;
+            await _terminalize();
+            return candidates;
+        }
+    }
 }
