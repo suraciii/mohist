@@ -6,6 +6,7 @@ public enum EventProducerFamily
     Issue,
     Epic,
     AgentSession,
+    AgentJob,
     Runner,
     InboxItemPersisted,
 }
@@ -22,6 +23,7 @@ public readonly record struct ProducerLineageContext(
     bool StageRequired = false,
     bool WorkflowOrigin = false);
 
+[GenerateSerializer]
 public sealed class ProducerConformanceException : Exception
 {
     public ProducerConformanceException(EventProducerFamily family, string message)
@@ -30,7 +32,7 @@ public sealed class ProducerConformanceException : Exception
         Family = family;
     }
 
-    public EventProducerFamily Family { get; }
+    [Id(0)] public EventProducerFamily Family { get; }
 }
 
 public static class ProducerConformance
@@ -89,6 +91,16 @@ public static class ProducerConformance
                     Absent(family, extensions, EventCatalog.Lineage.WorkflowRunId);
                     Absent(family, extensions, EventCatalog.Lineage.Stage);
                 }
+                break;
+            case EventProducerFamily.AgentJob:
+                Require(family, extensions, EventCatalog.Lineage.AgentId, context.AgentId);
+                Optional(family, extensions, EventCatalog.Lineage.ProjectId, context.ProjectId);
+                Optional(family, extensions, EventCatalog.Lineage.Issue, context.Issue);
+                Optional(family, extensions, EventCatalog.Lineage.Epic, context.Epic);
+                Optional(family, extensions, EventCatalog.Lineage.WorkflowRunId, context.WorkflowRunId);
+                Absent(family, extensions, EventCatalog.Lineage.SessionId);
+                Absent(family, extensions, EventCatalog.Lineage.Stage);
+                Absent(family, extensions, EventCatalog.Lineage.RunnerId);
                 break;
             case EventProducerFamily.Runner:
                 Require(family, extensions, EventCatalog.Lineage.RunnerId, context.RunnerId);

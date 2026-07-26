@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -36,7 +37,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "do a failing thing",
             WorkspacePath: "/tmp/agent-job-fail-pending",
             ProjectId: projectId,
-            AgentSessionId: sessionId));
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var snapshot = await job.GetRuntimeSnapshotAsync();
@@ -94,7 +96,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "do the thing",
             WorkspacePath: "/tmp/agent-job-success-pending",
             ProjectId: projectId,
-            AgentSessionId: sessionId));
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
@@ -115,6 +118,39 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task FailedJob_ReactivationAfterSessionClose_EmitsRetainedFailureEvent()
+    {
+        var jobKey = $"agent-job-failure-recovery-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+        _fixture.EventStore.ThrowOnAppend = evt => evt.Type == EventCatalog.ReverseDns.AgentJobFailed;
+
+        try
+        {
+            await job.SubmitAsync(new AgentJobInput("doomed", AgentId: "agent-real"));
+            await job.FailAsync("runner-lost");
+            Assert.DoesNotContain(_fixture.EventStore.Appended,
+                evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobFailed
+                    && evt.Envelope.Source.ToString() == $"/mohist/agent-job/{jobKey}");
+
+            _fixture.EventStore.ThrowOnAppend = null;
+            var management = Grains.GetGrain<IManagementGrain>(0);
+            await management.ForceActivationCollection(TimeSpan.Zero);
+
+            await job.GetStatusAsync();
+
+            var failure = Assert.Single(_fixture.EventStore.Appended,
+                evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobFailed
+                    && evt.Envelope.Source.ToString() == $"/mohist/agent-job/{jobKey}");
+            Assert.Equal(jobKey, failure.Envelope.Subject);
+            Assert.Equal("agent-real", failure.Envelope.Extensions[EventCatalog.Lineage.AgentId]);
+        }
+        finally
+        {
+            _fixture.EventStore.ThrowOnAppend = null;
+        }
+    }
+
+    [Fact]
     public async Task ReportResultAsync_RunnerCategoryPrecedence_OutputJsonWinsOverErrorCodeAndStatus()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
@@ -128,7 +164,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "do",
             WorkspacePath: "/tmp/agent-job-cat-precedence-output",
             ProjectId: projectId,
-            AgentSessionId: sessionId));
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -170,7 +207,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "do",
             WorkspacePath: "/tmp/agent-job-cat-precedence-code",
             ProjectId: projectId,
-            AgentSessionId: sessionId));
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -212,7 +250,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "do",
             WorkspacePath: "/tmp/agent-job-cat-precedence-status",
             ProjectId: projectId,
-            AgentSessionId: sessionId));
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -246,7 +285,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "exhausted",
             WorkspacePath: "/tmp/agent-job-exhaust",
             ProjectId: projectId,
-            AgentSessionId: sessionId));
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
         await job.CheckTimeoutsAsync();
@@ -276,7 +316,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "never reports",
             WorkspacePath: "/tmp/agent-job-timeout",
             ProjectId: projectId,
-            AgentSessionId: sessionId));
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
@@ -307,7 +348,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "doomed",
             WorkspacePath: "/tmp/agent-job-forced",
             ProjectId: projectId,
-            AgentSessionId: sessionId));
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
 
         await job.FailAsync("runner-lost");
 
@@ -335,7 +377,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "do",
             WorkspacePath: "/tmp/agent-job-dup",
             ProjectId: projectId,
-            AgentSessionId: sessionId));
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;

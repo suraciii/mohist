@@ -20,7 +20,7 @@ public class InboxSubscriptionApiSpecs
     }
 
     [Fact]
-    public async Task Get_NoStoredPreferences_ReturnsAllFourEnabled()
+    public async Task Get_NoStoredPreferences_ReturnsAllFiveEnabled()
     {
         var projectId = await CreateProjectAsync("sub-default");
 
@@ -31,6 +31,7 @@ public class InboxSubscriptionApiSpecs
         Assert.True(sub.GetProperty("approval_requested").GetBoolean());
         Assert.True(sub.GetProperty("issue_started").GetBoolean());
         Assert.True(sub.GetProperty("issue_completed").GetBoolean());
+        Assert.True(sub.GetProperty("agent_response_failed").GetBoolean());
     }
 
     [Fact]
@@ -44,6 +45,7 @@ public class InboxSubscriptionApiSpecs
             ["approval_requested"] = false,
             ["issue_started"] = true,
             ["issue_completed"] = false,
+            ["agent_response_failed"] = false,
         };
 
         var putResult = await _client.PutAsJsonAsync(
@@ -57,6 +59,7 @@ public class InboxSubscriptionApiSpecs
         Assert.False(sub.GetProperty("approval_requested").GetBoolean());
         Assert.True(sub.GetProperty("issue_started").GetBoolean());
         Assert.False(sub.GetProperty("issue_completed").GetBoolean());
+        Assert.False(sub.GetProperty("agent_response_failed").GetBoolean());
     }
 
     [Fact]
@@ -70,6 +73,7 @@ public class InboxSubscriptionApiSpecs
             ["approval_requested"] = true,
             ["issue_started"] = true,
             ["issue_completed"] = true,
+            ["agent_response_failed"] = true,
             ["bogus_kind"] = false,
         };
 
@@ -85,6 +89,7 @@ public class InboxSubscriptionApiSpecs
         Assert.True(sub.GetProperty("approval_requested").GetBoolean());
         Assert.True(sub.GetProperty("issue_started").GetBoolean());
         Assert.True(sub.GetProperty("issue_completed").GetBoolean());
+        Assert.True(sub.GetProperty("agent_response_failed").GetBoolean());
     }
 
     [Fact]
@@ -97,6 +102,7 @@ public class InboxSubscriptionApiSpecs
             ["workflow_failed"] = true,
             ["approval_requested"] = true,
             ["issue_started"] = true,
+            ["issue_completed"] = true,
         };
 
         using var response = await _client.PutAsJsonAsync(
@@ -162,6 +168,7 @@ public class InboxSubscriptionApiSpecs
             ["approval_requested"] = false,
             ["issue_started"] = false,
             ["issue_completed"] = true,
+            ["agent_response_failed"] = false,
         };
 
         var putResult = await _client.PutAsJsonAsync(
@@ -179,6 +186,7 @@ public class InboxSubscriptionApiSpecs
         Assert.True(subB.GetProperty("approval_requested").GetBoolean());
         Assert.True(subB.GetProperty("issue_started").GetBoolean());
         Assert.True(subB.GetProperty("issue_completed").GetBoolean());
+        Assert.True(subB.GetProperty("agent_response_failed").GetBoolean());
     }
 
     [Fact]
@@ -207,6 +215,7 @@ public class InboxSubscriptionApiSpecs
         Assert.True(sub.GetProperty("approval_requested").GetBoolean());
         Assert.True(sub.GetProperty("issue_started").GetBoolean());
         Assert.True(sub.GetProperty("issue_completed").GetBoolean());
+        Assert.True(sub.GetProperty("agent_response_failed").GetBoolean());
     }
 
     private async Task<HttpResponseMessage> PutJsonAsync(string url, string json)

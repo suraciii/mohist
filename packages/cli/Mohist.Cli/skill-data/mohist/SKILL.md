@@ -74,8 +74,8 @@ issue belongs to another project.
 
 | Operation | CLI | Effect |
 |---|---|---|
-| Approve | `mo run approve <run-id>` / `mo run approve --issue <number>` | Approve at an approval gate (Plan → Build, Check → Integrate). |
-| Reject | `mo run reject <run-id> --message <m>` | Reject at an approval gate with a change request. |
+| Approve | `mo run approve <run-id> --author <name>` / `mo run approve --issue <number> --author <name>` | Approve at an approval gate (Plan → Build, Check → Integrate). `--author` records the declared operator (1-100 chars). |
+| Reject | `mo run reject <run-id> --author <name> --message <m>` | Reject at an approval gate with a change request. `--author` records the declared operator; both flags are required. |
 | Retry | `mo run retry <run-id>` | Retry the current failure point and restore the manual-retry budget. |
 | Rerun | `mo run rerun <run-id>` | Rerun the whole workflow from the beginning. |
 | Rerun from stage | `mo run rerun <run-id> --from-stage <stage>` | Invalidate the target stage and everything after it, then rerun. |
@@ -89,6 +89,7 @@ Key distinctions:
 - **`done` vs `close`**: `done` records delivered work after a terminal workflow; `close` cancels work that will not be delivered.
 - **`retry` vs `rerun --from-stage`**: `retry` retries the current failure point; `rerun` re-runs the whole workflow from the beginning; `rerun --from-stage` invalidates one named stage and everything after it.
 - **`reject` vs `stop`**: `reject` bounces back at an approval gate with a change request (the issue stays alive for another pass); `stop` ends the run.
+- **Approval operator (`--author`)**: `mo run approve` and `mo run reject` require `--author <name>` to declare who placed the gate (1-100 characters, trimmed; mirrors the comment `--author`). The declared name travels through the approval decision and the approval read model so the history distinguishes human vs. agent. Omitting, blank, or oversized `--author` is rejected with no state change.
 
 Read-only and aux helpers (also useful while driving):
 
@@ -149,5 +150,6 @@ All issue/epic commands accept these unless documented otherwise:
 | `--project <name>` / `--project-id <id>` | Target project; canonical is `--project`. `--project-id` is a backwards-compatible alias. |
 | `-o, --output <table\|json>` | Output format (table by default; many commands default to JSON). |
 | `--message <m>` / `-m <m>` | Required by `mo run reject` to carry the change-request reason. |
+| `--author <name>` | Required by `mo run approve` / `mo run reject` to record the declared approval operator (1-100 characters, trimmed). Mirrors the comment `--author`. |
 
 For the full flag surface on any command, run `mo <cmd> --help`.

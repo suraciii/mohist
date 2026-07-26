@@ -7,5 +7,6 @@ public class InboxSubscriptionRow
     public bool ApprovalRequestedEnabled { get; set; }
     public bool IssueStartedEnabled { get; set; }
     public bool IssueCompletedEnabled { get; set; }
+    public bool AgentResponseFailedEnabled { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

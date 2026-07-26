@@ -84,6 +84,19 @@ public class RecordingEventStore : IEventStore
         }
     }
 
+    public Task<IReadOnlyList<StoredCloudEvent>> ListAgentJobEventsAsync(string agentJobId, int limit = 200, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var source = $"/mohist/agent-job/{agentJobId}";
+            return Task.FromResult<IReadOnlyList<StoredCloudEvent>>(_events
+                .Where(e => e.Envelope.Source.ToString() == source)
+                .TakeLast(limit)
+                .Select(e => new StoredCloudEvent(e.Id, e.Envelope))
+                .ToList());
+        }
+    }
+
     public Task MarkDispatchedAsync(EventOrigin origin, string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
     {
         lock (_gate)
@@ -155,6 +168,8 @@ public class RecordingEventStore : IEventStore
             return EventOrigin.Epic;
         if (source.StartsWith("/mohist/agent-session/", StringComparison.Ordinal))
             return EventOrigin.AgentSession;
+        if (source.StartsWith("/mohist/agent-job/", StringComparison.Ordinal))
+            return EventOrigin.AgentJob;
         return EventOrigin.WorkflowRun;
     }
 

@@ -55,6 +55,36 @@ public class InboxProjectionHandlerSpecs
     }
 
     [Fact]
+    public async Task AgentJobFailed_ProducesAgentResponseFailedItemInOwningProject()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueNumber: 42,
+            title: "Issue 42");
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        var evt = new CloudEvent(
+            id: "evt-agent-failed",
+            source: new Uri("/mohist/agent-job/job_1", UriKind.Relative),
+            type: EventCatalog.ReverseDns.AgentJobFailed,
+            time: TestTime.UtcNow,
+            data: null,
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.AgentId] = "agent_1",
+                [EventCatalog.Lineage.ProjectId] = "proj_a",
+                [EventCatalog.Lineage.Issue] = "42",
+            });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+        Assert.Equal(NotificationKinds.AgentResponseFailed, item.NotificationKind);
+        Assert.Equal("evt-agent-failed", item.SourceEventId);
+    }
+
+    [Fact]
     public async Task StageApprovalRequested_ProducesApprovalRequestedItemInOwningProject()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
@@ -642,13 +672,19 @@ public class InboxProjectionHandlerSpecs
     }
 
     [Fact]
-    public async Task Filter_AcceptsAllFourTypes()
+    public async Task Filter_AcceptsAllFiveTypes()
     {
         var handler = InboxProjectionTestSupport.CreateHandler(InboxProjectionTestSupport.CreateDatabase());
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "p", 1, "e1")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "p", 1, "e2")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "w", "e3")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "w", "e4")));
+        Assert.True(handler.Filter(new CloudEvent(
+            id: "e5",
+            source: new Uri("/mohist/agent-job/job_1", UriKind.Relative),
+            type: EventCatalog.ReverseDns.AgentJobFailed,
+            time: TestTime.UtcNow,
+            data: null)));
     }
 
     [Fact]
@@ -664,7 +700,7 @@ public class InboxProjectionHandlerSpecs
     }
 
     [Fact]
-    public async Task HasSubscriptionAttributeWithExpectedFourTypes()
+    public async Task HasSubscriptionAttributeWithExpectedFiveTypes()
     {
         var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
             typeof(InboxProjectionHandler), typeof(SubscriptionAttribute));
@@ -673,7 +709,8 @@ public class InboxProjectionHandlerSpecs
             EventCatalog.ReverseDns.WorkflowRunFailed + "|" +
             EventCatalog.ReverseDns.StageApprovalRequested + "|" +
             EventCatalog.ReverseDns.IssueWorkStarted + "|" +
-            EventCatalog.ReverseDns.IssueCompleted,
+            EventCatalog.ReverseDns.IssueCompleted + "|" +
+            EventCatalog.ReverseDns.AgentJobFailed,
             attr!.Type);
     }
 

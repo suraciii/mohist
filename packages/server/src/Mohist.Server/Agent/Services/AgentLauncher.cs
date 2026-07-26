@@ -102,7 +102,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
             AgentConfig: agent.AgentConfig?.Clone(),
             AgentSessionId: sessionId,
-            Variant: resolvedVariant);
+            Variant: resolvedVariant,
+            IssueNumber: context.IssueNumber,
+            EpicNumber: context.EpicNumber);
         if (triggerLabels is null)
             await jobGrain.SubmitAsync(jobInput);
         else
@@ -203,7 +205,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Model: resolvedModel,
             Variant: resolvedVariant,
             Prompt: trimmedPrompt,
-            Runtime: resolvedRuntime);
+            Runtime: resolvedRuntime,
+            WorkflowRunId: executionContext.WorkflowRunId);
 
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
         var canonical = await jobGrain.EnsurePreparedAsync(resolvedPlan);
@@ -287,7 +290,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
             AgentConfig: agent.AgentConfig?.Clone(),
             AgentSessionId: sessionId,
-            Variant: resolvedVariant);
+            Variant: resolvedVariant,
+            IssueNumber: context.IssueNumber,
+            EpicNumber: context.EpicNumber);
         await jobGrain.EnsureSubmittedAsync(jobInput);
 
         return new AgentLaunchResult(

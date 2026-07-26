@@ -25,6 +25,6 @@ public sealed class AgentJobWorkCoordinator : IAgentJobWorkCoordinator, ISinglet
         return new AgentJobWorkReportResult(report.Accepted, report.Reason);
     }
 
-    public Task FailAsync(string agentJobId, string reason) =>
-        _grains.GetGrain<IAgentJobGrain>(agentJobId).FailAsync(reason);
+    public Task FailAsync(string agentJobId, string reason, string? agentId = null) =>
+        _grains.GetGrain<IAgentJobGrain>(agentJobId).FailAsync(reason, agentId);
 }

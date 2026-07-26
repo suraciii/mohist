@@ -119,6 +119,7 @@ public static class InboxRoutes
                 NotificationKinds.ApprovalRequested,
                 NotificationKinds.IssueStarted,
                 NotificationKinds.IssueCompleted,
+                NotificationKinds.AgentResponseFailed,
             };
             var provided = properties.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
             var missing = required.Where(k => !provided.Contains(k)).ToArray();
@@ -171,19 +172,24 @@ public sealed class InboxSubscriptionDto
     [JsonPropertyName("issue_completed")]
     public bool IssueCompleted { get; init; }
 
+    [JsonPropertyName("agent_response_failed")]
+    public bool AgentResponseFailed { get; init; }
+
     public static InboxSubscriptionDto FromState(InboxSubscriptionState state) => new()
     {
         WorkflowFailed = state.WorkflowFailedEnabled,
         ApprovalRequested = state.ApprovalRequestedEnabled,
         IssueStarted = state.IssueStartedEnabled,
         IssueCompleted = state.IssueCompletedEnabled,
+        AgentResponseFailed = state.AgentResponseFailedEnabled,
     };
 
     public InboxSubscriptionState ToState() => new(
         WorkflowFailedEnabled: WorkflowFailed,
         ApprovalRequestedEnabled: ApprovalRequested,
         IssueStartedEnabled: IssueStarted,
-        IssueCompletedEnabled: IssueCompleted);
+        IssueCompletedEnabled: IssueCompleted,
+        AgentResponseFailedEnabled: AgentResponseFailed);
 }
 
 /// <summary>

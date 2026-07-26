@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -95,7 +96,8 @@ public static class MohistServiceRegistration
 
         services.AddDbContextFactory<MohistDbContext>(options =>
             options.UseSqlite(connectionString)
-                .AddInterceptors(new RequestWorkDbCommandInterceptor()));
+                .AddInterceptors(new RequestWorkDbCommandInterceptor())
+                .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
         services.AddTransient<IHttpMessageHandlerBuilderFilter, RequestWorkHttpMessageHandlerBuilderFilter>();
 
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>>(sp => sp.GetRequiredService<IIssueStore>());

@@ -29,7 +29,16 @@ public static partial class IssueRoutes
 
             try
             {
-                var feedbackId = await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(req.Body);
+                string decidedBy;
+                try
+                {
+                    decidedBy = ApprovalOperatorValidation.Normalize(req.Author);
+                }
+                catch (ArgumentException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message);
+                }
+                var feedbackId = await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(req.Body, decidedBy);
                 var feedback = await grains.GetGrain<IWorkflowGrain>(wrId).GetFeedbackAsync(feedbackId);
                 if (feedback is null)
                     return ApiResults.NotFound("Feedback was created but could not be read back");

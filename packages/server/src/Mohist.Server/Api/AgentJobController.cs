@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Api;
@@ -11,7 +12,7 @@ namespace Mohist.Server.Api;
 /// Minimal validation HTTP API for the standalone Agent Jobs engine.
 ///
 /// POST <c>/api/agent-jobs/validate</c> accepts a body of
-/// <c>{ prompt, model, workspace }</c>, creates an <see cref="IAgentJobGrain"/>
+/// <c>{ prompt, agentId, model, workspace }</c>, creates an <see cref="IAgentJobGrain"/>
 /// with a generated key, dispatches it through the engine, awaits the job's
 /// terminal result, and returns the job's status/message/output/artifacts.
 ///
@@ -32,7 +33,9 @@ public static class AgentJobController
 
     public static WebApplication MapAgentJobRoutes(this WebApplication app)
     {
-        app.MapPost(ValidatePath, HandleValidateAsync);
+        app.MapPost(ValidatePath, static (HttpRequest request, IGrainFactory grains, IOptions<AgentJobOptions> options,
+            AgentQuerier agents, TimeProvider timeProvider, CancellationToken ct) =>
+            HandleValidateAsync(request, grains, options, timeProvider, ct, agents));
         return app;
     }
 
@@ -41,7 +44,8 @@ public static class AgentJobController
         IGrainFactory grains,
         IOptions<AgentJobOptions> options,
         TimeProvider timeProvider,
-        CancellationToken ct)
+        CancellationToken ct,
+        AgentQuerier? agents = null)
     {
         if (request.ContentLength is 0)
         {
@@ -69,6 +73,8 @@ public static class AgentJobController
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(body.Prompt))
             errors.Add("prompt is required");
+        if (string.IsNullOrWhiteSpace(body.AgentId))
+            errors.Add("agentId is required");
         if (body.Workspace is not null && string.IsNullOrWhiteSpace(body.Workspace.Path))
             errors.Add("workspace.path is required when workspace is provided");
         if (body.JobId is { Length: > 0 } && !IsValidJobId(body.JobId))
@@ -82,6 +88,21 @@ public static class AgentJobController
                 new { fields = errors });
         }
 
+        if (agents is not null)
+        {
+            var projectId = body.Workspace?.ProjectId;
+            if (string.IsNullOrWhiteSpace(projectId))
+            {
+                return ApiResults.BadRequest("workspace.projectId is required.", "validation_failed");
+            }
+
+            var agent = await agents.GetByIdAsync(projectId, body.AgentId!.Trim());
+            if (agent is null)
+            {
+                return ApiResults.BadRequest("agentId must identify an Agent in workspace.projectId.", "validation_failed");
+            }
+        }
+
         var agentOptions = options.Value;
         var timeout = ResolveTimeout(agentOptions);
         var jobKey = ResolveJobKey(body);
@@ -91,7 +112,8 @@ public static class AgentJobController
             Prompt: body.Prompt!.Trim(),
             Model: string.IsNullOrWhiteSpace(body.Model) ? null : body.Model.Trim(),
             WorkspacePath: body.Workspace?.Path,
-            ProjectId: body.Workspace?.ProjectId);
+            ProjectId: body.Workspace?.ProjectId,
+            AgentId: body.AgentId!.Trim());
 
         try
         {
@@ -224,6 +246,7 @@ public static class AgentJobController
 public sealed record AgentJobValidationRequest
 {
     public string? Prompt { get; init; }
+    public string? AgentId { get; init; }
     public string? Model { get; init; }
     public string? Uses { get; init; }
     public string? JobId { get; init; }

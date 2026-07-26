@@ -152,7 +152,7 @@ public class WorkflowRunStatusTransitionTests
     {
         var run = BuildAwaitingApprovalRun();
 
-        var events = run.Approve(DateTimeOffset.UnixEpoch);
+        var events = run.Approve(DateTimeOffset.UnixEpoch, "operator-1");
 
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.Equal("build", run.CurrentStageId);
@@ -298,7 +298,7 @@ public class WorkflowRunStatusTransitionTests
     {
         var run = BuildAwaitingApprovalRun();
 
-        run.Reject("not enough detail", DateTimeOffset.UnixEpoch);
+        run.Reject("not enough detail", DateTimeOffset.UnixEpoch, "operator-1");
 
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
     }

@@ -135,7 +135,8 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: workId,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
-            AgentJobId: agentJobId);
+            AgentJobId: agentJobId,
+            AgentId: "agent-test");
 
         Assert.Equal(
             RunnerWorkAssignmentStatus.Assigned,
@@ -214,7 +215,8 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: workId,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
-            AgentJobId: agentJobId);
+            AgentJobId: agentJobId,
+            AgentId: "agent-test");
         Assert.Equal(
             RunnerWorkAssignmentStatus.Assigned,
             (await runner.AssignAgentJobAsync(agentDispatch)).Status);
@@ -308,7 +310,8 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: $"agent-work-{Guid.NewGuid():N}",
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
-            AgentJobId: $"agent-job-{Guid.NewGuid():N}");
+            AgentJobId: $"agent-job-{Guid.NewGuid():N}",
+            AgentId: "agent-test");
         var assignment = await runner.AssignAgentJobAsync(agentJobDispatch);
         Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assignment.Status);
         await Grains.GetGrain<IAgentJobGrain>(agentJobDispatch.AgentJobId!)

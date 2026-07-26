@@ -304,7 +304,8 @@ public class IssueArchivedDetailApiSpecs
 
         using var response = action switch
         {
-            "reject" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { message = "historical" }),
+            "approve" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { author = "supervisor" }),
+            "reject" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { author = "supervisor", message = "historical" }),
             "rerun-from-stage" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { stage = "build" }),
             _ => await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", null),
         };
@@ -330,7 +331,8 @@ public class IssueArchivedDetailApiSpecs
 
         using var response = action switch
         {
-            "reject" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { message = "historical" }),
+            "approve" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { author = "supervisor" }),
+            "reject" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { author = "supervisor", message = "historical" }),
             "rerun-from-stage" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { stage = "build" }),
             _ => await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", null),
         };

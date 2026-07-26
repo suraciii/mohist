@@ -84,7 +84,8 @@ public static partial class WorkflowRunExtensions
         {
             if (run.CurrentStageId is null) return false;
             var current = run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
-            if (current is null || !current.IsAwaitingApproval) return false;
+            if (current is null) return false;
+            if (current.ApprovalStatus is null) return false;
 
             current.ApprovalStatus = null;
             current.Status = StageRunStatus.Running;
