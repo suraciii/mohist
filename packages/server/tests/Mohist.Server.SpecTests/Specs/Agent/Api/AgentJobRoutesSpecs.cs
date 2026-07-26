@@ -296,19 +296,18 @@ internal sealed class SingleAgentJobGrainFactory : IGrainFactory
 }
 
 [Collection("MohistIntegration")]
-public class AgentJobDispatchRouteSpecs
+public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
 {
-    private readonly MohistIntegrationFixture _fixture;
-
     public AgentJobDispatchRouteSpecs(MohistIntegrationFixture fixture)
+        : base(fixture)
     {
-        _fixture = fixture;
     }
 
     [Fact]
     public async Task PostValidate_DispatchesAgentJobToRunner_AndReturnsReportedCompletion()
     {
-        var (projectId, agentId) = await CreateProjectAndAgentAsync("agent-route-project");
+        var projectId = await CreateProjectAsync("agent-route-project");
+        var agentId = (await CreateAgentAsync(projectId, "validation-agent")).Id;
         var runnerId = $"agent-route-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 2);
@@ -361,7 +360,8 @@ public class AgentJobDispatchRouteSpecs
     [Fact]
     public async Task PostValidate_WhenRunnerReportsFailure_ReturnsStructuredFailure()
     {
-        var (projectId, agentId) = await CreateProjectAndAgentAsync("agent-route-fail-project");
+        var projectId = await CreateProjectAsync("agent-route-fail-project");
+        var agentId = (await CreateAgentAsync(projectId, "validation-agent")).Id;
         var runnerId = $"agent-route-fail-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-fail-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 4);
@@ -406,7 +406,8 @@ public class AgentJobDispatchRouteSpecs
     [Fact]
     public async Task RunnerReportEndpoint_ForAgentJob_DeliversResultToValidateResponse()
     {
-        var (projectId, agentId) = await CreateProjectAndAgentAsync("agent-route-http-report-project");
+        var projectId = await CreateProjectAsync("agent-route-http-report-project");
+        var agentId = (await CreateAgentAsync(projectId, "validation-agent")).Id;
         var runnerId = $"agent-route-http-report-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-http-report-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 2);
@@ -462,7 +463,8 @@ public class AgentJobDispatchRouteSpecs
     [Fact]
     public async Task RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId()
     {
-        var (projectId, agentId) = await CreateProjectAndAgentAsync("agent-route-http-poll-project");
+        var projectId = await CreateProjectAsync("agent-route-http-poll-project");
+        var agentId = (await CreateAgentAsync(projectId, "validation-agent")).Id;
         var runnerId = $"agent-route-http-poll-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-http-poll-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 1);
@@ -547,37 +549,6 @@ public class AgentJobDispatchRouteSpecs
             TimeSpan.FromSeconds(5),
             TimeSpan.FromMilliseconds(25),
             $"Runner '{runnerId}' to reach Online");
-    }
-
-    private async Task<(string ProjectId, string AgentId)> CreateProjectAndAgentAsync(string prefix)
-    {
-        var rawProjectName = $"{prefix}-{Guid.NewGuid():N}";
-        var projectName = rawProjectName.Length > 63 ? rawProjectName[..63] : rawProjectName;
-        using var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new
-        {
-            name = projectName,
-            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-        });
-        projectResponse.EnsureSuccessStatusCode();
-        var projectPayload = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var projectId = projectPayload.GetProperty("data").GetProperty("id").GetString()
-            ?? throw new InvalidOperationException("Project creation returned no id");
-
-        using var agentResponse = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/agents", new
-        {
-            name = "validation-agent",
-            description = "agent job route test agent",
-            instructions = "complete the requested validation task",
-            agentConfig = new { model = "openai/gpt-5.6" },
-            skills = new[] { "coding" },
-            maxConcurrentRuns = 1,
-        });
-        agentResponse.EnsureSuccessStatusCode();
-        var agentPayload = await agentResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var agentId = agentPayload.GetProperty("data").GetProperty("id").GetString()
-            ?? throw new InvalidOperationException("Agent creation returned no id");
-
-        return (projectId, agentId);
     }
 
     private async Task<string> WaitForAgentJobDispatchAsync(string agentJobId, string expectedRunnerId)
