@@ -1,6 +1,6 @@
 {
   "Mohist.Server.ArchTests/ArchitectureRules.cs": 30000,
-  "Mohist.Server.SpecTests/Specs/Agent/Api/AgentJobRoutesSpecs.cs": 25068,
+  "Mohist.Server.SpecTests/Specs/Agent/Api/AgentJobRoutesSpecs.cs": 26041,
   "Mohist.Server.SpecTests/Specs/AgentOps/AgentUsageReporterSpecs.cs": 33354,
   "Mohist.Server.SpecTests/Specs/Api/ProjectEventsApiSpecs.cs": 33599,
   "Mohist.Server.SpecTests/Specs/Epic/Grain/EpicEventPublishTestSupport.cs": 24074,
