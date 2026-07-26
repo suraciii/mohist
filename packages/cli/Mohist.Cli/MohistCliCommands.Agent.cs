@@ -284,18 +284,24 @@ internal static class AgentCommands
                     return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--name is required");
                 }
 
+                var instructionsResult = await BodyInputResolver.ResolveAsync(
+                    instructions,
+                    instructionsFile,
+                    new BodyInputResolver.SourceFlags("--instructions", "--instructions-file", "Agent instructions"),
+                    api.FileSystem,
+                    api.StandardInput,
+                    TextWriter.Null);
+                if (instructionsResult is BodyInputResolver.Result.Failure instructionsFailure)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, instructionsFailure.Message);
+
+                var config = await ResolveJsonAsync(agentConfig, api, TextWriter.Null);
+                if (config is ResolveJsonResult.Invalid configFailure)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, configFailure.Message);
+
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-
                 if (resolveExit != 0) return resolveExit;
 
-                var resolvedInstructions = await ResolveInstructionsAsync(instructions, instructionsFile, api);
-                if (resolvedInstructions is null)
-                    return 1;
-
-                var config = await ResolveJsonAsync(agentConfig, api);
-                if (config is ResolveJsonResult.Invalid)
-                    return 1;
+                var resolvedInstructions = ((BodyInputResolver.Result.Success)instructionsResult).Body;
 
                 return await PrintAgentIdAsync(api, ProjectAgentsPath(resolvedProjectId, "/agents"), new
                 {
@@ -663,11 +669,15 @@ internal static class AgentCommands
         return resolved is BodyInputResolver.Result.Success success ? success.Body : null;
     }
 
-    private static async Task<ResolveJsonResult> ResolveJsonAsync(string? value, MohistCliApi api)
+    private static async Task<ResolveJsonResult> ResolveJsonAsync(
+        string? value,
+        MohistCliApi api,
+        TextWriter? error = null)
     {
         if (string.IsNullOrWhiteSpace(value))
             return new ResolveJsonResult.Valid(null);
 
+        error ??= api.Error;
         var text = value;
         if (value.StartsWith('@'))
         {
@@ -677,8 +687,9 @@ internal static class AgentCommands
             }
             catch (Exception ex)
             {
-                api.Error.WriteLine($"could not read agent config file: {value[1..]} ({ex.Message})");
-                return new ResolveJsonResult.Invalid();
+                var message = $"could not read agent config file: {value[1..]} ({ex.Message})";
+                error.WriteLine(message);
+                return new ResolveJsonResult.Invalid(message);
             }
         }
 
@@ -688,8 +699,9 @@ internal static class AgentCommands
         }
         catch (JsonException ex)
         {
-            api.Error.WriteLine($"--agent-config must be valid JSON ({ex.Message})");
-            return new ResolveJsonResult.Invalid();
+            var message = $"--agent-config must be valid JSON ({ex.Message})";
+            error.WriteLine(message);
+            return new ResolveJsonResult.Invalid(message);
         }
     }
 
@@ -907,7 +919,7 @@ internal static class AgentCommands
 
         public sealed record Valid(JsonNode? Value) : ResolveJsonResult;
 
-        public sealed record Invalid : ResolveJsonResult;
+        public sealed record Invalid(string Message) : ResolveJsonResult;
     }
 
     internal sealed record AgentRef(string Id, string Name)

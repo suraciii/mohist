@@ -688,6 +688,44 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
+    public async Task AgentCreate_MissingInstructionsFailsWithScopedUsageBeforeHttp()
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "create", "--name", "reviewer"],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("Agent instructions is required", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo agent create [flags]", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task AgentCreate_UnreadableInstructionsFileFailsWithScopedUsageBeforeHttp()
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "create", "--name", "reviewer", "--instructions-file", "missing.md"],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("could not read body file: missing.md", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo agent create [flags]", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task AgentCreate_MissingFieldsAndConflictFailClearly()
     {
         var missingHandler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
