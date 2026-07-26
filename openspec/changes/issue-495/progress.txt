@@ -1,0 +1,11 @@
+## Codebase Patterns
+
+- `WorkflowRun.RetryTarget` is the shared domain resolver used by the status mapper; it returns a normalized `TaskFailed` target for both ordinary task failures and persisted legacy `ContextExhaustion` failures.
+- Task target resolution falls back to the last failed task in the failure's recorded stage when the persisted failure has no task id.
+- `Retry` retains the failed-run and failed-stage guards, then executes only the target returned by `RetryTarget`; rerun and rerun-from-stage remain separate controls.
+- The Server test projects use Microsoft Testing Platform, so `dotnet test --filter` is ignored in this workspace. Build with `-p:SkipWebBuild=true`, then invoke the test DLL directly with xUnit v3 `-class` for focused runs.
+
+## T-001
+
+- Added unit coverage for legacy ContextExhaustion status/action mapping and task retry, check retry, and no-target rejection without mutation.
+- Existing `WorkflowRetrySpecs` passed all 25 tests, covering ordinary task/check retry, rerun, rerun-from-stage support, and recovery retry behavior.
