@@ -64,3 +64,8 @@
 - 1506 / 1506 unit tests pass (new: 9 `OtlpWriteBlockPlannerTests`).
 - 3246 / 3246 spec tests pass (new: 10 `TraceIngesterBoundedWriteSpecs` and 4 `OtlpRoutesBoundedWriteSpecs`).
 - 32 / 32 arch tests pass; `npm test` passes end-to-end; `npm run typecheck` passes for both `web` and `runner`; `dotnet build /p:TreatWarningsAsErrors=true` is clean.
+
+### Verification recovery
+
+- The stored verify output from 2026-07-26 reports 3245 / 3246 SpecTests, with the failing test `EventDispatcherImmediateTriggerSpecs.LostImmediateTrigger_LeavesRowUndispatched_AndReminderTickRecovers` at line 195. UnitTests (1506) and ArchTests (32) passed.
+- The failure reproduces in the full SpecTests run as `Assert.Equal` expected `0`, actual `1` for the event store pending count. The same test passes when run alone, while all issue-471 telemetry specs pass in isolation. This is the pre-existing full-suite fake-time/reminder flake already noted above and is unrelated to issue-471; no unrelated test change was made.
