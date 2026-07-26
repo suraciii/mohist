@@ -1,15 +1,3 @@
-## Findings
+No blocking findings.
 
-### P1: Legacy Workflow-backed Sessions disappear because SQL treats a missing source kind differently
-
-`ListStatusCandidatesAsync` filters the Workflow branch with `session.LabelSourceKind != DirectSourceKind` (`packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuery.cs:119-125`). In SQLite, that predicate does not match `NULL`. Before this change, `WorkflowActivityQuerier` treated every record whose source kind was not exactly `agent-launch`, including `null`, as Workflow-backed and emitted it when its project, Workflow Run ID, work ID, and pending work matched (`packages/server/src/Mohist.Server/Workflow/Services/WorkflowActivityQuerier.cs:61-97`). Persisted Session deserialization intentionally permits a legacy source kind to be absent (`packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionStore.cs:175-183`), so an otherwise valid legacy Workflow Session now vanishes from `/api/agent/status`, violating the unchanged-response contract. Make the Workflow branch explicitly include a null source kind (while still excluding `agent-launch`) and add a regression that compares the legacy record's status result before and after selection.
-
-### P1: The terminalization spec never exercises terminalization after candidate selection
-
-`Status_SessionForTerminalizedWorkflow_IsExcludedByCurrentStatusCheck` writes a running `WorkflowRunRow` and immediately calls `TerminalizeWorkflowAsync` before sending the status request (`packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/AgentStatusHistoryBoundedSelectionSpecs.cs:147-165`). The joined candidate query therefore sees `completed` and excludes the Session before `WorkflowQuerier.GetStatusAsync` can run. The configured fake pending work also uses `GetSessionWorkId(sessionId)`, which differs from the random `workId` inserted by `InsertWorkflowSessionAsync`, so the assertion would still pass if the Session were selected. This does not cover the required race in which a selected running Workflow terminalizes before its current-status read. Add a deterministic seam that terminalizes after candidate materialization, configure the fake with the Session's actual work ID, and assert both that the status read occurred and that the Session is omitted.
-
-### P2: The history-stability test does not verify the response payload required by the acceptance criteria
-
-`Status_WithIdenticalActiveWorkAndThousandsOfInactiveHistoricalSessions_KeepsResponseStable` captures only the first response's `amplification` object and then compares database and downstream counters (`packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/AgentStatusHistoryBoundedSelectionSpecs.cs:59-79`). It never compares `activeAgents` JSON, ordering, candidate count from the small dataset, or materialized-row count across the same small/large datasets. The task specifically requires proving that adding history leaves active-agent JSON, candidate count, materialization count, and operation counters unchanged. Capture the complete small response and the materialization count through the existing seam, then compare all required values after inserting the historical rows.
-
-<promise>FAIL</promise>
+<promise>PASS</promise>
