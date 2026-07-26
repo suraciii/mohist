@@ -381,3 +381,9 @@ link until T-005 switches the CLI over.
   confirm that test name appears in the UTF-16LE log's `failed ` lines.
   Then revert. (The whole suite passing with 0 failures is insufficient
   proof alone — a non-discovered class would just lower the total.)
+
+### T-002 verification rerun
+
+- Re-audited every AgentJob read spec scenario and T-002 acceptance criterion against the committed server routes, grain-backed project isolation, CLI commands, renderers, and tests; no gaps found.
+- Focused verification passed: server specs 3107/3107 and CLI tests 1383/1383.
+- `npm run build` passed with zero .NET warnings/errors. The first `npm test` attempt hit the documented unrelated runner-dispatch pickup race in `SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch`; the immediate full rerun passed across server, CLI, Web, and Runner.
