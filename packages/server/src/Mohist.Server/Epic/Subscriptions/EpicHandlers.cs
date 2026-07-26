@@ -6,7 +6,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Epic.Subscriptions;
 
 /// <summary>
 /// Subscribes to <c>com.mohist.issue.completed</c> and dispatches
@@ -17,7 +17,9 @@ namespace Mohist.Server.Events.Subscriptions;
 /// as an external prerequisite, so a dependent epic can advance once
 /// the blocker clears.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueCompleted)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueCompleted,
+    Identity = "Mohist.Server.Events.Subscriptions.EpicAutoDoneHandler")]
 public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
 {
     private readonly EpicProgressRecomputeDispatcher _dispatcher;
@@ -55,7 +57,9 @@ public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
 /// epic when its in-progress issue is cancelled. Cancellation only recomputes
 /// the owning epic: external prerequisites become startable only when done.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueCancelled)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueCancelled,
+    Identity = "Mohist.Server.Events.Subscriptions.EpicCancelledHandler")]
 public sealed class EpicCancelledHandler : ICloudEventHandler<IssueCancelled>
 {
     private readonly EpicProgressRecomputeDispatcher _dispatcher;
@@ -91,7 +95,9 @@ public sealed class EpicCancelledHandler : ICloudEventHandler<IssueCancelled>
 /// unblock a running-but-idle epic. Only undraft (NewIsDraft == false)
 /// is actionable — drafting a ready issue has no epic-progress effect.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueDraftChanged)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueDraftChanged,
+    Identity = "Mohist.Server.Events.Subscriptions.EpicDraftChangedHandler")]
 public sealed class EpicDraftChangedHandler : ICloudEventHandler<IssueDraftChanged>
 {
     private readonly EpicProgressRecomputeDispatcher _dispatcher;
@@ -127,7 +133,9 @@ public sealed class EpicDraftChangedHandler : ICloudEventHandler<IssueDraftChang
 /// a convergence path the deleted sweep covered; this subscription closes
 /// the gap with a durable, event-driven trigger.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueReopened)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueReopened,
+    Identity = "Mohist.Server.Events.Subscriptions.EpicIssueReopenedHandler")]
 public sealed class EpicIssueReopenedHandler : ICloudEventHandler<IssueReopened>
 {
     private readonly EpicProgressRecomputeDispatcher _dispatcher;
@@ -163,7 +171,9 @@ public sealed class EpicIssueReopenedHandler : ICloudEventHandler<IssueReopened>
 /// deleted periodic sweep used to converge. This subscription closes that
 /// gap with a durable, event-driven trigger.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssuePrerequisiteRemoved)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssuePrerequisiteRemoved,
+    Identity = "Mohist.Server.Events.Subscriptions.EpicPrerequisiteRemovedHandler")]
 public sealed class EpicPrerequisiteRemovedHandler : ICloudEventHandler<IssuePrerequisiteRemoved>
 {
     private readonly EpicProgressRecomputeDispatcher _dispatcher;
@@ -200,7 +210,9 @@ public sealed class EpicPrerequisiteRemovedHandler : ICloudEventHandler<IssuePre
 /// the recompute on redelivery. It also covers the auto-mark-done path for
 /// an epic that starts with no open members.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.EpicStatusChanged)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.EpicStatusChanged,
+    Identity = "Mohist.Server.Events.Subscriptions.EpicRunningStatusHandler")]
 public sealed class EpicRunningStatusHandler : ICloudEventHandler<Epic.Domain.Events.EpicStatusChanged>
 {
     private readonly EpicEventRecomputeDispatcher _dispatcher;
@@ -231,7 +243,9 @@ public sealed class EpicRunningStatusHandler : ICloudEventHandler<Epic.Domain.Ev
 /// permanently failing start surfaces to the dispatcher for dead-lettering
 /// rather than being silently swallowed again.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.EpicStartAttemptFailed)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.EpicStartAttemptFailed,
+    Identity = "Mohist.Server.Events.Subscriptions.EpicStartRetryHandler")]
 public sealed class EpicStartRetryHandler : ICloudEventHandler<Epic.Domain.Events.EpicStartAttemptFailed>
 {
     private readonly EpicEventRecomputeDispatcher _dispatcher;

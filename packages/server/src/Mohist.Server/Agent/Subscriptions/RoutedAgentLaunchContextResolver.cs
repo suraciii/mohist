@@ -4,9 +4,8 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Workflow.Domain.Run;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Agent.Subscriptions;
 
 /// <summary>
 /// Narrow post-match resolver that turns a routed CloudEvent into an
@@ -99,7 +98,6 @@ public sealed class RoutedAgentLaunchContextResolver : IScopedService
                     $"explicit workflow run '{envelopeWorkflowRunId}' is not persisted");
             }
 
-            var run = routingContext.Run;
             if (!string.Equals(routingContext.ProjectId, projectId, StringComparison.Ordinal))
             {
                 return RoutedExecutionContextResolution.Unresolved(
@@ -121,7 +119,7 @@ public sealed class RoutedAgentLaunchContextResolver : IScopedService
                     $"workflow run '{envelopeWorkflowRunId}' belongs to epic {routingContext.EpicNumber?.ToString() ?? "(none)"}, not {envelopeEpic.Value}");
             }
 
-            if (run.Workspace is null || string.IsNullOrWhiteSpace(run.Workspace.Path))
+            if (string.IsNullOrWhiteSpace(routingContext.WorkspacePath))
             {
                 return RoutedExecutionContextResolution.Unresolved(
                     RoutedResolutionFailure.WorkspaceEmpty,
@@ -132,12 +130,12 @@ public sealed class RoutedAgentLaunchContextResolver : IScopedService
 
             return RoutedExecutionContextResolution.Ready(
                 new RoutedExecutionContext(
-                    WorkflowRunId: run.Id,
+                    WorkflowRunId: routingContext.WorkflowRunId,
                     ProjectId: projectId!,
                     IssueNumber: issueNumber ?? routingContext.IssueNumber,
                     EpicNumber: envelopeEpic ?? routingContext.EpicNumber,
-                    WorkspacePath: run.Workspace.Path,
-                    TerminalRun: run.Status.IsTerminal()));
+                    WorkspacePath: routingContext.WorkspacePath,
+                    TerminalRun: routingContext.IsTerminal));
         }
 
         if (!hasIssueLineage)
@@ -163,12 +161,11 @@ public sealed class RoutedAgentLaunchContextResolver : IScopedService
                 $"issue {issueNumber.Value}'s bound workflow run '{issueWorkflowRunId}' is not persisted");
         }
 
-        var boundRun = boundContext.Run;
-        if (boundRun.Status.IsTerminal())
+        if (boundContext.IsTerminal)
         {
             return RoutedExecutionContextResolution.Unresolved(
                 RoutedResolutionFailure.IssueRunTerminal,
-                $"issue {issueNumber.Value}'s bound workflow run '{boundRun.Id}' is in a terminal status ({boundRun.Status})",
+                $"issue {issueNumber.Value}'s bound workflow run '{boundContext.WorkflowRunId}' is in a terminal status ({boundContext.Status})",
                 issueNumber,
                 envelopeEpic ?? boundContext.EpicNumber);
         }
@@ -177,39 +174,39 @@ public sealed class RoutedAgentLaunchContextResolver : IScopedService
         {
             return RoutedExecutionContextResolution.Unresolved(
                 RoutedResolutionFailure.LineageMismatch,
-                    $"issue-bound workflow run '{boundRun.Id}' belongs to project '{boundContext.ProjectId ?? "(unknown)"}', not '{projectId}'");
+                    $"issue-bound workflow run '{boundContext.WorkflowRunId}' belongs to project '{boundContext.ProjectId ?? "(unknown)"}', not '{projectId}'");
         }
 
         if (boundContext.IssueNumber != issueNumber)
         {
             return RoutedExecutionContextResolution.Unresolved(
                 RoutedResolutionFailure.LineageMismatch,
-                $"issue-bound workflow run '{boundRun.Id}' belongs to issue {boundContext.IssueNumber?.ToString() ?? "(none)"}, not {issueNumber.Value}");
+                $"issue-bound workflow run '{boundContext.WorkflowRunId}' belongs to issue {boundContext.IssueNumber?.ToString() ?? "(none)"}, not {issueNumber.Value}");
         }
 
         if (envelopeEpic is > 0 && boundContext.EpicNumber != envelopeEpic)
         {
             return RoutedExecutionContextResolution.Unresolved(
                 RoutedResolutionFailure.LineageMismatch,
-                $"issue-bound workflow run '{boundRun.Id}' belongs to epic {boundContext.EpicNumber?.ToString() ?? "(none)"}, not {envelopeEpic.Value}");
+                $"issue-bound workflow run '{boundContext.WorkflowRunId}' belongs to epic {boundContext.EpicNumber?.ToString() ?? "(none)"}, not {envelopeEpic.Value}");
         }
 
-        if (boundRun.Workspace is null || string.IsNullOrWhiteSpace(boundRun.Workspace.Path))
+        if (string.IsNullOrWhiteSpace(boundContext.WorkspacePath))
         {
             return RoutedExecutionContextResolution.Unresolved(
                 RoutedResolutionFailure.WorkspaceEmpty,
-                $"issue-bound workflow run '{boundRun.Id}' has no persisted workspace path",
+                $"issue-bound workflow run '{boundContext.WorkflowRunId}' has no persisted workspace path",
                 issueNumber,
                 envelopeEpic ?? boundContext.EpicNumber);
         }
 
         return RoutedExecutionContextResolution.Ready(
             new RoutedExecutionContext(
-                WorkflowRunId: boundRun.Id,
+                WorkflowRunId: boundContext.WorkflowRunId,
                 ProjectId: projectId!,
                 IssueNumber: issueNumber,
-                    EpicNumber: envelopeEpic ?? boundContext.EpicNumber,
-                WorkspacePath: boundRun.Workspace.Path,
+                EpicNumber: envelopeEpic ?? boundContext.EpicNumber,
+                WorkspacePath: boundContext.WorkspacePath,
                 TerminalRun: false));
     }
 

@@ -48,7 +48,6 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
-    public FakeGitService Git => _factory.Services.GetRequiredService<FakeGitService>();
     public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
@@ -198,7 +197,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
-            services.RemoveAll<IGitService>();
             for (var index = services.Count - 1; index >= 0; index--)
             {
                 if (services[index].ServiceType == typeof(ILoggerProvider))
@@ -229,8 +227,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IPromptLoader>();
             services.AddSingleton<IPromptLoader>(_ => new InMemoryPromptLoader());
             services.AddSingleton<IStartupFilter, LoopbackTestConnectionStartupFilter>();
-            services.AddSingleton<FakeGitService>();
-            services.AddSingleton<IGitService>(provider => provider.GetRequiredService<FakeGitService>());
             services.RemoveAll<IRunnerWorkspaceClient>();
             services.AddSingleton<FakeRunnerWorkspaceClient>();
             services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());

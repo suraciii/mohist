@@ -158,6 +158,72 @@ public class EventBusTests
         Assert.Contains("wildcards are only allowed", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Subscription_DefaultsIdentityToHandlerRuntimeFullName()
+    {
+        var handler = new RecordingHandler(_ => true, _ => { });
+
+        var subscription = new Subscription("test.greeting", handler, DispatchDynamic);
+
+        Assert.Equal(typeof(RecordingHandler).FullName, subscription.Identity);
+    }
+
+    [Fact]
+    public void Subscription_AcceptsExplicitDurableIdentity()
+    {
+        var handler = new RecordingHandler(_ => true, _ => { });
+        const string legacy = "Mohist.Server.Events.Subscriptions.RecordingHandler";
+
+        var subscription = new Subscription("test.greeting", handler, DispatchDynamic, legacy);
+
+        Assert.Equal(legacy, subscription.Identity);
+    }
+
+    [Fact]
+    public void Subscription_ExplicitIdentityOverridesRuntimeFullName()
+    {
+        var handler = new RecordingHandler(_ => true, _ => { });
+
+        var subscription = new Subscription(
+            "test.greeting",
+            handler,
+            DispatchDynamic,
+            "custom.durable.identity");
+
+        Assert.NotEqual(typeof(RecordingHandler).FullName, subscription.Identity);
+        Assert.Equal("custom.durable.identity", subscription.Identity);
+    }
+
+    [Fact]
+    public void AddCloudEventHandlers_UsesAttributeIdentity_WhenDeclared()
+    {
+        var services = new ServiceCollection();
+
+        services.AddCloudEventHandlers([typeof(IdentityDeclaredHandler)]);
+
+        var subscriptions = services
+            .BuildServiceProvider()
+            .GetRequiredService<IEnumerable<Subscription>>();
+
+        var sub = Assert.Single(subscriptions);
+        Assert.Equal("Mohist.Server.Events.Subscriptions.PreservedIdentity", sub.Identity);
+    }
+
+    [Fact]
+    public void AddCloudEventHandlers_FallsBackToRuntimeFullName_WhenAttributeIdentityOmitted()
+    {
+        var services = new ServiceCollection();
+
+        services.AddCloudEventHandlers([typeof(IdentityOmittedHandler)]);
+
+        var subscriptions = services
+            .BuildServiceProvider()
+            .GetRequiredService<IEnumerable<Subscription>>();
+
+        var sub = Assert.Single(subscriptions);
+        Assert.Equal(typeof(IdentityOmittedHandler).FullName, sub.Identity);
+    }
+
     private sealed record TestPayload(string Message);
 
     private static Task DispatchDynamic(object handler, CloudEvent evt, CancellationToken ct)
@@ -196,6 +262,22 @@ public class EventBusTests
 
     [Subscription(Type = "test.*.invalid")]
     private sealed class InvalidPatternHandler : ICloudEventHandler
+    {
+        public bool Filter(CloudEvent evt) => true;
+
+        public Task HandleAsync(CloudEvent evt, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    [Subscription(Type = "test.identity.declared", Identity = "Mohist.Server.Events.Subscriptions.PreservedIdentity")]
+    private sealed class IdentityDeclaredHandler : ICloudEventHandler
+    {
+        public bool Filter(CloudEvent evt) => true;
+
+        public Task HandleAsync(CloudEvent evt, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    [Subscription(Type = "test.identity.omitted")]
+    private sealed class IdentityOmittedHandler : ICloudEventHandler
     {
         public bool Filter(CloudEvent evt) => true;
 

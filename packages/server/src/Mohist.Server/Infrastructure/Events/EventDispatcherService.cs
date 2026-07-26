@@ -85,7 +85,7 @@ public sealed class EventDispatcherService
             row.ExtensionsJson);
         var envelope = ReconstructEnvelope(evt);
         var subscription = _subscriptions.FirstOrDefault(sub =>
-            string.Equals(HandlerName(sub), row.FailingHandler, StringComparison.Ordinal)
+            string.Equals(sub.Identity, row.FailingHandler, StringComparison.Ordinal)
             && CloudEventTypeMatcher.Matches(sub.Type, envelope.Type));
         if (subscription is null)
         {
@@ -209,7 +209,7 @@ public sealed class EventDispatcherService
                 _log.LogWarning(
                     ex,
                     "Event dispatcher handler {Handler} failed for {Type} {EventId} on attempt {Attempt}/{MaxAttempts}",
-                    HandlerName(item.Subscription),
+                    item.Subscription.Identity,
                     envelope.Type,
                     envelope.Id,
                     state.AttemptCount,
@@ -268,7 +268,7 @@ public sealed class EventDispatcherService
             DataContentType = evt.DataContentType,
             Data = evt.Data,
             ExtensionsJson = evt.ExtensionsJson,
-            FailingHandler = HandlerName(subscription),
+            FailingHandler = subscription.Identity,
             ErrorMessage = state.Error is null ? "unknown" : OperatorDiagnostic.Summarize(state.Error) ?? "unknown",
             ErrorStack = state.Error?.ToString(),
             AttemptCount = state.AttemptCount,
@@ -302,9 +302,6 @@ public sealed class EventDispatcherService
         nameof(EventOrigin.AgentJob) => EventOrigin.AgentJob,
         _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
     };
-
-    private static string HandlerName(Subscription subscription) =>
-        subscription.Handler.GetType().FullName ?? subscription.Handler.GetType().Name;
 
     private readonly record struct EventKey(string Source, long Id);
 

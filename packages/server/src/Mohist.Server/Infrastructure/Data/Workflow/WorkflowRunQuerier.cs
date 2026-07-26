@@ -53,10 +53,13 @@ public sealed class WorkflowRunQuerier
 
         WorkflowRunLineage.RestoreStoredEpicNumber(run, row.EpicNumber);
         return new WorkflowRunRoutingContext(
-            run,
+            run.Id,
             row.MetadataProjectId,
             row.IssueNumber,
-            row.EpicNumber);
+            row.EpicNumber,
+            run.Workspace?.Path,
+            run.Status.ToString(),
+            run.Status.IsTerminal());
     }
 
     /// <summary>
@@ -171,7 +174,10 @@ public sealed class WorkflowRunQuerier
 }
 
 public sealed record WorkflowRunRoutingContext(
-    WorkflowRun Run,
+    string WorkflowRunId,
     string? ProjectId,
     int? IssueNumber,
-    int? EpicNumber);
+    int? EpicNumber,
+    string? WorkspacePath,
+    string Status,
+    bool IsTerminal);

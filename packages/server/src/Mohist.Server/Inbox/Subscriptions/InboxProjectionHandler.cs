@@ -7,12 +7,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Inbox;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Inbox;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Workflow.Domain.Run;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Inbox.Subscriptions;
 
 /// <summary>
 /// Server-side projection that turns the four authoritative "operator
@@ -57,12 +56,14 @@ namespace Mohist.Server.Events.Subscriptions;
 /// projection back so dispatcher retry can complete both writes exactly once.
 /// </para>
 /// </summary>
-[Subscription(Type =
-    "com.mohist.workflow.run.failed|" +
-    "com.mohist.workflow.stage.approval-requested|" +
-    "com.mohist.issue.work-started|" +
-    EventCatalog.ReverseDns.IssueCompleted + "|" +
-    EventCatalog.ReverseDns.AgentJobFailed)]
+[Subscription(
+    Type =
+        "com.mohist.workflow.run.failed|" +
+        "com.mohist.workflow.stage.approval-requested|" +
+        "com.mohist.issue.work-started|" +
+        EventCatalog.ReverseDns.IssueCompleted + "|" +
+        EventCatalog.ReverseDns.AgentJobFailed,
+    Identity = "Mohist.Server.Events.Subscriptions.InboxProjectionHandler")]
 public sealed class InboxProjectionHandler : ICloudEventHandler
 {
     private const string HintSource = "/mohist/inbox";

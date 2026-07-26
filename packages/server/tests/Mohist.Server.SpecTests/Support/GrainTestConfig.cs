@@ -5,7 +5,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Events.Grains;
-using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -20,11 +19,13 @@ using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Subscriptions;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Workflow.Services.Prompts;
+using Mohist.Server.Workflow.Subscriptions;
 using Mohist.Server.SpecTests.Specs.Issue.Profile;
 using Orleans.Configuration;
 using Orleans.Hosting;
@@ -260,7 +261,8 @@ public static class GrainTestConfig
                     "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed",
                     handler,
                     (instance, envelope, ct) =>
-                        ((WorkflowStageLockReleaseHandler)instance).HandleAsync(envelope, ct)),
+                        ((WorkflowStageLockReleaseHandler)instance).HandleAsync(envelope, ct),
+                    "Mohist.Server.Events.Subscriptions.WorkflowStageLockReleaseHandler"),
             ];
         });
         siloBuilder.Services.Configure<EventDispatcherOptions>(options =>

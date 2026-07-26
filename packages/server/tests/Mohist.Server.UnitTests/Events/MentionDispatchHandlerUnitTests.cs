@@ -1,5 +1,5 @@
 using Mohist.Server.Agent.Services;
-using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Sessions.Services;
 using Xunit;
 using AgentDomain = Mohist.Server.Agent.Domain;

@@ -4,4 +4,6 @@ namespace Mohist.Server.Infrastructure.Events;
 public sealed class SubscriptionAttribute : Attribute
 {
     public required string Type { get; init; }
+
+    public string? Identity { get; init; }
 }

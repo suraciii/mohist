@@ -95,8 +95,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
         services.ConfigureMohistServices(config);
 
         // Test-only overrides so the fixture doesn't touch the real
-        // filesystem, the real git, the real env vars.
-        services.RemoveAll<IGitService>();
+        // filesystem or the real env vars.
         services.RemoveAll<IFileSystem>();
         services.AddSingleton<IFileSystem, InMemoryServerFileSystem>();
         services.RemoveAll<ISystemUpdateStore>();
@@ -112,8 +111,6 @@ public sealed class MohistDbFixture : IAsyncLifetime
         services.AddSingleton<IWebContentProvider, InMemoryWebContentProvider>();
         services.RemoveAll<IPromptLoader>();
         services.AddSingleton<IPromptLoader>(_ => new InMemoryPromptLoader());
-        services.AddSingleton<FakeGitService>();
-        services.AddSingleton<IGitService>(sp => sp.GetRequiredService<FakeGitService>());
         services.RemoveAll<IEnvironmentVariableProvider>();
         services.AddSingleton<IEnvironmentVariableProvider, MockEnvironmentVariableProvider>();
         services.RemoveAll<Mohist.Server.Infrastructure.Config.IConfigDocumentStore>();

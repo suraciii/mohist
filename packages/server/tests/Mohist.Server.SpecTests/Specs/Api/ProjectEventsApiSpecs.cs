@@ -367,11 +367,15 @@ public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
 
+        var projectEventMarker = $"\"projectid\":\"{project.Id}\"";
         var issueCountBefore = await db.IssueEvents.AsNoTracking()
+            .Where(row => row.ExtensionsJson.Contains(projectEventMarker))
             .CountAsync();
         var workflowCountBefore = await db.WorkflowRunEvents.AsNoTracking()
+            .Where(row => row.ExtensionsJson.Contains(projectEventMarker))
             .CountAsync();
         var sessionCountBefore = await db.AgentSessionEvents.AsNoTracking()
+            .Where(row => row.ExtensionsJson.Contains(projectEventMarker))
             .CountAsync();
 
         var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
@@ -379,9 +383,15 @@ public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
 
         Assert.Single(response);
 
-        Assert.Equal(issueCountBefore, await db.IssueEvents.AsNoTracking().CountAsync());
-        Assert.Equal(workflowCountBefore, await db.WorkflowRunEvents.AsNoTracking().CountAsync());
-        Assert.Equal(sessionCountBefore, await db.AgentSessionEvents.AsNoTracking().CountAsync());
+        Assert.Equal(issueCountBefore, await db.IssueEvents.AsNoTracking()
+            .Where(row => row.ExtensionsJson.Contains(projectEventMarker))
+            .CountAsync());
+        Assert.Equal(workflowCountBefore, await db.WorkflowRunEvents.AsNoTracking()
+            .Where(row => row.ExtensionsJson.Contains(projectEventMarker))
+            .CountAsync());
+        Assert.Equal(sessionCountBefore, await db.AgentSessionEvents.AsNoTracking()
+            .Where(row => row.ExtensionsJson.Contains(projectEventMarker))
+            .CountAsync());
     }
 
     [Fact]

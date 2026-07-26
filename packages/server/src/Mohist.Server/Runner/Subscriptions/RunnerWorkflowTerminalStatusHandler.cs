@@ -3,7 +3,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Workflow.Domain.Run;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Runner.Subscriptions;
 
 /// <summary>
 /// Server-side subscriber to workflow terminal lifecycle events. When a
@@ -33,7 +33,9 @@ namespace Mohist.Server.Events.Subscriptions;
 /// dispatcher, which retries without affecting the workflow transaction that
 /// already committed the source event.
 /// </summary>
-[Subscription(Type = "com.mohist.workflow.run.completed|com.mohist.workflow.run.stopped")]
+[Subscription(
+    Type = "com.mohist.workflow.run.completed|com.mohist.workflow.run.stopped",
+    Identity = "Mohist.Server.Events.Subscriptions.RunnerWorkflowTerminalStatusHandler")]
 public sealed class RunnerWorkflowTerminalStatusHandler : ICloudEventHandler
 {
     private readonly IRunnerWorkflowStatusRouter _router;

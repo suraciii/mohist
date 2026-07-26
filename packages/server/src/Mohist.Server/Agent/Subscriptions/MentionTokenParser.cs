@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Agent.Subscriptions;
 
 /// <summary>
 /// Parses <c>@&lt;token&gt;</c> mention tokens out of an issue comment body

@@ -1,5 +1,5 @@
-using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Workflow.Subscriptions;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Events.Workflow;

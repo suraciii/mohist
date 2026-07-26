@@ -25,9 +25,10 @@ User Project
 | decide workflow | Server | Runner |
 | register/presence/capacity | Server | Web / CLI |
 | workspace prep/clean | Runner | Server |
-| run shell/process/agent | Runner | Server |
+| user-project shell/process/agent execution | Runner | Server |
 | git side effects | Runner | Server |
 | OpenSpec side effects | Runner | Server |
+| Mohist daemon self-management process execution (inspect, update, install, restart, and determine the status of Mohist and its managed services) | Server | Runner for user-project workspace, git, shell, and agent execution |
 | explore/chat | external agent skill | Mohist runtime |
 | skill install | CLI | Server |
 | product design | docs/ | design/ |
@@ -47,6 +48,8 @@ WorkflowRun decides.
 Runner produces facts. Never interprets them.
 Workflow interprets facts. Never produces them.
 
+Runner may report a failure classification, including `retry-safe`, as an execution fact. It does not authorize or cause a retry. Workflow is the sole authority that decides whether work fails, retries, recovers, advances, waits, or requires approval.
+
 ## Report pipeline
 
 ```
@@ -65,7 +68,7 @@ Decision            ← interpret in workflow context
 State change        ← advance or wait
 ```
 
-Runner may say: completed / failed / verification passed / output produced.
+Runner may say: completed / failed / verification passed / output produced / failure classification reported.
 Runner may not say: advance state / mark done / bypass approval / allow retry.
 
 Every in-flight work has an owner. Stale reports get rejected, never merged.

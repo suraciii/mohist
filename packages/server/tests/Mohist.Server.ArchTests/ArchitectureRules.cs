@@ -189,7 +189,11 @@ public class ArchitectureRules
         {
             "Domain",
             "Grains",
-            "Services"
+            "Services",
+            // issue-493 T-004: durable CloudEvent handlers that change or
+            // coordinate a domain's state live with their owning feature.
+            // See specs/server-architecture-alignment/spec.md#Domain-owned-durable-reactions.
+            "Subscriptions"
         };
 
         var allowedFeatureRootFiles = new HashSet<string>(StringComparer.Ordinal)
@@ -209,6 +213,47 @@ public class ArchitectureRules
         Assert.True(
             violations.Count == 0,
             "Feature directories must only contain Domain, Grains, and Services. Violations: " + string.Join(", ", violations));
+    }
+
+    [Fact]
+    public void DomainSubscriptionHandlers_ResideWithAssignedFeatureModule()
+    {
+        var paths = EmbeddedSources("ServerSources/")
+            .Where(source => IsDomainSubscriptionHandler(source.Path))
+            .Select(source => source.Path)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.DoesNotContain(paths, path => path.StartsWith("Events/Subscriptions/", StringComparison.Ordinal));
+
+        var assigned = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["Issue"] = ["IssueWorkflowStartHandler.cs", "IssueWorkflowCompletionHandler.cs", "IssueEpicChangedHandler.cs", "IssueCompositeHandlers.cs"],
+            ["Epic"] = ["EpicHandlers.cs"],
+            ["Workflow"] = ["WorkflowStageLockReleaseHandler.cs"],
+            ["Runner"] = ["RunnerWorkflowTerminalStatusHandler.cs"],
+            ["Agent"] = ["RoutingDispatchHandler.cs", "MentionDispatchHandler.cs", "RoutedAgentLaunchContextResolver.cs", "ResponsePromptRenderer.cs", "MentionTokenParser.cs"],
+            ["Inbox"] = ["InboxProjectionHandler.cs"],
+            ["Notifications"] = ["HermesIssueNotificationHandler.cs"],
+        };
+
+        var inventory = assigned.SelectMany(pair => pair.Value.Select(file => (file, pair.Key)))
+            .ToDictionary(item => item.file, item => item.Key, StringComparer.Ordinal);
+        var violations = paths.Select(path => (path, file: Path.GetFileName(path)))
+            .Where(item => !inventory.TryGetValue(item.file, out var owner)
+                || !item.path.StartsWith(owner + "/", StringComparison.Ordinal))
+            .Select(item => item.path)
+            .ToList();
+        var missing = inventory.Keys.Except(paths.Select(Path.GetFileName), StringComparer.Ordinal).ToList();
+        Assert.True(
+            violations.Count == 0 && missing.Count == 0,
+            "Subscription inventory mismatch. Misplaced: " + string.Join(", ", violations)
+            + "; missing: " + string.Join(", ", missing));
+    }
+
+    private static bool IsDomainSubscriptionHandler(string path)
+    {
+        return path.Split('/').Contains("Subscriptions", StringComparer.Ordinal);
     }
 
     [Fact]
@@ -457,14 +502,8 @@ public class ArchitectureRules
         });
     }
 
-    // Domain namespaces participating in the cross-domain dependency check.
-    // Epic is NOT listed as its own domain: per design/domain-analysis.md, Epic is
-    // the "organization facet" of the Issue subdomain (same problem class, two
-    // granularities), so Mohist.Server.Epic.* is measured as part of Issue, not as
-    // a separate domain. Measuring it cross-domain would mis-flag subdomain-internal
-    // coupling (Epic→IssueQuerier, IIssueGrain) as violations.
     private static readonly string[] DomainNamespaces =
-        ["Agent", "AgentOps", "Issue", "Workflow", "Project", "Runner", "Sessions"];
+        ["Agent", "AgentOps", "Epic", "Issue", "Workflow", "Project", "Runner", "Sessions"];
 
     private static readonly (string from, string to)[] AllowedDomainDependencies =
     [
@@ -476,6 +515,8 @@ public class ArchitectureRules
         ("AgentOps", "Runner"),
         ("AgentOps", "Sessions"),
         ("AgentOps", "Workflow"),
+        ("Epic", "Issue"),
+        ("Issue", "Epic"),
         ("Issue", "Workflow"),
         ("Issue", "Project"),
         ("Runner", "Sessions"),

@@ -37,7 +37,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Grain;
 /// reconciliation write (the read path cannot bring the issue to
 /// <c>Done</c>). Issue → <c>Done</c> transitions are owned solely by the
 /// <c>com.mohist.workflow.run.completed</c> event subscription
-/// (<see cref="Mohist.Server.Events.Subscriptions.IssueWorkflowCompletionHandler"/>).
+/// (<see cref="Mohist.Server.Issue.Subscriptions.IssueWorkflowCompletionHandler"/>).
 ///
 /// Spec: <c>openspec/changes/issue-307/specs/issue-workflow-run-reference/spec.md#workflow-status-read-path-is-a-pure-query</c>.
 /// </summary>

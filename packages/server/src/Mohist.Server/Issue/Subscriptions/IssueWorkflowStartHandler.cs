@@ -6,9 +6,11 @@ using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Issue.Subscriptions;
 
-[Subscription(Type = EventCatalog.ReverseDns.IssueWorkStarted)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueWorkStarted,
+    Identity = "Mohist.Server.Events.Subscriptions.IssueWorkflowStartHandler")]
 public sealed class IssueWorkflowStartHandler : ICloudEventHandler<IssueWorkStarted>
 {
     private readonly IGrainFactory _grains;

@@ -5,7 +5,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Issue.Subscriptions;
 
 /// <summary>
 /// Four durable handlers + one dispatcher that turn
@@ -14,9 +14,12 @@ namespace Mohist.Server.Events.Subscriptions;
 /// affected parents). Every handler reads the <c>parent</c> lineage
 /// extension stamped by <see cref="IssueLineage.BuildExtensions"/> on the
 /// producing issue event; handlers without a <c>parent</c> extension
-/// no-op. Mirrors <see cref="EpicAutoDoneHandler"/>'s shape.
+/// no-op. Mirrors
+/// <c>Mohist.Server.Epic.Subscriptions.EpicAutoDoneHandler</c>'s shape.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueWorkStarted)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueWorkStarted,
+    Identity = "Mohist.Server.Events.Subscriptions.IssueCompositeChildStartedHandler")]
 public sealed class IssueCompositeChildStartedHandler : ICloudEventHandler<IssueWorkStarted>
 {
     private readonly IGrainFactory _grains;
@@ -44,7 +47,9 @@ public sealed class IssueCompositeChildStartedHandler : ICloudEventHandler<Issue
 /// recompute's fan-out starts them. When every child becomes terminal with
 /// at least one Done, the parent aggregates to <c>Done</c>.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueCompleted)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueCompleted,
+    Identity = "Mohist.Server.Events.Subscriptions.IssueCompositeChildCompletedHandler")]
 public sealed class IssueCompositeChildCompletedHandler : ICloudEventHandler<IssueCompleted>
 {
     private readonly IGrainFactory _grains;
@@ -69,11 +74,14 @@ public sealed class IssueCompositeChildCompletedHandler : ICloudEventHandler<Iss
 /// Subscribes to <c>com.mohist.issue.cancelled</c>:
 /// when a child is cancelled, the parent re-evaluates. A cancellation
 /// unfreezes the parent's serial in-progress slot (mirroring the Epic
-/// semantics handled by <see cref="EpicCancelledHandler"/>) and the
+/// semantics handled by
+/// <c>Mohist.Server.Epic.Subscriptions.EpicCancelledHandler</c>) and the
 /// recompute's fan-out starts any Backlog children newly unlocked by
 /// losing that blocking sibling.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueCancelled)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueCancelled,
+    Identity = "Mohist.Server.Events.Subscriptions.IssueCompositeChildCancelledHandler")]
 public sealed class IssueCompositeChildCancelledHandler : ICloudEventHandler<IssueCancelled>
 {
     private readonly IGrainFactory _grains;
@@ -102,7 +110,9 @@ public sealed class IssueCompositeChildCancelledHandler : ICloudEventHandler<Iss
 /// stays Cancelled — the user must explicitly reopen the parent. Handlers
 /// without a <c>parent</c> lineage extension no-op.
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueReopened)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueReopened,
+    Identity = "Mohist.Server.Events.Subscriptions.IssueCompositeChildReopenedHandler")]
 public sealed class IssueCompositeChildReopenedHandler : ICloudEventHandler<IssueReopened>
 {
     private readonly IGrainFactory _grains;
@@ -133,7 +143,9 @@ public sealed class IssueCompositeChildReopenedHandler : ICloudEventHandler<Issu
 /// to a normal issue. Both the previous and new parent are dispatched
 /// (one of them is null on attach/detach — those branches no-op).
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueParentChanged)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueParentChanged,
+    Identity = "Mohist.Server.Events.Subscriptions.IssueCompositeParentChangedHandler")]
 public sealed class IssueCompositeParentChangedHandler : ICloudEventHandler<IssueParentChanged>
 {
     private readonly IGrainFactory _grains;

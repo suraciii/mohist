@@ -5,7 +5,7 @@ using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Events;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Agent.Subscriptions;
 
 /// <summary>
 /// System handler that turns an <c>@&lt;agent&gt;</c> mention in an issue
@@ -42,7 +42,9 @@ namespace Mohist.Server.Events.Subscriptions;
 /// mention is that nothing happens.
 /// </para>
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.IssueCommentAdded)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueCommentAdded,
+    Identity = "Mohist.Server.Events.Subscriptions.MentionDispatchHandler")]
 public sealed class MentionDispatchHandler : ICloudEventHandler
 {
     private readonly IServiceScopeFactory _scopeFactory;

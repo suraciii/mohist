@@ -3,7 +3,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Issue.Subscriptions;
 
 /// <summary>
 /// Subscribes to <c>com.mohist.workflow.run.completed</c> and dispatches
@@ -16,14 +16,14 @@ namespace Mohist.Server.Events.Subscriptions;
 /// same project-scoped Issue number from its durable start command.
 /// <para>
 /// This is the symmetric counterpart of
-/// <see cref="EpicAutoDoneHandler"/> (issue→epic): a terminal
-/// workflow-run event drives its owning issue to <c>Done</c> through
-/// the IssueGrain, instead of an issue completion event driving the
-/// owning epic through the EpicGrain. Only <c>Completed</c> is handled —
-/// the single-type <c>[Subscription]</c> covers the explicit
-/// "only Completed drives the transition" rule (<c>failed</c>/<c>stopped</c>
-/// terminal states are out of scope for this change and remain
-/// unchanged).
+/// <c>Mohist.Server.Epic.Subscriptions.EpicAutoDoneHandler</c>
+/// (issue→epic): a terminal workflow-run event drives its owning issue
+/// to <c>Done</c> through the IssueGrain, instead of an issue
+/// completion event driving the owning epic through the EpicGrain. Only
+/// <c>Completed</c> is handled — the single-type <c>[Subscription]</c>
+/// covers the explicit "only Completed drives the transition" rule
+/// (<c>failed</c>/<c>stopped</c> terminal states are out of scope for
+/// this change and remain unchanged).
 /// </para>
 /// <para>
 /// Handler failures propagate to the durable dispatcher, which owns retry
@@ -32,7 +32,9 @@ namespace Mohist.Server.Events.Subscriptions;
 /// <c>Status == InProgress</c> and <c>workflowRunId</c> match guards.
 /// </para>
 /// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.WorkflowRunCompleted)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.WorkflowRunCompleted,
+    Identity = "Mohist.Server.Events.Subscriptions.IssueWorkflowCompletionHandler")]
 public sealed class IssueWorkflowCompletionHandler : ICloudEventHandler
 {
     private readonly IGrainFactory _grains;

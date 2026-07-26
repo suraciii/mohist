@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Events.Matching;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Agent.Subscriptions;
 
 /// <summary>
 /// Plain-text substitution of CloudEvent envelope-sourced placeholders in

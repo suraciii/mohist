@@ -6,9 +6,11 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Workflow.Grains;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Issue.Subscriptions;
 
-[Subscription(Type = EventCatalog.ReverseDns.IssueEpicChanged)]
+[Subscription(
+    Type = EventCatalog.ReverseDns.IssueEpicChanged,
+    Identity = "Mohist.Server.Events.Subscriptions.IssueEpicChangedHandler")]
 public sealed class IssueEpicChangedHandler : ICloudEventHandler<IssueEpicChanged>
 {
     private readonly IServiceScopeFactory _scopes;

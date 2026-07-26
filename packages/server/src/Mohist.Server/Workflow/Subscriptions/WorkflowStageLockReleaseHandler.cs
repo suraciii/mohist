@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Grains;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Workflow.Subscriptions;
 
 /// <summary>
 /// Bus subscription that releases the workflow run's sequential stage lock
@@ -22,7 +22,9 @@ namespace Mohist.Server.Events.Subscriptions;
 /// calls <c>ReleaseStageLocksAsync</c> on the await stack. Failures escape
 /// into the durable dispatcher's retry / dead-letter pipeline.
 /// </summary>
-[Subscription(Type = "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed")]
+[Subscription(
+    Type = "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed",
+    Identity = "Mohist.Server.Events.Subscriptions.WorkflowStageLockReleaseHandler")]
 public sealed class WorkflowStageLockReleaseHandler : ICloudEventHandler
 {
     private readonly IGrainFactory _grains;
