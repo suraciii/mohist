@@ -1,12 +1,11 @@
-// Issue-313 T-008 / design P7 / D2 / D3 / D5: the server-invoked
-// `RemoveWorkspace` SignalR method is extracted from `runner-signalr.ts`
-// into a free-function `registerWorkspaceRemovalHandler(conn, deps)` so
-// the cluster's dependency surface is explicit (D3) and so the manual
-// workspace-removal handler can be exercised independently from the
-// connection lifecycle / other push handlers.
+// The server-invoked
+// `RemoveWorkspace` SignalR method is registered through the
+// free-function `registerWorkspaceRemovalHandler(conn, deps)` so
+// the cluster's dependency surface is explicit and the handler can be
+// exercised independently from the connection lifecycle.
 //
 // Behaviour preserves the SignalR reply contract while enforcing the
-// issue-313 registry-safety invariant:
+// registry-safety invariant:
 //   - runner-root containment check (rejects `workspace_cleanup_refused`)
 //   - paths outside runnerRoot never mutate the registry
 //   - for in-root paths, registry entry drop before disk deletion (so the
@@ -17,7 +16,7 @@
 //     delete failure
 //   - reply shape `{ removed, status, path, reason, message }`
 //
-// The handler deps are minimised per design D3: `runnerRoot` (needed for
+// The handler deps are minimised: `runnerRoot` (needed for
 // the containment check), `registry` (for the consistent-entry drop),
 // and `pathExists` (kept as an optional injection point, falls through
 // to `existsSync` from `node:fs` so existing tests work unchanged).
@@ -82,9 +81,8 @@ export function registerWorkspaceRemovalHandler(
 // Drop the registry entry whose workspace path resolves to
 // `workspacePath`. Called by the manual RemoveWorkspace handler so the
 // registry stays consistent with disk reality: the entry is dropped
-// regardless of whether the directory existed on disk, matching the
-// T-002 contract "safeRemove must tolerate an already-missing
-// directory (treat as removed, delete the entry)". `null` is accepted
+// regardless of whether the directory existed on disk — an already-missing
+// directory is treated as removed and its entry deleted. `null` is accepted
 // to cover the "query.workspacePath missing" branch — there is no path
 // to match, so the registry is left untouched.
 async function dropRegistryEntryForPath(

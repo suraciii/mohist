@@ -119,7 +119,7 @@ export type WorkDispatchResponse = {
  * runner filesystems; this is policy, not actions.
  *
  * Sourced via the dedicated config channel
- * `GET /api/runner/{runnerId}/config` (issue-359); independent of
+ * `GET /api/runner/{runnerId}/config`; independent of
  * work dispatch.
  */
 export interface CleanupPolicy {
@@ -244,7 +244,7 @@ export type ActionResult = (
    * between `ActionResult` (internal) and `WorkItemResult` (wire) is
    * where the fact is dropped. Only `mohist/opencode`-style agent
    * Actions populate `finalAssistantText`; the executor uses it as the
-   * text corpus for `_output` markers (design D4).
+   * text corpus for `_output` markers.
    */
   turnFact?: { finalAssistantText?: string | null } | null
 }
@@ -257,13 +257,13 @@ export interface RunnerOptions {
   pollIntervalMs: number
   heartbeatIntervalMs: number
   dispatchLivenessProbeIntervalMs: number
-  // Optional override for the convergence backstop cadence (T-003).
+  // Optional override for the convergence backstop cadence.
   // Defaults to 5 minutes inside RunnerHost. Set to a very large value
   // to effectively disable the periodic tick while keeping startup /
   // reconnect convergence. Used by tests to drive ticks deterministically.
   cleanupConvergenceIntervalMs?: number
 
-  // Optional override for the cleanup loop cadence (T-004).
+  // Optional override for the cleanup loop cadence.
   // Defaults to 2 minutes inside RunnerHost. The cleanup loop runs
   // retention + budget eviction with pre-delete guards. Set to a very
   // large value to effectively disable the periodic tick. Used by tests
@@ -275,8 +275,7 @@ export interface RunnerOptions {
    * milliseconds. Defaults to {@link TASK_LOG_FLUSH_INTERVAL_MS}
    * inside RunnerHost. The trigger fires on either an elapsed
    * interval since the last fire or a reached line-count threshold;
-   * an empty drain short-circuits without a network round-trip
-   * (design D1).
+   * an empty drain short-circuits without a network round-trip.
    */
   taskLogFlushIntervalMs?: number
 
@@ -285,7 +284,7 @@ export interface RunnerOptions {
    * threshold. Defaults to {@link TASK_LOG_FLUSH_LINE_THRESHOLD}
    * inside RunnerHost. Crossing this on a captured line fires the
    * trigger eagerly so a chatty command is not held back by the
-   * interval (design D1).
+   * interval.
    */
   taskLogFlushLineThreshold?: number
 
@@ -294,7 +293,7 @@ export interface RunnerOptions {
    * milliseconds. Defaults to
    * {@link TASK_LOG_INCREMENTAL_UPLOAD_TIMEOUT_MS} inside RunnerHost.
    * Distinct from the terminal-batch timeout because incremental
-   * batches are smaller but the rail tolerates more slack (design D1).
+   * batches are smaller but the rail tolerates more slack.
    */
   taskLogIncrementalUploadTimeoutMs?: number
 

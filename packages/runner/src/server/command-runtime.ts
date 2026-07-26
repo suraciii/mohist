@@ -1,7 +1,7 @@
-// Issue-451 T-004 / design D2: the runner routes Follow-up, Cancel, and
+// The runner routes Follow-up, Cancel, and
 // the `SessionCommand` compact/reset handler by the `runtime` field
 // carried on the command's persisted binding. OpenCode and Pi are
-// intentionally parallel deep modules (per `design/runtimes/pi.md`):
+// intentionally parallel deep modules:
 // their request/result types are not interchangeable, so a generic
 // `AgentRuntime` interface is forbidden. The dispatch helper exposes
 // the selector + the two parallel call surfaces the handlers use
@@ -55,7 +55,8 @@ export interface CommandRuntimeAccessors {
  * Discriminated handle the handlers receive after the binding has been
  * resolved. The handlers branch on `kind` to invoke the matching
  * backend; the alternative (a registry keyed by `runtime` string) was
- * rejected in design D2.
+ * rejected to keep the two deep modules' types from leaking into a
+ * shared surface.
  */
 export type CommandRuntimeHandle =
   | { readonly kind: "opencode"; readonly runtime: OpenCodeRuntime }
@@ -129,7 +130,7 @@ export function callCancel(
  * OpenCode's `RuntimeCancelResult` wraps `facts: RuntimeCancelFacts`
  * which carries `cancelled: true`; Pi's `PiCancelFacts` is the
  * flattened result and adds `stopConfirmed: boolean` for the
- * interrupt-unconfirmed honesty signal (design D6).
+ * interrupt-unconfirmed honesty signal.
  */
 export interface CancelCallFacts {
   readonly cancelled: boolean

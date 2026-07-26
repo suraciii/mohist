@@ -21,7 +21,7 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<IssueWorkflowStatus?> GetWorkflowStatusAsync();
 
     /// <summary>
-    /// issue-417 T-006 (D4): returns the Issue's currently-bound
+    /// returns the Issue's currently-bound
     /// workflow run id, or <c>null</c> when the issue has no
     /// <c>workflowRunId</c>. Used by the durable
     /// <c>IssueWorkStartedHandler</c> to detect and discard stale
@@ -34,7 +34,7 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<IssueStartReadiness> GetStartReadinessAsync();
 
     /// <summary>
-    /// issue-419 T-002 (D2): composite advancement entry point. Marks
+    /// composite advancement entry point. Marks
     /// the parent <c>Backlog → InProgress</c> without minting a workflow
     /// run, then fans out <c>StartWorkAsync</c> to every currently
     /// startable child in parallel. Invoked from <c>StartWorkAsync</c>
@@ -44,7 +44,7 @@ public interface IIssueGrain : IGrainWithStringKey
     Task StartCompositeAsync();
 
     /// <summary>
-    /// issue-419 T-002 (D1, D6): idempotent recompute of the parent's
+    /// idempotent recompute of the parent's
     /// aggregated status from a fresh children snapshot, with optional
     /// fan-out of newly-unlocked startable children. Dispatched by the
     /// durable handlers on child <c>started</c>, <c>completed</c>,
@@ -62,7 +62,7 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<bool> TryStartFromEpicAsync(int expectedEpicNumber);
 
     /// <summary>
-    /// issue-417 T-005: receipt-bearing create invoked from the
+    /// receipt-bearing create invoked from the
     /// <c>IIssueBindingParticipant</c> proxy under the coordinator
     /// fence. Receipt match, stale-revision rejection, and unknown-target
     /// rejection all behave as documented on
@@ -86,7 +86,7 @@ public interface IIssueGrain : IGrainWithStringKey
         long? expectedRevision);
 
     /// <summary>
-    /// issue-417 T-005: receipt-bearing reassignment that atomically
+    /// receipt-bearing reassignment that atomically
     /// applies the repository change plus every present PATCH field in
     /// a single Issue transaction, so an ambiguous result cannot commit
     /// only the repository reassignment while dropping sibling Issue
@@ -98,7 +98,7 @@ public interface IIssueGrain : IGrainWithStringKey
         long? expectedRevision);
 
     /// <summary>
-    /// issue-417 T-005: receipt-bearing reopen that re-validates the
+    /// receipt-bearing reopen that re-validates the
     /// retained target declaration and writes a receipt. The
     /// coordinator is the only caller (route-level callers must enter
     /// through the coordinator).
@@ -108,7 +108,7 @@ public interface IIssueGrain : IGrainWithStringKey
         long? expectedRevision);
 
     /// <summary>
-    /// issue-417 T-005: returns the current coordination revision so
+    /// returns the current coordination revision so
     /// the coordinator can capture an <c>expectedRevision</c> snapshot
     /// before fencing. Returns <c>0</c> for an unloaded issue slot.
     /// </summary>
@@ -116,7 +116,7 @@ public interface IIssueGrain : IGrainWithStringKey
 }
 
 /// <summary>
-/// issue-417 T-005: complete aggregate PATCH bundled with a repository
+/// complete aggregate PATCH bundled with a repository
 /// reassignment so an ambiguous coordinator outcome cannot commit only
 /// the repository change and drop sibling Issue fields. Every field
 /// honors its own three-state (absent / present-and-null /

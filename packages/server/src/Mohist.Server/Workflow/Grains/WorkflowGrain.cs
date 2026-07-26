@@ -127,7 +127,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     }
 
     /// <summary>
-    /// issue-417 T-006 (D4): durable-event startup carrying an immutable
+    /// durable-event startup carrying an immutable
     /// repository/workspace snapshot captured at Issue transaction commit.
     /// The snapshot lands on the run via <see cref="WorkflowRun.Lifecycle"/>'s
     /// <c>EnsureStarted</c>, which is idempotent on identical replay and

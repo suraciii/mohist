@@ -87,7 +87,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             _ = _session.MergeMetadata(command.Metadata);
             // When a session was minted up front (e.g. by the generic
-            // agent-session launch endpoint, T-003) the launch endpoint
+            // agent-session launch endpoint) the launch endpoint
             // opened the session with an empty RunnerId; the runner's
             // subsequent open call carries the authoritative RunnerId,
             // and we stamp it onto the runtime exactly once. An

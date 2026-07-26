@@ -31,7 +31,7 @@ public class IssueRow
     public string? RepositoryName { get; set; }
 
     /// <summary>
-    /// issue-477 T-001: nullable custom-Profile backing key used by the
+    /// Nullable custom-Profile backing key used by the
     /// restrictive foreign key that protects Issue-level WorkflowProfile
     /// deletions. Populated only when the Issue's explicit WorkflowProfile
     /// selection (read from State) resolves to a custom Profile in this

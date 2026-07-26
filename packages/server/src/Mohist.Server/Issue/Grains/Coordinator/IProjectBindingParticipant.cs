@@ -1,7 +1,7 @@
 namespace Mohist.Server.Issue.Grains.Coordinator;
 
 /// <summary>
-/// issue-417 D2: narrow Project-side participant interface consumed only
+/// narrow Project-side participant interface consumed only
 /// by the binding coordinator. Mirrors
 /// <see cref="IIssueBindingParticipant"/> but for the single
 /// repository-removal command. The coordinator is the only caller;

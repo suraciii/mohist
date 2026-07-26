@@ -50,8 +50,8 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         var evaluator = services.GetRequiredService<RoutingTableEvaluator>();
         var probe = new DispatchRuleExecutionProbe(projectId, agentQuerier);
         // Envelope-only matching + prompt rendering: workspace / Workflow /
-        // Issue state does not affect rule selection (issue-449 design
-        // decision 4). The resolver runs AFTER the evaluator picks a hit.
+        // Issue state does not affect rule selection. The resolver runs
+        // AFTER the evaluator picks a hit.
         var outcomes = rules.Count == 0
             ? (IReadOnlyList<RuleOutcome>)Array.Empty<RuleOutcome>()
             : evaluator.Evaluate(new CloudEventEventMatchInput(evt), rules, probe);
@@ -341,8 +341,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
     /// <summary>
     /// Record a routed-launch preflight failure as a failed AgentJob +
     /// AgentSession without dispatching a Runner. The grain's
-    /// preflight-failed terminal-delivery protocol (issue-449 design
-    /// decision 2) handles the durable close fact.
+    /// preflight-failed terminal-delivery protocol handles the durable close fact.
     /// </summary>
     private async Task RecordPreflightFailureAsync(
         IServiceProvider services,

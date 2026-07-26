@@ -1,5 +1,4 @@
-// Issue-461 T-001 / design D1 + D7 + issue-451 T-004 / design D2-D4:
-// the runner SignalR client owns connection-lifecycle hooks (start,
+// The runner SignalR client owns connection-lifecycle hooks (start,
 // stop, reconnect) and exposes the host-owned runtime accessors +
 // outbox to the follow-up, cancel, and session-command handlers. The
 // client does NOT resolve the runtime during registration; handlers
@@ -78,7 +77,7 @@ export interface RunnerSignalRClientOptions {
   registry?: WorkspaceRegistry | null
   /**
    * Late-binding runtime accessor used by the Follow-up / Cancel
-   * handlers (issue-461 T-001 / design D1). The host wires this so
+   * handlers. The host wires this so
    * the handler always consults the current runtime handle (which
    * is rebuilt on Server exit). Tests can pass either a static fake
    * or a getter to drive the timing used by acceptance criteria
@@ -86,7 +85,7 @@ export interface RunnerSignalRClientOptions {
    */
   openCodeRuntime?: CommandRuntimeAccessors["openCode"]
   /**
-   * Late-binding Pi runtime accessor (issue-451 T-004 / design D2).
+   * Late-binding Pi runtime accessor.
    * The host wires this next to `openCodeRuntime`; the dispatch
    * selector reads the binding's `runtime` field per command.
    */

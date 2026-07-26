@@ -1,7 +1,6 @@
 // Real delivery adapter for `AgentSessionRuntimeEventOutbox`. It maps a
 // `RuntimeEventRecord` to the corresponding `ServerConnection` method
-// based on the record's `producerFamily` + `target.kind`. The Network
-// surface is unchanged from issue 410 / pre-issue-461; both the
+// based on the record's `producerFamily` + `target.kind`. Both the
 // Workflow and generic endpoints already return
 // `AgentSessionRuntimeEventReceipt[]`.
 

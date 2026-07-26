@@ -1,19 +1,18 @@
-// Issue-461 T-001 / design D1-D7 + issue-451 T-004 / design D2-D3:
-// the follow-up handler routes both input and operation-correlated
+// The follow-up handler routes both input and operation-correlated
 // terminal outcomes through the host-owned
-// `AgentSessionRuntimeEventOutbox` instead of `FollowupFailureOutbox`.
+// `AgentSessionRuntimeEventOutbox`.
 //
 // Behaviour:
 //   - drops silently on null / missing payload, missing/empty text, no
 //     resolver, resolver returning null, resolver throwing (logged)
-//   - resolves the runtime accessor at invocation time (issue-461 D1:
-//     host-owned late binding), so a runtime built or replaced after
+//   - resolves the runtime accessor at invocation time (host-owned
+//     late binding), so a runtime built or replaced after
 //     SignalR client construction is visible to later commands
 //   - admits a follow-up command only when (a) the binding resolves and
 //     (b) the captured runtime is ready and (c) the outbox is healthy;
 //     otherwise returns `{ accepted: false, error: "unavailable" }`
 //     without enqueuing input or invoking the runtime
-//   - dispatches to the binding's runtime (issue-451 T-004 / design D2):
+//   - dispatches to the binding's runtime:
 //     the wire binding's `runtime` field selects between the OpenCode
 //     and Pi backends; an unknown or not-ready runtime reports
 //     `unavailable` and the command is not silently dropped

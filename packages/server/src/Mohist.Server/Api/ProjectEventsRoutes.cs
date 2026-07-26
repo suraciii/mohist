@@ -6,7 +6,7 @@ namespace Mohist.Server.Api;
 
 /// <summary>
 /// Project-scoped read endpoint for the Activity evidence feed
-/// (issue-402 T-000). The route surfaces recorded issue, workflow, and
+///. The route surfaces recorded issue, workflow, and
 /// agent-session CloudEvents with persisted session lifecycle transcript facts,
 /// without changing how events are recorded, emitted, or subscribed. The
 /// endpoint is read-only and does not introduce event-subscription or

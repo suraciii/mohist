@@ -42,7 +42,7 @@ public sealed class IssueWorkflowStartHandler : ICloudEventHandler<IssueWorkStar
         var workflow = _grains.GetGrain<IWorkflowGrain>(evt.Data.WorkflowRunId);
         var issueContext = new WorkflowIssueContext(issue.ProjectId, issue.Number, issue.EpicNumber);
 
-        // issue-417 T-006 (D4): when the Issue transaction captured an
+        // When the Issue transaction captured an
         // immutable repository/workspace snapshot, replay it verbatim into
         // the run so dispatch/review/rebase read run-owned facts rather than
         // live Project metadata. A null snapshot (older producer or a path

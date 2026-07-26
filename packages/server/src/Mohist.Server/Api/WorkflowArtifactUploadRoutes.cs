@@ -10,7 +10,7 @@ namespace Mohist.Server.Api;
 /// result. The endpoint is intentionally separate from
 /// <see cref="WorkflowRoutes"/>: it accepts raw multipart bodies
 /// rather than JSON, and the URL is internal (not part of the public
-/// issue-scoped query surface that ships in T-008).
+/// issue-scoped query surface).
 /// </summary>
 /// <remarks>
 /// <para>

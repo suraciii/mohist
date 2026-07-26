@@ -17,7 +17,7 @@ export interface PiSdkMessage {
 }
 
 /**
- * Reception callback for an idle `prompt()` call (issue #451 / design D5).
+ * Reception callback for an idle `prompt()` call.
  *
  * Mirrors `preflightResult` on the Pi SDK's `PromptOptions`. The SDK
  * invokes it with `true` once the prompt has passed preflight validation
@@ -25,8 +25,7 @@ export interface PiSdkMessage {
  * about to start the underlying agent loop, and with `false` when the
  * preflight rejects the prompt (missing model, missing credentials,
  * streaming without `streamingBehavior`). The runner resolves an idle
- * Follow-up on `true` and fails it on `false` — no automatic retry
- * (`design/runtimes/pi.md` D5).
+ * Follow-up on `true` and fails it on `false` — no automatic retry.
  */
 export type PiPromptPreflightResult = (success: boolean) => void
 
@@ -50,7 +49,7 @@ export interface PiSdkSession {
   /**
    * Read the currently selected Pi model, or `undefined` if no model
    * has been selected yet on this session. Mirrors
-   * `AgentSession.model` (issue #451 / design D8).
+   * `AgentSession.model`.
    *
    * The returned object is opaque to the boundary — the caller passes
    * it back through `setModel` to apply it onto another session.
@@ -58,8 +57,8 @@ export interface PiSdkSession {
   getModel(): unknown
   /**
    * Read the current Pi thinking level (e.g. `"off"`, `"medium"`,
-   * `"high"`). Mirrors `AgentSession.thinkingLevel` (issue #451 /
-   * design D8). Always returns a non-empty string; the SDK defaults
+   * `"high"`). Mirrors `AgentSession.thinkingLevel`
+   *. Always returns a non-empty string; the SDK defaults
    * to `"off"` when no level has been set explicitly.
    */
   getThinkingLevel(): string
@@ -239,7 +238,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *
  * `getModel` and `getThinkingLevel` read directly from the live
  * `AgentSession` so Reset can carry the current model/thinking
- * level onto a freshly created session (issue #451 / design D8).
+ * level onto a freshly created session.
  *
  * The non-getter members (`sessionFile`, `sessionId`, `messages`,
  * `isStreaming`, `subscribe`, `prompt`, `steer`, `abort`, `compact`,

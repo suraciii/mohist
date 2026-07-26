@@ -8,11 +8,11 @@ namespace Mohist.Server.Infrastructure.Data.Sessions;
 /// Pure helper that builds the lineage extensions dictionary for an
 /// AgentSession CloudEvent from the producing session's own
 /// <c>Metadata.Labels</c>. No cross-aggregate query is issued —
-/// stamping uses only identity the session already holds (D6).
+/// stamping uses only identity the session already holds.
 /// </summary>
 /// <remarks>
-/// Lineage attribute names live on <see cref="EventCatalog.Lineage"/> and
-/// stay in sync with <c>design/event-protocol.md</c>. The matrix for
+/// Lineage attribute names live on <see cref="EventCatalog.Lineage"/>.
+/// The matrix for
 /// <c>agent-session.*</c>:
 /// <list type="bullet">
 /// <item><c>projectid</c> and <c>sessionid</c> are always stamped when

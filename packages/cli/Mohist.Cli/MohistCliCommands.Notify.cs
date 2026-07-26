@@ -16,7 +16,6 @@ namespace Mohist.Cli;
 /// <c>Mohist:Notifications:Hermes</c> config directly to
 /// <c>~/.mohist/config.jsonc</c>, and emits a copy-pasteable
 /// <c>hermes webhook subscribe mohist</c> command for the user to run.
-/// See <c>openspec/changes/issue-353/specs/notify-setup/spec.md</c>.
 /// </summary>
 internal static class NotifyCommands
 {

@@ -7,11 +7,11 @@ namespace Mohist.Server.Infrastructure.Data.Issue;
 /// Pure helper that builds the lineage extensions dictionary for an issue
 /// CloudEvent from the producing issue aggregate's own state. No
 /// cross-aggregate query is issued — stamping uses only identity the
-/// issue already holds (D5).
+/// issue already holds.
 /// </summary>
 /// <remarks>
-/// Lineage attribute names live on <see cref="EventCatalog.Lineage"/> and
-/// stay in sync with <c>design/event-protocol.md</c>. The user-visible
+/// Lineage attribute names live on <see cref="EventCatalog.Lineage"/>.
+/// The user-visible
 /// issue number is stamped under the protocol name <c>issue</c>. The current
 /// Epic number is stamped under <c>epic</c>; when it is null, the key is
 /// omitted entirely. The parent issue number is stamped under <c>parent</c>;

@@ -8,7 +8,7 @@ using Mohist.Server.Issue.Grains;
 namespace Mohist.Server.Events.Subscriptions;
 
 /// <summary>
-/// issue-419 T-002 (D5): four durable handlers + one dispatcher that turn
+/// Four durable handlers + one dispatcher that turn
 /// issue lifecycle events into parent recomputes, plus a fifth handler
 /// covering <c>parent-changed</c> (attach/detach fan-out across both
 /// affected parents). Every handler reads the <c>parent</c> lineage
@@ -38,7 +38,7 @@ public sealed class IssueCompositeChildStartedHandler : ICloudEventHandler<Issue
 }
 
 /// <summary>
-/// Subscribes to <c>com.mohist.issue.completed</c> (issue-419 T-002 D5):
+/// Subscribes to <c>com.mohist.issue.completed</c>:
 /// when a child transitions to <c>Done</c>, its parent re-evaluates. A
 /// terminal child may also unlock siblings whose prereq it satisfied — the
 /// recompute's fan-out starts them. When every child becomes terminal with
@@ -66,7 +66,7 @@ public sealed class IssueCompositeChildCompletedHandler : ICloudEventHandler<Iss
 }
 
 /// <summary>
-/// Subscribes to <c>com.mohist.issue.cancelled</c> (issue-419 T-002 D5):
+/// Subscribes to <c>com.mohist.issue.cancelled</c>:
 /// when a child is cancelled, the parent re-evaluates. A cancellation
 /// unfreezes the parent's serial in-progress slot (mirroring the Epic
 /// semantics handled by <see cref="EpicCancelledHandler"/>) and the
@@ -95,7 +95,7 @@ public sealed class IssueCompositeChildCancelledHandler : ICloudEventHandler<Iss
 }
 
 /// <summary>
-/// Subscribes to <c>com.mohist.issue.reopened</c> (issue-419 T-002 D5):
+/// Subscribes to <c>com.mohist.issue.reopened</c>:
 /// reopening a Done or Cancelled child returns it to Backlog. A
 /// Done parent then auto-flips back to <c>InProgress</c> via the
 /// <see cref="IssueCompositeStatusChanged"/> transition. A Cancelled parent
@@ -124,7 +124,7 @@ public sealed class IssueCompositeChildReopenedHandler : ICloudEventHandler<Issu
 }
 
 /// <summary>
-/// Subscribes to <c>com.mohist.issue.parent-changed</c> (issue-419 T-002 D5):
+/// Subscribes to <c>com.mohist.issue.parent-changed</c>:
 /// attaches and detaches both trigger a recompute on the affected parent
 /// grain. Attach may unlock the new child for immediate start (handled by
 /// <see cref="IIssueGrain.RecomputeCompositeStatusAsync"/>'s fan-out step);
@@ -226,7 +226,7 @@ internal static class ParentCompositeRecomputeDispatcher
         if (!CloudEventLineage.TryReadParent(extensions, out var parentNumber))
         {
             log.LogDebug(
-                "{EvtType} event {EventId} has no parent lineage; skipping (event pre-issue-419 or unattached issue)",
+                "{EvtType} event {EventId} has no parent lineage; skipping (event predates parent lineage or issue is unattached)",
                 evtType, eventId);
             return;
         }

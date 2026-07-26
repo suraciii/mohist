@@ -1,10 +1,7 @@
-// Issue-461 T-001 / design D1-D7:
-//
 // `AgentSessionRuntimeEventOutbox` is the shared delivery primitive owned
-// by `RunnerHost`. It replaces `FollowupFailureOutbox` and absorbs the
-// direct Workflow reporter / follow-up uploads into one durable ordered
-// queue while preserving the existing operation-fenced terminal
-// settlement semantics for follow-up activity outcomes.
+// by `RunnerHost`: one durable ordered queue for Workflow reporter and
+// follow-up uploads, with operation-fenced terminal settlement for
+// follow-up activity outcomes.
 //
 // Two acknowledgement policies share the same ordered state:
 //   - `matching-receipt` (Workflow input/activity/close and follow-up
@@ -25,7 +22,7 @@
 // in-memory implementation. No Node filesystem adapter is constructed
 // inside the test tree.
 //
-// Recovery model (D5):
+// Recovery model:
 //   - The outbox loads before the runner starts accepting commands or
 //     claiming work. A missing file is treated as an empty queue; an
 //     unreadable or invalid file marks the outbox unhealthy and never
@@ -37,7 +34,7 @@
 //   - `stop()` cancels network and local-persistence retry timers and
 //     in-flight HTTP attempts but never deletes durable records.
 //
-// D6: the legacy `.mohist/runner-state/followup-failures.json` v1 file
+// The legacy `.mohist/runner-state/followup-failures.json` v1 file
 // is imported at first load. Each entry becomes a `successful-response`
 // terminal record with deterministic ID
 // `legacy-followup-terminal:{operationId}`. The legacy file is renamed

@@ -11,7 +11,7 @@ namespace Mohist.Server.Api;
 /// <see cref="WorkflowArtifactUploadRoutes"/> in routing shape: a
 /// dual owner-kind pair of <c>POST</c> endpoints that write directly
 /// to <see cref="TaskLogStore"/> (via <see cref="TaskLogService"/>)
-/// with no grain involvement (design D1).
+/// with no grain involvement.
 /// </summary>
 /// <remarks>
 /// TaskLog is review evidence associated with a work item only — it
@@ -155,7 +155,7 @@ public static class TaskLogRoutes
 
 /// <summary>
 /// Wire-shape for a runner-side task-log upload. The runner emits
-/// one batch per work item at task completion (design D6).
+/// one batch per work item at task completion.
 /// </summary>
 public sealed class TaskLogUploadRequest
 {

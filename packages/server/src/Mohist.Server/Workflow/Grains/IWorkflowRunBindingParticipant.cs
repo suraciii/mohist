@@ -1,7 +1,7 @@
 namespace Mohist.Server.Workflow.Grains;
 
 /// <summary>
-/// issue-477 T-001: narrow WorkflowRun-side participant that commits
+/// narrow WorkflowRun-side participant that commits
 /// the Profile ID binding. Consumed only by the
 /// <c>WorkflowProfileReferenceCoordinator</c>. The participant writes
 /// the nullable backing key only when the Profile is a custom

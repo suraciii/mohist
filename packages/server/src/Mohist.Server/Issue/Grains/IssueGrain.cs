@@ -309,7 +309,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // context bundle on top of any existing variables, so an issue whose
         // agent config was set during creation survives the T1 merge.
         //
-        // Issue-474 T-002: the context bundle seeds `vars.agent = {}` when
+        // the context bundle seeds `vars.agent = {}` when
         // the issue's existing variables do not already define the key, so
         // built-in workflows can still template-bind
         // `options: ${{ vars.agent }}` without the issue page having to set
@@ -372,7 +372,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     }
 
     /// <summary>
-    /// issue-419 T-002 (D2): composite advancement entry. Loads a fresh
+    /// composite advancement entry. Loads a fresh
     /// children snapshot, marks the parent <c>Backlog → InProgress</c>
     /// without minting a workflow run (no-op when already past Backlog),
     /// then fans out <c>StartWorkAsync</c> to every currently-startable
@@ -404,7 +404,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     }
 
     /// <summary>
-    /// issue-419 T-002 (D1, D6): idempotent recompute of the parent's
+    /// idempotent recompute of the parent's
     /// aggregated status. Loads a fresh children snapshot, decides the
     /// target status via <see cref="Domain.Issue.RecomputeCompositeStatus"/>,
     /// applies the matching transition (no-op when already at target),
@@ -413,7 +413,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     /// the issue has zero remaining children — it has reverted to a normal
     /// issue and composite advancement no longer applies.
     /// <para>
-    /// Fan-out is gated on <c>target == InProgress</c> per design D6 step 4:
+    /// Fan-out is gated on <c>target == InProgress</c>:
     /// attaching a child to a still-Backlog parent must NOT pre-empt the
     /// user's explicit <c>mo issue start</c>. Redelivery is safe: the
     /// aggregate transition is a no-op when the status already matches,

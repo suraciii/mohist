@@ -190,7 +190,7 @@ public sealed class InboxSubscriptionDto
 /// Response shape for an inbox item. The server stores only structured
 /// fields (<c>notificationKind</c>, issue identity, timestamps) — the
 /// product-facing text is rendered on the Web client from
-/// <see cref="NotificationKind"/> and issue identity, per design D7.
+/// <see cref="NotificationKind"/> and issue identity.
 /// </summary>
 public sealed class InboxItemDto
 {

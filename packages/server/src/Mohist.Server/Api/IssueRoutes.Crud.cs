@@ -82,7 +82,7 @@ public static partial class IssueRoutes
             var number = await counter.NextAsync();
             var commandId = $"create:{project.Id}:{number}";
 
-            // issue-417 T-005: route the create through the
+            // route the create through the
             // Project-scoped coordinator so it serializes against the
             // matching Project repository removal. The coordinator
             // resolves the canonical name, captures the issue's
@@ -232,7 +232,7 @@ public static partial class IssueRoutes
             var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            // issue-417 T-005: a repository-bearing PATCH must be routed
+            // a repository-bearing PATCH must be routed
             // through the Project-scoped coordinator so the complete
             // aggregate PATCH is fenced as a single command — an ambiguous
             // result cannot commit the repository reassignment while

@@ -15,7 +15,7 @@ namespace Mohist.Server.AgentOps.Services;
 /// Reports usage and cost figures for the
 /// <c>GET /api/projects/{projectRef}/agent/usage</c> and
 /// <c>GET /api/projects/{projectRef}/agent/cost</c> endpoints
-/// (issue-327 T-004 / design D1, D2). Composes the usage timeseries
+///. Composes the usage timeseries
 /// (with cumulative-cost-per-ship projection), the cumulative cost rollup
 /// (total / today), and the windowed cost figures. Pure refactor: each
 /// response is byte-for-byte identical to the pre-split core-querier
@@ -243,7 +243,7 @@ public sealed class AgentUsageReporter : IScopedService
 
     /// <summary>
     /// Computes windowed (current + previous) spend and per-issue cost for
-    /// the agent-cost surface (issue-322 T-004 / design D1, D2). Both windows
+    /// the agent-cost surface. Both windows
     /// are 30 days when <paramref name="windowDays"/> is <c>null</c> (the
     /// Dashboard back-compat default); when a value is supplied, both
     /// windows scale to that length and the previous window is the same

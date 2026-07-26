@@ -130,7 +130,7 @@ public static partial class WorkflowRunExtensions
         }
 
         /// <summary>
-        /// issue-417 T-006 (D4): input-idempotent start called by the
+        /// input-idempotent start called by the
         /// durable <c>IssueWorkStarted</c> handler. Idempotency rules:
         /// <list type="bullet">
         ///   <item>A run with no <see cref="WorkflowRun.Repository"/>

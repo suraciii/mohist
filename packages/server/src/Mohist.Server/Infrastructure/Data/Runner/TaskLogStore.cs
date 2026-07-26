@@ -8,8 +8,7 @@ namespace Mohist.Server.Infrastructure.Data.Runner;
 /// Dedicated persistence and cursor-paginated query for ops task
 /// execution logs. Mirrors <see cref="RunnerWorkStore"/>'s
 /// placement convention and writes directly with no grain
-/// involvement, matching the artifact-upload independence
-/// described in design D1 / D8.
+/// involvement, matching the artifact-upload independence.
 /// </summary>
 public class TaskLogStore
 {
@@ -115,7 +114,7 @@ public class TaskLogStore
     /// in ascending <c>Seq</c> order. The cursor is the last seq
     /// seen on the previous page; the returned page starts strictly
     /// after it. Pagination is stable because the runner does not
-    /// reuse seq values for discarded head lines (design D6).
+    /// reuse seq values for discarded head lines.
     /// </summary>
     /// <param name="afterSeq">
     /// When null, the first page (the smallest seq) is returned.

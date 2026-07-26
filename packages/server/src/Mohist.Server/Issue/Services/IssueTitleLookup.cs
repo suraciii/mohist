@@ -10,7 +10,7 @@ namespace Mohist.Server.Issue.Services;
 /// because the lookup reads <c>db.Issues</c> + <see cref="IssueRowMapper.ByNumber"/> —
 /// both Issue-domain data — and matches the architecture rule of
 /// placing cross-domain read queries on the domain that owns the data
-/// (issue-327 T-003 / issue-370 T-004 / design D5).
+///.
 /// </summary>
 /// <remarks>
 /// Pure static (no DI) following the <see cref="IssueRowMapper"/> /
@@ -53,8 +53,7 @@ internal static class IssueTitleLookup
     /// fallback. Returns the stored title verbatim when the number maps
     /// to a non-whitespace title; otherwise returns the literal
     /// <c>Issue #{number}</c> byte-identical to the pre-change resolver,
-    /// so list / activity-feed projections stay in lockstep (issue-327
-    /// T-003 / issue-370 T-004 / design D5).
+    /// so list / activity-feed projections stay in lockstep.
     /// </summary>
     internal static string Resolve(IReadOnlyDictionary<int, string> titles, int issueNumber) =>
         titles.TryGetValue(issueNumber, out var title) && !string.IsNullOrWhiteSpace(title)

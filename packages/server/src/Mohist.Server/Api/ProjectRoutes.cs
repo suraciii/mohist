@@ -380,7 +380,7 @@ public static class ProjectRoutes
         {
             var project = context.GetResolvedProject();
 
-            // issue-417 T-005: deletion enters through the
+            // deletion enters through the
             // Project-scoped coordinator. The coordinator performs the
             // committed-state blocker check before fencing; the
             // Project participant still owns the existence / default

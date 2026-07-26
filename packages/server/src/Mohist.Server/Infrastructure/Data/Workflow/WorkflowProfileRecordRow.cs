@@ -1,7 +1,7 @@
 namespace Mohist.Server.Infrastructure.Data.Workflow;
 
 /// <summary>
-/// issue-477 T-001: Project-scoped WorkflowProfile collection row. One row
+/// Project-scoped WorkflowProfile collection row. One row
 /// per custom (non-built-in) Profile. Built-in <c>mohist/*</c> Profiles are
 /// served by <c>WorkflowProfileCatalog</c> and never persisted here. The
 /// <c>(ProjectId, ProfileId)</c> composite is the natural key and the

@@ -276,7 +276,7 @@ public sealed record AgentUsageSummary(
 /// list is appended on <c>usage.updated</c> / <c>context_health_update</c>,
 /// hard-capped at a small fixed size (~24 samples) and time-thinned to
 /// a coarse bucket (~30s) so the grain state and downstream payloads
-/// stay small regardless of session length (issue-245 T-002, design D5).
+/// stay small regardless of session length.
 /// </summary>
 public sealed record ContextUsageHistoryEntry(
     [property: JsonPropertyName("at")] DateTime At,

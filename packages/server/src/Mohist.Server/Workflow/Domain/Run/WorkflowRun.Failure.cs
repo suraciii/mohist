@@ -102,7 +102,7 @@ public static partial class WorkflowRunExtensions
                     return [new WorkflowRunResumed()];
                 // ContextExhaustion is a legacy failure reason: it was only ever
                 // produced by the removed session-health gate, but persisted runs
-                // (e.g. issue #407) still carry it. Retry re-runs the failing task
+                // still carry it. Retry re-runs the failing task
                 // rather than refusing — capacity is OpenCode's responsibility now.
                 case FailureReason.ContextExhaustion:
                 {

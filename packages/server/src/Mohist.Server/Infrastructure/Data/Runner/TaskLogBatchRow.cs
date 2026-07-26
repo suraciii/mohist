@@ -4,8 +4,8 @@ namespace Mohist.Server.Infrastructure.Data.Runner;
 
 /// <summary>
 /// Batch-level metadata for a task log upload. One row per work
-/// item (the runner flushes a single terminal batch per work item
-/// per design D6), keyed by <c>(OwnerKind, OwnerId, WorkId)</c>.
+/// item (the runner flushes a single terminal batch per work item),
+/// keyed by <c>(OwnerKind, OwnerId, WorkId)</c>.
 /// <c>Truncated</c> reflects whether the runner dropped head lines
 /// at capture time so the web client can signal that to the user.
 /// </summary>

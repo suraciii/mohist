@@ -9,7 +9,7 @@ namespace Mohist.Server.Api;
 /// <summary>
 /// Bare <c>GET /api/workflow-runs/{workflowRunId}</c> — the read model
 /// surfaced to <c>mo workflow show &lt;runId&gt;</c> / <c>mo workflow
-/// status &lt;runId&gt;</c> (issue-381 T-002 / Decision 2). Returns a
+/// status &lt;runId&gt;</c>. Returns a
 /// <see cref="WorkflowRunDetailDto"/> that composes the existing
 /// <see cref="WorkflowStatusView"/> with an optional associated-issue
 /// reference (number + title) reverse-resolved via

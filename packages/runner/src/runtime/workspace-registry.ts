@@ -104,7 +104,7 @@ export class WorkspaceRegistry {
   }
 
   // Upsert a workspace registration in the `active` phase. Called from
-  // WorkspaceManager.materialize() success. Per design D7, every
+  // WorkspaceManager.materialize() success. Every
   // successful materialize stamps `materializedAt = now` so the
   // timestamp records the last materialization. `terminalAt` is
   // preserved if the entry was previously eligible — eligibility is

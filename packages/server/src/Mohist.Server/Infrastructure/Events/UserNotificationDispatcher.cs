@@ -75,7 +75,7 @@ public sealed class ConnectionSubscriptionRegistry : ISingletonService
     /// <c>Unsubscribe</c> hub call updates this set together
     /// with the per-task type-subscription. Transport-level state,
     /// NOT durable — the Web is expected to re-assert the per-task
-    /// subscribe on SignalR reconnect (see design D5).
+    /// subscribe on SignalR reconnect.
     /// </summary>
     private readonly ConcurrentDictionary<string, HashSet<TaskLogSubscriptionKey>> _byConnectionTaskLog = new(StringComparer.Ordinal);
 
@@ -270,7 +270,7 @@ public sealed class ConnectionSubscriptionRegistry : ISingletonService
 /// <summary>
 /// Composite key for the per-connection task-log scope set. The
 /// <c>(workflowRunId, taskId)</c> pair is the on-demand delivery
-/// dimension (see design D5): a client receives a delta for a
+/// dimension: a client receives a delta for a
 /// task only when it has explicitly subscribed to that pair.
 /// </summary>
 public readonly record struct TaskLogSubscriptionKey(

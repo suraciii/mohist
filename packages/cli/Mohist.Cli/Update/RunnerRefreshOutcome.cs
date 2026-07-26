@@ -168,7 +168,7 @@ internal sealed class RunnerRefreshVerifier
 
         if (string.IsNullOrWhiteSpace(identity.BuildGitHash))
         {
-            return new RunnerRefreshOutcome.UnknownIdentity("runner did not report a buildGitHash; pre-T-001 runner cannot be verified");
+            return new RunnerRefreshOutcome.UnknownIdentity("runner did not report a buildGitHash; runner build cannot be verified");
         }
 
         return string.Equals(identity.BuildGitHash, repoHead, StringComparison.Ordinal)

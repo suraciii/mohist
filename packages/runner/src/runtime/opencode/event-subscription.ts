@@ -4,11 +4,7 @@
  * async-iterable consumer and fans each normalized event out to its
  * listeners. It deliberately does not decide which events map to
  * which Mohist transcript/tool/usage/model/status facts; that lives
- * in higher-level code (T-004 turns / T-005 session commands).
- *
- * Per spec `specs/opencode-runtime/spec.md` "One global event
- * subscription" and `specs/opencode-turn-execution/spec.md` "idempotent
- * projection".
+ * in higher-level code (turn execution / session commands).
  */
 
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"

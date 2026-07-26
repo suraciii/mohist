@@ -14,7 +14,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 
     /// <summary>
     /// Synchronous, idempotent terminal-close command issued by an
-    /// authoritative AgentJob owner (issue-449 design decision 2). The
+    /// authoritative AgentJob owner. The
     /// delivery id stored in <see cref="AppendTerminalCloseCommand.DeliveryId"/>
     /// is the correlation key on the persisted <c>session.closed</c>
     /// transcript part; a second call with the same delivery id is a
@@ -100,7 +100,7 @@ public sealed record AppendAgentSessionSystemEventsCommand(
     [property: Id(0)] IReadOnlyList<AgentSessionRuntimeEventInput> RuntimeEvents = null!);
 
 /// <summary>
-/// Idempotent AgentSession close command (issue-449 design decision 2).
+/// Idempotent AgentSession close command.
 /// The AgentJob owns the canonical terminal delivery: every retry across
 /// reminder ticks, activation loss, and report replay reuses the same
 /// <see cref="DeliveryId"/> so the AgentSession persists at most one

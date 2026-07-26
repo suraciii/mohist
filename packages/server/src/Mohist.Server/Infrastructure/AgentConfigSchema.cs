@@ -5,7 +5,7 @@ namespace Mohist.Server.Infrastructure;
 
 /// <summary>
 /// Converged AgentConfig schema shared by the issue-level and
-/// agent-definition write surfaces. Per #410 T-002 design D5, the
+/// agent-definition write surfaces. The
 /// issue-level and agent-definition <c>agentConfig</c> surfaces accept
 /// only <c>model</c> + <c>variant</c>; legacy runtime/liveness keys
 /// (<c>type</c>, <c>livenessQuietThresholdMs</c>, <c>probeTimeoutMs</c>,
@@ -16,7 +16,7 @@ namespace Mohist.Server.Infrastructure;
 /// path covers them when they reach an execution request.
 ///
 /// <para>
-/// Per issue-452 design D1, the whitelist also carries the execution
+/// The whitelist also carries the execution
 /// backend dimension (<c>runtime</c>: <c>opencode</c> | <c>pi</c>).
 /// Absent / unset resolves to <c>opencode</c>; any other value is
 /// rejected as invalid. The same validation covers Agent CRUD and the
@@ -148,7 +148,7 @@ public static class AgentConfigSchema
     /// ConfigService) that hold agent config as a plain dictionary.
     /// Iterates <see cref="AllowedKeys"/> so the projection tracks the
     /// validation whitelist — adding a new key to the validation surface
-    /// automatically flows into the write-side merge (issue-452 D1).
+    /// automatically flows into the write-side merge.
     /// </summary>
     public static Dictionary<string, object?>? Filter(IDictionary<string, object?>? agentConfig)
     {

@@ -11,7 +11,7 @@ namespace Mohist.Server.Sessions.Services;
 /// <see cref="AgentUsageReporter"/>). Centralises the "byte-alignment"
 /// invariant that previously lived only in prose comments: every
 /// consumer now invokes the same method, so the projections cannot drift
-/// (issue-327 T-003, issue-370 T-001 / design D1, D6).
+///.
 /// </summary>
 /// <remarks>
 /// Pure (no DB, no clock, no DI) so each method is a one-token swap for
@@ -20,7 +20,7 @@ namespace Mohist.Server.Sessions.Services;
 /// <c>WorkflowStatusMapper</c> precedent. The mapper also houses
 /// <see cref="Labels"/> (the single shared label-filter dictionary
 /// builder) so the three callers no longer each carry their own copy
-/// (design D6).
+///.
 /// </remarks>
 internal static class AgentSessionDtoMapper
 {
@@ -28,8 +28,7 @@ internal static class AgentSessionDtoMapper
     /// Projects the session's <see cref="AgentSession.Status.UsageSummary"/>
     /// into an <see cref="AgentUsageDto"/>, attaching the bounded
     /// <see cref="ContextUsageHistoryEntryDto"/> trend so the activity
-    /// surface can render a context-usage mini-chart (issue-245 T-002 /
-    /// design D5).
+    /// surface can render a context-usage mini-chart.
     /// </summary>
     internal static AgentUsageDto ToUsageDto(AgentSession s) =>
         ToUsageDto(AgentSessionJsonHelper.Usage(s), BuildUsageHistoryDto(s));
@@ -68,7 +67,7 @@ internal static class AgentSessionDtoMapper
     /// <c>null</c> when the session has not yet recorded any usage
     /// (grain never thinned a sample) so the wire stays quiet for
     /// historical/legacy sessions. An empty list is projected as
-    /// <c>null</c> for the same reason (issue-245 T-002 / design D5).
+    /// <c>null</c> for the same reason.
     /// </summary>
     internal static IReadOnlyList<ContextUsageHistoryEntryDto>? BuildUsageHistoryDto(AgentSession domainSession)
     {
@@ -112,11 +111,11 @@ internal static class AgentSessionDtoMapper
     /// payload of <c>text</c> and <c>reasoning</c> part types is
     /// rewritten to a serialized <c>{ text }</c> object so both callers
     /// observe identical projected events; all other part types pass
-    /// through verbatim (issue-327 T-002, issue-370 T-001 / design D1).
+    /// through verbatim.
     /// <see cref="TranscriptEventProjection.TurnId"/> is propagated so the
     /// latest-fact reducer can apply the (turn sequence, part sequence,
     /// part id) total order the AgentJob-owned close contract depends on
-    /// (issue-449 design decision 4).
+    ///.
     /// </summary>
     internal static TranscriptEventProjection ToProjection(string sessionId, AgentSessionTranscriptPartRow part) => new()
     {
@@ -136,7 +135,7 @@ internal static class AgentSessionDtoMapper
     /// <see cref="AgentSessionQuery.ListByLabelsAsync"/>. Skips any pair
     /// whose key or value is null/empty/whitespace and uses ordinal
     /// (case-sensitive) comparison so a downstream index lookup is
-    /// case-correct (issue-327 T-003, issue-370 T-001 / design D6).
+    /// case-correct.
     /// </summary>
     internal static IReadOnlyDictionary<string, string> Labels(params (string Key, string? Value)[] values)
     {

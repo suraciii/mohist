@@ -32,7 +32,7 @@ namespace Mohist.Server.Agent.Grains;
 /// the matching <c>session.closed</c> transcript fact is durable. The
 /// reminder drives retries until acknowledgement so a process restart,
 /// an activation loss, or a Session-persistence failure cannot lose the
-/// terminal fact (issue-449 design decision 2).
+/// terminal fact.
 /// </summary>
 public sealed class AgentJobGrain : Grain, IAgentJobGrain
 {
@@ -356,8 +356,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     }
 
     /// <summary>
-    /// Idempotent routed-launch preparation (issue-449 design decisions
-    /// 1-3). Registers the durable <c>agent-job-recovery</c> reminder
+    /// Idempotent routed-launch preparation. Registers the durable
+    /// <c>agent-job-recovery</c> reminder
     /// BEFORE persisting the canonical plan so a crash between
     /// reminder registration and plan persistence still leaves an
     /// orphan reminder that self-cleans on its first tick. The reminder
@@ -402,8 +402,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     }
 
     /// <summary>
-    /// Advance the durable prepared launch plan (issue-449 design
-    /// decisions 1-3). Idempotent across immediate, OnActivate, and
+    /// Advance the durable prepared launch plan. Idempotent across
+    /// immediate, OnActivate, and
     /// reminder-recovery paths. Opens the AgentSession from the
     /// persisted plan only — never from caller's newly resolved
     /// values — and either persists LaunchReady and submits the
@@ -782,7 +782,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             with["model"] = JSON.SerializeToElement(input.Model);
         if (!string.IsNullOrWhiteSpace(input.Variant))
             with["variant"] = JSON.SerializeToElement(input.Variant);
-        // Issue-452 design D4: the dispatch envelope carries the
+        // The dispatch envelope carries the
         // snapshot-fixed runtime so the runner AgentJob executor can
         // select the right runtime (PiRuntime / OpenCodeRuntime). The
         // raw-prompt-only validation path leaves Runtime unset on the
@@ -901,7 +901,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     /// stable delivery id before saving terminal state, then registers a
     /// durable <c>agent-job-recovery</c> reminder so the durable delivery
     /// to the AgentSession survives activation loss, process restart, and
-    /// report replay (issue-449 design decision 2). Idempotent for
+    /// report replay. Idempotent for
     /// already-terminal jobs that still carry a pending delivery — the
     /// same delivery is retried so a redelivered report or a fresh
     /// activation converges on exactly one <c>session.closed</c> fact.
@@ -1066,7 +1066,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     /// <summary>
     /// Durable reminder tick driving two recovery loops:
-    /// terminal-delivery retry (issue-449 design decision 2) and
+    /// terminal-delivery retry and
     /// prepared-launch advancement (design decisions 1-3). A single
     /// reminder name covers both so the grain keeps a durable wake-up
     /// until either Runner acceptance is persisted (preparation) or the
@@ -1125,7 +1125,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     }
 
     /// <summary>
-    /// Runner failure category precedence (issue-449 design decision 4):
+    /// Runner failure category precedence:
     /// structured output <c>failureCategory</c> → <c>WorkResult.Error.Code</c>
     /// → report status. The output JSON is the most specific runner signal
     /// (e.g., <c>prompt_timeout</c>); the error code carries pre-execution

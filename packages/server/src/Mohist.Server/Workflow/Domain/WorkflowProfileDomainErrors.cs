@@ -1,7 +1,7 @@
 namespace Mohist.Server.Workflow.Domain;
 
 /// <summary>
-/// issue-477 T-001: domain error carried by the WorkflowProfile collection
+/// domain error carried by the WorkflowProfile collection
 /// when callers attempt to mutate a built-in Profile. Distinct from the
 /// Definition / Action-contract validation surface and the
 /// deletion-blocker surface so the API can map them to the right error
@@ -19,7 +19,7 @@ public sealed class WorkflowProfileReadOnlyException : Exception
 }
 
 /// <summary>
-/// issue-477 T-001: thrown by the collection provider when a save request
+/// thrown by the collection provider when a save request
 /// collides with an existing Profile at the same <c>(ProjectId, ProfileId)</c>.
 /// </summary>
 public sealed class WorkflowProfileAlreadyExistsException : Exception
@@ -36,7 +36,7 @@ public sealed class WorkflowProfileAlreadyExistsException : Exception
 }
 
 /// <summary>
-/// issue-477 T-001: thrown when a custom update / delete cannot find the
+/// thrown when a custom update / delete cannot find the
 /// target <c>(ProjectId, ProfileId)</c> row. The custom-Profile foreign-key
 /// backstop on Issue selection / Run binding translates this into a
 /// retryable workflow-profile-not-found conflict for the caller that lost

@@ -1,7 +1,7 @@
 /**
  * `options.model` first-slash parsing for the OpenCode runtime.
  *
- * The Mohist contract (see `specs/opencode-model-catalog/spec.md`):
+ * The Mohist contract:
  *   - non-empty `provider/modelID` form,
  *   - provider is the substring before the first `/`,
  *   - the model ID is the entire remainder (additional `/` preserved),

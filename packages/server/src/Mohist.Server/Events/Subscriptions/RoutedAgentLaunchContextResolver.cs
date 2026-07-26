@@ -10,7 +10,7 @@ namespace Mohist.Server.Events.Subscriptions;
 
 /// <summary>
 /// Narrow post-match resolver that turns a routed CloudEvent into an
-/// ownership-validated execution context (issue-449 design decision 1).
+/// ownership-validated execution context.
 ///
 /// <para>
 /// The resolver is invoked by <see cref="RoutingDispatchHandler"/> ONLY

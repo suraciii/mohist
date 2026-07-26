@@ -554,7 +554,7 @@ internal static class AgentCommands
     {
         var session = new Command(
             "session",
-            "Manage a generic AgentSession launched from an Agent profile (issue-129). Subcommands: list <agent>, show <sessionId>, transcript <sessionId>, launch <agent>, compact <sessionId>, reset <sessionId>, followup <sessionId>, cancel <sessionId>.");
+            "Manage a generic AgentSession launched from an Agent profile. Subcommands: list <agent>, show <sessionId>, transcript <sessionId>, launch <agent>, compact <sessionId>, reset <sessionId>, followup <sessionId>, cancel <sessionId>.");
 
         session.Subcommands.Add(BuildSessionList(api));
         session.Subcommands.Add(BuildSessionShow(api));

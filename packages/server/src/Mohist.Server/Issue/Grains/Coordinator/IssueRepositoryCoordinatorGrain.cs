@@ -12,7 +12,7 @@ using Orleans.Runtime;
 namespace Mohist.Server.Issue.Grains.Coordinator;
 
 /// <summary>
-/// issue-417 T-005: Project-scoped, non-reentrant (Orleans default)
+/// Project-scoped, non-reentrant (Orleans default)
 /// application process manager that serializes Issue create, target
 /// reassignment, cancelled-Issue reopen, and Project repository
 /// removal. Persists at most one <see cref="PendingRepositoryCommand"/>
@@ -632,7 +632,7 @@ public enum CoordinatorProbeKind
 }
 
 /// <summary>
-/// issue-417 T-005: test-only static probe that runs synchronously
+/// test-only static probe that runs synchronously
 /// after the coordinator persists its fence but before it invokes the
 /// participant. Tests set this hook to await on a TaskCompletionSource
 /// so the test can force the "between fence persistence and

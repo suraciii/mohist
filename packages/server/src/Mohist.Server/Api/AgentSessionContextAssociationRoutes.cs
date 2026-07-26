@@ -11,7 +11,7 @@ namespace Mohist.Server.Api;
 /// <see cref="Sessions.Domain.AgentSession"/>s associated with an issue
 /// or epic via their recorded <c>agent-launch/issue-number</c> or
 /// <c>agent-launch/epic-number</c> context-reference labels
-/// (issue-130 T-006). Each returns a lightweight association list where
+///. Each returns a lightweight association list where
 /// every entry carries the session id, agent id, agent name, status,
 /// created timestamp, and a link back to the session summary route.
 /// These endpoints are pure reads — they perform no writes and create

@@ -4,7 +4,7 @@ using Mohist.Workflow.Definition;
 namespace Mohist.Server.Workflow.Services;
 
 /// <summary>
-/// issue-477 T-001: narrow WorkflowProfile collection contract. The
+/// narrow WorkflowProfile collection contract. The
 /// provider is the sole existence and read-only authority for built-in
 /// <c>mohist/*</c> Profiles and the read/write authority for custom
 /// (Project-scoped) Profiles. Callers MUST go through this provider
@@ -88,7 +88,7 @@ public interface IWorkflowProfileProvider
 }
 
 /// <summary>
-/// issue-477 T-001: a single Profile as exposed through the collection
+/// a single Profile as exposed through the collection
 /// provider. Built-in entries have <see cref="SourceProvenance"/> =
     /// <c>BuiltIn</c>; custom entries carry <c>Verbatim</c> or
     /// <c>CanonicalLegacy</c> provenance.

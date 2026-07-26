@@ -22,7 +22,7 @@ public class AgentSessionRow
     public string? LabelStage { get; set; }
     public string? LabelSourceKind { get; set; }
 
-    // Direct Agent (generic agent-launch) label keys, issued-130 T-001.
+    // Direct Agent (generic agent-launch) label keys.
     // Mirror the workflow-shaped columns above; the json_extract paths
     // reference GenericAgentSessionMetadata constants so the SQL and the
     // runtime metadata can never drift.

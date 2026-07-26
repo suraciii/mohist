@@ -1,7 +1,7 @@
 namespace Mohist.Server.Project.Domain;
 
 /// <summary>
-/// issue-417 T-004: thrown when a repository removal is rejected because
+/// thrown when a repository removal is rejected because
 /// at least one non-terminal Issue in the Project is still bound to the
 /// target repository name. The grain / route surfaces this as a distinct
 /// <c>repository_in_use</c> envelope without mutating Project or Issue
@@ -19,7 +19,7 @@ public sealed class RepositoryInUseException : InvalidOperationException
 }
 
 /// <summary>
-/// issue-417 T-004: thrown when a Project repository participant command
+/// thrown when a Project repository participant command
 /// is replayed with a stale revision (some other transition committed
 /// in the meantime). Mirrors
 /// <see cref="Mohist.Server.Issue.Domain.IssueRepositoryStaleRevisionException"/>
@@ -41,7 +41,7 @@ public sealed class ProjectRepositoryStaleRevisionException : Exception
 }
 
 /// <summary>
-/// issue-417 T-004: thrown when a Project repository participant
+/// thrown when a Project repository participant
 /// command is rejected because the named repository does not exist in
 /// the Project. Distinct from a default-repository conflict so the
 /// existing not-found / default precedence on the API surface is

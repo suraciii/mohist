@@ -194,7 +194,7 @@ internal static class MohistCliCommands
         services.AddSingleton(http);
         // Production callers leave queryExecutor null and the default
         // SqliteOtelQueryExecutor is used; tests inject a fake so otel query
-        // specs never touch a real SQLite file (design/testing.md constraint 1).
+        // specs never touch a real SQLite file.
         if (queryExecutor is not null)
             services.AddSingleton(queryExecutor);
         // Production callers leave installer/updater null and the default

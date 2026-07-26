@@ -40,7 +40,7 @@ public sealed record WorkspaceIdentity(
     [property: Id(2)] string? ChangeDir = null);
 
 /// <summary>
-/// issue-417 T-006 (D4): authoritative, immutable repository
+/// authoritative, immutable repository
 /// context captured at workflow-run creation. Issue-backed runs
 /// MUST populate this; generic runs may leave it null. Once
 /// assigned, ordinary run commands cannot mutate it — the context
@@ -75,8 +75,8 @@ public sealed class WorkflowRun
     /// <summary>
     /// When the run (re-)entered <see cref="WorkflowRunStatus.Ready"/>. Drives
     /// fairness: the scheduler serves Ready runs in <c>ReadySince ASC</c> order,
-    /// so just-served runs re-queue at the tail with zero scheduler state (see
-    /// <c>design/workflow/scheduling.md</c> §Fairness). Maintained as a side
+    /// so just-served runs re-queue at the tail with zero scheduler state.
+    /// Maintained as a side
     /// effect of entering Ready;
     /// leaving Ready does not clear it, re-entering overwrites it.
     /// </summary>
@@ -84,7 +84,7 @@ public sealed class WorkflowRun
     public FailureDetails? Failure { get; set; }
     public WorkspaceIdentity? Workspace { get; set; }
     /// <summary>
-    /// issue-417 T-006 (D4): immutable repository snapshot assigned
+    /// immutable repository snapshot assigned
     /// at workflow start. Normal run commands MUST NOT mutate it;
     /// <see cref="WorkflowRunExtensions.EnsureStarted"/> is the only
     /// entry that touches this property, and it refuses to overwrite

@@ -75,7 +75,7 @@ public class AgentSessionQuerier : IScopedService
     /// <summary>
     /// Lists generic (non-workflow) <see cref="AgentSession"/>s for an Agent
     /// profile within a project, recency-ordered and capped at the
-    /// requested limit (issued-130 T-002 / design D2). Composes the three
+    /// requested limit. Composes the three
     /// indexed labels (<c>project-id</c>, <c>agent-id</c>,
     /// <c>source-kind = agent-launch</c>) so the DB query cannot leak
     /// workflow sessions or another agent's sessions. Terminal status
@@ -85,7 +85,7 @@ public class AgentSessionQuerier : IScopedService
     /// present". The optional <paramref name="statusSet"/> is applied as
     /// an in-memory filter over the indexed result set so it composes
     /// with <paramref name="additionalContextLabels"/> (DB-level filters
-    /// resolved against the T-001 indexed columns). Each returned item
+    /// resolved against the indexed columns). Each returned item
     /// carries enough information for the workbench to derive the four
     /// primary state groupings (recent / running / failed / ended)
     /// directly from the response.
@@ -95,7 +95,7 @@ public class AgentSessionQuerier : IScopedService
     /// matches the established project-wide list
     /// (<see cref="ListCurrentAsync"/>) and the active-agents readout
     /// (<see cref="AgentActivityFeedAssembler.GetActivityAsync"/>, which
-    /// absorbed the activity-feed projection in issue-327 T-003). Status
+    /// absorbed the activity-feed projection). Status
     /// vocabulary: <c>running</c> / <c>completed</c> / <c>failed</c> /
     /// <c>stopped</c>. The legacy runner protocol's <c>cancelled</c>
     /// alias is normalised to <c>stopped</c> at this read boundary.
@@ -167,8 +167,8 @@ public class AgentSessionQuerier : IScopedService
     /// Lists generic <c>agent-launch</c> sessions that carry a specific
     /// context-reference label (issue-number or epic-number), returning a
     /// lightweight association list for the issue/epic association endpoints
-    /// (issue-130 T-006). Filters by <c>(project-id, source-kind=agent-launch,
-    /// {labelKey}={labelValue})</c> using the T-001 indexed columns. Session
+    ///. Filters by <c>(project-id, source-kind=agent-launch,
+    /// {labelKey}={labelValue})</c> using the indexed columns. Session
     /// status is resolved via the same terminal-fact logic as
     /// <see cref="ListAgentSessionsAsync"/>. Each returned entry includes a
     /// relative URL link back to the session summary route
@@ -222,7 +222,7 @@ public class AgentSessionQuerier : IScopedService
     /// envelope from the labels stamped at launch. Returns <c>null</c>
     /// when the session carried no context references so the wire
     /// response omits the field instead of fabricating an empty object
-    /// (issued-130 T-002: "absent rather than null", per design D4).
+    /// ("absent rather than null").
     /// </summary>
     private static AgentSessionListContextRefsDto? BuildAgentSessionListContextRefs(AgentSessionRecord record)
     {
@@ -260,7 +260,7 @@ public class AgentSessionQuerier : IScopedService
 
     /// <summary>
     /// Resolves the runner + activity state of a generic (non-workflow)
-    /// <see cref="AgentSession"/> for followup delivery (issue-129 T-004).
+    /// <see cref="AgentSession"/> for followup delivery.
     /// Distinct from <see cref="ResolveFollowupTargetAsync"/> which is
     /// issue-anchored and returns null when the workflow-run label is
     /// blank: generic sessions are addressed by their minted sessionId
@@ -268,7 +268,7 @@ public class AgentSessionQuerier : IScopedService
     /// <c>source-kind = agent-launch</c> labels (no workflow-run lookup
     /// key). The runner id is sourced from the grain's runtime (the
     /// runner's <c>open</c> call is what stamps it onto the session after
-    /// the launch mints it with an empty RunnerId, per T-003). Active
+    /// the launch mints it with an empty RunnerId, ). Active
     /// state mirrors <see cref="AgentSessionJsonHelper.StatusName"/>.
     /// </summary>
     /// <remarks>
@@ -394,7 +394,7 @@ public class AgentSessionQuerier : IScopedService
     /// <summary>
     /// Builds the generic-session summary surfaced by
     /// <c>GET /api/projects/{projectRef}/agent-sessions/{sessionId}</c>
-    /// (issue-130 T-003 / design D4). Returns <c>null</c> when the
+    ///. Returns <c>null</c> when the
     /// session id does not resolve to a generic <c>agent-launch</c>
     /// session in the requested project — the cross-project guard
     /// matches <see cref="ResolveGenericFollowupTargetAsync"/> so the caller never
@@ -488,7 +488,7 @@ public class AgentSessionQuerier : IScopedService
 
     /// <summary>
     /// Builds the optional <see cref="GenericAgentSessionSummaryContextRefsDto"/>
-    /// envelope from the labels stamped at launch (issue-130 T-003).
+    /// envelope from the labels stamped at launch.
     /// Returns <c>null</c> when the session carried no context references
     /// so the wire response omits the field instead of fabricating an
     /// empty object — mirroring the agent-scoped list's
@@ -717,7 +717,7 @@ public sealed record FollowupTarget(
 
 /// <summary>
 /// Followup target for a generic (non-workflow) <see cref="AgentSession"/>
-/// (issue-129 T-004). Identifies a session by its minted
+///. Identifies a session by its minted
 /// <see cref="SessionId"/> alone — there is no <c>workflowRunId</c> /
 /// <c>sessionName</c> pair to carry. The runner resolves the session
 /// through the OpenCode runtime's <c>generic:</c>-prefixed binding

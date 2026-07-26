@@ -6,7 +6,7 @@ namespace Mohist.Server.Sessions.Services;
 
 /// <summary>
 /// Shared loader for the transcript turns/parts read sequence used by the
-/// five former duplication sites (issue-327 T-002 / design D3). Returns the
+/// five former duplication sites. Returns the
 /// raw materials — the loaded turn rows, a turn-id → session-id dictionary,
 /// and the materialized parts list (optionally pre-filtered by part type so SQL stays the
 /// filter boundary) — and lets each caller impose its own ordering and

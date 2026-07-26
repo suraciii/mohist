@@ -14,8 +14,6 @@ namespace Mohist.Server.Otel;
 /// downstream queries.
 /// </summary>
 /// <remarks>
-/// Schema reference: <c>openspec/changes/issue-219/design.md</c> Decision 4
-/// and <c>openspec/changes/issue-219/specs/otel-trace-collection/spec.md</c>.
 /// Times are stored as ISO 8601 UTC text so SQLite's lexicographic
 /// ordering matches chronological ordering and the values are
 /// human-readable for CLI consumers.
@@ -168,7 +166,7 @@ public sealed class OtelDb
     /// Test-only constructor that injects explicit connection strings instead
     /// of deriving them from a file path. Used to back <c>OtelDb</c> with an
     /// in-memory shared-cache SQLite database so OTel specs never touch a real
-    /// <c>otel.db</c> file (design/testing.md hard-constraint 1). The caller
+    /// <c>otel.db</c> file. The caller
     /// owns a keeper <see cref="SqliteConnection"/> that keeps the in-memory
     /// database alive for the lifetime of this instance.
     /// </summary>

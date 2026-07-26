@@ -5,7 +5,7 @@ using Mohist.Server.Project.Grains;
 namespace Mohist.Server.Issue.Grains.Coordinator;
 
 /// <summary>
-/// issue-417 D2: adapts <see cref="IIssueGrain"/> to the narrow
+/// adapts <see cref="IIssueGrain"/> to the narrow
 /// <see cref="IIssueBindingParticipant"/> surface the coordinator
 /// consumes. Each participant method captures the issue's
 /// coordination revision, applies the receipt-bearing transaction
@@ -142,7 +142,7 @@ public enum BindingParticipantProbeKind
 }
 
 /// <summary>
-/// issue-417 T-005: test-only static probe that runs synchronously
+/// test-only static probe that runs synchronously
 /// before the coordinator invokes a participant. Tests set this hook
 /// to await on a TaskCompletionSource so the test can force
 /// ordering / lost-response points without wall-clock waits. Production

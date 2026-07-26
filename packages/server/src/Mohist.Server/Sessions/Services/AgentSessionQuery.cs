@@ -113,7 +113,7 @@ public sealed class AgentSessionQuery : IScopedService
                 AgentSessionQueryMetadataKeys.Stage => query.Where(s => s.LabelStage == value),
                 AgentSessionQueryMetadataKeys.SourceKind => query.Where(s => s.LabelSourceKind == value),
 
-                // Direct Agent (agent-launch) lookup keys — issued-130 T-001.
+                // Direct Agent (agent-launch) lookup keys — .
                 // Each maps a GenericAgentSessionMetadata constant to the
                 // matching stored computed column; drift between SQL and
                 // metadata is caught at compile time.
@@ -124,7 +124,7 @@ public sealed class AgentSessionQuery : IScopedService
                 GenericAgentSessionMetadata.Repository => query.Where(s => s.LabelAgentLaunchRepository == value),
                 GenericAgentSessionMetadata.WorkspacePath => query.Where(s => s.LabelAgentLaunchWorkspacePath == value),
 
-                // issue-391 T-003: subscription trigger correlation labels.
+                // subscription trigger correlation labels.
                 GenericAgentSessionMetadata.TriggerEventId => query.Where(s => s.LabelTriggerEventId == value),
                 GenericAgentSessionMetadata.TriggerRuleId => query.Where(s => s.LabelTriggerRuleId == value),
 

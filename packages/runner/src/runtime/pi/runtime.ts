@@ -184,7 +184,7 @@ export class PiRuntime {
   }
 
   /**
-   * Follow-up against a bound Pi Session (issue #451 / design D5).
+   * Follow-up against a bound Pi Session.
    *
    * Branches on the physical Pi session's `isStreaming`:
    *  - Busy → `await session.steer(text)`. The running turn's
@@ -272,7 +272,7 @@ export class PiRuntime {
   }
 
   /**
-   * Cancel against an active Pi Session turn (issue #451 / design D6).
+   * Cancel against an active Pi Session turn.
    *
    * Resolves/opens the session (missing file → `missing-session` with a
    * Reset hint). Reuses the existing `abortAndDiagnose` pattern:
@@ -318,7 +318,7 @@ export class PiRuntime {
   }
 
   /**
-   * Compact against the bound Pi Session (issue #451 / design D7).
+   * Compact against the bound Pi Session.
    *
    * Acquires the per-session prompt mutex (so a concurrent `prompt()`
    * from a Workflow turn, an idle Follow-up, or another compact cannot
@@ -343,7 +343,7 @@ export class PiRuntime {
    *
    * On any compact failure the runtime returns a `turn-failed`
    * carrying the underlying error — it MUST NOT synthesize a summary
-   * or fabricate a compaction record (`design/runtimes/pi.md` D7).
+   * or fabricate a compaction record.
    * A missing bound file surfaces as `missing-session` with a Reset
    * hint (no silent new session).
    */
@@ -393,7 +393,7 @@ export class PiRuntime {
   }
 
   /**
-   * Reset against a bound Pi Session (issue #451 / design D8).
+   * Reset against a bound Pi Session.
    *
    * Best-effort opens the bound session to read the current model and
    * thinking level; if the bound file is missing, Reset still proceeds

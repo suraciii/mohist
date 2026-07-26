@@ -65,8 +65,7 @@ public sealed class WorkflowRunQuerier
     /// work), ordered by <c>ReadySince ASC</c> for round-robin fairness. A run
     /// records when it (re-)entered Ready; serving the oldest-Ready run first
     /// means a just-served run re-queues at the tail — fairness as a property
-    /// of persisted data with zero scheduler state (see
-    /// <c>design/workflow/scheduling.md</c> §Fairness). Filters at the DB layer
+    /// of persisted data with zero scheduler state. Filters at the DB layer
     /// on the STORED <c>Status</c> column + <c>AssignedWorkerId</c>, backed by
     /// <c>IX_WorkflowRuns_Status_ReadySince</c>; never deserializes
     /// <c>State</c>. The <c>Ready</c> filter already excludes in-flight work,
@@ -88,7 +87,7 @@ public sealed class WorkflowRunQuerier
     }
 
     /// <summary>
-    /// Issue-318 D4: returns workflow runs that are unassigned and waiting
+    /// returns workflow runs that are unassigned and waiting
     /// for *any* runner to claim (<c>Pending</c>). Filters at the database
     /// layer on the STORED <c>Status</c> computed column; never
     /// deserializes the <c>State</c> JSON of non-matching rows. The
@@ -117,7 +116,7 @@ public sealed class WorkflowRunQuerier
     }
 
     /// <summary>
-    /// Issue-318 D4: counts workflow runs that are currently in flight
+    /// counts workflow runs that are currently in flight
     /// (<c>Running</c>) and bound to <paramref name="workerId"/>. Used by
     /// the runner grain's dispatch-capacity gate so the per-runner slot
     /// budget accounts for work already picked up. Filters at the database

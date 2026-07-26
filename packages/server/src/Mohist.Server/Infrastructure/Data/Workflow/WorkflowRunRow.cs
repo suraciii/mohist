@@ -37,7 +37,7 @@ public class WorkflowRunRow
     public DateTime? ReadySince { get; set; }
 
     /// <summary>
-    /// Issue-318 D3: STORED computed column mirroring the persisted
+    /// STORED computed column mirroring the persisted
     /// <c>State.status</c> enum value, normalized to lowercase so the
     /// scheduler can filter on <c>status</c> at the database layer
     /// without deserializing the JSON state. Mirrors the
@@ -53,7 +53,7 @@ public class WorkflowRunRow
     public int? IssueNumber { get; set; }
 
     /// <summary>
-    /// issue-477 T-001: nullable custom-Profile backing key used by the
+    /// nullable custom-Profile backing key used by the
     /// restrictive foreign key that protects active WorkflowRun bindings
     /// from deletion. Populated only when the Run's bound WorkflowProfileId
     /// resolves to a custom (non-built-in) Profile in this Project; null

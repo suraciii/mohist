@@ -173,7 +173,7 @@ public static partial class IssueRoutes
                 }
             }
 
-            // issue-417 T-005: reopen enters through the Project-scoped
+            // reopen enters through the Project-scoped
             // coordinator so repository removal cannot race into an
             // orphan reopen. The coordinator fences the reopen and
             // invokes the idempotent Issue participant, which

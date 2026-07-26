@@ -10,7 +10,7 @@ using Mohist.Workflow.Definition;
 namespace Mohist.Server.Infrastructure.Data.Workflow;
 
 /// <summary>
-/// issue-477 T-001: data migration that converts the legacy
+/// data migration that converts the legacy
 /// project-templates / Issue-templates / Issue-default-cascade into the
 /// new Project-scoped WorkflowProfile collection. The migration:
 ///
