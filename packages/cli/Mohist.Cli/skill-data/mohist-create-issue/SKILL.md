@@ -81,8 +81,8 @@ Use this output as the source of truth for the `id` of any profile you write int
 
 Pick `recommended_workflow` using **default or operator choice** — there is no tag-based scoring. Concretely:
 
-1. **Default profile for the project.** The project is configured with a default workflow profile (the operator's standing choice for issues on this project). Use that id if it appears in the `--described` output as enabled. This is the recommended path.
-2. **Operator-chosen enabled id.** If the operator explicitly names a profile (in this turn, or in prior context for this issue), use that id — provided it is enabled in the `--described` output. Reject the operator's choice politely if the id is not enabled, and ask them to enable it or pick another.
+1. **Default profile for the project.** The project is configured with a default workflow profile (the operator's standing choice for issues on this project). Use that id if it appears in the `mo workflow list` output as enabled. This is the recommended path.
+2. **Operator-chosen enabled id.** If the operator explicitly names a profile (in this turn, or in prior context for this issue), use that id — provided it is enabled in the `mo workflow list` output. Reject the operator's choice politely if the id is not enabled, and ask them to enable it or pick another.
 3. **First enabled profile as last resort.** If there is no project default and the operator has not chosen one, the first enabled profile, else fail with an actionable error.
 
 Do not score profiles against content keywords. Do not look for suitability tags. The natural-language description exists to tell a human reader what the profile does; it is not a scoring input for the agent.
@@ -117,7 +117,7 @@ Supported fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `recommended_workflow` | yes | Profile id from `mo project workflow profile list --described`, chosen by the default-or-operator rule above (or the first enabled profile as last resort). |
+| `recommended_workflow` | yes | Profile id from `mo workflow list`, chosen by the default-or-operator rule above (or the first enabled profile as last resort). |
 | `recommended_workflow_reason` | yes | One short natural-language sentence explaining the choice (default, operator-chosen, or first-enabled fallback). Multi-line values use the YAML `\|` block scalar. |
 | `risk` | yes | One of `low`, `medium`, `high`. |
 

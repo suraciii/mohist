@@ -396,11 +396,19 @@ internal static class CommandPresentations
                 CommandPresentationCatalog.Attach(Find(group, "list"), new CommandPresentation(
                     CommandCapability.Work, "List Epics in the active Project"));
                 CommandPresentationCatalog.Attach(Find(group, "create"), new CommandPresentation(
-                    CommandCapability.Work, "Create a new Epic"));
+                    CommandCapability.Work, "Create a new Epic",
+                    JsonFields: EpicCommands.EpicDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "view"), new CommandPresentation(
                     CommandCapability.Work, "Read an Epic by its ID"));
                 CommandPresentationCatalog.Attach(Find(group, "edit"), new CommandPresentation(
-                    CommandCapability.Work, "Edit an Epic"));
+                    CommandCapability.Work, "Edit an Epic",
+                    JsonFields: EpicCommands.EpicDescriptor.Fields));
+                foreach (var action in new[] { "add", "remove", "start", "pause", "resume", "done", "close", "reopen" })
+                {
+                    CommandPresentationCatalog.Attach(Find(group, action), new CommandPresentation(
+                        CommandCapability.Work, $"{action} an Epic",
+                        JsonFields: EpicCommands.EpicDescriptor.Fields));
+                }
                 CommandPresentationCatalog.Attach(Find(group, "delete"), new CommandPresentation(
                     CommandCapability.Work, "Delete an Epic"));
             }

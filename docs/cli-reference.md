@@ -97,8 +97,8 @@ task-command     = mo <task> [target] [flags]
 |---|---|
 | `project` | `list`、`view`、`create`、`use`、`delete`；`workflow set-default`；`prompt list/view/set/unset/preview`；`variable list/get/set/unset` |
 | `repo` | `list`、`view`、`add`、`edit`、`remove`、`set-default` |
-| `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`；`comment list/add`；`commit list`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset`；`watch list/add/remove` |
-| `epic` | `list`、`view`、`create`、`edit`、`link`、`unlink`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
+| `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`；`comment list/create`；`commit list`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset`；`watch list/add/remove` |
+| `epic` | `list`、`view`、`create`、`edit`、`add`、`remove`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
 | `label` | `list`、`view`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
 | `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |

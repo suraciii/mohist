@@ -67,7 +67,7 @@ aggregate 是内部实现，不机械决定命令导航。跨 context 的关系�
 - `agent launch` 启动 Mohist Agent 工作并返回 AgentJob 与 AgentSession；Job 的工作结果从
   `agent job` 读取，Session 不裁定 Job。
 - `session transcript/followup/compact/reset/cancel` 改变或读取 AgentSession；不按 Issue 来源和 Agent 来源复制两套路径。
-- `epic link/unlink` 表达 Epic membership 这一用户意图；Issue 仍是当前 EpicNumber 的唯一
+- `epic add/remove` 表达 Epic membership 这一用户意图；Issue 仍是当前 EpicNumber 的唯一
   写入权威，CLI 不暴露跨 aggregate 协调过程。
 - `--issue`、`--run`、`--agent` 是解析或筛选条件，不转移动作所有权。
 

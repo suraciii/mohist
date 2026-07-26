@@ -12,6 +12,7 @@ namespace Mohist.Cli.Tests.Skills;
 public sealed class SkillsContentTests
 {
     private static readonly Regex FencedMoCommand = new("^\\s*(mo\\s+.+?)(?:\\s+#.*)?$", RegexOptions.Compiled);
+    private static readonly Regex InlineMoCommand = new("`(mo\\s+[^`]+)`", RegexOptions.Compiled);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly FakeFileSystem _files = new();
@@ -343,6 +344,33 @@ public sealed class SkillsContentTests
     }
 
     [Fact]
+    public void PackagedSkillInlineMoExamples_ParseAgainstCanonicalCommandTree()
+    {
+        var root = BuildRootCommand();
+        var examples = EmbeddedSkillData.Paths()
+            .Where(path => path.EndsWith("/SKILL.md", StringComparison.Ordinal))
+            .SelectMany(ExtractInlineMoExamples)
+            .Where(command => !command.Contains("<command>", StringComparison.Ordinal)
+                && !command.EndsWith(" --body-file", StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Contains("mo workflow list", examples, StringComparer.Ordinal);
+        foreach (var command in examples)
+        {
+            var args = Tokenize(command)
+                .Skip(1)
+                .Select(token => token.StartsWith('<') && token.EndsWith('>') ? "1" : token)
+                .Append("--help")
+                .ToArray();
+            var parseResult = root.Parse(args);
+            Assert.True(
+                parseResult.Errors.All(error => error.Message.StartsWith("Required argument missing", StringComparison.Ordinal)),
+                $"Packaged inline Skill example failed to parse: {command}\n{string.Join("\n", parseResult.Errors.Select(error => error.Message))}");
+        }
+    }
+
+    [Fact]
     public void MohistEntrySkill_IsAProgressiveDecisionEntryPoint()
     {
         var content = EmbeddedSkillData.ReadText("mohist/SKILL.md");
@@ -406,6 +434,12 @@ public sealed class SkillsContentTests
             if (match.Success)
                 yield return match.Groups[1].Value.Trim();
         }
+    }
+
+    private static IEnumerable<string> ExtractInlineMoExamples(string path)
+    {
+        foreach (Match match in InlineMoCommand.Matches(EmbeddedSkillData.ReadText(path)))
+            yield return match.Groups[1].Value.Trim();
     }
 
     private static string[] Tokenize(string command) =>

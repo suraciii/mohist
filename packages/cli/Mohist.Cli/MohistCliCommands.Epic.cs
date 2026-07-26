@@ -6,7 +6,7 @@ namespace Mohist.Cli;
 
 internal static class EpicCommands
 {
-    private static readonly ResourceDescriptor EpicDescriptor = new(
+    internal static readonly ResourceDescriptor EpicDescriptor = new(
         ResourceCardinality.Single,
         ["number", "title", "description", "status", "state", "priority", "createdAt", "updatedAt"]);
 

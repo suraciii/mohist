@@ -161,6 +161,21 @@ public sealed class CliHelpSpecs
     }
 
     [Fact]
+    public async Task EpicEditHelp_ListsRuntimeJsonFields()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["epic", "edit", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("JSON FIELDS", text, StringComparison.Ordinal);
+        Assert.Contains("number", text, StringComparison.Ordinal);
+        Assert.Contains("updatedAt", text, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task IssueEditHelp_SeparatesLongOptionNamesFromDescriptions()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
