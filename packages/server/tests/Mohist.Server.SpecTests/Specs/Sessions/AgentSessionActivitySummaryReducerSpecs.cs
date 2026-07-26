@@ -48,6 +48,21 @@ public sealed class AgentSessionActivitySummaryReducerSpecs
     }
 
     [Fact]
+    public void Reduce_SameTurnIdLessToolReplacement_UsesFinalToolState()
+    {
+        var state = AgentSessionActivitySummaryReducer.Reduce(
+            AgentSessionActivitySummaryState.Empty,
+            [
+                Part(TranscriptPartTypes.Input, "input", "{}"),
+                Part(TranscriptPartTypes.Tool, "tool", "{\"status\":\"failed\"}"),
+                Part(TranscriptPartTypes.Tool, "tool", "{\"status\":\"completed\"}")
+            ]);
+
+        Assert.Equal(1, state.Summary.ToolCallCount);
+        Assert.Null(state.Summary.ToolErrorCount);
+    }
+
+    [Fact]
     public void Reduce_SealedToolFailure_RemainsAfterLaterTurnCompletesSameIdentifier()
     {
         var state = AgentSessionActivitySummaryReducer.Reduce(

@@ -22,3 +22,9 @@
 - `AgentActivityFeedAssemblerSpecs` gains two specs that pin the new contract: persisted-summary → card eventSummary mapping, and transcript-history growth that leaves the summary-read contribution at zero (transcriptRecords == N + K, not 2N + K).
 - `AgentSessionDtoMapperCrossConsumerIdentitySpecs.UsageAndEventSummary_QuerierAndAssembler_PreserveAlignedFieldsAndHistoryDifference` is updated: `AgentSessionListAssembler.ListCurrentAsync` still reduces transcript parts (out of T-002 scope), while `AgentActivityFeedAssembler.GetActivityAsync` reads the persisted summary, so the two consumers intentionally diverge for sessions whose persisted summary has not yet been written by the grain. The shared usage / context-history delta is preserved.
 - All 3152 SpecTests, 1455 UnitTests, 32 ArchTests, 5134 web tests, and 1426 runner tests pass after the change.
+
+## Review Fix
+
+- The summary reducer now uses the same `(type, correlationKey)` replacement key as transcript storage for id-less tool updates, so a same-turn failed update followed by completed produces one non-failed tool summary entry.
+- `AgentSessionActivitySummaryReducerSpecs` covers the id-less failed-to-completed replacement path.
+- Verification passed: targeted `AgentSessionActivitySummaryReducerSpecs` (6 tests), `dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore`, and `dotnet test Mohist.sln -p:SkipWebBuild=true --no-restore` (3153 SpecTests, 1455 UnitTests, 32 ArchTests, 1375 CLI tests, and 175 Workflow Definition tests).

@@ -38,12 +38,6 @@ internal static class AgentSessionActivitySummaryReducer
             }
 
             var existingKey = PartKey(mutation.Type, mutation.CorrelationKey);
-            var isToolWithoutIdentifier = mutation.Type == TranscriptPartTypes.Tool
-                && ExtractToolCallId(mutation.PayloadJson) is null
-                && string.IsNullOrWhiteSpace(mutation.CorrelationId);
-            if (isToolWithoutIdentifier)
-                existingKey = PartKey(mutation.Type, $"{mutation.CorrelationKey}:{currentPartSequence + 1}");
-
             AgentSessionActivitySummaryPart? existingPart = null;
             var replacesCurrentPart = mutation.Type is TranscriptPartTypes.Tool or TranscriptPartTypes.Model
                 && currentParts.TryGetValue(existingKey, out existingPart);
