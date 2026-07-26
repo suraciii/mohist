@@ -1,0 +1,26 @@
+{
+  "project": "mohist",
+  "description": "Enable budget-protected built-in observability by default while preserving an explicit opt-out and local-only OTLP exposure.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Enable protected built-in observability by default",
+      "spec": "specs/built-in-observability-defaults/spec.md#built-in-observability-is-enabled-by-default",
+      "description": "Align the outbound tracing, collector, and host listener-plan defaults for an absent `Mohist:Otel:Enabled` setting, while preserving explicit `false` as a full opt-out. Update Docker Compose and self-hosting documentation to inherit the default without publishing the local OTLP port, and add the focused startup, opt-out, status, and deployment-surface coverage for the complete behavior.",
+      "acceptanceCriteria": [
+        "With no `Mohist:Otel:Enabled` setting, both OpenTelemetry options bindings enable their components, the host plan includes a `localhost:4318` OTLP listener, and runtime status is never `off`.",
+        "With `Mohist:Otel:Enabled=false`, the Server does not construct the tracing pipeline, bind or map the OTLP receiver, start diagnostics or maintenance work, and `mo otel status` reports `off`.",
+        "The unmodified Docker Compose configuration inherits the Server default, publishes only port `3456`, and does not publish `4318`.",
+        "Observability and self-hosting documentation state the enabled default, loopback-only receiver, resource budget, status command, and `Mohist:Otel:Enabled=false` rollback path.",
+        "Focused Server unit/spec tests cover default enablement and explicit opt-out across the options bindings, host plan, OTLP route, diagnostics sampler, and status surface; `npm test` passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server defaults and startup composition enable protected local observability; Compose and documentation reflect the default; focused regression coverage passes.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the two OtelOptions types separate because they own outbound SDK and collector-specific settings respectively; only their shared enabled default and HostFactory resolution must agree. Do not alter existing budget, retention, ingest, or degradation behavior."
+    }
+  ]
+}
