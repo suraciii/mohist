@@ -14,6 +14,23 @@ Root help SHALL present one product description, usage, command groups named Wor
 - **THEN** the output SHALL identify `run` in the Automation group and describe its purpose
 - **AND THEN** the output MUST direct the user to the Run command group rather than listing `run retry` flags
 
+#### Scenario: Following the shared-help entry
+- **WHEN** root help directs a user to `mo help <topic>`
+- **THEN** every advertised topic MUST resolve locally and print its shared rule
+
+### Requirement: Shared help topics
+`mo help <topic>` SHALL provide the shared topics `output`, `environment`, and `exit-codes`. Each topic MUST describe only cross-command rules that cannot be learned from a leaf command, MUST execute without Project resolution or Server access, and MUST return a scoped usage error for an unknown topic.
+
+#### Scenario: Reading output rules
+- **WHEN** a user runs `mo help output`
+- **THEN** stdout SHALL describe the shared human output, JSON field-selection, and stdout/stderr rules
+- **AND THEN** the command SHALL exit successfully without performing a remote request
+
+#### Scenario: Requesting an unknown topic
+- **WHEN** a user runs `mo help unknown`
+- **THEN** the CLI SHALL exit with code 2 and print the `mo help` usage to stderr
+- **AND THEN** the command MUST NOT resolve a Project or contact the Server
+
 ### Requirement: Command-group help establishes boundaries
 Each command-group help output SHALL state the resource or task boundary and scope, show usage, and list its actions with one-sentence result descriptions. It MUST include `SEE ALSO` only when an adjacent command group would otherwise be confused with the current group.
 

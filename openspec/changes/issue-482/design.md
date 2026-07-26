@@ -39,6 +39,12 @@ Wire the custom renderer into the command-line help hook for root, group, and le
 
 This preserves the existing local parser validation behavior while replacing default help formatting. Leaving default framework help in place was rejected because it cannot enforce grouped root output, bounded group context, leaf JSON-field sections, or forbidden-content checks.
 
+### Provide shared rules through a local help task
+
+Register `mo help <topic>` as a first-class task command in the same presentation module. Define the bounded local topics `output`, `environment`, and `exit-codes` there; each topic describes only rules shared across command groups and links users back to leaf help for command-specific syntax. Topic lookup, output rendering, and unknown-topic usage failures use the same local help/error path as `--help`.
+
+Putting these rules into root help would make the index too dense, while duplicating them in every leaf would create contradictory copies. A generic documentation reader was rejected because only the three named topics are part of the CLI contract and they require no external file or Server access.
+
 ### Rename the Skill command without changing asset ownership
 
 Refactor `SkillsCommands` into the singular public `skill` group. Rename resource reads from `get` to `view`, retain `list`, `install`, `path`, and `sync` only where each has an independent product behavior, and keep `SkillAssetService`, `SkillInstallService`, packaging, and managed-cache semantics unchanged. The command rename affects only the CLI facade; skill-data remains the packaged source of guidance.
@@ -68,7 +74,7 @@ Full-page help snapshots were rejected as the primary guard because incidental f
 
 ## Migration Plan
 
-1. Create the presentation metadata and custom help/error renderer around the existing command tree, with local-only help tests.
+1. Create the presentation metadata, shared `mo help <topic>` task, and custom help/error renderer around the existing command tree, with local-only help and topic tests.
 2. Rename registrations and public actions to canonical areas and verbs, remove aliases and obsolete root areas, and update existing handler tests to use only canonical calls.
 3. Rename `skills` to `skill` and `get` to `view`, preserving packaged-asset and installation behavior behind the new facade.
 4. Rewrite the packaged Mohist Skill, add parser-based example validation, and update sibling-Skill references.
