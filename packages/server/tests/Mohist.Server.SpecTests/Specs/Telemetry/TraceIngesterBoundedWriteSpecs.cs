@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
 
-public sealed class TraceIngesterBoundedWriteSpecs
+public sealed class TraceIngesterBoundedWriteSpecs : IDisposable
 {
     private const string TraceId = "00000000000000000000000000000001";
     private const string SpanIdPrefix = "00000000000000";
@@ -25,6 +25,8 @@ public sealed class TraceIngesterBoundedWriteSpecs
         (_db, _keeper) = InMemoryOtelDb.Create();
         _gate = new OtlpIngestGate();
     }
+
+    public void Dispose() => _keeper.Dispose();
 
     [Fact]
     public async Task IngestBatch_OneBlock_CommitsSpansAndHeader()
