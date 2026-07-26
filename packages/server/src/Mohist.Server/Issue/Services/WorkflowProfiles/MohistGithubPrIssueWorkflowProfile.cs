@@ -19,5 +19,5 @@ public class MohistGithubPrIssueWorkflowProfile : MohistIssueWorkflowProfileBase
     public override string DisplayName => "Mohist GitHub PR";
     public override string Description => WorkflowProfileCatalog.GithubPrProfileAsset.Description;
     public override bool IsDefault => false;
-    public override WorkflowDefinition Definition => MohistWorkflow.GithubPrWorkflowDefinition;
+    public override WorkflowDefinition Definition => WorkflowProfileCatalog.GithubPrWorkflowDefinition;
 }
