@@ -2,15 +2,19 @@
 Each persisted AgentSession SHALL retain the event summary used by its activity card. When accepted runtime observations change the summary, the updated summary MUST be persisted with the Session state; a Session with no applicable observations MUST expose an empty summary.
 
 #### Scenario: Runtime observations update the stored summary
-- **WHEN** an AgentSession receives accepted model-resolution, tool, and terminal activity observations
-- **THEN** its persisted summary MUST expose the resolved model, distinct tool-call count, failed-tool-call count, and the failure category from the latest terminal activity fact
+- **WHEN** an AgentSession receives accepted model-resolution, tool, and session-activity observations
+- **THEN** its persisted summary MUST expose the resolved model, distinct tool-call count, failed-tool-call count, and the failure category from the latest session-activity transcript part
 
-#### Scenario: Latest terminal fact remains internally consistent
-- **WHEN** multiple terminal activity observations exist for an AgentSession, including observations from separate turns
-- **THEN** the persisted failure category and failure reason MUST both be derived from the same latest terminal activity fact in turn, part, and identifier order
+#### Scenario: Latest activity part remains internally consistent
+- **WHEN** multiple session-activity parts exist for an AgentSession, including parts from separate turns and a later nonterminal activity update
+- **THEN** the persisted failure category and failure reason MUST both be derived from the same latest session-activity part in `(turn sequence, part sequence, part identifier)` order, including clearing both fields when that part has neither value
 
-#### Scenario: Repeated tool observations are not double counted
-- **WHEN** an AgentSession receives multiple observations for the same tool-call identifier, including a failed observation
+#### Scenario: Tool updates preserve final per-turn state
+- **WHEN** one turn contains multiple observations for the same tool-call identifier and its final transcript part is completed after an earlier failed observation
+- **THEN** its persisted summary MUST count that identifier once as a tool call and MUST NOT count it as a failed tool call
+
+#### Scenario: Tool failures remain counted across turns
+- **WHEN** a completed turn has a final failed tool part and a later turn contains a completed part for the same tool-call identifier
 - **THEN** its persisted summary MUST count that identifier once as a tool call and once as a failed tool call
 
 ### Requirement: Activity Feed Uses Persisted Session Summaries
