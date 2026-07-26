@@ -36,6 +36,7 @@ public sealed class TraceIngester
     private readonly IOtlpIngestGate? _gate;
     private readonly OtlpWriteBlockPlanner _planner;
     private readonly Action? _transactionStarted;
+    private readonly Action? _traceAggregateStarted;
 
     /// <summary>OTLP-defined service.name attribute key.</summary>
     public const string ServiceNameAttributeKey = "service.name";
@@ -51,7 +52,8 @@ public sealed class TraceIngester
         RuntimeObservability? runtime,
         IIngestProtectionDecision? protection = null,
         Action? transactionStarted = null,
-        IOtlpIngestGate? gate = null)
+        IOtlpIngestGate? gate = null,
+        Action? traceAggregateStarted = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(logger);
@@ -60,6 +62,7 @@ public sealed class TraceIngester
         _runtime = runtime;
         _protection = protection ?? new AcceptAllIngestProtectionDecision();
         _transactionStarted = transactionStarted;
+        _traceAggregateStarted = traceAggregateStarted;
         _gate = gate;
         _planner = new OtlpWriteBlockPlanner();
     }
@@ -288,6 +291,7 @@ public sealed class TraceIngester
                     newIdentityCount++;
             }
 
+            _traceAggregateStarted?.Invoke();
             UpsertTraceHeader(
                 connection,
                 transaction,

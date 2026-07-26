@@ -252,55 +252,37 @@ public sealed class TraceIngesterBoundedWriteSpecs
     }
 
     [Fact]
-    public async Task IngestBatch_OperationCount_IsBoundedByAcceptedSpans()
+    public async Task IngestBatch_TraceAggregateRefreshes_AreBoundedByBlocks()
     {
-        var transactionCount = 0;
+        var aggregateCount = 0;
         var ingester = new TraceIngester(
             _db,
             NullLogger<TraceIngester>.Instance,
             runtime: null,
             protection: null,
-            transactionStarted: () => transactionCount++,
+            traceAggregateStarted: () => aggregateCount++,
             gate: _gate);
 
-        var traceCount = 4;
-        var spansPerTrace = 200;
-        var prepared = new List<PreparedIngestSpan>(traceCount * spansPerTrace);
-        for (var t = 0; t < traceCount; t++)
-        {
-            var traceId = $"0000000000000000000000000000{(0xb000 + t):X4}";
-            for (var s = 0; s < spansPerTrace; s++)
-            {
-                var spanId = $"{SpanIdPrefix}{t:X2}{s:X4}";
-                var span = new NormalizedIngestSpan(
-                    TraceId: traceId,
-                    SpanId: spanId,
-                    ParentSpanId: null,
-                    Name: $"s-{t}-{s}",
-                    Kind: 1,
-                    StartTime: "2026-01-01T00:00:00.0000000Z",
-                    EndTime: "2026-01-01T00:00:01.0000000Z",
-                    StatusCode: 1,
-                    StatusMessage: null,
-                    AttributesJson: null);
-                prepared.Add(new PreparedIngestSpan(span, "svc-a", null));
-            }
-        }
-        var batch = new PreparedIngestBatch(prepared.ToImmutableArray(), 0, 0, 0);
-        var plan = ingester.Planner.Plan(batch);
+        var smallPlan = ingester.Planner.Plan(BuildPreparedBatch(
+            "0000000000000000000000000000b001",
+            1));
+        var smallOutcome = await ingester.IngestPlannedAsync(smallPlan);
+        var smallAggregateCount = aggregateCount;
 
-        // 4 traces × 200 spans = 800 spans. The block plan keeps
-        // a trace per block when each trace has fewer Spans than
-        // the block limit, so this becomes 2 blocks of 512 + 288
-        // when crossing to the next trace.
-        var outcome = await ingester.IngestPlannedAsync(plan);
+        var largePlan = ingester.Planner.Plan(BuildPreparedBatch(
+            "0000000000000000000000000000b002",
+            OtlpWriteBlockPlanner.MaxSpansPerBlock + 200));
+        var largeStart = aggregateCount;
+        var largeOutcome = await ingester.IngestPlannedAsync(largePlan);
+        var largeAggregateCount = aggregateCount - largeStart;
 
-        Assert.Equal(IngestResponseDisposition.Success, outcome.ResponseDisposition);
-
-        // The bounded block planner should use a small bounded
-        // number of transactions, not 800 individual transactions.
-        Assert.Equal(plan.Blocks.Length, transactionCount);
-        Assert.True(transactionCount <= 8, $"Expected at most 8 transactions, got {transactionCount}");
+        Assert.Equal(IngestResponseDisposition.Success, smallOutcome.ResponseDisposition);
+        Assert.Equal(IngestResponseDisposition.Success, largeOutcome.ResponseDisposition);
+        Assert.Single(smallPlan.Blocks);
+        Assert.Equal(smallPlan.Blocks.Length, smallAggregateCount);
+        Assert.Equal(2, largeAggregateCount);
+        Assert.Equal(largePlan.Blocks.Length, largeAggregateCount);
+        Assert.True(largeAggregateCount <= smallAggregateCount * 2);
     }
 
     [Fact]
@@ -464,6 +446,17 @@ public sealed class TraceIngesterBoundedWriteSpecs
             StatusMessage: null,
             AttributesJson: null);
         return new PreparedIngestSpan(span, serviceName, null);
+    }
+
+    private static PreparedIngestBatch BuildPreparedBatch(string traceId, int count)
+    {
+        var prepared = new List<PreparedIngestSpan>(count);
+        for (var index = 0; index < count; index++)
+        {
+            prepared.Add(BuildPreparedSpan(traceId, $"{SpanIdPrefix}{index:X6}", "svc-a"));
+        }
+
+        return new PreparedIngestBatch(prepared.ToImmutableArray(), 0, 0, 0);
     }
 
     private static PreparedIngestSpan BuildOversizedPreparedSpan(string traceId, string spanId, string serviceName)
