@@ -109,7 +109,7 @@ A `running` epic can be observable-but-not-advancing when there are still open
 linked issues but **no startable next issue right now** (e.g. waiting on a
 dependency, next issue is blocked). This **running-but-idle** is NOT a separate
 state — the epic's `status` stays `running`, and `progress.nextIssueReason` in
-`mo epic show` explains why. Use it to decide whether to wait, set
+`mo epic view` explains why. Use it to decide whether to wait, set
 prerequisites, or `Pause` to stop the autopilot until you can unblock it.
 
 ```bash
@@ -119,13 +119,13 @@ mo epic pause  <epic-id-or-number>   # running → paused (current issue keeps r
 mo epic resume <epic-id-or-number>   # paused → running
 
 # Check why a running epic is idle
-mo epic show <epic-id-or-number>     # inspect progress.nextIssue + nextIssueReason
+mo epic view <epic-id-or-number>     # inspect progress.nextIssue + nextIssueReason
 ```
 
 **Recommend autopilot over manual per-issue starts.** Manually `mo issue start`
 ing each member defeats the milestone model — you lose the running-but-idle
 signal, the idempotent retry, and the auto-advancement on terminal. Use Start
-once, then watch `mo epic show`; only fall back to manual issue commands when
+once, then watch `mo epic view`; only fall back to manual issue commands when
 the autopilot is `paused` and you specifically want to start one out of order.
 
 ### Lifecycle: terminal (done / close)

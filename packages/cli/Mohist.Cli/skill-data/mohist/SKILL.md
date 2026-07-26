@@ -1,115 +1,74 @@
 ---
 name: mohist
-description: "Perform Mohist issue, epic, and workflow operations against the current .NET backend/API/Web. Use when the user asks to create, view, start, approve, or close issues or epics, check project status or logs, or do anything involving Mohist issues, epics, or workflows. This skill is the entry dispatcher: judge the scenario first, then load the matching scenario skill. Exact command syntax lives in `mo --help` and the leaf help of each command; the legacy Node CLI has been removed."
+description: Use for Mohist issues, epics, WorkflowRuns, projects, and related operations. This Skill is the decision entry point: establish current state, choose the scenario Skill when one exists, make Mohist-specific state decisions, then hand exact syntax to the current `mo` help.
 ---
 
-# mohist
+# Mohist
 
-Use this skill for current Mohist .NET backend, API, Web UI, and workflow operations.
+## Scope
 
-Current execution paths:
+This Skill dispatches work involving Mohist issues, epics, WorkflowRuns, projects,
+and their supporting resources. It helps choose the next decision; it is not a
+second command reference and it does not replace a scenario Skill.
 
-- Server: `dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj`
-- Tests: `dotnet test Mohist.sln`
-- Web UI: `npm run dev:web`
-- Runner: `npm run dev:runner`
+## First read
 
-Prefer the current `mo` CLI, ASP.NET Core API, or Web UI workflows. Do not instruct the user to use the removed pre-Orleans Node CLI.
+Before interpreting or changing existing work, read the current state with the
+canonical CLI:
 
-When operating on Mohist issues or workflows:
+```bash
+mo issue view <number>
+mo run view <run-id>
+```
 
-- Use the current `mo` CLI command surface and current .NET backend behavior as the source of truth.
-- When the user provides an existing issue context, load its current state and history via `mo issue view <number>` and related read-only commands, rather than assuming any particular filesystem layout.
-- Keep changes scoped to the current issue; do not substitute adjacent cleanup or legacy behavior unless the issue explicitly requires it.
-- For local verification, prefer the smallest relevant command or test filter instead of broad full-repo runs.
+Use the Issue read for an Issue context and the Run read for a WorkflowRun
+context. Do not infer state from an old message, cached output, or a local
+working tree. For a Run associated with an Issue, use the Run command's current
+targeting help before choosing an Issue-based lookup.
 
-Boundaries:
+## Scenario routing
 
-- Do not rely on the removed pre-Orleans Node CLI or its workflow/runtime behavior.
-- Do not assume Mohist server APIs must be running for purely local CLI or filesystem tasks unless the task explicitly requires server interaction.
-- Do not mutate internal runtime data under `.mohist/skills` when the task is about shared coder-agent skills.
+Load the narrowest sibling Skill for the work:
 
-## Load the right scenario skill
+- Exploring or distilling a requirement, including deciding Issue versus epic:
+  `mohist-explore`.
+- Creating an Issue from an agreed requirement: `mohist-create-issue`.
+- Creating an epic, linking its Issues, setting prerequisites, or driving its
+  milestone lifecycle: `mohist-create-epic`.
 
-This skill is the entry point and dispatcher. Judge what the task actually needs,
-then load the matching scenario skill for the detailed mechanics:
+The sibling Skill owns its detailed questions, confirmation points, and command
+sequence. Do not reproduce those procedures here. For routine reads, workflow
+actions, or resources without a sibling Skill, continue to the current leaf
+help.
 
-- **Explore / distill a requirement** (and decide issue vs epic) → `mo skill view mohist-explore`
-- **Create an issue** (frontmatter, workflow/risk, labeling, confirmation) → `mo skill view mohist-create-issue`
-- **Create an epic** (milestone description, link issues, prerequisites, lifecycle) → `mo skill view mohist-create-epic`
+## Mohist-specific decisions
 
-The issue/epic lifecycle commands below (start, rebase, close, and the epic
-autopilot trio) plus the WorkflowRun control commands are **not** covered by a
-dedicated scenario skill — they are reference-level operations fully answerable
-by `mo <cmd> --help`. They live here so the dispatcher is the single source of
-truth for day-to-day driving of issues and runs, and an agent does not have to
-guess, omit, or invent a command.
+These distinctions are domain decisions; exact arguments and flags belong to
+leaf help.
 
-### Sibling skills
+- `retry` retries the current failed point of a WorkflowRun. `rerun` starts the
+  workflow again; `rerun --from-stage` invalidates the named stage and following
+  work before starting again. Choose `retry` for the current failure and
+  `rerun` when earlier work must be repeated.
+- `pause` leaves a WorkflowRun resumable. `stop` is terminal and abandons the
+  Run; use it only when that is intended. A stopped Run is not recovered by
+  `resume`.
+- `compact` changes a Session in place while retaining the Session. `reset`
+  changes it in place by resetting its conversation state. Choose based on
+  whether the Session should be condensed or reset; inspect the Session leaf
+  help before acting.
 
-| Skill | When |
-|---|---|
-| `mohist-explore` | Distill a fuzzy idea into a bounded PRD; decide issue/epic and scope. |
-| `mohist-create-issue` | Execute issue creation mechanics. |
-| `mohist-create-epic` | Execute epic creation mechanics + autopilot lifecycle semantics. |
+For every state-changing action, read the relevant leaf help first:
+`mo <command> --help`. Treat the command's current help as the authority for
+arguments, flags, JSON fields, confirmation, and targeting.
 
-## Issue lifecycle commands
+## CLI handoff
 
-These commands manage the work item itself. They take `<number>` (issue number
-in the active project, or use `--project` to target another project).
-WorkflowRun state changes use `mo run` below. For exact flags, JSON fields,
-and prerequisites, run `mo <command> --help`.
+Use the current command tree for all exact syntax. Start at `mo --help`, narrow
+to a command group, and then read the leaf help before constructing an
+invocation. Use `mo skill view <name>` when a sibling Skill needs to be loaded.
 
-| Operation | CLI | Effect |
-|---|---|---|
-| Start | `mo issue start <number>` | Drive the issue into the workflow (Draft → Plan). |
-| Done | `mo issue done <number>` | Mark externally delivered work Done after its workflow is stopped or completed. |
-| Rebase | `mo issue rebase <number> [--base-branch <b>]` | Rebase the issue branch onto its base. |
-| Close | `mo issue close <number>` | Close a completed/abandoned issue. |
-| Reopen | `mo issue reopen <number>` | Reopen a closed issue. |
-
-## WorkflowRun control commands
-
-Use a Run ID or `--issue <number>` as the target. Use `--project` when the
-issue belongs to another project.
-
-| Operation | CLI | Effect |
-|---|---|---|
-| Approve | `mo run approve <run-id>` / `mo run approve --issue <number>` | Approve at an approval gate (Plan → Build, Check → Integrate). |
-| Reject | `mo run reject <run-id> --message <m>` | Reject at an approval gate with a change request. |
-| Retry | `mo run retry <run-id>` | Retry the current failure point and restore the manual-retry budget. |
-| Rerun | `mo run rerun <run-id>` | Rerun the whole workflow from the beginning. |
-| Rerun from stage | `mo run rerun <run-id> --from-stage <stage>` | Invalidate the target stage and everything after it, then rerun. |
-| Pause | `mo run pause <run-id>` | Pause the run while preserving the `resume` entry. |
-| Resume | `mo run resume <run-id>` | Continue a paused run. |
-| Stop | `mo run stop <run-id> --yes` | **Terminal** stop. Use only when you intend to abandon the run. |
-
-Key distinctions:
-
-- **`pause` vs `stop`**: `pause` preserves a resume entry; `stop` is terminal and cannot be resumed. Automated `stop` calls require `--yes`.
-- **`done` vs `close`**: `done` records delivered work after a terminal workflow; `close` cancels work that will not be delivered.
-- **`retry` vs `rerun --from-stage`**: `retry` retries the current failure point; `rerun` re-runs the whole workflow from the beginning; `rerun --from-stage` invalidates one named stage and everything after it.
-- **`reject` vs `stop`**: `reject` bounces back at an approval gate with a change request (the issue stays alive for another pass); `stop` ends the run.
-
-For exact flag surface, JSON fields, and confirmation rules on any of these
-commands, run `mo <cmd> --help`.
-
-## Epic lifecycle commands
-
-Epic lifecycle has two layers: **autopilot** (the day-to-day trio) and the
-**terminal tail**. The autopilot trio is the default way to drive an epic —
-see `mohist-create-epic` for the full semantics (idempotency, running-but-idle,
-auto-advancement). Below is the command surface only.
-
-| Operation | CLI | Effect |
-|---|---|---|
-| Start | `mo epic start <id-or-number>` | `idle` → `running`; auto-advances to the first startable linked issue. Idempotent against `running`. |
-| Pause | `mo epic pause <id-or-number>` | `running` → `paused`; stops future advancement, does NOT interrupt the in-progress issue. Idempotent against `paused`. |
-| Resume | `mo epic resume <id-or-number>` | `paused` → `running`; re-evaluates readiness and advances. Idempotent against `running`. |
-| Done | `mo epic done <id-or-number>` | Terminal `done` (requires no open linked issues / all linked issues terminal; cancelled issues satisfy readiness but do not count as delivered). |
-| Close | `mo epic close <id-or-number>` | Terminal `closed` (abandon the milestone). |
-| Link | `mo epic link <epic> <issue>` | Link an issue to the epic as a member. |
-| Unlink | `mo epic unlink <epic> <issue>` | Unlink a member issue. |
-| View | `mo epic view <id-or-number>` | Detail + `progress.nextIssue` / `progress.nextIssueReason` (used to inspect running-but-idle). |
-
-For exact flag surface and JSON fields on any of these commands, run `mo <cmd> --help`.
+Help is local and safe to query. Do not assume a Project, service, or remote
+request is needed just to discover syntax. When help does not answer a product
+decision, return to the First read or the appropriate sibling Skill instead of
+copying command tables into this entry point.

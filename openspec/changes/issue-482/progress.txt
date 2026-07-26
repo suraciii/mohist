@@ -152,3 +152,22 @@ T-002 progress (layered local help and usage errors)
   run, Issue JSON fields, unknown topic, and invalid command usage.
 - `dotnet test Mohist.sln --filter FullyQualifiedName~Mohist.Cli.Tests --no-restore` passed: 1369
   CLI tests.
+
+T-003 progress (packaged Mohist Skill progressive disclosure)
+
+# Patterns and gotchas discovered
+
+- The packaged entry Skill is embedded into the CLI test assembly, so content
+  tests should read it through `EmbeddedSkillData` rather than depending on a
+  checkout path.
+- Fenced examples include human-readable `<...>` placeholders, while the
+  command tree validates typed arguments during parsing. The parser-backed test
+  preserves the examples and substitutes a valid sentinel only at the parser
+  boundary; it never invokes a command action.
+- All packaged Skill examples must use the canonical tree. The sibling epic
+  guidance had `mo epic show`; it now uses `mo epic view`. The workflow profile
+  discovery example had an obsolete nested path and now uses `mo workflow list`.
+
+# Verification
+
+- CLI Skill/content tests passed: 1377 tests.

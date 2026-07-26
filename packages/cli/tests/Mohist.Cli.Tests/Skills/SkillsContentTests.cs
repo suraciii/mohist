@@ -1,6 +1,7 @@
 using Mohist.Cli.Tests.Compatibility;
 using global::System.Text.Json;
 using global::System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Cli;
 using EnvironmentAbstractions.TestHelpers;
@@ -10,6 +11,7 @@ namespace Mohist.Cli.Tests.Skills;
 
 public sealed class SkillsContentTests
 {
+    private static readonly Regex FencedMoCommand = new("^\\s*(mo\\s+.+?)(?:\\s+#.*)?$", RegexOptions.Compiled);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly FakeFileSystem _files = new();
@@ -317,6 +319,99 @@ public sealed class SkillsContentTests
         Assert.Equal(0, await BuildRootCommand().Parse(["skill", "path", "mohist"]).InvokeAsync());
         Assert.Equal("keep", _files.ReadAllText(sentinel));
     }
+
+    [Fact]
+    public void PackagedSkillMoExamples_ParseAgainstCanonicalCommandTree()
+    {
+        var root = BuildRootCommand();
+        var examples = EmbeddedSkillData.Paths()
+            .Where(path => path.EndsWith("/SKILL.md", StringComparison.Ordinal))
+            .SelectMany(path => ExtractMoExamples(path).Select(command => (path, command)))
+            .ToArray();
+
+        Assert.NotEmpty(examples);
+        foreach (var (path, command) in examples)
+        {
+            var parseResult = root.Parse(Tokenize(command)
+                .Skip(1)
+                .Select(token => token.StartsWith('<') && token.EndsWith('>') ? "1" : token)
+                .ToArray());
+            Assert.True(
+                parseResult.Errors.Count == 0,
+                $"Packaged Skill example failed to parse: {path}: {command}\n{string.Join("\n", parseResult.Errors.Select(error => error.Message))}");
+        }
+    }
+
+    [Fact]
+    public void MohistEntrySkill_IsAProgressiveDecisionEntryPoint()
+    {
+        var content = EmbeddedSkillData.ReadText("mohist/SKILL.md");
+
+        Assert.Contains("## Scope", content, StringComparison.Ordinal);
+        Assert.Contains("## First read", content, StringComparison.Ordinal);
+        Assert.Contains("## Scenario routing", content, StringComparison.Ordinal);
+        Assert.Contains("## Mohist-specific decisions", content, StringComparison.Ordinal);
+        Assert.Contains("## CLI handoff", content, StringComparison.Ordinal);
+        Assert.Contains("mo issue view <number>", content, StringComparison.Ordinal);
+        Assert.Contains("mo run view <run-id>", content, StringComparison.Ordinal);
+        Assert.Contains("mohist-explore", content, StringComparison.Ordinal);
+        Assert.Contains("mohist-create-issue", content, StringComparison.Ordinal);
+        Assert.Contains("mohist-create-epic", content, StringComparison.Ordinal);
+        Assert.Contains("retry", content, StringComparison.Ordinal);
+        Assert.Contains("rerun --from-stage", content, StringComparison.Ordinal);
+        Assert.Contains("pause", content, StringComparison.Ordinal);
+        Assert.Contains("stop", content, StringComparison.Ordinal);
+        Assert.Contains("compact", content, StringComparison.Ordinal);
+        Assert.Contains("reset", content, StringComparison.Ordinal);
+
+        foreach (var forbidden in new[]
+        {
+            "dotnet ", "npm ", "packages/", "legacy", "pre-Orleans", "mo issue show",
+            "mo skills", "mo repository", "mo opencode", "mo config", "| Operation |",
+        })
+        {
+            Assert.DoesNotContain(forbidden, content, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Theory]
+    [InlineData("skills", "list")]
+    [InlineData("repository", "view", "repo")]
+    [InlineData("opencode", "models")]
+    [InlineData("config")]
+    [InlineData("skill", "get", "mohist")]
+    [InlineData("epic", "show", "1")]
+    public void RemovedSkillPaths_FailTheSameParserCheck(params string[] args)
+    {
+        var parseResult = BuildRootCommand().Parse(args);
+
+        Assert.NotEmpty(parseResult.Errors);
+    }
+
+    private static IEnumerable<string> ExtractMoExamples(string path)
+    {
+        var inFence = false;
+        foreach (var line in EmbeddedSkillData.ReadText(path).Split('\n'))
+        {
+            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            {
+                inFence = !inFence;
+                continue;
+            }
+
+            if (!inFence)
+                continue;
+
+            var match = FencedMoCommand.Match(line.TrimEnd('\r'));
+            if (match.Success)
+                yield return match.Groups[1].Value.Trim();
+        }
+    }
+
+    private static string[] Tokenize(string command) =>
+        Regex.Matches(command, "\\\"(?:\\\\.|[^\\\"])*\\\"|\\S+")
+            .Select(match => match.Value.Trim('"'))
+            .ToArray();
 
     private global::System.CommandLine.RootCommand BuildRootCommand(
         TextWriter? output = null,
