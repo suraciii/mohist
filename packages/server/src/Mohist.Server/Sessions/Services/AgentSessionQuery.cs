@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
 
@@ -12,8 +13,11 @@ public enum AgentSessionQueryOrder
     CreatedDescending,
 }
 
-public sealed class AgentSessionQuery : IScopedService
+public class AgentSessionQuery : IScopedService
 {
+    private const string DirectSourceKind = "agent-launch";
+    private const string ActiveActivityValue = "active";
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _timeProvider;
 
@@ -70,6 +74,74 @@ public sealed class AgentSessionQuery : IScopedService
             .ToListAsync(ct);
         return ToRecords(rows);
     }
+
+    /// <summary>
+    /// Purpose-specific candidate query for the project-scoped
+    /// <c>/api/agent/status</c> read. Materializes only Agent Sessions that
+    /// can contribute to the active-agent readout for
+    /// <paramref name="projectId"/>:
+    /// <list type="bullet">
+    /// <item>direct Agent Sessions whose own project label matches the
+    ///   request and whose projected activity is <c>"active"</c>;</item>
+    /// <item>non-direct Sessions whose own project label matches the
+    ///   request, have a work id, and join a Workflow Run currently
+    ///   persisted as <c>"running"</c> for that same project.</item>
+    /// </list>
+    /// Rows are returned in the existing global creation-descending order
+    /// so callers preserve the established active-agent ordering. The
+    /// candidate predicate uses the indexed <c>Activity</c> projection and
+    /// the matching <c>IX_AgentSessions_StatusProject_SourceKind_Activity_CreatedAt</c>
+    /// composite index for the direct branch, and the indexed
+    /// <see cref="WorkflowRunRow.Status"/> / <see cref="WorkflowRunRow.MetadataProjectId"/>
+    /// projections for the joined branch, so historical Sessions with
+    /// <c>activity = idle</c>, missing source ids, or non-running Workflow
+    /// Runs are not selected and their <c>State</c> JSON is not
+    /// deserialized (issue-467).
+    /// </summary>
+    public virtual async Task<IReadOnlyList<AgentSessionRecord>> ListStatusCandidatesAsync(
+        string projectId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId)) return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var directCandidates = db.AgentSessions.AsNoTracking()
+            .Where(session =>
+                session.LabelProjectId == projectId
+                && session.LabelSourceKind == DirectSourceKind
+                && session.Activity == ActiveActivityValue);
+        var workflowCandidates =
+            from session in db.AgentSessions.AsNoTracking()
+            join workflow in db.WorkflowRuns.AsNoTracking()
+                on session.LabelSourceId equals workflow.WorkflowRunId
+            where session.LabelProjectId == projectId
+                && (session.LabelSourceKind == null || session.LabelSourceKind != DirectSourceKind)
+                && session.LabelWorkId != null
+                && session.LabelWorkId.Trim() != string.Empty
+                && workflow.MetadataProjectId == projectId
+                && workflow.Status == "running"
+            select session;
+
+        var rows = await directCandidates
+            .Concat(workflowCandidates)
+            .OrderByDescending(session => session.CreatedAt)
+            .ToListAsync(ct);
+        OnRowsMaterialized(rows.Count);
+        return ToRecords(rows);
+    }
+
+    /// <summary>
+    /// Narrow internal hook fired once after every candidate query
+    /// materializes its rows. Default is a no-op; production code keeps the
+    /// existing request-work interceptors as the sole source for database
+    /// and downstream counts. The seam exists so deterministic tests can
+    /// observe how many rows the new status candidate query materialized
+    /// without expanding the public API (issue-467 acceptance criteria).
+    /// </summary>
+    internal Action<int>? OnRowsMaterializedCallback { get; set; }
+
+    private void OnRowsMaterialized(int count) =>
+        OnRowsMaterializedCallback?.Invoke(count);
 
     /// <summary>
     /// Translates the "active"/"inactive" status filter into a DB-level

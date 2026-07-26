@@ -17,6 +17,7 @@
   "Mohist.Server.SpecTests/Specs/Issue/Querier/IssueMetricsStageDurationsSpecs.cs": 45941,
   "Mohist.Server.SpecTests/Specs/Project/Api/ProjectApiSpecs.cs": 30791,
   "Mohist.Server.SpecTests/Specs/Runner/Grain/RunnerStatusProjectionSpecs.cs": 30462,
+  "Mohist.Server.SpecTests/Specs/Sessions/AgentStatusHistoryBoundedSelectionSpecs.cs": 28635,
   "Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionSummarySpecs.cs": 27070,
   "Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionTranscriptAxisSpecs.cs": 31206,
   "Mohist.Server.SpecTests/Specs/Telemetry/OtelQueryRoutesIntegrationSpecs.cs": 27967,

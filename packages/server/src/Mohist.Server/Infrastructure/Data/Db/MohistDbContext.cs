@@ -184,6 +184,18 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.LabelTriggerRuleId)
                 .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.TriggerRuleId), stored: false);
 
+            // issue-467 T-001: stored projection of status.activity, lowered
+            // to match the existing Status column convention. Powers the
+            // history-bounded direct-session candidate selection in
+            // AgentSessionQuery.ListStatusCandidatesAsync; the matching
+            // composite index (LabelProjectId, SourceKind, Activity,
+            // CreatedAt) is added below so the candidate predicate uses an
+            // index-only path.
+            entity.Property(e => e.Activity)
+                .HasComputedColumnSql(
+                    "LOWER(COALESCE(json_extract(\"State\", '$.status.activity'), json_extract(\"State\", '$.status.Activity')))",
+                    stored: true);
+
             entity.HasIndex(e => new { e.LabelProjectId, e.CreatedAt }).HasDatabaseName("IX_AgentSessions_LabelProjectId_CreatedAt");
             entity.HasIndex(e => e.LabelSourceId).HasDatabaseName("IX_AgentSessions_LabelSourceId");
             entity.HasIndex(e => new { e.LabelSourceId, e.LabelSessionName }).HasDatabaseName("IX_AgentSessions_LabelSourceId_LabelSessionName");
@@ -203,6 +215,14 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentSessions_LabelAgentLaunchEpicNumber");
             entity.HasIndex(e => new { e.LabelProjectId, e.LabelAgentLaunchEpicNumber, e.CreatedAt })
                 .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelAgentLaunchEpicNumber_CreatedAt");
+
+            // issue-467 T-001: direct status candidate index. Composite on
+            // (LabelProjectId, LabelSourceKind, Activity, CreatedAt) so the
+            // direct-session branch of AgentSessionQuery.ListStatusCandidatesAsync
+            // resolves through a single index scan ordered by CreatedAt
+            // DESC, never touching historical inactive / completed rows.
+            entity.HasIndex(e => new { e.LabelProjectId, e.LabelSourceKind, e.Activity, e.CreatedAt })
+                .HasDatabaseName("IX_AgentSessions_StatusProject_SourceKind_Activity_CreatedAt");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>
