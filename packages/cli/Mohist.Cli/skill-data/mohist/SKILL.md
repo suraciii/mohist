@@ -1,6 +1,6 @@
 ---
 name: mohist
-description: "Perform Mohist issue, epic, and workflow operations against the current .NET backend/API/Web. Use when the user asks to create, view, start, approve, or close issues or epics, check project status or logs, or do anything involving Mohist issues, epics, or workflows. This skill is the entry dispatcher: judge the scenario first, then load the matching scenario skill. The full issue/epic lifecycle command surface also lives here (no separate scenario skill covers it). The legacy Node CLI has been removed."
+description: "Perform Mohist issue, epic, and workflow operations against the current .NET backend/API/Web. Use when the user asks to create, view, start, approve, or close issues or epics, check project status or logs, or do anything involving Mohist issues, epics, or workflows. This skill is the entry dispatcher: judge the scenario first, then load the matching scenario skill. Exact command syntax lives in `mo --help` and the leaf help of each command; the legacy Node CLI has been removed."
 ---
 
 # mohist
@@ -19,7 +19,7 @@ Prefer the current `mo` CLI, ASP.NET Core API, or Web UI workflows. Do not instr
 When operating on Mohist issues or workflows:
 
 - Use the current `mo` CLI command surface and current .NET backend behavior as the source of truth.
-- When the user provides an existing issue context, load its current state and history via `mo issue show <number>` and related read-only commands, rather than assuming any particular filesystem layout.
+- When the user provides an existing issue context, load its current state and history via `mo issue view <number>` and related read-only commands, rather than assuming any particular filesystem layout.
 - Keep changes scoped to the current issue; do not substitute adjacent cleanup or legacy behavior unless the issue explicitly requires it.
 - For local verification, prefer the smallest relevant command or test filter instead of broad full-repo runs.
 
@@ -34,9 +34,9 @@ Boundaries:
 This skill is the entry point and dispatcher. Judge what the task actually needs,
 then load the matching scenario skill for the detailed mechanics:
 
-- **Explore / distill a requirement** (and decide issue vs epic) → `mo skills get mohist-explore`
-- **Create an issue** (frontmatter, workflow/risk, labeling, confirmation) → `mo skills get mohist-create-issue`
-- **Create an epic** (milestone description, link issues, prerequisites, lifecycle) → `mo skills get mohist-create-epic`
+- **Explore / distill a requirement** (and decide issue vs epic) → `mo skill view mohist-explore`
+- **Create an issue** (frontmatter, workflow/risk, labeling, confirmation) → `mo skill view mohist-create-issue`
+- **Create an epic** (milestone description, link issues, prerequisites, lifecycle) → `mo skill view mohist-create-epic`
 
 The issue/epic lifecycle commands below (start, rebase, close, and the epic
 autopilot trio) plus the WorkflowRun control commands are **not** covered by a
@@ -56,8 +56,9 @@ guess, omit, or invent a command.
 ## Issue lifecycle commands
 
 These commands manage the work item itself. They take `<number>` (issue number
-in the active project, or use `--project` / `--project-id` to target another
-project). WorkflowRun state changes use `mo run` below.
+in the active project, or use `--project` to target another project).
+WorkflowRun state changes use `mo run` below. For exact flags, JSON fields,
+and prerequisites, run `mo <command> --help`.
 
 | Operation | CLI | Effect |
 |---|---|---|
@@ -74,8 +75,8 @@ issue belongs to another project.
 
 | Operation | CLI | Effect |
 |---|---|---|
-| Approve | `mo run approve <run-id> --author <name>` / `mo run approve --issue <number> --author <name>` | Approve at an approval gate (Plan → Build, Check → Integrate). `--author` records the declared operator (1-100 chars). |
-| Reject | `mo run reject <run-id> --author <name> --message <m>` | Reject at an approval gate with a change request. `--author` records the declared operator; both flags are required. |
+| Approve | `mo run approve <run-id>` / `mo run approve --issue <number>` | Approve at an approval gate (Plan → Build, Check → Integrate). |
+| Reject | `mo run reject <run-id> --message <m>` | Reject at an approval gate with a change request. |
 | Retry | `mo run retry <run-id>` | Retry the current failure point and restore the manual-retry budget. |
 | Rerun | `mo run rerun <run-id>` | Rerun the whole workflow from the beginning. |
 | Rerun from stage | `mo run rerun <run-id> --from-stage <stage>` | Invalidate the target stage and everything after it, then rerun. |
@@ -89,24 +90,9 @@ Key distinctions:
 - **`done` vs `close`**: `done` records delivered work after a terminal workflow; `close` cancels work that will not be delivered.
 - **`retry` vs `rerun --from-stage`**: `retry` retries the current failure point; `rerun` re-runs the whole workflow from the beginning; `rerun --from-stage` invalidates one named stage and everything after it.
 - **`reject` vs `stop`**: `reject` bounces back at an approval gate with a change request (the issue stays alive for another pass); `stop` ends the run.
-- **Approval operator (`--author`)**: `mo run approve` and `mo run reject` require `--author <name>` to declare who placed the gate (1-100 characters, trimmed; mirrors the comment `--author`). The declared name travels through the approval decision and the approval read model so the history distinguishes human vs. agent. Omitting, blank, or oversized `--author` is rejected with no state change.
 
-Read-only and aux helpers (also useful while driving):
-
-```bash
-mo issue show <number>            # details + current stage/health
-mo issue events <number>          # event stream
-mo issue logs <number>            # logs
-mo issue diff <number>            # current branch vs base diff
-mo issue commits <number>         # commits on the issue branch
-mo issue sessions <number>        # list coder sessions (plan/build/check/integrate…)
-mo issue session transcript <number> <name>   # one session's conversation
-mo issue session followup <number> <name> --text <t>  # push a follow-up instruction into a running session
-mo issue comment add <number> --body <text>   # add a comment
-mo issue prereq add <number> <prereq>         # add a start prerequisite
-mo issue workflow status <number>             # workflow status
-mo issue workflow timeline <number>           # workflow timeline
-```
+For exact flag surface, JSON fields, and confirmation rules on any of these
+commands, run `mo <cmd> --help`.
 
 ## Epic lifecycle commands
 
@@ -124,32 +110,6 @@ auto-advancement). Below is the command surface only.
 | Close | `mo epic close <id-or-number>` | Terminal `closed` (abandon the milestone). |
 | Link | `mo epic link <epic> <issue>` | Link an issue to the epic as a member. |
 | Unlink | `mo epic unlink <epic> <issue>` | Unlink a member issue. |
-| Show | `mo epic show <id-or-number>` | Detail + `progress.nextIssue` / `progress.nextIssueReason` (used to inspect running-but-idle). |
+| View | `mo epic view <id-or-number>` | Detail + `progress.nextIssue` / `progress.nextIssueReason` (used to inspect running-but-idle). |
 
-Read-only and helpers:
-
-```bash
-mo epic list                       # list epics of the current project
-mo epic update <id-or-number>      # edit title/description/priority
-```
-
-Project-wide listing (use sparingly — the project group also exposes workflow
-template/config which is unrelated to epics):
-
-```bash
-mo project workflow profile list   # list workflow profiles
-mo label list                      # labels available in the current project
-```
-
-## Common flags
-
-All issue/epic commands accept these unless documented otherwise:
-
-| Flag | Meaning |
-|---|---|
-| `--project <name>` / `--project-id <id>` | Target project; canonical is `--project`. `--project-id` is a backwards-compatible alias. |
-| `-o, --output <table\|json>` | Output format (table by default; many commands default to JSON). |
-| `--message <m>` / `-m <m>` | Required by `mo run reject` to carry the change-request reason. |
-| `--author <name>` | Required by `mo run approve` / `mo run reject` to record the declared approval operator (1-100 characters, trimmed). Mirrors the comment `--author`. |
-
-For the full flag surface on any command, run `mo <cmd> --help`.
+For exact flag surface and JSON fields on any of these commands, run `mo <cmd> --help`.

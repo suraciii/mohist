@@ -19,8 +19,8 @@ internal static class EpicCommands
 
         epic.Subcommands.Add(BuildList(api));
         epic.Subcommands.Add(BuildCreate(api));
-        epic.Subcommands.Add(BuildShow(api));
-        epic.Subcommands.Add(BuildUpdate(api));
+        epic.Subcommands.Add(BuildView(api));
+        epic.Subcommands.Add(BuildEdit(api));
         epic.Subcommands.Add(BuildLink(api));
         epic.Subcommands.Add(BuildUnlink(api));
         epic.Subcommands.Add(BuildStart(api));
@@ -122,9 +122,9 @@ internal static class EpicCommands
         return cmd;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("show", "Show epic details");
+        var cmd = new Command("view", "Show epic details");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
@@ -156,9 +156,9 @@ internal static class EpicCommands
         return cmd;
     }
 
-    private static Command BuildUpdate(MohistCliApi api)
+    private static Command BuildEdit(MohistCliApi api)
     {
-        var cmd = new Command("update", "Update an epic");
+        var cmd = new Command("edit", "Update an epic");
         var numberArg = NumberArg();
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
         var descriptionOpt = new Option<string?>("--description", "-d") { Description = "New description" };

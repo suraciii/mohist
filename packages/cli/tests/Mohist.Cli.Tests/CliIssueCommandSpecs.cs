@@ -11,9 +11,9 @@ public class CliIssueCommandSpecs
     public static IEnumerable<object[]> RemovedRepositoryOptionCases()
     {
         yield return [new[] { "issue", "create", "Title", "--repository", "web" }];
-        yield return [new[] { "issue", "update", "1", "--repository", "web" }];
+        yield return [new[] { "issue", "edit", "1", "--repository", "web" }];
         yield return [new[] { "issue", "list", "--repository", "web" }];
-        yield return [new[] { "issue", "show", "1", "--repository", "web" }];
+        yield return [new[] { "issue", "view", "1", "--repository", "web" }];
     }
 
     [Theory]
@@ -137,7 +137,7 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "7"], output, error, fileSystem, executor);
+            http, ["issue", "view", "7"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("repository: web", output.ToString(), StringComparison.Ordinal);

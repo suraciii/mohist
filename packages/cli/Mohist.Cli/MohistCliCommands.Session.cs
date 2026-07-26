@@ -36,12 +36,12 @@ internal static class SessionCommands
         var session = new Command(
             "session",
             "Manage one AgentSession by its stable Session ID (issue-479). " +
-            "Subcommands: list (--agent|--issue|--run), show <session-id>, " +
+            "Subcommands: list (--agent|--issue|--run), view <session-id>, " +
             "transcript <session-id>, followup <session-id>, " +
             "compact <session-id>, reset <session-id>, cancel <session-id>.");
 
         session.Subcommands.Add(BuildList(api));
-        session.Subcommands.Add(BuildShow(api));
+        session.Subcommands.Add(BuildView(api));
         session.Subcommands.Add(BuildTranscript(api));
         session.Subcommands.Add(BuildFollowup(api));
         session.Subcommands.Add(BuildCompact(api));
@@ -70,7 +70,6 @@ internal static class SessionCommands
         var cmd = new Command(
             "list",
             "List AgentSessions filtered by source. Exactly one of --agent, --issue, or --run is required.");
-        cmd.Aliases.Add("ls");
         var agentOpt = new Option<string?>("--agent") { Description = "Filter by Agent name or id (agent-launch source)" };
         var issueOpt = new Option<int?>("--issue") { Description = "Filter by Issue number (workflow source)" };
         var runOpt = new Option<string?>("--run") { Description = "Filter by Workflow run id (workflow source)" };
@@ -139,10 +138,10 @@ internal static class SessionCommands
         return cmd;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
         var cmd = new Command(
-            "show",
+            "view",
             "Show the unified summary of an AgentSession by its stable Session ID. GETs the project-scoped .../sessions/{sessionId} route that resolves agent-launch and workflow sessions by the same id.");
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id returned by launch or the workflow session list" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();

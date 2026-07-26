@@ -50,7 +50,7 @@ public class CliIssueUpdatePatchBodySpecs
         fs.AddFile("/tmp/body.md", "Updated body content");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--body-file", "/tmp/body.md"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--body-file", "/tmp/body.md"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -69,7 +69,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--body", "Inline body"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--body", "Inline body"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -85,7 +85,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "stream=backend", "-l", "module=auth"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "stream=backend", "-l", "module=auth"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -109,7 +109,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "stream=backend"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "stream=backend"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -125,7 +125,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1"], output, error, fs, executor);
+            http, ["issue", "edit", "1"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -145,7 +145,7 @@ public class CliIssueUpdatePatchBodySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "1", "--body", "Inline", "--body-file", "/tmp/body.md"],
+            ["issue", "edit", "1", "--body", "Inline", "--body-file", "/tmp/body.md"],
             output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
@@ -160,7 +160,7 @@ public class CliIssueUpdatePatchBodySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "1", "--body", "Inline", "--body-stdin"],
+            ["issue", "edit", "1", "--body", "Inline", "--body-stdin"],
             output, error, fs, executor,
             standardInput: new StringReader("from stdin"));
 
@@ -177,7 +177,7 @@ public class CliIssueUpdatePatchBodySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "1", "--body-file", "/tmp/body.md", "--body-stdin"],
+            ["issue", "edit", "1", "--body-file", "/tmp/body.md", "--body-stdin"],
             output, error, fs, executor,
             standardInput: new StringReader("from stdin"));
 
@@ -192,7 +192,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--title", "New title"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--title", "New title"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -209,7 +209,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--priority", "p1"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--priority", "p1"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -226,7 +226,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--ready"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--ready"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -241,7 +241,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--draft"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--draft"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -256,7 +256,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--title", "X"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--title", "X"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);

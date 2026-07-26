@@ -21,12 +21,13 @@ internal static class AgentCommands
 
         agent.Subcommands.Add(BuildCreate(api));
         agent.Subcommands.Add(BuildList(api));
-        agent.Subcommands.Add(BuildShow(api));
-        agent.Subcommands.Add(BuildUpdate(api));
+        agent.Subcommands.Add(BuildView(api));
+        agent.Subcommands.Add(BuildEdit(api));
         agent.Subcommands.Add(BuildArchive(api));
         agent.Subcommands.Add(BuildLaunch(api));
         agent.Subcommands.Add(BuildJob(api));
         agent.Subcommands.Add(BuildInstall(api));
+        agent.Subcommands.Add(AgentModelCommands.Build(api));
 
         return agent;
     }
@@ -314,7 +315,6 @@ internal static class AgentCommands
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List agents");
-        cmd.Aliases.Add("ls");
         var allOpt = new Option<bool>("--all") { Description = "Include archived agents" };
         var statusOpt = new Option<string?>("--status") { Description = "Filter by status" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
@@ -353,9 +353,9 @@ internal static class AgentCommands
         return cmd;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("show", "Show agent details");
+        var cmd = new Command("view", "Show agent details");
         var nameOrIdArg = NameOrIdArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
@@ -393,9 +393,9 @@ internal static class AgentCommands
         return cmd;
     }
 
-    private static Command BuildUpdate(MohistCliApi api)
+    private static Command BuildEdit(MohistCliApi api)
     {
-        var cmd = new Command("update", "Update an agent");
+        var cmd = new Command("edit", "Update an agent");
         var nameOrIdArg = NameOrIdArg();
         var nameOpt = new Option<string?>("--name") { Description = "New agent name" };
         var descriptionOpt = new Option<string?>("--description") { Description = "New agent description" };
@@ -510,7 +510,6 @@ internal static class AgentCommands
     private static Command BuildArchive(MohistCliApi api)
     {
         var cmd = new Command("archive", "Archive an agent");
-        cmd.Aliases.Add("delete");
         var nameOrIdArg = NameOrIdArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
 
@@ -719,7 +718,6 @@ internal static class AgentCommands
         var cmd = new Command(
             "list",
             "List AgentJobs for a given Agent profile. Resolves the agent ref client-side, then GETs .../agents/{agentId}/jobs.");
-        cmd.Aliases.Add("ls");
         var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
         var statusOpt = new Option<string?>("--status") { Description = "Filter by job status (pending, running, completed, failed)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();

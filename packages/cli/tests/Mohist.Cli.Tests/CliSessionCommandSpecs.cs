@@ -36,12 +36,14 @@ public class CliSessionCommandSpecs
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("list", stdout, StringComparison.Ordinal);
-        Assert.Contains("show", stdout, StringComparison.Ordinal);
+        Assert.Contains("view", stdout, StringComparison.Ordinal);
         Assert.Contains("transcript", stdout, StringComparison.Ordinal);
         Assert.Contains("compact", stdout, StringComparison.Ordinal);
         Assert.Contains("reset", stdout, StringComparison.Ordinal);
         Assert.Contains("followup", stdout, StringComparison.Ordinal);
         Assert.Contains("cancel", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("show", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("ls", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -91,7 +93,7 @@ public class CliSessionCommandSpecs
             throw new InvalidOperationException("API must not be called for a parse error"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "show", StableSessionId], output, error, fileSystem, executor);
+            http, ["agent", "session", "view", StableSessionId], output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
@@ -104,7 +106,7 @@ public class CliSessionCommandSpecs
             throw new InvalidOperationException("API must not be called for a parse error"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "session", "show", "42", "plan"], output, error, fileSystem, executor);
+            http, ["issue", "session", "view", "42", "plan"], output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
@@ -151,7 +153,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "show", StableSessionId], output, error, fileSystem, executor);
+            http, ["session", "view", StableSessionId], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -193,7 +195,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "show", "sess_wf_1"], output, error, fileSystem, executor);
+            http, ["session", "view", "sess_wf_1"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -216,7 +218,7 @@ public class CliSessionCommandSpecs
                 HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "show", StableSessionId], output, error, fileSystem, executor);
+            http, ["session", "view", StableSessionId], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("not found", error.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -234,7 +236,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "show", StableSessionId, "--project", "proj_other"], output, error, fileSystem, executor);
+            http, ["session", "view", StableSessionId, "--project", "proj_other"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal($"/api/projects/proj_other/sessions/{StableSessionId}", handler.Requests.Single().RequestUri?.PathAndQuery);
@@ -258,7 +260,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "show", StableSessionId, "--json", "id,source,agentName"], output, error, fileSystem, executor);
+            http, ["session", "view", StableSessionId, "--json", "id,source,agentName"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();

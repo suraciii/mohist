@@ -89,20 +89,18 @@ public class CliRootCommandShapeTests
             "service",
             "install",
             "update",
-            "skills",
-            "opencode",
-            "config",
+            "skill",
             "notification",
             "otel",
             "info",
         ];
         foreach (var name in survivingResourceGroups)
             Assert.Contains($"\n  {name} ", stdout);
-        // `repo` is the primary name; `repository` is registered as an
-        // alias. System.CommandLine renders them as `  repo, repository  …`.
-        // We assert the full rendered form because anchored `\n  repo `
-        // would miss the actual column layout (it's `repo,` not `repo `).
-        Assert.Contains("\n  repo, repository ", stdout);
+        Assert.Contains("\n  repo ", stdout);
+        Assert.DoesNotContain("repository", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  opencode ", stdout);
+        Assert.DoesNotContain("\n  config ", stdout);
+        Assert.DoesNotContain("\n  skills ", stdout);
     }
 
     [Fact]

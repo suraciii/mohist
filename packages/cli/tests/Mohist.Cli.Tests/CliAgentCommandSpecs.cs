@@ -612,16 +612,13 @@ public class CliAgentCommandSpecs
         var stdout = output.ToString();
         Assert.Contains("create", stdout);
         Assert.Contains("list", stdout);
-        Assert.Contains("show", stdout);
-        Assert.Contains("update", stdout);
-        // `archive` is the canonical command, `delete` is a transitional name
-        // alias of it — System.CommandLine emits both on the canonical row.
-        Assert.Contains("archive, delete <name-or-id>", stdout);
-        var subcommandLines = stdout
-            .Split('\n')
-            .Where(line => line.StartsWith("  ", StringComparison.Ordinal))
-            .ToList();
-        Assert.DoesNotContain(subcommandLines, line => line.TrimStart().StartsWith("delete ", StringComparison.Ordinal));
+        Assert.Contains("view", stdout);
+        Assert.Contains("edit", stdout);
+        Assert.Contains("archive <name-or-id>", stdout);
+        Assert.DoesNotContain("show", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("update", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("delete", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("  ls ", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -729,7 +726,7 @@ public class CliAgentCommandSpecs
         })));
         var output = new StringWriter();
 
-        var exitCode = await RunAsync(handler, ["agent", "show", "reviewer",], output: output, fileSystem: FileSystemWithProject());
+        var exitCode = await RunAsync(handler, ["agent", "view", "reviewer",], output: output, fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/proj_123/agents?all=true", handler.Requests[0].RequestUri?.PathAndQuery);
@@ -748,7 +745,7 @@ public class CliAgentCommandSpecs
         })));
         var error = new StringWriter();
 
-        var exitCode = await RunAsync(handler, ["agent", "show", "missing"], error: error, fileSystem: FileSystemWithProject());
+        var exitCode = await RunAsync(handler, ["agent", "view", "missing"], error: error, fileSystem: FileSystemWithProject());
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("Agent 'missing' not found", error.ToString());
@@ -766,7 +763,7 @@ public class CliAgentCommandSpecs
         })));
 
         var exitCode = await RunAsync(handler,
-            ["agent", "update", "reviewer", "--name", "reviewer-v2", "--instructions", "new prompt", "--agent-config", "{\"model\":\"zhipu/glm\"}", "--skills", "mohist", "--max-concurrent-runs", "3"],
+            ["agent", "edit", "reviewer", "--name", "reviewer-v2", "--instructions", "new prompt", "--agent-config", "{\"model\":\"zhipu/glm\"}", "--skills", "mohist", "--max-concurrent-runs", "3"],
             fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
@@ -792,7 +789,7 @@ public class CliAgentCommandSpecs
         })));
 
         var exitCode = await RunAsync(handler,
-            ["agent", "update", "reviewer", "--clear-description", "--clear-agent-config", "--clear-skills", "--clear-max-concurrent-runs"],
+            ["agent", "edit", "reviewer", "--clear-description", "--clear-agent-config", "--clear-skills", "--clear-max-concurrent-runs"],
             fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
@@ -818,7 +815,7 @@ public class CliAgentCommandSpecs
         var error = new StringWriter();
 
         var exitCode = await RunAsync(handler,
-            ["agent", "update", "reviewer", setFlag, setValue, clearFlag],
+            ["agent", "edit", "reviewer", setFlag, setValue, clearFlag],
             error: error,
             fileSystem: FileSystemWithProject());
 
@@ -835,7 +832,7 @@ public class CliAgentCommandSpecs
             : RecordingHttpHandler.JsonError("Agent name 'coder' is already used", "AGENT_NAME_CONFLICT", HttpStatusCode.Conflict)));
         var error = new StringWriter();
 
-        var exitCode = await RunAsync(handler, ["agent", "update", "reviewer", "--name", "coder"], error: error, fileSystem: FileSystemWithProject());
+        var exitCode = await RunAsync(handler, ["agent", "edit", "reviewer", "--name", "coder"], error: error, fileSystem: FileSystemWithProject());
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("Agent name 'coder' is already used", error.ToString());
@@ -906,7 +903,7 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
-    public async Task AgentArchive_DeleteAlias_ProducesIdenticalRequestAndOutput()
+    public async Task AgentDelete_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (request, _) => Task.FromResult(RecordingHttpHandler.Json(new
@@ -918,59 +915,16 @@ public class CliAgentCommandSpecs
             })),
             "proj_123");
 
-        var canonicalExit = await MohistCliCommands.RunAsync(
-            http, ["agent", "archive", "reviewer", "--project", "proj_123"], output, error, fs, executor);
-        var canonicalStdout = output.ToString();
-        var canonicalStderr = error.ToString();
-        var canonicalRequests = handler.Requests.ToList();
-
-        output.GetStringBuilder().Clear();
-        error.GetStringBuilder().Clear();
-
-        var aliasExit = await MohistCliCommands.RunAsync(
-            http, ["agent", "delete", "reviewer", "--project", "proj_123"], output, error, fs, executor);
-        var aliasStdout = output.ToString();
-        var aliasStderr = error.ToString();
-        var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();
-
-        Assert.Equal(canonicalExit, aliasExit);
-        Assert.Equal(canonicalStdout, aliasStdout);
-        Assert.Equal(canonicalStderr, aliasStderr);
-        Assert.Equal(canonicalRequests.Count, aliasRequests.Count);
-        for (var i = 0; i < canonicalRequests.Count; i++)
-        {
-            Assert.Equal(canonicalRequests[i].Method, aliasRequests[i].Method);
-            Assert.Equal(canonicalRequests[i].RequestUri, aliasRequests[i].RequestUri);
-        }
-    }
-
-    [Fact]
-    public async Task AgentArchive_AliasDelete_HonorsProjectIdFlag()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
-            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
-            {
-                success = true,
-                data = Agent("agent_123", "reviewer", status: "archived"),
-            })),
-            "proj_default");
-
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "delete", "agent_123", "--project", "proj_other"], output, error, fs, executor);
+            http, ["agent", "delete", "reviewer", "--project", "proj_123"], output, error, fs, executor);
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal("/api/projects/proj_other/agents/agent_123", handler.Requests[0].RequestUri?.PathAndQuery);
-        Assert.Contains("Agent reviewer (agent_123) archived", output.ToString());
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
-    public async Task AgentDelete_ArchivesByResolvedName_LegacyDeleteVerbStillWorks()
+    public async Task AgentDelete_Directly_IsRejectedAsUsageFailure()
     {
-        // The transitional `delete` verb still works as a name alias of
-        // `archive` — pin this legacy entry point separately so the
-        // alias-parity contract in the new specs has a single owner and
-        // any future drift in `delete` (e.g. an accidental hard-removal)
-        // is caught here.
         var handler = new RecordingHttpHandler((request, _) => Task.FromResult(RecordingHttpHandler.Json(new
         {
             success = true,
@@ -982,10 +936,8 @@ public class CliAgentCommandSpecs
 
         var exitCode = await RunAsync(handler, ["agent", "delete", "reviewer"], output: output, fileSystem: FileSystemWithProject());
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal(HttpMethod.Delete, handler.Requests[1].Method);
-        Assert.Equal("/api/projects/proj_123/agents/agent_123", handler.Requests[1].RequestUri?.PathAndQuery);
-        Assert.Contains("Agent reviewer (agent_123) archived", output.ToString());
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]

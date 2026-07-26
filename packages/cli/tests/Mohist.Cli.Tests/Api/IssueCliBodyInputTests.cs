@@ -24,7 +24,7 @@ public class IssueCliBodyInputTests
     [Fact]
     public void IssueUpdate_Help_ListsAllThreeBodyOptionsAndMutualExclusion()
     {
-        var help = RenderHelp(["issue", "update", "--help"]);
+        var help = RenderHelp(["issue", "edit", "--help"]);
 
         Assert.Contains("--body", help);
         Assert.Contains("--body-file", help);
@@ -182,7 +182,7 @@ public class IssueCliBodyInputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "update", "1", "--body-file", "body.md", "--project", "mohist-local"],
+            ["issue", "edit", "1", "--body-file", "body.md", "--project", "mohist-local"],
             output,
             error,
             files,
@@ -207,7 +207,7 @@ public class IssueCliBodyInputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "update", "1", "--body", "a", "--body-file", "b.md", "--project", "mohist-local"],
+            ["issue", "edit", "1", "--body", "a", "--body-file", "b.md", "--project", "mohist-local"],
             output,
             error,
             files,

@@ -214,10 +214,9 @@ internal static partial class IssueCommands
         }
     }
 
-    private static Command BuildUpdate(MohistCliApi api)
+    private static Command BuildEdit(MohistCliApi api)
     {
-        var cmd = new Command("update", "Update an issue");
-        cmd.Aliases.Add("edit");
+        var cmd = new Command("edit", "Update an issue");
         var numberArg = NumberArg();
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
         var bodyOpt = new Option<string?>("--body", "-b") { Description = "New body (mutually exclusive with --body-file and --body-stdin)" };
@@ -457,12 +456,12 @@ internal static partial class IssueCommands
         var number = data["number"]?.GetValue<int?>();
         if (isDraft && number is int draftNumber)
         {
-            output.WriteLine($"Mark the issue ready with 'mo issue update {draftNumber} --ready' before starting.");
+            output.WriteLine($"Mark the issue ready with 'mo issue edit {draftNumber} --ready' before starting.");
             return;
         }
         if (isDraft)
         {
-            output.WriteLine("Mark the issue ready with 'mo issue update <number> --ready' before starting.");
+            output.WriteLine("Mark the issue ready with 'mo issue edit <number> --ready' before starting.");
             return;
         }
         if (blocker is System.Text.Json.Nodes.JsonObject blockerObj)

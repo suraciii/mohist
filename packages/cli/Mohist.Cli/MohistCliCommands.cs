@@ -17,7 +17,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(ServiceCommands.Build(provider));
         root.Subcommands.Add(InstallCommands.Build(provider));
         root.Subcommands.Add(UpdateCommands.Build(provider));
-        root.Subcommands.Add(SkillsCommands.Build(provider));
+        root.Subcommands.Add(SkillCommands.Build(provider));
         root.Subcommands.Add(RunCommands.Build(api));
         root.Subcommands.Add(WorkflowCommands.Build(api));
         var environment = provider.GetService<IEnvironmentVariableProvider>()
@@ -34,8 +34,6 @@ internal static class MohistCliCommands
         root.Subcommands.Add(SessionCommands.Build(api));
         root.Subcommands.Add(EpicCommands.Build(api));
         root.Subcommands.Add(LabelCommands.Build(api));
-        root.Subcommands.Add(OpencodeCommands.Build(api));
-        root.Subcommands.Add(ConfigProvidersCommands.BuildConfig(api));
         root.Subcommands.Add(NotifyCommands.Build(api));
         root.Subcommands.Add(OtelCommands.Build(api, environment, provider.GetService<IOtelQueryExecutor>() ?? new SqliteOtelQueryExecutor()));
 

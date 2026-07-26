@@ -51,7 +51,7 @@ Mohist 通过出站 webhook 把 issue 工作流的关键事件推给 Hermes，�
 mo update server
 ```
 
-> 注意：通知配置是嵌套 section，`mo config get/set/list` 目前只覆盖平铺键，这一节需直接编辑 `~/.mohist/config.jsonc`（统一配置命令面已列为 follow-up）。
+> 注意：通知配置是嵌套 section，这一节需直接编辑 `~/.mohist/config.jsonc`（统一配置命令面已列为 follow-up）。
 
 首份配置可用向导生成：
 

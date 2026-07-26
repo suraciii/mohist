@@ -26,7 +26,7 @@ public sealed class SkillsContentTests
     {
         using var stdout = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "list"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout).Parse(["skill", "list"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         var lines = SplitLines(stdout.ToString());
@@ -42,7 +42,7 @@ public sealed class SkillsContentTests
     {
         using var stdout = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "list", "--json", "name,description"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout).Parse(["skill", "list", "--json", "name,description"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         var items = JsonSerializer.Deserialize<List<SkillListItem>>(stdout.ToString(), JsonOptions);
@@ -80,7 +80,7 @@ public sealed class SkillsContentTests
 
         using var stdout = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "get", "mohist"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout).Parse(["skill", "view", "mohist"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         var content = stdout.ToString();
@@ -95,7 +95,7 @@ public sealed class SkillsContentTests
     {
         using var stdout = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "get", "mohist", "--json", "name,description,content"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout).Parse(["skill", "view", "mohist", "--json", "name,description,content"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         var item = JsonNode.Parse(stdout.ToString())!.AsObject();
@@ -109,7 +109,7 @@ public sealed class SkillsContentTests
     {
         using var stdout = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "get", "mohist-create-epic", "--full"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout).Parse(["skill", "view", "mohist-create-epic", "--full"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         var content = stdout.ToString();
@@ -125,7 +125,7 @@ public sealed class SkillsContentTests
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout, stderr).Parse(["skills", "get", "--all"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout, stderr).Parse(["skill", "view", "--all"]).InvokeAsync();
 
         Assert.True(exitCode == 0, $"stderr: {stderr}");
         var content = stdout.ToString();
@@ -141,8 +141,8 @@ public sealed class SkillsContentTests
         using var stdout = new StringWriter();
         using var jsonStdout = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "path", "mohist"]).InvokeAsync();
-        var jsonExitCode = await BuildRootCommand(jsonStdout).Parse(["skills", "path", "mohist", "--json", "name,path"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout).Parse(["skill", "path", "mohist"]).InvokeAsync();
+        var jsonExitCode = await BuildRootCommand(jsonStdout).Parse(["skill", "path", "mohist", "--json", "name,path"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         Assert.Equal(0, jsonExitCode);
@@ -171,8 +171,8 @@ public sealed class SkillsContentTests
             getUserHome: () => userHome);
         var assets = new SkillAssetService(_files, _environment, resolver);
 
-        var exitCode = await BuildRootCommand(stdout, assets: assets).Parse(["skills", "path", "mohist"]).InvokeAsync();
-        var jsonExitCode = await BuildRootCommand(jsonStdout, assets: assets).Parse(["skills", "path", "mohist", "--json", "name,path"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout, assets: assets).Parse(["skill", "path", "mohist"]).InvokeAsync();
+        var jsonExitCode = await BuildRootCommand(jsonStdout, assets: assets).Parse(["skill", "path", "mohist", "--json", "name,path"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         Assert.Equal(0, jsonExitCode);
@@ -201,8 +201,8 @@ public sealed class SkillsContentTests
         using var mohistStdout = new StringWriter();
         using var exploreStdout = new StringWriter();
 
-        var mohistExit = await BuildRootCommand(mohistStdout, assets: assets).Parse(["skills", "get", "mohist"]).InvokeAsync();
-        var exploreExit = await BuildRootCommand(exploreStdout, assets: assets).Parse(["skills", "get", "mohist-explore"]).InvokeAsync();
+        var mohistExit = await BuildRootCommand(mohistStdout, assets: assets).Parse(["skill", "view", "mohist"]).InvokeAsync();
+        var exploreExit = await BuildRootCommand(exploreStdout, assets: assets).Parse(["skill", "view", "mohist-explore"]).InvokeAsync();
 
         Assert.Equal(0, mohistExit);
         Assert.Equal(0, exploreExit);
@@ -228,7 +228,7 @@ public sealed class SkillsContentTests
             getSiblingAssetRoot: () => siblingRoot);
         var assets = new SkillAssetService(_files, _environment, resolver);
 
-        var exitCode = await BuildRootCommand(stdout, assets: assets).Parse(["skills", "path", "mohist"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout, assets: assets).Parse(["skill", "path", "mohist"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         var textPath = stdout.ToString().Trim();
@@ -251,7 +251,7 @@ public sealed class SkillsContentTests
         var assets = new SkillAssetService(_files, _environment, resolver);
 
         var exitCode = await BuildRootCommand(stdout, stderr, assets)
-            .Parse(["skills", "get", "mohist"]).InvokeAsync();
+            .Parse(["skill", "view", "mohist"]).InvokeAsync();
 
         Assert.Equal(1, exitCode);
         Assert.Equal(string.Empty, stdout.ToString());
@@ -279,9 +279,9 @@ public sealed class SkillsContentTests
             getUserHome: () => overrideRoot);
         var assets = new SkillAssetService(_files, _environment, resolver);
 
-        Assert.Equal(0, await BuildRootCommand(listStdout, assets: assets).Parse(["skills", "list"]).InvokeAsync());
-        Assert.Equal(0, await BuildRootCommand(getStdout, assets: assets).Parse(["skills", "get", "mohist"]).InvokeAsync());
-        Assert.Equal(0, await BuildRootCommand(pathStdout, assets: assets).Parse(["skills", "path", "mohist"]).InvokeAsync());
+        Assert.Equal(0, await BuildRootCommand(listStdout, assets: assets).Parse(["skill", "list"]).InvokeAsync());
+        Assert.Equal(0, await BuildRootCommand(getStdout, assets: assets).Parse(["skill", "view", "mohist"]).InvokeAsync());
+        Assert.Equal(0, await BuildRootCommand(pathStdout, assets: assets).Parse(["skill", "path", "mohist"]).InvokeAsync());
 
         var lines = SplitLines(listStdout.ToString());
         Assert.Equal(2, lines.Length);
@@ -290,14 +290,14 @@ public sealed class SkillsContentTests
     }
 
     [Theory]
-    [InlineData("get")]
+    [InlineData("view")]
     [InlineData("path")]
     public async Task UnknownSkill_PrintsClearError_AndExitsNonZero(string command)
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout, stderr).Parse(["skills", command, "unknown-skill"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout, stderr).Parse(["skill", command, "unknown-skill"]).InvokeAsync();
 
         Assert.Equal(1, exitCode);
         Assert.Equal(string.Empty, stdout.ToString());
@@ -312,9 +312,9 @@ public sealed class SkillsContentTests
         var sentinel = Path.Combine(mohistSkillsDir, "sentinel.txt");
         _files.AddFile(sentinel, "keep");
 
-        Assert.Equal(0, await BuildRootCommand().Parse(["skills", "list"]).InvokeAsync());
-        Assert.Equal(0, await BuildRootCommand().Parse(["skills", "get", "mohist"]).InvokeAsync());
-        Assert.Equal(0, await BuildRootCommand().Parse(["skills", "path", "mohist"]).InvokeAsync());
+        Assert.Equal(0, await BuildRootCommand().Parse(["skill", "list"]).InvokeAsync());
+        Assert.Equal(0, await BuildRootCommand().Parse(["skill", "view", "mohist"]).InvokeAsync());
+        Assert.Equal(0, await BuildRootCommand().Parse(["skill", "path", "mohist"]).InvokeAsync());
         Assert.Equal("keep", _files.ReadAllText(sentinel));
     }
 

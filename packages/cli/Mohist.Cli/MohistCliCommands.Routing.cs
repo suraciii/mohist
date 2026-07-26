@@ -18,8 +18,8 @@ internal static class RoutingCommands
         var rule = new Command("rule", "Manage the project's ordered routing rules.");
         rule.Subcommands.Add(BuildCreate(api));
         rule.Subcommands.Add(BuildList(api));
-        rule.Subcommands.Add(BuildShow(api));
-        rule.Subcommands.Add(BuildUpdate(api));
+        rule.Subcommands.Add(BuildView(api));
+        rule.Subcommands.Add(BuildEdit(api));
         rule.Subcommands.Add(BuildArchive(api));
         rule.Subcommands.Add(BuildMove(api));
         return rule;
@@ -78,9 +78,9 @@ internal static class RoutingCommands
         return command;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
-        var command = new Command("show", "Show a routing rule.");
+        var command = new Command("view", "Show a routing rule.");
         var target = new Argument<string>("rule") { Description = "Rule id or name." };
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
         var output = MohistCliCommands.OutputOption();
@@ -96,9 +96,9 @@ internal static class RoutingCommands
         return command;
     }
 
-    private static Command BuildUpdate(MohistCliApi api)
+    private static Command BuildEdit(MohistCliApi api)
     {
-        var command = new Command("update", "Update a routing rule.");
+        var command = new Command("edit", "Update a routing rule.");
         var target = new Argument<string>("rule");
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
         var name = new Option<string?>("--name"); var match = new Option<string?>("--match");

@@ -8,11 +8,10 @@ internal static class RepositoryCommands
     public static Command Build(MohistCliApi api)
     {
         var repository = new Command("repo", "Repository management");
-        repository.Aliases.Add("repository");
 
         repository.Subcommands.Add(BuildList(api));
         repository.Subcommands.Add(BuildAdd(api));
-        repository.Subcommands.Add(BuildUpdate(api));
+        repository.Subcommands.Add(BuildEdit(api));
         repository.Subcommands.Add(BuildSetDefault(api));
         repository.Subcommands.Add(BuildDelete(api));
 
@@ -22,7 +21,6 @@ internal static class RepositoryCommands
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List repositories");
-        cmd.Aliases.Add("ls");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption("table");
         cmd.Options.Add(projectOpt);
@@ -111,9 +109,9 @@ internal static class RepositoryCommands
         return cmd;
     }
 
-    private static Command BuildUpdate(MohistCliApi api)
+    private static Command BuildEdit(MohistCliApi api)
     {
-        var cmd = new Command("update", "Update a repository");
+        var cmd = new Command("edit", "Update a repository");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
         var gitUrlOpt = new Option<string?>("--git-url", "-u") { Description = "Git URL" };
         var baseBranchOpt = new Option<string?>("--base-branch", "-b") { Description = "Base branch" };
@@ -204,8 +202,6 @@ internal static class RepositoryCommands
     private static Command BuildDelete(MohistCliApi api)
     {
         var cmd = new Command("delete", "Delete a repository");
-        cmd.Aliases.Add("remove");
-        cmd.Aliases.Add("rm");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption("table");

@@ -139,14 +139,15 @@ public class CliServerStatusCommandSpecs
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         // `status` was relocated to `mo server status` and must no longer
-        // appear as a peer of `list`/`create`/`show`/`use`/`delete`/`workflow`.
+        // appear as a peer of `list`/`create`/`view`/`use`/`delete`/`workflow`.
         Assert.Contains("list", stdout);
         Assert.Contains("create", stdout);
-        Assert.Contains("show", stdout);
+        Assert.Contains("view", stdout);
         Assert.Contains("use", stdout);
         Assert.Contains("delete", stdout);
         Assert.Contains("workflow", stdout);
         Assert.DoesNotContain("\n  status ", stdout);
+        Assert.DoesNotContain("show", stdout, StringComparison.Ordinal);
     }
 
     [Fact]

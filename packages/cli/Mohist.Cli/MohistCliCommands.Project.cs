@@ -11,7 +11,7 @@ internal static class ProjectCommands
 
         project.Subcommands.Add(BuildList(api));
         project.Subcommands.Add(BuildCreate(api));
-        project.Subcommands.Add(BuildShow(api));
+        project.Subcommands.Add(BuildView(api));
         project.Subcommands.Add(BuildUse(api));
         project.Subcommands.Add(BuildDelete(api));
         project.Subcommands.Add(ProjectWorkflowCommands.Build(api));
@@ -23,7 +23,6 @@ internal static class ProjectCommands
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List all projects");
-        cmd.Aliases.Add("ls");
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
@@ -81,9 +80,9 @@ internal static class ProjectCommands
         return cmd;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("show", "Show project details");
+        var cmd = new Command("view", "Show project details");
         var identifierArg = new Argument<string>("project") { Description = "Project name or ID" };
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Arguments.Add(identifierArg);
@@ -120,8 +119,6 @@ internal static class ProjectCommands
     private static Command BuildDelete(MohistCliApi api)
     {
         var cmd = new Command("delete", "Delete a project");
-        cmd.Aliases.Add("remove");
-        cmd.Aliases.Add("rm");
         var identifierArg = new Argument<string>("project") { Description = "Project name or ID" };
         cmd.Arguments.Add(identifierArg);
         cmd.SetAction(ctx =>

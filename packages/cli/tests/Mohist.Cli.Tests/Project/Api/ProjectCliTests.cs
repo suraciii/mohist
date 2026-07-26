@@ -156,7 +156,7 @@ public class ProjectCliTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["repository", "add", "backend", "--git-url", "git@example.com:backend.git", "--base-branch", "main", "--set-default"],
+            ["repo", "add", "backend", "--git-url", "git@example.com:backend.git", "--base-branch", "main", "--set-default"],
             output,
             error,
             files,
@@ -193,7 +193,7 @@ public class ProjectCliTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["repository", "add", "backend"],
+            ["repo", "add", "backend"],
             output,
             error,
             files,
@@ -228,7 +228,7 @@ public class ProjectCliTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["repository", "add", "backend", "--git-url", "/proj/backend"],
+            ["repo", "add", "backend", "--git-url", "/proj/backend"],
             output,
             error,
             files,

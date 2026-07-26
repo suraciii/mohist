@@ -20,7 +20,6 @@ internal static class LabelCommands
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List the label catalog for the project");
-        cmd.Aliases.Add("ls");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Options.Add(projectOpt);
@@ -204,8 +203,6 @@ internal static class LabelCommands
     private static Command BuildDelete(MohistCliApi api)
     {
         var cmd = new Command("delete", "Delete a label definition from the project catalog");
-        cmd.Aliases.Add("remove");
-        cmd.Aliases.Add("rm");
         var keyArg = new Argument<string>("key") { Description = "Label key to delete" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
 

@@ -32,7 +32,6 @@ internal static class WorkflowCommands
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List Profiles in the current Project");
-        cmd.Aliases.Add("ls");
         var output = MohistCliCommands.OutputOption();
         cmd.Options.Add(output);
         var (project, projectId) = AddProjectOptions(cmd);

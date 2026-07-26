@@ -113,7 +113,7 @@ mo issue list --archived
 mo issue list --all
 
 # 详情
-mo issue show 42
+mo issue view 42
 ```
 
 Web UI 上点 issue card 进详情页，能看到：
@@ -248,7 +248,7 @@ Done 之后，issue 还会留在看板的 Done 列。归档后从看板移走：
 
 ```bash
 mo issue archive 42
-mo issue unarchive 42    # 反悔
+mo issue restore 42      # 反悔
 mo issue list --archived  # 看归档列表
 ```
 
@@ -259,10 +259,10 @@ Web UI 上有 Archive 页。
 没启动的 issue 可以随便改：
 
 ```bash
-mo issue update 42 --title "New title"
-mo issue update 42 --body-file ./new-body.md
-mo issue update 42 --priority p1
-mo issue update 42 --label kind=bug --label area=web
+mo issue edit 42 --title "New title"
+mo issue edit 42 --body-file ./new-body.md
+mo issue edit 42 --priority p1
+mo issue edit 42 --label kind=bug --label area=web
 ```
 
 启动后的 issue 改 body 要谨慎——Inline Agent 已经基于旧 body 在工作。

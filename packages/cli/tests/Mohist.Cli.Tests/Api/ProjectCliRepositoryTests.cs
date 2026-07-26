@@ -35,7 +35,7 @@ public class ProjectCliRepositoryTests
     [Fact]
     public void RepoUpdateHelp_DocumentsProjectAndProjectIdOptions()
     {
-        var help = RenderHelp(["repo", "update", "--help"]);
+        var help = RenderHelp(["repo", "edit", "--help"]);
 
         Assert.Contains("--project", help);
         Assert.DoesNotContain("--project-id", help);
@@ -66,10 +66,12 @@ public class ProjectCliRepositoryTests
 
         Assert.Contains("list", help);
         Assert.Contains("create", help);
-        Assert.Contains("show", help);
+        Assert.Contains("view", help);
         Assert.Contains("use", help);
         Assert.Contains("delete", help);
         Assert.DoesNotContain("repo", help);
+        Assert.DoesNotContain("show", help);
+        Assert.DoesNotContain("update", help);
     }
 
     [Fact]

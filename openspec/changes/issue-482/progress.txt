@@ -1,0 +1,130 @@
+T-001 progress (canonical `mo` command surface)
+
+# Patterns and gotchas discovered
+
+- Root command is registered in `MohistCliCommands.Build` (MohistCliCommands.cs:10-43). Subcommand
+  classes follow `static Command Build(...)` and add their leaves to a parent Command. Editing
+  registrations there is the only entry point for changing what `mo --help` lists.
+
+- Each leaf has its own `BuildX` method. To rename `show → view`, `update → edit`, `unarchive →
+  restore`, etc., rename BOTH the leaf creation `new Command("show", ...)` AND the `BuildX` method
+  name, then update every caller (`root.Subcommands.Add(BuildX(...))` inside the parent). The
+  tests reference the literal command name string, not the method name, so method rename is a
+  pure readability change.
+
+- `Aliases.Add(...)` is what made the old `repository`, `ls`, `rm`, `remove`, `delete`, `update`,
+  `edit`, `unarchive`, `get`, `show` work. Just removing `cmd.Aliases.Add(...)` is enough to
+  reject the legacy path with a parse error and no remote request — no extra handling needed.
+
+- System.CommandLine `RootCommand.Parse(["removed", "sub"])` does NOT always populate
+  `parseResult.Errors` for unknown tokens. The reliable regression check is
+  `MohistCliCommands.RunAsync(["removed", "sub"])` which routes through the canonical
+  parse-error → nearest-command help → exit code 2 path. Assert `Assert.NotEqual(0, exitCode)`
+  AND `Assert.Empty(handler.Requests)` together.
+
+- For `mo agent view <name>` and `mo agent edit <name>`, the CLI needs to resolve the name → id
+  via `GET .../agents?all=true`. Tests that pass a name must respond with a list containing
+  `{ id, name }`. Tests that pass an `agent_<id>` token bypass the list and resolve directly.
+
+- `IssueCliStartReadinessTests` assert the literal guidance text rendered by
+  `PrintCreateGuidance`. After the `update → edit` rename, the guidance text and test
+  assertions both have to be updated in lockstep — the test failure signature is
+  `String: "Mark the issue ready with 'mo issue edit 83 --ready'..."` /
+  `Not found: "mo issue update 83 --ready"`.
+
+- `ResourceOutput.cs` is the JSON vocabulary authority: `JsonSelection.Parse` rejects unknown
+  field names with `JsonSelectionKind.Invalid`. So `mo issue list --json number,nope` already
+  fails locally — the regression test for invalid JSON fields just asserts
+  `Assert.NotEqual(0, exitCode) && Assert.Empty(handler.Requests)`.
+
+# Acceptance criteria checklist
+
+- Root help lists canonical areas (`project`, `repo`, `issue`, `epic`, `label`, `workflow`,
+  `run`, `agent`, `session`, `activity`, `routing`, `runner`, `server`, `service`, `event`,
+  `notification`, `otel`, `skill`, `install`, `update`, `info`) and does NOT list `skills`,
+  `repository`, `opencode`, `config`. Pinned in `CliRootCommandShapeTests` and
+  `CliCanonicalCommandSurfaceSpecs.Root_Help_*`.
+
+- `mo issue view 42`, `mo issue edit 42 --title ...`, `mo issue restore 42` use the canonical
+  paths; legacy `show`/`update`/`unarchive` fail as usage errors. Pinned in
+  `CliCanonicalCommandSurfaceSpecs.{IssueView,IssueEdit,IssueRestore,IssueShow,IssueUpdate,
+  IssueUnarchive}_*`.
+
+- `mo agent view/edit`, `mo project view`, `mo epic view/edit`, `mo session view`,
+  `mo routing rule view/edit`, `mo repo edit` all replace `show`/`update` and reject the
+  legacy action. Pinned in `CliCanonicalCommandSurfaceSpecs`.
+
+- `mo agent model list --runtime <runtime>` replaces `mo opencode models`; `mo opencode` is
+  no longer registered. Pinned in `CliAgentModelListCommandSpecs.OpencodeGroup_IsNotRegistered`
+  + `AgentModelList_*`.
+
+- `mo config` is no longer registered. Pinned in
+  `CliCanonicalCommandSurfaceSpecs.{ConfigRoot,ConfigGet}_IsRejectedAsUsageFailure`.
+
+- `mo skills` is no longer registered; `mo skill` is singular; `get` → `view`. Pinned in
+  `SkillsCommandRegistrationTests.SkillGet_IsNotRegistered`, `SkillUpdate_IsNotRegistered`,
+  `SkillHelp_*`, plus `CliCanonicalCommandSurfaceSpecs.{SkillsPlural,SkillGet}_*`.
+
+- `mo repository` is no longer an alias of `repo`. Pinned in
+  `CliRepositoryCommandSpecs.RepositoryAlias_IsRejectedAsUsageFailure` and
+  `CliCanonicalCommandSurfaceSpecs.RepositoryAlias_IsRejectedAsUsageFailure`.
+
+- `--project-id` rejected locally without remote request; canonical paths preserve request and
+  response semantics. Pinned in `CliCanonicalCommandSurfaceSpecs.ProjectIdFlag_*`.
+
+- `--json <fields>` field discovery works (`CliResourceOutputSpecs`), invalid field fails
+  locally (`CliCanonicalCommandSurfaceSpecs.IssueList_InvalidJsonField_*`), selected
+  projection works (`CliCanonicalCommandSurfaceSpecs.IssueList_SelectedJson_*`).
+
+# Files touched
+
+- `packages/cli/Mohist.Cli/MohistCliCommands.cs` — root registration (removed `OpencodeCommands`
+  and `ConfigProvidersCommands`, renamed `SkillsCommands` → `SkillCommands`).
+- `packages/cli/Mohist.Cli/MohistCliCommands.{Skills,Repository,Project,Issue*,
+  Label,Workflow,Epic,Session,Routing,Agent}.cs` — leaf renames (`show → view`, `update →
+  edit`, `unarchive → restore`) and alias removals (`ls`, `rm`, `remove`, `delete`,
+  `update`, `edit`, `get`, `repository`).
+- `packages/cli/Mohist.Cli/MohistCliCommands.AgentModel.cs` (new) — `mo agent model list
+  --runtime <runtime>` leaf registered under `agent`.
+- `packages/cli/Mohist.Cli/MohistCliCommands.{Opencode,ConfigProviders}.cs` — deleted; their
+  responsibilities are now under `agent model list` and the existing per-resource edit
+  commands.
+- `packages/cli/Mohist.Cli/MohistCliCommands.Issue.CrudWrites.cs` — `PrintCreateGuidance` text
+  updated to reference `mo issue edit <number>`.
+- `packages/cli/Mohist.Cli/SkillInstallService.cs` — stub guidance text updated to
+  `mo skill view <name>`.
+- `packages/cli/Mohist.Cli/skill-data/mohist/SKILL.md` — rewritten to progressive-disclosure
+  form, all commands reference `mo skill view`, `mo issue view/edit/restore`, `mo epic view`,
+  etc.
+- `packages/cli/tests/Mohist.Cli.Tests/` — migrated every `"skills", "..."` /
+  `"issue", "show"/"update"`, etc. to the canonical paths. Tests that asserted alias-parity
+  were converted into "alias rejected as usage failure" tests.
+- `packages/cli/tests/Mohist.Cli.Tests/CliCanonicalCommandSurfaceSpecs.cs` (new) — regression
+  suite for every spec scenario from `specs/cli-command-language/spec.md`.
+- `packages/cli/tests/Mohist.Cli.Tests/CliAgentModelListCommandSpecs.cs` (new) — replaces the
+  old `CliOpencodeModelsCommandSpecs.cs` (deleted) and adds the `OpencodeGroup_IsNotRegistered`
+  guard.
+- `docs/cli-reference.md` — already aligned with canonical paths; no change needed.
+- `docs/{agent-supervision,getting-started,hermes-notifications,issues,repositories,runner,
+  self-host,skills,sub-issues,troubleshooting}.md`, `design/agent-supervision.md`,
+  `design/hermes-webhook.md`, `AGENTS.md`, `CONTRIBUTING.md` — all `mo issue show/update` →
+  `mo issue view/edit`, `mo project show` → `mo project view`, `mo skills get/install/list`
+  → `mo skill view/install/list`, `mo issue unarchive` → `mo issue restore`, `mo config …` /
+  `mo opencode` references removed or replaced.
+
+# Open questions for T-002 / T-003
+
+- T-002 (help) must wire `mo help <topic>` for `output`, `environment`, `exit-codes` and a
+  nearest-command help renderer. Reuse `MohistCliCommands.RunAsync` parse-error branch (lines
+  232-248) as the model.
+
+- T-003 (Skill) must keep the rewritten `mohist/SKILL.md` lean and route every example to leaf
+  help. Every fenced `mo` invocation in packaged Skills must parse against the new command
+  tree — the test harness should call `MohistCliCommands.Build(api, provider).Parse(args)`
+  for each fenced invocation.
+
+# Verification
+
+- `dotnet test --filter FullyQualifiedName~Mohist.Cli.Tests` → 1360 passed, 0 failed.
+- `npm test` → all workspace tests pass: 175 workflow + 1360 cli + 1455 server unit + 32 server
+  arch + 3190 server spec + 5133 web + 1423 runner.

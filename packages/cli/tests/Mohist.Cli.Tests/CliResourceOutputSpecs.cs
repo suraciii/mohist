@@ -71,7 +71,7 @@ public sealed class CliResourceOutputSpecs
             }));
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "7", "--json", "number,title"], output, error, fs, executor);
+            http, ["issue", "view", "7", "--json", "number,title"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         var result = JsonNode.Parse(output.ToString())!.AsObject();
@@ -131,7 +131,7 @@ public sealed class CliResourceOutputSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "7", "--output", "json"], output, error, fs, executor);
+            http, ["issue", "view", "7", "--output", "json"], output, error, fs, executor);
 
         Assert.Equal(2, exit);
         Assert.Empty(output.ToString());
@@ -190,7 +190,7 @@ public sealed class CliResourceOutputSpecs
             }, HttpStatusCode.Conflict));
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["epic", "update", "12", "--title", "Changed", "--project", "proj_test", "--json", "number,title"], output, error, fs, executor);
+            http, ["epic", "edit", "12", "--title", "Changed", "--project", "proj_test", "--json", "number,title"], output, error, fs, executor);
 
         Assert.Equal(1, exit);
         Assert.Empty(output.ToString());

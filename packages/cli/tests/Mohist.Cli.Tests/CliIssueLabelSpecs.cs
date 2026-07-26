@@ -259,7 +259,7 @@ public class CliIssueLabelSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "stream=backend"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "stream=backend"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(2, handler.Requests.Count);
@@ -287,7 +287,7 @@ public class CliIssueLabelSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "-stream"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "-stream"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -308,7 +308,7 @@ public class CliIssueLabelSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "-stream"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "-stream"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -325,7 +325,7 @@ public class CliIssueLabelSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "=x"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "=x"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);

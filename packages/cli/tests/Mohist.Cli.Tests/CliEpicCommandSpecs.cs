@@ -145,7 +145,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "show", "8"], output, error, fileSystem, executor);
+            http, ["epic", "view", "8"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -241,7 +241,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "update", "8", "--title", "New title"], output, error, fileSystem, executor);
+            http, ["epic", "edit", "8", "--title", "New title"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -324,7 +324,7 @@ public class CliEpicCommandSpecs
 
         var stdout = output.ToString();
         Assert.Equal(0, exitCode);
-        foreach (var command in new[] { "list", "create", "show", "update", "link", "unlink", "start", "pause", "resume", "done", "close", "reopen" })
+        foreach (var command in new[] { "list", "create", "view", "edit", "link", "unlink", "start", "pause", "resume", "done", "close", "reopen" })
             Assert.Contains(command, stdout, StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }

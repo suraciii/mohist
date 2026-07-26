@@ -5,7 +5,7 @@ Issue 跑挂了怎么办？这份是速查手册。
 ## 先判断状态
 
 ```bash
-mo issue show <number>
+mo issue view <number>
 ```
 
 或 Web UI 看详情页。关注三个字段：
@@ -59,7 +59,7 @@ mo issue show <number>
 
 ```bash
 mo issue logs <n>      # 看具体错误
-mo issue sessions <n>  # 看 AI 实际在想什么
+mo session list --issue <n>  # 看 AI 实际在想什么
 ```
 
 **解决**：
@@ -80,7 +80,7 @@ mo issue sessions <n>  # 看 AI 实际在想什么
 **排查**：
 
 ```bash
-mo issue sessions <n>   # 看 AI 的挣扎过程
+mo session list --issue <n>   # 看 AI 的挣扎过程
 ```
 
 **解决**：
@@ -144,7 +144,7 @@ mo server status
 **排查**：
 
 ```bash
-mo issue sessions <n>   # 看最后一行
+mo session list --issue <n>   # 看最后一行
 mo server logs          # 看应用级日志（Mohist server 自身的 log tail）
 ```
 
@@ -204,7 +204,7 @@ mo issue rebase <n>     # 主动 rebase
 # 完整诊断
 mo issue logs <n>
 mo issue events <n>
-mo issue sessions <n>
+mo session list --issue <n>
 mo server logs
 
 # 还不行

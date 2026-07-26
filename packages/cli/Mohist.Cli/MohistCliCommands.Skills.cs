@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Mohist.Cli;
 
-internal static class SkillsCommands
+internal static class SkillCommands
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -14,17 +14,17 @@ internal static class SkillsCommands
 
     public static Command Build(IServiceProvider provider)
     {
-        var skills = new Command("skills", "Manage coder agent skills");
+        var skill = new Command("skill", "Manage coder agent skills");
         var assets = provider.GetRequiredService<SkillAssetService>();
         var api = provider.GetRequiredService<MohistCliApi>();
 
-        skills.Subcommands.Add(BuildInstall(provider));
-        skills.Subcommands.Add(BuildList(assets, api));
-        skills.Subcommands.Add(BuildGet(assets, api));
-        skills.Subcommands.Add(BuildPath(assets, api));
-        skills.Subcommands.Add(BuildSync(provider));
+        skill.Subcommands.Add(BuildInstall(provider));
+        skill.Subcommands.Add(BuildList(assets, api));
+        skill.Subcommands.Add(BuildView(assets, api));
+        skill.Subcommands.Add(BuildPath(assets, api));
+        skill.Subcommands.Add(BuildSync(provider));
 
-        return skills;
+        return skill;
     }
 
     private static Command BuildInstall(IServiceProvider provider)
@@ -52,7 +52,7 @@ internal static class SkillsCommands
 
     private static Command BuildSync(IServiceProvider provider)
     {
-        var sync = new Command("sync", "Sync working-tree skill-data into the managed cache so `mo skills get` reflects local edits");
+        var sync = new Command("sync", "Sync working-tree skill-data into the managed cache so `mo skill view` reflects local edits");
         var updater = MohistCliCommands.ResolveSourceCodeUpdater(provider);
         var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
         var sourceOpt = new Option<string?>("--source") { Description = "Source skill-data directory (default: <repo-root>/packages/cli/Mohist.Cli/skill-data)" };
@@ -96,19 +96,19 @@ internal static class SkillsCommands
         return list;
     }
 
-    private static Command BuildGet(SkillAssetService assets, MohistCliApi api)
+    private static Command BuildView(SkillAssetService assets, MohistCliApi api)
     {
-        var get = new Command("get", "Print packaged Mohist coder agent skill guidance");
+        var view = new Command("view", "Print packaged Mohist coder agent skill guidance");
         var nameArgument = new Argument<string?>("name") { Arity = ArgumentArity.ZeroOrOne, Description = "Built-in skill name" };
         var fullOption = new Option<bool>("--full") { Description = "Append packaged references and templates" };
         var jsonOption = MohistCliCommands.JsonSelectionOption();
         var allOption = new Option<bool>("--all") { Description = "Print all visible built-in skills" };
 
-        get.Arguments.Add(nameArgument);
-        get.Options.Add(fullOption);
-        get.Options.Add(jsonOption);
-        get.Options.Add(allOption);
-        get.SetAction(async ctx =>
+        view.Arguments.Add(nameArgument);
+        view.Options.Add(fullOption);
+        view.Options.Add(jsonOption);
+        view.Options.Add(allOption);
+        view.SetAction(async ctx =>
         {
             var name = ctx.GetValue(nameArgument);
             var full = ctx.GetValue(fullOption);
@@ -181,7 +181,7 @@ internal static class SkillsCommands
             return 0;
         });
 
-        return get;
+        return view;
     }
 
     private static Command BuildPath(SkillAssetService assets, MohistCliApi api)

@@ -15,7 +15,6 @@ internal static partial class IssueCommands
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List issues");
-        cmd.Aliases.Add("ls");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var stageOpt = MohistCliCommands.StageOption();
         var labelOpt = MohistCliCommands.LabelFilterOption();
@@ -84,9 +83,9 @@ internal static partial class IssueCommands
         return cmd;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("show", "Show issue details");
+        var cmd = new Command("view", "Show issue details");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption();
