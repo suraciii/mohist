@@ -19,9 +19,8 @@ public sealed class OtlpIngestGate : IOtlpIngestGate, IOtlpIngestGateTestSeam
     public const int TemporaryAdmissionRetryAfterSeconds = 1;
 
     private readonly object _gate = new();
+    private readonly SemaphoreSlim _writerLease = new(1, 1);
     private int _requestLeasesInUse;
-    private bool _writerLeaseInUse;
-    private TaskCompletionSource<bool>? _writerSignal;
     private TaskCompletionSource<bool>? _nextRequestSignal;
 
     public OtlpIngestGate()
@@ -65,53 +64,22 @@ public sealed class OtlpIngestGate : IOtlpIngestGate, IOtlpIngestGateTestSeam
         signalToWake?.TrySetResult(true);
     }
 
-    public Task<OtlpWriterLease> AcquireWriterLeaseAsync(CancellationToken ct)
+    public async Task<OtlpWriterLease> AcquireWriterLeaseAsync(CancellationToken ct)
     {
-        OtlpIngestGate owner = this;
-        TaskCompletionSource<bool>? waiter;
-        lock (_gate)
-        {
-            if (!_writerLeaseInUse)
-            {
-                _writerLeaseInUse = true;
-                return Task.FromResult(new OtlpWriterLease(owner));
-            }
-            _writerSignal ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            waiter = _writerSignal;
-        }
-        return AwaitWriterLeaseAsync(owner, waiter!, ct);
-    }
-
-    private static async Task<OtlpWriterLease> AwaitWriterLeaseAsync(
-        OtlpIngestGate owner,
-        TaskCompletionSource<bool> waiter,
-        CancellationToken ct)
-    {
-        if (waiter.Task.IsCompleted)
-            return new OtlpWriterLease(owner);
-
-        using var registration = ct.Register(static state =>
-        {
-            var source = (TaskCompletionSource<bool>)state!;
-            source.TrySetCanceled();
-        }, waiter);
-
-        await waiter.Task.ConfigureAwait(false);
-        return new OtlpWriterLease(owner);
+        await _writerLease.WaitAsync(ct).ConfigureAwait(false);
+        return new OtlpWriterLease(this);
     }
 
     internal void ReleaseWriterLease()
     {
-        TaskCompletionSource<bool>? signal = null;
-        lock (_gate)
+        try
         {
-            if (!_writerLeaseInUse)
-                throw new InvalidOperationException("No writer lease is held.");
-            _writerLeaseInUse = false;
-            signal = _writerSignal;
-            _writerSignal = null;
+            _writerLease.Release();
         }
-        signal?.TrySetResult(true);
+        catch (SemaphoreFullException ex)
+        {
+            throw new InvalidOperationException("No writer lease is held.", ex);
+        }
     }
 
     /// <summary>

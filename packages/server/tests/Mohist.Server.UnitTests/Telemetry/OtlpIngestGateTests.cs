@@ -64,4 +64,46 @@ public sealed class OtlpIngestGateTests
         var gate = new OtlpIngestGate();
         Assert.Throws<InvalidOperationException>(() => gate.ReleaseRequestLease());
     }
+
+    [Fact]
+    public async Task WriterLease_QueuesContendersAndHandsOffOneAtATime()
+    {
+        var gate = new OtlpIngestGate();
+        var first = await gate.AcquireWriterLeaseAsync(CancellationToken.None);
+
+        var secondTask = gate.AcquireWriterLeaseAsync(CancellationToken.None);
+        var thirdTask = gate.AcquireWriterLeaseAsync(CancellationToken.None);
+
+        Assert.False(secondTask.IsCompleted);
+        Assert.False(thirdTask.IsCompleted);
+
+        first.Dispose();
+        var completed = await Task.WhenAny(secondTask, thirdTask);
+        Assert.True(completed.IsCompletedSuccessfully);
+        Assert.NotEqual(secondTask.IsCompleted, thirdTask.IsCompleted);
+
+        using (await completed)
+        {
+            Assert.False(secondTask.IsCompleted && thirdTask.IsCompleted);
+        }
+
+        using var remaining = await (completed == secondTask ? thirdTask : secondTask);
+    }
+
+    [Fact]
+    public async Task WriterLease_CancellingOneWaiterDoesNotCancelAnother()
+    {
+        var gate = new OtlpIngestGate();
+        var holder = await gate.AcquireWriterLeaseAsync(CancellationToken.None);
+        using var cancellation = new CancellationTokenSource();
+
+        var cancelledTask = gate.AcquireWriterLeaseAsync(cancellation.Token);
+        var waitingTask = gate.AcquireWriterLeaseAsync(CancellationToken.None);
+
+        cancellation.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => cancelledTask);
+
+        holder.Dispose();
+        using var acquired = await waitingTask;
+    }
 }

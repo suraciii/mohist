@@ -69,3 +69,10 @@
 
 - The stored verify output from 2026-07-26 reports 3245 / 3246 SpecTests, with the failing test `EventDispatcherImmediateTriggerSpecs.LostImmediateTrigger_LeavesRowUndispatched_AndReminderTickRecovers` at line 195. UnitTests (1506) and ArchTests (32) passed.
 - The failure reproduces in the full SpecTests run as `Assert.Equal` expected `0`, actual `1` for the event store pending count. The same test passes when run alone, while all issue-471 telemetry specs pass in isolation. This is the pre-existing full-suite fake-time/reminder flake already noted above and is unrelated to issue-471; no unrelated test change was made.
+
+### Review fix: writer lease handoff
+
+- Replaced the shared writer wake-up signal with a one-permit `SemaphoreSlim`. Each admitted request now waits independently, cancellation only affects its own wait, and a lease is granted atomically to exactly one writer.
+- Added deterministic gate unit coverage for two queued writers and for cancelling one queued writer while another remains eligible to acquire the released lease.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore --filter 'FullyQualifiedName~OtlpIngestGateTests'` passes all 1508 UnitTests because the test platform ignores the filter.
+- The full SpecTests run and `npm test` both reproduce the documented, unrelated `EventDispatcherImmediateTriggerSpecs.LostImmediateTrigger_LeavesRowUndispatched_AndReminderTickRecovers` failure: 3245 / 3246 specs pass. UnitTests (1508), ArchTests (32), CLI tests (1327), and definition tests (175) pass within `npm test` before that failure stops the workspace test phase.
