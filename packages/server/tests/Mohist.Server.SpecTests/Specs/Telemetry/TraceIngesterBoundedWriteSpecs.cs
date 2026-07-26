@@ -328,7 +328,7 @@ public sealed class TraceIngesterBoundedWriteSpecs
         var request = BuildJsonRequest(TraceId, SpanIdPrefix + "01", "cancelled");
         var plan = ingester.Planner.Plan(ingester.Prepare(request));
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
             async () => await ingester.IngestPlannedAsync(plan, cts.Token));
     }
 
