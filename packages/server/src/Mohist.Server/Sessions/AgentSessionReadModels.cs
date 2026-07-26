@@ -23,7 +23,7 @@ public sealed record AgentUsageDto(
 /// One sample of the bounded context-usage history exposed on
 /// <see cref="AgentUsageDto.ContextUsageHistory"/> so the Pulse
 /// zone can render a context-usage trend mini-chart from the live
-/// activity feed (issue-245 T-002 / design D5). The list is omitted
+/// activity feed. The list is omitted
 /// from the wire when empty (<c>JsonIgnoreCondition.WhenWritingNull</c>).
 /// </summary>
 public sealed record ContextUsageHistoryEntryDto(
@@ -173,7 +173,7 @@ public sealed record WorkflowSessionDto(
 /// Read shape for a generic (non-workflow) <see cref="Sessions.Domain.AgentSession"/>
 /// as surfaced by the agent-scoped list endpoint
 /// (<c>GET /api/projects/{projectRef}/agents/{agentRef}/sessions</c>).
-/// Issued-130 T-002 / design D2: the status field carries one of the
+/// the status field carries one of the
 /// spec vocabulary values (<c>running</c> / <c>completed</c> / <c>failed</c>
 /// / <c>stopped</c>) so the workbench can derive the four primary state
 /// groupings (recent / running / failed / ended) directly from the list
@@ -197,7 +197,7 @@ public sealed record AgentSessionListItemDto(
 
 /// <summary>
 /// Optional envelope of context references recorded on a generic
-/// AgentSession at launch (issue-130 T-002). Each field is null when the
+/// AgentSession at launch. Each field is null when the
 /// session carried no such reference; the envelope itself is null when
 /// the session had no context references at all.
 /// </summary>
@@ -212,7 +212,7 @@ public sealed record AgentSessionListContextRefsDto(
 /// (<c>GET /api/projects/{projectRef}/agent-sessions/{sessionId}</c>),
 /// surfaced as the
 /// <see cref="Sessions.Services.AgentSessionQuerier.GetGenericSessionSummaryAsync"/>
-/// response. Issue-130 T-003 / design D4: the summary carries the
+/// response. The summary carries the
 /// resolved Agent profile identity (id + name), the session status in
 /// the spec vocabulary (<c>running</c> / <c>completed</c> / <c>failed</c>
 /// / <c>stopped</c>), the created / last-activity timestamps, the
@@ -253,7 +253,7 @@ public sealed record GenericAgentSessionSummaryDto(
 /// association read endpoints
 /// (<c>GET /api/projects/{projectRef}/issues/{number}/agent-sessions</c>
 /// and <c>GET /api/projects/{projectRef}/epics/{epicRef}/agent-sessions</c>).
-/// Issue-130 T-006: each entry carries the session id, the agent id and
+/// each entry carries the session id, the agent id and
 /// agent name, the status, the created timestamp, and a link back to the
 /// session summary route (<c>GET .../agent-sessions/{sessionId}</c>).
 /// <see cref="SessionLink"/> is a relative URL path the client can use
@@ -269,7 +269,7 @@ public sealed record AgentSessionContextAssociationDto(
 
 /// <summary>
 /// Optional envelope of context references recorded on a generic
-/// AgentSession at launch (issue-130 T-003 / design D4). Each field is
+/// AgentSession at launch. Each field is
 /// null when the session carried no such reference; the envelope itself
 /// is null when the session had no context references at all, mirroring
 /// <see cref="AgentSessionListContextRefsDto"/> but kept as a distinct

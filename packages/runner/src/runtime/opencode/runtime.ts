@@ -9,7 +9,7 @@
  *   - the readiness check (server health plus global event subscription);
  *   - error normalization to a small Mohist result set;
  *   - permission authorization (no auto-approve, no Workflow Approval);
- *   - Workflow Inline Agent turn execution (T-004) over the native
+ *   - Workflow Inline Agent turn execution over the native
  *     `client.session.*` surface.
  *
  * Callers depend only on Mohist-owned request/result types from
@@ -50,9 +50,8 @@ export interface OpenCodeRuntimeDeps {
   readonly rebuildDelayMs?: number
   /**
    * Optional override for the provider-error failure policy. Defaults
-   * to the design defaults (quota/credit/billing pattern set,
-   * consecutive-retry threshold 5). See `errors.ts` and
-   * `design/runtimes/opencode.md`「Provider 错误失败策略」.
+   * to the quota/credit/billing pattern set with a consecutive-retry
+   * threshold of 5. See `errors.ts`.
    */
   readonly providerErrorPolicy?: RuntimeProviderErrorPolicy
 }
@@ -115,8 +114,7 @@ export class OpenCodeRuntime {
 
   /**
    * Resolve or create a physical Session via `client.session.create()`.
-   * In T-002 this is the first boundary call that exercises the
-   * runtime; the full turn execution lands in T-004. The result is
+   * The result is
    * already a Mohist-owned shape (no SDK DTO leaks).
    */
   async resolveSession(
@@ -273,7 +271,7 @@ export class OpenCodeRuntime {
   /**
    * Dispatch a Follow-up prompt to an existing Runtime Session.
    *
-   * Wraps `client.session.promptAsync` (issue-410 T-003 / design D3).
+   * Wraps `client.session.promptAsync`.
    * The runtime verifies the persisted binding still resolves to a
    * live physical Session before dispatching; a stale binding surfaces
    * as `missing-session` with the existing Reset hint. The dispatch
@@ -361,7 +359,7 @@ export class OpenCodeRuntime {
   /**
    * Cancel an active Runtime Session turn.
    *
-   * Wraps `client.session.abort` (issue-410 T-003 / design D3). The
+   * Wraps `client.session.abort`. The
    * runtime resolves the binding first; a stale binding surfaces as
    * `missing-session` with the existing Reset hint. `cancelled: true`
    * is the authoritative reply — whether the agent honours the

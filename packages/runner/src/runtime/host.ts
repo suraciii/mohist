@@ -54,8 +54,6 @@ export interface ReportResult {
  * works still executing or awaiting ack, or the next poll's report will
  * drop them and the server will re-dispatch — a rollback storm that
  * duplicates execution and eventually fails works as runner-lost.
- * (design/workflow/scheduling.md §Poll Reconciliation — Implementation
- * constraint.)
  */
 interface InFlightEntry {
   /** The execution promise; resolves when the work settles (success or failure). */
@@ -75,7 +73,7 @@ interface AwaitingAckEntry {
  * Builds the work key used to dedupe in-flight / awaiting-ack tracking.
  * `ownerKind:ownerId:workId`. The ownerId is the agentJobId for agent-job
  * work, the workflowRunId for workflow work. Matches the server-side
- * `workKey` convention (design/workflow/scheduling.md §Interfaces).
+ * `workKey` convention.
  */
 function workKey(work: DispatchWorkItem): string {
   const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
@@ -131,8 +129,8 @@ export class RunnerHost {
   private piRuntime: PiRuntime | null = null
   private providerPolicyDiagnostic: string | null = null
   /**
-   * Per-runner journal for SessionCommand dedup/recovery
-   * (issue-451 T-004 / design D4). Shared with `RunnerSignalRClient`
+   * Per-runner journal for SessionCommand dedup/recovery.
+   * Shared with `RunnerSignalRClient`
    * so its `registerSessionCommandHandler` reuses the in-flight
    * dedup + on-disk recovery the host owns.
    */
@@ -144,9 +142,9 @@ export class RunnerHost {
   // immediate heartbeat it triggers.
   private activeSignal: AbortSignal | null = null
 
-  // Step 10 of design/eventbus.md: WorkExecutor is created once per host
-  // (not per work item). The previous design recreated it for every
-  // executeAndReport call, so shared lifecycle state was always cold.
+  // WorkExecutor is created once per host
+  // (not per work item): recreating it for every
+  // executeAndReport call would leave shared lifecycle state always cold.
   private workExecutor: WorkExecutor | null = null
 
   // Process-lifetime reported set (see workKey/InFlightEntry doc above).
@@ -169,9 +167,8 @@ export class RunnerHost {
     this.connection = new ServerConnection(options, this.buildGitHash)
     // Runner-local registry of workspaces this host has materialized.
     // Loaded eagerly at startup so the in-memory cache is hot before the
-    // first dispatch or SignalR RPC (per T-002 acceptance criteria:
-    // "Registry is persisted and reloaded on runner restart; active
-    // entries remain active until a terminal transition is observed").
+    // first dispatch or SignalR RPC: active
+    // entries remain active until a terminal transition is observed.
     // The registry is shared with WorkspaceManager (for materialize /
     // verify registration hooks) and RunnerSignalRClient (for the
     // RemoveWorkspace entry-removal hook).
@@ -352,7 +349,7 @@ export class RunnerHost {
     } catch (error) {
       // Cleanup is best-effort; the next tick retries. fetchConfig failures
       // (network blip, server restart) flow through this same catch so the
-      // loop stays resilient without a stale-policy fallback (issue-359 D4).
+      // loop stays resilient without a stale-policy fallback.
       console.error("workspace cleanup loop failed:", error)
     }
   }
@@ -376,7 +373,7 @@ export class RunnerHost {
     // recovered, which is the cheapest moment to ask the server for the
     // truth about every active registry entry. Push may also have queued
     // events during the disconnect window; this catch-all reconciles
-    // whatever push did not cover (design D2 backstop).
+    // whatever push did not cover.
     const signal = this.activeSignal
     if (signal) {
       void this.runConvergenceOnce(signal)
@@ -729,8 +726,7 @@ export class RunnerHost {
     // Owner-id mirrors `artifact-side-effects.ts:107`: agent-job
     // dispatches upload under `work.agentJobId`, workflow dispatches
     // under `work.workflowRunId`. Routing through a single uploadTaskLog
-    // call keeps the task-log channel symmetric with artifact uploads
-    // (design D7).
+    // call keeps the task-log channel symmetric with artifact uploads.
     const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
     const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
 
@@ -738,7 +734,7 @@ export class RunnerHost {
      * Upload a pre-built task-log batch via the independent task-log
      * channel. Best-effort: a failed upload is logged and swallowed; the
      * report (which carries the verdict) is NEVER blocked or failed by
-     * a flush failure (design D6 / D1).
+     * a flush failure.
      *
      * The terminal batch always uploads; incremental batches skip the
      * network round-trip when there is nothing to send (drain returned
@@ -780,12 +776,9 @@ export class RunnerHost {
      * Terminal reconciliation batch. Phase 1 retained behaviour: the
      * full snapshot is uploaded via the terminal-timeout constant and
      * the server dedups by `seq` so a failed incremental upload is
-     * recovered (design D1 / spec
-     * `a-failed-incremental-upload-is-reconciled-by-the-terminal-batch`).
+     * recovered.
      * The collector may be `null` when work failed before any phase
-     * ran; even an empty batch is allowed to flow through (T-001
-     * spec: "A task with no captured lines returns { lines: [] } and
-     * never an error").
+     * ran; even an empty batch is allowed to flow through.
      */
     const flushTaskLog = async (collector: import("./task-log.js").TaskLogCollector | null) => {
       if (!collector) return
@@ -797,8 +790,7 @@ export class RunnerHost {
      * Incremental batch primitive. Drains the collector (entries with
      * `seq > watermark`), and when there is something new, uploads it
      * under the larger incremental-timeout constant. An empty drain
-     * short-circuits — no network round-trip is issued (design D1 /
-     * spec `an-empty-increment-produces-no-upload`).
+     * short-circuits — no network round-trip is issued.
      */
     const flushIncrementalTaskLog = async (collector: import("./task-log.js").TaskLogCollector | null) => {
       if (!collector) return
@@ -827,8 +819,7 @@ export class RunnerHost {
 
     // Start the incremental flush trigger alongside executeWithLog and
     // stop it BEFORE the terminal flush so a final drain cannot race
-    // the terminal batch (design D1 / spec
-    // `executeAndReport-starts-stops-the-trigger-around-the-work-lifecycle`).
+    // the terminal batch.
     // The trigger fires on either an elapsed interval since the last
     // fire or a reached line-count threshold of NEW (un-drained) lines
     // — the latter is checked via `noteAppend`, which the collector
@@ -856,7 +847,7 @@ export class RunnerHost {
       // Flush BEFORE the caller reports so the report carries the verdict
       // while the (best-effort) upload runs in parallel with the verdict
       // round-trip. Errors are logged and swallowed — they never block
-      // or fail the result (design D6).
+      // or fail the result.
       await flushTaskLog(execution.collector)
       return execution.result
     } finally {
@@ -936,7 +927,7 @@ const TASK_LOG_UPLOAD_TIMEOUT_MS = 250
 /**
  * Maximum time an incremental task-log upload is allowed to take.
  * Distinct from the terminal-batch timeout because incremental batches
- * are smaller but the rail tolerates more slack (design D1). Larger
+ * are smaller but the rail tolerates more slack. Larger
  * than the terminal timeout because we accept second-level latency for
  * the live channel.
  */
@@ -945,7 +936,7 @@ const TASK_LOG_INCREMENTAL_UPLOAD_TIMEOUT_MS = 5_000
 /**
  * Wall-clock interval between incremental flush trigger fires. The
  * trigger fires regardless of whether new lines have arrived — an
- * empty drain then short-circuits without an upload (design D1).
+ * empty drain then short-circuits without an upload.
  */
 const TASK_LOG_FLUSH_INTERVAL_MS = 1_500
 
@@ -953,7 +944,7 @@ const TASK_LOG_FLUSH_INTERVAL_MS = 1_500
  * Threshold on the count of new (un-drained) lines buffered past the
  * sent-seq watermark. Crossing this threshold on a write fires the
  * trigger eagerly, so a chatty command does not have to wait for the
- * interval to see its tail in the web view (design D1).
+ * interval to see its tail in the web view.
  */
 const TASK_LOG_FLUSH_LINE_THRESHOLD = 200
 

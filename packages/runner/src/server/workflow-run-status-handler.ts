@@ -1,11 +1,10 @@
-// Issue-313 T-008 / design P7 / D2 / D3 / D5: the server-pushed terminal
-// `ReceiveWorkflowRunStatus` SignalR method is extracted from
-// `runner-signalr.ts` into a free-function
-// `registerWorkflowRunStatusHandler(conn, deps)` so the cluster's
-// dependency surface is explicit (D3) and so the registry transition
+// The server-pushed terminal
+// `ReceiveWorkflowRunStatus` SignalR method is registered through the
+// free-function `registerWorkflowRunStatusHandler(conn, deps)` so the
+// cluster's dependency surface is explicit and the registry transition
 // path can be exercised independently of the other push handlers.
 //
-// Behaviour is byte-identical to the inline implementation:
+// Behaviour:
 //   - drops on null/undefined payload, missing/empty `workflowRunId`,
 //     non-terminal status, or unregistered `registry`
 //   - terminal status (`Completed` / `Stopped`) →

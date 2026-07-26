@@ -56,7 +56,7 @@ internal static class TranscriptEventSummaryProjector
             // Reason and category MUST come from the same latest fact so
             // a current failure reason cannot be paired with a category
             // left by an older Runtime Session lineage entry
-            // (issue-449 design decision 4).
+            //.
             failureReason = AgentSessionJsonHelper.GetStringProp(payload, "failureReason");
             failureCategory = AgentSessionJsonHelper.GetStringProp(payload, "failureCategory");
         }

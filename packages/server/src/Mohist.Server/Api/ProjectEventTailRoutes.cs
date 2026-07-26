@@ -7,7 +7,7 @@ namespace Mohist.Server.Api;
 
 /// <summary>
 /// NDJSON streaming tail of the project-scoped live event envelope
-/// (issue-413 T-002). The endpoint compiles the optional
+///. The endpoint compiles the optional
 /// <c>?match=</c> expression as the single authority (400 with a
 /// structured location diagnostic before any stream on failure), opens a
 /// transient strictly project-scoped subscription against
@@ -120,7 +120,7 @@ public static class ProjectEventTailRoutes
 /// <c>time</c>, <c>subject</c>, <c>specversion</c>) plus context
 /// extensions as a flat object. The payload (<c>data</c>) is
 /// intentionally omitted — matching is envelope-only
-/// (<c>specs/event-envelope-matching</c>) and the tail observes only the
+/// and the tail observes only the
 /// envelope.
 /// </summary>
 public sealed record CloudEventTailDto(

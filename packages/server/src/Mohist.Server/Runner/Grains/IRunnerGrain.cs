@@ -37,7 +37,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task<AgentJobPollState> ReconcileAgentJobsAsync(List<string> reportedWorkKeys);
     /// <summary>
     /// Marks the runner present. Poll IS the heartbeat under the
-    /// reconciliation model (design/workflow/scheduling.md §Supervision): the
+    /// reconciliation model: the
     /// DispatchService calls this on every poll; the HTTP heartbeat degrades
     /// to an info-refresh channel.
     /// </summary>
@@ -185,7 +185,7 @@ public static class WorkDispatchOwnerKinds
 /// <summary>
 /// The process's full level state, sent in every poll body. The DispatchService
 /// reconciles <c>desired − reported</c> to redeliver lost dispatches and decide
-/// new claims (design/workflow/scheduling.md §Poll Reconciliation).
+/// new claims.
 /// </summary>
 [GenerateSerializer]
 public sealed record RunnerPollRequest(
@@ -207,8 +207,7 @@ public sealed record RunnerPollAdmission(
 /// <summary>
 /// The dispatches rendered for this poll: redeliveries (desired − reported) plus
 /// new claims against spare capacity. Multiple dispatches per poll replace the
-/// old one-dispatch-per-poll limit (design/workflow/scheduling.md §Poll
-/// Reconciliation step ⑤).
+/// old one-dispatch-per-poll limit.
 /// </summary>
 [GenerateSerializer]
 public sealed record RunnerPollResponse(
@@ -233,8 +232,8 @@ public record WorkResult(
     [property: Id(6)] ExecutionError? Error = null)
 {
     /// <summary>
-    /// Flattened <c>Error.Code</c> for cross-domain readers (issue-449
-    /// T-001): AgentJobGrain projects the runner failure category
+    /// Flattened <c>Error.Code</c> for cross-domain readers:
+    /// AgentJobGrain projects the runner failure category
     /// without depending on the Workflow domain's
     /// <c>ExecutionError</c> type. Returns <c>null</c> when the
     /// dispatcher payload omitted the <c>Error</c> block.

@@ -7,7 +7,7 @@ namespace Mohist.Server.Events.Hub;
 
 /// <summary>
 /// Bus subscription that drives the project-scoped live event tail
-/// endpoint (<c>GET /api/projects/{projectRef}/events/tail</c>, issue-413).
+/// endpoint (<c>GET /api/projects/{projectRef}/events/tail</c>).
 /// Subscribes to <c>com.mohist.*</c> and forwards every envelope to
 /// <see cref="Publish"/>, which applies strict project isolation (envelope
 /// <c>projectid</c> must equal the tail's project; absent ⇒ skip) and the
@@ -33,8 +33,7 @@ namespace Mohist.Server.Events.Hub;
 /// <para>
 /// <b>Process-local seam.</b> <see cref="ActiveSubscriptionCount"/>
 /// reflects tails opened against this in-process singleton. Multi-silo
-/// tails are tracked in <c>design/event-protocol.md</c> as a known
-/// limitation.
+/// tailing is a known limitation.
 /// </para>
 /// </remarks>
 [Subscription(Type = "com.mohist.*")]

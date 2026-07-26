@@ -58,7 +58,7 @@ public sealed record WorkflowIssueContext(
     [property: Id(2)] int? EpicNumber);
 
 /// <summary>
-/// issue-417 T-006 (D4): immutable start snapshot carried by the
+/// immutable start snapshot carried by the
 /// <c>IssueWorkStarted</c> durable event. Captured at the moment the
 /// Issue transaction commits, it is replayed verbatim into the
 /// WorkflowRun so dispatch/review/rebase read run-owned repository

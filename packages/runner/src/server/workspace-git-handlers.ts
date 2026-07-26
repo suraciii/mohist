@@ -15,14 +15,12 @@ import {
   parseNumstatTotal,
 } from "./git-parsers.js"
 
-// Issue-313 T-007 / design P6 / D3 / D4 / D6: the five git workspace
+// The five git workspace
 // query handlers (`GetDiff` / `GetCommits` / `GetCommitDiff` /
-// `GetWorkspaceStatus` / `GetFileContent`) used to live inline in
-// `runner-signalr.ts`. They are extracted into a free-function
-// `registerWorkspaceGitHandlers(conn, deps)` so the cluster's
-// dependency surface is explicit (design D3) and so future tests
-// can wire up a direct dependency injection without going through the
-// module-level setters.
+// `GetWorkspaceStatus` / `GetFileContent`) are registered through the
+// free-function `registerWorkspaceGitHandlers(conn, deps)` so the cluster's
+// dependency surface is explicit and tests can wire up direct
+// dependency injection without going through module-level setters.
 //
 // Behaviour is byte-identical to the inline implementation:
 //   - worktree probe (`pathExists` + `rev-parse --is-inside-work-tree`)
@@ -31,16 +29,16 @@ import {
 //   - commitCount fallback to 0 on non-zero exit
 //   - numstat / ahead-behind / log parser toleration
 //   - not-found sentinels (`null` / `{ exists: false }` / `{ base: null, head: null }`)
-//   - per-handler `new AbortController()` local pattern (design D6 — kept
+//   - per-handler `new AbortController()` local pattern (kept
 //     to minimise behaviour drift even though the signal is never fired)
 //
 // Test seams: `setRunnerSignalRGitRunnerForTest` and
 // `setRunnerSignalRExistsCheckerForTest` mutate the module-level
-// `runGitCommand` / `pathExists` bindings here (per design D4 — the
+// `runGitCommand` / `pathExists` bindings here (the
 // setter lives where the binding lives). The handlers read those
 // bindings on every invocation through the closures below; that is
-// what makes T-006's existing `findHandler` tests keep working after
-// the extraction. `runner-signalr.ts` re-exports both setters so the
+// what keeps the existing `findHandler` tests working.
+// `runner-signalr.ts` re-exports both setters so the
 // existing `from "../src/server/runner-signalr.js"` test imports stay
 // zero-diff.
 //
@@ -95,7 +93,7 @@ export function registerWorkspaceGitHandlers(
   // captured at registration time). `deps.runCommand` / `deps.pathExists`
   // are honored only when the caller provides them, which `runner-signalr.ts`
   // does NOT — it always passes the bare defaults, leaving the module-level
-  // bindings as the test seam (design D4).
+  // bindings as the test seam.
   async function runGit(workDir: string, args: string[], signal: AbortSignal, options?: CommandLineOptions) {
     if (deps.runCommand) return deps.runCommand("git", args, workDir, signal, undefined, options)
     return runGitCommand("git", args, workDir, signal, undefined, options)

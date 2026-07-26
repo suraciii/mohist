@@ -5,7 +5,7 @@ using Mohist.Server.Infrastructure;
 namespace Mohist.Server.Workflow.Grains;
 
 /// <summary>
-/// issue-477 T-001: narrow Project-scoped, non-reentrant application
+/// narrow Project-scoped, non-reentrant application
 /// process manager. Mirrors the design pattern of
 /// <c>IssueRepositoryCoordinatorGrain</c> but owned by the Workflow
 /// profile reference surface: Project default writes, WorkflowRun

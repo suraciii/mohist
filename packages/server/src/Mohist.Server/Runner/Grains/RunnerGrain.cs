@@ -16,7 +16,7 @@ namespace Mohist.Server.Runner.Grains;
 
 /// <summary>
 /// Presence, capacity, and closeout for a runner process. Under the
-/// reconciliation model (design/workflow/scheduling.md) this grain holds NO
+/// reconciliation model this grain holds NO
 /// workflow work records — the workflow run IS the ledger, and the stateless
 /// <see cref="Services.DispatchService"/> computes dispatches per poll. This
 /// grain retains only:

@@ -19,8 +19,8 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync();
 
     /// <summary>
-    /// Idempotent routed-launch preparation entry point (issue-449
-    /// design decisions 1-3). The caller passes the fully-resolved
+    /// Idempotent routed-launch preparation entry point. The caller
+    /// passes the fully-resolved
     /// <see cref="RoutedAgentLaunchPlan"/> it just computed from the
     /// event lineage; the grain registers a durable recovery reminder,
     /// persists the canonical plan (or its preflight-failed equivalent),
@@ -99,8 +99,8 @@ public static class AgentJobFailureReasons
 
     /// <summary>
     /// Stable reason code for routed-launch preflight failures where
-    /// no AgentJob dispatch should be issued (issue-449 design
-    /// decision 2). Surfaced verbatim on the AgentSession terminal
+    /// no AgentJob dispatch should be issued. Surfaced verbatim on the
+    /// AgentSession terminal
     /// close payload and on the issue event feed.
     /// </summary>
     public const string WorkspaceUnavailable = "workspace-unavailable";
@@ -121,7 +121,7 @@ public enum AgentJobStatus
 /// preflight-failed equivalent) before any Session open or dispatch
 /// attempt; redelivery always reads back the same canonical plan, so a
 /// later delivery cannot overwrite the first delivery's resolved
-/// workspace or lineage (issue-449 design decisions 1-3).
+/// workspace or lineage.
 ///
 /// <para>
 /// <see cref="SessionId"/> is the stable AgentSession id minted from the
@@ -141,8 +141,8 @@ public enum AgentJobStatus
 /// </para>
 ///
 /// <para>
-/// <see cref="Runtime"/> is the resolved execution backend (issue-452
-/// design D2). It is captured here so editing the Agent's backend
+/// <see cref="Runtime"/> is the resolved execution backend. It is
+/// captured here so editing the Agent's backend
 /// config after launch cannot change the in-flight execution; recovery
 /// reuses the snapshotted runtime rather than re-reading mutable
 /// Agent config. Field id is append-only (next free after Variant /
@@ -174,7 +174,7 @@ public sealed record RoutedAgentLaunchPlan(
 
 /// <summary>
 /// Whether the canonical routed-launch plan is executable or already
-/// decided as preflight-failed (issue-449 design decision 2). The
+/// decided as preflight-failed. The
 /// AgentJob grain refuses to dispatch <see cref="PreflightFailed"/>.
 /// </summary>
 public enum RoutedLaunchDisposition
@@ -200,7 +200,7 @@ public sealed record AgentJobInput(
     [property: Id(3)] string? ProjectId = null,
     /// <summary>
     /// Resolved execution backend snapshot captured at launch time
-    /// (issue-452 design D2). Null only on raw-prompt-only validation
+    ///. Null only on raw-prompt-only validation
     /// dispatches that never resolve an Agent profile; resolved
     /// launches always pin the runtime (defaulting to
     /// <c>AgentConfigSchema.OpenCodeRuntime</c>) so the runner

@@ -10,7 +10,7 @@ using Mohist.Workflow.Definition;
 namespace Mohist.Server.Workflow.Services;
 
 /// <summary>
-/// issue-477 T-001: collection-aware WorkflowProfile provider. Built-in
+/// collection-aware WorkflowProfile provider. Built-in
 /// Profiles are served in-memory from <see cref="WorkflowProfileCatalog"/>;
 /// custom Profiles are persisted to <see cref="WorkflowProfileRecordRow"/>.
 /// The provider is the only authority for membership, so the coordinator

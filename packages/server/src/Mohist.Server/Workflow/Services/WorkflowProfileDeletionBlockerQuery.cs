@@ -6,7 +6,7 @@ using Mohist.Server.Infrastructure.Hosting;
 namespace Mohist.Server.Workflow.Services;
 
 /// <summary>
-/// issue-477 T-001: deletion-blocker projection for the WorkflowProfile
+/// deletion-blocker projection for the WorkflowProfile
 /// collection. Mirrors <see cref="Mohist.Server.Project.Services.RepositoryDeletionBlockerQuery"/>'s
 /// shape: a single Project-scoped projection that issues one read each
 /// for the Project default, the Issue explicit selections (including

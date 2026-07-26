@@ -1,7 +1,7 @@
 namespace Mohist.Server.Project.Domain;
 
 /// <summary>
-/// issue-417 T-004: receipt persisted alongside the Project aggregate
+/// receipt persisted alongside the Project aggregate
 /// when a repository command is committed. Mirrors
 /// <see cref="Mohist.Server.Issue.Domain.IssueRepositoryBindingReceipt"/>
 /// but tracks Project-scoped repository transitions: add, metadata

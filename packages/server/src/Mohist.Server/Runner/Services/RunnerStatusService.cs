@@ -127,7 +127,7 @@ public class RunnerStatusService : IScopedService
         var connectionState = DeriveConnectionState(info.RunnerId);
         var status = DeriveStatus(info, runtime, connectionState, now);
 
-        // Runners are global execution resources (issue-222 Decision 4): the
+        // Runners are global execution resources: the
         // RunnerInfo.ProjectId field is preserved on the wire for runner-line
         // compatibility but does not bind the runner to any project. The
         // scope view is therefore always "global".

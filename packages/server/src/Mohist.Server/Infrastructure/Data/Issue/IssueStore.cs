@@ -101,7 +101,7 @@ public class IssueStore : IIssueStore
         EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueStore), _backgroundTasks);
 
     /// <summary>
-    /// issue-477: when a Profile deletion commits between the Issue participant's
+    /// When a Profile deletion commits between the Issue participant's
     /// existence check and its <c>SaveChangesAsync</c>, the restrictive foreign key
     /// on <c>WorkflowProfileIdKey</c> rejects the write. Translate that race into the
     /// retryable <see cref="WorkflowProfileNotFoundException"/> so the coordinator

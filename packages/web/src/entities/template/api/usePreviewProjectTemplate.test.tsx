@@ -6,8 +6,7 @@ import { usePreviewProjectTemplate, type ProjectTemplatePreviewer } from '..'
 
 // react-query mutations resolve through notifyManager's scheduled timers;
 // advance the clock ourselves under fake timers instead of polling wall-clock
-// time (waitFor's default 1000ms is too tight on slow CI — design/testing.md:
-// advance fake time, don't poll harder).
+// time (waitFor's default 1000ms is too tight on slow CI).
 async function flush() {
   await vi.advanceTimersByTimeAsync(1000)
 }

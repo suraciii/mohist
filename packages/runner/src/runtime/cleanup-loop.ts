@@ -22,7 +22,7 @@ export interface CleanupLoopResult {
   // Eligible entries resolved to the terminal `stuck` phase this tick
   // because a pre-delete guard deterministically refused them. Such an
   // entry leaves the eligible set, so it is neither re-evaluated nor
-  // re-warned on subsequent ticks (issue-423).
+  // re-warned on subsequent ticks.
   stuckResolved: number
   workspaceUsageBytes: number | null
 }
@@ -55,7 +55,7 @@ export class CleanupLoop {
     const eligible = this.registry.list().filter((e) => e.phase === "eligible")
     if (eligible.length === 0) return result
 
-    // Resolution pass (issue-423): give a guard-refused eligible entry a
+    // Resolution pass: give a guard-refused eligible entry a
     // deterministic exit so it is not re-evaluated and re-warned every
     // tick. A guard refusal is deterministic (identical outcome on every
     // tick), so it MUST NOT be retried indefinitely. This pass runs

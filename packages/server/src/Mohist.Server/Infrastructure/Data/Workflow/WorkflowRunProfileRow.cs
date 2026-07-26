@@ -12,8 +12,8 @@ public class WorkflowRunProfileRow
     /// <summary>
     /// Initialization-default VariableBundle JSON. Entries here resolve
     /// below Project, Issue, explicit Run, and selected-stage overlays so
-    /// any explicit write wins. Issue-474 T-002 seeds
-    /// <c>vars.archive = ""</c> here on WorkflowRun creation; the marker is
+    /// any explicit write wins. <c>vars.archive = ""</c> is seeded
+    /// here on WorkflowRun creation; the marker is
     /// removed once the key is set by an explicit Run write (setVars, PUT,
     /// or PATCH).
     /// </summary>

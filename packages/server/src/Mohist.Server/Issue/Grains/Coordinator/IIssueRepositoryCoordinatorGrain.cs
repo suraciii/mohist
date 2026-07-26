@@ -1,7 +1,7 @@
 namespace Mohist.Server.Issue.Grains.Coordinator;
 
 /// <summary>
-/// issue-417 D2: Project-scoped, non-reentrant application process
+/// Project-scoped, non-reentrant application process
 /// manager. Serializes Issue create, target reassignment, cancelled-Issue
 /// reopen, and repository removal so they cannot race into an orphan
 /// binding. Persists at most one
@@ -45,7 +45,7 @@ public interface IIssueRepositoryCoordinatorGrain : IGrainWithStringKey
     Task<IssueRepositoryBindingResult> UpdateRepositoryAsync(RepositoryCommandPayload.Update payload, string commandId, long? expectedRevision);
 
     /// <summary>
-    /// issue-417 T-005: test-only hook that lets a test force the
+    /// test-only hook that lets a test force the
     /// coordinator activation to deactivate. Used to prove that
     /// the persisted fence survives activation loss and replays on
     /// the next activation.

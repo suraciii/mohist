@@ -12,7 +12,7 @@ import {
 // react-query mutations (MSW-backed) resolve through notifyManager's scheduled
 // timers and fetch microtasks; advance the clock ourselves under fake timers
 // instead of polling wall-clock time (waitFor's default 1000ms is too tight on
-// slow CI — design/testing.md: advance fake time, don't poll harder).
+// slow CI).
 async function flush() {
   await vi.advanceTimersByTimeAsync(1000)
 }

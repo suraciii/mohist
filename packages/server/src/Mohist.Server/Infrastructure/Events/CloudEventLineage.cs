@@ -81,7 +81,8 @@ public static class CloudEventLineage
     /// when the key is present and parses to a positive integer; absent
     /// keys, non-numeric values, and zero or negative numbers all return
     /// <c>false</c>. Handlers that ignore unknown extension keys remain
-    /// unaffected when an event lacks this key (pre-issue-418 lineage).
+    /// unaffected when an event lacks this key (produced before parent
+    /// lineage existed).
     /// </summary>
     public static bool TryReadParent(
         IReadOnlyDictionary<string, string> extensions,

@@ -1,5 +1,4 @@
-// Issue-461 T-001 / design D1 + D7 + issue-451 T-004 / design D2 + D6:
-// the cancel handler does NOT consult outbox health — it is the one
+// The cancel handler does NOT consult outbox health — it is the one
 // SignalR operation that must remain available while the durable
 // snapshot is being recovered. It captures the runtime via the host-owned
 // invocation-time accessor at command time (a runtime initialized or
@@ -7,19 +6,18 @@
 // resolves the binding through the binding-only `followupTargetResolver`.
 //
 // The cancel reply carries `interruptUnconfirmed` whenever the bound
-// runtime reports a stop it could not confirm (issue-451 T-004 / design
-// D6). The flag is surfaced end-to-end so the API/user is never told a
+// runtime reports a stop it could not confirm. The flag is surfaced end-to-end so the API/user is never told a
 // still-running turn has been safely stopped. OpenCode replies never
 // carry the flag because the OpenCode abort is authoritative (no
 // `stopConfirmed` field on the result); Pi's `cancel` reports
 // `stopConfirmed: false` exactly when the upper layers must surface
 // `interruptUnconfirmed: true`.
 //
-// Issue-492 T-002 / design D5: when a Cancel is confirmed, the handler
+// When a Cancel is confirmed, the handler
 // enqueues a binding-guarded `session.activity` fact through the host
 // runtime-event outbox so the grain's `ApplyRuntimeEventToDomain` →
 // `ParseActivity` path settles activity: confirmed → `idle`, unconfirmed
-// → `unknown` (the spec forbids reporting an unconfirmed stop as `idle`).
+// → `unknown` (an unconfirmed stop must never be reported as `idle`).
 // The grain's `AppendEventsAsync(..., requireCurrentRuntimeBinding: true)`
 // discards the fact if the binding has been superseded by a concurrent
 // Reset / recovery. The outbox is best-effort: if it is null or unhealthy

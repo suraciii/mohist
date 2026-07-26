@@ -12,8 +12,8 @@ namespace Mohist.Server.Api;
 
 /// <summary>
 /// Product launch endpoint for a generic AgentSession from a project-scoped
-/// Agent profile (issue-129 T-003; refactored to shared
-/// <see cref="IAgentLauncher"/> in issue-391 T-001). Distinct from the
+/// Agent profile (composed through the shared
+/// <see cref="IAgentLauncher"/>). Distinct from the
 /// validation-only <c>POST /api/agent-jobs/validate</c> route, which
 /// remains a developer smoke-test surface and is not the product API.
 /// </summary>
@@ -179,7 +179,7 @@ public sealed record AgentSessionLaunchRequest(
     AgentSessionLaunchContextRef? Context = null,
     /// <summary>
     /// Optional launch-time override of the execution backend
-    /// (issue-452 design D2). When set, wins over the Agent's configured
+    ///. When set, wins over the Agent's configured
     /// <c>runtime</c> in <c>agentConfig</c>; when absent, the Agent's
     /// configured backend applies (defaulting to <c>opencode</c>).
     /// Accepted values: <c>opencode</c>, <c>pi</c>.

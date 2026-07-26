@@ -1,11 +1,5 @@
 // Pure parsers for git CLI output produced by the runner's SignalR git
 // query handlers (`GetDiff` / `GetCommits` / `GetWorkspaceStatus` etc.).
-//
-// Extracted from `runner-signalr.ts` as part of issue-313 / design P1 so the
-// parsers can be unit-tested directly (previously zero coverage). Behaviour
-// is byte-identical to the inline implementations — see acceptance criteria
-// for T-002 in `openspec/changes/issue-313/tasks.json` and the spec scenarios
-// in `specs/workspace-git-queries/spec.md`.
 
 export function parseDiffFiles(numstat: string, fullDiff: string): Array<{ file: string; additions: number; deletions: number; diff: string; isBinary: boolean }> {
   const patches = splitDiffByFile(fullDiff)

@@ -1,7 +1,7 @@
 namespace Mohist.Server.Issue.Grains.Coordinator;
 
 /// <summary>
-/// issue-417 D2: narrow Issue-side participant interface consumed only
+/// narrow Issue-side participant interface consumed only
 /// by the binding coordinator. Only the coordinator grain may depend on
 /// this interface (enforced by ArchTest); production routes, services,
 /// and other grains MUST go through <see cref="IIssueRepositoryCoordinatorGrain"/>

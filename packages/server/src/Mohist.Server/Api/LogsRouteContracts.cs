@@ -37,7 +37,7 @@ public sealed record LogEntry(
 /// lines and a missing source is <see cref="Unavailable"/>.
 /// </summary>
 /// <remarks>
-/// Per design D1: a single typed shape (not a tagged union) is the agreed
+/// A single typed shape (not a tagged union) is the agreed
 /// contract. <see cref="Cursor"/> and <see cref="NextCursor"/> are byte
 /// offsets into the active log file; <see cref="Source"/> is the active
 /// file name; <see cref="Reset"/> tells the client to replace its view;

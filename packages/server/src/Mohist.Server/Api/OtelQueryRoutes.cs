@@ -16,7 +16,7 @@ namespace Mohist.Server.Api;
 /// Query side of the built-in OTel trace collector. The
 /// <c>/otel/api/*</c> routes run on the main API port (no
 /// <c>RequireHost</c> filter) and are protected from the OTLP port by
-/// the <c>OtelPortIsolationMiddleware</c> installed in T-002.
+/// the <c>OtelPortIsolationMiddleware</c> installed.
 /// </summary>
 /// <remarks>
 /// <para>All three endpoints wrap their payload in the standard

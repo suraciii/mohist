@@ -2,9 +2,7 @@ namespace Mohist.Server.Infrastructure.Events;
 
 /// <summary>
 /// Reusable type-pattern matcher shared by subscription registration and
-/// the subscription dispatch handler's
-/// Encodes the simple extension defined in
-/// <c>design/agent-subscriptions.md</c>:
+/// the subscription dispatch handler. Supported patterns:
 /// <list type="bullet">
 ///   <item>exact match against the concrete type,</item>
 ///   <item><c>|</c>-separated alternatives (logical OR inside a single

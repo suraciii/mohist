@@ -1,31 +1,11 @@
 // Session-target resolution and the wire/target types shared by the
 // server→runner push handlers (`ReceiveFollowup`, `CancelAgentSession`,
 // `ReceiveWorkflowRunStatus`).
-//
-// Extracted from `runner-signalr.ts` as part of issue-313 / design P3 so the
-// pure resolver can be unit-tested directly (it was previously defined next
-// to the transport plumbing and exercised only indirectly). Behaviour is
-// byte-identical to the inline implementation — see acceptance criteria
-// for T-004 in `openspec/changes/issue-313/tasks.json` and the spec
-// scenarios in `specs/runner-signalr-push-handlers/spec.md` ("Session
-// target resolution discriminates on target.kind with legacy fallback").
-//
-// Issue-410 T-003 / design D3: the `FollowupTarget` carried by the
-// handlers is no longer a live `ClientSideConnection` — it is a Mohist-owned
-// value object `{ runtimeSessionId, workDir, projectId }` resolved from
-// the persisted binding (the same source the Workflow path already uses).
-// The handlers pass the value object to `OpenCodeRuntime.followup` /
-// `OpenCodeRuntime.cancel`. The module has no live connection lifecycle or
-// per-session reconnect path.
-//
-// Issue-410 T-004: the `RuntimeSessionBinding` and `SessionTarget` types
-// are now defined here. The wire shape is unchanged; only the connection
-// lifecycle went away.
 
 /**
  * Persisted runtime-session binding carried on the wire target by
  * `ReceiveFollowup` / `CancelAgentSession`. Mirrors the server-side
- * `RuntimeSessionBinding` record (issue-407).
+ * `RuntimeSessionBinding` record.
  */
 export interface RuntimeSessionBinding {
   runtime: string
@@ -54,10 +34,10 @@ export interface FollowupTarget {
 
 /**
  * The runner-side resolver turns a discriminated `SessionTarget`
- * (issue-129 T-004) into a `FollowupTarget` constructed from the
+ * into a `FollowupTarget` constructed from the
  * persisted binding, or `null` when no usable binding is registered.
  *
- * Issue-461 D1: the resolver is BINDING-ONLY. It never reads runtime
+ * The resolver is BINDING-ONLY. It never reads runtime
  * or outbox readiness. Admission is owned by each caller (claim,
  * follow-up, cancel) so the resolver observes neither a stale runtime
  * nor a second runtime during replacement.
@@ -72,17 +52,16 @@ export type FollowupTargetResolver = (target: SessionTarget) => FollowupTargetRe
 
 /**
  * Discriminated session target carried in the unified
- * `ReceiveFollowup` SignalR payload (issue-129 T-004). The runner
+ * `ReceiveFollowup` SignalR payload. The runner
  * branches on `kind` to pick the right runtime-events endpoint
- * (`workflow:` / `generic:`, T-002) and the right server-side
+ * (`workflow:` / `generic:`) and the right server-side
  * runtime endpoint. Older runners that only know workflow followups
  * can keep reading the top-level `workflowRunId` / `sessionName`
  * fields the server still populates for the issue-scoped route.
  *
  * The `binding` field carries the persisted AgentSession binding
- * (the same source the Workflow path already uses). Issue-410 T-003
- * promotes `binding` from a resume path input to the resolver's
- * authoritative source: the resolver reads `binding.runtimeSessionId`
+ * (the same source the Workflow path already uses): the resolver
+ * reads `binding.runtimeSessionId`
  * + `binding.workDir` and projects them into a `FollowupTarget`.
  * A legacy binding whose runtime is not `opencode` is treated as
  * missing — the resolver returns `null` and the handler fails with
@@ -125,11 +104,11 @@ export interface ReceiveWorkflowRunStatusPayload {
 
 /**
  * Payload delivered by the server-side `CancelAgentSession` SignalR
- * invocation (issue-129 T-005 / design D6). Distinct from
+ * invocation. Distinct from
  * `ReceiveFollowup` because cancel needs a reply path (the runner
  * returns `{ state: "cancelled" | "not-cancellable" | <terminal-state> }`)
  * while followup is strictly fire-and-forget. The `target` shape is the
- * same `SessionTarget` discriminator introduced in T-004; today only
+ * same `SessionTarget` discriminator; today only
  * generic (non-workflow) sessions are reachable through this method
  * because the cancel endpoint is product-level and issue-anchored
  * sessions have no cancel surface.
@@ -141,11 +120,11 @@ export interface CancelAgentSessionPayload {
 /**
  * Reply shape returned by the runner for the `CancelAgentSession`
  * invocation. The server mirrors this value into the HTTP response so
- * the API can never fake success (design D6). Recognised values:
+ * the API can never fake success. Recognised values:
  * `cancelled`, `not-cancellable`, and the terminal-state names
  * (`completed` / `failed` / `stopped`).
  *
- * `interruptUnconfirmed` (issue-451 T-004 / design D6) is the honest
+ * `interruptUnconfirmed` is the honest
  * stop-confirmation flag the API needs to surface when a runtime
  * (currently Pi) could not confirm the turn actually stopped. OpenCode
  * replies never set the flag — the OpenCode abort is authoritative —
@@ -156,7 +135,7 @@ export interface CancelAgentSessionReply {
   interruptUnconfirmed?: boolean
 }
 
-// Issue-129 T-004: derives a discriminated `SessionTarget` from the
+// Derives a discriminated `SessionTarget` from the
 // unified `ReceiveFollowup` SignalR payload. Prefers the `target` field
 // when present; falls back to the legacy top-level `workflowRunId` /
 // `sessionName` fields so older server builds (which only populate the

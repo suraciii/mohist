@@ -13,7 +13,7 @@ namespace Mohist.Server.Runner.Services;
 /// Wraps <see cref="TaskLogStore"/> so API code stays out of the
 /// persistence layer (architectural rule: API → Services, not
 /// API → Infrastructure.Data). TaskLog is review evidence associated
-/// with a work item — independent of status adjudication by design D1,
+/// with a work item — independent of status adjudication,
 /// so this service performs no grain calls.
 ///
 /// <para>
@@ -23,7 +23,7 @@ namespace Mohist.Server.Runner.Services;
 /// subscribers, per-connection send error, network drop) is logged
 /// and swallowed, never blocking persistence or task execution.
 /// This is the concrete form of the
-/// "落库权威 + 实时分发 best-effort" invariant (design D3).
+/// "落库权威 + 实时分发 best-effort" invariant.
 /// </para>
 /// </summary>
 public sealed class TaskLogService : IScopedService
@@ -90,7 +90,7 @@ public sealed class TaskLogService : IScopedService
 
         // 2. Best-effort fan-out, AFTER persistence has succeeded.
         //    A publisher throw, no-subscribers state, or per-send
-        //    failure is logged and swallowed. This is the design D3
+        //    failure is logged and swallowed. This is the
         //    "persistence-before-distribution" invariant made
         //    concrete; the authoritative log is already on disk so
         //    any dropped delta is recoverable by the terminal
@@ -116,7 +116,7 @@ public sealed class TaskLogService : IScopedService
             // Never let distribution failure break persistence or
             // the calling upload route. The authoritative log has
             // already been committed; dropping the realtime push
-            // is the correct best-effort behaviour per design D3.
+            // is the correct best-effort behaviour.
             _log.LogWarning(ex,
                 "Task-log realtime fan-out failed for {OwnerKind}/{OwnerId}/{WorkId}; persistence unaffected",
                 ownerKind, ownerId, workId);

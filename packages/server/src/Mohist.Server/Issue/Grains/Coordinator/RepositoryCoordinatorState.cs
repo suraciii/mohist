@@ -5,7 +5,7 @@ using Mohist.Server.Infrastructure;
 namespace Mohist.Server.Issue.Grains.Coordinator;
 
 /// <summary>
-/// issue-417 D2: persisted coordinator fence. Holds at most one in-flight
+/// persisted coordinator fence. Holds at most one in-flight
 /// repository command so a lost response, activation deactivation, or
 /// timed-out downstream cannot race a later command into an inconsistent
 /// committed state. Successful and rejected outcomes both clear the fence;

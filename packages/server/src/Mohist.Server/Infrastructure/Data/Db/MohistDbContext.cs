@@ -190,7 +190,7 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.LabelProjectId, e.LabelIssueNumber, e.CreatedAt })
                 .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelIssueNumber_CreatedAt");
 
-            // issued-130 T-001: composite index for the agent-scoped recency
+            // Composite index for the agent-scoped recency
             // list, plus single-column indexes on the two context-ref number
             // labels used by the issue/epic association reads.
             entity.HasIndex(e => new { e.LabelAgentId, e.LabelProjectId, e.CreatedAt })
@@ -310,13 +310,13 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ParentIssueNumber);
             entity.Property(e => e.IsArchived)
                 .HasComputedColumnSql("json_extract(State, '$.archivedAt') IS NOT NULL");
-            // issue-417 T-002 / D3: stored generated RepositoryName projected
+            // Stored generated RepositoryName projected
             // from Issue state JSON. Powers the (ProjectId, RepositoryName,
             // Status) index used by repository-deletion blocker checks and
             // list filtering.
             entity.Property(e => e.RepositoryName)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.repositoryRef'), json_extract(State, '$.RepositoryRef'))", stored: true);
-            // issue-477 T-001: explicit Issue WorkflowProfile selection is
+            // Explicit Issue WorkflowProfile selection is
             // surfaced from State JSON so the public reference stays one
             // place. The coordinator copy + this projection are the only
             // writes; the FK backstop is on WorkflowProfileIdKey.
@@ -333,7 +333,7 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.ProjectId, e.ParentIssueNumber, e.Number });
             entity.HasIndex(e => e.WorkflowRunId);
             entity.HasIndex(e => e.Status);
-            // issue-417 T-002 / D3: deletion-blocker + list filter index.
+            // Deletion-blocker + list filter index.
             entity.HasIndex(e => new { e.ProjectId, e.RepositoryName, e.Status })
                 .HasDatabaseName("IX_Issues_ProjectId_RepositoryName_Status");
         });
@@ -626,13 +626,13 @@ public class MohistDbContext : DbContext
             // PascalCase historical/projection path.
             entity.Property(e => e.ReadySince)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.readySince'), json_extract(State, '$.ReadySince'))", stored: false);
-            // Issue-318 D3: STORED status computed column. Mirrors the
+            // STORED status computed column. Mirrors the
             // COALESCE path-robustness pattern used by IssueRow.ProjectId /
             // AgentRow.Status; LOWER normalizes the camelCase enum value
             // (e.g. "ready", "pending") so the column is always lowercase
             // regardless of any PascalCase historical state. The matching
-            // IX_WorkflowRuns_Status index is created in T-004 migration;
-            // T-002 declares the model-side projection only.
+            // IX_WorkflowRuns_Status index is created by migration;
+            // This declares the model-side projection only.
             entity.Property(e => e.Status)
                 .HasComputedColumnSql("LOWER(COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status')))", stored: true);
             entity.Property(e => e.IssueNumber)
@@ -646,7 +646,7 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_WorkflowRuns_ProjectId_IssueNumber");
             entity.HasIndex(e => new { e.MetadataProjectId, e.EpicNumber })
                 .HasDatabaseName("IX_WorkflowRuns_ProjectId_EpicNumber");
-            // Issue-318 D3: covering index for the two scheduler queries
+            // Covering index for the two scheduler queries
             // (FindAssignableAsync -> status == pending, FindAssignedToAsync
             // -> status == ready AND assigned == worker). The composite
             // matches the worker-bound filter exactly; the standalone
@@ -659,7 +659,7 @@ public class MohistDbContext : DbContext
             // the round-robin scan is index-only.
             entity.HasIndex(e => new { e.Status, e.AssignedWorkerId, e.ReadySince })
                 .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");
-            // issue-477 T-001: Run's nullable custom-Profile backing key.
+            // Run's nullable custom-Profile backing key.
             // The terminalization transaction clears this column while
             // keeping the public Profile ID in State. Built-in bindings
             // leave it null.
@@ -911,7 +911,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Timestamp).IsRequired();
             entity.Property(e => e.Source).HasMaxLength(64).IsRequired();
             entity.Property(e => e.Text).IsRequired();
-            // issue-336 T-001: composite index supports cursor pagination
+            // Composite index supports cursor pagination
             // over (OwnerKind, OwnerId, WorkId, Seq) and also enforces
             // owner-kind routing isolation between workflow and agent-job
             // entries (the two owner kinds share no key space).
@@ -990,7 +990,7 @@ public class MohistDbContext : DbContext
         return true;
     }
 
-    // issued-130 T-001: build a json_extract stored-column expression whose
+    // Build a json_extract stored-column expression whose
     // path is keyed by a label-name constant. Returning the expression from
     // one helper means a rename in GenericAgentSessionMetadata is a
     // compile-time error rather than a silent SQL/metadata drift.

@@ -3,7 +3,7 @@ using Mohist.Server.Project.Domain;
 namespace Mohist.Server.Issue.Grains.Coordinator;
 
 /// <summary>
-/// issue-417 D2: adapts <see cref="Mohist.Server.Project.Grains.IProjectGrain"/>
+/// adapts <see cref="Mohist.Server.Project.Grains.IProjectGrain"/>
 /// to the narrow <see cref="IProjectBindingParticipant"/> surface the
 /// coordinator consumes. Mirrors <see cref="IssueBindingParticipantProxy"/>
 /// but for the single repository-removal command. Translates

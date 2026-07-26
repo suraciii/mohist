@@ -4,8 +4,7 @@
  * At the module boundary, every SDK failure maps to one of a small
  * set of Mohist `RuntimeErrorKind` values. Provider-specific detail
  * is carried only as `RuntimeDiagnostic` records, never as an output
- * field. The runtime does not introduce a global Workflow error enum
- * (see design D8 / `specs/opencode-runtime/spec.md`).
+ * field. The runtime does not introduce a global Workflow error enum.
  *
  * OpenCode is authoritative on permissions. The runtime responds once to
  * requests that OpenCode classifies as ask, and never creates a Workflow

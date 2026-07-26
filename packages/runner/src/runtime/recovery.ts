@@ -153,10 +153,8 @@ export function readAddTasks(raw: unknown): AddTaskInput[] {
 /**
  * Walks a JSON value and substitutes only `${{ failure.* }}` references
  * against the failure context. Every other `${{ }}` namespace passes
- * through byte-for-byte unchanged — those references continue to follow
- * the dispatch-time and execution-time rules in `task-dispatch.md`.
+ * through byte-for-byte unchanged.
  *
- * Behavior per spec (`specs/recovery-failure-context/spec.md`):
  * - Whole-string `${{ failure.output }}`, `${{ failure.output.X }}`, or
  *   `${{ failure.error.X }}`
  *   preserves the resolved JSON type (object / array / number /

@@ -10,7 +10,7 @@ using Orleans.Runtime;
 namespace Mohist.Server.Workflow.Grains;
 
 /// <summary>
-/// issue-477 T-001: Project-scoped, non-reentrant (Orleans default)
+/// Project-scoped, non-reentrant (Orleans default)
 /// application process manager that serializes Project default
 /// WorkflowProfile writes, WorkflowRun startup bindings, and custom
 /// Profile deletions. Persists at most one

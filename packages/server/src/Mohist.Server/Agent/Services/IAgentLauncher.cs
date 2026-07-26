@@ -8,14 +8,12 @@ namespace Mohist.Server.Agent.Services;
 /// <summary>
 /// Shared entry point for starting a generic AgentSession for an Agent
 /// profile. The HTTP manual launch path (<c>POST /api/projects/{...}/agents/{...}/sessions</c>)
-/// and the routing dispatch handler (<c>RoutingDispatchHandler</c>,
-/// issue-391 T-003) both go through this service so the mint-session → open →
+/// and the routing dispatch handler (<c>RoutingDispatchHandler</c>)
+/// both go through this service so the mint-session → open →
 /// build-input → submit-to-grain chain and the resulting <see cref="GenericAgentSessionContext"/>
 /// metadata are composed exactly once and identically. Without this
 /// service, the two call sites would duplicate the AgentJob grain submission
-/// pipeline and the session metadata labels could drift, breaking the
-/// shared launch contract documented in <c>specs/agent-subscription-dispatch/spec.md#Subscription-triggered
-/// launch reuses the shared Agent launcher</c>.
+/// pipeline and the session metadata labels could drift.
 /// </summary>
 public interface IAgentLauncher
 {
@@ -52,8 +50,8 @@ public interface IAgentLauncher
     /// from session.
     /// </param>
     /// <param name="runtimeOverride">
-    /// Optional launch-time override of the execution backend
-    /// (issue-452 design D2). When non-null, wins over the Agent's
+    /// Optional launch-time override of the execution backend.
+    /// When non-null, wins over the Agent's
     /// configured backend; when null, the Agent's configured backend
     /// resolves, defaulting to <c>opencode</c>. Manual HTTP launch
     /// passes the caller-supplied <c>runtime</c> from the request body;
@@ -70,7 +68,7 @@ public interface IAgentLauncher
         CancellationToken ct = default);
 
     /// <summary>
-    /// Routed-launch path (issue-449 design decisions 1-3). Builds the
+    /// Routed-launch path. Builds the
     /// canonical <see cref="RoutedAgentLaunchPlan"/> from the resolved
     /// routing execution context, calls <c>EnsurePreparedAsync</c> on
     /// the AgentJob grain, and advances the prepared launch to Session

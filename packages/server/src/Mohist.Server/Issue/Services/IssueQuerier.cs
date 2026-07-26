@@ -210,7 +210,7 @@ public class IssueQuerier : IScopedService
     /// Reverse lookup that returns the human-numbered handle plus the
     /// title of the issue bound to <paramref name="workflowRunId"/>, or
     /// <c>null</c> when no issue row is bound. Used by
-    /// <c>GET /api/workflow-runs/{workflowRunId}</c> (issue-381 T-002) to
+    /// <c>GET /api/workflow-runs/{workflowRunId}</c> to
     /// attach an issue ref to the read model without requiring the
     /// caller to know an issue number. The result is intentionally
     /// minimal — number + title only — so the read surface does not
@@ -687,8 +687,8 @@ public class IssueQuerier : IScopedService
             {
                 if (byNumber.TryGetValue(link.IssueNumber, out var issue) && epics.TryGetValue(link.EpicNumber, out var epic))
                 {
-                    // Issue-179: primaryEpic reflects the issue's NON-TERMINAL
-                    // epic membership. After T-001, an issue may belong to at
+                    // primaryEpic reflects the issue's NON-TERMINAL
+                    // epic membership. An issue may belong to at
                     // most one non-terminal epic, so filtering terminal
                     // owners leaves at most one candidate per issue. The
                     // "last write wins" loop naturally resolves to that
@@ -872,7 +872,7 @@ public class IssueQuerier : IScopedService
     }
 
     /// <summary>
-    /// Composite-child projection for issue-420. Loads every current
+    /// Composite-child projection. Loads every current
     /// (non-archived) child of every parent present in <paramref name="issues"/>
     /// in one project-scoped query, applies the same workflow projection
     /// the full read model uses so canonical child health reflects the

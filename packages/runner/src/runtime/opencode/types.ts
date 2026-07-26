@@ -6,9 +6,6 @@
  * SDK. This keeps SDK drift contained to one module: callers depend
  * on these shapes only, and the SDK is an implementation detail
  * inside the module.
- *
- * See `specs/opencode-runtime/spec.md` (deep-module isolation) and
- * `design/runtimes/opencode.md` (D2, D8).
  */
 
 export type RuntimeDiagnosticSeverity = "info" | "warning" | "error"
@@ -110,7 +107,7 @@ export interface RuntimeTurnResult {
 
 /**
  * Inputs for a Follow-up turn on an existing Runtime Session. Wraps
- * `client.session.promptAsync` (issue-410 T-003 / design D3). The
+ * `client.session.promptAsync`. The
  * runtime verifies the persisted binding still resolves to a live
  * physical Session before dispatching the prompt; a stale binding
  * surfaces as `missing-session` (the existing Reset hint).
@@ -138,7 +135,7 @@ export interface RuntimeFollowupResult {
 
 /**
  * Inputs for a Cancel against an active Runtime Session turn. Wraps
- * `client.session.abort` (issue-410 T-003 / design D3). The runtime
+ * `client.session.abort`. The runtime
  * resolves the binding first; a stale binding surfaces as
  * `missing-session` (the existing Reset hint). `cancelled: true` is
  * the authoritative reply — whether the agent honours the cancellation
@@ -173,8 +170,7 @@ export interface RuntimeCancelResult {
  *   completes the turn before `attempt` reaches the threshold is
  *   left to OpenCode.
  *
- * Defaults match `design/runtimes/opencode.md` Provider 错误失败策略:
- * the pattern set covers quota/credit/billing wording in both
+ * Defaults: the pattern set covers quota/credit/billing wording in both
  * English and Chinese, and the threshold defaults to 5.
  */
 export interface RuntimeProviderErrorPolicy {

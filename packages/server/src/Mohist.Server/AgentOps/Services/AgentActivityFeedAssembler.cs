@@ -17,14 +17,13 @@ namespace Mohist.Server.AgentOps.Services;
 /// <summary>
 /// Assembles the activity-feed payload for the
 /// <c>GET /api/projects/{projectRef}/agent/activity</c> endpoint
-/// (issue-327 T-003 / design D1, D2). Composes listing + active-session
+///. Composes listing + active-session
 /// reconciliation + latest-event / event-summary / issue-title /
 /// task-progress / preview-card projection into a single
 /// <see cref="ActivityDto"/>. Depends one-way on the shared
 /// <see cref="ActiveSessionReconciler.ReconcileAsync"/> and
 /// <see cref="TranscriptReductions.LoadEventSummariesAsync"/> reductions
-/// (moved off <see cref="AgentSessionQuerier"/> by issue-370 T-003) and
-/// the shared <see cref="TranscriptPartLoader"/> (T-002) — the core
+/// and the shared <see cref="TranscriptPartLoader"/> — the core
 /// querier does not depend on this service.
 /// </summary>
 /// <remarks>
@@ -42,7 +41,7 @@ namespace Mohist.Server.AgentOps.Services;
 /// dropped that argument. The issue-title batch lookup and the
 /// <c>Issue #{number}</c> fallback resolver moved to
 /// <see cref="IssueTitleLookup"/> on the Issue read side
-/// (issue-370 T-004 / design D5), so the assembler now reads the
+///, so the assembler now reads the
 /// same <c>(project, numbers)</c> tuple as
 /// <see cref="AgentSessionListAssembler.ListCurrentAsync"/>.
 /// </remarks>

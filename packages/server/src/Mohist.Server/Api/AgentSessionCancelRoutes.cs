@@ -22,8 +22,8 @@ namespace Mohist.Server.Api;
 /// The cancel path is a separate SignalR method from <c>ReceiveFollowup</c>
 /// because cancel needs a reply path (runner → server → client) for the
 /// honest state, whereas followup is strictly fire-and-forget. The wire
-/// payload is the same <see cref="SessionTarget"/> shape introduced in
-/// T-004; T-005 only adds a new method name + reply shape.
+/// payload is the same <see cref="SessionTarget"/> shape; cancel only
+/// adds a new method name + reply shape.
 /// </para>
 /// <para>
 /// The HTTP response mirrors the runner's reported state
@@ -148,7 +148,7 @@ public static class AgentSessionCancelRoutes
 
 /// <summary>
 /// Reply shape for the server→runner <c>CancelAgentSession</c> SignalR
-/// invocation (issue-129 T-005 / design D6 + issue-451 T-004 / design D6).
+/// invocation.
 /// The runner reports the session state it actually observed so the API
 /// can never pretend success. Recognised values:
 /// <list type="bullet">
@@ -163,8 +163,8 @@ public static class AgentSessionCancelRoutes
 /// </list>
 /// <para>
 /// <c>interruptUnconfirmed</c> is the additive honesty flag the API
-/// needs to surface a stop the runner could not confirm (issue-451
-/// T-004 / design D6). OpenCode replies never set the flag because the
+/// needs to surface a stop the runner could not confirm.
+/// OpenCode replies never set the flag because the
 /// OpenCode abort is authoritative; Pi replies set it exactly when the
 /// session's stop state could not be observed. Absent on a confirmed
 /// cancel so existing callers see byte-identical responses.

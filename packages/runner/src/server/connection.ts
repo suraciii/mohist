@@ -195,7 +195,7 @@ export class ServerConnection {
    * (owner-kind pair), but the body is JSON, not multipart, and the
    * server endpoint is a separate store (`TaskLogStore`) that does
    * not invoke any grain — the upload is decoupled from the report
-   * call and from status adjudication (design D1 / D6 / D7).
+   * call and from status adjudication.
    *
    * `ownerKind` defaults to `"workflow"` for backwards compatibility
    * with callers that always dispatch workflow-scoped work; pass

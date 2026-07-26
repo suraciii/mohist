@@ -9,7 +9,7 @@ namespace Mohist.Cli;
 // WriteTable / AsArray / StringOf / BoolOf / NumberOf / Truncate). Splitting into
 // collaborator classes would force infrastructure duplication or reverse-dependency
 // on a "core" — worse than partial. This is the textbook partial use-case, not a
-// god-class split. See design.md §"决策 2" and tasks.json#T-001.
+// god-class split.
 //
 // Cluster layout:
 //   TableRenderer.cs         — dispatch + shared infrastructure

@@ -6,7 +6,7 @@ using Mohist.Server.Workflow.Services;
 namespace Mohist.Server.Workflow.Grains.Coordinator;
 
 /// <summary>
-/// issue-477 T-001: Project-side participant that commits the Project
+/// Project-side participant that commits the Project
 /// default WorkflowProfile binding. The backing key is written only when
 /// the Profile is a custom (non-built-in) row; built-in bindings leave
 /// the backing key null.

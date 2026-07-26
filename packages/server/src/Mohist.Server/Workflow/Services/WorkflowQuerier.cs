@@ -103,7 +103,7 @@ public class WorkflowQuerier : IScopedService
     }
 
     /// <summary>
-    /// issue-417 T-006 (D4): returns the immutable repository context
+    /// returns the immutable repository context
     /// the run captured at start time, or <c>null</c> when the run
     /// has none (generic / non-Issue-backed runs) or when the run
     /// state cannot be loaded. The rebase / review / cleanup routes

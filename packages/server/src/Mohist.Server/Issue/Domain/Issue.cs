@@ -163,7 +163,7 @@ public sealed partial class Issue
     /// <summary>
     /// Coordination revision incremented on every create, repository
     /// reassignment, first start, completion, cancellation, and reopen.
-    /// The coordinator (T-005) compares incoming <c>expectedRevision</c>
+    /// The coordinator compares incoming <c>expectedRevision</c>
     /// against this value to detect stale PATCH/POST payloads.
     /// </summary>
     public long RepositoryBindingRevision

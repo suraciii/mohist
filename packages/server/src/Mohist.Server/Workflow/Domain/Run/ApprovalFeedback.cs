@@ -9,8 +9,7 @@ public enum ApprovalFeedbackStatus { Open, Resolved }
 /// <summary>
 /// JSON converter that emits the enum as lowercase strings (e.g. "open",
 /// "resolved") to match the agent-readable feedback JSON contract
-/// (<see cref="Mohist.Server.Workflow.Grains.WorkflowFeedbackRecord"/>)
-/// and the spec at openspec/changes/issue-109/specs/approval-feedback-cli.
+/// (<see cref="Mohist.Server.Workflow.Grains.WorkflowFeedbackRecord"/>).
 /// </summary>
 internal sealed class ApprovalFeedbackStatusJsonConverter : JsonConverter<ApprovalFeedbackStatus>
 {

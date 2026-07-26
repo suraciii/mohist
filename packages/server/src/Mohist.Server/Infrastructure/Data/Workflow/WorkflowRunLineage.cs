@@ -11,9 +11,9 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 /// stamping uses only identity the run already holds.
 /// </summary>
 /// <remarks>
-/// Lineage attribute names live on <see cref="EventCatalog.Lineage"/> and
-/// stay in sync with <c>design/event-protocol.md</c>. Stage carriage is
-/// derived structurally from the variant (D2): events whose record type
+/// Lineage attribute names live on <see cref="EventCatalog.Lineage"/>.
+/// Stage carriage is
+/// derived structurally from the variant: events whose record type
 /// exposes a <c>Stage</c> member carry the stamp; <see cref="WorkflowArtifactRecorded"/>
 /// has no <c>Stage</c> member and therefore MUST NOT receive a <c>stage</c>
 /// stamp even though it is a <c>workflow.*</c> event.
@@ -124,7 +124,7 @@ public static class WorkflowRunLineage
 
     /// <summary>
     /// Extract the <c>Stage</c> name from a workflow event by structural
-    /// inspection of the unwrapped union variant (D2). Returns <c>null</c>
+    /// inspection of the unwrapped union variant. Returns <c>null</c>
     /// for variants that do not expose a <c>Stage</c> member (e.g.
     /// <see cref="WorkflowArtifactRecorded"/>, the run-lifecycle variants).
     /// </summary>

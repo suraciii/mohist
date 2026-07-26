@@ -142,18 +142,16 @@ public static class RunnerRoutes
         // omitted. The "null means unlimited / disabled" contract is only
         // meaningful end-to-end if the wire shape always carries every
         // field — the runner's CleanupPolicy TS type tolerates either
-        // present-null or absent, but the spec (issue-359
-        // runner-config-endpoint) requires the present-null form so the
+        // present-null or absent, but the config endpoint contract
+        // requires the present-null form so the
         // response is self-describing. The override is local to this
-        // handler; /poll no longer carries CleanupPolicy (T-002 removed the
-        // field from WorkDispatchResponse atomically with the runner
-        // switch to /config).
+        // handler; /poll no longer carries CleanupPolicy.
         // Per-request re-bind from the currently-loaded IConfiguration.
         // IOptions<T> would snapshot once at startup; IOptionsSnapshot<T>
         // is request-scoped (matches the minimal-API handler lifetime),
         // rebuilds every request through OptionsFactory<T>, and honors
         // every registered IConfigureOptions<T> in registration order.
-        // Combined with the T-001 native-AddJsonFile wiring, a reload
+        // Combined with the native-AddJsonFile wiring, a reload
         // of config.jsonc reaches the next /config call without a
         // server restart. No singleton consumes CleanupPolicyOptions
         // today, so IOptionsMonitor is unnecessary machinery.
@@ -424,7 +422,7 @@ public static class RunnerRoutes
 
         // Generic (non-workflow) AgentSession routes — used by the runner
         // when it executes an agent-job dispatch whose launch minted an
-        // AgentSession id (issue-129 T-002/T-003). Identifies a session by
+        // AgentSession id. Identifies a session by
         // (projectId, sessionId) without a workflowRunId/sessionName pair.
         group.MapGet("/agent-sessions/{projectId}/{sessionId}", async (
             string projectId, string sessionId,
@@ -453,15 +451,15 @@ public static class RunnerRoutes
             if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
             // The session was minted up front by the launch endpoint
-            // (T-003) carrying source-kind=agent-launch + agent id/name
+            // carrying source-kind=agent-launch + agent id/name
             // labels. The runner's open call only contributes annotations
             // (workId/workType/stage/title/issueNumber) for traceability
             // — labels are intentionally left untouched so the launch
             // identity (projectId, agentId, agentName, source-kind) is
             // preserved by AgentSessionMetadata.Merge.
             //
-            // The session's own runtime is authoritative (issue-452
-            // design D5): the launch endpoint pinned the backend at
+            // The session's own runtime is authoritative: the launch
+            // endpoint pinned the backend at
             // launch time, so we read it back from the session rather
             // than hardcoding opencode.
             var session = await grain.OpenAsync(new OpenAgentSessionCommand(
@@ -486,7 +484,7 @@ public static class RunnerRoutes
 
             try
             {
-                // Issue-452 design D5: the session's persisted runtime is
+                // the session's persisted runtime is
                 // authoritative for the generic path. The launch endpoint
                 // pinned it at launch time; attach binds the physical
                 // session to that backend rather than a hardcoded literal.
@@ -755,8 +753,8 @@ public static class RunnerRoutes
     /// <c>DefaultIgnoreCondition</c> to <c>Never</c> so that
     /// <c>cleanupPolicy</c> fields are always emitted, even when null.
     /// The runner's <c>CleanupPolicy</c> TS type tolerates either
-    /// present-null or absent, but the spec (issue-359
-    /// runner-config-endpoint) requires the present-null form so the
+    /// present-null or absent, but the config endpoint contract
+    /// requires the present-null form so the
     /// response is self-describing: "null means unlimited / disabled"
     /// reads the same on the wire as it does in the bound options. The
     /// override is scoped to <c>GET /api/runner/{id}/config</c> only.
@@ -840,7 +838,7 @@ public record GenericAgentSessionOpenRequest(
     string? WorkDir = null);
 /// <summary>
 /// Wire shape returned to the runner for generic AgentSession endpoints
-/// (issue-129 T-002/T-003). Mirrors the workflow response shape but drops
+///. Mirrors the workflow response shape but drops
 /// the (projectId, workflowRunId, sessionName) key — generic sessions are
 /// addressed solely by sessionId.
 /// </summary>

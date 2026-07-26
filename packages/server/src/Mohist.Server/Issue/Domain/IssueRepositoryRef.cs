@@ -2,7 +2,7 @@ namespace Mohist.Server.Issue.Domain;
 
 /// <summary>
 /// Canonical, Project-local name of a repository resource bound to an
-/// Issue. Stored non-null for newly created Issues (issue-417 D1).
+/// Issue. Stored non-null for newly created Issues.
 /// The aggregate never falls back to a default and never tries to
 /// re-resolve through Project metadata; reads and the coordinator use
 /// the stored value verbatim, which is what makes

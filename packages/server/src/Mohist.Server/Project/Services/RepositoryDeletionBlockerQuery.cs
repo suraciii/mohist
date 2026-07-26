@@ -5,7 +5,7 @@ using Mohist.Server.Infrastructure.Hosting;
 namespace Mohist.Server.Project.Services;
 
 /// <summary>
-/// issue-417 T-004: focused projection over <see cref="IssueRow"/> for
+/// focused projection over <see cref="IssueRow"/> for
 /// repository deletion protection. Reads the committed
 /// <c>(ProjectId, RepositoryName)</c> index directly instead of going
 /// through enriched read models so the result is independent of

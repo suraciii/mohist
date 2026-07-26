@@ -108,7 +108,7 @@ export interface PiProviderErrorPolicy {
 }
 
 /**
- * Inputs for a Follow-up on a Pi-bound AgentSession (issue #451 / design D5).
+ * Inputs for a Follow-up on a Pi-bound AgentSession.
  *
  * The runtime resolves the persisted binding first; a stale binding
  * surfaces as `missing-session` (the existing Reset hint) — the runtime
@@ -138,8 +138,8 @@ export interface PiFollowupFacts {
 export type PiFollowupResult = PiResult<PiFollowupFacts>
 
 /**
- * Inputs for a Cancel against an active Pi Session turn (issue #451 /
- * design D6). Mirrors `RuntimeCancelRequest`.
+ * Inputs for a Cancel against an active Pi Session turn.
+ * Mirrors `RuntimeCancelRequest`.
  *
  * `runtimeSessionId` carries the bound physical Pi Session path.
  * `null` means "no current binding — cancel is a no-op"; in that
@@ -171,7 +171,7 @@ export interface PiCancelFacts {
 export type PiCancelResult = PiResult<PiCancelFacts>
 
 /**
- * Inputs for a Compact against an idle Pi Session (issue #451 / design D7).
+ * Inputs for a Compact against an idle Pi Session.
  *
  * Compact operates on the bound physical Pi Session in-place — the
  * physical Pi Session identity SHALL NOT change after compaction, and
@@ -202,7 +202,7 @@ export interface PiCompactFacts {
 }
 
 /**
- * Inputs for a Reset on an idle Pi Session (issue #451 / design D8).
+ * Inputs for a Reset on an idle Pi Session.
  *
  * Reset creates a new empty Pi session file in `workDir` and replaces
  * the binding with the new file path only after it is successfully

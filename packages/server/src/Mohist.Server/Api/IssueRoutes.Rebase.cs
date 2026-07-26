@@ -30,7 +30,7 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetAsync(project.Id, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
 
-            // T-006: read the run-owned repository context instead of
+            // Read the run-owned repository context instead of
             // composing live Project metadata. The run's authoritative
             // snapshot survives even if the Project's repository
             // declaration has since been removed (Cleanup after terminal).

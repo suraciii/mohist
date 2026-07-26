@@ -30,7 +30,7 @@ public static class IssueVariableBuilder
     /// variables. This is what gets persisted on the issue profile at start.
     /// </summary>
     /// <remarks>
-    /// Issue-474 T-002: when the issue's existing <see cref="VariableBundle"/>
+    /// when the issue's existing <see cref="VariableBundle"/>
     /// does not carry a <c>vars.agent</c> entry, the bundle seeds an empty
     /// object so built-in workflows that template-bind
     /// <c>options: ${{ vars.agent }}</c> still resolve to a usable surface.
@@ -294,7 +294,7 @@ public static class IssueVariableBuilder
     /// Final-pass projection: walk the merged variable bundle and project
     /// every <c>vars.agent</c> / <c>stages.&lt;stage&gt;.vars.agent</c>
     /// block down to the converged <c>{model, variant}</c> whitelist.
-    /// Per #410 T-002 design D5, the <c>vars.agent</c> surface only carries
+    /// the <c>vars.agent</c> surface only carries
     /// <c>{model, variant}</c>; legacy runtime/liveness keys carried via any
     /// read-in path (ConfigService.GetAgentConfigAsync,
     /// ProjectWorkflowProfileManager.SetVariablesAsync project write path,

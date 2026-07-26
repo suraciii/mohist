@@ -1,7 +1,7 @@
 namespace Mohist.Server.Issue.Grains.Coordinator;
 
 /// <summary>
-/// issue-417 D2: narrow Issue-side receipt interface consumed only by
+/// narrow Issue-side receipt interface consumed only by
 /// the binding coordinator and its proxy. Only the coordinator and
 /// <c>IssueBindingParticipantProxy</c> may depend on this interface
 /// (enforced by ArchTest); production routes, services, and other grains

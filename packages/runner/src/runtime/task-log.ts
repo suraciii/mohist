@@ -24,7 +24,7 @@
  * The Phase 1 masker is intentionally minimal: a small set of
  * credential patterns (git remote URLs with embedded credentials,
  * common token prefixes). A hardened masker with encoding-variant
- * defense is future security work (design D5 / issue body Non-Goals).
+ * defense is future security work.
  */
 
 /**
@@ -65,7 +65,7 @@ export interface TaskLogBatch {
  * prefixes); the goal is to plug the most common leak paths while
  * leaving the future hardened masker free to expand the catalog.
  *
- * The masker is exposed so the executor wiring (T-003) can prime it
+ * The masker is exposed so the executor wiring can prime it
  * with additional runtime secrets (e.g. agent API keys) at host
  * startup; defaults cover the common case.
  */
@@ -215,7 +215,7 @@ export class TaskLogger {
  * before the upload completes). That is safe because the new line
  * picks up a higher `seq` and is included in the next `drain`. The
  * watermark makes this ordering explicit so retries never re-send a
- * line that has already been included in an increment (design D1).
+ * line that has already been included in an increment.
  *
  * Append listener: {@link TaskLogCollector.setAppendListener} wires an
  * optional callback that is invoked synchronously from inside
@@ -338,8 +338,7 @@ export class TaskLogCollector {
    * strictly greater than the current sent-seq watermark, in `seq`
    * ascending order, and advances the watermark to the highest
    * returned `seq`. Returns `null` when there is nothing new — the
-   * caller can short-circuit without issuing an upload (design D1,
-   * spec "An empty increment produces no upload").
+   * caller can short-circuit without issuing an upload.
    *
    * The returned array is a defensive copy; later `append`s are not
    * observed. `truncated` is included so a late head-drop that
@@ -361,7 +360,7 @@ export class TaskLogCollector {
 
   /**
    * Terminal-batch snapshot. The collector is NOT cleared after a
-   * flush — design D6 makes this a one-shot terminal batch per work
+   * flush — this is a one-shot terminal batch per work
    * item, so the buffer is discarded by the host once the upload
    * completes. The returned array is a defensive copy.
    *

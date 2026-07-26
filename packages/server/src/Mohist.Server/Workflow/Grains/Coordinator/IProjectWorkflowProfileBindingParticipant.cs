@@ -1,7 +1,7 @@
 namespace Mohist.Server.Workflow.Grains.Coordinator;
 
 /// <summary>
-/// issue-477 T-001: narrow Project-side participant that commits the
+/// narrow Project-side participant that commits the
 /// Project default WorkflowProfile binding. Consumed only by the
 /// <c>WorkflowProfileReferenceCoordinator</c>; the coordinator captures
 /// the Project's binding revision, the participant re-validates Profile

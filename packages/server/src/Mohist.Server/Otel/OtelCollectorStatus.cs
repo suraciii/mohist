@@ -2,9 +2,9 @@ namespace Mohist.Server.Otel;
 
 /// <summary>
 /// Process-wide record of whether the OTLP ingestion port is currently
-/// bound and accepting traffic. Updated by the host startup path (T-002)
+/// bound and accepting traffic. Updated by the host startup path
 /// when Kestrel reports the OTLP port's status, and read by
-/// <c>/otel/api/status</c> (T-003) so callers can tell whether the
+/// <c>/otel/api/status</c> so callers can tell whether the
 /// collector is online.
 /// </summary>
 public sealed class OtelCollectorStatus

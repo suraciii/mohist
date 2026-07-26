@@ -69,7 +69,7 @@ export class ConvergenceBackstop {
         // workspaces it owns; if the server has forgotten the run we
         // should forget the entry too. The on-disk directory is left
         // alone — automatic cleanup has its own pre-delete guards
-        // (T-004), and the manual `RemoveWorkspace` entrypoint is still
+        //, and the manual `RemoveWorkspace` entrypoint is still
         // available to reclaim disk space if desired.
         const removed = await this.registry.remove(entry.workflowRunId)
         if (removed) dropped++

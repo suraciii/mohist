@@ -6,7 +6,7 @@ using Mohist.Server.Sessions.Services;
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// Agent-scoped session list endpoint for issue-130 T-005. Returns generic
+/// Agent-scoped session list endpoint. Returns generic
 /// <c>agent-launch</c> sessions for the resolved Agent profile, ordered by
 /// recency with an optional <c>?status=</c> filter and <c>?limit=</c> cap.
 /// Distinct from the project-wide <c>GET .../agent/sessions</c> list

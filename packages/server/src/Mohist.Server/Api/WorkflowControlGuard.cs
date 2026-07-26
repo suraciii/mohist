@@ -6,7 +6,7 @@ namespace Mohist.Server.Api;
 /// <c>/api/projects/{projectRef}/issues/{number}/{verb}</c>) and the new
 /// workflow-run-scoped control endpoints (under
 /// <c>/api/workflow-runs/{workflowRunId}/{verb}</c>) so the two addressing
-/// axes share one referee (issue-381 Decision 1).
+/// axes share one referee.
 /// </summary>
 public static class WorkflowControlGuard
 {

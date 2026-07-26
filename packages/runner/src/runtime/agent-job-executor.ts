@@ -35,7 +35,7 @@ import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeB
  * `{ prompt, instructions?, model?, variant?, runtime }` shape —
  * composed at launch time from the resolved Agent snapshot and
  * stable for the lifetime of the in-flight request. `runtime` is
- * snapshotted onto the AgentJob by the server (T-001) so the executor
+ * snapshotted onto the AgentJob by the server so the executor
  * never re-reads the Agent definition; an in-flight edit of the
  * Agent's backend cannot change this turn's runtime.
  *
@@ -321,8 +321,8 @@ function readOptionalString(payload: JsonObject | null, key: string): string | n
 
 /**
  * Read the runtime selection from the dispatch `with.runtime`. The
- * server snapshots the resolved runtime onto the AgentJob envelope
- * (T-001); absent is treated as `opencode` so legacy / partial-rollout
+ * server snapshots the resolved runtime onto the AgentJob envelope;
+ * absent is treated as `opencode` so legacy / partial-rollout
  * dispatches keep their existing behavior.
  */
 function readRuntime(payload: JsonObject | null): "opencode" | "pi" {

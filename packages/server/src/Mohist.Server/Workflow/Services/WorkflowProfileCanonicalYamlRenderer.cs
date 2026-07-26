@@ -7,7 +7,7 @@ using YamlDotNet.Serialization.NamingConventions;
 namespace Mohist.Server.Workflow.Services;
 
 /// <summary>
-/// issue-477 T-001: deterministic canonical YAML renderer used by the
+/// deterministic canonical YAML renderer used by the
 /// data migration to convert legacy semantic WorkflowProfile JSON into a
 /// stable, persisted YAML source. The renderer is the bridge between
 /// legacy <c>WorkflowProfilePersistence.Serialize</c> output (which keeps

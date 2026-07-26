@@ -4,7 +4,7 @@ namespace Mohist.Server.Sessions.Services;
 
 /// <summary>
 /// Shared construction for the context-reference envelope on AgentSession
-/// list items and generic-session summaries (issue-327 T-002 / design D4).
+/// list items and generic-session summaries.
 /// Reads the four launch labels (<see cref="GenericAgentSessionMetadata.IssueNumber"/>,
 /// <see cref="GenericAgentSessionMetadata.EpicNumber"/>,
 /// <see cref="GenericAgentSessionMetadata.Repository"/>,

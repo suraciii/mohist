@@ -4,7 +4,7 @@ import type { TaskLogger } from "../runtime/task-log.js"
 /**
  * Single network default applied to every network-bound git/gh command
  * (clone, fetch, ls-remote, push, gh pr list/edit/create, gh --version,
- * gh auth status). Per design D2 the policy lives at the call site, not
+ * gh auth status). The policy lives at the call site, not
  * in the primitive — the primitive (`runCommand`) provides the knob
  * (`CommandLineOptions.timeoutMs`), and each network call site opts in
  * with this constant. There is intentionally no per-command budget
@@ -18,8 +18,8 @@ export interface GitSink {
    * Single sink for ops command output. When supplied, every line of
    * stdout / stderr emitted by the child `git` process is forwarded
    * through `log.write(source, line)` — masking, monotonic seq
-   * assignment, and buffering all happen in that one chokepoint
-   * (design D2). Without a sink the returned aggregate is unchanged
+   * assignment, and buffering all happen in that one chokepoint.
+   * Without a sink the returned aggregate is unchanged
    * so existing callers keep working.
    */
   log: TaskLogger
@@ -36,7 +36,7 @@ export interface GitOptions {
   sink?: GitSink | null
   /**
    * Per-command timeout in ms. Layered over the caller-supplied
-   * `AbortSignal` by `runCommand` (per design D5). Network-bound call
+   * `AbortSignal` by `runCommand`. Network-bound call
    * sites pass `NETWORK_COMMAND_TIMEOUT_MS`; local-only probes omit
    * it and run under the work-level signal only.
    */

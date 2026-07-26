@@ -5,7 +5,7 @@ using Mohist.Server.Workflow.Services;
 namespace Mohist.Server.Workflow.Grains;
 
 /// <summary>
-/// issue-477 T-001: WorkflowRun-side participant that commits the
+/// WorkflowRun-side participant that commits the
 /// Profile ID binding. The backing key is written only when the Profile
 /// is a custom (non-built-in) row; built-in bindings leave the backing
 /// key null. Terminalization calls <see cref="ClearBindingAsync"/> to

@@ -1,28 +1,7 @@
-// SignalR connection liveness + reconnect helpers extracted from
-// `runner-signalr.ts` as part of issue-313 / design P4. These helpers own
-// the lifecycle semantics of the runner's hub connection: probing (`Ping`)
+// SignalR connection liveness + reconnect helpers: probing (`Ping`)
 // with a settle-once-idempotent timeout/abort race, manually tearing down
-// and rebuilding the connection (swallowing stop failures), and firing the
-// `onReconnected` callback with the live connection id.
-//
-// Extracted as free functions taking the `HubConnection` and the
-// `onReconnected` callback (per design D3 — free functions, deps explicit,
-// so the helpers can be unit-tested directly without instantiating the
-// full `RunnerSignalRClient`). Behaviour is byte-identical to the previous
-// inline implementations — see acceptance criteria for T-005 in
-// `openspec/changes/issue-313/tasks.json` and the spec scenarios in
-// `specs/runner-connection-liveness/spec.md`.
-//
-// Contract invariants preserved:
-// - `probeLiveness` is idempotent (settle-once) and abort-aware; non-
-//   `Connected` state skips the `Ping` invocation entirely.
-// - `forceReconnect` walks stop→start for any non-Disconnected state
-//   (swallowing stop errors so the start can re-establish the real state),
-//   jumps straight to start for the Disconnected case, and short-circuits
-//   start when the supplied `AbortSignal` fires after stop completes.
-// - `notifyReconnected` prefers the SignalR-supplied id, falls back to
-//   `connection.connectionId`, and only invokes the callback when at
-//   least one of the two yields a non-empty string.
+// and rebuilding the connection, and firing the `onReconnected` callback
+// with the live connection id.
 
 import * as signalR from "@microsoft/signalr"
 

@@ -10,8 +10,8 @@ namespace Mohist.Server.Infrastructure.Data.Epic;
 /// epic already holds.
 /// </summary>
 /// <remarks>
-/// Lineage attribute names live on <see cref="EventCatalog.Lineage"/> and
-/// stay in sync with <c>design/event-protocol.md</c>. Epic events route by
+/// Lineage attribute names live on <see cref="EventCatalog.Lineage"/>.
+/// Epic events route by
 /// the project-scoped <c>epic</c> number.
 /// </remarks>
 public static class EpicLineage

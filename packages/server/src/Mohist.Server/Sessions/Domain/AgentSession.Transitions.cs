@@ -6,8 +6,8 @@ public static partial class AgentSessionExtensions
 {
     /// <summary>
     /// Target cap for the retained context-usage history. Picked small
-    /// so a trend mini-chart still gets a "lifetime" view (issue-245 T-002,
-    /// design D5) while the grain state and downstream activity payloads
+    /// so a trend mini-chart still gets a "lifetime" view
+    /// while the grain state and downstream activity payloads
     /// stay bounded.
     /// </summary>
     public const int ContextUsageHistoryCap = 24;
@@ -286,7 +286,7 @@ public static partial class AgentSessionExtensions
         /// expose the latest known health snapshot, and the bounded
         /// context-usage history is thinned-appended so a freshly
         /// opened Pulse sees the lifetime trend rather than only the
-        /// latest snapshot (issue-245 T-002 / design D5).
+        /// latest snapshot.
         /// </summary>
         public IReadOnlyList<AgentSessionEvent> RecordContextHealthUpdate(
             string healthStatus,
@@ -346,7 +346,7 @@ public static partial class AgentSessionExtensions
 
         /// <summary>
         /// Appends a thinned <see cref="ContextUsageHistoryEntry"/> to
-        /// <paramref name="history"/>. Behaviour (issue-245 T-002, design D5):
+        /// <paramref name="history"/>. Behaviour:
         /// <list type="bullet">
         ///   <item><description>returns <paramref name="history"/> unchanged
         ///   when <paramref name="contextWindowUsed"/> or

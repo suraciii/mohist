@@ -14,10 +14,10 @@ namespace Mohist.Server.Agent.Services;
 /// <summary>
 /// <see cref="IAgentLauncher"/> implementation that performs the canonical
 /// mint-session → open-generic-session → build-AgentJobInput → submit-to-grain
-/// pipeline. Extracted verbatim from the manual HTTP launch route
-/// (<c>Api/AgentSessionLaunchRoutes.cs</c>, issue-129 T-003) so the manual
-/// HTTP path and the subscription dispatch handler (issue-391 T-003) compose
-/// sessions through a single, observable, testable entry point.
+/// pipeline. Shared by the manual HTTP launch route
+/// (<c>Api/AgentSessionLaunchRoutes.cs</c>) and the subscription dispatch
+/// handler so both compose sessions through a single, observable, testable
+/// entry point.
 ///
 /// <para>
 /// Lifetime is <see cref="IScopedService"/> because the launcher resolves
@@ -139,7 +139,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
     }
 
     /// <summary>
-    /// Routed-launch path (issue-449 design decisions 1-3). The
+    /// Routed-launch path. The
     /// resolver's <see cref="RoutedExecutionContext"/> is the
     /// ownership-validated workspace + lineage for this event/rule hit;
     /// the launcher mints the stable session id + job key from the
@@ -345,8 +345,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
     /// <c>AgentConfig</c> JSON element so they can be captured into the
     /// launch-time snapshot on <see cref="AgentJobInput"/>. Editing the
     /// Agent definition while a job is in flight therefore cannot change
-    /// the resolved model/variant — they were copied at launch time
-    /// (design D2, #410 T-001 AC).
+    /// the resolved model/variant — they were copied at launch time.
     /// </summary>
     internal static (string? Model, string? Variant) ResolveModelAndVariant(JsonElement? agentConfig)
     {
@@ -361,7 +360,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
     /// <summary>
     /// Resolves the execution backend as
     /// <c>launchOverride ?? agentConfig.runtime ?? "opencode"</c>
-    /// (issue-452 design D2). The launch-time override wins over the
+    /// The launch-time override wins over the
     /// Agent's configured backend; absent an override, the Agent's
     /// configured backend is used; absent both, the backend resolves to
     /// <see cref="AgentConfigSchema.OpenCodeRuntime"/>. Manual HTTP
