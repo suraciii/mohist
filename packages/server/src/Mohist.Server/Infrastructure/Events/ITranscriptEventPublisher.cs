@@ -25,7 +25,7 @@ namespace Mohist.Server.Infrastructure.Events;
 /// transcript data, such as <c>session.input</c>,
 /// <c>message.delta</c>, <c>reasoning.delta</c>,
 /// <c>tool_call.started</c>, <c>tool_call.updated</c>,
-/// <c>tool_call.completed</c>, and <c>session.closed</c>.
+/// <c>tool_call.completed</c>, and <c>session.activity</c>.
 /// </para>
 /// </summary>
 public interface ITranscriptEventPublisher

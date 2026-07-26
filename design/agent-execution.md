@@ -397,14 +397,13 @@ Server 是 binding 与 activity 的唯一状态裁判。Runner 不能自行决�
 
 ## 实装差距
 
-本文以上内容是目标设计。当前实现仍写入或消费 `session.closed`、
-`session.followup_completed` 与 `session.followup_failed`，并有消费者从历史结束事实推导
-整个 AgentSession 的状态和命令能力。当前实现还持久化并展示物理 Session 历史。
+#484 已落地扁平 transcript 与独立 activity：不再写入 `session.closed` /
+`session.followup_*`，状态与命令资格只读当前 activity；终态以 `session.activity`
+（activity=idle + 终态 status）持久化。
 
-#484 负责删除这些 Session 终态语义，改为扁平 transcript 与独立 activity，并移除
-单次执行子资源、物理 Session 历史复制和 Runner 协议版本门。数据库结构可以迁移，
-但不迁移物理会话内容。实施不保留
-`session.closed` 别名，也不把旧事件转换成另一套有身份的会话子资源。
+残留差距：退役词汇仍留在三条路径上——server 仍接受（但已无生产者）`session.closed`
+runtime 事件并映射为同名片段类型；事件 feed 仍把终态 `session.activity` 记录以
+`session.closed` 类型展示；web 仍保留该名字的标签与视图处理。#496 负责清除。
 
 Runtime Session 确认缺失后的自动创建与 expected-binding replacement 尚未覆盖全部入口；
 当前部分路径仍要求用户 Reset。该差距按本文的最小 current-binding 模型实施。

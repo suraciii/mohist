@@ -1023,7 +1023,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             ?? AgentSessionJsonHelper.GetBoolProp(payload, "producedExpectedOutput")
             ?? false;
 
-        var result = ContextExhaustionClassifier.ClassifyClose(
+        var result = ContextExhaustionClassifier.ClassifyTurnFailure(
             "failed",
             usage.ContextWindowUsed,
             usage.ContextWindowSize,

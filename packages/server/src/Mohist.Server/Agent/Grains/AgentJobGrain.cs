@@ -32,7 +32,7 @@ namespace Mohist.Server.Agent.Grains;
 /// registers a durable <c>agent-job-recovery</c> Orleans reminder. The
 /// AgentSession grain's idempotent <c>AppendTerminalCloseAsync</c> command
 /// flips that pending flag off and unregisters the reminder only after
-/// the matching <c>session.closed</c> transcript fact is durable. The
+/// the matching terminal <c>session.activity</c> transcript fact is durable. The
 /// reminder drives retries until acknowledgement so a process restart,
 /// an activation loss, or a Session-persistence failure cannot lose the
 /// terminal fact.
@@ -952,7 +952,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     /// report replay. Idempotent for
     /// already-terminal jobs that still carry a pending delivery — the
     /// same delivery is retried so a redelivered report or a fresh
-    /// activation converges on exactly one <c>session.closed</c> fact.
+    /// activation converges on exactly one terminal <c>session.activity</c> fact.
     /// </summary>
     internal async Task EnterTerminalStateAsync(
         AgentJobStatus terminalStatus,

@@ -16,7 +16,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     /// Synchronous, idempotent terminal-close command issued by an
     /// authoritative AgentJob owner. The
     /// delivery id stored in <see cref="AppendTerminalCloseCommand.DeliveryId"/>
-    /// is the correlation key on the persisted <c>session.closed</c>
+    /// is the correlation key on the persisted terminal <c>session.activity</c>
     /// transcript part; a second call with the same delivery id is a
     /// no-op (the AgentSession already owns the close fact). The method
     /// returns only after the state/events and the transcript part are
@@ -104,10 +104,10 @@ public sealed record AppendAgentSessionSystemEventsCommand(
 /// The AgentJob owns the canonical terminal delivery: every retry across
 /// reminder ticks, activation loss, and report replay reuses the same
 /// <see cref="DeliveryId"/> so the AgentSession persists at most one
-/// <c>session.closed</c> transcript fact per AgentJob-owned close.
+/// terminal <c>session.activity</c> transcript fact per AgentJob-owned close.
 /// <see cref="RecordedAt"/> is the AgentJob's terminal timestamp; the
-/// AgentSession projects it onto the persisted close payload so all
-/// observable close metadata is identical regardless of which retry
+/// AgentSession projects it onto the persisted terminal payload so all
+/// observable terminal metadata is identical regardless of which retry
 /// observed the durable acknowledgement. <see cref="RuntimeSessionId"/>
 /// is the AgentJob's bound runtime at the time the terminal was decided;
 /// when the bound runtime has been superseded by a reset the AgentSession
