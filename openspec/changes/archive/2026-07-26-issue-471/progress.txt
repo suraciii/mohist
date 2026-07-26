@@ -1,0 +1,91 @@
+## T-001 Bounded OTLP admission and decoded request bodies
+
+### Codebase patterns
+
+- The existing `OtlpRoutes` reads the request body directly via `request.Body.CopyToAsync` (JSON) or `MemoryStream.ToArray` (protobuf) before any parse or persist.
+- The `OtlpTraceResponseWriter` is the single OTLP response writer; new overloads for `413` and `429` fit the same `WriteStatusCoreAsync` path.
+- `OtelDbPool` and `OtelDb` are open-read-write SQL connections; tests use the shared in-memory `InMemoryOtelDb` factory with a keeper connection.
+- `OtlpRoutesWebApplicationFactory` already configures `OtelOptions.Enabled = true`, an in-memory otel DB, and a `FakeTimeProvider`; the `IOtlpIngestGate` and `IOtlpIngestGateTestSeam` are now registered by `MohistServiceRegistration`, so any test fixture extending it can resolve both.
+
+### Decisions and gotchas
+
+- `OtlpIngestGate` is a non-queued singleton with at most 4 request leases and 1 writer lease. The 5th recognized request returns a `429` with `Retry-After: 1` *before* the route touches `request.Body`.
+- Lease acquisition happens after `Content-Type` recognition and before any body read; the lease is released in `finally` for every completion path (success, 4xx, 5xx, cancellation, exception). There is no queue, worker, or deferred payload.
+- `LimitedOtlpBodyReader` is fail-closed: it stops appending the moment the running total would exceed `DefaultMaxBytes` (16 MiB). When the next read would push it past the limit, it throws `OtlpBodyTooLargeException` *after* the previously read bytes remain the only thing retained — no full buffering, no allocation of the excess.
+- A subtle off-by-one: when the body is exactly at the limit, the reader must not throw. The current implementation reads `min(buffer, remaining)` and only throws when a *next* read would push it past. The edge case is verified by `ReadAllAsync_BodyAtLimit_ReturnsBytes` (16 MiB exactly) and `ReadAllAsync_BodyOverLimit_ThrowsOtlpBodyTooLarge` (16 MiB + 1).
+- ASP.NET Core 11's `RequestDecompressionOptions.DecpressionProviders` is a dictionary; defaults are `br`, `deflate`, `gzip`. Just `AddRequestDecompression()` is enough; the explicit `Providers.Add(...)` pattern from older .NET versions does not compile.
+- The response writer's `Retry-After` is set on the response *before* `WriteStatusCoreAsync` writes the body. The header is omitted for 413 (no retry needed for a permanent size refusal) and present for 429.
+- Protobuf wire encoding for `google.rpc.Status`: field 1 (`code`) = `8` for `RESOURCE_EXHAUSTED`, field 2 (`message`) = the bounded message. `details` is omitted, matching the canonical encoding.
+- 415 (unsupported media) intentionally bypasses the gate: the `Content-Type` check fires before admission so unsupported content returns JSON 415 without holding a lease. `UnsupportedMedia_ReturnsJson415_NotAffectedByGate` proves this.
+
+### Test seams
+
+- `OtlpIngestGate` implements `IOtlpIngestGateTestSeam` with `BlockNextRequestLease()` and `ReleaseNextRequestSignal()`. The signal is created on demand by the test (so a second `BlockNextRequestLease` returns `false` if one is already pending). The test suite drives the four-slot exhaustion path without scheduler or wall-clock waits by externally holding the gate through `IOtlpIngestGate.TryAcquireRequestLease` / `ReleaseRequestLease` and then issuing a 5th request.
+- The `BlockNextRequestLease` seam exists to lock the 5th request's *next* admission until a manual signal — this is not currently used by any test (the simpler external-slot-fill pattern is sufficient and avoids a race between the test and the route), but is left in place for future precise control tests.
+
+### Verified
+
+- 1497 / 1497 unit tests pass (new: 5 `OtlpIngestGateTests`, 8 `LimitedOtlpBodyReaderTests`, 6 new cases in `OtlpTraceResponseWriterTests`).
+- 15 / 15 `OtlpRoutesBoundedIngressSpecs` pass; 10 / 10 existing `OtlpRoutesIntegrationSpecs` pass; 25 / 25 OTLP-related spec tests pass; 1497 / 1497 unit tests pass.
+- A single pre-existing flake in `EventDispatcherImmediateTriggerSpecs.LostImmediateTrigger_LeavesRowUndispatched_AndReminderTickRecovers` is unrelated (passes in isolation).
+- `npm test` for runner + web passes; web typecheck passes; `dotnet build /p:TreatWarningsAsErrors=true` clean.
+
+### Notes for T-002
+
+- The gate's writer lease (`AcquireWriterLeaseAsync`) is implemented but unused at the route layer in T-001; T-002 should `await using` it inside `TraceIngester.IngestBatch` to serialize the database write path.
+- The route handler has not been touched inside the `try` block in a way that T-002 must preserve: the body has been fully read and stored in `bodyBytes` before T-002's call, so a block planner only needs the decoded byte payload.
+- `OtlpIngestGate.TryAcquireRequestLease` and `ReleaseRequestLease` are the only public surface the writer-lease consumer needs; `BlockNextRequestLease` / `ReleaseNextRequestSignal` remain internal test seams.
+- Decompression is enabled in `MohistHostFactory.Build` between `UseOtelPortIsolation` and `UseResponseCompression`. T-002 does not need to re-order middleware.
+
+## T-002 Persist OTLP traces in linear bounded write blocks
+
+### Codebase patterns
+
+- `TraceIngester` exposes an internal `transactionStarted` callback that fires once per SQL transaction begin. The bounded write path reuses it to count blocks and to inject deterministic failure (a callback that throws triggers the established rollback path with retryable outcome semantics).
+- `OtlpWriterLease` is a `readonly struct`; `default(OtlpWriterLease)` is a no-op when the ingester is constructed without a gate, so the same ingester works in unit tests and production.
+- `InMemoryOtelDb.Create()` already sets up the existing schema; T-002 adds two new DDL entries (`idx_spans_trace_start`, `idx_spans_trace_end`) and the factory is updated to match so in-memory and on-disk stores are aligned.
+- `TraceIngester.Planner` is an internal test seam returning the singleton `OtlpWriteBlockPlanner`; the public ingest path calls `IngestBatch`, which now plans then commits blocks in one go.
+
+### Decisions and gotchas
+
+- The block planner is a pure function of the `PreparedIngestBatch` — no DB access, no IO. This keeps the planner testable in isolation and avoids a second pass through the connection pool. It is exposed through `TraceIngester.Planner` so unit tests can exercise partitioning without a database.
+- A single normalized Span whose persisted-data weight alone exceeds `OtlpWriteBlockPlanner.MaxBlockBytes` is *not* placed in any block; the planner increments `OversizedDropped`, closes the prior block, and continues. The non-retryable classification flows into `ClassifiedBatchTotals.MalformedDropped` so `IngestOutcomeBuilder` produces a `PartialSuccess` disposition and the response writer's `partial_success.rejectedSpans` carries the combined refused + dropped count.
+- The block writer preserves `INSERT OR REPLACE` semantics: each block reads prior `(trace_id, span_id)` identities in one tuple-IN query, inserts or replaces every row, and adds *only* the new identities to the trace's `span_count`. The trace header update is a single `UPDATE` per affected trace (an additive composite-indexed `ORDER BY ... LIMIT 1` for the bounds). Work grows with affected traces, not with the incoming Span count.
+- A new trace header is inserted only when the trace does not already exist; the existing trace path is a plain `UPDATE`. This avoids the silent double-count that happens if an `INSERT OR IGNORE` is followed by an `UPDATE` (the prior bug the spec calls out for the operation-count assertion).
+- The writer lease is acquired with `using var writerLease = ...` around the entire block loop so an early cancellation releases the lease before the route handler returns. The lease is a synchronous `IDisposable`, so the await is followed by a manual `try/finally` rather than `await using` (the latter requires `IAsyncDisposable`).
+- `Microsoft.Data.Sqlite` does not reliably support reusing a single named parameter across two SQL statements in the same command text. The trace-header helper therefore issues two separate `Command`s (one `INSERT` and one `UPDATE`) instead of a single batched text. The cost is a small additional round-trip per affected trace, but the deterministic correctness is what the spec asks for.
+- The existing `transactionStarted` callback runs *after* `BeginTransaction` and *before* the block writes. Tests use it as both a block counter and a fault-injection point. Throwing from it produces the same `RolledBack` outcome as a write failure, so the retryable/cancelled semantics are reused for free.
+- The bounded-blocks tests live in `SpecTests` rather than `UnitTests` because the assertions need an in-memory `OtelDb` + `OtlpIngestGate` pair; `UnitTests` does not reference `SpecTests.Support.InMemoryOtelDb`. The plannertests, by contrast, are pure data and live in `UnitTests`.
+- ArchTests enforces a 24,000-byte ratchet on individual C# test files. The bounded-write spec file is split into one `TraceIngesterBoundedWriteSpecs` and one `OtlpRoutesBoundedWriteSpecs`; each stays under the limit while still covering all the spec scenarios.
+- The spec file naming must end with `Specs` or `Collection`; the bounded-write tests were originally `BoundedWriteTests` and tripped the rule. Renamed to `BoundedWriteSpecs` and the existing `TraceIngesterSpecs` collection is unaffected.
+
+### Verified
+
+- 1506 / 1506 unit tests pass (new: 9 `OtlpWriteBlockPlannerTests`).
+- 3246 / 3246 spec tests pass (new: 10 `TraceIngesterBoundedWriteSpecs` and 4 `OtlpRoutesBoundedWriteSpecs`).
+- 32 / 32 arch tests pass; `npm test` passes end-to-end; `npm run typecheck` passes for both `web` and `runner`; `dotnet build /p:TreatWarningsAsErrors=true` is clean.
+
+### Verification recovery
+
+- The stored verify output from 2026-07-26 reports 3245 / 3246 SpecTests, with the failing test `EventDispatcherImmediateTriggerSpecs.LostImmediateTrigger_LeavesRowUndispatched_AndReminderTickRecovers` at line 195. UnitTests (1506) and ArchTests (32) passed.
+- The failure reproduces in the full SpecTests run as `Assert.Equal` expected `0`, actual `1` for the event store pending count. The same test passes when run alone, while all issue-471 telemetry specs pass in isolation. This is the pre-existing full-suite fake-time/reminder flake already noted above and is unrelated to issue-471; no unrelated test change was made.
+
+### Review fix: writer lease handoff
+
+- Replaced the shared writer wake-up signal with a one-permit `SemaphoreSlim`. Each admitted request now waits independently, cancellation only affects its own wait, and a lease is granted atomically to exactly one writer.
+- Added deterministic gate unit coverage for two queued writers and for cancelling one queued writer while another remains eligible to acquire the released lease.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore --filter 'FullyQualifiedName~OtlpIngestGateTests'` passes all 1508 UnitTests because the test platform ignores the filter.
+- The full SpecTests run and `npm test` both reproduce the documented, unrelated `EventDispatcherImmediateTriggerSpecs.LostImmediateTrigger_LeavesRowUndispatched_AndReminderTickRecovers` failure: 3245 / 3246 specs pass. UnitTests (1508), ArchTests (32), CLI tests (1327), and definition tests (175) pass within `npm test` before that failure stops the workspace test phase.
+
+### Review fix: admission happens before body reads
+
+- Removed the inert `IOtlpIngestGateTestSeam`; its signal was never observed by admission and could not prove request ordering.
+- Added a TestServer-only `OtlpRequestBodyReadProbe` startup filter. Marked requests receive a wrapped server-side body stream that records the first read, and fixture reset clears it between tests.
+- The full-slot JSON and protobuf `429` specs mark their requests and assert that the route returned without reading either body.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore` passes all 1508 UnitTests. The full SpecTests run and `npm test` continue to reproduce only the documented unrelated dispatcher flake: 3245 / 3246 specs pass; UnitTests (1508), ArchTests (32), CLI tests (1327), and definition tests (175) pass within `npm test` before it stops.
+
+### CI repair: cancellation assertion subtype
+
+- PR #221's `.NET build and test` job failed `IngestBatch_CancelledBeforeLeaseAcquire_NoSavedCounts`: `SemaphoreSlim.WaitAsync` produced `TaskCanceledException`, while the test required the exact `OperationCanceledException` type.
+- Changed the assertion to `Assert.ThrowsAnyAsync<OperationCanceledException>`, preserving the cancellation contract while accepting its standard subtype.
+- A full local SpecTests run after the change no longer reports the telemetry cancellation assertion. It reached 3245 / 3246 passing before the unrelated `AgentJobGrainSpecs.SubmitAsync_IdenticalSecondCallAfterRunning_IsIdempotent` timed out while its status remained Pending.

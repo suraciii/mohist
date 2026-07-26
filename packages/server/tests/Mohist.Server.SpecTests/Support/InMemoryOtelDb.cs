@@ -34,6 +34,8 @@ public static class InMemoryOtelDb
             "CREATE INDEX IF NOT EXISTS idx_traces_start ON traces(start_time DESC);",
             "CREATE INDEX IF NOT EXISTS idx_traces_end ON traces(end_time);",
             "CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id);",
+            "CREATE INDEX IF NOT EXISTS idx_spans_trace_start ON spans(trace_id, start_time);",
+            "CREATE INDEX IF NOT EXISTS idx_spans_trace_end ON spans(trace_id, end_time);",
         })
         {
             using var cmd = keeper.CreateCommand();
