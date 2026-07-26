@@ -150,40 +150,38 @@ public class CliIssueUpdatePatchBodySpecs
 
         Assert.Equal(1, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
-        Assert.Contains("--body, --body-file, --body-stdin", error.ToString());
+        Assert.Contains("--body, --body-file", error.ToString());
     }
 
     [Fact]
-    public async Task IssueUpdate_BodyAndBodyStdin_ConflictExitsWithCodeOne()
+    public async Task IssueUpdate_BodyStdin_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "edit", "1", "--body", "Inline", "--body-stdin"],
+            ["issue", "edit", "1", "--body-stdin"],
             output, error, fs, executor,
             standardInput: new StringReader("from stdin"));
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
-        Assert.Contains("--body, --body-file, --body-stdin", error.ToString());
+        Assert.Contains("--body-stdin", error.ToString());
     }
 
     [Fact]
-    public async Task IssueUpdate_BodyFileAndBodyStdin_ConflictExitsWithCodeOne()
+    public async Task IssueUpdate_BodyFileDash_ReadsStandardInput()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
-        fs.AddFile("/tmp/body.md", "From file");
-
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "edit", "1", "--body-file", "/tmp/body.md", "--body-stdin"],
+            ["issue", "edit", "1", "--body-file", "-"],
             output, error, fs, executor,
             standardInput: new StringReader("from stdin"));
 
-        Assert.Equal(1, exitCode);
-        Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
-        Assert.Contains("--body, --body-file, --body-stdin", error.ToString());
+        Assert.Equal(0, exitCode);
+        var patch = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
+        Assert.Equal("from stdin", JsonNode.Parse(patch.Body!)!["body"]?.GetValue<string>());
     }
 
     [Fact]

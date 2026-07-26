@@ -79,6 +79,12 @@ internal static class CommandHelpHook
         return CliExitCode.For(CliExitOutcome.UsageFailure);
     }
 
+    public static int RenderUsageFailure(ParseResult parseResult, TextWriter error, string diagnostic)
+    {
+        error.WriteLine(diagnostic);
+        return RenderNearestUsage(parseResult, error);
+    }
+
     private static Command? FindNearestRenderable(ParseResult parseResult)
     {
         var result = parseResult.CommandResult;
@@ -134,7 +140,7 @@ internal static class CommandHelpHook
             }
             else
             {
-                CommandHelpRenderer.RenderGroup(output, command);
+                CommandHelpRenderer.RenderGroup(output, command, path);
             }
             return CliExitCode.For(CliExitOutcome.Success);
         }

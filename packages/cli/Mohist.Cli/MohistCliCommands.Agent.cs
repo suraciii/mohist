@@ -247,8 +247,7 @@ internal static class AgentCommands
     {
         var cmd = new Command("create", "Create a new agent");
         var nameOpt = new Option<string?>("--name") { Description = "Agent name" };
-        var instructionsOpt = new Option<string?>("--instructions") { Description = "Agent instructions (literal text, @file, or - with --instructions-stdin)" };
-        var instructionsStdinOpt = new Option<bool>("--instructions-stdin") { Description = "Read agent instructions from stdin" };
+        var instructionsOpt = new Option<string?>("--instructions") { Description = "Agent instructions (literal text, @file, or - for stdin)" };
         var descriptionOpt = new Option<string?>("--description") { Description = "Agent description" };
         var agentConfigOpt = new Option<string?>("--agent-config") { Description = "Agent config JSON or @file" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
@@ -257,7 +256,6 @@ internal static class AgentCommands
 
         cmd.Options.Add(nameOpt);
         cmd.Options.Add(instructionsOpt);
-        cmd.Options.Add(instructionsStdinOpt);
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(agentConfigOpt);
         cmd.Options.Add(skillsOpt);
@@ -268,7 +266,6 @@ internal static class AgentCommands
         {
             var name = ctx.GetValue(nameOpt);
             var instructions = ctx.GetValue(instructionsOpt);
-            var instructionsStdin = ctx.GetValue(instructionsStdinOpt);
             var description = ctx.GetValue(descriptionOpt);
             var agentConfig = ctx.GetValue(agentConfigOpt);
             var skills = ctx.GetValue(skillsOpt);
@@ -290,7 +287,7 @@ internal static class AgentCommands
 
                 if (resolveExit != 0) return resolveExit;
 
-                var resolvedInstructions = await ResolveInstructionsAsync(instructions, instructionsStdin, api);
+                var resolvedInstructions = await ResolveInstructionsAsync(instructions, api);
                 if (resolvedInstructions is null)
                     return 1;
 
@@ -399,8 +396,7 @@ internal static class AgentCommands
         var nameOrIdArg = NameOrIdArg();
         var nameOpt = new Option<string?>("--name") { Description = "New agent name" };
         var descriptionOpt = new Option<string?>("--description") { Description = "New agent description" };
-        var instructionsOpt = new Option<string?>("--instructions") { Description = "New agent instructions (literal text, @file, or - with --instructions-stdin)" };
-        var instructionsStdinOpt = new Option<bool>("--instructions-stdin") { Description = "Read new agent instructions from stdin" };
+        var instructionsOpt = new Option<string?>("--instructions") { Description = "New agent instructions (literal text, @file, or - for stdin)" };
         var agentConfigOpt = new Option<string?>("--agent-config") { Description = "New agent config JSON or @file" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
         var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Maximum concurrent runs" };
@@ -414,7 +410,6 @@ internal static class AgentCommands
         cmd.Options.Add(nameOpt);
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(instructionsOpt);
-        cmd.Options.Add(instructionsStdinOpt);
         cmd.Options.Add(agentConfigOpt);
         cmd.Options.Add(skillsOpt);
         cmd.Options.Add(maxConcurrentRunsOpt);
@@ -430,7 +425,6 @@ internal static class AgentCommands
             var name = ctx.GetValue(nameOpt);
             var description = ctx.GetValue(descriptionOpt);
             var instructions = ctx.GetValue(instructionsOpt);
-            var instructionsStdin = ctx.GetValue(instructionsStdinOpt);
             var agentConfig = ctx.GetValue(agentConfigOpt);
             var skills = ctx.GetValue(skillsOpt);
             var maxConcurrentRuns = ctx.GetValue(maxConcurrentRunsOpt);
@@ -460,9 +454,9 @@ internal static class AgentCommands
                     return 1;
 
                 string? resolvedInstructions = null;
-                if (!string.IsNullOrWhiteSpace(instructions) || instructionsStdin)
+                if (!string.IsNullOrWhiteSpace(instructions))
                 {
-                    resolvedInstructions = await ResolveInstructionsAsync(instructions, instructionsStdin, api);
+                    resolvedInstructions = await ResolveInstructionsAsync(instructions, api);
                     if (resolvedInstructions is null)
                         return 1;
                 }
@@ -549,9 +543,8 @@ internal static class AgentCommands
             "launch",
             "Launch a generic AgentSession from an Agent profile. Returns both the AgentJob id (the work owner) and the AgentSession id (the conversation owner). Sends POST /api/projects/:projectId/agents/:agentId/sessions.");
         var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
-        var promptOpt = new Option<string?>("--prompt") { Description = "Prompt text (mutually exclusive with --prompt-file and --prompt-stdin)" };
-        var promptFileOpt = new Option<string?>("--prompt-file") { Description = "Read prompt from a UTF-8 file path (recommended for long prompts; mutually exclusive with --prompt and --prompt-stdin)" };
-        var promptStdinOpt = new Option<bool>("--prompt-stdin") { Description = "Read prompt from stdin (mutually exclusive with --prompt and --prompt-file)" };
+        var promptOpt = new Option<string?>("--prompt") { Description = "Prompt text (mutually exclusive with --prompt-file)" };
+        var promptFileOpt = new Option<string?>("--prompt-file") { Description = "Read prompt from a UTF-8 file path, or - for stdin (mutually exclusive with --prompt)" };
         var issueRefOpt = new Option<int?>("--issue") { Description = "Optional context reference: record the issue number on the session metadata" };
         var epicRefOpt = new Option<string?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
         var repositoryRefOpt = new Option<string?>("--repository") { Description = "Optional context reference: record the repository on the session metadata" };
@@ -562,7 +555,6 @@ internal static class AgentCommands
         cmd.Arguments.Add(agentRefArg);
         cmd.Options.Add(promptOpt);
         cmd.Options.Add(promptFileOpt);
-        cmd.Options.Add(promptStdinOpt);
         cmd.Options.Add(issueRefOpt);
         cmd.Options.Add(epicRefOpt);
         cmd.Options.Add(repositoryRefOpt);
@@ -575,7 +567,6 @@ internal static class AgentCommands
             var agentRef = ctx.GetValue(agentRefArg);
             var prompt = ctx.GetValue(promptOpt);
             var promptFile = ctx.GetValue(promptFileOpt);
-            var promptStdin = ctx.GetValue(promptStdinOpt);
             var issueRef = ctx.GetValue(issueRefOpt);
             var epicRef = ctx.GetValue(epicRefOpt);
             var repositoryRef = ctx.GetValue(repositoryRefOpt);
@@ -597,8 +588,8 @@ internal static class AgentCommands
                 if (resolveExit != 0) return resolveExit;
 
                 var resolvedPrompt = await BodyInputResolver.ResolveAsync(
-                    prompt, promptFile, promptStdin,
-                    new BodyInputResolver.SourceFlags("--prompt", "--prompt-file", "--prompt-stdin", "prompt"),
+                    prompt, promptFile,
+                    new BodyInputResolver.SourceFlags("--prompt", "--prompt-file", "prompt"),
                     api.FileSystem, api.StandardInput, api.Error);
                 if (resolvedPrompt is BodyInputResolver.Result.Failure)
                     return 1;
@@ -633,12 +624,10 @@ internal static class AgentCommands
         };
     }
 
-    private static async Task<string?> ResolveInstructionsAsync(string? instructions, bool instructionsStdin, MohistCliApi api)
+    private static async Task<string?> ResolveInstructionsAsync(string? instructions, MohistCliApi api)
     {
         string? inline = null;
         string? file = null;
-        var stdin = instructionsStdin;
-
         if (string.Equals(instructions, "-", StringComparison.Ordinal))
         {
             return await api.StandardInput.ReadToEndAsync();
@@ -653,7 +642,7 @@ internal static class AgentCommands
             inline = instructions;
         }
 
-        var resolved = await BodyInputResolver.ResolveAsync(inline, file, stdin, api.FileSystem, api.StandardInput, api.Error);
+        var resolved = await BodyInputResolver.ResolveAsync(inline, file, api.FileSystem, api.StandardInput, api.Error);
         return resolved is BodyInputResolver.Result.Success success ? success.Body : null;
     }
 

@@ -59,7 +59,7 @@ public class CliSessionCommandSpecs
         var stdout = output.ToString();
         Assert.Contains("--text", stdout, StringComparison.Ordinal);
         Assert.Contains("--text-file", stdout, StringComparison.Ordinal);
-        Assert.Contains("--text-stdin", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("--text-stdin", stdout, StringComparison.Ordinal);
         Assert.Contains("joins an active turn", stdout, StringComparison.Ordinal);
         Assert.Contains("user-initiated turn when idle", stdout, StringComparison.Ordinal);
         Assert.Contains("without creating a TaskRun or AgentJob", stdout, StringComparison.Ordinal);
@@ -454,7 +454,7 @@ public class CliSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionList_NoFilter_RejectsWithOne()
+    public async Task SessionList_NoFilter_RejectsWithScopedUsageFailure()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called when no filter is provided"));
@@ -462,13 +462,15 @@ public class CliSessionCommandSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["session", "list"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Contains("--agent, --issue, or --run is required", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo session list", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
     [Fact]
-    public async Task SessionList_MultipleFilters_RejectsWithOne()
+    public async Task SessionList_MultipleFilters_RejectsWithScopedUsageFailure()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called when filters conflict"));
@@ -476,8 +478,10 @@ public class CliSessionCommandSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["session", "list", "--agent", "reviewer", "--issue", "42"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Contains("Only one of", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo session list", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -598,7 +602,7 @@ public class CliSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionFollowup_TextStdin_ReadsFromStdin()
+    public async Task SessionFollowup_TextFileDash_ReadsFromStdin()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -610,7 +614,7 @@ public class CliSessionCommandSpecs
         var stdin = new StringReader("please continue");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "followup", StableSessionId, "--text-stdin"], output, error, fileSystem, executor,
+            http, ["session", "followup", StableSessionId, "--text-file", "-"], output, error, fileSystem, executor,
             standardInput: stdin);
 
         Assert.Equal(0, exitCode);
@@ -666,17 +670,17 @@ public class CliSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionFollowup_BlankInlineTextWithStdin_StillFailsMutualExclusion()
+    public async Task SessionFollowup_TextStdin_IsRejectedAsUsageFailure()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "followup", StableSessionId, "--text", " ", "--text-stdin"], output, error, fileSystem, executor,
+            http, ["session", "followup", StableSessionId, "--text-stdin"], output, error, fileSystem, executor,
             standardInput: new StringReader("from stdin"));
 
-        Assert.Equal(1, exitCode);
-        Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--text-stdin", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 

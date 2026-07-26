@@ -310,7 +310,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module", "--description", "New desc"], output, error, fs, executor);
+            http, ["label", "edit", "module", "--description", "New desc"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -340,7 +340,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module", "--supported-values", "auth,ui,persistence"], output, error, fs, executor);
+            http, ["label", "edit", "module", "--supported-values", "auth,ui,persistence"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -371,7 +371,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module", "--description", "Updated", "--supported-values", "auth,ui"], output, error, fs, executor);
+            http, ["label", "edit", "module", "--description", "Updated", "--supported-values", "auth,ui"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -390,7 +390,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "Module", "--description", "Whatever"], output, error, fs, executor);
+            http, ["label", "edit", "Module", "--description", "Whatever"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -403,7 +403,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module", "--description", "   "], output, error, fs, executor);
+            http, ["label", "edit", "module", "--description", "   "], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -416,7 +416,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module"], output, error, fs, executor);
+            http, ["label", "edit", "module"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -430,7 +430,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module", "--supported-values", "auth,,ui"], output, error, fs, executor);
+            http, ["label", "edit", "module", "--supported-values", "auth,,ui"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -454,7 +454,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "unknown", "--description", "Anything"], output, error, fs, executor);
+            http, ["label", "edit", "unknown", "--description", "Anything"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("unknown", error.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -477,7 +477,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "refactor", "--description", "Trying to change"], output, error, fs, executor);
+            http, ["label", "edit", "refactor", "--description", "Trying to change"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("refactor", error.ToString(), StringComparison.OrdinalIgnoreCase);

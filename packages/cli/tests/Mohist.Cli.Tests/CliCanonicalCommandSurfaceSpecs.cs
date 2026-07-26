@@ -224,6 +224,20 @@ public class CliCanonicalCommandSurfaceSpecs
         Assert.Empty(handler.Requests);
     }
 
+    [Theory]
+    [InlineData("label", "update", "module")]
+    [InlineData("issue", "template", "get", "feature")]
+    [InlineData("issue", "template", "ls")]
+    public async Task RemovedResourceVerbOrAlias_IsRejectedAsUsageFailure(params string[] args)
+    {
+        var (handler, http, output, error, fs, executor) = SetupEnv();
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
+
+        Assert.Equal(2, exitCode);
+        Assert.Empty(handler.Requests);
+    }
+
     // ---------- Project view, Agent view/edit, Epic view/edit, Session view ----------
 
     [Fact]
@@ -480,8 +494,10 @@ public class CliCanonicalCommandSurfaceSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "list", "--project-id", "proj_test"], output, error, fs, executor);
 
-        Assert.NotEqual(0, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo issue list", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

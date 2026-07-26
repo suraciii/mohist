@@ -8,14 +8,13 @@ internal static partial class IssueCommands
     {
         var template = new Command("template", "Issue template management");
         template.Subcommands.Add(BuildTemplateList(api));
-        template.Subcommands.Add(BuildTemplateGet(api));
+        template.Subcommands.Add(BuildTemplateView(api));
         return template;
     }
 
     private static Command BuildTemplateList(MohistCliApi api)
     {
         var cmd = new Command("list", "List available issue templates for the active project");
-        cmd.Aliases.Add("ls");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Options.Add(projectOpt);
@@ -43,9 +42,9 @@ internal static partial class IssueCommands
         return cmd;
     }
 
-    private static Command BuildTemplateGet(MohistCliApi api)
+    private static Command BuildTemplateView(MohistCliApi api)
     {
-        var cmd = new Command("get", "Show a single issue template by name");
+        var cmd = new Command("view", "View a single issue template by name");
         var nameArg = new Argument<string>("name") { Description = "Template name or id (e.g. feature)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();

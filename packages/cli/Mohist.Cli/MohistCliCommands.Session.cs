@@ -103,13 +103,17 @@ internal static class SessionCommands
                 var providedCount = (agentProvided ? 1 : 0) + (issueProvided ? 1 : 0) + (runProvided ? 1 : 0);
                 if (providedCount == 0)
                 {
-                    api.Error.WriteLine("One of --agent, --issue, or --run is required.");
-                    return 1;
+                    return CommandHelpHook.RenderUsageFailure(
+                        ctx,
+                        api.Error,
+                        "One of --agent, --issue, or --run is required.");
                 }
                 if (providedCount > 1)
                 {
-                    api.Error.WriteLine("Only one of --agent, --issue, or --run may be set.");
-                    return 1;
+                    return CommandHelpHook.RenderUsageFailure(
+                        ctx,
+                        api.Error,
+                        "Only one of --agent, --issue, or --run may be set.");
                 }
 
                 var (mode, exit) = api.ResolveOutputMode(output);
@@ -220,16 +224,14 @@ internal static class SessionCommands
             "followup",
             "Send follow-up text to an AgentSession. It joins an active turn or starts a user-initiated turn when idle without creating a TaskRun or AgentJob. Sends POST /api/projects/:projectId/agent-sessions/:sessionId/followup.");
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
-        var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file and --text-stdin)" };
-        var textFileOpt = new Option<string?>("--text-file") { Description = "Read followup text from a UTF-8 file path (recommended for long messages; mutually exclusive with --text and --text-stdin)" };
-        var textStdinOpt = new Option<bool>("--text-stdin") { Description = "Read followup text from stdin (mutually exclusive with --text and --text-file)" };
+        var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file)" };
+        var textFileOpt = new Option<string?>("--text-file") { Description = "Read followup text from a UTF-8 file path, or - for stdin (mutually exclusive with --text)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption("table");
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(textOpt);
         cmd.Options.Add(textFileOpt);
-        cmd.Options.Add(textStdinOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
@@ -238,7 +240,6 @@ internal static class SessionCommands
             var sessionId = ctx.GetValue(sessionIdArg);
             var text = ctx.GetValue(textOpt);
             var textFile = ctx.GetValue(textFileOpt);
-            var textStdin = ctx.GetValue(textStdinOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
@@ -253,8 +254,8 @@ internal static class SessionCommands
                 if (resolveExit != 0) return resolveExit;
 
                 var resolvedText = await BodyInputResolver.ResolveAsync(
-                    text, textFile, textStdin,
-                    new BodyInputResolver.SourceFlags("--text", "--text-file", "--text-stdin", "text"),
+                    text, textFile,
+                    new BodyInputResolver.SourceFlags("--text", "--text-file", "text"),
                     api.FileSystem, api.StandardInput, api.Error);
                 if (resolvedText is BodyInputResolver.Result.Failure)
                     return 1;

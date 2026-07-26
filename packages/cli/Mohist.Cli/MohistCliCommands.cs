@@ -237,8 +237,10 @@ internal static class MohistCliCommands
         if (args.Any(arg => string.Equals(arg, "--project-id", StringComparison.Ordinal)
             || arg.StartsWith("--project-id=", StringComparison.Ordinal)))
         {
-            await error.WriteLineAsync("--project-id is not supported; use --project <name-or-id>.").ConfigureAwait(false);
-            return CliExitCode.For(CliExitOutcome.UsageFailure);
+            return CommandHelpHook.RenderUsageFailure(
+                parseResult,
+                error,
+                "--project-id is not supported; use --project <name-or-id>.");
         }
 
         var helpRequested = args.Any(arg => IsHelpToken(arg));

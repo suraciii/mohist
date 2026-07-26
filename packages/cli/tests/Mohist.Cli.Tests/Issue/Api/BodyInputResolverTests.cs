@@ -4,26 +4,14 @@ using Xunit;
 
 namespace Mohist.Cli.Tests.Issue.Api;
 
-public class BodyInputResolverTests
+public sealed class BodyInputResolverTests
 {
     [Fact]
     public async Task ResolveAsync_InlineBody_ReturnsBodyAsSuccess()
     {
-        var files = new FakeFileSystem();
-        var stdin = new StringReader(string.Empty);
-        var error = new StringWriter();
+        var result = await ResolveAsync("x", null);
 
-        var result = await BodyInputResolver.ResolveAsync(
-            inlineBody: "x",
-            bodyFile: null,
-            bodyStdin: false,
-            files,
-            stdin,
-            error);
-
-        var success = Assert.IsType<BodyInputResolver.Result.Success>(result);
-        Assert.Equal("x", success.Body);
-        Assert.Equal(string.Empty, error.ToString());
+        Assert.Equal("x", Assert.IsType<BodyInputResolver.Result.Success>(result).Body);
     }
 
     [Fact]
@@ -31,252 +19,82 @@ public class BodyInputResolverTests
     {
         var files = new FakeFileSystem();
         files.AddFile("body.md", "# hello\nfrom file\n");
-        var stdin = new StringReader(string.Empty);
-        var error = new StringWriter();
 
-        var result = await BodyInputResolver.ResolveAsync(
-            inlineBody: null,
-            bodyFile: "body.md",
-            bodyStdin: false,
-            files,
-            stdin,
-            error);
+        var result = await ResolveAsync(null, "body.md", files);
 
-        var success = Assert.IsType<BodyInputResolver.Result.Success>(result);
-        Assert.Equal("# hello\nfrom file\n", success.Body);
-        Assert.Equal(string.Empty, error.ToString());
+        Assert.Equal("# hello\nfrom file\n", Assert.IsType<BodyInputResolver.Result.Success>(result).Body);
     }
 
     [Fact]
-    public async Task ResolveAsync_BodyStdin_ReturnsDrainedStdinAsSuccess()
+    public async Task ResolveAsync_DashFile_ReadsStandardInput()
     {
-        var files = new FakeFileSystem();
         var stdin = new StringReader("piped body content");
-        var error = new StringWriter();
 
-        var result = await BodyInputResolver.ResolveAsync(
-            inlineBody: null,
-            bodyFile: null,
-            bodyStdin: true,
-            files,
-            stdin,
-            error);
+        var result = await ResolveAsync(null, "-", standardInput: stdin);
 
-        var success = Assert.IsType<BodyInputResolver.Result.Success>(result);
-        Assert.Equal("piped body content", success.Body);
-        Assert.Equal(string.Empty, error.ToString());
-    }
-
-    [Fact]
-    public async Task ResolveAsync_ZeroSources_WritesErrorAndReturnsFailure()
-    {
-        var files = new FakeFileSystem();
-        var stdin = new StringReader(string.Empty);
-        var error = new StringWriter();
-
-        var result = await BodyInputResolver.ResolveAsync(
-            inlineBody: null,
-            bodyFile: null,
-            bodyStdin: false,
-            files,
-            stdin,
-            error);
-
-        Assert.IsType<BodyInputResolver.Result.Failure>(result);
-        var err = error.ToString();
-        Assert.Contains("issue body is required", err);
-    }
-
-    [Fact]
-    public async Task ResolveAsync_InlineAndFile_WritesMutualExclusionErrorAndReturnsFailure()
-    {
-        var files = new FakeFileSystem();
-        files.AddFile("body.md", "from file");
-        var stdin = new StringReader(string.Empty);
-        var error = new StringWriter();
-
-        var result = await BodyInputResolver.ResolveAsync(
-            inlineBody: "literal",
-            bodyFile: "body.md",
-            bodyStdin: false,
-            files,
-            stdin,
-            error);
-
-        Assert.IsType<BodyInputResolver.Result.Failure>(result);
-        var err = error.ToString();
-        Assert.Contains("--body", err);
-        Assert.Contains("--body-file", err);
-        Assert.Contains("mutually exclusive", err);
-    }
-
-    [Fact]
-    public async Task ResolveAsync_AllThreeSources_WritesMutualExclusionErrorAndReturnsFailure()
-    {
-        var files = new FakeFileSystem();
-        files.AddFile("body.md", "from file");
-        var stdin = new StringReader("piped");
-        var error = new StringWriter();
-
-        var result = await BodyInputResolver.ResolveAsync(
-            inlineBody: "a",
-            bodyFile: "body.md",
-            bodyStdin: true,
-            files,
-            stdin,
-            error);
-
-        Assert.IsType<BodyInputResolver.Result.Failure>(result);
-        var err = error.ToString();
-        Assert.Contains("--body", err);
-        Assert.Contains("--body-file", err);
-        Assert.Contains("--body-stdin", err);
-    }
-
-    [Fact]
-    public async Task ResolveAsync_StdinAndFile_WritesMutualExclusionErrorAndReturnsFailure()
-    {
-        var files = new FakeFileSystem();
-        files.AddFile("body.md", "from file");
-        var stdin = new StringReader("piped");
-        var error = new StringWriter();
-
-        var result = await BodyInputResolver.ResolveAsync(
-            inlineBody: null,
-            bodyFile: "body.md",
-            bodyStdin: true,
-            files,
-            stdin,
-            error);
-
-        Assert.IsType<BodyInputResolver.Result.Failure>(result);
-        var err = error.ToString();
-        Assert.Contains("--body-file", err);
-        Assert.Contains("--body-stdin", err);
-    }
-
-    [Fact]
-    public async Task ResolveAsync_InlineAndStdin_WritesMutualExclusionErrorAndReturnsFailure()
-    {
-        var files = new FakeFileSystem();
-        var stdin = new StringReader("piped");
-        var error = new StringWriter();
-
-        var result = await BodyInputResolver.ResolveAsync(
-            inlineBody: "literal",
-            bodyFile: null,
-            bodyStdin: true,
-            files,
-            stdin,
-            error);
-
-        Assert.IsType<BodyInputResolver.Result.Failure>(result);
-        var err = error.ToString();
-        Assert.Contains("--body", err);
-        Assert.Contains("--body-stdin", err);
-    }
-
-    [Fact]
-    public async Task ResolveAsync_FileDoesNotExist_WritesFileReadErrorAndReturnsFailure()
-    {
-        var files = new FakeFileSystem();
-        var stdin = new StringReader(string.Empty);
-        var error = new StringWriter();
-
-        var result = await BodyInputResolver.ResolveAsync(
-            inlineBody: null,
-            bodyFile: "missing.md",
-            bodyStdin: false,
-            files,
-            stdin,
-            error);
-
-        Assert.IsType<BodyInputResolver.Result.Failure>(result);
-        var err = error.ToString();
-        Assert.Contains("could not read body file", err);
-        Assert.Contains("missing.md", err);
-    }
-
-    [Fact]
-    public async Task ResolveAsync_StdinDrainedToEndOfStream()
-    {
-        var files = new FakeFileSystem();
-        var stdin = new StringReader("line one\nline two\nline three");
-        var error = new StringWriter();
-
-        var result = await BodyInputResolver.ResolveAsync(
-            inlineBody: null,
-            bodyFile: null,
-            bodyStdin: true,
-            files,
-            stdin,
-            error);
-
-        var success = Assert.IsType<BodyInputResolver.Result.Success>(result);
-        Assert.Equal("line one\nline two\nline three", success.Body);
+        Assert.Equal("piped body content", Assert.IsType<BodyInputResolver.Result.Success>(result).Body);
         Assert.Equal(-1, stdin.Peek());
     }
 
     [Fact]
-    public async Task ResolveAsync_DoesNotMakeHttpCall_OnAnyPath()
+    public async Task ResolveAsync_MissingBody_WritesCanonicalSourceGuidance()
+    {
+        var error = new StringWriter();
+
+        var result = await BodyInputResolver.ResolveAsync(
+            inlineBody: null,
+            bodyFile: null,
+            new FakeFileSystem(),
+            new StringReader(string.Empty),
+            error);
+
+        Assert.IsType<BodyInputResolver.Result.Failure>(result);
+        Assert.Contains("--body or --body-file", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_InlineAndFile_WritesMutualExclusionError()
     {
         var files = new FakeFileSystem();
-        var stdin = new StringReader(string.Empty);
+        files.AddFile("body.md", "from file");
         var error = new StringWriter();
-        var http = new RecordingHttpHandler();
 
-        await BodyInputResolver.ResolveAsync(
-            inlineBody: "x",
-            bodyFile: null,
-            bodyStdin: false,
+        var result = await BodyInputResolver.ResolveAsync(
+            "literal",
+            "body.md",
             files,
-            stdin,
-            error);
-        await BodyInputResolver.ResolveAsync(
-            inlineBody: null,
-            bodyFile: "body.md",
-            bodyStdin: false,
-            files,
-            stdin,
-            error);
-        await BodyInputResolver.ResolveAsync(
-            inlineBody: null,
-            bodyFile: null,
-            bodyStdin: true,
-            files,
-            stdin,
-            error);
-        await BodyInputResolver.ResolveAsync(
-            inlineBody: null,
-            bodyFile: null,
-            bodyStdin: false,
-            files,
-            stdin,
-            error);
-        await BodyInputResolver.ResolveAsync(
-            inlineBody: "x",
-            bodyFile: "body.md",
-            bodyStdin: false,
-            files,
-            stdin,
+            new StringReader(string.Empty),
             error);
 
-        Assert.Empty(http.Requests);
+        Assert.IsType<BodyInputResolver.Result.Failure>(result);
+        Assert.Contains("--body, --body-file", error.ToString(), StringComparison.Ordinal);
     }
 
-    private sealed class RecordingHttpHandler : System.Net.Http.HttpMessageHandler
+    [Fact]
+    public async Task ResolveAsync_MissingFile_WritesFileReadError()
     {
-        public List<System.Net.Http.HttpRequestMessage> Requests { get; } = new();
+        var error = new StringWriter();
 
-        protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(
-            System.Net.Http.HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            Requests.Add(request);
-            return Task.FromResult(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
-            {
-                Content = new StringContent("""{ "success": true, "data": null }"""),
-            });
-        }
+        var result = await BodyInputResolver.ResolveAsync(
+            null,
+            "missing.md",
+            new FakeFileSystem(),
+            new StringReader(string.Empty),
+            error);
+
+        Assert.IsType<BodyInputResolver.Result.Failure>(result);
+        Assert.Contains("could not read body file: missing.md", error.ToString(), StringComparison.Ordinal);
     }
+
+    private static Task<BodyInputResolver.Result> ResolveAsync(
+        string? inlineBody,
+        string? bodyFile,
+        FakeFileSystem? files = null,
+        TextReader? standardInput = null) =>
+        BodyInputResolver.ResolveAsync(
+            inlineBody,
+            bodyFile,
+            files ?? new FakeFileSystem(),
+            standardInput ?? new StringReader(string.Empty),
+            TextWriter.Null);
 }

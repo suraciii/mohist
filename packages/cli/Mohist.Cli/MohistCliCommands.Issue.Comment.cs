@@ -58,7 +58,7 @@ internal static partial class IssueCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 var resolved = await BodyInputResolver.ResolveAsync(
-                    body, bodyFile, false, api.FileSystem, api.StandardInput, api.Error);
+                    body, bodyFile, api.FileSystem, api.StandardInput, api.Error);
                 if (resolved is BodyInputResolver.Result.Failure)
                     return 1;
                 var bodyText = ((BodyInputResolver.Result.Success)resolved).Body;

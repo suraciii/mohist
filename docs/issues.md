@@ -21,7 +21,7 @@ mo issue create "Fix login bug" --body "Users can't login on Safari"
 mo issue create "Refactor auth module" --body-file ./issue-body.md
 
 # 从 stdin
-cat ./my-issue.md | mo issue create "My issue" --body-stdin
+cat ./my-issue.md | mo issue create "My issue" --body-file -
 
 # 指定优先级和标签
 mo issue create "Critical fix" --priority p0 --label kind=bug

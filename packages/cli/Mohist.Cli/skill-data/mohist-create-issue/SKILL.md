@@ -15,7 +15,7 @@ An issue body's shape comes from a built-in template, not from this skill. Disco
 
 ```bash
 mo issue template list          # metadata only: id, name, description
-mo issue template get <id>      # full body, with per-section guidance comments
+mo issue template view <id>     # full body, with per-section guidance comments
 ```
 
 Select by reading the **descriptions** and applying one boundary question — *does external behavior change?*
@@ -26,7 +26,7 @@ Select by reading the **descriptions** and applying one boundary question — *d
 | Behavior **deviates from correct** — an invariant is violated (functional or non-functional bug) | `bug` |
 | External behavior **unchanged**; value is internal (refactor, test coverage, optimization) | `refactor` |
 
-Once selected, `mo issue template get <id>` returns the raw body. It is markdown with two things per section: an HTML comment (`<!-- ... -->`) carrying the per-section writing instructions, and a `<placeholder>` line. **Read the comments — they tell you exactly what to write and what to forbid in that section.** Fill the body by replacing each `<placeholder>` with the matching piece of the requirement clarification from `mohist-explore`. The HTML comments may be left in place (they are hidden in rendered markdown; they do not need stripping).
+Once selected, `mo issue template view <id>` returns the raw body. It is markdown with two things per section: an HTML comment (`<!-- ... -->`) carrying the per-section writing instructions, and a `<placeholder>` line. **Read the comments — they tell you exactly what to write and what to forbid in that section.** Fill the body by replacing each `<placeholder>` with the matching piece of the requirement clarification from `mohist-explore`. The HTML comments may be left in place (they are hidden in rendered markdown; they do not need stripping).
 
 ## Universal writing rules (apply to every section, stated once here)
 
@@ -164,7 +164,7 @@ Never run `mo issue create --body-file` without confirmation. The body file is a
 
 - [ ] The issue passes the Scope gate defined in `mohist-explore` (one-sentence standalone value, every scope item serves that sentence, stop-here test) — **regardless of how the requirement content was produced**. If a check fails, fix the split before creating; do not create an issue that only has value together with a sibling.
 - [ ] `mo issue template list` was run; a template selected via the boundary question (behavior changes / deviates / unchanged).
-- [ ] `mo issue template get <id>` was run; the per-section guidance comments were read and followed.
+- [ ] `mo issue template view <id>` was run; the per-section guidance comments were read and followed.
 - [ ] Each `<placeholder>` in the body is replaced by content from the `mohist-explore` clarification; no placeholder remains.
 - [ ] The body obeys the universal writing rules: literal, product source language, no source paths, planner-actionable.
 - [ ] `mo workflow list` was run and parsed.

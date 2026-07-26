@@ -49,7 +49,7 @@ internal static class CommandHelpRenderer
         writer.WriteLine("    docs                 See docs/cli-reference.md.");
     }
 
-    public static void RenderGroup(TextWriter writer, Command group)
+    public static void RenderGroup(TextWriter writer, Command group, string[] invocationPath)
     {
         var presentation = CommandPresentationCatalog.Get(group);
         writer.WriteLine(presentation?.Summary ?? group.Description ?? group.Name);
@@ -63,7 +63,7 @@ internal static class CommandHelpRenderer
         }
 
         writer.WriteLine("USAGE");
-        writer.WriteLine($"    mo {group.Name} [<action>] [<resource>] [flags]");
+        writer.WriteLine($"    {FormatGroupUsage(invocationPath)}");
         writer.WriteLine();
 
         var visible = EnumerateVisible(group).ToArray();
@@ -88,7 +88,7 @@ internal static class CommandHelpRenderer
         }
 
         writer.WriteLine("FURTHER HELP");
-        writer.WriteLine($"    mo {group.Name} <action> --help");
+        writer.WriteLine($"    mo {string.Join(" ", invocationPath)} <action> --help");
         writer.WriteLine("                        Show the exact invocation, options, and JSON fields.");
     }
 
@@ -232,10 +232,13 @@ internal static class CommandHelpRenderer
         sb.Append(symbol.Description ?? string.Empty);
         if (symbol is Argument argument && argument.Arity.MinimumNumberOfValues > 0)
             sb.Append(" (required)");
-        if (symbol is Option option && option.Arity.MinimumNumberOfValues > 0)
+        if (symbol is Option option && option.Required)
             sb.Append(" (required)");
         return sb.ToString();
     }
+
+    private static string FormatGroupUsage(string[] invocationPath) =>
+        $"mo {string.Join(" ", invocationPath)} [<action>] [<resource>] [flags]";
 
     private static bool HasJsonSelection(Command leaf) =>
         leaf.Options.Any(o => string.Equals(o.Name.TrimStart('-'), "json", StringComparison.Ordinal));

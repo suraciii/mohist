@@ -10,9 +10,8 @@ internal static partial class IssueCommands
     {
         var cmd = new Command("create", "Create a new issue");
         var titleArg = new Argument<string>("title") { Description = "Issue title" };
-        var bodyOpt = new Option<string?>("--body", "-b") { Description = "Issue body (mutually exclusive with --body-file and --body-stdin)" };
-        var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read issue body from a UTF-8 file path (recommended for long Markdown; mutually exclusive with --body and --body-stdin)" };
-        var bodyStdinOpt = new Option<bool>("--body-stdin") { Description = "Read issue body from stdin (mutually exclusive with --body and --body-file)" };
+        var bodyOpt = new Option<string?>("--body", "-b") { Description = "Issue body (mutually exclusive with --body-file)" };
+        var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read issue body from a UTF-8 file path, or - for stdin (mutually exclusive with --body)" };
         var labelOpt = MohistCliCommands.LabelOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
         var parentOpt = new Option<int?>("--parent") { Description = "Parent issue number" };
@@ -29,7 +28,6 @@ internal static partial class IssueCommands
         cmd.Arguments.Add(titleArg);
         cmd.Options.Add(bodyOpt);
         cmd.Options.Add(bodyFileOpt);
-        cmd.Options.Add(bodyStdinOpt);
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
         cmd.Options.Add(parentOpt);
@@ -50,7 +48,6 @@ internal static partial class IssueCommands
             var title = ctx.GetValue(titleArg);
             var body = ctx.GetValue(bodyOpt);
             var bodyFile = ctx.GetValue(bodyFileOpt);
-            var bodyStdin = ctx.GetValue(bodyStdinOpt);
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
             var parent = ctx.GetValue(parentOpt);
@@ -94,7 +91,7 @@ internal static partial class IssueCommands
                     return 1;
                 }
                 var resolvedBody = await BodyInputResolver.ResolveAsync(
-                    body, bodyFile, bodyStdin, api.FileSystem, api.StandardInput, api.Error);
+                    body, bodyFile, api.FileSystem, api.StandardInput, api.Error);
                 if (resolvedBody is BodyInputResolver.Result.Failure)
                     return 1;
                 var bodyText = ((BodyInputResolver.Result.Success)resolvedBody).Body;
@@ -219,9 +216,8 @@ internal static partial class IssueCommands
         var cmd = new Command("edit", "Update an issue");
         var numberArg = NumberArg();
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
-        var bodyOpt = new Option<string?>("--body", "-b") { Description = "New body (mutually exclusive with --body-file and --body-stdin)" };
-        var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read new body from a UTF-8 file path (recommended for long Markdown; mutually exclusive with --body and --body-stdin)" };
-        var bodyStdinOpt = new Option<bool>("--body-stdin") { Description = "Read new body from stdin (mutually exclusive with --body and --body-file)" };
+        var bodyOpt = new Option<string?>("--body", "-b") { Description = "New body (mutually exclusive with --body-file)" };
+        var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read new body from a UTF-8 file path, or - for stdin (mutually exclusive with --body)" };
         var labelOpt = MohistCliCommands.LabelOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
         var parentOpt = new Option<string?>("--parent") { Description = "Parent issue number or none" };
@@ -239,7 +235,6 @@ internal static partial class IssueCommands
         cmd.Options.Add(titleOpt);
         cmd.Options.Add(bodyOpt);
         cmd.Options.Add(bodyFileOpt);
-        cmd.Options.Add(bodyStdinOpt);
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
         cmd.Options.Add(parentOpt);
@@ -261,7 +256,6 @@ internal static partial class IssueCommands
             var title = ctx.GetValue(titleOpt);
             var body = ctx.GetValue(bodyOpt);
             var bodyFile = ctx.GetValue(bodyFileOpt);
-            var bodyStdin = ctx.GetValue(bodyStdinOpt);
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
             var parent = ctx.GetValue(parentOpt);
@@ -280,7 +274,6 @@ internal static partial class IssueCommands
             var titleProvided = ctx.GetResult(titleOpt) is not null;
             var bodyProvided = ctx.GetResult(bodyOpt) is not null;
             var bodyFileProvided = ctx.GetResult(bodyFileOpt) is not null;
-            var bodyStdinProvided = IsOptionProvided(ctx, bodyStdinOpt);
             var labelsProvided = ctx.GetResult(labelOpt) is not null;
             var priorityProvided = ctx.GetResult(priorityOpt) is not null;
             var parentProvided = ctx.GetResult(parentOpt) is not null;
@@ -313,11 +306,10 @@ internal static partial class IssueCommands
                 }
                 var bodySourceCount =
                     (bodyProvided ? 1 : 0)
-                    + (bodyFileProvided ? 1 : 0)
-                    + (bodyStdinProvided ? 1 : 0);
+                    + (bodyFileProvided ? 1 : 0);
                 if (bodySourceCount > 1)
                 {
-                    api.Error.WriteLine("the following options are mutually exclusive: --body, --body-file, --body-stdin; pass only one");
+                    api.Error.WriteLine("the following options are mutually exclusive: --body, --body-file; pass only one");
                     return 1;
                 }
                 string? resolvedBody = null;
@@ -325,7 +317,7 @@ internal static partial class IssueCommands
                 if (bodyWillBeSent)
                 {
                     var resolved = await BodyInputResolver.ResolveAsync(
-                        body, bodyFile, bodyStdin, api.FileSystem, api.StandardInput, api.Error);
+                        body, bodyFile, api.FileSystem, api.StandardInput, api.Error);
                     if (resolved is BodyInputResolver.Result.Failure)
                         return 1;
                     resolvedBody = ((BodyInputResolver.Result.Success)resolved).Body;

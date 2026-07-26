@@ -69,6 +69,34 @@ public sealed class CliHelpSpecs
         Assert.Empty(handler.Requests);
     }
 
+    [Theory]
+    [InlineData(new[] { "agent", "model", "--help" }, "mo agent model [<action>] [<resource>] [flags]")]
+    [InlineData(new[] { "project", "workflow", "prompt", "--help" }, "mo project workflow prompt [<action>] [<resource>] [flags]")]
+    public async Task NestedGroupHelp_UsesTheCompleteInvocationPath(string[] args, string usage)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(usage, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("/api/", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task LeafHelp_DoesNotMarkOptionalValueOptionsAsRequired()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["label", "edit", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.DoesNotContain("--description       New description of when to use this label (required)", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("--project           Project name or id (required)", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task IssueViewHelp_ListsRuntimeJsonFields()
     {

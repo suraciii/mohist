@@ -20,24 +20,21 @@ internal static class BodyInputResolver
     public sealed record SourceFlags(
         string InlineFlag,
         string FileFlag,
-        string StdinFlag,
         string BodyKind);
 
     public static Task<Result> ResolveAsync(
         string? inlineBody,
         string? bodyFile,
-        bool bodyStdin,
         IFileSystem fileSystem,
         TextReader standardInput,
         TextWriter error) =>
-        ResolveAsync(inlineBody, bodyFile, bodyStdin,
-            new SourceFlags("--body", "--body-file", "--body-stdin", "issue body"),
+        ResolveAsync(inlineBody, bodyFile,
+            new SourceFlags("--body", "--body-file", "issue body"),
             fileSystem, standardInput, error);
 
     public static async Task<Result> ResolveAsync(
         string? inlineBody,
         string? bodyFile,
-        bool bodyStdin,
         SourceFlags flags,
         IFileSystem fileSystem,
         TextReader standardInput,
@@ -45,13 +42,11 @@ internal static class BodyInputResolver
     {
         var hasInline = inlineBody is not null;
         var hasFile = !string.IsNullOrWhiteSpace(bodyFile);
-        var hasStdin = bodyStdin;
-
-        var providedCount = (hasInline ? 1 : 0) + (hasFile ? 1 : 0) + (hasStdin ? 1 : 0);
+        var providedCount = (hasInline ? 1 : 0) + (hasFile ? 1 : 0);
         if (providedCount == 0)
         {
             await error.WriteLineAsync(
-                $"{flags.BodyKind} is required (use {flags.InlineFlag}, {flags.FileFlag}, or {flags.StdinFlag})")
+                $"{flags.BodyKind} is required (use {flags.InlineFlag} or {flags.FileFlag})")
                 .ConfigureAwait(false);
             return new Result.Failure($"{flags.BodyKind} is required");
         }
@@ -61,7 +56,6 @@ internal static class BodyInputResolver
             var provided = new List<string>();
             if (hasInline) provided.Add(flags.InlineFlag);
             if (hasFile) provided.Add(flags.FileFlag);
-            if (hasStdin) provided.Add(flags.StdinFlag);
             await error.WriteLineAsync(
                 $"the following options are mutually exclusive: {string.Join(", ", provided)}; pass only one")
                 .ConfigureAwait(false);
@@ -73,7 +67,7 @@ internal static class BodyInputResolver
         {
             resolved = inlineBody!;
         }
-        else if (hasStdin)
+        else if (bodyFile == "-")
         {
             var text = await standardInput.ReadToEndAsync().ConfigureAwait(false);
             resolved = text ?? string.Empty;

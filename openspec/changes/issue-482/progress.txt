@@ -171,3 +171,17 @@ T-003 progress (packaged Mohist Skill progressive disclosure)
 # Verification
 
 - CLI Skill/content tests passed: 1377 tests.
+
+Review-fix progress
+
+- Nested group help now derives its complete path from the registered command
+  ancestors, so `agent model` and `project workflow prompt` help advertise
+  executable paths. Leaf help marks only parser-required options as required.
+- Help no longer exposes the Agent model HTTP route. Resource paths are fully
+  canonical: label edits use `edit`; Issue Template reads use `view`; the
+  Template `ls` alias is removed.
+- Local selector and deprecated-project-option failures now render scoped usage
+  with exit code 2. Long text stdin is selected solely by `--*-file -`; the
+  obsolete `*-stdin` options are rejected.
+- Focused CLI verification: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore`
+  passed, 1378 tests.

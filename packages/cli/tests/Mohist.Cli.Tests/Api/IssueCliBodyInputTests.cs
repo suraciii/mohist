@@ -11,24 +11,24 @@ namespace Mohist.Cli.Tests.Api;
 public class IssueCliBodyInputTests
 {
     [Fact]
-    public void IssueCreate_Help_ListsAllThreeBodyOptionsAndMutualExclusion()
+    public void IssueCreate_Help_ListsCanonicalBodyOptions()
     {
         var help = RenderHelp(["issue", "create", "--help"]);
 
         Assert.Contains("--body", help);
         Assert.Contains("--body-file", help);
-        Assert.Contains("--body-stdin", help);
+        Assert.DoesNotContain("--body-stdin", help);
         Assert.Contains("mutually exclusive", help, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void IssueUpdate_Help_ListsAllThreeBodyOptionsAndMutualExclusion()
+    public void IssueUpdate_Help_ListsCanonicalBodyOptions()
     {
         var help = RenderHelp(["issue", "edit", "--help"]);
 
         Assert.Contains("--body", help);
         Assert.Contains("--body-file", help);
-        Assert.Contains("--body-stdin", help);
+        Assert.DoesNotContain("--body-stdin", help);
         Assert.Contains("mutually exclusive", help, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -81,7 +81,7 @@ public class IssueCliBodyInputTests
     }
 
     [Fact]
-    public async Task IssueCreate_BodyStdin_DrainsStdinAndSendsContents()
+    public async Task IssueCreate_BodyFileDash_DrainsStdinAndSendsContents()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "id": "issue_1", "number": 1 } }""");
@@ -91,7 +91,7 @@ public class IssueCliBodyInputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "create", "Title", "--body-stdin", "--project", "mohist-local"],
+            ["issue", "create", "Title", "--body-file", "-", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),

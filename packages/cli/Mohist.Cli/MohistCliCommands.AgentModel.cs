@@ -6,7 +6,7 @@ internal static class AgentModelCommands
 {
     public static Command Build(MohistCliApi api)
     {
-        var model = new Command("model", "Agent model catalog");
+        var model = new Command("model", "Manage the model catalog for an Agent runtime");
         model.Subcommands.Add(BuildList(api));
         return model;
     }
@@ -15,7 +15,7 @@ internal static class AgentModelCommands
     {
         var cmd = new Command(
             "list",
-            "List available coder model IDs for the runtime (one per line; copy-paste into --model). Uses GET /api/projects/{projectId}/opencode/models.");
+            "List available coder model IDs for the runtime (one per line; use with --model).");
 
         var runtimeOpt = new Option<string?>("--runtime") { Description = "Filter by runtime (default: project's configured runtime)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();

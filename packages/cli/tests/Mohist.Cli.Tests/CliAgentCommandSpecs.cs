@@ -655,7 +655,7 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
-    public async Task AgentCreate_ResolvesInstructionsFromStdinFlagAndDash()
+    public async Task AgentCreate_ResolvesInstructionsFromDash()
     {
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
         {
@@ -664,13 +664,10 @@ public class CliAgentCommandSpecs
         }, HttpStatusCode.Created)));
         var fileSystem = FileSystemWithProject();
 
-        var flagExit = await RunAsync(handler, ["agent", "create", "--name", "reviewer", "--instructions-stdin"], fileSystem: fileSystem, standardInput: new StringReader("flag stdin prompt"));
         var stdinExit = await RunAsync(handler, ["agent", "create", "--name", "coder", "--instructions", "-"], fileSystem: fileSystem, standardInput: new StringReader("stdin prompt"));
 
-        Assert.Equal(0, flagExit);
         Assert.Equal(0, stdinExit);
-        Assert.Equal("flag stdin prompt", JsonNode.Parse(handler.Requests[0].Body!)!["instructions"]?.GetValue<string>());
-        Assert.Equal("stdin prompt", JsonNode.Parse(handler.Requests[1].Body!)!["instructions"]?.GetValue<string>());
+        Assert.Equal("stdin prompt", JsonNode.Parse(handler.Requests[0].Body!)!["instructions"]?.GetValue<string>());
     }
 
     [Fact]
