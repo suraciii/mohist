@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -60,6 +61,31 @@ public sealed class AgentSessionActivitySummaryReducerSpecs
 
         Assert.Equal(1, state.Summary.ToolCallCount);
         Assert.Null(state.Summary.ToolErrorCount);
+    }
+
+    [Fact]
+    public void Reduce_ToolOutput_IsNotRetainedInPersistedSummaryState()
+    {
+        var rawOutput = new string('x', 10_000);
+        var state = AgentSessionActivitySummaryReducer.Reduce(
+            AgentSessionActivitySummaryState.Empty,
+            [
+                Part(TranscriptPartTypes.Input, "input", "{}"),
+                Part(TranscriptPartTypes.Tool, "tool-1", $$"""{"toolCallId":"tool-1","status":"completed","rawOutput":"{{rawOutput}}"}""")
+            ]);
+        var session = new AgentSession
+        {
+            Id = "session-summary-output",
+            Runtime = new AgentSessionRuntime("runner-1", "/work"),
+            Status = new AgentSessionStatusSnapshot(CreatedAt: ObservedAt),
+            PersistedActivitySummary = state,
+        };
+
+        var persisted = JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions);
+
+        Assert.Equal(1, state.Summary.ToolCallCount);
+        Assert.Null(state.Summary.ToolErrorCount);
+        Assert.DoesNotContain(rawOutput, persisted, StringComparison.Ordinal);
     }
 
     [Fact]

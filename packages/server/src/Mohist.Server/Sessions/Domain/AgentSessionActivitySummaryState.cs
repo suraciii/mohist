@@ -39,7 +39,7 @@ internal sealed record AgentSessionActivitySummaryPart(
     string CorrelationKey,
     string PartId,
     long Sequence,
-    string PayloadJson);
+    bool IsFailed);
 
 internal sealed record AgentSessionActivitySummaryCandidate(
     long TurnSequence,

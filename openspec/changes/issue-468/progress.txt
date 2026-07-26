@@ -28,3 +28,9 @@
 - The summary reducer now uses the same `(type, correlationKey)` replacement key as transcript storage for id-less tool updates, so a same-turn failed update followed by completed produces one non-failed tool summary entry.
 - `AgentSessionActivitySummaryReducerSpecs` covers the id-less failed-to-completed replacement path.
 - Verification passed: targeted `AgentSessionActivitySummaryReducerSpecs` (6 tests), `dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore`, and `dotnet test Mohist.sln -p:SkipWebBuild=true --no-restore` (3153 SpecTests, 1455 UnitTests, 32 ArchTests, 1375 CLI tests, and 175 Workflow Definition tests).
+
+## Review Fix: Bounded Tool State
+
+- Open-turn summary parts now retain the final tool failure flag rather than the raw tool payload, preventing `rawOutput` from being copied into Session state.
+- `AgentSessionActivitySummaryReducerSpecs` serializes a summary containing a large completed-tool output and verifies that the output is absent while its tool count is retained.
+- Verification passed: targeted `AgentSessionActivitySummaryReducerSpecs` (7 tests), `dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore`, and non-concurrent `dotnet test Mohist.sln -p:SkipWebBuild=true --no-restore` (3154 SpecTests, 1455 UnitTests, 32 ArchTests, 1375 CLI tests, and 175 Workflow Definition tests).

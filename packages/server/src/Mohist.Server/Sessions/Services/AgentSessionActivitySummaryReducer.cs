@@ -43,7 +43,7 @@ internal static class AgentSessionActivitySummaryReducer
                 && currentParts.TryGetValue(existingKey, out existingPart);
             var partSequence = replacesCurrentPart ? existingPart!.Sequence : ++currentPartSequence;
             var part = replacesCurrentPart
-                ? existingPart! with { PayloadJson = mutation.PayloadJson }
+                ? existingPart! with { IsFailed = IsFailed(mutation.PayloadJson) }
                 : CreatePart(mutation, partSequence);
 
             if (mutation.Type is TranscriptPartTypes.Tool or TranscriptPartTypes.Model)
@@ -73,7 +73,7 @@ internal static class AgentSessionActivitySummaryReducer
         foreach (var part in currentParts.Values.Where(part => part.Type == TranscriptPartTypes.Tool))
         {
             toolCallIds.Add(part.PartId);
-            if (IsFailed(part.PayloadJson))
+            if (part.IsFailed)
                 failedToolCallIds.Add(part.PartId);
         }
 
@@ -111,7 +111,7 @@ internal static class AgentSessionActivitySummaryReducer
             mutation.CorrelationKey,
             partId,
             sequence,
-            mutation.PayloadJson);
+            IsFailed(mutation.PayloadJson));
     }
 
     private static void SealCurrentTurn(
@@ -122,7 +122,7 @@ internal static class AgentSessionActivitySummaryReducer
         foreach (var part in currentParts.Where(part => part.Type == TranscriptPartTypes.Tool))
         {
             sealedToolCallIds.Add(part.PartId);
-            if (IsFailed(part.PayloadJson))
+            if (part.IsFailed)
                 sealedFailedToolCallIds.Add(part.PartId);
         }
     }
