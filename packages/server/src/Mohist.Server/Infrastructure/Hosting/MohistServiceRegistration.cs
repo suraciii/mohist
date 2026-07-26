@@ -210,7 +210,6 @@ public static class MohistServiceRegistration
         services.AddSingleton<OtlpTraceResponseWriter>();
         services.AddSingleton<OtlpIngestGate>();
         services.AddSingleton<IOtlpIngestGate>(provider => provider.GetRequiredService<OtlpIngestGate>());
-        services.AddSingleton<IOtlpIngestGateTestSeam>(provider => provider.GetRequiredService<OtlpIngestGate>());
         services.AddSingleton<TraceIngester>(sp =>
             new TraceIngester(
                 sp.GetRequiredService<OtelDb>(),

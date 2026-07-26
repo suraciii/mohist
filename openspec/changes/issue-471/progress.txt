@@ -76,3 +76,10 @@
 - Added deterministic gate unit coverage for two queued writers and for cancelling one queued writer while another remains eligible to acquire the released lease.
 - `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore --filter 'FullyQualifiedName~OtlpIngestGateTests'` passes all 1508 UnitTests because the test platform ignores the filter.
 - The full SpecTests run and `npm test` both reproduce the documented, unrelated `EventDispatcherImmediateTriggerSpecs.LostImmediateTrigger_LeavesRowUndispatched_AndReminderTickRecovers` failure: 3245 / 3246 specs pass. UnitTests (1508), ArchTests (32), CLI tests (1327), and definition tests (175) pass within `npm test` before that failure stops the workspace test phase.
+
+### Review fix: admission happens before body reads
+
+- Removed the inert `IOtlpIngestGateTestSeam`; its signal was never observed by admission and could not prove request ordering.
+- Added a TestServer-only `OtlpRequestBodyReadProbe` startup filter. Marked requests receive a wrapped server-side body stream that records the first read, and fixture reset clears it between tests.
+- The full-slot JSON and protobuf `429` specs mark their requests and assert that the route returned without reading either body.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore` passes all 1508 UnitTests. The full SpecTests run and `npm test` continue to reproduce only the documented unrelated dispatcher flake: 3245 / 3246 specs pass; UnitTests (1508), ArchTests (32), CLI tests (1327), and definition tests (175) pass within `npm test` before it stops.

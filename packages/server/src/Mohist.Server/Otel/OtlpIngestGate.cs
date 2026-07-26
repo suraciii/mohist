@@ -6,14 +6,7 @@ namespace Mohist.Server.Otel;
 /// beyond the configured limit return immediately without reading the
 /// request body, and the gate retains no queue or background worker.
 /// </summary>
-/// <remarks>
-/// Design D1. The gate exposes a structurally identical
-/// <see cref="IOtlpIngestGate"/> surface so a test can supply a fake
-/// with deterministic wait/release control; the production
-/// implementation instantiates the singleton that
-/// <c>MohistServiceRegistration</c> registers.
-/// </remarks>
-public sealed class OtlpIngestGate : IOtlpIngestGate, IOtlpIngestGateTestSeam
+public sealed class OtlpIngestGate : IOtlpIngestGate
 {
     public const int RequestLeaseLimit = 4;
     public const int TemporaryAdmissionRetryAfterSeconds = 1;
@@ -21,7 +14,6 @@ public sealed class OtlpIngestGate : IOtlpIngestGate, IOtlpIngestGateTestSeam
     private readonly object _gate = new();
     private readonly SemaphoreSlim _writerLease = new(1, 1);
     private int _requestLeasesInUse;
-    private TaskCompletionSource<bool>? _nextRequestSignal;
 
     public OtlpIngestGate()
     {
@@ -49,19 +41,12 @@ public sealed class OtlpIngestGate : IOtlpIngestGate, IOtlpIngestGateTestSeam
 
     public void ReleaseRequestLease()
     {
-        TaskCompletionSource<bool>? signalToWake = null;
         lock (_gate)
         {
             if (_requestLeasesInUse == 0)
                 throw new InvalidOperationException("No request lease is held.");
             _requestLeasesInUse--;
-            if (_requestLeasesInUse == RequestLeaseLimit - 1)
-            {
-                signalToWake = _nextRequestSignal;
-                _nextRequestSignal = null;
-            }
         }
-        signalToWake?.TrySetResult(true);
     }
 
     public async Task<OtlpWriterLease> AcquireWriterLeaseAsync(CancellationToken ct)
@@ -82,53 +67,6 @@ public sealed class OtlpIngestGate : IOtlpIngestGate, IOtlpIngestGateTestSeam
         }
     }
 
-    /// <summary>
-    /// Test-only seam that blocks the next request-lease acquisition
-    /// until <see cref="ReleaseNextRequestSignal"/> is called. Used by
-    /// the integration specs to drive the four-slot exhaustion path
-    /// without scheduler or wall-clock waits.
-    /// </summary>
-    internal void BlockNextRequestLease()
-    {
-        lock (_gate)
-            _nextRequestSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-    }
-
-    /// <summary>
-    /// Resolves the pending request-lease wait signal created by
-    /// <see cref="BlockNextRequestLease"/>. Throws if no signal is
-    /// pending.
-    /// </summary>
-    internal void ReleaseNextRequestSignal()
-    {
-        TaskCompletionSource<bool>? signal = null;
-        lock (_gate)
-        {
-            signal = _nextRequestSignal;
-            _nextRequestSignal = null;
-        }
-        signal?.TrySetResult(true);
-    }
-
-    bool IOtlpIngestGateTestSeam.BlockNextRequestLease()
-    {
-        lock (_gate)
-        {
-            if (_nextRequestSignal is not null)
-                return false;
-            _nextRequestSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            return true;
-        }
-    }
-
-    void IOtlpIngestGateTestSeam.ReleaseNextRequestSignal() => ReleaseNextRequestSignal();
-}
-
-public interface IOtlpIngestGateTestSeam
-{
-    bool BlockNextRequestLease();
-
-    void ReleaseNextRequestSignal();
 }
 
 public interface IOtlpIngestGate

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -31,15 +30,11 @@ public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
     [Fact]
     public async Task OverLimitJsonRequest_Returns413_ResourceExhausted_JsonEncoding_NoRows()
     {
-        var seam = _factory.Services.GetRequiredService<IOtlpIngestGateTestSeam>();
-        Assert.True(seam.BlockNextRequestLease());
-
         using var client = _factory.CreateOtlpClient();
         using var content = new StringContent(BuildLargeJsonPayload(LimitedOtlpBodyReader.DefaultMaxBytes + 1), Encoding.UTF8, "application/json");
 
         using var response = await client.PostAsync(OtlpPath, content);
 
-        seam.ReleaseNextRequestSignal();
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
         AssertRetryAfter(response, expected: null);
@@ -50,16 +45,12 @@ public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
     [Fact]
     public async Task OverLimitProtobufRequest_Returns413_ResourceExhausted_ProtobufEncoding_NoRows()
     {
-        var seam = _factory.Services.GetRequiredService<IOtlpIngestGateTestSeam>();
-        Assert.True(seam.BlockNextRequestLease());
-
         using var client = _factory.CreateOtlpClient();
         using var content = new ByteArrayContent(BuildLargeProtobufPayload(LimitedOtlpBodyReader.DefaultMaxBytes + 256));
         content.Headers.ContentType = new MediaTypeHeaderValue("application/x-protobuf");
 
         using var response = await client.PostAsync(OtlpPath, content);
 
-        seam.ReleaseNextRequestSignal();
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         Assert.Equal("application/x-protobuf", response.Content.Headers.ContentType?.MediaType);
         AssertRetryAfter(response, expected: null);
@@ -70,15 +61,11 @@ public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
     [Fact]
     public async Task BodyExceedsLimitButSignalFiresFourthAdmit_AcceptsThen413()
     {
-        var seam = _factory.Services.GetRequiredService<IOtlpIngestGateTestSeam>();
-        Assert.True(seam.BlockNextRequestLease());
-
         using var client = _factory.CreateOtlpClient();
         using var content = new StringContent(BuildLargeJsonPayload(LimitedOtlpBodyReader.DefaultMaxBytes + 1), Encoding.UTF8, "application/json");
 
         using var response = await client.PostAsync(OtlpPath, content);
 
-        seam.ReleaseNextRequestSignal();
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         await AssertNoPersistedRowsAsync();
     }
@@ -87,10 +74,12 @@ public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
     public async Task FiveRequests_AllAdmitted_BeyondLimit_FifthReceivesJson429_RetryAfterOne()
     {
         var gate = (OtlpIngestGate)_factory.Services.GetRequiredService<IOtlpIngestGate>();
+        var probe = _factory.Services.GetRequiredService<OtlpRequestBodyReadProbe>();
         for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
             Assert.True(gate.TryAcquireRequestLease().Admitted);
 
         using var client = _factory.CreateOtlpClient();
+        client.DefaultRequestHeaders.TryAddWithoutValidation(OtlpRequestBodyReadProbe.HeaderName, "1");
         using var content = new StringContent("{}", Encoding.UTF8, "application/json");
 
         using var response = await client.PostAsync(OtlpPath, content);
@@ -99,6 +88,7 @@ public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
         AssertRetryAfter(response, "1");
         await AssertResourceExhaustedJsonAsync(response, OtlpTraceResponseWriter.TemporaryAdmissionMessage);
+        Assert.False(probe.WasRead);
 
         for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
             gate.ReleaseRequestLease();
@@ -108,10 +98,12 @@ public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
     public async Task FiveRequests_AllAdmitted_BeyondLimit_FifthProtobuf429_RetryAfterOne()
     {
         var gate = (OtlpIngestGate)_factory.Services.GetRequiredService<IOtlpIngestGate>();
+        var probe = _factory.Services.GetRequiredService<OtlpRequestBodyReadProbe>();
         for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
             Assert.True(gate.TryAcquireRequestLease().Admitted);
 
         using var client = _factory.CreateOtlpClient();
+        client.DefaultRequestHeaders.TryAddWithoutValidation(OtlpRequestBodyReadProbe.HeaderName, "1");
         var payload = BuildMinimalProtobufTracePayload("00000000000000000000000000000099", "0000000000000099", "over-proto", "sp");
         using var content = new ByteArrayContent(payload);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/x-protobuf");
@@ -122,6 +114,7 @@ public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
         Assert.Equal("application/x-protobuf", response.Content.Headers.ContentType?.MediaType);
         AssertRetryAfter(response, "1");
         await AssertResourceExhaustedProtobufAsync(response, OtlpTraceResponseWriter.TemporaryAdmissionMessage);
+        Assert.False(probe.WasRead);
 
         for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
             gate.ReleaseRequestLease();
