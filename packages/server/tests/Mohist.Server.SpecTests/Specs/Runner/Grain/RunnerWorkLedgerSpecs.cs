@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Runner.Grains;
@@ -123,6 +124,51 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         Assert.Equal(AgentJobStatus.Failed, terminal.Status);
         Assert.Equal("runner-lost", terminal.Message);
         Assert.Equal("runner-lost", terminal.FailureReason);
+    }
+
+    [Fact]
+    public async Task RunnerLoss_ContextlessAgentJob_ReactivationRetriesRawFailureEvent()
+    {
+        await ClearBacklogAsync();
+        var runnerId = $"agent-job-raw-loss-runner-{Guid.NewGuid():N}";
+        var projectId = $"agent-job-raw-loss-project-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+
+        var jobKey = $"agent-job-raw-loss-{Guid.NewGuid():N}";
+        var work = new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: $"agent-job-raw-loss-work-{Guid.NewGuid():N}",
+            AgentJobId: jobKey,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+        _fixture.EventStore.ThrowOnAppend = evt =>
+            evt.Type == EventCatalog.ReverseDns.AgentJobRawFailed;
+
+        try
+        {
+            var assigned = await runner.AssignAgentJobAsync(work);
+            Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assigned.Status);
+
+            await runner.UnregisterAsync();
+            Assert.DoesNotContain(_fixture.EventStore.Appended,
+                evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobRawFailed
+                    && evt.Envelope.Subject == jobKey);
+
+            _fixture.EventStore.ThrowOnAppend = null;
+            await Grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+
+            var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
+            await job.GetStatusAsync();
+
+            var failure = Assert.Single(_fixture.EventStore.Appended,
+                evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobRawFailed
+                    && evt.Envelope.Subject == jobKey);
+            Assert.DoesNotContain(EventCatalog.Lineage.AgentId, failure.Envelope.Extensions.Keys);
+        }
+        finally
+        {
+            _fixture.EventStore.ThrowOnAppend = null;
+        }
     }
 
     private async Task<RunnerWorkRow?> FindRunnerWorkAsync(

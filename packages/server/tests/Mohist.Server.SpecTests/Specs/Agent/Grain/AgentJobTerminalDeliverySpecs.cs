@@ -124,7 +124,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
 
         try
         {
-            await job.SubmitAsync(new AgentJobInput("doomed"));
+            await job.SubmitAsync(new AgentJobInput("doomed", AgentId: "agent-real"));
             await job.FailAsync("runner-lost");
             Assert.DoesNotContain(_fixture.EventStore.Appended,
                 evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobFailed
@@ -140,6 +140,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
                 evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobFailed
                     && evt.Envelope.Source.ToString() == $"/mohist/agent-job/{jobKey}");
             Assert.Equal(jobKey, failure.Envelope.Subject);
+            Assert.Equal("agent-real", failure.Envelope.Extensions[EventCatalog.Lineage.AgentId]);
         }
         finally
         {

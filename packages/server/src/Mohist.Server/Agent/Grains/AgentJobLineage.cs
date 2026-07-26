@@ -6,19 +6,20 @@ using Mohist.Server.Infrastructure.Events;
 namespace Mohist.Server.Agent.Grains;
 
 /// <summary>
-/// Pure helper that builds the CloudEvent envelope for the
-/// <c>com.mohist.agent.job.failed</c> event the AgentJob grain emits on every
-/// terminal-failure transition (issue-491 design D2). Lineage is stamped from
-/// the durable launch context (<see cref="AgentJobInput"/> +
+/// Pure helper that builds the CloudEvent envelope for AgentJob terminal
+/// failures (issue-491 design D2). A resolved Agent emits
+/// <c>com.mohist.agent.job.failed</c>; a raw prompt job emits the distinct
+/// raw-job contract because it has no Agent identity to stamp. Lineage is
+/// stamped from the durable launch context (<see cref="AgentJobInput"/> +
 /// <see cref="RoutedAgentLaunchPlan"/>) so the failure event never re-reads
 /// mutable Agent / Issue / Workflow state.
 ///
 /// <para>
-/// <c>agentid</c> is the only required lineage key (per
+/// <c>agentid</c> is required only by the resolved-Agent event contract (per
 /// <see cref="EventProducerFamily.AgentJob"/> conformance). Issue / epic /
-/// workflow-run lineage are stamped when the launch context carries them;
-/// their absence is valid for contextless jobs (raw-prompt validation,
-/// workflow-only dispatches). The grain's persistence story is unchanged:
+/// workflow-run lineage are stamped when the launch context carries it;
+/// their absence is valid for jobs without that context. The grain's
+/// persistence story is unchanged:
 /// the emission flows through the no-DbContext
 /// <see cref="Mohist.Server.Infrastructure.Events.IEventStore.AppendAsync(CloudEvent,System.Threading.CancellationToken)"/>
 /// overload so the durable write does not block on the AgentJob's own
@@ -36,17 +37,15 @@ public static class AgentJobLineage
         string? AgentId);
 
     public static IReadOnlyDictionary<string, string> BuildExtensions(
-        string jobKey,
         AgentJobInput? input,
         RoutedAgentLaunchPlan? routedPlan = null)
     {
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal);
         var agentId = !string.IsNullOrWhiteSpace(input?.AgentId)
             ? input!.AgentId
-            : !string.IsNullOrWhiteSpace(routedPlan?.AgentId)
-                ? routedPlan.AgentId
-                : $"agent-job:{jobKey}";
-        extensions[EventCatalog.Lineage.AgentId] = agentId!;
+            : routedPlan?.AgentId;
+        if (!string.IsNullOrWhiteSpace(agentId))
+            extensions[EventCatalog.Lineage.AgentId] = agentId!;
         var projectId = !string.IsNullOrWhiteSpace(input?.ProjectId)
             ? input!.ProjectId
             : routedPlan?.ProjectId;
@@ -82,10 +81,13 @@ public static class AgentJobLineage
             projectId = payload.ProjectId,
             agentId = payload.AgentId,
         }, JSON.Options);
+        var type = string.IsNullOrWhiteSpace(payload.AgentId)
+            ? EventCatalog.ReverseDns.AgentJobRawFailed
+            : EventCatalog.ReverseDns.AgentJobFailed;
         return new CloudEvent(
             id: AgentJobSessionDeliveryIds.FailureEventId(jobKey),
             source: new Uri(source, UriKind.Relative),
-            type: EventCatalog.ReverseDns.AgentJobFailed,
+            type: type,
             time: now,
             data: data,
             subject: jobKey,

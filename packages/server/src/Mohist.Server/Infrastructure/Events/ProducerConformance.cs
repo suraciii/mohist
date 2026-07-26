@@ -7,6 +7,7 @@ public enum EventProducerFamily
     Epic,
     AgentSession,
     AgentJob,
+    RawAgentJob,
     Runner,
     InboxItemPersisted,
 }
@@ -94,6 +95,16 @@ public static class ProducerConformance
                 break;
             case EventProducerFamily.AgentJob:
                 Require(family, extensions, EventCatalog.Lineage.AgentId, context.AgentId);
+                Optional(family, extensions, EventCatalog.Lineage.ProjectId, context.ProjectId);
+                Optional(family, extensions, EventCatalog.Lineage.Issue, context.Issue);
+                Optional(family, extensions, EventCatalog.Lineage.Epic, context.Epic);
+                Optional(family, extensions, EventCatalog.Lineage.WorkflowRunId, context.WorkflowRunId);
+                Absent(family, extensions, EventCatalog.Lineage.SessionId);
+                Absent(family, extensions, EventCatalog.Lineage.Stage);
+                Absent(family, extensions, EventCatalog.Lineage.RunnerId);
+                break;
+            case EventProducerFamily.RawAgentJob:
+                Absent(family, extensions, EventCatalog.Lineage.AgentId);
                 Optional(family, extensions, EventCatalog.Lineage.ProjectId, context.ProjectId);
                 Optional(family, extensions, EventCatalog.Lineage.Issue, context.Issue);
                 Optional(family, extensions, EventCatalog.Lineage.Epic, context.Epic);

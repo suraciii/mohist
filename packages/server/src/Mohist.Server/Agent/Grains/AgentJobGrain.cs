@@ -87,9 +87,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _log.LogInformation("AgentJob {Id} OnActivateAsync: status={Status}, input={Input}, routedPlan={RoutedPlan}",
             Key, State.Status, State.Input is not null, State.RoutedPlan is not null);
 
-        if (State.Input is null && State.RoutedPlan is null)
-            return;
-
         if (IsTerminal)
         {
             // A terminal job carries a durable recovery obligation:
@@ -111,6 +108,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             }
             return;
         }
+
+        if (State.Input is null && State.RoutedPlan is null)
+            return;
 
         // Routed-launch preparation recovery: the plan is durable but
         // Session open / LaunchReady / Pending dispatch have not yet
@@ -1039,13 +1039,16 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     internal CloudEvent BuildFailureEnvelope(PendingFailureEvent obligation)
     {
-        var extensions = AgentJobLineage.BuildExtensions(Key, State.Input, State.RoutedPlan);
+        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
         var projectId = extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var pid) ? pid : null;
         var issue = extensions.TryGetValue(EventCatalog.Lineage.Issue, out var iss) ? iss : null;
         var epic = extensions.TryGetValue(EventCatalog.Lineage.Epic, out var epi) ? epi : null;
         var workflowRunId = extensions.TryGetValue(EventCatalog.Lineage.WorkflowRunId, out var wri) ? wri : null;
         var agentId = extensions.TryGetValue(EventCatalog.Lineage.AgentId, out var aid) ? aid : null;
-        ProducerConformance.Assert(EventProducerFamily.AgentJob, extensions, new ProducerLineageContext(
+        var producerFamily = string.IsNullOrWhiteSpace(agentId)
+            ? EventProducerFamily.RawAgentJob
+            : EventProducerFamily.AgentJob;
+        ProducerConformance.Assert(producerFamily, extensions, new ProducerLineageContext(
             ProjectId: projectId,
             Issue: issue,
             Epic: epic,
@@ -1179,12 +1182,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(reminderName, RecoveryReminderName, StringComparison.Ordinal))
             return;
 
-        if (State.Input is null && State.RoutedPlan is null)
-        {
-            await UnregisterSelfAsync(reminderName);
-            return;
-        }
-
         if (IsTerminal)
         {
             if (State.PendingSessionClose is not null)
@@ -1196,6 +1193,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await UnregisterSelfAsync(reminderName);
                 return;
             }
+            return;
+        }
+
+        if (State.Input is null && State.RoutedPlan is null)
+        {
+            await UnregisterSelfAsync(reminderName);
             return;
         }
 
