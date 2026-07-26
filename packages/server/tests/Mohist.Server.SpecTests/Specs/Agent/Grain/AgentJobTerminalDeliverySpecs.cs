@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -112,6 +113,38 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var closed = await GetSingleClosedAsync(sessionId);
         Assert.Equal("completed", closed.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, closed.GetProperty("failureReason").ValueKind);
+    }
+
+    [Fact]
+    public async Task FailedJob_ReactivationAfterSessionClose_EmitsRetainedFailureEvent()
+    {
+        var jobKey = $"agent-job-failure-recovery-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+        _fixture.EventStore.ThrowOnAppend = evt => evt.Type == EventCatalog.ReverseDns.AgentJobFailed;
+
+        try
+        {
+            await job.SubmitAsync(new AgentJobInput("doomed"));
+            await job.FailAsync("runner-lost");
+            Assert.DoesNotContain(_fixture.EventStore.Appended,
+                evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobFailed
+                    && evt.Envelope.Source.ToString() == $"/mohist/agent-job/{jobKey}");
+
+            _fixture.EventStore.ThrowOnAppend = null;
+            var management = Grains.GetGrain<IManagementGrain>(0);
+            await management.ForceActivationCollection(TimeSpan.Zero);
+
+            await job.GetStatusAsync();
+
+            var failure = Assert.Single(_fixture.EventStore.Appended,
+                evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobFailed
+                    && evt.Envelope.Source.ToString() == $"/mohist/agent-job/{jobKey}");
+            Assert.Equal(jobKey, failure.Envelope.Subject);
+        }
+        finally
+        {
+            _fixture.EventStore.ThrowOnAppend = null;
+        }
     }
 
     [Fact]

@@ -93,18 +93,21 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (IsTerminal)
         {
             // A terminal job carries a durable recovery obligation:
-            // either the pending Session-close delivery is still
-            // outstanding or the reminder registration is still active.
+            // either the pending Session-close delivery or the pending
+            // failure-event append is still outstanding.
             // Try to deliver here so a freshly reactivated grain
             // finishes the work without waiting for the next reminder
             // tick (the reminder is the safety net, not the only path).
             // If a reminder was lost across silos, re-register it so the
-            // background loop keeps retrying until Session close is
+            // background loop keeps retrying until both obligations are
             // durable.
-            if (State.PendingSessionClose is not null)
+            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null)
             {
                 await EnsureRecoveryReminderAsync();
-                await DeliverTerminalToSessionAsync(State.PendingSessionClose);
+                if (State.PendingSessionClose is not null)
+                    await DeliverTerminalToSessionAsync(State.PendingSessionClose);
+                if (State.PendingFailureEvent is not null)
+                    await EmitFailureEventAsync(State.PendingFailureEvent);
             }
             return;
         }
@@ -1094,10 +1097,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var sessionId = State.Input?.AgentSessionId;
         if (string.IsNullOrWhiteSpace(sessionId))
         {
-            // No AgentSession to close — nothing to deliver; still unregister
-            // the reminder so an agentless AgentJob (raw prompt / workflow
-            // dispatch) does not leave an orphan reminder alive.
-            await ClearPendingAndReminderAsync();
+            // No AgentSession to close. Clear that obligation while retaining
+            // the reminder for a pending failure event, if one exists.
+            await ClearPendingSessionCloseAndMaybeReminderAsync();
             return;
         }
 
@@ -1125,7 +1127,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 PayloadJson: payloadJson,
                 RuntimeSessionId: State.RuntimeSessionId));
 
-            await ClearPendingAndReminderAsync();
+            await ClearPendingSessionCloseAndMaybeReminderAsync();
         }
         catch (Exception ex)
         {
@@ -1138,10 +1140,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
-    private async Task ClearPendingAndReminderAsync()
+    private async Task ClearPendingSessionCloseAndMaybeReminderAsync()
     {
         State.PendingSessionClose = null;
         await SaveAsync();
+        if (State.PendingFailureEvent is not null)
+            return;
         try
         {
             var reminder = await this.GetReminder(RecoveryReminderName);

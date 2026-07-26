@@ -223,3 +223,16 @@ that review artifact:
 Final verification: `npm test` passed on 2026-07-26 (1478 server unit, 3069
 server spec, 32 architecture, 1381 CLI, 175 definition, 5130 web, and 1426
 runner tests).
+
+## Recovery follow-up
+
+Kept the `agent-job-recovery` reminder registered after a successful
+Session-close delivery when a failed-terminal event append remains pending.
+Activation now restores and drains either durable obligation. Added a spec
+that forces the initial event append to fail, forces a new activation after
+the session-close path, and verifies the retained failure event is appended.
+The server spec suite passed 3070 tests on 2026-07-26.
+
+Final recovery verification: `npm test` passed on 2026-07-26 (1478 server
+unit, 3070 server spec, 32 architecture, 1381 CLI, 175 definition, 5130 web,
+and 1426 runner tests).
