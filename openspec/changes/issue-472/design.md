@@ -54,7 +54,7 @@
 
 1. 更新两个 options 默认值与 HostFactory 的 enabled 解析，保持 `false` 的覆盖优先级。
 2. 移除 Compose 的显式关闭配置，保留当前 API 端口映射。
-3. 更新可观测性和自托管文档，说明默认启用、默认本地接收、资源预算、状态查询与 opt-out。
+3. 更新 `docs/observability.md` 和 `docs/self-host.md`，说明默认启用、默认本地接收、资源预算、状态查询与 opt-out；同步 `design/observability.md` 的“当前差距”，删除已完成的保留、存储上限、接收/写入边界和降级状态断言，只保留真实未实装的能力。
 4. 运行 Server 相关 unit/spec 测试，重点验证缺省启动、显式关闭、listener 计划和 Compose 端口表面。
 5. 发布后用 `mo otel status` 确认新实例为 `healthy` 或 `degraded`；出现资源或绑定问题时设置 `Mohist:Otel:Enabled=false` 并重启 Server，恢复完全关闭的既有行为。
 
