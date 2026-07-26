@@ -20,4 +20,4 @@
 - **Server API** (`/api/projects/{projectRef}/agent/status` and the `/api/agent/status` alias): response schema, ordering, and active-session semantics remain unchanged.
 - **Observability**: preserve #470's request-work amplification metrics, including their correspondence to selected candidates, processed Sessions, database work, and downstream Workflow reads.
 - **Tests** (`packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/AgentPathAmplificationSpecs.cs` and related status specs): cover large unrelated historical Session populations and repeated Workflow references with operation counters rather than wall-clock assertions.
-- **Dependencies and persistence**: no new dependency, migration, or persisted-schema change.
+- **Dependencies and persistence**: no new dependency; add a stored direct-activity projection and status-selection index through an EF migration. No business-state or public-schema change.
