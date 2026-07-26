@@ -43,7 +43,10 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        await workflow.ApproveAsync("operator-1");
+        await workflow.ApproveAsync("  operator-1  ");
+
+        var run = await LoadRunAsync();
+        Assert.Equal("operator-1", run.Stages.Single(stage => stage.Id == "plan").ApprovalStatus?.DecidedBy);
 
         var (task2, r3) = await PollWorkAnyAsync();
         Assert.StartsWith("compile.", task2.WorkId);
@@ -93,7 +96,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
 
         // RequestChanges must NOT mark the workflow as failed; it
         // routes through the feedback loop.
-        await workflow.RequestChangesAsync("not good enough", "operator-1");
+        await workflow.RequestChangesAsync("not good enough", "  operator-1  ");
 
         var run = await LoadRunAsync();
         Assert.NotEqual(WorkflowRunStatus.Failed, run.Status);

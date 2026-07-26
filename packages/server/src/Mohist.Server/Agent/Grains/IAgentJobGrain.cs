@@ -90,7 +90,7 @@ public sealed record PendingSessionClose(
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending
 /// failed-terminal CloudEvent append. The AgentJob writes a
-/// <c>com.mohist.agent-job.failed</c> event exactly once for every
+/// <c>com.mohist.agent.job.failed</c> event exactly once for every
 /// failed terminal transition; until the append succeeds the grain
 /// keeps this record and the <c>agent-job-recovery</c> reminder keeps
 /// retrying. <see cref="EventId"/> is the stable CloudEvent id
@@ -175,7 +175,7 @@ public enum AgentJobStatus
 /// from the launching CloudEvent when one is present (or the
 /// issue-bound nonterminal run when the event is issue-scoped). It
 /// stamps the durable failure-event envelope so the issue-grade
-/// <c>com.mohist.agent-job.failed</c> event carries the same
+/// <c>com.mohist.agent.job.failed</c> event carries the same
 /// workflow-run lineage as the routed launch source. Append-only
 /// Orleans field id (next free after Runtime).
 /// </para>

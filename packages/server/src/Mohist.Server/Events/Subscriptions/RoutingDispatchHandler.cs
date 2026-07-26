@@ -68,7 +68,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         // Issue-491 design D3: envelope-only self-response guard. A rule
         // whose configured AgentId equals the envelope's `agentid` is
         // treated as a non-match so an Agent cannot respond to its own
-        // `com.mohist.agent-job.failed` event. Empty-AgentId rules and
+        // `com.mohist.agent.job.failed` event. Empty-AgentId rules and
         // rules pointing at a different Agent are unaffected — the event
         // routes with the same standing as any other.
         var envelopeAgentId = CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.AgentId);

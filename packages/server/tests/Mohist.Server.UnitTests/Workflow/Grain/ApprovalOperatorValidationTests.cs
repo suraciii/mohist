@@ -45,19 +45,4 @@ public class ApprovalOperatorValidationTests
         Assert.Contains("100 characters", ex.Message);
     }
 
-    [Fact]
-    public void EnsureValid_AcceptsTrimmedAuthor()
-    {
-        // EnsureValid is the void sibling of Normalize — same contract,
-        // discards the normalized string. Verified by not throwing.
-        ApprovalOperatorValidation.EnsureValid("  supervisor  ");
-    }
-
-    [Fact]
-    public void EnsureValid_StillRejectsBlank()
-    {
-        Assert.Throws<ArgumentException>(() => ApprovalOperatorValidation.EnsureValid(null));
-        Assert.Throws<ArgumentException>(() => ApprovalOperatorValidation.EnsureValid(""));
-        Assert.Throws<ArgumentException>(() => ApprovalOperatorValidation.EnsureValid("   "));
-    }
 }

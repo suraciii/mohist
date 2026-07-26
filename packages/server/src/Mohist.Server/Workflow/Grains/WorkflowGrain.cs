@@ -252,22 +252,22 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task ApproveAsync(string decidedBy)
     {
         EnsureRun();
-        ApprovalOperatorValidation.EnsureValid(decidedBy);
-        var events = _run.Approve(Now(), decidedBy);
-        _log.LogInformation("Workflow {Id} approved at stage={Stage} by {Operator}", GrainKey, _run.CurrentStageId, decidedBy);
+        var normalizedOperator = ApprovalOperatorValidation.Normalize(decidedBy);
+        var events = _run.Approve(Now(), normalizedOperator);
+        _log.LogInformation("Workflow {Id} approved at stage={Stage} by {Operator}", GrainKey, _run.CurrentStageId, normalizedOperator);
         await CommitAsync(events);
     }
 
     public async Task<string> RequestChangesAsync(string body, string decidedBy)
     {
         EnsureRun();
-        ApprovalOperatorValidation.EnsureValid(decidedBy);
+        var normalizedOperator = ApprovalOperatorValidation.Normalize(decidedBy);
         var stage = _run.CurrentStage();
         var approval = await _profileManager.LoadApprovalConfigAsync(GrainKey);
         var feedbackTasks = WorkflowRunExtensions.ResolveFeedbackTasks(approval?.Feedback?.Tasks, stage.Id);
         var feedbackId = CreateFeedbackId();
-        var events = _run.RequestChanges(body, feedbackId, Now(), decidedBy, feedbackTasks);
-        _log.LogInformation("Workflow {Id} requested changes at stage={Stage} by {Operator}: feedback={FeedbackId}", GrainKey, stage.Id, decidedBy, feedbackId);
+        var events = _run.RequestChanges(body, feedbackId, Now(), normalizedOperator, feedbackTasks);
+        _log.LogInformation("Workflow {Id} requested changes at stage={Stage} by {Operator}: feedback={FeedbackId}", GrainKey, stage.Id, normalizedOperator, feedbackId);
         await CommitAsync(events);
         return feedbackId;
     }

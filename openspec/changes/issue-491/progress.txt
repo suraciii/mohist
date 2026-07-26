@@ -212,5 +212,14 @@ that review artifact:
    Hermes delivery, failure-reason rendering, inbox subscription API mapping,
    and an enabled migration default for existing subscription rows.
 3. Added projection, Hermes, subscription API, and producer-conformance
-   coverage. The server unit suite passed 1480 tests and the server spec suite
+   coverage. The server unit suite passed 1478 tests and the server spec suite
    passed 3069 tests on 2026-07-26.
+4. Normalized approval operators at the `WorkflowGrain` boundary before
+   persistence, event emission, and logging. The existing direct-grain specs
+   now pass whitespace-padded authors through approve and request-changes and
+   assert the canonical value. The inbox projection spec baseline is 42035
+   bytes after adding the failure projection scenario.
+
+Final verification: `npm test` passed on 2026-07-26 (1478 server unit, 3069
+server spec, 32 architecture, 1381 CLI, 175 definition, 5130 web, and 1426
+runner tests).

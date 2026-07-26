@@ -23,9 +23,4 @@ internal static class ApprovalOperatorValidation
 
         return normalized;
     }
-
-    public static void EnsureValid(string? raw)
-    {
-        _ = Normalize(raw);
-    }
 }
