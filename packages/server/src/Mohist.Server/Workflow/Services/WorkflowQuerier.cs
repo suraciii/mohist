@@ -29,7 +29,7 @@ public class WorkflowQuerier : IScopedService
         _artifactQuerier = artifactQuerier;
     }
 
-    public async Task<WorkflowStatusView?> GetStatusAsync(string workflowRunId)
+    public virtual async Task<WorkflowStatusView?> GetStatusAsync(string workflowRunId)
     {
         await using var db = await _db.CreateDbContextAsync();
 

@@ -28,6 +28,10 @@ public sealed class AgentPathAmplificationSpecs
     [Fact]
     public async Task Status_reports_filtered_candidates_with_truthful_off_state_counts()
     {
+        // issue-467 T-001: the candidate count must reflect only Sessions
+        // that can contribute to the active-agent readout, not the full
+        // project Session history. Adding inactive historical Sessions
+        // leaves candidates unchanged.
         var project = await CreateProjectAsync("status-filter");
         await InsertSessionsAsync(project.Id, count: 1, activeCount: 1);
         var small = (await GetDataAsync($"/api/projects/{project.Id}/agent/status"))
@@ -38,7 +42,7 @@ public sealed class AgentPathAmplificationSpecs
         var amplification = status.GetProperty("amplification");
 
         AssertAmplificationShape(amplification);
-        Assert.Equal(21, amplification.GetProperty("candidates").GetInt64());
+        Assert.Equal(1, amplification.GetProperty("candidates").GetInt64());
         Assert.Equal(1, amplification.GetProperty("processed").GetInt64());
         Assert.Equal(0, amplification.GetProperty("transcriptRecords").GetInt64());
         Assert.Equal(

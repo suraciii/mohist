@@ -1,0 +1,28 @@
+{
+  "project": "mohist-local",
+  "description": "Make project agent-status polling select only active direct Sessions and Sessions for running Workflows, so its work is bounded by current activity rather than Session history.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement history-bounded active agent-status selection",
+      "spec": "specs/agent-status-active-selection/spec.md#agent-status-selects-only-active-work-candidates",
+      "description": "Add the indexed persisted activity projection and migration required to select active direct Sessions without evaluating historical Session state. Implement the purpose-specific, globally ordered status-candidate query for Sessions whose own project identity matches the request: active direct Sessions and Sessions joined to running project Workflows; switch project-scoped `WorkflowActivityQuerier` status reads to it, retain one current Workflow status read per distinct run, and preserve the existing response and amplification contract. Include deterministic integration coverage for visibility, ordering, candidate materialization, Workflow-read de-duplication, and cost stability with thousands of irrelevant historical rows.",
+      "acceptanceCriteria": [
+        "A migration adds the stored direct-activity projection and the index required for project, source-kind, activity, and creation-order status selection; no new dependency is added.",
+        "`/api/projects/{projectRef}/agent/status` and its alias materialize only active direct Sessions and Sessions associated with running Workflow Runs in the selected project, in the existing global creation-descending order; every selected Session's own project identity matches the requested project.",
+        "The existing `activeAgents` content remains unchanged for active direct Sessions and matching Workflow pending work; inactive direct Sessions, non-running Workflow Sessions, and non-matching pending-work Sessions remain absent.",
+        "Multiple candidate Sessions for one running Workflow cause at most one `WorkflowQuerier` status read for that Workflow during a request, while a Workflow that terminalizes after candidate selection is still excluded by the current-status check.",
+        "With identical active work, adding thousands of completed, failed, cancelled, or idle historical Sessions leaves the active-agent JSON, candidate count, materialized-row count, database-call count, and downstream-call count unchanged; a Session from another project that references a running Workflow in the selected project is excluded.",
+        "The status amplification response retains its existing field shape; `candidates` reflects selected Session candidates and `processed` reflects emitted active-agent results, including explicit zero values when no current work exists.",
+        "Tests use operation counters or fakes rather than wall-clock assertions, and `npm test` passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentSessionRow activity projection and EF migration; purpose-specific status candidate query in packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuery.cs; project-scoped selection in packages/server/src/Mohist.Server/Workflow/Services/WorkflowActivityQuerier.cs; and updated status amplification and activity-visibility specs under packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep `AgentStatusHandlers` and the DTO schema unchanged. Do not use a response cache or a `json_extract` predicate over every historical direct Session. Reuse the existing request-work interceptors for database and downstream counts; use a narrow internal test seam only where materialized-row or Workflow-read counts cannot otherwise be observed."
+    }
+  ]
+}

@@ -33,15 +33,15 @@ public class WorkflowActivityQuerier : IScopedService
     public async Task<ActiveAgentsListResult> ListActiveAgentsResultAsync(string? projectId = null, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var sessions = string.IsNullOrWhiteSpace(projectId)
-            ? await ListAllSessionsAsync(db, ct)
-            : await _sessionQuery.ListByLabelsAsync(
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-                },
-                AgentSessionQueryOrder.CreatedDescending,
-                ct: ct);
+        IReadOnlyList<AgentSessionRecord> sessions;
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            sessions = await ListAllSessionsAsync(db, ct);
+        }
+        else
+        {
+            sessions = await _sessionQuery.ListStatusCandidatesAsync(projectId, ct);
+        }
         var candidatesCount = sessions.Count;
         var workflowStatuses = await LoadRunningWorkflowStatusesAsync(db, sessions, projectId, ct);
         var result = new List<ActiveAgentDto>();

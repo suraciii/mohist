@@ -43,6 +43,10 @@ public class IntegrationApiCollection : ICollectionFixture<MohistIntegrationFixt
 [CollectionDefinition("IntegrationSessions")]
 public class IntegrationSessionsCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+[CollectionDefinition("AgentStatusHistoryBounded")]
+public class AgentStatusHistoryBoundedCollection
+    : ICollectionFixture<Specs.Sessions.AgentStatusHistoryBoundedFixture>;
+
 [CollectionDefinition("IntegrationWorkflow")]
 public class IntegrationWorkflowCollection : ICollectionFixture<MohistIntegrationFixture>;
 
