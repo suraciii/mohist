@@ -147,12 +147,20 @@ internal static class CommandHelpRenderer
         if (HasJsonSelection(leaf))
         {
             writer.WriteLine("JSON FIELDS");
-            var fields = presentation?.JsonFields ?? leaf.Options
-                .Where(o => string.Equals(o.Name.TrimStart('-'), "json", StringComparison.Ordinal))
-                .Select(CommandPresentationCatalog.GetJsonFields)
-                .FirstOrDefault(candidate => candidate is { Count: > 0 });
-            if (fields is { Count: > 0 })
-                writer.WriteLine($"    {string.Join(", ", fields)}");
+            if (presentation?.JsonFieldGroups is { Count: > 0 } groups)
+            {
+                foreach (var group in groups)
+                    writer.WriteLine($"    {group.Invocation}: {string.Join(", ", group.Fields)}");
+            }
+            else
+            {
+                var fields = presentation?.JsonFields ?? leaf.Options
+                    .Where(o => string.Equals(o.Name.TrimStart('-'), "json", StringComparison.Ordinal))
+                    .Select(CommandPresentationCatalog.GetJsonFields)
+                    .FirstOrDefault(candidate => candidate is { Count: > 0 });
+                if (fields is { Count: > 0 })
+                    writer.WriteLine($"    {string.Join(", ", fields)}");
+            }
             writer.WriteLine("    Run with --json (no value) to list the fields accepted by this command.");
             writer.WriteLine();
         }

@@ -4,7 +4,7 @@ namespace Mohist.Cli;
 
 internal static partial class IssueCommands
 {
-    private static readonly ResourceDescriptor ArchiveCompletedDescriptor = new(
+    internal static readonly ResourceDescriptor ArchiveCompletedDescriptor = new(
         ResourceCardinality.Single,
         ["archived", "skipped", "skippedNumbers", "message"]);
 

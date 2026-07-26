@@ -179,7 +179,12 @@ internal static class CommandPresentations
                     CommandCapability.Work, "Rebase the Issue branch onto a new base"));
                 CommandPresentationCatalog.Attach(Find(group, "archive"), new CommandPresentation(
                     CommandCapability.Work, "Archive one Issue or all completed Issues",
-                    Boundary: "Archive is recoverable; use `mo issue restore <number>` to bring it back. --all-completed is mutually exclusive with a target number."));
+                    Boundary: "Archive is recoverable; use `mo issue restore <number>` to bring it back. --all-completed is mutually exclusive with a target number.",
+                    JsonFieldGroups:
+                    [
+                        new("target issue", IssueCommands.IssueDescriptor.Fields),
+                        new("--all-completed", IssueCommands.ArchiveCompletedDescriptor.Fields),
+                    ]));
                 CommandPresentationCatalog.Attach(Find(group, "restore"), new CommandPresentation(
                     CommandCapability.Work, "Restore an archived Issue"));
                 CommandPresentationCatalog.Attach(Find(group, "logs"), new CommandPresentation(

@@ -233,6 +233,21 @@ public class CliIssueCommandSpecs
         Assert.Contains("\"message\": \"Archived 3 completed issues, skipped 0\"", stdout, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(new[] { "issue", "archive", "42", "--json" }, "number")]
+    [InlineData(new[] { "issue", "archive", "--all-completed", "--json" }, "archived")]
+    public async Task ArchiveJsonDiscovery_UsesFieldsForSelectedInvocation(string[] args, string expectedField)
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called for JSON discovery"));
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(expectedField, output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task ArchiveAllCompleted_NoProject_FailsClearly()
     {

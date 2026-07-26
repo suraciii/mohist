@@ -145,6 +145,22 @@ public sealed class CliHelpSpecs
         Assert.Empty(handler.Requests);
     }
 
+    [Fact]
+    public async Task IssueArchiveHelp_ListsRuntimeJsonFieldsForBothInvocationForms()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["issue", "archive", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("target issue:", text, StringComparison.Ordinal);
+        Assert.Contains("number", text, StringComparison.Ordinal);
+        Assert.Contains("--all-completed:", text, StringComparison.Ordinal);
+        Assert.Contains("archived", text, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Theory]
     [InlineData(new[] { "workflow", "list", "--help" }, "displayName")]
     [InlineData(new[] { "skill", "list", "--help" }, "description")]

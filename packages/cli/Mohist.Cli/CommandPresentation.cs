@@ -11,6 +11,8 @@ internal enum CommandCapability
     Tools,
 }
 
+internal sealed record JsonFieldGroup(string Invocation, IReadOnlyList<string> Fields);
+
 internal sealed record CommandPresentation(
     CommandCapability Capability,
     string Summary,
@@ -18,7 +20,8 @@ internal sealed record CommandPresentation(
     string? SeeAlso = null,
     string? Note = null,
     IReadOnlyList<string>? Examples = null,
-    IReadOnlyList<string>? JsonFields = null);
+    IReadOnlyList<string>? JsonFields = null,
+    IReadOnlyList<JsonFieldGroup>? JsonFieldGroups = null);
 
 internal static class CommandPresentationCatalog
 {
