@@ -1216,6 +1216,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/work-type\"')", true);
 
+                    b.Property<string>("Activity")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("LOWER(COALESCE(json_extract(\"State\", '$.status.activity'), json_extract(\"State\", '$.status.Activity')))", true);
+
                     b.Property<DateTime?>("LastDataAt")
                         .HasColumnType("TEXT");
 
@@ -1264,6 +1269,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("LabelProjectId", "LabelIssueNumber", "CreatedAt")
                         .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelIssueNumber_CreatedAt");
+
+                    b.HasIndex("LabelProjectId", "LabelSourceKind", "Activity", "CreatedAt")
+                        .HasDatabaseName("IX_AgentSessions_StatusProject_SourceKind_Activity_CreatedAt");
 
                     b.ToTable("AgentSessions", (string)null);
                 });
