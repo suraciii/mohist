@@ -50,6 +50,33 @@ public class MohistHostPlanCompositionSpecs
     }
 
     [Fact]
+    public void CreatePrimaryPlan_MissingEnablementUsesProtectedLocalDefaults()
+    {
+        var builder = NewBuilder();
+        builder.Environment.EnvironmentName = MohistHostEnvironment.Testing;
+        var factory = new MohistHostFactory([], builder);
+
+        var plan = factory.CreatePrimaryPlan(new RuntimeEpoch(Start));
+
+        Assert.True(plan.Enabled);
+        Assert.Equal(new OtelListenerIntent("localhost", 4318), plan.ListenerIntent);
+    }
+
+    [Fact]
+    public void CreatePrimaryPlan_ExplicitFalseOmitsCollectorListener()
+    {
+        var builder = NewBuilder();
+        builder.Environment.EnvironmentName = MohistHostEnvironment.Testing;
+        builder.Configuration["Mohist:Otel:Enabled"] = "false";
+        var factory = new MohistHostFactory([], builder);
+
+        var plan = factory.CreatePrimaryPlan(new RuntimeEpoch(Start));
+
+        Assert.False(plan.Enabled);
+        Assert.Null(plan.ListenerIntent);
+    }
+
+    [Fact]
     public void ApplyPlan_RegistersExactlyOneDiagnosticsSamplerPerPlan()
     {
         var primaryPlan = MohistHostPlan.Primary(

@@ -28,9 +28,6 @@ services:
     environment:
       # Listening config — override freely.
       ASPNETCORE_URLS: http://0.0.0.0:3456
-      # OTLP ingestion port is off by default; flip to "true" (and publish the
-      # extra port) if you want the built-in trace collector.
-      Mohist:Otel:Enabled: "false"
 
     volumes:
       # Named volume — Docker manages ownership/permissions, the simplest choice

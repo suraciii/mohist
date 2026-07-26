@@ -6,6 +6,11 @@ Mohist 是 self-hosted 产品。这篇覆盖长跑部署、开机自启、远程
 
 Mohist server 支持两种长跑部署模式，选其一即可。**两种模式下 runner 都跑在宿主机上**（它要操作你的 git 仓库、调 opencode/git/gh 等 shell 工具，不属于容器）。
 
+Server 默认启用受资源预算保护的内置观测：Trace 最长保留 72 小时，观测存储预算为 1 GiB，
+OTLP 接收端只监听 `localhost:4318`，默认部署不会发布 `4318`。运行 `mo otel status` 查看
+`healthy`、`degraded` 或 `off` 状态。若需要回退为完全关闭观测的行为，设置
+`Mohist:Otel:Enabled=false` 后重启 Server。
+
 | 模式 | 适合 | 说明 |
 |---|---|---|
 | **systemd 模式** | Linux 主机（NUC / NAS / VPS / 笔记本） | 原生进程，`mo install` 自动写 unit、开机自启；runner 也可一并装成 unit。改动小、与系统最贴合。 |

@@ -1,0 +1,12 @@
+## Codebase Patterns
+
+- Outbound and collector `OtelOptions` remain separate; both use property initializers for defaults.
+- `MohistHostFactory.CreatePrimaryPlan` must bind collector options rather than use `GetValue<bool>`, otherwise a missing enablement key becomes false and listener defaults drift from DI.
+- The query/status routes remain mapped on the main API even when disabled so `mo otel status` can report `off`; only OTLP ingest is omitted when disabled.
+
+## T-001
+
+- Baseline focused test attempts were blocked by concurrent .NET build output contention and missing web `tsc` dependencies in the workspace; rerun serially after implementation.
+- Updated defaults, host-plan binding, Compose exposure, product/self-hosting docs, and the observability current-gap statement. Added absent-setting and explicit opt-out host-plan coverage plus absent-setting SDK registration coverage.
+- Added a runtime status assertion that a default-enabled `OtelOptions` snapshot is never `off`.
+- Serial focused unit/spec runs pass. The first full `npm test` had one non-reproducible Server spec failure after 3,246 passes; a complete serial spec rerun and the next full `npm test` both passed. Final full run passed all .NET, web, and runner tests/checks.
