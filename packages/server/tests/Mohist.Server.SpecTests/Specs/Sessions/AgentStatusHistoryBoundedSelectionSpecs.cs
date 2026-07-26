@@ -123,6 +123,27 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
     }
 
     [Fact]
+    public async Task Status_WorkflowSessionWithoutWorkId_IsNotACandidate()
+    {
+        var project = await CreateProjectAsync("status-workflow-no-work-id");
+        var workflowRunId = $"wf-{Guid.NewGuid():N}";
+        await InsertWorkflowRunRowAsync(workflowRunId, project, status: "running");
+        await InsertWorkflowSessionAsync(project, workflowRunId, issueNumber: 10, workId: string.Empty);
+
+        using var scope = _fixture.Services.CreateScope();
+        var sessionQuery = scope.ServiceProvider.GetRequiredService<AgentSessionQuery>();
+        var stubQuerier = scope.ServiceProvider.GetRequiredService<CountingWorkflowQuerier>();
+
+        var rows = await CountMaterializedRowsAsync(sessionQuery, project);
+        var status = await GetStatusDataAsync(project);
+
+        Assert.Equal(0, rows);
+        Assert.Equal(0, status.GetProperty("amplification").GetProperty("candidates").GetInt64());
+        Assert.Equal(0, status.GetProperty("activeAgents").GetArrayLength());
+        Assert.Equal(0, stubQuerier.GetStatusCallCount(workflowRunId));
+    }
+
+    [Fact]
     public async Task Status_SessionForTerminalizedWorkflow_IsExcludedByCurrentStatusCheck()
     {
         var project = await CreateProjectAsync("status-workflow-terminalized");

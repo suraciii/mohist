@@ -84,7 +84,7 @@ public sealed class AgentSessionQuery : IScopedService
     /// <item>direct Agent Sessions whose own project label matches the
     ///   request and whose projected activity is <c>"active"</c>;</item>
     /// <item>non-direct Sessions whose own project label matches the
-    ///   request and whose source id is a Workflow Run currently
+    ///   request, have a work id, and join a Workflow Run currently
     ///   persisted as <c>"running"</c> for that same project.</item>
     /// </list>
     /// Rows are returned in the existing global creation-descending order
@@ -105,27 +105,27 @@ public sealed class AgentSessionQuery : IScopedService
         if (string.IsNullOrWhiteSpace(projectId)) return [];
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var runningWorkflowIds = await db.WorkflowRuns.AsNoTracking()
-            .Where(run => run.MetadataProjectId == projectId && run.Status == "running")
-            .Select(run => run.WorkflowRunId)
+        var directCandidates = db.AgentSessions.AsNoTracking()
+            .Where(session =>
+                session.LabelProjectId == projectId
+                && session.LabelSourceKind == DirectSourceKind
+                && session.Activity == ActiveActivityValue);
+        var workflowCandidates =
+            from session in db.AgentSessions.AsNoTracking()
+            join workflow in db.WorkflowRuns.AsNoTracking()
+                on session.LabelSourceId equals workflow.WorkflowRunId
+            where session.LabelProjectId == projectId
+                && session.LabelSourceKind != DirectSourceKind
+                && session.LabelWorkId != null
+                && session.LabelWorkId.Trim() != string.Empty
+                && workflow.MetadataProjectId == projectId
+                && workflow.Status == "running"
+            select session;
+
+        var rows = await directCandidates
+            .Concat(workflowCandidates)
+            .OrderByDescending(session => session.CreatedAt)
             .ToListAsync(ct);
-        var runningWorkflowIdSet = runningWorkflowIds.Count == 0
-            ? null
-            : (ISet<string>)new HashSet<string>(runningWorkflowIds, StringComparer.Ordinal);
-
-        var query = db.AgentSessions.AsNoTracking()
-            .Where(session => session.LabelProjectId == projectId);
-
-        query = query.Where(session =>
-            (session.LabelSourceKind == DirectSourceKind && session.Activity == ActiveActivityValue)
-            || (session.LabelSourceKind != DirectSourceKind
-                && session.LabelSourceId != null
-                && runningWorkflowIdSet != null
-                && runningWorkflowIdSet.Contains(session.LabelSourceId)));
-
-        query = query.OrderByDescending(session => session.CreatedAt);
-
-        var rows = await query.ToListAsync(ct);
         OnRowsMaterialized(rows.Count);
         return ToRecords(rows);
     }
