@@ -344,6 +344,6 @@ internal sealed class ReadAgentJobGrain : IAgentJobGrain
         Task.FromResult(new AgentJobRuntimeSnapshot(_status, null, null, null, 0, false, false, _projectId));
     public Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan) => Task.FromResult(plan);
     public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
-    public Task FailAsync(string reason) => Task.CompletedTask;
+    public Task FailAsync(string reason, string? agentId = null) => Task.CompletedTask;
     public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
 }
