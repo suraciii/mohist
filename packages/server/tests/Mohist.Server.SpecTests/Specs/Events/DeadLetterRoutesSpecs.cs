@@ -52,7 +52,7 @@ public sealed class DeadLetterRoutesSpecs
     }
 
     [Fact]
-    public async Task Redeliver_RetriesRecordedHandlerAndResolvesRow()
+    public async Task Redeliver_RejectsEventBridgeBecauseItIsNotDurable()
     {
         var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
         var row = BuildRow(typeof(EventBridge).FullName!);
@@ -62,17 +62,10 @@ public sealed class DeadLetterRoutesSpecs
             $"/api/events/dead-letters/{row.DeadLetterId}/redeliver",
             new { });
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-        Assert.Equal(row.DeadLetterId, data.GetProperty("id").GetInt64());
-        Assert.True(data.GetProperty("delivered").GetBoolean());
-        Assert.Equal(1, data.GetProperty("attempts").GetInt32());
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var resolved = await store.GetAsync(row.DeadLetterId);
         Assert.NotNull(resolved);
-        Assert.Equal(DeadLetterStatus.Resolved, resolved.Status);
-        Assert.DoesNotContain(
-            await store.QueryAsync(failingHandler: null, limit: 100),
-            item => item.DeadLetterId == row.DeadLetterId);
+        Assert.Equal(DeadLetterStatus.Pending, resolved.Status);
     }
 
     [Fact]

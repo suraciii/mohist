@@ -3,8 +3,8 @@ using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.Events.Hub;
 
-[Subscription(Type = "com.mohist.*")]
-public sealed class EventBridge : ICloudEventHandler
+[EventPush(Type = "com.mohist.*")]
+public sealed class EventBridge : ICloudEventPushHandler
 {
     private readonly IUserNotificationDispatcher _dispatcher;
     private readonly IHubContext<MohistHub, IEventsClient> _hub;
@@ -27,7 +27,7 @@ public sealed class EventBridge : ICloudEventHandler
         try
         {
             var targets = await _dispatcher
-                .ResolveTargetConnectionsAsync(cloudEvent, CancellationToken.None)
+                .ResolveTargetConnectionsAsync(cloudEvent, ct)
                 .ConfigureAwait(false);
 
             if (targets.Count == 0)
@@ -45,6 +45,7 @@ public sealed class EventBridge : ICloudEventHandler
                     await _hub.Clients
                         .Client(connectionId)
                         .OnEvent(eventName, envelope)
+                        .WaitAsync(ct)
                         .ConfigureAwait(false);
                 }
                 catch (Exception ex)

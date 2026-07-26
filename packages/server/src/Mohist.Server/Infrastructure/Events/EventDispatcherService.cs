@@ -14,6 +14,7 @@ public sealed class EventDispatcherService
     private readonly TimeProvider _time;
     private readonly EventDispatcherOptions _options;
     private readonly ILogger<EventDispatcherService> _log;
+    private readonly IEventPushQueue _pushQueue;
     private readonly Dictionary<EventKey, Dictionary<int, HandlerState>> _states = [];
     private readonly SemaphoreSlim _dispatchGate = new(1, 1);
 
@@ -23,7 +24,8 @@ public sealed class EventDispatcherService
         IDeadLetterStore deadLetters,
         TimeProvider time,
         IOptions<EventDispatcherOptions> options,
-        ILogger<EventDispatcherService> log)
+        ILogger<EventDispatcherService> log,
+        IEventPushQueue? pushQueue = null)
     {
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _subscriptions = (subscriptions ?? throw new ArgumentNullException(nameof(subscriptions))).ToList();
@@ -31,6 +33,7 @@ public sealed class EventDispatcherService
         _time = time ?? throw new ArgumentNullException(nameof(time));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _log = log;
+        _pushQueue = pushQueue ?? NullEventPushQueue.Instance;
 
         if (_options.BatchSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(options), "BatchSize must be positive");
@@ -40,6 +43,10 @@ public sealed class EventDispatcherService
             throw new ArgumentOutOfRangeException(nameof(options), "BaseBackoff must not be negative");
         if (_options.MaxBackoff < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(options), "MaxBackoff must not be negative");
+        if (_options.PushQueueCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(options), "PushQueueCapacity must be positive");
+        if (_options.PushDeliveryTimeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(options), "PushDeliveryTimeout must be positive");
     }
 
     public async Task DispatchAsync(CancellationToken ct)
@@ -156,6 +163,14 @@ public sealed class EventDispatcherService
     private async Task<bool> DispatchOneAsync(UndeliveredEvent evt, CancellationToken ct)
     {
         var envelope = ReconstructEnvelope(evt);
+        try
+        {
+            _pushQueue.TryEnqueue(envelope);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Event push enqueue failed for {Type} {EventId}", envelope.Type, envelope.Id);
+        }
         var matching = _subscriptions
             .Select((subscription, index) => new IndexedSubscription(index, subscription))
             .Where(item => CloudEventTypeMatcher.Matches(item.Subscription.Type, envelope.Type))

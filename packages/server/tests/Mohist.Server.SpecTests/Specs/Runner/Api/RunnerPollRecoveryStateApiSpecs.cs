@@ -105,6 +105,36 @@ public sealed class RunnerPollRecoveryStateApiSpecs
     }
 
     [Fact]
+    public async Task Status_ReconcilesMissedStoppedPush()
+    {
+        var projectId = $"runner-status-recovery-{Guid.NewGuid():N}";
+        var workflowRunId = $"wr-status-recovery-{Guid.NewGuid():N}";
+        var runnerId = $"runner-status-recovery-{Guid.NewGuid():N}";
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        try
+        {
+            await SeedWorkflowAsync(projectId, workflowRunId, new RecoveryDefinition(
+                1,
+                [new RecoveryHandlerDefinition("output.promise=FAIL", [], RetrySelf: true)]));
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+            await _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId).StopAsync("missed push");
+
+            using var response = await _fixture.Client.PostAsJsonAsync(
+                $"/api/runner/{runnerId}/workflow-runs/status",
+                new { workflowRunIds = new[] { workflowRunId } });
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("Stopped", body.GetProperty("statuses").GetProperty(workflowRunId).GetString());
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
+    }
+
+    [Fact]
     public async Task Report_MalformedRecoveryFollowUpAcksAndFailsTheRunTerminally()
     {
         var projectId = $"runner-recovery-malformed-{Guid.NewGuid():N}";
