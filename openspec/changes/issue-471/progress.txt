@@ -1,0 +1,38 @@
+## T-001 Bounded OTLP admission and decoded request bodies
+
+### Codebase patterns
+
+- The existing `OtlpRoutes` reads the request body directly via `request.Body.CopyToAsync` (JSON) or `MemoryStream.ToArray` (protobuf) before any parse or persist.
+- The `OtlpTraceResponseWriter` is the single OTLP response writer; new overloads for `413` and `429` fit the same `WriteStatusCoreAsync` path.
+- `OtelDbPool` and `OtelDb` are open-read-write SQL connections; tests use the shared in-memory `InMemoryOtelDb` factory with a keeper connection.
+- `OtlpRoutesWebApplicationFactory` already configures `OtelOptions.Enabled = true`, an in-memory otel DB, and a `FakeTimeProvider`; the `IOtlpIngestGate` and `IOtlpIngestGateTestSeam` are now registered by `MohistServiceRegistration`, so any test fixture extending it can resolve both.
+
+### Decisions and gotchas
+
+- `OtlpIngestGate` is a non-queued singleton with at most 4 request leases and 1 writer lease. The 5th recognized request returns a `429` with `Retry-After: 1` *before* the route touches `request.Body`.
+- Lease acquisition happens after `Content-Type` recognition and before any body read; the lease is released in `finally` for every completion path (success, 4xx, 5xx, cancellation, exception). There is no queue, worker, or deferred payload.
+- `LimitedOtlpBodyReader` is fail-closed: it stops appending the moment the running total would exceed `DefaultMaxBytes` (16 MiB). When the next read would push it past the limit, it throws `OtlpBodyTooLargeException` *after* the previously read bytes remain the only thing retained — no full buffering, no allocation of the excess.
+- A subtle off-by-one: when the body is exactly at the limit, the reader must not throw. The current implementation reads `min(buffer, remaining)` and only throws when a *next* read would push it past. The edge case is verified by `ReadAllAsync_BodyAtLimit_ReturnsBytes` (16 MiB exactly) and `ReadAllAsync_BodyOverLimit_ThrowsOtlpBodyTooLarge` (16 MiB + 1).
+- ASP.NET Core 11's `RequestDecompressionOptions.DecpressionProviders` is a dictionary; defaults are `br`, `deflate`, `gzip`. Just `AddRequestDecompression()` is enough; the explicit `Providers.Add(...)` pattern from older .NET versions does not compile.
+- The response writer's `Retry-After` is set on the response *before* `WriteStatusCoreAsync` writes the body. The header is omitted for 413 (no retry needed for a permanent size refusal) and present for 429.
+- Protobuf wire encoding for `google.rpc.Status`: field 1 (`code`) = `8` for `RESOURCE_EXHAUSTED`, field 2 (`message`) = the bounded message. `details` is omitted, matching the canonical encoding.
+- 415 (unsupported media) intentionally bypasses the gate: the `Content-Type` check fires before admission so unsupported content returns JSON 415 without holding a lease. `UnsupportedMedia_ReturnsJson415_NotAffectedByGate` proves this.
+
+### Test seams
+
+- `OtlpIngestGate` implements `IOtlpIngestGateTestSeam` with `BlockNextRequestLease()` and `ReleaseNextRequestSignal()`. The signal is created on demand by the test (so a second `BlockNextRequestLease` returns `false` if one is already pending). The test suite drives the four-slot exhaustion path without scheduler or wall-clock waits by externally holding the gate through `IOtlpIngestGate.TryAcquireRequestLease` / `ReleaseRequestLease` and then issuing a 5th request.
+- The `BlockNextRequestLease` seam exists to lock the 5th request's *next* admission until a manual signal — this is not currently used by any test (the simpler external-slot-fill pattern is sufficient and avoids a race between the test and the route), but is left in place for future precise control tests.
+
+### Verified
+
+- 1497 / 1497 unit tests pass (new: 5 `OtlpIngestGateTests`, 8 `LimitedOtlpBodyReaderTests`, 6 new cases in `OtlpTraceResponseWriterTests`).
+- 15 / 15 `OtlpRoutesBoundedIngressSpecs` pass; 10 / 10 existing `OtlpRoutesIntegrationSpecs` pass; 25 / 25 OTLP-related spec tests pass; 1497 / 1497 unit tests pass.
+- A single pre-existing flake in `EventDispatcherImmediateTriggerSpecs.LostImmediateTrigger_LeavesRowUndispatched_AndReminderTickRecovers` is unrelated (passes in isolation).
+- `npm test` for runner + web passes; web typecheck passes; `dotnet build /p:TreatWarningsAsErrors=true` clean.
+
+### Notes for T-002
+
+- The gate's writer lease (`AcquireWriterLeaseAsync`) is implemented but unused at the route layer in T-001; T-002 should `await using` it inside `TraceIngester.IngestBatch` to serialize the database write path.
+- The route handler has not been touched inside the `try` block in a way that T-002 must preserve: the body has been fully read and stored in `bodyBytes` before T-002's call, so a block planner only needs the decoded byte payload.
+- `OtlpIngestGate.TryAcquireRequestLease` and `ReleaseRequestLease` are the only public surface the writer-lease consumer needs; `BlockNextRequestLease` / `ReleaseNextRequestSignal` remain internal test seams.
+- Decompression is enabled in `MohistHostFactory.Build` between `UseOtelPortIsolation` and `UseResponseCompression`. T-002 does not need to re-order middleware.
