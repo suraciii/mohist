@@ -308,7 +308,7 @@ public class AgentJobDispatchRouteSpecs
     [Fact]
     public async Task PostValidate_DispatchesAgentJobToRunner_AndReturnsReportedCompletion()
     {
-        var projectId = $"agent-route-project-{Guid.NewGuid():N}";
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("agent-route-project");
         var runnerId = $"agent-route-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 2);
@@ -320,7 +320,7 @@ public class AgentJobDispatchRouteSpecs
                 new
                 {
                     prompt = "route completion prompt",
-                    agentId = "agent-validation",
+                    agentId,
                     model = "openai/gpt-test",
                     jobId = jobKey,
                     workspace = new { path = "/tmp/agent-job-route", projectId },
@@ -361,7 +361,7 @@ public class AgentJobDispatchRouteSpecs
     [Fact]
     public async Task PostValidate_WhenRunnerReportsFailure_ReturnsStructuredFailure()
     {
-        var projectId = $"agent-route-fail-project-{Guid.NewGuid():N}";
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("agent-route-fail-project");
         var runnerId = $"agent-route-fail-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-fail-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 4);
@@ -373,7 +373,7 @@ public class AgentJobDispatchRouteSpecs
                 new
                 {
                     prompt = "do the failing thing",
-                    agentId = "agent-validation",
+                    agentId,
                     model = "test/model",
                     jobId = jobKey,
                     workspace = new { path = "/tmp/agent-job-fail", projectId },
@@ -406,7 +406,7 @@ public class AgentJobDispatchRouteSpecs
     [Fact]
     public async Task RunnerReportEndpoint_ForAgentJob_DeliversResultToValidateResponse()
     {
-        var projectId = $"agent-route-http-report-project-{Guid.NewGuid():N}";
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("agent-route-http-report-project");
         var runnerId = $"agent-route-http-report-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-http-report-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 2);
@@ -418,7 +418,7 @@ public class AgentJobDispatchRouteSpecs
                 new
                 {
                     prompt = "http report route prompt",
-                    agentId = "agent-validation",
+                    agentId,
                     model = "openai/gpt-test",
                     jobId = jobKey,
                     workspace = new { path = "/tmp/agent-job-http-report", projectId },
@@ -462,7 +462,7 @@ public class AgentJobDispatchRouteSpecs
     [Fact]
     public async Task RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId()
     {
-        var projectId = $"agent-route-http-poll-project-{Guid.NewGuid():N}";
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("agent-route-http-poll-project");
         var runnerId = $"agent-route-http-poll-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-http-poll-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 1);
@@ -474,7 +474,7 @@ public class AgentJobDispatchRouteSpecs
                 new
                 {
                     prompt = "http poll route prompt",
-                    agentId = "agent-validation",
+                    agentId,
                     model = "openai/gpt-test",
                     jobId = jobKey,
                     workspace = new { path = "/tmp/agent-job-http-poll", projectId },
@@ -547,6 +547,37 @@ public class AgentJobDispatchRouteSpecs
             TimeSpan.FromSeconds(5),
             TimeSpan.FromMilliseconds(25),
             $"Runner '{runnerId}' to reach Online");
+    }
+
+    private async Task<(string ProjectId, string AgentId)> CreateProjectAndAgentAsync(string prefix)
+    {
+        var rawProjectName = $"{prefix}-{Guid.NewGuid():N}";
+        var projectName = rawProjectName.Length > 63 ? rawProjectName[..63] : rawProjectName;
+        using var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new
+        {
+            name = projectName,
+            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+        });
+        projectResponse.EnsureSuccessStatusCode();
+        var projectPayload = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = projectPayload.GetProperty("data").GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("Project creation returned no id");
+
+        using var agentResponse = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/agents", new
+        {
+            name = "validation-agent",
+            description = "agent job route test agent",
+            instructions = "complete the requested validation task",
+            agentConfig = new { model = "openai/gpt-5.6" },
+            skills = new[] { "coding" },
+            maxConcurrentRuns = 1,
+        });
+        agentResponse.EnsureSuccessStatusCode();
+        var agentPayload = await agentResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var agentId = agentPayload.GetProperty("data").GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("Agent creation returned no id");
+
+        return (projectId, agentId);
     }
 
     private async Task<string> WaitForAgentJobDispatchAsync(string agentJobId, string expectedRunnerId)
