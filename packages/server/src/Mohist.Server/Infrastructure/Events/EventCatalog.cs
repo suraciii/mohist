@@ -163,7 +163,7 @@ public static class EventCatalog
 
         public const string RunnerDisconnected = "com.mohist.runner.disconnected";
 
-        public const string AgentJobFailed = "com.mohist.agent-job.failed";
+        public const string AgentJobFailed = "com.mohist.agent.job.failed";
 
         public const string IssueCompleted = "com.mohist.issue.completed";
         public const string IssueCancelled = "com.mohist.issue.cancelled";

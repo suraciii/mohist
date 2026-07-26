@@ -1036,7 +1036,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     internal CloudEvent BuildFailureEnvelope(PendingFailureEvent obligation)
     {
-        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
+        var extensions = AgentJobLineage.BuildExtensions(Key, State.Input, State.RoutedPlan);
         var projectId = extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var pid) ? pid : null;
         var issue = extensions.TryGetValue(EventCatalog.Lineage.Issue, out var iss) ? iss : null;
         var epic = extensions.TryGetValue(EventCatalog.Lineage.Epic, out var epi) ? epi : null;

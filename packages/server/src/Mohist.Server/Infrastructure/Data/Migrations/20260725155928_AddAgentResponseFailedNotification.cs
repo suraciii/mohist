@@ -19,7 +19,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 table: "InboxSubscriptions",
                 type: "INTEGER",
                 nullable: false,
-                defaultValue: false);
+                defaultValue: true);
 
             migrationBuilder.AddCheckConstraint(
                 name: "CK_InboxItems_NotificationKind",

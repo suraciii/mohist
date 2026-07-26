@@ -7,7 +7,7 @@ namespace Mohist.Server.Agent.Grains;
 
 /// <summary>
 /// Pure helper that builds the CloudEvent envelope for the
-/// <c>com.mohist.agent-job.failed</c> event the AgentJob grain emits on every
+/// <c>com.mohist.agent.job.failed</c> event the AgentJob grain emits on every
 /// terminal-failure transition (issue-491 design D2). Lineage is stamped from
 /// the durable launch context (<see cref="AgentJobInput"/> +
 /// <see cref="RoutedAgentLaunchPlan"/>) so the failure event never re-reads
@@ -36,15 +36,17 @@ public static class AgentJobLineage
         string? AgentId);
 
     public static IReadOnlyDictionary<string, string> BuildExtensions(
+        string jobKey,
         AgentJobInput? input,
         RoutedAgentLaunchPlan? routedPlan = null)
     {
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal);
         var agentId = !string.IsNullOrWhiteSpace(input?.AgentId)
             ? input!.AgentId
-            : routedPlan?.AgentId;
-        if (!string.IsNullOrWhiteSpace(agentId))
-            extensions[EventCatalog.Lineage.AgentId] = agentId!;
+            : !string.IsNullOrWhiteSpace(routedPlan?.AgentId)
+                ? routedPlan.AgentId
+                : $"agent-job:{jobKey}";
+        extensions[EventCatalog.Lineage.AgentId] = agentId!;
         var projectId = !string.IsNullOrWhiteSpace(input?.ProjectId)
             ? input!.ProjectId
             : routedPlan?.ProjectId;

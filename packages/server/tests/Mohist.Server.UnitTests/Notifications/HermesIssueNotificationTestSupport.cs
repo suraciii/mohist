@@ -102,6 +102,20 @@ public abstract class HermesIssueNotificationTestSupport
                 [EventCatalog.Lineage.Issue] = "42",
             });
 
+    protected static CloudEvent AgentJobFailedEvent(string failureReason) =>
+        new(
+            id: "evt_agent_job_failed",
+            source: new Uri("/mohist/agent-job/job_1", UriKind.Relative),
+            type: EventCatalog.ReverseDns.AgentJobFailed,
+            time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
+            data: JsonSerializer.SerializeToElement(new { failureReason }, CloudEvent.JsonOptions),
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.AgentId] = "agent_1",
+                [EventCatalog.Lineage.ProjectId] = "proj_1",
+                [EventCatalog.Lineage.Issue] = "42",
+            });
+
     protected static CloudEvent IssueEventUnified<T>(string type, T data) where T : class =>
         new(
             id: "evt_unified_" + type.Replace(".", "_", StringComparison.Ordinal),

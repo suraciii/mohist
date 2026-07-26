@@ -93,11 +93,7 @@ public static class ProducerConformance
                 }
                 break;
             case EventProducerFamily.AgentJob:
-                // AgentJob failure events always carry the agent that
-                // failed when one is known; raw-prompt-only validation
-                // jobs (no resolved Agent profile) still emit so the
-                // owner can observe the failure but stamp no agentid.
-                Optional(family, extensions, EventCatalog.Lineage.AgentId, context.AgentId);
+                Require(family, extensions, EventCatalog.Lineage.AgentId, context.AgentId);
                 Optional(family, extensions, EventCatalog.Lineage.ProjectId, context.ProjectId);
                 Optional(family, extensions, EventCatalog.Lineage.Issue, context.Issue);
                 Optional(family, extensions, EventCatalog.Lineage.Epic, context.Epic);
