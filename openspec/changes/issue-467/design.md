@@ -36,7 +36,7 @@ Alternative considered: use `json_extract(State, '$.status.activity')` in the ne
 Add a status-only candidate query at the Session persistence boundary. It returns rows in the existing global creation-descending order from two database-side branches:
 
 - direct Sessions for the requested project whose source kind is `agent-launch` and whose projected activity is `active`;
-- non-direct Sessions whose projected source ID joins a Workflow Run in the requested project with persisted status `running`.
+- non-direct Sessions whose projected project ID matches the requested project and whose projected source ID joins a Workflow Run in that project with persisted status `running`.
 
 The query materializes the combined ordered rows once and passes them through the existing Session JSON-to-record mapping once. `WorkflowActivityQuerier` will call this path for a project-scoped status request, while its unscoped behavior remains unchanged. Its response assembly continues to apply the current direct-session and pending-work checks, preserving visibility during races between selection and Workflow status loading.
 
@@ -56,7 +56,7 @@ Alternative considered: expose deserialization as a new public amplification fie
 
 ### Test selection cost as operations, not elapsed time
 
-Extend `AgentPathAmplificationSpecs` with a fixed active dataset and a second dataset that adds thousands of terminal or idle historical rows. Assert identical active-agent JSON, candidate count, materialized-row count, database-call count, and downstream-call count. Add a case with multiple selected Sessions for one running Workflow and assert one Workflow status invocation. Keep current alias and visibility cases unchanged.
+Extend `AgentPathAmplificationSpecs` with a fixed active dataset and a second dataset that adds thousands of terminal or idle historical rows. Assert identical active-agent JSON, candidate count, materialized-row count, database-call count, and downstream-call count. Add a case with multiple selected Sessions for one running Workflow and assert one Workflow status invocation, plus a cross-project Session whose source ID references a running Workflow in the selected project and remains excluded. Keep current alias and visibility cases unchanged.
 
 Alternative considered: use elapsed-time assertions or a benchmark. Rejected because execution time is environment-dependent and does not prove which work was performed.
 

@@ -1,6 +1,6 @@
 ### Requirement: Agent status selects only active-work candidates
 
-For a project-scoped `/api/agent/status` request, the system SHALL select the candidate Sessions at the persistence boundary before materializing Session state. The candidate set SHALL contain only direct Agent Sessions that can be active and Sessions associated with Workflow Runs that are currently running in that project; completed, failed, cancelled, and otherwise irrelevant historical Sessions SHALL NOT be materialized or considered as candidates.
+For a project-scoped `/api/agent/status` request, the system SHALL select the candidate Sessions at the persistence boundary before materializing Session state. Every candidate Session's project identity SHALL match the requested project. The candidate set SHALL contain only direct Agent Sessions that can be active and Sessions associated with Workflow Runs that are currently running in that project; completed, failed, cancelled, and otherwise irrelevant historical Sessions SHALL NOT be materialized or considered as candidates.
 
 #### Scenario: Historical Sessions do not enter the status candidate set
 
@@ -16,6 +16,11 @@ For a project-scoped `/api/agent/status` request, the system SHALL select the ca
 
 - **WHEN** a Session is associated with a Workflow Run that is not currently running
 - **THEN** the Session SHALL NOT be selected or materialized for that project's agent-status request
+
+#### Scenario: A cross-project Workflow reference is excluded
+
+- **WHEN** a Session's project identity differs from the requested project but its Workflow reference names a running Workflow in the requested project
+- **THEN** the Session SHALL NOT be selected or materialized for the request
 
 ### Requirement: Agent status preserves active-agent visibility
 
