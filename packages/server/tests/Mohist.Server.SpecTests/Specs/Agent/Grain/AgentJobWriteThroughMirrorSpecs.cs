@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
@@ -15,24 +16,33 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task Mirror_SubmitWritesRowWithProjectAndAgent()
+    public async Task Mirror_SubmitWritesRowBeforeRunnerAcceptance()
     {
         var (_, projectId) = await RegisterAgentJobRunnerAsync($"mirror-submit-runner-{Guid.NewGuid():N}");
         var jobKey = $"mirror-submit-{Guid.NewGuid():N}";
-
         var job = JobGrain(jobKey);
-        await job.SubmitAsync(new AgentJobInput(
+
+        _fixture.DispatchObserver.BlockAssignmentPrepared();
+        var submitTask = job.SubmitAsync(new AgentJobInput(
             Prompt: "mirror test",
             WorkspacePath: "/tmp/mirror-submit",
             ProjectId: projectId,
             AgentId: "agent-mirror"));
 
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-
-        await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
-        var row = await db.AgentJobs.SingleAsync(r => r.JobKey == jobKey);
-        Assert.Equal(projectId, row.ProjectId);
-        Assert.Equal("agent-mirror", row.AgentId);
+        await _fixture.DispatchObserver.WaitForAssignmentPreparedAsync();
+        try
+        {
+            await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
+            var row = await db.AgentJobs.SingleAsync(r => r.JobKey == jobKey);
+            Assert.Equal(projectId, row.ProjectId);
+            Assert.Equal("agent-mirror", row.AgentId);
+            Assert.Equal("pending", row.Status);
+        }
+        finally
+        {
+            _fixture.DispatchObserver.ReleaseAssignmentPrepared();
+            await submitTask;
+        }
     }
 
     [Fact]
@@ -73,7 +83,12 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.ReportAgentJobResultAsync(jobKey, workId,
-            new WorkResult("completed", "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0));
+            new WorkResult(
+                "completed",
+                "ok",
+                Output: JSON.DeserializeElement("{\"answer\":\"done\"}"),
+                ExitCode: 0,
+                ArtifactUploadIds: ["artifact-completed"]));
 
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
@@ -81,6 +96,15 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
         var row = await db.AgentJobs.SingleAsync(r => r.JobKey == jobKey);
         Assert.Equal("completed", row.Status);
         Assert.NotNull(row.TerminalAt);
+        var state = JsonSerializer.Deserialize<AgentJobState>(row.State, JSON.Options);
+        Assert.NotNull(state);
+        Assert.NotNull(state!.TerminalResult);
+        Assert.Equal(AgentJobStatus.Completed, state.TerminalResult!.Status);
+        Assert.Equal("ok", state.TerminalResult.Message);
+        Assert.Equal("{\"answer\":\"done\"}", state.TerminalResult.Output);
+        Assert.Equal(new[] { "artifact-completed" }, state.TerminalResult.ArtifactUploadIds);
+        Assert.Null(state.TerminalResult.FailureReason);
+        Assert.Equal(0, state.TerminalResult.ExitCode);
     }
 
     [Fact]
@@ -101,7 +125,11 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.ReportAgentJobResultAsync(jobKey, workId,
-            new WorkResult("failed", "boom", ExitCode: 1));
+            new WorkResult(
+                "failed",
+                "boom",
+                ExitCode: 1,
+                ArtifactUploadIds: ["artifact-failed"]));
 
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
@@ -109,6 +137,15 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
         var row = await db.AgentJobs.SingleAsync(r => r.JobKey == jobKey);
         Assert.Equal("failed", row.Status);
         Assert.NotNull(row.TerminalAt);
+        var state = JsonSerializer.Deserialize<AgentJobState>(row.State, JSON.Options);
+        Assert.NotNull(state);
+        Assert.NotNull(state!.TerminalResult);
+        Assert.Equal(AgentJobStatus.Failed, state.TerminalResult!.Status);
+        Assert.Equal("boom", state.TerminalResult.Message);
+        Assert.Null(state.TerminalResult.Output);
+        Assert.Equal(new[] { "artifact-failed" }, state.TerminalResult.ArtifactUploadIds);
+        Assert.Equal("boom", state.TerminalResult.FailureReason);
+        Assert.Equal(1, state.TerminalResult.ExitCode);
     }
 
     [Fact]

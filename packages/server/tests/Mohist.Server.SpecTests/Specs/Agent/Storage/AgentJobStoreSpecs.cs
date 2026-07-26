@@ -113,10 +113,73 @@ public class AgentJobStoreSpecs : IAsyncLifetime
         Assert.Equal(AgentJobStatus.Completed, deserialized!.Status);
         Assert.Equal("proj-2", deserialized.Input!.ProjectId);
         Assert.Equal("agent-2", deserialized.Input.AgentId);
-        Assert.NotNull(deserialized.TerminalResult);
-        Assert.Equal("ok", deserialized.TerminalResult!.Message);
+        Assert.Equal(AgentJobStatus.Completed, deserialized.TerminalResult!.Status);
+        Assert.Equal("ok", deserialized.TerminalResult.Message);
+        Assert.Equal("{}", deserialized.TerminalResult.Output);
         Assert.Equal(new[] { "artifact-1" }, deserialized.TerminalResult.ArtifactUploadIds);
+        Assert.Null(deserialized.TerminalResult.FailureReason);
         Assert.Equal(0, deserialized.TerminalResult.ExitCode);
+    }
+
+    [Fact]
+    public async Task LoadAsync_RoundTripsFailedTerminalResultFields()
+    {
+        var key = $"job-failed-{Guid.NewGuid():N}";
+        var state = MakeState(AgentJobStatus.Failed, projectId: "proj-failed", agentId: "agent-failed");
+        state.TerminalResult = new AgentJobTerminalResult(
+            AgentJobStatus.Failed,
+            "failed message",
+            "{\"error\":\"detail\"}",
+            new[] { "artifact-failed" },
+            "failure-reason",
+            17);
+
+        await _store.SaveAsync(key, Serialize(state));
+        var loaded = await _store.LoadAsync(key);
+
+        Assert.NotNull(loaded);
+        var deserialized = JsonSerializer.Deserialize<AgentJobState>(loaded!, JSON.Options);
+        Assert.NotNull(deserialized);
+        Assert.NotNull(deserialized!.TerminalResult);
+        Assert.Equal(AgentJobStatus.Failed, deserialized.TerminalResult!.Status);
+        Assert.Equal("failed message", deserialized.TerminalResult.Message);
+        Assert.Equal("{\"error\":\"detail\"}", deserialized.TerminalResult.Output);
+        Assert.Equal(new[] { "artifact-failed" }, deserialized.TerminalResult.ArtifactUploadIds);
+        Assert.Equal("failure-reason", deserialized.TerminalResult.FailureReason);
+        Assert.Equal(17, deserialized.TerminalResult.ExitCode);
+    }
+
+    [Fact]
+    public async Task Querier_ListByAgent_AppliesLimit()
+    {
+        var agentId = $"agent-limit-{Guid.NewGuid():N}";
+        var projectId = "proj-limit";
+        await _store.SaveAsync($"old-{agentId}", Serialize(MakeState(AgentJobStatus.Pending, projectId, agentId,
+            submittedAt: new DateTimeOffset(2026, 7, 25, 8, 0, 0, TimeSpan.Zero))));
+        await _store.SaveAsync($"new-{agentId}", Serialize(MakeState(AgentJobStatus.Pending, projectId, agentId,
+            submittedAt: new DateTimeOffset(2026, 7, 25, 12, 0, 0, TimeSpan.Zero))));
+        await _store.SaveAsync($"mid-{agentId}", Serialize(MakeState(AgentJobStatus.Pending, projectId, agentId,
+            submittedAt: new DateTimeOffset(2026, 7, 25, 10, 0, 0, TimeSpan.Zero))));
+
+        var result = await _querier.ListByAgentAsync(projectId, agentId, limit: 2);
+
+        Assert.Equal(new[] { $"new-{agentId}", $"mid-{agentId}" },
+            result.Select(r => r.JobKey).ToArray());
+    }
+
+    [Fact]
+    public async Task Querier_ListByAgent_OrdersEqualSubmissionTimesByKey()
+    {
+        var agentId = $"agent-tie-{Guid.NewGuid():N}";
+        var projectId = "proj-tie";
+        var submittedAt = new DateTimeOffset(2026, 7, 25, 10, 0, 0, TimeSpan.Zero);
+        await _store.SaveAsync($"a-{agentId}", Serialize(MakeState(AgentJobStatus.Pending, projectId, agentId, submittedAt)));
+        await _store.SaveAsync($"z-{agentId}", Serialize(MakeState(AgentJobStatus.Pending, projectId, agentId, submittedAt)));
+
+        var result = await _querier.ListByAgentAsync(projectId, agentId);
+
+        Assert.Equal(new[] { $"z-{agentId}", $"a-{agentId}" },
+            result.Select(r => r.JobKey).ToArray());
     }
 
     [Fact]

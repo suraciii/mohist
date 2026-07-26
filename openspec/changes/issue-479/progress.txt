@@ -90,6 +90,14 @@ source.
   relational write failure. The recovery reminder re-writes the row on the
   next transition.
 
+### Verification / follow-up
+
+- `AgentJobQuerier.ListByAgentAsync` now applies a deterministic JobKey tie-breaker after descending SubmittedAt ordering.
+- Mirror specs observe the relational row while submission is still Pending, and deserialize completed/failed row State to assert every AgentJobTerminalResult field.
+- Store specs cover failed terminal-result round-trip, list limit, and equal-timestamp ordering.
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore` passed with 3107 tests.
+- `npm run build` passed with zero .NET warnings/errors; final `npm test` passed across server, CLI, Web, and Runner. A few earlier full-suite attempts hit the pre-existing runner pickup race recorded below; a warm rerun passed.
+
 ## T-002: AgentJob read API surface and mo agent job CLI
 
 ### Summary

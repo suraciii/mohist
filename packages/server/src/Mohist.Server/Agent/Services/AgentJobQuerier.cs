@@ -37,6 +37,7 @@ public class AgentJobQuerier : IScopedService
 
         var rows = await query
             .OrderByDescending(r => r.SubmittedAt)
+            .ThenByDescending(r => r.JobKey)
             .Take(clampedLimit)
             .ToListAsync(ct);
 
