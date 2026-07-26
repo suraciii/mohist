@@ -57,6 +57,11 @@
 
 ## Open items
 
+- The validation route now resolves the submitted `agentId` against the supplied
+  `workspace.projectId` before it dispatches an AgentJob. Direct internal handler
+  tests may omit the resolver to isolate terminal-result formatting; the mapped
+  HTTP endpoint always supplies it.
+
 - The integration tests (`MohistIntegrationFixture` consuming the real
   production `MohistHostRunner`) failed at host startup with the
   `PendingModelChangesWarning` despite the deployment of the new migration

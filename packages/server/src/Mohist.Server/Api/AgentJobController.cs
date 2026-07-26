@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Api;
@@ -32,7 +33,9 @@ public static class AgentJobController
 
     public static WebApplication MapAgentJobRoutes(this WebApplication app)
     {
-        app.MapPost(ValidatePath, HandleValidateAsync);
+        app.MapPost(ValidatePath, static (HttpRequest request, IGrainFactory grains, IOptions<AgentJobOptions> options,
+            AgentQuerier agents, TimeProvider timeProvider, CancellationToken ct) =>
+            HandleValidateAsync(request, grains, options, timeProvider, ct, agents));
         return app;
     }
 
@@ -41,7 +44,8 @@ public static class AgentJobController
         IGrainFactory grains,
         IOptions<AgentJobOptions> options,
         TimeProvider timeProvider,
-        CancellationToken ct)
+        CancellationToken ct,
+        AgentQuerier? agents = null)
     {
         if (request.ContentLength is 0)
         {
@@ -82,6 +86,21 @@ public static class AgentJobController
                 "Validation failed: " + string.Join("; ", errors),
                 "validation_failed",
                 new { fields = errors });
+        }
+
+        if (agents is not null)
+        {
+            var projectId = body.Workspace?.ProjectId;
+            if (string.IsNullOrWhiteSpace(projectId))
+            {
+                return ApiResults.BadRequest("workspace.projectId is required.", "validation_failed");
+            }
+
+            var agent = await agents.GetByIdAsync(projectId, body.AgentId!.Trim());
+            if (agent is null)
+            {
+                return ApiResults.BadRequest("agentId must identify an Agent in workspace.projectId.", "validation_failed");
+            }
         }
 
         var agentOptions = options.Value;
