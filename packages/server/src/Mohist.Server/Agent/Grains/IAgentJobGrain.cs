@@ -64,7 +64,8 @@ public sealed record AgentJobRuntimeSnapshot(
     [property: Id(3)] string? FailureReason,
     [property: Id(4)] int DispatchAttempts = 0,
     [property: Id(5)] bool RunnerAccepted = false,
-    [property: Id(6)] bool HasPendingSessionClose = false);
+    [property: Id(6)] bool HasPendingSessionClose = false,
+    [property: Id(7)] string? ProjectId = null);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending

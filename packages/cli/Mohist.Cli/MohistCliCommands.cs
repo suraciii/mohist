@@ -31,6 +31,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(RepositoryCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
         root.Subcommands.Add(AgentCommands.Build(api));
+        root.Subcommands.Add(SessionCommands.Build(api));
         root.Subcommands.Add(EpicCommands.Build(api));
         root.Subcommands.Add(LabelCommands.Build(api));
         root.Subcommands.Add(OpencodeCommands.Build(api));

@@ -133,6 +133,47 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("WatchEntries", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.AgentJobs.AgentJobRow", b =>
+                {
+                    b.Property<string>("JobKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.input.projectId')", stored: true);
+
+                    b.Property<string>("AgentId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.input.agentId')", stored: true);
+
+                    b.Property<string>("Status")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.status')", stored: true);
+
+                    b.Property<string>("SubmittedAt")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.submittedAt')", stored: true);
+
+                    b.Property<string>("TerminalAt")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.terminalAt')", stored: true);
+
+                    b.HasKey("JobKey");
+                    b.HasIndex("AgentId", "ProjectId", "SubmittedAt")
+                        .HasDatabaseName("IX_AgentJobs_AgentId_ProjectId_SubmittedAt");
+                    b.ToTable("AgentJobs", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicCounterRow", b =>
                 {
                     b.Property<string>("ProjectId")

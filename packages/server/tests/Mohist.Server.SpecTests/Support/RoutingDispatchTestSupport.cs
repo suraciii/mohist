@@ -469,6 +469,7 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
             EpicNumber: context.EpicNumber));
         return Task.FromResult(new AgentLaunchResult(
             SessionId: $"mention-session-{sequence}",
+            JobKey: $"mention-job-{sequence}",
             AgentId: agent.Id,
             AgentName: agent.Name));
     }

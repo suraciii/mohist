@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
@@ -47,6 +48,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly TimeProvider _timeProvider;
     private readonly IPersistentState<AgentJobState> _state;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
+    private readonly IAgentJobStore? _jobStore;
     private IDisposable? _dispatchTimer;
     private IDisposable? _jobTimeoutTimer;
 
@@ -55,13 +57,15 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         IOptions<AgentJobOptions> options,
         TimeProvider timeProvider,
         [PersistentState("agent-job")] IPersistentState<AgentJobState> state,
-        IAgentJobDispatchObserver? dispatchObserver = null)
+        IAgentJobDispatchObserver? dispatchObserver = null,
+        IAgentJobStore? jobStore = null)
     {
         _log = log;
         _options = options.Value;
         _timeProvider = timeProvider;
         _state = state;
         _dispatchObserver = dispatchObserver ?? NoopAgentJobDispatchObserver.Instance;
+        _jobStore = jobStore;
         // The backoff schedule is captured at activation time from the current
         // snapshot of AgentJobOptions. Hot-reload of the configuration section
         // is not applied to an already-active grain; it takes effect on the
@@ -146,7 +150,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.FailureReason,
             State.DispatchAttempts,
             State.RunnerAccepted,
-            State.PendingSessionClose is not null));
+            State.PendingSessionClose is not null,
+            State.Input?.ProjectId ?? State.RoutedPlan?.ProjectId));
 
     /// <summary>
     /// Returns the job's terminal result. Before the job has reached a terminal
@@ -938,6 +943,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         State.Status = terminalStatus;
         State.FailureReason = failureReason;
         State.RunningSince = null;
+        State.TerminalAt = _timeProvider.GetUtcNow();
         State.TerminalResult = new AgentJobTerminalResult(
             terminalStatus,
             message,
@@ -1148,7 +1154,29 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private static string? FailureCategoryFromStatus(string? status) =>
         string.IsNullOrWhiteSpace(status) ? null : status;
 
-    private Task SaveAsync() => _state.WriteStateAsync();
+    private async Task SaveAsync()
+    {
+        await _state.WriteStateAsync();
+        await MirrorToJobStoreAsync();
+    }
+
+    private async Task MirrorToJobStoreAsync()
+    {
+        if (_jobStore is null)
+            return;
+
+        try
+        {
+            var json = JsonSerializer.Serialize(State, Infrastructure.JSON.Options);
+            await _jobStore.SaveAsync(Key, json);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} mirror write to AgentJobs relational read model failed; grain state remains authoritative",
+                Key);
+        }
+    }
 
     private static string StableWorkId(string key)
     {

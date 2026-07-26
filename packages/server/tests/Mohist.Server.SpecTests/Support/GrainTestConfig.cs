@@ -7,6 +7,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -227,6 +228,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         siloBuilder.Services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
+        siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();
         siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
         siloBuilder.Services.AddScoped<RunnerWorkStore>();

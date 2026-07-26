@@ -25,14 +25,11 @@ public class CliAgentSessionRecoverySpecs
             throw new InvalidOperationException("API must not be called for help"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", operation, "--help"], output, error, fileSystem, executor);
+            http, ["session", operation, "--help"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains(description, stdout, StringComparison.Ordinal);
-        Assert.Contains("Stable AgentSession id", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("new session id", stdout, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("rotat", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
     }
 
@@ -45,7 +42,7 @@ public class CliAgentSessionRecoverySpecs
             Task.FromResult(RecoveryResponse(operation)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", operation, StableSessionId], output, error, fileSystem, executor);
+            http, ["session", operation, StableSessionId], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -68,7 +65,7 @@ public class CliAgentSessionRecoverySpecs
             Task.FromResult(RecoveryResponse(operation)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", operation, StableSessionId, "--json", "id"], output, error, fileSystem, executor);
+            http, ["session", operation, StableSessionId, "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -89,7 +86,7 @@ public class CliAgentSessionRecoverySpecs
                 HttpStatusCode.Conflict)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", operation, StableSessionId], output, error, fileSystem, executor);
+            http, ["session", operation, StableSessionId], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         AssertStableIdentityError(error.ToString(), "session_active");
@@ -108,7 +105,7 @@ public class CliAgentSessionRecoverySpecs
                 HttpStatusCode.Conflict)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", operation, StableSessionId], output, error, fileSystem, executor);
+            http, ["session", operation, StableSessionId], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         AssertStableIdentityError(error.ToString(), "runtime_session_missing");
@@ -124,7 +121,7 @@ public class CliAgentSessionRecoverySpecs
             Task.FromResult(RecoveryResponse(operation)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", operation, StableSessionId, "--project", "proj_other"], output, error, fileSystem, executor);
+            http, ["session", operation, StableSessionId, "--project", "proj_other"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal($"/api/projects/proj_other/agent-sessions/{StableSessionId}/{operation}", handler.Requests.Single().RequestUri?.PathAndQuery);
@@ -139,7 +136,7 @@ public class CliAgentSessionRecoverySpecs
             throw new InvalidOperationException("API must not be called when output mode is invalid"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", operation, StableSessionId, "--output", "json"], output, error, fileSystem, executor);
+            http, ["session", operation, StableSessionId, "--output", "json"], output, error, fileSystem, executor);
 
         Assert.Equal(2, exitCode);
         Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);

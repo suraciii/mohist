@@ -31,9 +31,12 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public void IssueSessions_Help_ListsProjectProjectIdAndOutputOptions()
+    public void SessionList_Help_ListsProjectProjectIdAndOutputOptions()
     {
-        var help = RenderHelp(["issue", "sessions", "--help"]);
+        // `mo issue sessions <num>` was retired by issue-479 T-005; the
+        // list is now `mo session list --issue <num>`. The unified command
+        // inherits the same --project / --json contract.
+        var help = RenderHelp(["session", "list", "--help"]);
 
         Assert.Contains("--project", help);
         Assert.DoesNotContain("--project-id", help);
@@ -163,8 +166,10 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public async Task IssueSessions_ByProjectName_SendsGetOnResolvedPath()
+    public async Task SessionList_ByIssue_ByProjectName_SendsGetOnResolvedPath()
     {
+        // `mo issue sessions <num>` was retired; the unified list is
+        // `mo session list --issue <num>` (issue-479 T-005).
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": [] }""");
 
@@ -173,14 +178,14 @@ public class IssueCliProjectRefAndOutputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "sessions", "83", "--project", "mohist-local"],
+            ["session", "list", "--issue", "83", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
         Assert.Equal(0, exitCode);
-        Assert.Equal("/api/projects/mohist-local/issues/83/coder-sessions", http.Requests.Single().RequestUri!.PathAndQuery);
+        Assert.Equal("/api/projects/mohist-local/sessions?issue=83", http.Requests.Single().RequestUri!.PathAndQuery);
     }
 
     [Fact]
