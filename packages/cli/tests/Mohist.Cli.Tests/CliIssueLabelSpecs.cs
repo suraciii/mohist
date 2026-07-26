@@ -213,15 +213,16 @@ public class CliIssueLabelSpecs
     }
 
     [Fact]
-    public async Task IssueCreate_MalformedLabel_ReturnsExitOneWithError()
+    public async Task IssueCreate_MalformedLabel_ReturnsUsageFailureWithError()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "Bad", "-l", "=x"], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
         Assert.NotEqual("", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -231,9 +232,10 @@ public class CliIssueLabelSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "Bad", "-l", "Bad-Key=foo"], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
         Assert.NotEqual("", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -243,9 +245,10 @@ public class CliIssueLabelSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "Bad", "-l", "stream="], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
         Assert.NotEqual("", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -259,7 +262,7 @@ public class CliIssueLabelSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "stream=backend"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "stream=backend"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(2, handler.Requests.Count);
@@ -287,7 +290,7 @@ public class CliIssueLabelSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "-stream"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "-stream"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -308,7 +311,7 @@ public class CliIssueLabelSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "-stream"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "-stream"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -325,11 +328,12 @@ public class CliIssueLabelSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "=x"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "=x"], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
         Assert.NotEqual("", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

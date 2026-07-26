@@ -23,7 +23,7 @@ public class IssueCliProjectRefAndOutputTests
     [Fact]
     public void IssueShow_Help_ListsProjectProjectIdAndJsonOptions()
     {
-        var help = RenderHelp(["issue", "show", "--help"]);
+        var help = RenderHelp(["issue", "view", "--help"]);
 
         Assert.Contains("--project", help);
         Assert.DoesNotContain("--project-id", help);
@@ -64,7 +64,7 @@ public class IssueCliProjectRefAndOutputTests
     [Fact]
     public void IssueShow_Help_OutputOptionDefaultsToJson()
     {
-        var help = RenderHelp(["issue", "show", "--help"]);
+        var help = RenderHelp(["issue", "view", "--help"]);
 
         Assert.Contains("--json", help);
     }
@@ -82,7 +82,7 @@ public class IssueCliProjectRefAndOutputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "show", "83", "--project", "mohist-local"],
+            ["issue", "view", "83", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -108,7 +108,7 @@ public class IssueCliProjectRefAndOutputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "show", "83", "--project", "proj_f6c141d63b6243bfbb481737b2243b87"],
+            ["issue", "view", "83", "--project", "proj_f6c141d63b6243bfbb481737b2243b87"],
             output,
             error,
             new FakeFileSystem(),
@@ -133,7 +133,7 @@ public class IssueCliProjectRefAndOutputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "show", "83", "--project", "proj_f6c141d63b6243bfbb481737b2243b87"],
+            ["issue", "view", "83", "--project", "proj_f6c141d63b6243bfbb481737b2243b87"],
             output,
             error,
             new FakeFileSystem(),
@@ -361,7 +361,7 @@ public class IssueCliProjectRefAndOutputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "show", "83"],
+            ["issue", "view", "83"],
             output,
             error,
             new FakeFileSystem(),

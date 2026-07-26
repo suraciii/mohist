@@ -20,24 +20,21 @@ internal static class BodyInputResolver
     public sealed record SourceFlags(
         string InlineFlag,
         string FileFlag,
-        string StdinFlag,
         string BodyKind);
 
     public static Task<Result> ResolveAsync(
         string? inlineBody,
         string? bodyFile,
-        bool bodyStdin,
         IFileSystem fileSystem,
         TextReader standardInput,
         TextWriter error) =>
-        ResolveAsync(inlineBody, bodyFile, bodyStdin,
-            new SourceFlags("--body", "--body-file", "--body-stdin", "issue body"),
+        ResolveAsync(inlineBody, bodyFile,
+            new SourceFlags("--body", "--body-file", "issue body"),
             fileSystem, standardInput, error);
 
     public static async Task<Result> ResolveAsync(
         string? inlineBody,
         string? bodyFile,
-        bool bodyStdin,
         SourceFlags flags,
         IFileSystem fileSystem,
         TextReader standardInput,
@@ -45,15 +42,13 @@ internal static class BodyInputResolver
     {
         var hasInline = inlineBody is not null;
         var hasFile = !string.IsNullOrWhiteSpace(bodyFile);
-        var hasStdin = bodyStdin;
-
-        var providedCount = (hasInline ? 1 : 0) + (hasFile ? 1 : 0) + (hasStdin ? 1 : 0);
+        var providedCount = (hasInline ? 1 : 0) + (hasFile ? 1 : 0);
         if (providedCount == 0)
         {
-            await error.WriteLineAsync(
-                $"{flags.BodyKind} is required (use {flags.InlineFlag}, {flags.FileFlag}, or {flags.StdinFlag})")
+            var message = $"{flags.BodyKind} is required (use {flags.InlineFlag} or {flags.FileFlag})";
+            await error.WriteLineAsync(message)
                 .ConfigureAwait(false);
-            return new Result.Failure($"{flags.BodyKind} is required");
+            return new Result.Failure(message);
         }
 
         if (providedCount > 1)
@@ -61,11 +56,10 @@ internal static class BodyInputResolver
             var provided = new List<string>();
             if (hasInline) provided.Add(flags.InlineFlag);
             if (hasFile) provided.Add(flags.FileFlag);
-            if (hasStdin) provided.Add(flags.StdinFlag);
-            await error.WriteLineAsync(
-                $"the following options are mutually exclusive: {string.Join(", ", provided)}; pass only one")
+            var message = $"the following options are mutually exclusive: {string.Join(", ", provided)}; pass only one";
+            await error.WriteLineAsync(message)
                 .ConfigureAwait(false);
-            return new Result.Failure($"mutually exclusive body sources: {string.Join(", ", provided)}");
+            return new Result.Failure(message);
         }
 
         string resolved;
@@ -73,7 +67,7 @@ internal static class BodyInputResolver
         {
             resolved = inlineBody!;
         }
-        else if (hasStdin)
+        else if (bodyFile == "-")
         {
             var text = await standardInput.ReadToEndAsync().ConfigureAwait(false);
             resolved = text ?? string.Empty;
@@ -87,18 +81,19 @@ internal static class BodyInputResolver
             }
             catch (Exception ex)
             {
-                await error.WriteLineAsync($"could not read body file: {bodyFile} ({ex.Message})")
+                var message = $"could not read body file: {bodyFile} ({ex.Message})";
+                await error.WriteLineAsync(message)
                     .ConfigureAwait(false);
-                return new Result.Failure($"could not read body file: {bodyFile}");
+                return new Result.Failure(message);
             }
         }
 
         if (string.IsNullOrWhiteSpace(resolved))
         {
-            await error.WriteLineAsync(
-                $"{flags.BodyKind} is required (resolved body is empty)")
+            var message = $"{flags.BodyKind} is required (resolved body is empty)";
+            await error.WriteLineAsync(message)
                 .ConfigureAwait(false);
-            return new Result.Failure($"{flags.BodyKind} is required");
+            return new Result.Failure(message);
         }
 
         return new Result.Success(resolved);

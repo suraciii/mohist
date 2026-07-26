@@ -10,6 +10,7 @@
 - **可发现**：从 `mo --help` 进入命令组，再进入叶子帮助，不需要先读完整手册。
 - **上下文克制**：每层只提供完成当前决策所需的信息，不重复下一层已经能回答的内容。
 - **对自动化稳定**：非交互调用不会等待输入；结构化输出只返回请求的字段；失败总是非零退出。
+- **错误可恢复**：命令语法、参数和字段选择错误返回 2，并在 stderr 给出最近命令的用法；这类错误不会请求 Server。
 - **人机同面**：Agent 和人使用同一套命令、帮助与错误信息，不维护第二套 Agent 专用命令面。
 
 ## 使用方式
@@ -94,17 +95,17 @@ task-command     = mo <task> [target] [flags]
 
 | 命令组 | 规范动作 |
 |---|---|
-| `project` | `list`、`view`、`create`、`use`、`delete`；`workflow set-default`；`prompt list/view/set/unset/preview`；`variable list/get/set/unset` |
-| `repo` | `list`、`view`、`add`、`edit`、`remove`、`set-default` |
-| `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`；`comment list/add`；`commit list`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset`；`watch list/add/remove` |
-| `epic` | `list`、`view`、`create`、`edit`、`link`、`unlink`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
-| `label` | `list`、`view`、`create`、`edit`、`delete` |
+| `project` | `list`、`view`、`create`、`use`、`delete`；`workflow set-default`；`prompt get/set/clear/preview`；`variable list/get/set/unset` |
+| `repo` | `list`、`create`、`edit`、`set-default`、`delete` |
+| `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`rebase`、`diff`；`comment create`；`commits`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset`；`watch list/add/remove` |
+| `epic` | `list`、`view`、`create`、`edit`、`add`、`remove`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
+| `label` | `list`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
 | `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
 | `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；只读 `model list --runtime` |
 | `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
 | `activity` | `list` |
-| `routing` | `rule list/view/create/edit/archive/restore/move`；`test` 评估整张路由表 |
+| `routing` | `rule list/view/create/edit/archive/move`；`test` 评估整张路由表 |
 
 ### 运维与工具命令组
 
@@ -311,7 +312,7 @@ mo session list --issue 42 --json id,name,status
 mo session transcript session_abc123
 
 # 从 stdin 提交长内容
-mo issue comment add 42 --body-file -
+mo issue comment create 42 --body-file -
 
 # 调整当前 Run 的变量；后续 attempt 使用新值
 mo run variable set --issue 42 agent.model openai/gpt-5

@@ -322,7 +322,7 @@ public class CliIssueWatchSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "201"], output, error, fs, executor);
+            http, ["issue", "view", "201"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();

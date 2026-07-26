@@ -28,7 +28,7 @@ The server treats the body as an **opaque raw string**. It does not parse sectio
 - `GET /issue-templates` (list) returns metadata only — the body is never read.
 - `GET /issue-templates/{id}` (detail) returns the full body verbatim, comments included.
 
-This mirrors GitHub's classic markdown issue templates, which populate the issue body verbatim including `<!-- comments -->`. Consumers (the Web `CreateIssueDialog`, the `mo issue template get` CLI output, the `mohist-create-issue` skill) all receive the same raw body. Nothing strips the guidance comments — they are hidden in rendered markdown but visible in the raw text the AI planner reads, where they double as fill-time instructions.
+This mirrors GitHub's classic markdown issue templates, which populate the issue body verbatim including `<!-- comments -->`. Consumers (the Web `CreateIssueDialog`, the `mo issue template view` CLI output, the `mohist-create-issue` skill) all receive the same raw body. Nothing strips the guidance comments — they are hidden in rendered markdown but visible in the raw text the AI planner reads, where they double as fill-time instructions.
 
 ## Two-tier, on-demand loading
 
@@ -37,7 +37,7 @@ Mirrors skill discovery (`SkillAssetService.TryReadFrontmatter`):
 | Tier | Trigger | Reads | Output |
 |---|---|---|---|
 | Discovery | `mo issue template list` / AI selecting a template | **frontmatter only** | name + description (enough for AI/human to judge) |
-| Detail | `mo issue template get <name>` / `composeIssueTemplateBody` | frontmatter + **full body** | the raw body string |
+| Detail | `mo issue template view <name>` / `composeIssueTemplateBody` | frontmatter + **full body** | the raw body string |
 
 The discovery tier never reads the body; the body is loaded only after a template is selected.
 

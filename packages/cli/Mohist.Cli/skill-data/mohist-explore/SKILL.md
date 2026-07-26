@@ -169,7 +169,7 @@ Common backtrack triggers:
 
 When the output is confirmed, point the user to the create skills — they own every execution detail:
 
-- **Single issue:** the `mohist-create-issue` skill picks a template (`mo issue template list`/`get`), fills its sections from this clarification, adds frontmatter, recommends workflow/risk, classifies with labels, and runs `mo issue create` after confirmation.
+- **Single issue:** the `mohist-create-issue` skill picks a template (`mo issue template list`/`view`), fills its sections from this clarification, adds frontmatter, recommends workflow/risk, classifies with labels, and runs `mo issue create` after confirmation.
 - **Epic + issues:** point the user to `mohist-create-epic` for the epic (`mo epic create`, link, prerequisites, lifecycle) and to `mohist-create-issue` for each child issue. The epic milestone and each issue clarification become the content the create skills fill into their templates.
 
 In both cases this skill produces only the **clarified thinking**; the create skills own the templates, the frontmatter, and the CLI execution.

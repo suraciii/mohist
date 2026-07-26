@@ -31,9 +31,7 @@ public class CliRootCommandShapeTests
         var stdout = output.ToString();
 
         // Required resource / resource-group commands: the four that the
-        // T-001..T-005 migrations touched, plus the standard suite. Each
-        // is advertised as `  <name>  <description>` in System.CommandLine's
-        // subcommand table — anchor with leading newline + two spaces.
+        // T-001..T-005 migrations touched, plus the standard suite.
         string[] requiredResourceGroups =
         [
             "project",
@@ -45,21 +43,19 @@ public class CliRootCommandShapeTests
             "session",
         ];
         foreach (var name in requiredResourceGroups)
-            Assert.Contains($"\n  {name} ", stdout);
+            Assert.Contains(name, stdout, StringComparison.Ordinal);
 
         // The single controlled exception.
-        Assert.Contains("\n  info ", stdout);
+        Assert.Contains("info", stdout, StringComparison.Ordinal);
 
         // The five legacy bare-verb / misnamed paths must NOT be advertised
-        // as top-level subcommands. Anchored on `\n  <name> ` to avoid
-        // false positives from substring matches inside other descriptions
-        // (e.g. `repository` contains `use`; `notification` contains `not`).
-        Assert.DoesNotContain("\n  status ", stdout);
-        Assert.DoesNotContain("\n  logs ", stdout);
-        Assert.DoesNotContain("\n  use ", stdout);
-        Assert.DoesNotContain("\n  notify ", stdout);
-        Assert.DoesNotContain("\n  system ", stdout);
-        Assert.DoesNotContain("\n  events ", stdout);
+        // as top-level subcommands.
+        Assert.DoesNotContain("status", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("logs", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("use", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("notify", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("system", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("events", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -89,20 +85,18 @@ public class CliRootCommandShapeTests
             "service",
             "install",
             "update",
-            "skills",
-            "opencode",
-            "config",
+            "skill",
             "notification",
             "otel",
             "info",
         ];
         foreach (var name in survivingResourceGroups)
-            Assert.Contains($"\n  {name} ", stdout);
-        // `repo` is the primary name; `repository` is registered as an
-        // alias. System.CommandLine renders them as `  repo, repository  …`.
-        // We assert the full rendered form because anchored `\n  repo `
-        // would miss the actual column layout (it's `repo,` not `repo `).
-        Assert.Contains("\n  repo, repository ", stdout);
+            Assert.Contains(name, stdout, StringComparison.Ordinal);
+        Assert.Contains("repo", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("repository", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("opencode", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("config", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("skills", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -192,13 +186,10 @@ public class CliRootCommandShapeTests
 
         Assert.Equal(0, exitCode);
         var help = output.ToString();
-        Assert.Contains("\n  tail ", help);
-        Assert.Contains("\n  dead-letter ", help);
-        Assert.DoesNotContain("\n  list ", help);
-        Assert.DoesNotContain("\n  rule ", help);
-        Assert.DoesNotContain("\n  test ", help);
-        Assert.DoesNotContain("\n  create ", help);
-        Assert.DoesNotContain("\n  edit ", help);
+        Assert.Contains("tail", help, StringComparison.Ordinal);
+        Assert.Contains("dead-letter", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("rule", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("test", help, StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 

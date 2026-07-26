@@ -13,10 +13,10 @@ public class CliRepositoryCommandSpecs
     {
         yield return [new[] { "repo", "list", "--project", "proj_by_name" }, HttpMethod.Get, "/api/projects/proj_by_name/repositories"];
         yield return [new[] { "repo", "list", "--project", "proj_by_id" }, HttpMethod.Get, "/api/projects/proj_by_id/repositories"];
-        yield return [new[] { "repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--project", "proj_by_name" }, HttpMethod.Post, "/api/projects/proj_by_name/repositories"];
-        yield return [new[] { "repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--project", "proj_by_id" }, HttpMethod.Post, "/api/projects/proj_by_id/repositories"];
-        yield return [new[] { "repo", "update", "origin", "--base-branch", "develop", "--project", "proj_by_name" }, HttpMethod.Patch, "/api/projects/proj_by_name/repositories/origin"];
-        yield return [new[] { "repo", "update", "origin", "--base-branch", "develop", "--project", "proj_by_id" }, HttpMethod.Patch, "/api/projects/proj_by_id/repositories/origin"];
+        yield return [new[] { "repo", "create", "origin", "--git-url", "git@example.com:repo.git", "--project", "proj_by_name" }, HttpMethod.Post, "/api/projects/proj_by_name/repositories"];
+        yield return [new[] { "repo", "create", "origin", "--git-url", "git@example.com:repo.git", "--project", "proj_by_id" }, HttpMethod.Post, "/api/projects/proj_by_id/repositories"];
+        yield return [new[] { "repo", "edit", "origin", "--base-branch", "develop", "--project", "proj_by_name" }, HttpMethod.Patch, "/api/projects/proj_by_name/repositories/origin"];
+        yield return [new[] { "repo", "edit", "origin", "--base-branch", "develop", "--project", "proj_by_id" }, HttpMethod.Patch, "/api/projects/proj_by_id/repositories/origin"];
         yield return [new[] { "repo", "set-default", "origin", "--project", "proj_by_name" }, HttpMethod.Patch, "/api/projects/proj_by_name/repositories/origin"];
         yield return [new[] { "repo", "set-default", "origin", "--project", "proj_by_id" }, HttpMethod.Patch, "/api/projects/proj_by_id/repositories/origin"];
         yield return [new[] { "repo", "delete", "origin", "--project", "proj_by_name" }, HttpMethod.Delete, "/api/projects/proj_by_name/repositories/origin"];
@@ -25,23 +25,23 @@ public class CliRepositoryCommandSpecs
 
     public static IEnumerable<object[]> SingleFieldUpdateCases()
     {
-        yield return [new[] { "repo", "update", "origin", "--git-url", "git@example.com:repo-v2.git" }, "gitUrl", "git@example.com:repo-v2.git"];
-        yield return [new[] { "repo", "update", "origin", "--base-branch", "release" }, "baseBranch", "release"];
+        yield return [new[] { "repo", "edit", "origin", "--git-url", "git@example.com:repo-v2.git" }, "gitUrl", "git@example.com:repo-v2.git"];
+        yield return [new[] { "repo", "edit", "origin", "--base-branch", "release" }, "baseBranch", "release"];
     }
 
     public static IEnumerable<object[]> NoResolvableProjectCases()
     {
         yield return [new[] { "repo", "list" }];
-        yield return [new[] { "repo", "add", "origin", "--git-url", "git@example.com:repo.git" }];
-        yield return [new[] { "repo", "update", "origin", "--base-branch", "release" }];
+        yield return [new[] { "repo", "create", "origin", "--git-url", "git@example.com:repo.git" }];
+        yield return [new[] { "repo", "edit", "origin", "--base-branch", "release" }];
         yield return [new[] { "repo", "set-default", "origin" }];
         yield return [new[] { "repo", "delete", "origin" }];
     }
 
     public static IEnumerable<object[]> MutationOutputCases()
     {
-        yield return [new[] { "repo", "update", "origin", "--base-branch", "release", }, false];
-        yield return [new[] { "repo", "update", "origin", "--base-branch", "release", "--json", "name,isDefault" }, true];
+        yield return [new[] { "repo", "edit", "origin", "--base-branch", "release", }, false];
+        yield return [new[] { "repo", "edit", "origin", "--base-branch", "release", "--json", "name,isDefault" }, true];
         yield return [new[] { "repo", "set-default", "origin", }, false];
         yield return [new[] { "repo", "set-default", "origin", "--json", "name,isDefault" }, true];
         yield return [new[] { "repo", "delete", "origin", }, false];
@@ -72,17 +72,22 @@ public class CliRepositoryCommandSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("repo [command] [options]", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("repository [command] [options]", stdout, StringComparison.Ordinal);
+        Assert.Contains("USAGE", stdout, StringComparison.Ordinal);
+        Assert.Contains("mo repo", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("repository [command]", stdout, StringComparison.Ordinal);
         Assert.Contains("list", stdout, StringComparison.Ordinal);
         Assert.Contains("add", stdout, StringComparison.Ordinal);
-        Assert.Contains("update", stdout, StringComparison.Ordinal);
+        Assert.Contains("edit", stdout, StringComparison.Ordinal);
         Assert.Contains("set-default", stdout, StringComparison.Ordinal);
         Assert.Contains("delete", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("update", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("remove", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain(" rm ", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain(" ls ", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task RepositoryAlias_RemainsAccepted()
+    public async Task RepositoryAlias_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = SetupEnv();
 
@@ -91,10 +96,8 @@ public class CliRepositoryCommandSpecs
             ["repository", "list"],
             output, error, fs, executor);
 
-        Assert.Equal(0, exitCode);
-        var request = handler.Requests.Single();
-        Assert.Equal(HttpMethod.Get, request.Method);
-        Assert.Equal($"/api/projects/{ActiveProjectId}/repositories", request.RequestUri?.PathAndQuery);
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -115,7 +118,7 @@ public class CliRepositoryCommandSpecs
         var (handler, http, output, error, fs, executor) = SetupEnv();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "repo", "add", "origin", "--git-url", "git@example.com:repo.git"], output, error, fs, executor);
+            http, ["project", "repo", "create", "origin", "--git-url", "git@example.com:repo.git"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
@@ -128,7 +131,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--base-branch", "main", "--set-default"],
+            ["repo", "create", "origin", "--git-url", "git@example.com:repo.git", "--base-branch", "main", "--set-default"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -153,7 +156,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "web", "--git-url", "git@example.com:web.git"],
+            ["repo", "create", "web", "--git-url", "git@example.com:web.git"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -169,7 +172,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--base-branch", "main", "--set-default", "--project", "proj_by_name"],
+            ["repo", "create", "origin", "--git-url", "git@example.com:repo.git", "--base-branch", "main", "--set-default", "--project", "proj_by_name"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -185,7 +188,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin"],
+            ["repo", "create", "origin"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
@@ -200,7 +203,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--default"],
+            ["repo", "create", "origin", "--git-url", "git@example.com:repo.git", "--default"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
@@ -214,7 +217,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "update", "origin", "--git-url", "git@example.com:repo-v2.git", "--base-branch", "develop"],
+            ["repo", "edit", "origin", "--git-url", "git@example.com:repo-v2.git", "--base-branch", "develop"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -252,7 +255,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "update", "origin"],
+            ["repo", "edit", "origin"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
@@ -268,7 +271,7 @@ public class CliRepositoryCommandSpecs
     public async Task RepoUpdate_WithUnsupportedOption_IsRejectedWithoutDispatch(string option, string? value)
     {
         var (handler, http, output, error, fs, executor) = SetupEnv();
-        var args = new List<string> { "repo", "update", "origin", option };
+        var args = new List<string> { "repo", "edit", "origin", option };
         if (value is not null) args.Add(value);
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -414,7 +417,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git"],
+            ["repo", "create", "origin", "--git-url", "git@example.com:repo.git"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
@@ -433,7 +436,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "update", "missing", "--base-branch", "release"],
+            ["repo", "edit", "missing", "--base-branch", "release"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
@@ -461,7 +464,7 @@ public class CliRepositoryCommandSpecs
     }
 
     [Fact]
-    public async Task RepoRemove_AliasesDelete()
+    public async Task RepoRemove_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = SetupEnv();
 
@@ -470,14 +473,12 @@ public class CliRepositoryCommandSpecs
             ["repo", "remove", "origin"],
             output, error, fs, executor);
 
-        Assert.Equal(0, exitCode);
-        var request = handler.Requests.Single();
-        Assert.Equal(HttpMethod.Delete, request.Method);
-        Assert.Equal($"/api/projects/{ActiveProjectId}/repositories/origin", request.RequestUri?.PathAndQuery);
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
-    public async Task RepoRm_AliasesDelete()
+    public async Task RepoRm_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = SetupEnv();
 
@@ -486,10 +487,36 @@ public class CliRepositoryCommandSpecs
             ["repo", "rm", "origin"],
             output, error, fs, executor);
 
-        Assert.Equal(0, exitCode);
-        var request = handler.Requests.Single();
-        Assert.Equal(HttpMethod.Delete, request.Method);
-        Assert.Equal($"/api/projects/{ActiveProjectId}/repositories/origin", request.RequestUri?.PathAndQuery);
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task RepoLs_IsRejectedAsUsageFailure()
+    {
+        var (handler, http, output, error, fs, executor) = SetupEnv();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["repo", "ls"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task RepoUpdate_IsRejectedAsUsageFailure()
+    {
+        var (handler, http, output, error, fs, executor) = SetupEnv();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["repo", "update", "origin", "--base-branch", "release"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -563,7 +590,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git"],
+            ["repo", "create", "origin", "--git-url", "git@example.com:repo.git"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
@@ -676,7 +703,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "web", "--git-url", "git@example.com:web.git", "--base-branch", "develop", "--set-default"],
+            ["repo", "create", "web", "--git-url", "git@example.com:web.git", "--base-branch", "develop", "--set-default"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -711,7 +738,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--json", "name,gitUrl"],
+            ["repo", "create", "origin", "--git-url", "git@example.com:repo.git", "--json", "name,gitUrl"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -769,7 +796,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--output", "json"],
+            ["repo", "create", "origin", "--git-url", "git@example.com:repo.git", "--output", "json"],
             output, error, fs, executor);
 
         Assert.Equal(2, exitCode);

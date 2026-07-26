@@ -173,7 +173,7 @@ public class ResolveProjectIdTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "show", "83"],
+            ["issue", "view", "83"],
             output,
             error,
             files,
@@ -203,7 +203,7 @@ public class ResolveProjectIdTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "show", "83", "--project", "other-project"],
+            ["issue", "view", "83", "--project", "other-project"],
             output,
             error,
             files,

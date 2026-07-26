@@ -10,8 +10,8 @@ internal static class LabelCommands
         var label = new Command("label", "Issue label utilities");
 
         label.Subcommands.Add(BuildList(api));
-        label.Subcommands.Add(BuildAdd(api));
-        label.Subcommands.Add(BuildUpdate(api));
+        label.Subcommands.Add(BuildCreate(api));
+        label.Subcommands.Add(BuildEdit(api));
         label.Subcommands.Add(BuildDelete(api));
 
         return label;
@@ -20,9 +20,8 @@ internal static class LabelCommands
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List the label catalog for the project");
-        cmd.Aliases.Add("ls");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.LabelList)));
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
@@ -49,9 +48,9 @@ internal static class LabelCommands
         return cmd;
     }
 
-    private static Command BuildAdd(MohistCliApi api)
+    private static Command BuildCreate(MohistCliApi api)
     {
-        var cmd = new Command("add", "Add a label definition to the project catalog");
+        var cmd = new Command("create", "Create a label definition in the project catalog");
         var keyArg = new Argument<string>("key") { Description = "Label key (lowercase, dashes allowed)" };
         var descriptionOpt = new Option<string>("--description") { Description = "Description of when to use this label" };
         var supportedValuesOpt = new Option<string?>("--supported-values")
@@ -120,9 +119,9 @@ internal static class LabelCommands
         return cmd;
     }
 
-    private static Command BuildUpdate(MohistCliApi api)
+    private static Command BuildEdit(MohistCliApi api)
     {
-        var cmd = new Command("update", "Update a label definition in the project catalog (partial update)");
+        var cmd = new Command("edit", "Edit a label definition in the project catalog");
         var keyArg = new Argument<string>("key") { Description = "Label key (lowercase, dashes allowed)" };
         var descriptionOpt = new Option<string?>("--description") { Description = "New description of when to use this label" };
         var supportedValuesOpt = new Option<string?>("--supported-values")
@@ -204,8 +203,6 @@ internal static class LabelCommands
     private static Command BuildDelete(MohistCliApi api)
     {
         var cmd = new Command("delete", "Delete a label definition from the project catalog");
-        cmd.Aliases.Add("remove");
-        cmd.Aliases.Add("rm");
         var keyArg = new Argument<string>("key") { Description = "Label key to delete" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
 

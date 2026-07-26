@@ -123,7 +123,7 @@ internal sealed class SkillInstallService
         builder.AppendLine();
         builder.AppendLine("This Mohist-managed discovery stub keeps local agent skill installs lightweight and version-matched.");
         builder.AppendLine();
-        builder.Append("Run `mo skills get ").Append(skill.Name).AppendLine("` to view the full guidance packaged with this Mohist CLI.");
+        builder.Append("Run `mo skill view ").Append(skill.Name).AppendLine("` to view the full guidance packaged with this Mohist CLI.");
         return builder.ToString().Replace("\r\n", "\n");
     }
 }

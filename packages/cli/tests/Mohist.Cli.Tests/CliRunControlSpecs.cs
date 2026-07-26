@@ -848,6 +848,8 @@ public class CliRunControlSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
+        Assert.Contains("mo run stop [<run-id>] [flags]", stdout, StringComparison.Ordinal);
+        Assert.Contains("workflowRunId", stdout, StringComparison.Ordinal);
         // "terminal" or "permanent" must appear; "pause" must be the
         // resumable alternative the help points users to.
         Assert.Contains("terminal", stdout, StringComparison.OrdinalIgnoreCase);

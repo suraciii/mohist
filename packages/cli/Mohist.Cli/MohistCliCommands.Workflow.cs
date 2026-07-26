@@ -5,6 +5,10 @@ namespace Mohist.Cli;
 
 internal static class WorkflowCommands
 {
+    private static readonly ResourceDescriptor WorkflowProfileDescriptor = new(
+        ResourceCardinality.Single,
+        ["profileId", "name", "description", "definitionSource", "sourceProvenance", "isBuiltIn"]);
+
     private static string Path(string projectId, string? profileId = null) =>
         $"/api/projects/{MohistCliCommands.Escape(projectId)}/workflow-profiles" +
         (profileId is null ? string.Empty : $"/{MohistCliCommands.Escape(profileId)}");
@@ -32,8 +36,7 @@ internal static class WorkflowCommands
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List Profiles in the current Project");
-        cmd.Aliases.Add("ls");
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.WorkflowProfileList)));
         cmd.Options.Add(output);
         var (project, projectId) = AddProjectOptions(cmd);
         cmd.SetAction(async ctx =>
@@ -52,7 +55,7 @@ internal static class WorkflowCommands
         var cmd = new Command("view", "View a Workflow Profile");
         var profile = new Argument<string>("profile") { Description = "Profile ID" };
         var yaml = new Option<bool>("--yaml") { Description = "Print the Profile Definition source" };
-        var json = MohistCliCommands.JsonSelectionOption();
+        var json = MohistCliCommands.JsonSelectionOption(WorkflowProfileDescriptor);
         cmd.Arguments.Add(profile);
         cmd.Options.Add(yaml);
         cmd.Options.Add(json);
@@ -64,9 +67,9 @@ internal static class WorkflowCommands
                 api.Error.WriteLine("--yaml and --json are mutually exclusive");
                 return 2;
             }
-            var selection = JsonSelection.Parse(new ResourceDescriptor(ResourceCardinality.Single, ["profileId", "name", "description", "definitionSource", "sourceProvenance", "isBuiltIn"]), ctx.GetResult(json) is not null, ctx.GetValue(json));
+            var selection = JsonSelection.Parse(WorkflowProfileDescriptor, ctx.GetResult(json) is not null, ctx.GetValue(json));
             if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
-                return api.WriteJsonSelectionResult(new ResourceDescriptor(ResourceCardinality.Single, ["profileId", "name", "description", "definitionSource", "sourceProvenance", "isBuiltIn"]), selection);
+                return api.WriteJsonSelectionResult(WorkflowProfileDescriptor, selection);
             var (resolved, resolveExit) = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));
             if (resolveExit != 0) return resolveExit;
             var data = await api.GetDataOrPrintErrorAsync(Path(resolved, ctx.GetValue(profile)));
@@ -96,7 +99,7 @@ internal static class WorkflowCommands
         var yaml = new Option<string>("--yaml") { Description = "Definition source, or @<file>" };
         var nameOpt = new Option<string?>("--name");
         var descriptionOpt = new Option<string?>("--description");
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(WorkflowProfileDescriptor);
         cmd.Options.Add(id); cmd.Options.Add(yaml); cmd.Options.Add(nameOpt); cmd.Options.Add(descriptionOpt); cmd.Options.Add(output);
         var (project, projectId) = AddProjectOptions(cmd);
         cmd.SetAction(async ctx =>
@@ -110,7 +113,7 @@ internal static class WorkflowCommands
             var (mode, outputExit) = api.ResolveOutputMode(ctx.GetValue(output));
             if (outputExit != 0) return outputExit;
             var body = new { profileId, name = ctx.GetValue(nameOpt), description = ctx.GetValue(descriptionOpt), definitionSource = ((MohistCliApi.ExpandAtFileResult.Success)expanded).Value };
-            return await api.PrintMutationResourceAsync(method, Path(resolved, method == HttpMethod.Post ? null : profileId), body, new ResourceDescriptor(ResourceCardinality.Single, ["profileId", "name", "description", "definitionSource", "sourceProvenance", "isBuiltIn"]), new JsonSelection(JsonSelectionKind.None, [], null), data => mode.StartsWith("json:", StringComparison.Ordinal) ? api.WriteSelectedDataAsync(data, mode, nameof(MohistCliApi.TableShape.WorkflowProfile)) : api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowProfile));
+            return await api.PrintMutationResourceAsync(method, Path(resolved, method == HttpMethod.Post ? null : profileId), body, WorkflowProfileDescriptor, new JsonSelection(JsonSelectionKind.None, [], null), data => mode.StartsWith("json:", StringComparison.Ordinal) ? api.WriteSelectedDataAsync(data, mode, nameof(MohistCliApi.TableShape.WorkflowProfile)) : api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowProfile));
         });
         return cmd;
     }
@@ -119,7 +122,7 @@ internal static class WorkflowCommands
     {
         var cmd = new Command("delete", "Delete a custom Workflow Profile");
         var profile = new Argument<string>("profile") { Description = "Profile ID" };
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(WorkflowProfileDescriptor);
         cmd.Arguments.Add(profile); cmd.Options.Add(output);
         var (project, projectId) = AddProjectOptions(cmd);
         cmd.SetAction(async ctx =>

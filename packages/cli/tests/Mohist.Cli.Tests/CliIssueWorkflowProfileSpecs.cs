@@ -96,7 +96,7 @@ public class CliIssueWorkflowProfileSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "42"], output, error, fs, executor);
+            http, ["issue", "view", "42"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Last(r => r.Method == HttpMethod.Get);
@@ -132,7 +132,7 @@ public class CliIssueWorkflowProfileSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "42"], output, error, fs, executor);
+            http, ["issue", "view", "42"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -186,7 +186,7 @@ public class CliIssueWorkflowProfileSpecs
         Assert.Equal(0, createExit);
 
         var showExit = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "42"], output, error, fs, executor);
+            http, ["issue", "view", "42"], output, error, fs, executor);
         Assert.Equal(0, showExit);
 
         var stdout = output.ToString();
@@ -200,7 +200,7 @@ public class CliIssueWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "42", "--workflow-profile", "mohist/github-pr"],
+            ["issue", "edit", "42", "--workflow-profile", "mohist/github-pr"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -217,7 +217,7 @@ public class CliIssueWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "42", "--title", "Renamed"],
+            ["issue", "edit", "42", "--title", "Renamed"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -233,7 +233,7 @@ public class CliIssueWorkflowProfileSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "42"], output, error, fs, executor);
+            http, ["issue", "edit", "42"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -252,7 +252,7 @@ public class CliIssueWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "42", "--workflow-profile", "mohist/github-pr", "--priority", "p1"],
+            ["issue", "edit", "42", "--workflow-profile", "mohist/github-pr", "--priority", "p1"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -324,12 +324,12 @@ public class CliIssueWorkflowProfileSpecs
 
         var updateExit = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "42", "--workflow-profile", "mohist/github-pr"],
+            ["issue", "edit", "42", "--workflow-profile", "mohist/github-pr"],
             output, error, fs, new FakeCommandExecutor());
         Assert.Equal(0, updateExit);
 
         var showExit = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "42"], output, error, fs, new FakeCommandExecutor());
+            http, ["issue", "view", "42"], output, error, fs, new FakeCommandExecutor());
         Assert.Equal(0, showExit);
 
         var stdout = output.ToString();
@@ -353,7 +353,7 @@ public class CliIssueWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "42", "--workflow-profile", "mohist/github-pr"],
+            ["issue", "edit", "42", "--workflow-profile", "mohist/github-pr"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);

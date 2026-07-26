@@ -10,27 +10,40 @@ namespace Mohist.Cli.Tests.Skills;
 public sealed class SkillsCommandRegistrationTests
 {
     [Fact]
-    public void SkillsHelp_DescribesCoderAgentSkillManagement_AndListsExpectedSubcommands()
+    public void SkillHelp_DescribesCoderAgentSkillManagement_AndListsExpectedSubcommands()
     {
         var root = BuildRootCommand();
-        var help = RenderHelp(root, ["skills", "--help"]);
+        var help = RenderHelp(root, ["skill", "--help"]);
 
         Assert.Contains("Manage coder agent skills", help);
         Assert.Contains("install", help);
         Assert.Contains("list", help);
-        Assert.Contains("get", help);
+        Assert.Contains("view", help);
         Assert.Contains("path", help);
         Assert.DoesNotContain("update", help);
+        Assert.DoesNotContain("get", help);
     }
 
     [Fact]
-    public void SkillsUpdate_IsNotRegistered()
+    public void SkillUpdate_IsNotRegistered()
     {
         var root = BuildRootCommand();
-        var parseResult = root.Parse(["skills", "update"]);
+        var parseResult = root.Parse(["skill", "update"]);
 
         Assert.NotEmpty(parseResult.Errors);
         Assert.Contains(parseResult.Errors, error => error.Message.Contains("update", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SkillGet_IsNotRegistered()
+    {
+        var root = BuildRootCommand();
+        var skillCommand = root.Subcommands.Single(c => c.Name == "skill");
+        var viewCommand = skillCommand.Subcommands.Single(c => c.Name == "view");
+
+        // No `get` action and no `get` alias may live under `skill`.
+        Assert.DoesNotContain(viewCommand.Aliases, alias => alias == "get");
+        Assert.DoesNotContain(skillCommand.Subcommands, c => c.Name == "get");
     }
 
     private static global::System.CommandLine.RootCommand BuildRootCommand()

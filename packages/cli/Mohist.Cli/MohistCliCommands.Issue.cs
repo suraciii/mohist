@@ -11,15 +11,15 @@ internal static partial class IssueCommands
 
         issue.Subcommands.Add(BuildList(api));
         issue.Subcommands.Add(BuildCreate(api));
-        issue.Subcommands.Add(BuildShow(api));
-        issue.Subcommands.Add(BuildUpdate(api));
+        issue.Subcommands.Add(BuildView(api));
+        issue.Subcommands.Add(BuildEdit(api));
         issue.Subcommands.Add(BuildAction("start", "Start workflow", api));
         issue.Subcommands.Add(BuildAction("done", "Mark as done", api));
         issue.Subcommands.Add(BuildAction("close", "Close issue", api));
         issue.Subcommands.Add(BuildAction("reopen", "Reopen issue", api));
         issue.Subcommands.Add(BuildRebase(api));
         issue.Subcommands.Add(BuildArchive(api));
-        issue.Subcommands.Add(BuildAction("unarchive", "Unarchive issue", api));
+        issue.Subcommands.Add(BuildAction("restore", "Restore an archived issue", api));
         issue.Subcommands.Add(BuildGetSub("logs", api));
         issue.Subcommands.Add(BuildGetSub("events", api));
         issue.Subcommands.Add(BuildGetSub("diff", api));

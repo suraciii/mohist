@@ -72,8 +72,8 @@ Epic 和 Issue 都用 Project 内的编号作为永久身份。命令、页面�
 ### CLI（推荐）
 
 ```bash
-mo epic link <epic-number> <issue-number>
-mo epic unlink <epic-number> <issue-number>
+mo epic add <epic-number> <issue-number>
+mo epic remove <epic-number> <issue-number>
 ```
 
 关联会把 Issue 的当前 Epic 改为指定 Epic；若它原本属于另一个 Epic，则直接完成迁移。
@@ -103,10 +103,10 @@ issue 详情页 → **Edit** → 选 Epic；或在 Epic 详情页的 Linked Issu
 mo epic list --project <project>
 
 # 显示详情（使用 Project 内的 Epic 编号）
-mo epic show <epic-number> --project <project>
+mo epic view <epic-number> --project <project>
 ```
 
-详情（Web UI 详情页或 `mo epic show`）会展示 Epic 的进度：已交付了几个 issue、总共几个、几个被 blocked、几个正在进行；下一个待推进的 issue 是哪一个、当前为什么没有推进；以及是否已经满足标记完成的条件。
+详情（Web UI 详情页或 `mo epic view`）会展示 Epic 的进度：已交付了几个 issue、总共几个、几个被 blocked、几个正在进行；下一个待推进的 issue 是哪一个、当前为什么没有推进；以及是否已经满足标记完成的条件。
 
 ## Epic 的生命周期
 
@@ -150,7 +150,7 @@ mo epic resume 12
 
 这不是批量启动。Epic 每次把当前可推进的 issue 交给 workflow，避免一个目标下的工作全靠 owner 手动接力。
 
-当一个 `running` 的 Epic 仍有 open linked issue、但没有可推进的 next startable issue 时，它处于 **running-but-idle** 的可观察情况。此时 Epic 仍然是 `running` 状态（**不是第六个状态**），Epic 详情（Web UI 详情页或 `mo epic show`）会解释当前为什么没有推进（例如正在等待某个 in-progress issue 完成、下一个 issue 被 blocked 或依赖未就绪）。
+当一个 `running` 的 Epic 仍有 open linked issue、但没有可推进的 next startable issue 时，它处于 **running-but-idle** 的可观察情况。此时 Epic 仍然是 `running` 状态（**不是第六个状态**），Epic 详情（Web UI 详情页或 `mo epic view`）会解释当前为什么没有推进（例如正在等待某个 in-progress issue 完成、下一个 issue 被 blocked 或依赖未就绪）。
 
 没有 linked issues 时，详情页会提示这是一个空 Epic；所有 linked issues 都已进入终态时，详情会显示已可标记完成，并可能由系统自动转为 `done`。
 

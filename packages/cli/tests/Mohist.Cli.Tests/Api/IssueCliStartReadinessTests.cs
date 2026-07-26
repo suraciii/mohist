@@ -110,12 +110,13 @@ public class IssueCliStartReadinessTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
         Assert.Contains("--ready", err);
         Assert.Contains("--draft", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Usage:", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,7 +143,7 @@ public class IssueCliStartReadinessTests
 
         Assert.Equal(0, exitCode);
         var text = error.ToString();
-        Assert.Contains("mo issue update 83 --ready", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("mo issue edit 83 --ready", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("mo issue start 83", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("before starting", text, StringComparison.OrdinalIgnoreCase);
     }
@@ -173,7 +174,7 @@ public class IssueCliStartReadinessTests
         var text = output.ToString();
         var guidance = error.ToString();
         var dataIndex = text.IndexOf("number:", StringComparison.Ordinal);
-        var guidanceIndex = guidance.IndexOf("mo issue update", StringComparison.OrdinalIgnoreCase);
+        var guidanceIndex = guidance.IndexOf("mo issue edit", StringComparison.OrdinalIgnoreCase);
         Assert.True(dataIndex >= 0, "expected issue data in output");
         Assert.True(guidanceIndex >= 0, "expected guidance in diagnostics");
     }
@@ -254,7 +255,7 @@ public class IssueCliStartReadinessTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "update", "83", "--ready", "--project", "mohist-local"],
+            ["issue", "edit", "83", "--ready", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -284,7 +285,7 @@ public class IssueCliStartReadinessTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "update", "83", "--draft", "--project", "mohist-local"],
+            ["issue", "edit", "83", "--draft", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -305,18 +306,19 @@ public class IssueCliStartReadinessTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "update", "83", "--ready", "--draft", "--project", "mohist-local"],
+            ["issue", "edit", "83", "--ready", "--draft", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
         Assert.Contains("--ready", err);
         Assert.Contains("--draft", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Usage:", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -332,7 +334,7 @@ public class IssueCliStartReadinessTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "update", "83", "--title", "Renamed", "--project", "mohist-local"],
+            ["issue", "edit", "83", "--title", "Renamed", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -357,7 +359,7 @@ public class IssueCliStartReadinessTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "update", "83", "--ready", "--project", "mohist-local"],
+            ["issue", "edit", "83", "--ready", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),

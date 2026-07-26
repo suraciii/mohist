@@ -6,6 +6,8 @@ namespace Mohist.Cli.Tests.Project.Api;
 
 public class CliOptionFactoryTests
 {
+    private static readonly ResourceDescriptor OutputDescriptor = new(ResourceCardinality.Single, ["id"]);
+
     [Fact]
     public void ProjectRefOption_ReturnsCanonicalProjectAndDoesNotAdvertiseLegacyOption()
     {
@@ -37,7 +39,7 @@ public class CliOptionFactoryTests
     [Fact]
     public void OutputOption_DefaultsToHumanOutput()
     {
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(OutputDescriptor);
 
         Assert.NotNull(output.DefaultValueFactory);
         var defaultValue = output.DefaultValueFactory(default!);
@@ -48,7 +50,7 @@ public class CliOptionFactoryTests
     [Fact]
     public void OutputOption_DescriptionDocumentsFieldSelectionAndDiscovery()
     {
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(OutputDescriptor);
 
         Assert.NotNull(output.Description);
         Assert.Contains("selected fields", output.Description);
@@ -58,7 +60,7 @@ public class CliOptionFactoryTests
     [Fact]
     public void OutputOption_IsNamedJson()
     {
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(OutputDescriptor);
 
         Assert.Equal("--json", output.Name);
     }

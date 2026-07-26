@@ -5,4 +5,4 @@ description: "Perform Mohist issue, epic, and workflow operations against the cu
 
 This Mohist-managed discovery stub keeps local agent skill installs lightweight and version-matched.
 
-Run `mo skills get mohist` to view the full guidance packaged with this Mohist CLI.
+Run `mo skill view mohist` to view the full guidance packaged with this Mohist CLI.

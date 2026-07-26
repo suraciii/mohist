@@ -20,7 +20,7 @@ public class CliIssueCommentSpecs
                 : null!);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "comment", "add", "42", "--author", "  Ada Lovelace  ", "--body", "Looks good"], output, error, fs, executor);
+            http, ["issue", "comment", "create", "42", "--author", "  Ada Lovelace  ", "--body", "Looks good"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var postReq = handler.Requests.Last(r => r.Method == HttpMethod.Post);
@@ -45,7 +45,7 @@ public class CliIssueCommentSpecs
         fs.AddFile("/tmp/comment.md", "long comment...");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "comment", "add", "42", "--author", "Grace Hopper", "--body-file", "/tmp/comment.md"], output, error, fs, executor);
+            http, ["issue", "comment", "create", "42", "--author", "Grace Hopper", "--body-file", "/tmp/comment.md"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var body = JsonNode.Parse(handler.Requests.Last(r => r.Method == HttpMethod.Post).Body!)!;
@@ -54,15 +54,18 @@ public class CliIssueCommentSpecs
     }
 
     [Fact]
-    public async Task IssueCommentAdd_MissingBody_FailsBeforePost()
+    public async Task IssueCommentAdd_MissingBody_FailsWithScopedUsageBeforeHttp()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "comment", "add", "42", "--author", "Ada"], output, error, fs, executor);
+            http, ["issue", "comment", "create", "42", "--author", "Ada"], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Post);
-        Assert.Contains("--body", error.ToString());
+        Assert.Contains("comment body is required", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo issue comment create <number> [flags]", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
     }
 }

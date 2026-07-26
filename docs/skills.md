@@ -25,7 +25,7 @@ Mohist runtime（workflow 执行）
 
 ## Mohist 分发的 Skill
 
-`mo skills list` 看可分发的 skill。当前有四个：
+`mo skill list` 看可分发的 skill。当前有四个：
 
 ### `mohist`
 
@@ -59,10 +59,10 @@ Mohist runtime（workflow 执行）
 ## 安装 Skill 到外部 Agent
 
 ```bash
-mo skills install
+mo skill install
 ```
 
-这会把 skill 内容同步到你的外部 agent 配置目录。具体位置看 `mo skills install --help`。
+这会把 skill 内容同步到你的外部 agent 配置目录。具体位置看 `mo skill install --help`。
 
 安装后，在外部 agent 里就能触发：
 
@@ -72,16 +72,16 @@ mo skills install
 
 ## 获取 Skill 完整内容
 
-`mo skills list` 给的是 discovery stub（简短描述）。完整内容用：
+`mo skill list` 给的是 discovery stub（简短描述）。完整内容用：
 
 ```bash
-mo skills get mohist
-mo skills get mohist-explore
-mo skills get mohist-create-issue
-mo skills get mohist-create-epic
+mo skill view mohist
+mo skill view mohist-explore
+mo skill view mohist-create-issue
+mo skill view mohist-create-epic
 ```
 
-这会输出与当前 Mohist 版本匹配的完整 skill 指令。每次 `mo skills install` 都会刷新。
+这会输出与当前 Mohist 版本匹配的完整 skill 指令。每次 `mo skill install` 都会刷新。
 
 ## 典型工作流：从想法到 issue
 
@@ -166,9 +166,9 @@ Skill **不能**做：
 - 团队 code review checklist
 - 特定类型 issue 的探索流程
 
-skill 是普通文件（放在你外部 agent 的 skill 目录下）。看 `mo skills get mohist-explore` 的输出学结构。
+skill 是普通文件（放在你外部 agent 的 skill 目录下）。看 `mo skill view mohist-explore` 的输出学结构。
 
-分发自己的 skill 当前需要手动复制到外部 agent 目录（roadmap：通过 `mo skills` 统一管理）。
+分发自己的 skill 当前需要手动复制到外部 agent 目录（roadmap：通过 `mo skill` 统一管理）。
 
 ---
 

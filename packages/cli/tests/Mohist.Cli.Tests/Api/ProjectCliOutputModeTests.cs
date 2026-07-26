@@ -30,7 +30,7 @@ public class ProjectCliOutputModeTests
     [Fact]
     public void ProjectShow_Help_ListsOutputOption()
     {
-        var help = RenderHelp(["project", "show", "--help"]);
+        var help = RenderHelp(["project", "view", "--help"]);
 
         Assert.Contains("--json", help);
     }
@@ -38,7 +38,7 @@ public class ProjectCliOutputModeTests
     [Fact]
     public void ProjectShow_Help_DescribesJsonFieldSelection()
     {
-        var help = RenderHelp(["project", "show", "--help"]);
+        var help = RenderHelp(["project", "view", "--help"]);
 
         var jsonLine = help.Split('\n').FirstOrDefault(line => line.Contains("--json")) ?? "";
         Assert.Contains("selected fields", jsonLine, StringComparison.OrdinalIgnoreCase);
@@ -259,7 +259,7 @@ public class ProjectCliOutputModeTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "show", "mohist-local",],
+            ["project", "view", "mohist-local",],
             output,
             error,
             new FakeFileSystem(),
@@ -286,7 +286,7 @@ public class ProjectCliOutputModeTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "show", "mohist-local", "--output", "yaml"],
+            ["project", "view", "mohist-local", "--output", "yaml"],
             output,
             error,
             new FakeFileSystem(),

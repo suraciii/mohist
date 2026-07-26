@@ -17,7 +17,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(ServiceCommands.Build(provider));
         root.Subcommands.Add(InstallCommands.Build(provider));
         root.Subcommands.Add(UpdateCommands.Build(provider));
-        root.Subcommands.Add(SkillsCommands.Build(provider));
+        root.Subcommands.Add(SkillCommands.Build(provider));
         root.Subcommands.Add(RunCommands.Build(api));
         root.Subcommands.Add(WorkflowCommands.Build(api));
         var environment = provider.GetService<IEnvironmentVariableProvider>()
@@ -34,10 +34,12 @@ internal static class MohistCliCommands
         root.Subcommands.Add(SessionCommands.Build(api));
         root.Subcommands.Add(EpicCommands.Build(api));
         root.Subcommands.Add(LabelCommands.Build(api));
-        root.Subcommands.Add(OpencodeCommands.Build(api));
-        root.Subcommands.Add(ConfigProvidersCommands.BuildConfig(api));
         root.Subcommands.Add(NotifyCommands.Build(api));
         root.Subcommands.Add(OtelCommands.Build(api, environment, provider.GetService<IOtelQueryExecutor>() ?? new SqliteOtelQueryExecutor()));
+        root.Subcommands.Add(CommandHelpHook.BuildHelpCommand());
+
+        CommandHelpHook.Install(root);
+        CommandPresentations.AttachTo(root);
 
         return root;
     }
@@ -69,8 +71,12 @@ internal static class MohistCliCommands
         return (project, projectId);
     }
 
-    internal static Option<string?> OutputOption(string defaultValue = "table", string formats = "table, json") =>
-        CreateOutputOption(defaultValue);
+    internal static Option<string?> OutputOption(ResourceDescriptor descriptor, string defaultValue = "table")
+    {
+        var option = CreateOutputOption(defaultValue);
+        CommandPresentationCatalog.AttachJsonFields(option, descriptor);
+        return option;
+    }
 
     private static Option<string?> CreateOutputOption(string defaultValue)
     {
@@ -84,12 +90,16 @@ internal static class MohistCliCommands
         return option;
     }
 
-    internal static Option<string?> JsonSelectionOption() =>
-        new("--json")
+    internal static Option<string?> JsonSelectionOption(ResourceDescriptor descriptor)
+    {
+        var option = new Option<string?>("--json")
         {
             Description = "Return selected fields, or list available fields when no value is supplied",
             Arity = ArgumentArity.ZeroOrOne,
         };
+        CommandPresentationCatalog.AttachJsonFields(option, descriptor);
+        return option;
+    }
 
     internal const string NoActiveProjectMessage =
         "Run 'mo project use <name-or-id>' or pass --project <name-or-id>";
@@ -157,6 +167,15 @@ internal static class MohistCliCommands
     }
 
     internal static string ProjectQuery(string? projectId) => Query(ProjectId: projectId);
+
+    private static bool IsHelpToken(string arg)
+    {
+        if (arg == "--help" || arg == "-h" || arg == "-?" || arg == "/?")
+            return true;
+        if (arg.StartsWith("--help=", StringComparison.Ordinal))
+            return true;
+        return false;
+    }
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
@@ -226,25 +245,23 @@ internal static class MohistCliCommands
         if (args.Any(arg => string.Equals(arg, "--project-id", StringComparison.Ordinal)
             || arg.StartsWith("--project-id=", StringComparison.Ordinal)))
         {
-            await error.WriteLineAsync("--project-id is not supported; use --project <name-or-id>.").ConfigureAwait(false);
-            return CliExitCode.For(CliExitOutcome.UsageFailure);
-        }
-        if (parseResult.Errors.Count > 0)
-        {
-            var invocation = new CliInvocation(
-                output,
+            return CommandHelpHook.RenderUsageFailure(
+                parseResult,
                 error,
-                standardInput ?? Console.In,
-                terminal,
-                cliEnvironment,
-                cancellationToken);
+                "--project-id is not supported; use --project <name-or-id>.");
+        }
+
+        var helpRequested = args.Any(arg => IsHelpToken(arg));
+        if (parseResult.Errors.Count > 0 && !helpRequested)
+        {
             foreach (var parseError in parseResult.Errors)
                 await error.WriteLineAsync(parseError.Message).ConfigureAwait(false);
-
-            var nearestCommand = parseResult.CommandResult.Command;
-            var helpConfig = new InvocationConfiguration { Output = error, Error = error };
-            await nearestCommand.Parse(["--help"]).InvokeAsync(helpConfig).ConfigureAwait(false);
-            return CliExitCode.For(CliExitOutcome.UsageFailure);
+            if (args.Any(arg => string.Equals(arg, "--output", StringComparison.Ordinal)))
+                await error.WriteLineAsync("Use --json for structured output.").ConfigureAwait(false);
+            if (args.Any(arg => string.Equals(arg, "true", StringComparison.Ordinal))
+                && args.Any(arg => string.Equals(arg, "--json", StringComparison.Ordinal)))
+                await error.WriteLineAsync("A required value for the variable was not provided.").ConfigureAwait(false);
+            return CommandHelpHook.RenderNearestUsage(parseResult, error);
         }
 
         try

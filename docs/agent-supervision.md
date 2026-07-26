@@ -24,7 +24,7 @@ mo agent install supervisor
 Agent 需要在 issue 工作区里能发现 `mohist` skill（mo 命令面指南）。缺失时执行：
 
 ```bash
-mo skills install --path <你的仓库路径>
+mo skill install --path <你的仓库路径>
 ```
 
 ## Issue 关注：每个 issue 的 autopilot 开关

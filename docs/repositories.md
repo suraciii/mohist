@@ -15,10 +15,10 @@
 
 ```bash
 mo repo list
-mo repo add server --git-url /path/to/my-server --base-branch main
-mo repo add web    --git-url /path/to/my-web    --base-branch main
+mo repo create server --git-url /path/to/my-server --base-branch main
+mo repo create web    --git-url /path/to/my-web    --base-branch main
 mo repo set-default server
-mo repo update web --base-branch develop
+mo repo edit web --base-branch develop
 mo repo delete web
 ```
 
@@ -29,7 +29,7 @@ mo repo delete web
 
 ## Issue 与仓库
 
-每个 Issue 在创建时绑定一个目标仓库。`mo issue create "Web change" --repo web` 显式选择；省略 `--repo` 时绑定创建时的 default 仓库，之后切换 default 不会改写已有 Issue。未启动的 Issue 可用 `mo issue update <编号> --repo <资源名>` 重指派；首次启动后绑定永久锁定。`mo issue list --repo <资源名>` 根据已存储的绑定筛选，`mo issue show` 显示目标仓库。
+每个 Issue 在创建时绑定一个目标仓库。`mo issue create "Web change" --repo web` 显式选择；省略 `--repo` 时绑定创建时的 default 仓库，之后切换 default 不会改写已有 Issue。未启动的 Issue 可用 `mo issue edit <编号> --repo <资源名>` 重指派；首次启动后绑定永久锁定。`mo issue list --repo <资源名>` 根据已存储的绑定筛选，`mo issue view` 显示目标仓库。
 
 工作流的 workspace、分支、diff、rebase、本地集成和 GitHub Pull Request 都使用该 Issue 的目标仓库。Issue 运行期间，目标仓库的 git 地址和 base branch 保持不变；Runner 必须能访问 Project 声明的每个仓库。
 
