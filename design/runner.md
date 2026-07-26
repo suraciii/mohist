@@ -254,3 +254,20 @@ reported set（`inFlight ∪ awaitingAck`）属于进程生命周期，必须在
 
 随 runner 一起丢失的工作以 `FAILED("runner-lost")` 报告给其 owner，由 owner
 决定 WorkflowRun 迁移；Runner 没有 `Interrupted` workflow 状态。
+
+## 落盘状态
+
+runner 在 `<runnerRoot>/.mohist/runner-state/` 下持久化四类状态，全部原子写
+（临时文件 + rename），启动时载入。四类状态的损坏语义不同，由「丢了能不能
+重建」决定：
+
+| 文件 | 内容 | 损坏语义 |
+|---|---|---|
+| `runtime-events.json` | 运行时事件 outbox：待投递到 server 的 session 事件队列；每产生一个事实即快照写入 | 不可读 → outbox 不健康并按本地重试节奏重载，绝不改写不可读文件；超出保留上限时最先丢弃可重建的流式增量 |
+| `followup-operations.json` | followup 操作幂等日志：operationId → claimed / submitted；状态迁移即写入 | 版本或形状不符 → 日志不可用并拒绝新操作（fail-closed）；文件不存在视为全新开始 |
+| `session-commands.json` | session 命令幂等日志：operationId → started / completed + result；同上 | 同上：损坏 fail-closed，缺失视为全新开始 |
+| `workspaces.json` | runner 本地 workspace 注册表：已物化 worktree 及其身份；物化与终态迁移即写入，active 条目存续到观察到终态 | 不可读或损坏 → 当作空表启动（fail-open），下次写入时重建——磁盘上的 worktree 才是事实，注册表只是索引 |
+
+幂等日志 fail-closed 是因为丢了就可能重复执行；注册表 fail-open 是因为它能
+从磁盘重建。四类状态都是 runner 私有：server 从不直接读写，跨进程一致性靠
+事件投递与 poll 对账，不靠共享文件。
