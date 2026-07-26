@@ -30,7 +30,8 @@ public class RunnerGrainTimeProviderSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: "agent-work-1",
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
-            AgentJobId: "agent-job-1"));
+            AgentJobId: "agent-job-1",
+            AgentId: "agent-test"));
 
         var runtime = await runner.GetRuntimeStateAsync();
         var active = Assert.Single(runtime.ActiveWorks);
@@ -44,7 +45,8 @@ public class RunnerGrainTimeProviderSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: "agent-work-2",
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
-            AgentJobId: "agent-job-2"));
+            AgentJobId: "agent-job-2",
+            AgentId: "agent-test"));
 
         runtime = await runner.GetRuntimeStateAsync();
         var second = runtime.ActiveWorks.Single(w => w.WorkId == "agent-work-2");

@@ -199,7 +199,7 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
         // the meaningful wire guard: an idle 204 cannot prove the shape of
         // WorkDispatchResponse.
         _fixture.SetPolicy(new CleanupPolicyOptions { RetentionDays = 9 });
-        var projectId = $"runner-config-poll-project-{Guid.NewGuid():N}";
+        var (projectId, agentId) = await _fixture.CreateProjectAndAgentAsync("runner-config-poll-project");
         var runnerId = await _fixture.RegisterRunnerAsync(projectId, maxWorkflowSlots: 1);
         var jobKey = $"agent-job-runner-config-poll-{Guid.NewGuid():N}";
 
@@ -208,6 +208,7 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
             new
             {
                 prompt = "poll body should omit cleanup policy",
+                agentId,
                 model = "openai/gpt-test",
                 jobId = jobKey,
                 workspace = new { path = "/tmp/runner-config-poll", projectId },
@@ -337,6 +338,37 @@ public class RunnerConfigFixture : IAsyncLifetime
             $"Runner '{runnerId}' to reach Online");
         _registeredRunnerIds.Add(runnerId);
         return runnerId;
+    }
+
+    public async Task<(string ProjectId, string AgentId)> CreateProjectAndAgentAsync(string prefix)
+    {
+        var rawProjectName = $"{prefix}-{Guid.NewGuid():N}";
+        var projectName = rawProjectName.Length > 63 ? rawProjectName[..63] : rawProjectName;
+        using var projectResponse = await Client.PostAsJsonAsync("/api/projects", new
+        {
+            name = projectName,
+            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+        });
+        projectResponse.EnsureSuccessStatusCode();
+        var projectPayload = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = projectPayload.GetProperty("data").GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("Project creation returned no id");
+
+        using var agentResponse = await Client.PostAsJsonAsync($"/api/projects/{projectId}/agents", new
+        {
+            name = "validation-agent",
+            description = "runner config route test agent",
+            instructions = "complete the requested validation task",
+            agentConfig = new { model = "openai/gpt-5.6" },
+            skills = new[] { "coding" },
+            maxConcurrentRuns = 1,
+        });
+        agentResponse.EnsureSuccessStatusCode();
+        var agentPayload = await agentResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var agentId = agentPayload.GetProperty("data").GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("Agent creation returned no id");
+
+        return (projectId, agentId);
     }
 
     public async Task<string> WaitForAgentJobDispatchAsync(string agentJobId, string expectedRunnerId)

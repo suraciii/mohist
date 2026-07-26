@@ -299,6 +299,7 @@ public sealed class EventDispatcherService
         nameof(EventOrigin.Issue) => EventOrigin.Issue,
         nameof(EventOrigin.Epic) => EventOrigin.Epic,
         nameof(EventOrigin.AgentSession) => EventOrigin.AgentSession,
+        nameof(EventOrigin.AgentJob) => EventOrigin.AgentJob,
         _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
     };
 

@@ -120,16 +120,40 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.WatchEntryRow", b =>
                 {
-                    b.Property<string>("ProjectId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
-                    b.Property<int>("IssueNumber").HasColumnType("INTEGER");
-                    b.Property<string>("AgentId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
-                    b.Property<string>("State").IsRequired().HasMaxLength(16).HasColumnType("TEXT");
-                    b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
-                    b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("TEXT");
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("IssueNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AgentId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("ProjectId", "IssueNumber", "AgentId");
-                    b.HasIndex("ProjectId", "IssueNumber").HasDatabaseName("IX_WatchEntries_ProjectId_IssueNumber");
-                    b.HasIndex("ProjectId", "IssueNumber", "AgentId").IsUnique().HasDatabaseName("UX_WatchEntries_ProjectId_IssueNumber_AgentId");
-                    b.HasIndex("ProjectId", "IssueNumber", "State").HasDatabaseName("IX_WatchEntries_ProjectId_IssueNumber_State");
+
+                    b.HasIndex("ProjectId", "IssueNumber")
+                        .HasDatabaseName("IX_WatchEntries_ProjectId_IssueNumber");
+
+                    b.HasIndex("ProjectId", "IssueNumber", "AgentId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_WatchEntries_ProjectId_IssueNumber_AgentId");
+
+                    b.HasIndex("ProjectId", "IssueNumber", "State")
+                        .HasDatabaseName("IX_WatchEntries_ProjectId_IssueNumber_State");
+
                     b.ToTable("WatchEntries", (string)null);
                 });
 
@@ -234,6 +258,85 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
                     b.ToTable("Epics");
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.AgentJobEventRow", b =>
+                {
+                    b.Property<string>("Source")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Data")
+                        .IsRequired()
+                        .HasColumnType("JSON");
+
+                    b.Property<string>("DataContentType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DataStatus")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("LOWER(COALESCE(json_extract(\"Data\", '$.status'), json_extract(\"Data\", '$.Status')))", true);
+
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExtensionsJson")
+                        .IsRequired()
+                        .HasColumnType("JSON");
+
+                    b.Property<string>("SpecVersion")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("Time")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TimeSortKey")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("strftime('%Y-%m-%dT%H:%M:%S', \"Time\") ||\nsubstr(\n    CASE\n        WHEN instr(substr(\"Time\", 20), '+') > 0 THEN substr(\"Time\", 20, instr(substr(\"Time\", 20), '+') - 1)\n        WHEN instr(substr(\"Time\", 20), '-') > 0 THEN substr(\"Time\", 20, instr(substr(\"Time\", 20), '-') - 1)\n        ELSE ''\n    END || '.0000000',\n    1,\n    8\n) || 'Z'", true);
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Source", "Id");
+
+                    b.HasIndex("Source", "EventId")
+                        .IsUnique();
+
+                    b.HasIndex("Source", "Id")
+                        .HasDatabaseName("IX_AgentJobEvents_Undelivered")
+                        .HasFilter("\"DispatchedAt\" IS NULL");
+
+                    b.HasIndex("Type", "Time");
+
+                    b.HasIndex("TimeSortKey", "Source", "Id")
+                        .HasDatabaseName("IX_AgentJobEvents_TimeSortKey_Source_Id");
+
+                    b.HasIndex("Type", "Source", "Id");
+
+                    b.HasIndex("DataStatus", "Type", "TimeSortKey", "Source", "Id")
+                        .HasDatabaseName("IX_AgentJobEvents_DataStatus_Type_TimeSortKey_Source_Id");
+
+                    b.ToTable("AgentJobEvents", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.AgentSessionEventRow", b =>
@@ -675,7 +778,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.ToTable("InboxItems", null, t =>
                         {
-                            t.HasCheckConstraint("CK_InboxItems_NotificationKind", "\"NotificationKind\" IN ('workflow_failed', 'approval_requested', 'issue_started', 'issue_completed')");
+                            t.HasCheckConstraint("CK_InboxItems_NotificationKind", "\"NotificationKind\" IN ('workflow_failed', 'approval_requested', 'issue_started', 'issue_completed', 'agent_response_failed')");
                         });
                 });
 
@@ -684,6 +787,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("ProjectId")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("AgentResponseFailedEnabled")
+                        .HasColumnType("INTEGER");
 
                     b.Property<bool>("ApprovalRequestedEnabled")
                         .HasColumnType("INTEGER");
@@ -1888,12 +1994,20 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("WorkflowVariables");
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", b =>
+                {
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Project.ProjectRow", null)
+                        .WithOne()
+                        .HasForeignKey("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", "ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssueRow", b =>
                 {
                     b.HasOne("Mohist.Server.Infrastructure.Data.Workflow.WorkflowProfileRecordRow", null)
                         .WithMany()
                         .HasForeignKey("ProjectId", "WorkflowProfileIdKey")
-                        .HasPrincipalKey("ProjectId", "ProfileId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -1902,7 +2016,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasOne("Mohist.Server.Infrastructure.Data.Workflow.WorkflowProfileRecordRow", null)
                         .WithMany()
                         .HasForeignKey("ProjectId", "DefaultWorkflowProfileIdKey")
-                        .HasPrincipalKey("ProjectId", "ProfileId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -1911,17 +2024,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasOne("Mohist.Server.Infrastructure.Data.Workflow.WorkflowProfileRecordRow", null)
                         .WithMany()
                         .HasForeignKey("MetadataProjectId", "WorkflowProfileIdKey")
-                        .HasPrincipalKey("ProjectId", "ProfileId")
                         .OnDelete(DeleteBehavior.Restrict);
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", b =>
-                {
-                    b.HasOne("Mohist.Server.Infrastructure.Data.Project.ProjectRow", null)
-                        .WithOne()
-                        .HasForeignKey("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", "ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

@@ -33,11 +33,28 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: workId,
             AgentJobId: agentJobId,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
 
         var result = await runner.AssignAgentJobAsync(dispatch);
 
         Assert.Equal(RunnerWorkAssignmentStatus.Assigned, result.Status);
+    }
+
+    [Fact]
+    public async Task AssignWork_AgentJobDispatch_MissingAgentId_IsRejected()
+    {
+        var runnerId = await RegisterRunnerAsync("agent-job-missing-agent-runner");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var result = await runner.AssignAgentJobAsync(new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: "agent-work-missing-agent",
+            AgentJobId: "agent-job-missing-agent",
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob));
+
+        Assert.Equal(RunnerWorkAssignmentStatus.Rejected, result.Status);
+        Assert.Equal("invalid-work", result.Reason);
     }
 
     [Fact]
@@ -88,7 +105,8 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: workId,
             AgentJobId: agentJobId,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
 
         await runner.AssignAgentJobAsync(dispatch);
 
@@ -177,7 +195,8 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: workId,
             AgentJobId: agentJobId,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
 
         await runner.AssignAgentJobAsync(dispatch);
 
@@ -200,7 +219,8 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: workId,
             AgentJobId: agentJobId,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
 
         await runner.AssignAgentJobAsync(dispatch);
 
@@ -248,7 +268,8 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: workId,
             AgentJobId: agentJobId,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
 
         var report = await runner.ReportAgentJobResultAsync(agentJobId, workId, new WorkResult("completed"));
 
@@ -361,7 +382,8 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: workId,
             AgentJobId: agentJobId,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
 
         await runner.AssignAgentJobAsync(dispatch);
 
@@ -413,7 +435,8 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: workId,
             AgentJobId: agentJobId,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
 }
 
 [Collection("RunnerGrain")]

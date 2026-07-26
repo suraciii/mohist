@@ -49,7 +49,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var longBody = new string(
             'a',
             WorkflowRunExtensions.FeedbackSummaryMaxLength + 250);
-        var feedbackId = await workflow.RequestChangesAsync(longBody);
+        var feedbackId = await workflow.RequestChangesAsync(longBody, "operator-1");
 
         var (feedbackTask, feedbackRunner) = await PollWorkAnyAsync();
         Assert.StartsWith("apply-feedback.", feedbackTask.WorkId);
@@ -93,7 +93,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        await workflow.RequestChangesAsync("please add a quick start section");
+        await workflow.RequestChangesAsync("please add a quick start section", "operator-1");
 
         var (feedbackTask, _) = await PollWorkAnyAsync();
         using var doc = JsonDocument.Parse(feedbackTask.Variables!);
@@ -131,7 +131,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        var feedbackId = await workflow.RequestChangesAsync("add a quick start section");
+        var feedbackId = await workflow.RequestChangesAsync("add a quick start section", "operator-1");
 
         var (feedbackTask, _) = await PollWorkAnyAsync();
         using var doc = JsonDocument.Parse(feedbackTask.Variables!);
@@ -150,7 +150,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        var feedbackId = await workflow.RequestChangesAsync("explain the retry semantics");
+        var feedbackId = await workflow.RequestChangesAsync("explain the retry semantics", "operator-1");
 
         var (feedbackTask, feedbackRunner) = await PollWorkAnyAsync();
         Assert.StartsWith("apply-feedback.", feedbackTask.WorkId);
@@ -191,7 +191,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        var feedbackId = await workflow.RequestChangesAsync("explain the retry semantics");
+        var feedbackId = await workflow.RequestChangesAsync("explain the retry semantics", "operator-1");
 
         var (feedbackTask, feedbackRunner) = await PollWorkAnyAsync();
         await ReportAsync(
@@ -217,7 +217,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        var feedbackId = await workflow.RequestChangesAsync("explain the retry semantics");
+        var feedbackId = await workflow.RequestChangesAsync("explain the retry semantics", "operator-1");
 
         var (feedbackTask, feedbackRunner) = await PollWorkAnyAsync();
         await ReportAsync(
@@ -243,7 +243,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        var feedbackId = await workflow.RequestChangesAsync("explain the retry semantics");
+        var feedbackId = await workflow.RequestChangesAsync("explain the retry semantics", "operator-1");
 
         var (feedbackTask, feedbackRunner) = await PollWorkAnyAsync();
         await ReportAsync(feedbackRunner, feedbackTask.WorkId, new WorkResult("completed"));
@@ -265,7 +265,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        await workflow.RequestChangesAsync("first round of feedback");
+        await workflow.RequestChangesAsync("first round of feedback", "operator-1");
 
         var (feedbackTask, feedbackRunner) = await PollWorkAnyAsync();
         await ReportAsync(feedbackRunner, feedbackTask.WorkId, "completed");
@@ -273,7 +273,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var (rerunCheck, rerunRunner) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(rerunRunner, rerunCheck, "plan-ok");
 
-        await workflow.ApproveAsync();
+        await workflow.ApproveAsync("operator-1");
         var (buildTask, buildRunner) = await PollWorkAnyAsync();
         Assert.StartsWith("compile.", buildTask.WorkId);
         Assert.False(HasApprovalFeedback(buildTask.Variables), "non-feedback task must not carry approvalFeedback context");
@@ -290,7 +290,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        var feedbackId = await workflow.RequestChangesAsync("add a quick start section");
+        var feedbackId = await workflow.RequestChangesAsync("add a quick start section", "operator-1");
 
         // Force the workflow grain to deactivate so the next dispatch
         // rehydrates the workflow run from the JSON-serialized state.

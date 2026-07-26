@@ -97,7 +97,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId!);
         Assert.Null(await runner.PollAsync(Services));
 
-        await workflow.ApproveAsync();
+        await workflow.ApproveAsync("operator-1");
 
         var (nextTask, r2) = await PollWorkAnyAsync();
         Assert.StartsWith("compile.", nextTask.WorkId);

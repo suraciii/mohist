@@ -14,6 +14,8 @@ public sealed class HermesIssueNotificationRenderer
                 $"Issue #{draft.IssueNumber} needs approval at stage {draft.Stage ?? "unknown"}: {draft.IssueTitle}\nNext: {action}",
             NotificationKinds.WorkflowFailed =>
                 $"Issue #{draft.IssueNumber} failed: {draft.IssueTitle}\nReason: {failureReason}\nNext: {action}",
+            NotificationKinds.AgentResponseFailed =>
+                $"Agent response failed for issue #{draft.IssueNumber}: {draft.IssueTitle}\nReason: {failureReason}\nNext: {action}",
             NotificationKinds.IssueCompleted =>
                 $"Issue #{draft.IssueNumber} completed: {draft.IssueTitle}\nNext: {action}",
             NotificationKinds.IssueStarted =>
@@ -32,7 +34,9 @@ public sealed class HermesIssueNotificationRenderer
             draft.IssueTitle,
             draft.WorkflowRunId,
             draft.Stage,
-            draft.NotificationType == NotificationKinds.WorkflowFailed ? failureReason : draft.FailureReason,
+            draft.NotificationType is NotificationKinds.WorkflowFailed or NotificationKinds.AgentResponseFailed
+                ? failureReason
+                : draft.FailureReason,
             action,
             body);
     }
@@ -41,6 +45,7 @@ public sealed class HermesIssueNotificationRenderer
     {
         NotificationKinds.ApprovalRequested => $"approve {issueNumber}",
         NotificationKinds.WorkflowFailed => $"retry {issueNumber} or abandon {issueNumber}",
+        NotificationKinds.AgentResponseFailed => $"open issue {issueNumber}",
         NotificationKinds.IssueCompleted => $"review issue {issueNumber}",
         NotificationKinds.IssueStarted => $"open issue {issueNumber}",
         _ => $"open issue {issueNumber}",

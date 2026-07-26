@@ -61,7 +61,8 @@ namespace Mohist.Server.Events.Subscriptions;
     "com.mohist.workflow.run.failed|" +
     "com.mohist.workflow.stage.approval-requested|" +
     "com.mohist.issue.work-started|" +
-    EventCatalog.ReverseDns.IssueCompleted)]
+    EventCatalog.ReverseDns.IssueCompleted + "|" +
+    EventCatalog.ReverseDns.AgentJobFailed)]
 public sealed class InboxProjectionHandler : ICloudEventHandler
 {
     private const string HintSource = "/mohist/inbox";
@@ -96,6 +97,7 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             EventCatalog.ReverseDns.StageApprovalRequested => ResolveFromEnvelope(evt),
             EventCatalog.ReverseDns.IssueWorkStarted => ResolveFromEnvelope(evt),
             EventCatalog.ReverseDns.IssueCompleted => ResolveFromEnvelope(evt),
+            EventCatalog.ReverseDns.AgentJobFailed => ResolveFromEnvelope(evt),
             _ => null,
         };
 
@@ -205,6 +207,9 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
                 return true;
             case EventCatalog.ReverseDns.IssueCompleted:
                 kind = NotificationKinds.IssueCompleted;
+                return true;
+            case EventCatalog.ReverseDns.AgentJobFailed:
+                kind = NotificationKinds.AgentResponseFailed;
                 return true;
             default:
                 kind = string.Empty;

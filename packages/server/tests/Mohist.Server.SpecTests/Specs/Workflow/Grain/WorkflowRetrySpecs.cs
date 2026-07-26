@@ -418,7 +418,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         // the feedback loop. The workflow is now Running, not Failed,
         // so RetryAsync throws because Retry is reserved for failed runs.
 #pragma warning disable CS0618
-        await workflow.RequestChangesAsync("needs rework");
+        await workflow.RequestChangesAsync("needs rework", "operator-1");
 #pragma warning restore CS0618
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -440,7 +440,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         // Failed, and the available actions list shows a request-changes
         // action (instead of the prior retry/rerun failure-recovery
 #pragma warning disable CS0618
-        await workflow.RequestChangesAsync("needs rework");
+        await workflow.RequestChangesAsync("needs rework", "operator-1");
 #pragma warning restore CS0618
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);

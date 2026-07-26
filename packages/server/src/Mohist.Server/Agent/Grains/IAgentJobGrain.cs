@@ -48,7 +48,7 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// cannot accept the report (e.g., the grain reactivated in Pending
     /// status and no longer recognises the runner/work pair).
     /// </summary>
-    Task FailAsync(string reason);
+    Task FailAsync(string reason, string? agentId = null);
 }
 
 [GenerateSerializer]
@@ -87,10 +87,30 @@ public sealed record PendingSessionClose(
     [property: Id(4)] string? FailureCategory,
     [property: Id(5)] DateTimeOffset RecordedAt);
 
+/// <summary>
+/// Durable payload persisted on the AgentJob grain for a pending
+/// failed-terminal CloudEvent append. The AgentJob writes a
+/// <c>com.mohist.agent.job.failed</c> event exactly once for every
+/// failed terminal transition; until the append succeeds the grain
+/// keeps this record and the <c>agent-job-recovery</c> reminder keeps
+/// retrying. <see cref="EventId"/> is the stable CloudEvent id
+/// (<c>agent-job:{jobKey}:failed</c>) so retried appends collapse to
+/// the same envelope via the store-level (source, eventId) dedup.
+/// </summary>
+[GenerateSerializer]
+public sealed record PendingFailureEvent(
+    [property: Id(0)] string EventId,
+    [property: Id(1)] string? FailureReason,
+    [property: Id(2)] string? FailureCategory,
+    [property: Id(3)] DateTimeOffset RecordedAt);
+
 public static class AgentJobSessionDeliveryIds
 {
     public static string TerminalDeliveryId(string jobKey) =>
         $"agent-job:{jobKey}:terminal";
+
+    public static string FailureEventId(string jobKey) =>
+        $"agent-job:{jobKey}:failed";
 }
 
 public static class AgentJobFailureReasons
@@ -149,6 +169,16 @@ public enum AgentJobStatus
 /// Agent config. Field id is append-only (next free after Variant /
 /// Prompt).
 /// </para>
+///
+/// <para>
+/// <see cref="WorkflowRunId"/> captures the explicit workflow-run id
+/// from the launching CloudEvent when one is present (or the
+/// issue-bound nonterminal run when the event is issue-scoped). It
+/// stamps the durable failure-event envelope so the issue-grade
+/// <c>com.mohist.agent.job.failed</c> event carries the same
+/// workflow-run lineage as the routed launch source. Append-only
+/// Orleans field id (next free after Runtime).
+/// </para>
 /// </summary>
 [GenerateSerializer]
 public sealed record RoutedAgentLaunchPlan(
@@ -171,7 +201,8 @@ public sealed record RoutedAgentLaunchPlan(
     [property: Id(16)] string? Model = null,
     [property: Id(17)] string? Variant = null,
     [property: Id(18)] string? Prompt = null,
-    [property: Id(19)] string? Runtime = null);
+    [property: Id(19)] string? Runtime = null,
+    [property: Id(20)] string? WorkflowRunId = null);
 
 /// <summary>
 /// Whether the canonical routed-launch plan is executable or already
@@ -189,9 +220,8 @@ public enum RoutedLaunchDisposition
 /// project-scoped <c>Agent</c> profile, the resolved snapshot (id,
 /// instructions, model, and variant) is captured here so the executed
 /// bytes are stable for the lifetime of the job — even if the Agent is
-/// edited concurrently. A raw-prompt-only AgentJob remains supported:
-/// when <see cref="AgentId"/> is null, the runner receives the bare
-/// <see cref="Prompt"/>.
+/// edited concurrently. Raw-prompt-only AgentJobs are rejected before
+/// dispatch because a failed job must retain a real Agent identity.
 /// </summary>
 [GenerateSerializer]
 public sealed record AgentJobInput(
@@ -201,9 +231,7 @@ public sealed record AgentJobInput(
     [property: Id(3)] string? ProjectId = null,
     /// <summary>
     /// Resolved execution backend snapshot captured at launch time
-    ///. Null only on raw-prompt-only validation
-    /// dispatches that never resolve an Agent profile; resolved
-    /// launches always pin the runtime (defaulting to
+    /// (issue-452 design D2). Resolved launches pin the runtime (defaulting to
     /// <c>AgentConfigSchema.OpenCodeRuntime</c>) so the runner
     /// executor can pick the right runtime and recovery reuses the
     /// snapshotted value rather than re-reading mutable Agent config.
@@ -212,9 +240,9 @@ public sealed record AgentJobInput(
     /// </summary>
     [property: Id(4)] string? Runtime = null,
     /// <summary>
-    /// Resolved Agent profile identity captured at launch time. Carried
-    /// through to dispatch for traceability. Null when the job is a
-    /// raw-prompt-only AgentJob.
+    /// Resolved Agent profile identity captured at launch time. Required
+    /// for every executable AgentJob and carried through to dispatch for
+    /// traceability.
     /// </summary>
     [property: Id(5)] string? AgentId = null,
     /// <summary>
@@ -235,8 +263,7 @@ public sealed record AgentJobInput(
     /// Minted AgentSession id used by the runner to record runtime
     /// events against a generic (non-workflow) AgentSession. Optional;
     /// when null the dispatch envelope leaves <c>AgentSessionId</c>
-    /// unset (workflow-shaped path or a raw-prompt-only validation
-    /// dispatch).
+    /// unset (workflow-shaped path).
     /// </summary>
     [property: Id(8)] string? AgentSessionId = null,
     /// <summary>
@@ -245,7 +272,31 @@ public sealed record AgentJobInput(
     /// launch-time variant to the runtime turn. Null when no Agent
     /// definition supplied a variant or the launch did not pin one.
     /// </summary>
-    [property: Id(9)] string? Variant = null);
+    [property: Id(9)] string? Variant = null,
+    /// <summary>
+    /// Issue number captured at launch time. Populated by the launch
+    /// context (manual HTTP, mention, routed, or preflight) so the
+    /// durable failure-event envelope can stamp the issue lineage
+    /// without re-reading mutable Issue state. Append-only Orleans
+    /// field id (next free after Variant).
+    /// </summary>
+    [property: Id(10)] int? IssueNumber = null,
+    /// <summary>
+    /// Epic number captured at launch time. Populated by the launch
+    /// context so the durable failure-event envelope can stamp the
+    /// epic lineage. Append-only Orleans field id (next free after
+    /// IssueNumber).
+    /// </summary>
+    [property: Id(11)] int? EpicNumber = null,
+    /// <summary>
+    /// Workflow-run id captured at launch time. Populated by the
+    /// launch context (routed launch by the routed-resolver, mention
+    /// launch by the comment-attached run, manual launch by the
+    /// caller-supplied execution context) so the durable
+    /// failure-event envelope can stamp the workflow-run lineage.
+    /// Append-only Orleans field id (next free after EpicNumber).
+    /// </summary>
+    [property: Id(12)] string? WorkflowRunId = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

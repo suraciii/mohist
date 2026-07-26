@@ -5,7 +5,8 @@ public enum StageRunStatus { Pending, Running, AwaitingApproval, Completed, Fail
 public sealed record ApprovalStatus(
     string? Result,
     string RequestedAt,
-    string? RespondedAt);
+    string? RespondedAt,
+    string? DecidedBy = null);
 
 public sealed class StageRun
 {

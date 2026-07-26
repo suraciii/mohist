@@ -43,7 +43,10 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        await workflow.ApproveAsync();
+        await workflow.ApproveAsync("  operator-1  ");
+
+        var run = await LoadRunAsync();
+        Assert.Equal("operator-1", run.Stages.Single(stage => stage.Id == "plan").ApprovalStatus?.DecidedBy);
 
         var (task2, r3) = await PollWorkAnyAsync();
         Assert.StartsWith("compile.", task2.WorkId);
@@ -68,7 +71,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        await workflow.ApproveAsync();
+        await workflow.ApproveAsync("operator-1");
 
         var nextRunnerId = await RegisterRunnerAsync();
         var nextRunner = Grains.GetGrain<IRunnerGrain>(nextRunnerId);
@@ -93,13 +96,15 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
 
         // RequestChanges must NOT mark the workflow as failed; it
         // routes through the feedback loop.
-        await workflow.RequestChangesAsync("not good enough");
+        await workflow.RequestChangesAsync("not good enough", "  operator-1  ");
 
         var run = await LoadRunAsync();
         Assert.NotEqual(WorkflowRunStatus.Failed, run.Status);
         var current = run.Stages.First(s => s.Id == run.CurrentStageId);
         Assert.Equal(StageRunStatus.Running, current.Status);
-        Assert.Null(current.ApprovalStatus);
+        Assert.NotNull(current.ApprovalStatus);
+        Assert.Null(current.ApprovalStatus!.Result);
+        Assert.Equal("operator-1", current.ApprovalStatus.DecidedBy);
         Assert.Single(run.Feedback);
         Assert.Equal("not good enough", run.Feedback[0].Body);
         Assert.Equal(ApprovalFeedbackStatus.Open, run.Feedback[0].Status);
@@ -123,7 +128,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
 
         // RequestChanges routes through the feedback loop and
         // schedules an apply-feedback task. The stage does not fail.
-        await workflow.RequestChangesAsync("plan is too short");
+        await workflow.RequestChangesAsync("plan is too short", "operator-1");
 
         var run = await LoadRunAsync();
         var current = run.Stages.First(s => s.Id == run.CurrentStageId);

@@ -1,0 +1,67 @@
+{
+  "project": "mohist-local",
+  "description": "AgentJob terminal failure becomes visible via com.mohist.agent.job.failed (event + default-on 'Agent 响应失败' inbox/Hermes notification + self-response guard), and approve/reject record a declarative decidedBy operator end-to-end.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Emit com.mohist.agent.job.failed with lineage and prevent self-response",
+      "spec": "specs/agent-response-failure/spec.md#AgentJob terminal failure emits a failure event",
+      "description": "Add the com.mohist.agent.job.failed CloudEvent type and AgentJob producer family (agentid required, issue/epic/workflowrunid optional) to event infra. Inject IEventStore into AgentJobGrain and emit on every terminal-failure path (preflight, runner report, timeout, retry-bound, forced fail) via EnterTerminalStateAsync as a durable obligation retried by the existing agent-job-recovery reminder (idempotent by (source,id)); stamp agentid + business lineage; never emit on completed. Add the envelope-only self-response guard in RoutingDispatchHandler so a rule whose AgentId equals the envelope agentid is treated as no-match (logged); empty-AgentId and different-agent rules still match.",
+      "acceptanceCriteria": [
+        "Each AgentJob terminal-failure path (preflight, runner report, timeout, dispatch-retry-bound, forced fail) emits exactly one com.mohist.agent.job.failed; a completed job emits none — covered by fake-based spec tests injecting a fake IEventStore.",
+        "Event envelope carries required agentid and optional issue/epic/workflowrunid lineage sourced from the job launch context; AgentJob ProducerConformance case passes.",
+        "RoutingDispatchHandler skips launch and logs when rule.AgentId == envelope agentid; a rule with a different AgentId or an empty AgentId still matches and may launch — covered by a routing spec test.",
+        "Emission survives activation loss: the recovery reminder re-appends until success and the obligation clears once emitted (idempotent retry by (source,id)) — covered by a fake-based recovery test with injected TimeProvider.",
+        "Server builds with TreatWarningsAsErrors and `npm test` (server) is green."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Event catalog + producer conformance + AgentJobGrain emission + RoutingDispatchHandler guard, with passing spec/unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Reuse the no-DbContext IEventStore.AppendAsync(CloudEvent, ct) overload so the grain keeps its grain-storage persistence story. Widen ReceiveReminder self-clean condition so failed jobs without an AgentSession keep the reminder alive until the event is emitted. Mirror issue-449's PendingSessionClose obligation pattern. Confirm at build that the watch-launch / @mention AgentJob Input retains the originating issue id (the routed path already carries it via RoutedAgentLaunchPlan.IssueNumber) so issue-scoped failures project into the inbox rather than being dropped as contextless."
+    },
+    {
+      "id": "T-002",
+      "title": "Thread declarative decidedBy through approve/reject end-to-end",
+      "spec": "specs/approval-attribution/spec.md#Every approval decision records a declarative operator",
+      "description": "Add a declarative decidedBy operator to approve/reject, copying the comment-author model: ApprovalStatus/StageRun, WorkflowRun.Approve/Reject, StageApprovalResolved event, WorkflowGrain.ApproveAsync/RequestChangesAsync, ApprovalStatusView + WorkflowStatusMapper, CLI --author on mo run approve/reject, and the run-scoped + issue-scoped HTTP DTOs. Update the generic agent command reference (packages/cli/Mohist.Cli/skill-data/mohist/SKILL.md approve/reject rows + options table) to document the now-required --author. Validate identically to comment author (required, trim, reject blank or >100 chars). BREAKING: author is now required; historical rows read back with empty decidedBy.",
+      "acceptanceCriteria": [
+        "`mo run approve --author supervisor` and `mo run reject --author supervisor -m ...` record decidedBy and the approval read model exposes it — covered by a spec test.",
+        "Missing, blank, or >100-char author is rejected with no state change; surrounding whitespace is trimmed — covered by unit tests mirroring the existing comment-author validation cases.",
+        "StageApprovalResolved event and ApprovalStatusView both carry decidedBy set to the recorded operator.",
+        "Historical approval rows without decidedBy read back successfully with empty decidedBy (nullable), no error.",
+        "Both run-scoped and issue-scoped approve/reject HTTP endpoints accept the author field and forward it as decidedBy.",
+        "The generic agent command reference (packages/cli/Mohist.Cli/skill-data/mohist/SKILL.md approve/reject rows + options table) documents approve/reject with the required --author; the supervisor preset (packages/cli/Mohist.Cli/presets/supervisor/instructions.md) already declares --author on approve/reject and needs no change.",
+        "Server builds with TreatWarningsAsErrors; `npm test` (server) and the CLI build are green; web typecheck is unaffected (read-model field is additive)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Approval domain + grain + API + CLI decidedBy plumbing, with passing spec/unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of T-001/T-003 (issue states the two changes are each independently usable). Template to copy end-to-end: comment author at packages/cli/Mohist.Cli/MohistCliCommands.Issue.Comment.cs:18 -> IssueRoutes.Dtos.cs AddCommentRequest -> IssueGrain.AddCommentAsync -> IssueCommentAdded -> IssueCommentDto. The supervisor preset already declares --author on approve/reject (presets/supervisor/instructions.md:24), mirroring its comment --author; T-002 lands the CLI/API support that preset has been expecting, so the supervisor needs no text change — only the generic skill-data/mohist/SKILL.md command reference is incomplete and must be updated."
+    },
+    {
+      "id": "T-003",
+      "title": "Surface agent.job.failed as the default-on 'Agent 响应失败' notification (inbox + Hermes)",
+      "spec": "specs/agent-response-failure/spec.md#Failure produces an inbox item under a default-on notification kind",
+      "description": "Register the AgentResponseFailed notification kind default-on in both inbox and Hermes, mirroring WorkflowFailed end-to-end: NotificationKinds + IsDefined, InboxSubscriptionState default-on, HermesNotificationOptions.EnabledTypes default-on; subscribe InboxProjectionHandler and HermesIssueNotificationHandler to com.mohist.agent.job.failed with resolve mappings; add the HermesIssueNotificationRenderer branch using the payload's failureReason/failureCategory.",
+      "acceptanceCriteria": [
+        "A com.mohist.agent.job.failed event resolving an issue context produces one inbox item of kind 'Agent 响应失败' by default; the kind disabled for the project produces no item; a contextless event produces no item — covered by fake-based spec tests.",
+        "With Hermes configured, the kind pushes by default; disabling the Hermes type suppresses the push — covered by a spec test using a fake Hermes webhook client.",
+        "NotificationKinds.IsDefined accepts the new kind; InboxSubscriptionState and HermesNotificationOptions default it on for new projects.",
+        "Server builds with TreatWarningsAsErrors and `npm test` (server) is green."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Inbox + Hermes notification wiring for the failure event, with passing spec/unit tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Depends on T-001 because the notification consumes the com.mohist.agent.job.failed event. WorkflowFailed is the closest analog; reuse its shape across NotificationKinds, InboxSubscriptionState, HermesNotificationOptions, both handlers, and the renderer."
+    }
+  ]
+}

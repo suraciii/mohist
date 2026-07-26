@@ -65,6 +65,14 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
 
         var launchedAgentIds = new HashSet<string>(StringComparer.Ordinal);
 
+        // Issue-491 design D3: envelope-only self-response guard. A rule
+        // whose configured AgentId equals the envelope's `agentid` is
+        // treated as a non-match so an Agent cannot respond to its own
+        // `com.mohist.agent.job.failed` event. Empty-AgentId rules and
+        // rules pointing at a different Agent are unaffected — the event
+        // routes with the same standing as any other.
+        var envelopeAgentId = CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.AgentId);
+
         foreach (var outcome in outcomes)
         {
             if (outcome.Executable is RuleExecutable.SkippedInactiveAgent or RuleExecutable.SkippedEmptyPrompt or RuleExecutable.SkippedRuntimeError)
@@ -75,6 +83,14 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
 
             if (outcome.Match != RuleMatchResult.Matched || outcome.Executable != RuleExecutable.WouldLaunch)
                 continue;
+
+            if (IsSelfResponse(outcome.Rule.AgentId, envelopeAgentId))
+            {
+                _log.LogWarning(
+                    "Routing rule {RuleId} skipped for event {EventId}: envelope agentid '{EnvelopeAgentId}' matches rule agent id (self-response guard)",
+                    outcome.Rule.Id, evt.Id, envelopeAgentId ?? "(none)");
+                continue;
+            }
 
             var agent = await agentQuerier.GetByIdAsync(projectId, outcome.Rule.AgentId);
             if (agent is null || !string.Equals(agent.Status, AgentStatus.Active, StringComparison.Ordinal))
@@ -137,6 +153,20 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             launcher,
             launchedAgentIds,
             ct);
+    }
+
+    /// <summary>
+    /// Envelope-only self-response guard (issue-491 design D3). Returns
+    /// <c>true</c> only when the rule carries a non-empty
+    /// <c>AgentId</c> AND that id equals the envelope's <c>agentid</c>
+    /// lineage. Empty <c>AgentId</c> rules and rules pointing at a
+    /// different Agent are unaffected.
+    /// </summary>
+    internal static bool IsSelfResponse(string? ruleAgentId, string? envelopeAgentId)
+    {
+        if (string.IsNullOrWhiteSpace(ruleAgentId) || string.IsNullOrWhiteSpace(envelopeAgentId))
+            return false;
+        return string.Equals(ruleAgentId, envelopeAgentId, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -316,7 +346,8 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             Model: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Model,
             Variant: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Variant,
             Prompt: prompt,
-            Runtime: AgentLauncher.ResolveRuntime(agent.AgentConfig, runtimeOverride));
+            Runtime: AgentLauncher.ResolveRuntime(agent.AgentConfig, runtimeOverride),
+            WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId));
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
     }
@@ -388,7 +419,8 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             Model: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Model,
             Variant: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Variant,
             Prompt: outcome.RenderedPromptPreview,
-            Runtime: AgentLauncher.ResolveRuntime(agent.AgentConfig, runtimeOverride));
+            Runtime: AgentLauncher.ResolveRuntime(agent.AgentConfig, runtimeOverride),
+            WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId));
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
     }

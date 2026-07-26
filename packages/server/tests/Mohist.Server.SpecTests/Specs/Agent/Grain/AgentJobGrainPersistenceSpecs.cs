@@ -33,6 +33,7 @@ public sealed class AgentJobGrainPersistenceSpecs
             "persist me",
             WorkspacePath: "/tmp/agent-job-persist",
             ProjectId: projectId,
+            AgentId: "agent-test",
             AgentConfig: agentConfig);
 
         await job.SubmitAsync(input);
@@ -75,7 +76,8 @@ public sealed class AgentJobGrainPersistenceSpecs
         var input = new AgentJobInput(
             "survive acceptance crash",
             WorkspacePath: "/tmp/agent-job-acceptance",
-            ProjectId: projectId);
+            ProjectId: projectId,
+            AgentId: "agent-test");
         _fixture.DispatchObserver.FailRunnerAccepted = true;
 
         await job.SubmitAsync(input);
@@ -112,7 +114,8 @@ public sealed class AgentJobGrainPersistenceSpecs
         var input = new AgentJobInput(
             "replace unaccepted runner",
             WorkspacePath: "/tmp/agent-job-replacement",
-            ProjectId: projectId);
+            ProjectId: projectId,
+            AgentId: "agent-test");
         _fixture.DispatchObserver.FailAssignmentPrepared = true;
 
         await job.SubmitAsync(input);

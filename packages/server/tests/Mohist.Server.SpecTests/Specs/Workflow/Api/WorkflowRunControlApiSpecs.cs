@@ -61,12 +61,15 @@ public class WorkflowRunControlApiSpecs
         var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
         await ForceAwaitingApprovalAsync(wrId);
 
-        var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/approve", content: null);
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/approve",
+            new { author = "supervisor" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var run = await LoadRunAsync(wrId);
         var plan = run!.Stages.Single(s => s.Id == "plan");
         Assert.Equal("approved", plan.ApprovalStatus?.Result);
+        Assert.Equal("supervisor", plan.ApprovalStatus?.DecidedBy);
         Assert.Equal(StageRunStatus.Completed, plan.Status);
         Assert.Equal("build", run.CurrentStageId);
     }
@@ -79,7 +82,7 @@ public class WorkflowRunControlApiSpecs
 
         var response = await _client.PostAsJsonAsync(
             $"/api/workflow-runs/{wrId}/reject",
-            new { message = "add more detail" });
+            new { author = "supervisor", message = "add more detail" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var run = await LoadRunAsync(wrId);
@@ -87,7 +90,102 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal("add more detail", run.Feedback[0].Body);
         var plan = run.Stages.Single(s => s.Id == "plan");
         Assert.Equal(StageRunStatus.Running, plan.Status);
+        Assert.Equal("supervisor", plan.ApprovalStatus?.DecidedBy);
         Assert.Contains(plan.Tasks, t => t.DefinitionId == WorkflowRunExtensions.DefaultFeedbackTaskId);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Approve_WithBlankAuthor_Returns400AndDoesNotCallGrain(string author)
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceAwaitingApprovalAsync(wrId);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/approve",
+            new { author });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.NotEqual(StageRunStatus.Completed, run!.Stages.Single(s => s.Id == "plan").Status);
+    }
+
+    [Fact]
+    public async Task Approve_WithOverlongAuthor_Returns400AndDoesNotCallGrain()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceAwaitingApprovalAsync(wrId);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/approve",
+            new { author = new string('a', 101) });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.NotEqual(StageRunStatus.Completed, run!.Stages.Single(s => s.Id == "plan").Status);
+    }
+
+    [Fact]
+    public async Task Approve_TrimsSurroundingWhitespaceFromAuthor()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceAwaitingApprovalAsync(wrId);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/approve",
+            new { author = "  supervisor  " });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.Equal("supervisor", run!.Stages.Single(s => s.Id == "plan").ApprovalStatus?.DecidedBy);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Reject_WithBlankAuthor_Returns400AndDoesNotCallGrain(string author)
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceAwaitingApprovalAsync(wrId);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/reject",
+            new { author, message = "needs more detail" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.Null(run!.Feedback.FirstOrDefault());
+    }
+
+    [Fact]
+    public async Task Reject_WithOverlongAuthor_Returns400AndDoesNotCallGrain()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceAwaitingApprovalAsync(wrId);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/reject",
+            new { author = new string('a', 101), message = "needs more detail" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.Null(run!.Feedback.FirstOrDefault());
+    }
+
+    [Fact]
+    public async Task Reject_TrimsSurroundingWhitespaceFromAuthor()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceAwaitingApprovalAsync(wrId);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/reject",
+            new { author = "  supervisor  ", message = "needs more detail" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.Equal("supervisor", run!.Stages.Single(s => s.Id == "plan").ApprovalStatus?.DecidedBy);
     }
 
     [Fact]
@@ -124,7 +222,7 @@ public class WorkflowRunControlApiSpecs
 
         var response = await _client.PostAsJsonAsync(
             $"/api/workflow-runs/{wrId}/reject",
-            new { });
+            new { author = "supervisor" });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -141,11 +239,9 @@ public class WorkflowRunControlApiSpecs
         var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
 
         var content = verb == "reject"
-            ? JsonContent.Create(new { message = "needs more detail" })
-            : null;
-        var response = verb == "reject"
-            ? await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content)
-            : await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content: null);
+            ? JsonContent.Create(new { author = "supervisor", message = "needs more detail" })
+            : JsonContent.Create(new { author = "supervisor" });
+        var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content);
 
         Assert.NotEqual(HttpStatusCode.NotFound, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -202,7 +298,9 @@ public class WorkflowRunControlApiSpecs
     [Fact]
     public async Task NotFound_OnUnknownWorkflowRun_Returns404()
     {
-        var response = await _client.PostAsync($"/api/workflow-runs/wr_does_not_exist/approve", content: null);
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/wr_does_not_exist/approve",
+            new { author = "supervisor" });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -221,12 +319,15 @@ public class WorkflowRunControlApiSpecs
         var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
         await _grains.GetGrain<IWorkflowGrain>(wrId).StopAsync("seeded-stopped");
 
-        var content = verb == "reject"
-            ? JsonContent.Create(new { message = "rejected via spec" })
-            : null;
-        var response = verb == "reject"
-            ? await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content)
-            : await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content: null);
+        HttpContent? content = verb switch
+        {
+            "reject" => JsonContent.Create(new { author = "supervisor", message = "rejected via spec" }),
+            "approve" => JsonContent.Create(new { author = "supervisor" }),
+            _ => null,
+        };
+        var response = content is null
+            ? await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content: null)
+            : await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -307,8 +408,17 @@ public class WorkflowRunControlApiSpecs
         var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
         await _grains.GetGrain<IWorkflowGrain>(wrId).StopAsync("seeded-stopped");
 
-        var issueResponse = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/{issueVerb}", content: null);
-        var runResponse = await _client.PostAsync($"/api/workflow-runs/{wrId}/{runVerb}", content: null);
+        HttpContent? issueContent = issueVerb == "approve"
+            ? JsonContent.Create(new { author = "supervisor" })
+            : null;
+        HttpContent? runContent = runVerb == "approve"
+            ? JsonContent.Create(new { author = "supervisor" })
+            : null;
+
+        var issueResponse = await _client.PostAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/{issueVerb}", issueContent);
+        var runResponse = await _client.PostAsync(
+            $"/api/workflow-runs/{wrId}/{runVerb}", runContent);
 
         Assert.Equal(HttpStatusCode.Conflict, issueResponse.StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, runResponse.StatusCode);
@@ -432,10 +542,10 @@ public class WorkflowRunControlApiSpecs
 
         var issueResponse = await _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/reject",
-            new { });
+            new { author = "supervisor" });
         var runResponse = await _client.PostAsJsonAsync(
             $"/api/workflow-runs/{wrId}/reject",
-            new { });
+            new { author = "supervisor" });
 
         Assert.Equal(HttpStatusCode.BadRequest, issueResponse.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, runResponse.StatusCode);

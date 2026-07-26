@@ -157,7 +157,6 @@ public record WorkDispatch(
     /// agent-job dispatches whose launch minted a generic
     /// (non-workflow) AgentSession; the runner uses it verbatim as the
     /// session identity for runtime events. Null for workflow
-    /// dispatches and for raw-prompt-only AgentJob validation
     /// dispatches. New field; older-field consumers ignore it.
     /// </summary>
     [property: Id(16)] string? AgentSessionId = null,
@@ -171,7 +170,12 @@ public record WorkDispatch(
     /// not see <c>expect</c>. Null for checks-variant dispatches and
     /// tasks without a completion contract.
     /// </summary>
-    [property: Id(19)] string? Expect = null)
+    [property: Id(19)] string? Expect = null,
+    /// <summary>
+    /// Resolved Agent profile identity for AgentJob dispatches. Required
+    /// for AgentJob ownership and absent on workflow dispatches.
+    /// </summary>
+    [property: Id(20)] string? AgentId = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

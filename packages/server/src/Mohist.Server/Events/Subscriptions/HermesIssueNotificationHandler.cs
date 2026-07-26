@@ -17,7 +17,8 @@ namespace Mohist.Server.Events.Subscriptions;
     EventCatalog.ReverseDns.WorkflowRunFailed + "|" +
     EventCatalog.ReverseDns.StageApprovalRequested + "|" +
     EventCatalog.ReverseDns.IssueWorkStarted + "|" +
-    EventCatalog.ReverseDns.IssueCompleted)]
+    EventCatalog.ReverseDns.IssueCompleted + "|" +
+    EventCatalog.ReverseDns.AgentJobFailed)]
 public sealed class HermesIssueNotificationHandler : ICloudEventHandler
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -99,6 +100,7 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
             EventCatalog.ReverseDns.StageApprovalRequested => ResolveFromEnvelope(evt),
             EventCatalog.ReverseDns.IssueWorkStarted => ResolveFromEnvelope(evt),
             EventCatalog.ReverseDns.IssueCompleted => ResolveFromEnvelope(evt),
+            EventCatalog.ReverseDns.AgentJobFailed => ResolveFromEnvelope(evt),
             _ => null,
         };
 
@@ -112,9 +114,12 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
         var stage = evt.Type == EventCatalog.ReverseDns.StageApprovalRequested
             ? CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.Stage)
             : null;
-        var failureReason = evt.Type == EventCatalog.ReverseDns.WorkflowRunFailed
-            ? DeserializeData<WorkflowRunFailed>(evt)?.Message
-            : null;
+        var failureReason = evt.Type switch
+        {
+            EventCatalog.ReverseDns.WorkflowRunFailed => DeserializeData<WorkflowRunFailed>(evt)?.Message,
+            EventCatalog.ReverseDns.AgentJobFailed => ReadFailureReason(evt),
+            _ => null,
+        };
 
         var workflowRunId = CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId)
             ?? ReadWorkflowRunIdFromPayload(evt);
@@ -167,6 +172,13 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
     private static T? DeserializeData<T>(CloudEvent evt) where T : class =>
         evt.Data is { } data ? data.Deserialize<T>(CloudEvent.JsonOptions) : null;
 
+    private static string? ReadFailureReason(CloudEvent evt) =>
+        evt.Data is { } data
+        && data.TryGetProperty("failureReason", out var reason)
+        && reason.ValueKind == JsonValueKind.String
+            ? reason.GetString()
+            : null;
+
     private static bool TryResolveNotificationType(string? type, out string notificationType)
     {
         switch (type)
@@ -182,6 +194,9 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
                 return true;
             case EventCatalog.ReverseDns.IssueCompleted:
                 notificationType = NotificationKinds.IssueCompleted;
+                return true;
+            case EventCatalog.ReverseDns.AgentJobFailed:
+                notificationType = NotificationKinds.AgentResponseFailed;
                 return true;
             default:
                 notificationType = string.Empty;

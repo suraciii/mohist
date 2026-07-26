@@ -35,6 +35,7 @@ public class AgentJobRoutesSpecs
             new
             {
                 model = "openai/gpt-4",
+                agentId = "agent-validation",
                 workspace = new { path = "/tmp/agent-job-validation", projectId = "validation-project" },
             });
 
@@ -53,6 +54,7 @@ public class AgentJobRoutesSpecs
             new
             {
                 prompt = "hello",
+                agentId = "agent-validation",
                 workspace = new { projectId = "validation-project" },
             });
 
@@ -60,6 +62,24 @@ public class AgentJobRoutesSpecs
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(payload.GetProperty("success").GetBoolean());
         Assert.Contains("workspace.path", payload.GetProperty("error").GetString()!);
+    }
+
+    [Fact]
+    public async Task PostValidate_MissingAgentId_ReturnsValidationError()
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            AgentJobController.ValidatePath,
+            new
+            {
+                prompt = "hello",
+                workspace = new { path = "/tmp/agent-job-validation", projectId = "validation-project" },
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(payload.GetProperty("success").GetBoolean());
+        Assert.Equal("validation_failed", payload.GetProperty("code").GetString());
+        Assert.Contains("agentId", payload.GetProperty("error").GetString()!);
     }
 
     [Fact]
@@ -75,6 +95,7 @@ public class AgentJobRoutesSpecs
         var request = AgentJobRouteTestHelpers.JsonRequest(new
         {
             prompt = "do the thing without a runner",
+            agentId = "agent-validation",
             model = "test/model",
             workspace = new { path = "/tmp/agent-job-no-runner", projectId = "validation-no-runner-project" },
         });
@@ -103,6 +124,7 @@ public class AgentJobRoutesSpecs
         var request = AgentJobRouteTestHelpers.JsonRequest(new
         {
             prompt = "never reports back",
+            agentId = "agent-validation",
             model = "test/model",
             workspace = new { path = "/tmp/agent-job-timeout", projectId = "validation-timeout-project" },
         });
@@ -184,7 +206,7 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(_result);
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_result.Status, null, null, _result.FailureReason));
-    public Task FailAsync(string reason) => Task.CompletedTask;
+    public Task FailAsync(string reason, string? agentId = null) => Task.CompletedTask;
     public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
 }
 
@@ -212,7 +234,7 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(new AgentJobTerminalResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, _failureReason, null, null, _failureReason, null));
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, null, null, _failureReason));
-    public Task FailAsync(string reason)
+    public Task FailAsync(string reason, string? agentId = null)
     {
         _failureReason = reason;
         return Task.CompletedTask;
@@ -274,19 +296,18 @@ internal sealed class SingleAgentJobGrainFactory : IGrainFactory
 }
 
 [Collection("MohistIntegration")]
-public class AgentJobDispatchRouteSpecs
+public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
 {
-    private readonly MohistIntegrationFixture _fixture;
-
     public AgentJobDispatchRouteSpecs(MohistIntegrationFixture fixture)
+        : base(fixture)
     {
-        _fixture = fixture;
     }
 
     [Fact]
     public async Task PostValidate_DispatchesAgentJobToRunner_AndReturnsReportedCompletion()
     {
-        var projectId = $"agent-route-project-{Guid.NewGuid():N}";
+        var projectId = await CreateProjectAsync("agent-route-project");
+        var agentId = (await CreateAgentAsync(projectId, "validation-agent")).Id;
         var runnerId = $"agent-route-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 2);
@@ -298,6 +319,7 @@ public class AgentJobDispatchRouteSpecs
                 new
                 {
                     prompt = "route completion prompt",
+                    agentId,
                     model = "openai/gpt-test",
                     jobId = jobKey,
                     workspace = new { path = "/tmp/agent-job-route", projectId },
@@ -338,7 +360,8 @@ public class AgentJobDispatchRouteSpecs
     [Fact]
     public async Task PostValidate_WhenRunnerReportsFailure_ReturnsStructuredFailure()
     {
-        var projectId = $"agent-route-fail-project-{Guid.NewGuid():N}";
+        var projectId = await CreateProjectAsync("agent-route-fail-project");
+        var agentId = (await CreateAgentAsync(projectId, "validation-agent")).Id;
         var runnerId = $"agent-route-fail-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-fail-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 4);
@@ -350,6 +373,7 @@ public class AgentJobDispatchRouteSpecs
                 new
                 {
                     prompt = "do the failing thing",
+                    agentId,
                     model = "test/model",
                     jobId = jobKey,
                     workspace = new { path = "/tmp/agent-job-fail", projectId },
@@ -382,7 +406,8 @@ public class AgentJobDispatchRouteSpecs
     [Fact]
     public async Task RunnerReportEndpoint_ForAgentJob_DeliversResultToValidateResponse()
     {
-        var projectId = $"agent-route-http-report-project-{Guid.NewGuid():N}";
+        var projectId = await CreateProjectAsync("agent-route-http-report-project");
+        var agentId = (await CreateAgentAsync(projectId, "validation-agent")).Id;
         var runnerId = $"agent-route-http-report-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-http-report-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 2);
@@ -394,6 +419,7 @@ public class AgentJobDispatchRouteSpecs
                 new
                 {
                     prompt = "http report route prompt",
+                    agentId,
                     model = "openai/gpt-test",
                     jobId = jobKey,
                     workspace = new { path = "/tmp/agent-job-http-report", projectId },
@@ -437,7 +463,8 @@ public class AgentJobDispatchRouteSpecs
     [Fact]
     public async Task RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId()
     {
-        var projectId = $"agent-route-http-poll-project-{Guid.NewGuid():N}";
+        var projectId = await CreateProjectAsync("agent-route-http-poll-project");
+        var agentId = (await CreateAgentAsync(projectId, "validation-agent")).Id;
         var runnerId = $"agent-route-http-poll-runner-{Guid.NewGuid():N}";
         var jobKey = $"agent-job-validate-route-http-poll-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 1);
@@ -449,6 +476,7 @@ public class AgentJobDispatchRouteSpecs
                 new
                 {
                     prompt = "http poll route prompt",
+                    agentId,
                     model = "openai/gpt-test",
                     jobId = jobKey,
                     workspace = new { path = "/tmp/agent-job-http-poll", projectId },

@@ -257,7 +257,7 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var jobKey = $"deadlock-agent-job-{Guid.NewGuid():N}";
         var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
-        var input = MakeInput("deadlock", projectId, "/tmp/deadlock");
+        var input = MakeInput("deadlock", projectId, "/tmp/deadlock") with { AgentId = "agent-test" };
         var options = Services.GetRequiredService<IOptions<AgentJobOptions>>().Value;
         var dispatchRetryBound = options.DispatchRetryBound;
 
@@ -330,12 +330,14 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
                 WorkflowRunId: string.Empty,
                 WorkId: workIdA,
                 AgentJobId: agentJobIdA,
-                OwnerKind: WorkDispatchOwnerKinds.AgentJob)),
+                OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+                AgentId: "agent-test")),
             runner.AssignAgentJobAsync(new WorkDispatch(
                 WorkflowRunId: string.Empty,
                 WorkId: workIdB,
                 AgentJobId: agentJobIdB,
-                OwnerKind: WorkDispatchOwnerKinds.AgentJob)));
+                OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+                AgentId: "agent-test")));
 
         var accepted = assignments.Where(r => r.Status == RunnerWorkAssignmentStatus.Assigned).ToList();
         var rejected = assignments.Where(r => r.Status == RunnerWorkAssignmentStatus.Rejected).ToList();
@@ -384,7 +386,8 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
             WorkflowRunId: string.Empty,
             WorkId: workId,
             AgentJobId: agentJobId,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
 
         _fixture.RunnerAssignmentObserver.BlockAssignmentAdmission();
         var assignment = runner.AssignAgentJobAsync(dispatch);
@@ -423,7 +426,7 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var agentJobId = $"reconcile-job-{Guid.NewGuid():N}";
         var job = Grains.GetGrain<IAgentJobGrain>(agentJobId);
-        var input = MakeInput("reconcile", projectId, "/tmp/reconcile-deadlock");
+        var input = MakeInput("reconcile", projectId, "/tmp/reconcile-deadlock") with { AgentId = "agent-test" };
         var options = Services.GetRequiredService<IOptions<AgentJobOptions>>().Value;
         var dispatchRetryBound = options.DispatchRetryBound;
         var dispatchBackoffInitial = options.DispatchBackoffInitial;
@@ -501,7 +504,8 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
             WorkflowRunId: string.Empty,
             WorkId: reportedWorkId,
             AgentJobId: reportedAgentJobId,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
         Assert.Equal(
             RunnerWorkAssignmentStatus.Assigned,
             (await runner.AssignAgentJobAsync(reportedDispatch)).Status);
@@ -514,7 +518,8 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
             WorkflowRunId: string.Empty,
             WorkId: assignedWorkId,
             AgentJobId: assignedAgentJobId,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
 
         var report = runner.ReportAgentJobResultAsync(
             reportedAgentJobId,

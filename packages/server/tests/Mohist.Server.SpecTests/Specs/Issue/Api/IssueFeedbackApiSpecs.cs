@@ -51,7 +51,7 @@ public class IssueFeedbackApiSpecs
 
         var response = await _client.PostAsJsonAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
-            new { stage = "plan", body = "add a quick start section" });
+            new { stage = "plan", body = "add a quick start section", author = "supervisor" });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var envelope = await response.Content.ReadFromJsonAsync<FeedbackApiFeedbackEnvelopeDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -72,11 +72,17 @@ public class IssueFeedbackApiSpecs
         // replaced with a feedback task the runner can pick up. The
         // seed does not bind a runner, so the new state machine lands
         // the run on Pending (started, has dispatchable work, no
-        // assigned runner) — assignment pool will pick it up.
+        // assigned runner) — assignment pool will pick it up. The
+        // approval status is preserved (Result stays null while
+        // DecidedBy is stamped with the operator who requested
+        // changes) so the gate's history still attributes the
+        // request.
         Assert.Equal(WorkflowRunStatus.Pending, run.Status);
         var current = run.Stages.First(s => s.Id == "plan");
         Assert.Equal(StageRunStatus.Running, current.Status);
-        Assert.Null(current.ApprovalStatus);
+        Assert.NotNull(current.ApprovalStatus);
+        Assert.Null(current.ApprovalStatus!.Result);
+        Assert.Equal("supervisor", current.ApprovalStatus.DecidedBy);
     }
 
     [Fact]
@@ -86,7 +92,7 @@ public class IssueFeedbackApiSpecs
 
         var response = await _client.PostAsJsonAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
-            new { stage = "build", body = "should fail" });
+            new { stage = "build", body = "should fail", author = "supervisor" });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
@@ -150,7 +156,7 @@ public class IssueFeedbackApiSpecs
 
         await _client.PostOkAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
-            new { stage = "plan", body = "plan feedback" });
+            new { stage = "plan", body = "plan feedback", author = "supervisor" });
 
         var planOnly = await _client.GetDataAsync<FeedbackApiFeedbackDto[]>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback?stage=plan");
@@ -181,7 +187,7 @@ public class IssueFeedbackApiSpecs
 
         var created = await _client.PostDataAsync<FeedbackApiFeedbackDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
-            new { stage = "plan", body = "show me the body" });
+            new { stage = "plan", body = "show me the body", author = "supervisor" });
 
         var single = await _client.GetDataAsync<FeedbackApiFeedbackDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback/{created.Id}");
@@ -252,7 +258,7 @@ public class IssueFeedbackApiSpecs
 
         var created = await _client.PostDataAsync<FeedbackApiFeedbackDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
-            new { stage = "plan", body = "live list shape" });
+            new { stage = "plan", body = "live list shape", author = "supervisor" });
 
         var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback");
@@ -288,7 +294,7 @@ public class IssueFeedbackApiSpecs
 
         await _client.PostOkAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
-            new { stage = "plan", body = "detailed feedback" });
+            new { stage = "plan", body = "detailed feedback", author = "supervisor" });
 
         var detail = await _client.GetDataAsync<FeedbackApiIssueDetailDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}");

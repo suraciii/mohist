@@ -62,6 +62,20 @@ public sealed class HermesIssueNotificationTests : HermesIssueNotificationTestSu
     }
 
     [Fact]
+    public async Task AgentJobFailed_IsEnabledByDefaultAndSendsFailurePayload()
+    {
+        var fixture = CreateFixture();
+
+        await fixture.Handler.HandleAsync(AgentJobFailedEvent("runner unavailable"), CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
+
+        var payload = Assert.Single(fixture.Client.Sent);
+        Assert.Equal(NotificationKinds.AgentResponseFailed, payload.NotificationType);
+        Assert.Equal("runner unavailable", payload.FailureReason);
+        Assert.Contains("Agent response failed for issue #42", payload.Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WorkflowFailed_OmitsStackTraceLinesFromFailurePayloadAndBody()
     {
         var fixture = CreateFixture();
@@ -212,10 +226,7 @@ public sealed class HermesIssueNotificationTests : HermesIssueNotificationTestSu
     {
         var fixture = CreateFixture(new HermesNotificationOptions { WebhookUrl = null });
 
-        await fixture.Handler.HandleAsync(WorkflowEvent(
-            EventCatalog.ReverseDns.StageApprovalRequested,
-            "run_1",
-            new StageApprovalRequested("plan")), CancellationToken.None);
+        await fixture.Handler.HandleAsync(AgentJobFailedEvent("runner unavailable"), CancellationToken.None);
 
         Assert.Empty(fixture.Client.Sent);
         Assert.Equal(0, fixture.Dispatcher.QueuedCount);

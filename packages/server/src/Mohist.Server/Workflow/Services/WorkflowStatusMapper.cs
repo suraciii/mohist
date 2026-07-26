@@ -38,7 +38,7 @@ public static class WorkflowStatusMapper
                 MapTasks(s, definition),
                 MapChecks(s, definition),
                 s.ApprovalStatus is not null
-                    ? new ApprovalStatusView(s.ApprovalStatus.Result, s.ApprovalStatus.RequestedAt, s.ApprovalStatus.RespondedAt)
+                    ? new ApprovalStatusView(s.ApprovalStatus.Result, s.ApprovalStatus.RequestedAt, s.ApprovalStatus.RespondedAt, s.ApprovalStatus.DecidedBy)
                     : null,
                 stageFailure,
                 MapFeedback(run, s.Id));

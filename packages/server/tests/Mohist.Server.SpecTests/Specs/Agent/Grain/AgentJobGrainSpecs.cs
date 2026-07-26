@@ -24,6 +24,17 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task SubmitAsync_WithoutAgentIdentity_IsRejectedBeforeDispatch()
+    {
+        var job = JobGrain($"agent-job-missing-agent-{Guid.NewGuid():N}");
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            job.SubmitAsync(new AgentJobInput(Prompt: "missing identity")));
+
+        Assert.Equal(AgentJobStatus.Pending, await job.GetStatusAsync());
+    }
+
+    [Fact]
     public async Task SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-dispatch-runner-{Guid.NewGuid():N}");
@@ -36,7 +47,8 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             Prompt: "Hello world",
             Model: "test/model",
             WorkspacePath: "/tmp/agent-job-test",
-            ProjectId: projectId));
+            ProjectId: projectId,
+            AgentId: "agent-test"));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
@@ -253,7 +265,8 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             Prompt: "no runner ever",
             WorkspacePath: "/tmp/agent-job-bound",
             ProjectId: projectId,
-            AgentSessionId: sessionId));
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
         await job.CheckTimeoutsAsync();
@@ -348,7 +361,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(10));
 
         var job = JobGrain($"agent-job-reset-{Guid.NewGuid():N}");
-        await job.SubmitAsync(new AgentJobInput("delayed failure", ProjectId: projectId, AgentSessionId: sessionId));
+        await job.SubmitAsync(new AgentJobInput("delayed failure", ProjectId: projectId, AgentSessionId: sessionId, AgentId: "agent-test"));
         await job.AssignRunnerAsync("runner-a", "work-a");
         Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
         // Repeat of the same runtimeSessionId is idempotent — the
@@ -397,7 +410,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-a"));
 
         var job = JobGrain($"agent-job-close-{Guid.NewGuid():N}");
-        await job.SubmitAsync(new AgentJobInput("record terminal failure", ProjectId: projectId, AgentSessionId: sessionId));
+        await job.SubmitAsync(new AgentJobInput("record terminal failure", ProjectId: projectId, AgentSessionId: sessionId, AgentId: "agent-test"));
         await job.AssignRunnerAsync("runner-a", "work-a");
         Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
 

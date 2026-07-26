@@ -36,7 +36,7 @@ public partial class ApprovalFeedbackTests
     {
         var run = BuildAwaitingApprovalRun();
         var feedbackId = NextFeedbackId(run);
-        run.RequestChanges("apply feedback", feedbackId, DateTimeOffset.UnixEpoch,
+        run.RequestChanges("apply feedback", feedbackId, DateTimeOffset.UnixEpoch, "operator-1",
             [new TaskDefinition("apply-feedback", "Apply approval feedback", uses)]);
         var task = run.CurrentStage().Tasks.Last(t => t.CausedByFeedbackId == feedbackId);
         run.StartTask(task.Id, "worker-1", DateTimeOffset.UnixEpoch);

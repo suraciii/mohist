@@ -37,6 +37,7 @@ internal static partial class RunCommands
             "status",
             "stage",
             "issueRef",
+            "decidedBy",
         ]);
 
     public static Command Build(MohistCliApi api)
@@ -178,11 +179,16 @@ internal static partial class RunCommands
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
         var (projectOpt, projectIdOpt) = ProjectOptions();
+        var authorOpt = new Option<string?>("--author")
+        {
+            Description = "Declared approval operator (1-100 characters)",
+        };
         var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(authorOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
@@ -190,6 +196,7 @@ internal static partial class RunCommands
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
+            var author = ctx.GetValue(authorOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
             var selection = JsonSelection.Parse(RunControlDescriptor, jsonProvided, json);
@@ -200,6 +207,19 @@ internal static partial class RunCommands
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(RunControlDescriptor, selection);
 
+                string normalizedAuthor;
+                if (string.IsNullOrWhiteSpace(author))
+                {
+                    api.Error.WriteLine("--author is required and must not be blank.");
+                    return 1;
+                }
+                normalizedAuthor = author.Trim();
+                if (normalizedAuthor.Length > 100)
+                {
+                    api.Error.WriteLine("--author must be 100 characters or fewer.");
+                    return 1;
+                }
+
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
                     api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
                 if (resolveExit != 0)
@@ -208,7 +228,7 @@ internal static partial class RunCommands
                 return await api.PrintMutationResourceAsync(
                     HttpMethod.Post,
                     WorkflowRunPath(resolvedRunId!, "/approve"),
-                    new { },
+                    new { author = normalizedAuthor },
                     RunControlDescriptor,
                     selection,
                     data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));
@@ -218,7 +238,7 @@ internal static partial class RunCommands
     }
 
     // ────────────────────────────────────────────────────────────────────
-    //  reject — requires --message
+    //  reject — requires --message and --author
     // ────────────────────────────────────────────────────────────────────
 
     private static Command BuildReject(MohistCliApi api)
@@ -233,12 +253,17 @@ internal static partial class RunCommands
         {
             Description = "Reject reason / change request message (required, must not be empty)",
         };
+        var authorOpt = new Option<string?>("--author")
+        {
+            Description = "Declared rejection operator (1-100 characters)",
+        };
         var jsonOpt = MohistCliCommands.JsonSelectionOption();
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(messageOpt);
+        cmd.Options.Add(authorOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
@@ -247,6 +272,7 @@ internal static partial class RunCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var message = ctx.GetValue(messageOpt);
+            var author = ctx.GetValue(authorOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
             var selection = JsonSelection.Parse(RunControlDescriptor, jsonProvided, json);
@@ -264,6 +290,21 @@ internal static partial class RunCommands
                     return CliExitCode.For(CliExitOutcome.OperationFailure);
                 }
 
+                string normalizedAuthor;
+                if (string.IsNullOrWhiteSpace(author))
+                {
+                    await api.Error.WriteLineAsync(
+                        "--author is required and must not be blank.").ConfigureAwait(false);
+                    return CliExitCode.For(CliExitOutcome.OperationFailure);
+                }
+                normalizedAuthor = author.Trim();
+                if (normalizedAuthor.Length > 100)
+                {
+                    await api.Error.WriteLineAsync(
+                        "--author must be 100 characters or fewer.").ConfigureAwait(false);
+                    return CliExitCode.For(CliExitOutcome.OperationFailure);
+                }
+
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
                     api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
                 if (resolveExit != 0)
@@ -272,7 +313,7 @@ internal static partial class RunCommands
                 return await api.PrintMutationResourceAsync(
                     HttpMethod.Post,
                     WorkflowRunPath(resolvedRunId!, "/reject"),
-                    new { message },
+                    new { author = normalizedAuthor, message },
                     RunControlDescriptor,
                     selection,
                     data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));

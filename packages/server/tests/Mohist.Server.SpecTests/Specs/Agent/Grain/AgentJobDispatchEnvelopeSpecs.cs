@@ -147,7 +147,8 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
         var input = new AgentJobInput(
             Prompt: "no session",
             WorkspacePath: "/tmp/agent-job-no-session",
-            ProjectId: projectId);
+            ProjectId: projectId,
+            AgentId: "agent-test");
 
         await job.SubmitAsync(input);
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
@@ -206,6 +207,7 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
             Prompt: $"run on {runtime}",
             WorkspacePath: $"/tmp/agent-job-runtime-{runtime}",
             ProjectId: projectId,
+            AgentId: "agent-test",
             Runtime: runtime);
 
         await job.SubmitAsync(input);

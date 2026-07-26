@@ -25,6 +25,10 @@ public sealed class ProducerConformanceTests
             Extensions(("projectid", "proj"), ("sessionid", "session"), ("agentid", "agent")),
             new(ProjectId: "proj", SessionId: "session", AgentId: "agent"));
         ProducerConformance.Assert(
+            EventProducerFamily.AgentJob,
+            Extensions(("agentid", "agent"), ("projectid", "proj"), ("issue", "42")),
+            new(ProjectId: "proj", Issue: "42", AgentId: "agent"));
+        ProducerConformance.Assert(
             EventProducerFamily.Runner,
             Extensions(("runnerid", "runner"), ("projectid", "proj")),
             new(ProjectId: "proj", RunnerId: "runner"));
@@ -39,6 +43,7 @@ public sealed class ProducerConformanceTests
     [InlineData(EventProducerFamily.Issue, "issue")]
     [InlineData(EventProducerFamily.Epic, "epic")]
     [InlineData(EventProducerFamily.AgentSession, "sessionid")]
+    [InlineData(EventProducerFamily.AgentJob, "agentid")]
     [InlineData(EventProducerFamily.Runner, "runnerid")]
     [InlineData(EventProducerFamily.InboxItemPersisted, "issue")]
     public void Assert_RejectsMissingRequiredContext(EventProducerFamily family, string missingKey)
@@ -49,6 +54,7 @@ public sealed class ProducerConformanceTests
             ("epic", "7"),
             ("workflowrunid", "run"),
             ("sessionid", "session"),
+            ("agentid", "agent"),
             ("runnerid", "runner"));
         extensions.Remove(missingKey);
 
@@ -58,6 +64,7 @@ public sealed class ProducerConformanceTests
             EventProducerFamily.Issue => new ProducerLineageContext(ProjectId: "proj", Issue: "42"),
             EventProducerFamily.Epic => new ProducerLineageContext(ProjectId: "proj", Epic: "7"),
             EventProducerFamily.AgentSession => new ProducerLineageContext(ProjectId: "proj", SessionId: "session"),
+            EventProducerFamily.AgentJob => new ProducerLineageContext(AgentId: "agent"),
             EventProducerFamily.Runner => new ProducerLineageContext(RunnerId: "runner"),
             EventProducerFamily.InboxItemPersisted => new ProducerLineageContext(ProjectId: "proj", Issue: "42"),
             _ => throw new ArgumentOutOfRangeException(nameof(family)),

@@ -233,7 +233,9 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         if (work.OwnerKind != WorkDispatchOwnerKinds.AgentJob)
             return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "invalid-work");
-        if (string.IsNullOrWhiteSpace(work.AgentJobId) || string.IsNullOrWhiteSpace(work.WorkId))
+        if (string.IsNullOrWhiteSpace(work.AgentJobId)
+            || string.IsNullOrWhiteSpace(work.WorkId)
+            || string.IsNullOrWhiteSpace(work.AgentId))
             return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "invalid-work");
 
         await _assignmentObserver.AssignmentAdmissionAsync(RunnerId, work);
@@ -727,7 +729,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 await _closeoutObserver.AgentJobCloseoutStartingAsync(RunnerId, entry.OwnerId, entry.WorkId);
                 var reportResult = await _agentJobs.ReportAsync(entry.OwnerId, RunnerId, entry.WorkId, synthesizedFailure);
                 if (!reportResult.Accepted)
-                    await _agentJobs.FailAsync(entry.OwnerId, synthesizedFailure.Message ?? "failed");
+                    await _agentJobs.FailAsync(
+                        entry.OwnerId,
+                        synthesizedFailure.Message ?? "failed",
+                        entry.DispatchSnapshot?.AgentId);
 
                 TryRemoveWork(entry.WorkId, entry.OwnerKind, entry.OwnerId);
                 await PersistAsync();

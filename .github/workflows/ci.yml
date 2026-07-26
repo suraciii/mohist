@@ -16,7 +16,7 @@ jobs:
   dotnet:
     name: .NET build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY: false
@@ -52,7 +52,7 @@ jobs:
 
       - name: Test
         run: dotnet test Mohist.sln -p:SkipWebBuild=true --no-build
-        timeout-minutes: 5
+        timeout-minutes: 15
 
   node:
     name: Node build and test

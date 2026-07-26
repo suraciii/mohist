@@ -31,14 +31,24 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             int number,
+            ApproveRequest? req,
             IGrainFactory grains,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
+            string decidedBy;
+            try
+            {
+                decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message);
+            }
             var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
-            await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync();
+            await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync(decidedBy);
             return ApiResults.Ok();
         });
 
@@ -46,17 +56,26 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             int number,
-            RejectRequest? req,
+            RejectWithAuthorRequest? req,
             IGrainFactory grains,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
+            string decidedBy;
+            try
+            {
+                decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message);
+            }
+            if (string.IsNullOrWhiteSpace(req?.Message))
+                return ApiResults.BadRequest("Reject reason is required");
             var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
-            if (string.IsNullOrWhiteSpace(req?.Message))
-                return ApiResults.BadRequest("Reject reason is required");
-            await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(req.Message);
+            await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(req.Message, decidedBy);
             return ApiResults.Ok();
         });
 
@@ -200,7 +219,6 @@ public static partial class IssueRoutes
     private static bool IsWorkflowControllableForAction(string? workflowStatus, WorkflowControlAction action) =>
         WorkflowControlGuard.IsWorkflowControllableForAction(workflowStatus, action);
 
-    internal sealed record RejectRequest(string? Message);
     internal sealed record RerunFromStageRequest(string? Stage);
 
     private sealed record WorkflowControlResolution(string? WorkflowRunId, IResult? Result);

@@ -128,7 +128,8 @@ public sealed record PendingWorkView(
 public sealed record ApprovalStatusView(
     string? Result,
     string RequestedAt,
-    string? RespondedAt);
+    string? RespondedAt,
+    string? DecidedBy = null);
 
 /// <summary>
 /// Minimal associated-issue reference surfaced by the

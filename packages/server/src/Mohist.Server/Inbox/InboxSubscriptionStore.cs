@@ -24,7 +24,7 @@ public sealed class InboxSubscriptionStore : IScopedService
 
     /// <summary>
     /// Returns the current subscription state for <paramref name="projectId"/>.
-    /// When no row exists, returns a default with all four kinds enabled.
+    /// When no row exists, returns a default with all kinds enabled.
     /// </summary>
     public async Task<InboxSubscriptionState> GetAsync(string projectId, CancellationToken ct = default)
     {
@@ -69,6 +69,7 @@ public sealed class InboxSubscriptionStore : IScopedService
                 ApprovalRequestedEnabled = state.ApprovalRequestedEnabled,
                 IssueStartedEnabled = state.IssueStartedEnabled,
                 IssueCompletedEnabled = state.IssueCompletedEnabled,
+                AgentResponseFailedEnabled = state.AgentResponseFailedEnabled,
                 UpdatedAt = now,
             };
             db.InboxSubscriptions.Add(row);
@@ -79,6 +80,7 @@ public sealed class InboxSubscriptionStore : IScopedService
             row.ApprovalRequestedEnabled = state.ApprovalRequestedEnabled;
             row.IssueStartedEnabled = state.IssueStartedEnabled;
             row.IssueCompletedEnabled = state.IssueCompletedEnabled;
+            row.AgentResponseFailedEnabled = state.AgentResponseFailedEnabled;
             row.UpdatedAt = now;
         }
 
@@ -90,5 +92,6 @@ public sealed class InboxSubscriptionStore : IScopedService
         WorkflowFailedEnabled: row.WorkflowFailedEnabled,
         ApprovalRequestedEnabled: row.ApprovalRequestedEnabled,
         IssueStartedEnabled: row.IssueStartedEnabled,
-        IssueCompletedEnabled: row.IssueCompletedEnabled);
+        IssueCompletedEnabled: row.IssueCompletedEnabled,
+        AgentResponseFailedEnabled: row.AgentResponseFailedEnabled);
 }

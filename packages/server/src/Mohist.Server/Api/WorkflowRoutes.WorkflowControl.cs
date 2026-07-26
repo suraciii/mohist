@@ -24,26 +24,45 @@ public static partial class WorkflowRoutes
 
         app.MapPost("/api/workflow-runs/{workflowRunId}/approve", async (
             string workflowRunId,
+            ApproveRequest? req,
             IGrainFactory grains,
             WorkflowQuerier reader) =>
         {
             if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
                 return failure;
-            await grains.GetGrain<IWorkflowGrain>(workflowRunId).ApproveAsync();
+            string decidedBy;
+            try
+            {
+                decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message);
+            }
+            await grains.GetGrain<IWorkflowGrain>(workflowRunId).ApproveAsync(decidedBy);
             return ApiResults.Ok();
         });
 
         app.MapPost("/api/workflow-runs/{workflowRunId}/reject", async (
             string workflowRunId,
-            RejectRequest? req,
+            RejectWithAuthorRequest? req,
             IGrainFactory grains,
             WorkflowQuerier reader) =>
         {
             if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
                 return failure;
+            string decidedBy;
+            try
+            {
+                decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message);
+            }
             if (string.IsNullOrWhiteSpace(req?.Message))
                 return ApiResults.BadRequest("Reject reason is required");
-            await grains.GetGrain<IWorkflowGrain>(workflowRunId).RequestChangesAsync(req.Message);
+            await grains.GetGrain<IWorkflowGrain>(workflowRunId).RequestChangesAsync(req.Message, decidedBy);
             return ApiResults.Ok();
         });
 
@@ -140,7 +159,6 @@ public static partial class WorkflowRoutes
         return app;
     }
 
-    internal sealed record RejectRequest(string? Message);
     internal sealed record RerunFromStageRequest(string? Stage);
 
     private static async Task<IResult?> ResolveWorkflowRunControlAsync(

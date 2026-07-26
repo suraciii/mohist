@@ -37,7 +37,11 @@ public sealed record StageFailed(string Stage, string? Reason);
 public enum ApprovalResult { Approved, Rejected }
 
 public sealed record StageApprovalRequested(string Stage);
-public sealed record StageApprovalResolved(string Stage, ApprovalResult Result, string? Reason = null);
+public sealed record StageApprovalResolved(
+    string Stage,
+    ApprovalResult Result,
+    string? Reason = null,
+    string? DecidedBy = null);
 
 public sealed record FeedbackRequested(string Stage, string FeedbackId, string? Reason = null);
 

@@ -889,7 +889,7 @@ public record WorkDispatchResponse(
     /// dispatches whose launch minted a generic (non-workflow)
     /// AgentSession; the runner uses it verbatim as the session
     /// identity for runtime events. Null for workflow dispatches and
-    /// raw-prompt-only AgentJob validation dispatches.
+    /// AgentJob validation dispatches.
     /// </summary>
     string? AgentSessionId = null,
     string? Recovery = null,

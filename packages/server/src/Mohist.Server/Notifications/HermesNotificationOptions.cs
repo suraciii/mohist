@@ -19,6 +19,7 @@ public sealed class HermesNotificationOptions
         NotificationKinds.ApprovalRequested,
         NotificationKinds.WorkflowFailed,
         NotificationKinds.IssueCompleted,
+        NotificationKinds.AgentResponseFailed,
     ];
 
     public bool IsWebhookConfigured => !string.IsNullOrWhiteSpace(WebhookUrl);

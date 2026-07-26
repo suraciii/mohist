@@ -1,7 +1,7 @@
 namespace Mohist.Server.Inbox;
 
 /// <summary>
-/// Stable identifiers for the four MVP notification kinds. Stored as
+/// Stable identifiers for the project-scoped notification kinds. Stored as
 /// the string value on <c>InboxItems.NotificationKind</c> (TEXT, max
 /// 32 chars) and used as the rendering template key on the Web client.
 /// </summary>
@@ -11,12 +11,14 @@ public static class NotificationKinds
     public const string ApprovalRequested = "approval_requested";
     public const string IssueStarted = "issue_started";
     public const string IssueCompleted = "issue_completed";
+    public const string AgentResponseFailed = "agent_response_failed";
 
     public static bool IsDefined(string? value) => value is
         WorkflowFailed or
         ApprovalRequested or
         IssueStarted or
-        IssueCompleted;
+        IssueCompleted or
+        AgentResponseFailed;
 }
 
 /// <summary>
@@ -71,14 +73,15 @@ public sealed record InboxUnreadCount(int UnreadCount);
 /// <summary>
 /// Project-scoped inbox subscription preference state. Returned by
 /// <see cref="InboxSubscriptionStore.GetAsync"/> — when no row exists,
-/// all four kinds are synthesized as enabled. Toggles are keyed
+/// all kinds are synthesized as enabled. Toggles are keyed
 /// by <see cref="NotificationKinds"/> value.
 /// </summary>
 public sealed record InboxSubscriptionState(
     bool WorkflowFailedEnabled = true,
     bool ApprovalRequestedEnabled = true,
     bool IssueStartedEnabled = true,
-    bool IssueCompletedEnabled = true)
+    bool IssueCompletedEnabled = true,
+    bool AgentResponseFailedEnabled = true)
 {
     public bool IsEnabled(string kind) => kind switch
     {
@@ -86,6 +89,7 @@ public sealed record InboxSubscriptionState(
         NotificationKinds.ApprovalRequested => ApprovalRequestedEnabled,
         NotificationKinds.IssueStarted => IssueStartedEnabled,
         NotificationKinds.IssueCompleted => IssueCompletedEnabled,
+        NotificationKinds.AgentResponseFailed => AgentResponseFailedEnabled,
         _ => false,
     };
 }
