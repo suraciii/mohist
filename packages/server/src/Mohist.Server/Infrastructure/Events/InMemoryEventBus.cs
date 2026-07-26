@@ -63,9 +63,28 @@ public sealed class InMemoryEventBus : IEventPublisher
 
 }
 
-public sealed record Subscription(
-    string Type,
-    object Handler,
-    DispatchDelegate Dispatch);
+public sealed record Subscription
+{
+    public string Type { get; init; }
+    public object Handler { get; init; }
+    public DispatchDelegate Dispatch { get; init; }
+    public string Identity { get; init; }
+
+    public Subscription(string type, object handler, DispatchDelegate dispatch)
+        : this(type, handler, dispatch, ResolveIdentity(handler))
+    {
+    }
+
+    public Subscription(string type, object handler, DispatchDelegate dispatch, string identity)
+    {
+        Type = type;
+        Handler = handler;
+        Dispatch = dispatch;
+        Identity = identity;
+    }
+
+    private static string ResolveIdentity(object handler) =>
+        handler.GetType().FullName ?? handler.GetType().Name;
+}
 
 public delegate Task DispatchDelegate(object handler, CloudEvent evt, CancellationToken ct);

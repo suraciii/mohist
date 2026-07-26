@@ -19,7 +19,7 @@ namespace Mohist.Server.Workflow.Services;
 ///   Template:          自定义 YAML 字符串 (Template 设置, SourceTemplateId 清空)
 ///   两个都 null:       清空 issue 级模板 (继承项目默认)
 /// </summary>
-public class IssueWorkflowProfileManager : IScopedService
+public class IssueWorkflowProfileManager : IScopedService, IAgentRuntimeOverrideResolver
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IActionCatalogSource _catalogSource;

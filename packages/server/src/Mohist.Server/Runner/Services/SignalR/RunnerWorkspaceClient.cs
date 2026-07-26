@@ -177,3 +177,9 @@ public sealed record RunnerWorkspaceCommitsResult(
 public sealed record RunnerWorkspaceCommitDiffResult(string Diff);
 
 public sealed record RunnerWorkspaceFileContentResult(string? Base, string? Head, string? Reason = null);
+
+public sealed record DiffFile(string File, int Additions, int Deletions, string Diff, bool IsBinary);
+
+public sealed record GitCommit(string Hash, string ShortHash, string Message, string Author, string Date, string[] Files);
+
+public sealed record WorkspaceRemovalResult(bool Removed, string Status, string? Path, string? Reason, string Message);

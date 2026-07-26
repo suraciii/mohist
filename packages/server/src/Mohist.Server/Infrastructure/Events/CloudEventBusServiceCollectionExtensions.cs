@@ -61,7 +61,10 @@ public static class CloudEventBusServiceCollectionExtensions
                 var handler = sp.GetRequiredService(handlerType);
                 var attr = handlerType.GetCustomAttribute<SubscriptionAttribute>()!;
                 var dispatch = MakeDelegate(handler);
-                subs.Add(new Subscription(attr.Type, handler, dispatch));
+                var identity = attr.Identity
+                    ?? handlerType.FullName
+                    ?? handlerType.Name;
+                subs.Add(new Subscription(attr.Type, handler, dispatch, identity));
             }
             return subs;
         });

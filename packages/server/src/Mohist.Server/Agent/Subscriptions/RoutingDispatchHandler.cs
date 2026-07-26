@@ -3,14 +3,16 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Events.Matching;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.Workflow.Services;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Agent.Subscriptions;
 
-[Subscription(Type = "*")]
+[Subscription(
+    Type = "*",
+    Identity = "Mohist.Server.Events.Subscriptions.RoutingDispatchHandler")]
 public sealed class RoutingDispatchHandler : ICloudEventHandler
 {
     internal const string WatchRuleIdPrefix = "watch:";
@@ -434,7 +436,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         if (issueNumber is not > 0)
             return null;
 
-        return await services.GetRequiredService<IssueWorkflowProfileManager>()
+        return await services.GetRequiredService<IAgentRuntimeOverrideResolver>()
             .GetAgentRuntimeOverrideAsync(projectId, issueNumber.Value);
     }
 

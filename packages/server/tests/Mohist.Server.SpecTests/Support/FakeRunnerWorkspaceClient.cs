@@ -87,3 +87,5 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
             throw Throw;
     }
 }
+
+public sealed record RemoveWorkspaceCall(string WorkspacePath);

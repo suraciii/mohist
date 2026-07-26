@@ -110,9 +110,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<ISystemUpdateStore, InMemorySystemUpdateStore>();
             services.RemoveAll<IManagedAssetCatalog>();
             services.AddSingleton<IManagedAssetCatalog, InMemoryManagedAssetCatalog>();
-            services.RemoveAll<IGitService>();
-            services.AddSingleton<FakeGitService>();
-            services.AddSingleton<IGitService>(provider => provider.GetRequiredService<FakeGitService>());
             services.RemoveAll<IRunnerWorkspaceClient>();
             services.AddSingleton<FakeRunnerWorkspaceClient>();
             services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());

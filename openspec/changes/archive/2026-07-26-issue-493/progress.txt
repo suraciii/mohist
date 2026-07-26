@@ -1,0 +1,61 @@
+## Codebase Patterns
+- Workspace API routes resolve the run-owned repository/workspace context and delegate diff, commits, commit diff, status, file content, and cleanup through `IRunnerWorkspaceClient`; route specs control `FakeRunnerWorkspaceClient` directly.
+- Runner workspace transport DTOs belong beside `IRunnerWorkspaceClient` in `Runner/Services/SignalR`, not under the deleted Server-local workspace adapter.
+
+## T-001
+- Removed `IGitService`, `GitService`, their DI registration, the registration-only runner-root resolver, `FakeGitService`, and all fixture overrides.
+- Preserved `MohistWorkspaceLayout` because Issue workspace identity and workflow variable construction still use its runner-root/path contract.
+- Moved `DiffFile`, `GitCommit`, and `WorkspaceRemovalResult` to `RunnerWorkspaceClient.cs`; moved the test-only `RemoveWorkspaceCall` beside `FakeRunnerWorkspaceClient`.
+- Baseline and post-change focused workspace specs passed (18 tests). Server build passed. Full .NET suite passed: Server specs 3217, unit 1478, architecture 32, workflow definition 175, CLI 1327. Root `npm test` then stopped in unrelated JS workspaces because dependencies are not installed (`tsx` and `tsc` not found); no dependency installation was performed.
+
+## T-002
+- Added `Epic` to the architecture dependency matrix and explicitly allowed only the observed `Epic → Issue` and `Issue → Epic` directions; the existing deny-by-default rule now checks all other Epic directions.
+- Documented Server-owned Mohist daemon self-management separately from Runner-owned user-project workspace, git, shell, and agent execution.
+- Documented Runner failure classifications, including `retry-safe`, as facts and Workflow as the sole retry/recovery decision authority.
+- `Mohist.Server.ArchTests` passed with 32 tests. The full `npm test` run had one unrelated/flaky `AgentJobTerminalDeliverySpecs` failure (`Pending` did not reach `Running`); rerunning that exact test passed. Web and Runner typechecks could not start because `tsc` is not installed; no dependencies were installed.
+
+## T-003
+- Extended `SubscriptionAttribute` with an optional `Identity` property that handlers use to declare a pre-relocation full name as their durable identity.
+- Rewrote `Subscription` from a positional record into a class with two constructors: the existing 3-arg form derives `Identity` from `Handler.GetType().FullName` (preserving the legacy behavior); the new 4-arg form accepts an explicit identity supplied by the registration code.
+- `AddCloudEventHandlers` reads `attr.Identity ?? handlerType.FullName ?? handlerType.Name` and passes it to the subscription constructor; assembly discovery and subscription validation are unchanged.
+- `EventDispatcherService` now reads `subscription.Identity` for both `BuildDeadLetter.FailingHandler` and the `RedeliverAsync` lookup, and for the per-attempt warning log line. The previous `HandlerName` helper was deleted because every callsite moved to `subscription.Identity`. `FailingHandler` storage schema is unchanged.
+- Added 5 EventBusTests covering: default identity equals the runtime full type name; explicit identity overrides it; explicit identity is preserved on the record; `AddCloudEventHandlers` honors `SubscriptionAttribute.Identity` when declared; it falls back to the runtime full name when omitted.
+- Added a dedicated `EventDispatcherIdentitySpecs` file (4 tests) for the regression surface so `EventDispatcherSpecs` stays under its size ratchet baseline: dead-letter rows record the explicit identity verbatim; the default identity contract is unchanged for handlers without an explicit identity; a row persisted with a pre-relocation identity redelivers to the relocated handler; rows whose legacy identity has no matching subscription still surface the existing "not registered" failure.
+- Solution-wide .NET build clean. Test totals: Server unit 1488 (+10), Server spec 3217 (unchanged), Server arch 32 (unchanged), workflow definition 175 (unchanged), CLI 1327 (unchanged). Web/Runner typechecks and `npm test` still blocked on missing JS toolchain, same as T-001/T-002.
+
+## T-004
+- Moved `IssueWorkflowStartHandler`, `IssueWorkflowCompletionHandler`, `IssueEpicChangedHandler`, and the five `IssueComposite*Handler` types plus `ParentCompositeRecomputeDispatcher` into `Issue/Subscriptions/` under namespace `Mohist.Server.Issue.Subscriptions`.
+- Moved `EpicAutoDoneHandler`, `EpicCancelledHandler`, `EpicDraftChangedHandler`, `EpicIssueReopenedHandler`, `EpicPrerequisiteRemovedHandler`, `EpicRunningStatusHandler`, `EpicStartRetryHandler`, `EpicProgressRecomputeDispatcher`, and `EpicEventRecomputeDispatcher` into `Epic/Subscriptions/EpicHandlers.cs` under namespace `Mohist.Server.Epic.Subscriptions`.
+- Each relocated handler declares `Identity = "Mohist.Server.Events.Subscriptions.<PreRelocationName>"` on its `[Subscription]`, so historical dead-letter rows and rows written after relocation resolve to the relocated handler without a schema or data migration.
+- Deleted the originals from `Events/Subscriptions/`. `Events/Subscriptions/` still contains handlers for other tasks (T-005/T-006/T-007); it is not empty yet.
+- Updated `ArchitectureRules.FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices` to include `Subscriptions` in the allowed feature segments, with a comment cross-referencing `Domain-owned-durable-reactions`.
+- Updated test `using` directives in `EpicAutoDoneHandlerSpecs`, `EpicAutoDoneHandlerTestSupport`, `EpicAutoDoneCancelledHandlerSpecs`, `EpicAutoDonePrerequisiteHandlerSpecs`, `IssueCompositeHandlersSpecs`, `IssueWorkflowCompletionHandlerSpecs`, and `IssueWorkflowCompletionHandlerTestSupport` to import `Mohist.Server.Issue.Subscriptions` / `Mohist.Server.Epic.Subscriptions` and drop the obsolete `Mohist.Server.Events.Subscriptions` import.
+- Updated the `IssueWorkflowReadPathSpecs` and `IssueQuerier.GetIssueForWorkflowRunAsync` doc-comments to point to the new handler location; the identity string used by `EventDispatcherIdentitySpecs` is the legacy full name and is left intact.
+- Full .NET suite passes: Server unit 1488 (unchanged), Server spec 3217 (unchanged), Server arch 32 (unchanged), workflow definition 175 (unchanged), CLI 1327 (unchanged). Web/Runner typechecks and `npm test` still blocked on missing JS toolchain, same as T-001/T-002/T-003.
+
+## T-005
+- Moved `WorkflowStageLockReleaseHandler` into `Workflow/Subscriptions/` under namespace `Mohist.Server.Workflow.Subscriptions`; handler body, `ICloudEventHandler` implementation, awaited `IWorkflowGrain.ReleaseStageLocksAsync` call, and pipe-separated `[Subscription(Type = "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed")]` pattern are unchanged.
+- Moved `RunnerWorkflowTerminalStatusHandler` into `Runner/Subscriptions/` under namespace `Mohist.Server.Runner.Subscriptions`; handler body, `ICloudEventHandler` implementation, awaited `IRunnerWorkflowStatusRouter.RouteAsync` call, `WorkflowRunStatus.Completed`/`Stopped` resolution, and pipe-separated `[Subscription(Type = "com.mohist.workflow.run.completed|com.mohist.workflow.run.stopped")]` pattern are unchanged. `Failed` remains excluded so retry/rerun/rerun-from-stage can reclaim the workspace.
+- Each relocated handler declares `Identity = "Mohist.Server.Events.Subscriptions.<PreRelocationName>"` on its `[Subscription]`, matching the Issue/Epic pattern from T-004; historical dead-letter rows and rows written after relocation resolve to the relocated handler without a schema or data migration.
+- Deleted the originals from `Events/Subscriptions/`. The remaining `Events/Subscriptions/` files belong to T-006/T-007 (Hermes/Inbox/Agent routing); not empty yet.
+- Updated test `using` directives in `WorkflowStageLockReleaseHandlerTests` and `RunnerWorkflowTerminalStatusHandlerSpecs` to import `Mohist.Server.Workflow.Subscriptions` / `Mohist.Server.Runner.Subscriptions` and drop the obsolete `Mohist.Server.Events.Subscriptions` import.
+- Updated the explicit registration of `WorkflowStageLockReleaseHandler` in `GrainTestConfig.cs`: switched the test-side `Subscription` constructor from the 3-arg form (which would derive identity from the new runtime type name) to the 4-arg form passing `Identity = "Mohist.Server.Events.Subscriptions.WorkflowStageLockReleaseHandler"`, so the persisted-dead-letter-redelivery contract matches production. The dispatcher now matches the explicit identity, identical to the runtime-side registration that `AddCloudEventHandlersFromAssembly` produces from `SubscriptionAttribute.Identity`.
+- Full .NET suite passes: Server unit 1488 (unchanged), Server spec 3217 (unchanged), Server arch 32 (unchanged), workflow definition 175 (unchanged), CLI 1327 (unchanged). Focused `StageLockSpecs` and `RunnerWorkflowTerminalStatusHandlerSpecs` continue to assert the durable dispatch path and router propagation semantics. Web/Runner typechecks and `npm test` still blocked on missing JS toolchain, same as T-001/T-002/T-003/T-004.
+
+## T-006
+- Moved `RoutingDispatchHandler`, `MentionDispatchHandler`, `RoutedAgentLaunchContextResolver`, `ResponsePromptRenderer`, and `MentionTokenParser` into `Agent/Subscriptions/` under namespace `Mohist.Server.Agent.Subscriptions`; routing, mention parsing, launch resolution, and prompt rendering bodies are unchanged.
+- `RoutingDispatchHandler` and `MentionDispatchHandler` declare their pre-relocation `Mohist.Server.Events.Subscriptions.*` names through `SubscriptionAttribute.Identity`, preserving historical and newly written dead-letter identities.
+- Updated Agent services, routing-test API, routing/mention specs, unit tests, and dispatcher tests to consume the Agent-owned namespace. Service-graph coverage now asserts both handlers are registered exactly once and pins both legacy durable identities.
+- Pre-change baseline passed from existing binaries: Server unit 1488 and Server spec 3217. Moving the helpers exposed Agent's architecture guard against direct Workflow dependencies, so `WorkflowRunQuerier.LoadRoutingContextAsync` now returns the scalar routing projection needed by Agent and `IAgentRuntimeOverrideResolver` provides the narrow shared runtime-override contract implemented by `IssueWorkflowProfileManager`; service graphs forward-register the implementation.
+- Final `npm test` passed the complete .NET suite: Server unit 1488, Server spec 3217, Server arch 32, workflow definition 175, CLI 1327. The JS workspace phase remains blocked on missing installed tools (`tsx` for Web and `tsc` for Runner); no dependency installation was performed.
+
+## T-007
+- InboxProjectionHandler and HermesIssueNotificationHandler are now under `Inbox/Subscriptions` and `Notifications/Subscriptions`; both retain their legacy `Mohist.Server.Events.Subscriptions.*` identities and existing handler bodies.
+- Updated Inbox/Hermes test imports and service-graph assertions. The source ownership assertion now inventories every production `Subscriptions` file, rejects shared `Events/Subscriptions`, and accounts for grouped Issue/Epic handler files.
+- Focused pre-change binaries passed Server unit/spec coverage (1488/3217); the first architecture run used a stale binary. Rebuilt with `SkipWebBuild=true`, then architecture coverage passed 33 tests.
+- The architecture test file-size baseline was raised from 30000 to 32091 bytes for the ownership assertion. After an explicit `npm ci`, `npm test`, Web typecheck, and Web tests all passed.
+
+## Verification repair
+- `npm run verify` reproduced one failure in `ProjectEventsApiSpecs.GetProjectEvents_DoesNotCreateAnyNewEvents`: a global `AgentSessionEvents` count changed from 295 to 296 while unrelated SpecTests ran in parallel.
+- The endpoint test now scopes its before/after event counts to the current project's persisted `projectid` extension, preserving the no-write assertion without depending on concurrent tests' rows.
+- A subsequent full `npm test` run exposed the pre-existing `AgentJobTerminalDeliverySpecs.ReportResultAsync_SuccessfulRunnerReport_PersistsPendingCloseWithoutReasonOrCategory` timing failure (`Pending` did not reach `Running`); the exact method passed when run alone.

@@ -86,6 +86,8 @@ public static class MohistServiceRegistration
         // concrete type — scoped, like IssueQuerier.
         services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
+        services.AddScoped<IAgentRuntimeOverrideResolver>(sp =>
+            sp.GetRequiredService<Mohist.Server.Workflow.Services.IssueWorkflowProfileManager>());
         services.AddSingleton<IAgentJobWorkCoordinator>(sp => sp.GetRequiredService<AgentJobWorkCoordinator>());
         services.AddSingleton<Mohist.Server.Sessions.Services.IAgentSessionConnectionRegistry>(sp =>
             sp.GetRequiredService<Mohist.Server.Runner.Services.SignalR.RunnerConnectionTracker>());
@@ -208,8 +210,6 @@ public static class MohistServiceRegistration
         services.AddSingleton<TraceIngester>();
         services.AddSingleton<TraceQuerier>();
         services.AddSingleton<IOtelQueryExecutor>(provider => provider.GetRequiredService<TraceQuerier>());
-        var runnerRoot = ResolveRunnerRoot(configuration);
-        services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
         services.AddScoped<ISessionCommandDispatcher, RunnerSessionCommandDispatcher>();
         services.AddScoped<IActionCatalogSource>(sp => sp.GetRequiredService<RunnerRegistryCatalogSource>());
@@ -267,14 +267,6 @@ public static class MohistServiceRegistration
         }
 
         return dbPath;
-    }
-
-    private static string? ResolveRunnerRoot(IConfiguration configuration)
-    {
-        var configured = configuration[MohistWorkspaceLayout.RunnerRootConfigurationKey]
-            ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(MohistWorkspaceLayout.RunnerRootEnvironmentVariable)
-            ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(MohistWorkspaceLayout.WorkspaceRootEnvironmentVariable);
-        return string.IsNullOrWhiteSpace(configured) ? null : configured;
     }
 
     private static void CopyJsonOptions(System.Text.Json.JsonSerializerOptions source, System.Text.Json.JsonSerializerOptions target)

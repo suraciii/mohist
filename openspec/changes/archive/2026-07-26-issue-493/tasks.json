@@ -1,0 +1,139 @@
+{
+  "project": "mohist",
+  "description": "Align Server ownership boundaries by removing dead workspace execution, enforcing module dependencies, and colocating durable domain reactions without breaking dead-letter redelivery.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Remove Server-local workspace execution",
+      "spec": "specs/server-architecture-alignment/spec.md#Runner-owned-workspace-queries",
+      "description": "Remove the unused `IGitService` and `GitService` execution surface, its DI registration, runner-root helper, fake, and fixture overrides. Preserve the existing `IRunnerWorkspaceClient` path so all workspace reads and removal continue to be delegated to the assigned runner.",
+      "acceptanceCriteria": [
+        "Production and test code contain no `IGitService`, `GitService`, or `FakeGitService` references.",
+        "Workspace route coverage continues to prove requests are forwarded through `IRunnerWorkspaceClient`.",
+        "The Server builds and the affected workspace API/spec tests pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server has no local git/workspace execution registration or test fake; workspace APIs remain runner-backed.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not replace the deleted service with another Server-local adapter."
+    },
+    {
+      "id": "T-002",
+      "title": "Codify Server ownership and Epic dependency rules",
+      "spec": "specs/server-architecture-alignment/spec.md#Daemon-self-management-ownership",
+      "description": "Document daemon self-management and runner failure classifications as facts in `design/architecture.md`. Extend the architecture dependency matrix to include Epic while explicitly permitting only the observed Issue/Epic same-context directions.",
+      "acceptanceCriteria": [
+        "The architecture table scopes Server process execution to Mohist daemon self-management and excludes user-project execution.",
+        "The facts-and-decisions section states that retry classifications are runner facts and Workflow is the retry decision authority.",
+        "Architecture tests include Epic, permit the existing Issue/Epic collaboration directions, and fail for an unapproved Epic dependency.",
+        "Mohist.Server.ArchTests pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Architecture documentation and dependency guards consistently encode Server, Runner, Workflow, Issue, and Epic ownership.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This task also satisfies `Epic-dependency-enforcement` and `Runner-reports-facts-and-Workflow-decides-retries`."
+    },
+    {
+      "id": "T-003",
+      "title": "Stabilize durable handler identities",
+      "spec": "specs/server-architecture-alignment/spec.md#Domain-owned-durable-reactions",
+      "description": "Extend subscription registration and dispatch to use an optional explicit handler identity instead of always deriving one from the runtime full type name. Preserve the old `Mohist.Server.Events.Subscriptions.*` identities for every handler that will move, so historical and newly created dead letters resolve after namespace relocation.",
+      "acceptanceCriteria": [
+        "A subscription without an explicit identity retains the current full-type-name identity.",
+        "A relocated handler can declare its pre-relocation full name as its durable identity.",
+        "A dead-letter row recorded with a moved handler's pre-relocation identity is redelivered to the relocated handler.",
+        "Event dispatcher unit tests, including the legacy-identity redelivery regression, pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Durable subscription identity is explicit where needed and remains stable across namespace relocation.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the `FailingHandler` storage schema unchanged; compatibility is encoded in the subscription identity."
+    },
+    {
+      "id": "T-004",
+      "title": "Colocate Issue and Epic lifecycle reactions",
+      "spec": "specs/server-architecture-alignment/spec.md#Domain-owned-durable-reactions",
+      "description": "Move Issue workflow start, workflow completion, epic-change, and composite handlers plus `ParentCompositeRecomputeDispatcher` into Issue. Move all Epic auto-progress handlers plus `EpicProgressRecomputeDispatcher` and `EpicEventRecomputeDispatcher` into Epic, assigning each its legacy durable identity from T-003.",
+      "acceptanceCriteria": [
+        "`IssueWorkflowStartHandler`, `IssueWorkflowCompletionHandler`, `IssueEpicChangedHandler`, every `IssueComposite*Handler`, and `ParentCompositeRecomputeDispatcher` reside in Issue.",
+        "Every `Epic*Handler`, `EpicProgressRecomputeDispatcher`, and `EpicEventRecomputeDispatcher` resides in Epic.",
+        "Existing Issue and Epic handler tests continue to verify subscriptions, recomputation, workflow context refresh, idempotent behavior, and dispatcher failure handling.",
+        "The affected Server spec tests pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Issue and Epic lifecycle reactions are discoverable with their owning domains and retain their durable event behavior.",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Keep CloudEvent contracts and assembly scanning unchanged."
+    },
+    {
+      "id": "T-005",
+      "title": "Colocate Workflow and Runner lifecycle reactions",
+      "spec": "specs/server-architecture-alignment/spec.md#Domain-owned-durable-reactions",
+      "description": "Move `WorkflowStageLockReleaseHandler` into Workflow and `RunnerWorkflowTerminalStatusHandler` into Runner, each with its legacy durable identity. Retain current subscription patterns, awaited dispatch failures, and runner cleanup eligibility semantics.",
+      "acceptanceCriteria": [
+        "Workflow stage-completed and stage-failed events still release the corresponding stage lock through durable dispatch.",
+        "Completed and stopped workflow runs still notify the owning runner, while failed runs remain cleanup-ineligible.",
+        "Both handlers reside in their assigned feature modules and retain their pre-relocation durable identities.",
+        "Focused stage-lock and runner terminal-status unit/spec tests pass after explicit test registrations and imports are updated."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Workflow and Runner lifecycle reactions reside with their owning modules without changing workspace cleanup behavior.",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Do not move runner filesystem operations into Server."
+    },
+    {
+      "id": "T-006",
+      "title": "Colocate Agent routing reactions",
+      "spec": "specs/server-architecture-alignment/spec.md#Domain-owned-durable-reactions",
+      "description": "Move `RoutingDispatchHandler`, `MentionDispatchHandler`, `RoutedAgentLaunchContextResolver`, `ResponsePromptRenderer`, and `MentionTokenParser` into Agent, preserving the two handlers' legacy durable identities. Preserve wildcard routing, envelope-only evaluation, self-response protection, mention loop prevention, and Agent launch behavior.",
+      "acceptanceCriteria": [
+        "The Agent routing and mention handlers and their listed helpers reside in Agent and remain assembly-discovered exactly once.",
+        "Routing behavior continues to preserve event lineage, inactive-agent handling, watch behavior, self-response suppression, and mention loop prevention.",
+        "The moved handlers retain their pre-relocation durable identities.",
+        "Routing and mention unit/spec coverage passes, including service-graph registration assertions."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Agent event routing is colocated with Agent state and launch behavior while retaining existing delivery semantics.",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Do not broaden routing rule semantics or alter event payloads."
+    },
+    {
+      "id": "T-007",
+      "title": "Colocate notification reactions and verify boundary alignment",
+      "spec": "specs/server-architecture-alignment/spec.md#Domain-owned-durable-reactions",
+      "description": "Move `InboxProjectionHandler` into Inbox and `HermesIssueNotificationHandler` into Notifications with their legacy durable identities. Preserve Inbox durable projection behavior and Hermes asynchronous best-effort delivery, then add the source-level inventory assertion and run the issue's complete verification suite.",
+      "acceptanceCriteria": [
+        "`InboxProjectionHandler` resides in Inbox and retains durable dispatcher retry/dead-letter behavior for projection failures.",
+        "`HermesIssueNotificationHandler` resides in Notifications and preserves asynchronous best-effort delivery: post-enqueue failures are logged and do not enter CloudEvent dispatcher retry or dead-letter handling.",
+        "Every handler and helper in the design inventory resides in its assigned feature module, and `Events/Subscriptions` contains no domain subscription handler.",
+        "All moved handlers retain their pre-relocation durable identities and service-graph registration coverage passes.",
+        "`npm test`, `npm run typecheck -w packages/web`, and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Inbox and Notifications reactions are colocated with their owners, and the complete Server/Web verification suite proves the aligned plan.",
+      "dependsOn": ["T-003", "T-004", "T-005", "T-006"],
+      "passes": false,
+      "notes": "Keep generic event dispatch, persistence, and CloudEvent contracts in Infrastructure."
+    }
+  ]
+}

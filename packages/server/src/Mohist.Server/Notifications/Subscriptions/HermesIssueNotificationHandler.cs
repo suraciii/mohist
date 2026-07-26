@@ -7,18 +7,19 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Inbox;
 using Mohist.Server.Issue.Domain.Events;
-using Mohist.Server.Notifications;
 using Mohist.Server.Workflow.Domain.Run;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
-namespace Mohist.Server.Events.Subscriptions;
+namespace Mohist.Server.Notifications.Subscriptions;
 
-[Subscription(Type =
-    EventCatalog.ReverseDns.WorkflowRunFailed + "|" +
-    EventCatalog.ReverseDns.StageApprovalRequested + "|" +
-    EventCatalog.ReverseDns.IssueWorkStarted + "|" +
-    EventCatalog.ReverseDns.IssueCompleted + "|" +
-    EventCatalog.ReverseDns.AgentJobFailed)]
+[Subscription(
+    Type =
+        EventCatalog.ReverseDns.WorkflowRunFailed + "|" +
+        EventCatalog.ReverseDns.StageApprovalRequested + "|" +
+        EventCatalog.ReverseDns.IssueWorkStarted + "|" +
+        EventCatalog.ReverseDns.IssueCompleted + "|" +
+        EventCatalog.ReverseDns.AgentJobFailed,
+    Identity = "Mohist.Server.Events.Subscriptions.HermesIssueNotificationHandler")]
 public sealed class HermesIssueNotificationHandler : ICloudEventHandler
 {
     private readonly IServiceScopeFactory _scopeFactory;

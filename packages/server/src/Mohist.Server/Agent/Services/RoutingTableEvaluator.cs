@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 using Mohist.Server.Agent.Domain;
-using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Infrastructure.Events.Matching;
 using Mohist.Server.Infrastructure.Hosting;
 

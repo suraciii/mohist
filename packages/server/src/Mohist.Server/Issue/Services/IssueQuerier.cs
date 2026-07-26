@@ -124,7 +124,7 @@ public class IssueQuerier : IScopedService
     /// Reverse lookup: returns the project-scoped issue reference
     /// bound to <paramref name="workflowRunId"/>, or <c>null</c> when no
     /// in-progress issue is bound. Used by
-    /// <c>Events/Subscriptions/IssueWorkflowCompletionHandler</c> to
+    /// <c>Issue/Subscriptions/IssueWorkflowCompletionHandler</c> to
     /// resolve the owning issue from a <c>com.mohist.workflow.run.completed</c>
     /// CloudEvent (whose payload carries no issue context).
     /// <para>

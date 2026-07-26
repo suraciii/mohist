@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
-using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;

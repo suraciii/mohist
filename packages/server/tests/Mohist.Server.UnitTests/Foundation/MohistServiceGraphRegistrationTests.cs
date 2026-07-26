@@ -1,12 +1,16 @@
+using System.Reflection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
-using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Agent.Subscriptions;
+using Mohist.Server.Inbox.Subscriptions;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Notifications;
+using Mohist.Server.Notifications.Subscriptions;
 using Orleans.Hosting;
 using Xunit;
 
@@ -37,6 +41,18 @@ public sealed class MohistServiceGraphRegistrationTests
         AssertSingleRegistration<IEnumerable<Subscription>>(services);
         AssertSingleRegistration<InboxProjectionHandler>(services);
         AssertSingleRegistration<RoutingDispatchHandler>(services);
+        AssertSingleRegistration<MentionDispatchHandler>(services);
+        AssertSingleRegistration<IAgentRuntimeOverrideResolver>(services);
+        Assert.Equal(
+            "Mohist.Server.Events.Subscriptions.RoutingDispatchHandler",
+            typeof(RoutingDispatchHandler).GetCustomAttribute<SubscriptionAttribute>()?.Identity);
+        Assert.Equal(
+            "Mohist.Server.Events.Subscriptions.MentionDispatchHandler",
+            typeof(MentionDispatchHandler).GetCustomAttribute<SubscriptionAttribute>()?.Identity);
+        Assert.Equal(
+            "Mohist.Server.Events.Subscriptions.InboxProjectionHandler",
+            typeof(InboxProjectionHandler).GetCustomAttribute<SubscriptionAttribute>()?.Identity);
+        AssertSingleRegistration<HermesIssueNotificationHandler>(services);
         AssertSingleRegistration<HermesIssueNotificationRenderer>(services);
         AssertSingleRegistration<IHermesIssueNotificationDispatcher>(services);
         AssertSingleRegistration<IAgentJobDispatchObserver>(services);

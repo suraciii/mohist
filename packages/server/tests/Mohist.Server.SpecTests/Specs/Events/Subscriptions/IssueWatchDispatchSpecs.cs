@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
-using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
 using Xunit;

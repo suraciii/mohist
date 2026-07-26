@@ -1,4 +1,4 @@
-using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Agent.Subscriptions;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Events;

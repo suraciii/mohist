@@ -36,15 +36,6 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
     {
         // Given an issue bound to a project repository whose path and base branch are
         // subsequently changed in project configuration.
-        _fixture.Git.Reset();
-        _fixture.Git.BranchExists = true;
-        _fixture.Git.Diff = new GitDiffResult
-        {
-            Files = [new DiffFile("a.txt", 1, 0, "@@ -1 +1 @@\n-x\n+y\n", false)],
-            TotalAdditions = 1,
-            TotalDeletions = 1,
-        };
-        _fixture.Git.AheadBehind = (1, 0);
         _fixture.RunnerWorkspace.Reset();
         _fixture.RunnerWorkspace.WorkspaceStatus = new WorkspaceStatus
         {
@@ -58,7 +49,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         };
         _fixture.RunnerWorkspace.Diff = new RunnerWorkspaceDiffResult(
             "release", "mohist/run-test", "merge-base", 1, 0, 1, 1, 1,
-            [new DiffFile("a.txt", 1, 0, "@@ -1 +1 @@\n-x\n+y\n", false)]);
+            [new Mohist.Server.Runner.Services.SignalR.DiffFile("a.txt", 1, 0, "@@ -1 +1 @@\n-x\n+y\n", false)]);
 
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary-old", "develop");
         var issue = await CreateIssueAsync(projectId, "Repo path drifts", "secondary");
@@ -81,18 +72,12 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         // The diff endpoint passes the run-owned repository context even
         // after the Project declaration is replaced.
         Assert.Equal("develop", _fixture.RunnerWorkspace.LastBaseBranch);
-
-        // Then the diff git call used the latest path resolved from the current project
-        // configuration, not the repository fields resolved at issue creation.
-        Assert.NotEmpty(_fixture.Git.Diff.Files);
     }
 
     [Fact]
     public async Task GivenReferencedRepositoryRemoved_WhenUserRequestsWorkspaceEndpoints_ThenApiReturnsRepositoryConfigurationProblem()
     {
         // Given an issue bound to a project repository whose configuration is later removed.
-        _fixture.Git.Reset();
-        _fixture.Git.BranchExists = true;
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Repo gets removed", "secondary");
         await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);

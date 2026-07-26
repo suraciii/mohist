@@ -1,5 +1,6 @@
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Infrastructure.Events.Matching;
 
 namespace Mohist.Server.Api;
@@ -86,7 +87,7 @@ public static class RoutingTestRoutes
         }
 
         public string RenderPrompt(RoutingRule rule, EventMatchInput input) =>
-            Events.Subscriptions.ResponsePromptRenderer.Render(rule.ResponsePrompt, input);
+            ResponsePromptRenderer.Render(rule.ResponsePrompt, input);
     }
 }
 

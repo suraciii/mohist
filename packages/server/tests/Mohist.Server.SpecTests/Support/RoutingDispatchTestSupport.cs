@@ -6,7 +6,8 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
-using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Agent.Subscriptions;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -337,6 +338,8 @@ internal static class RoutingDispatchTestSupport
                 services.AddScoped<WorkflowRunQuerier>();
                 services.AddSingleton<IActionCatalogSource>(NullActionCatalogSource.Instance);
                 services.AddScoped<IssueWorkflowProfileManager>();
+                services.AddScoped<IAgentRuntimeOverrideResolver>(provider =>
+                    provider.GetRequiredService<IssueWorkflowProfileManager>());
                 services.AddScoped<RoutingTableEvaluator>();
                 configure?.Invoke(services);
                 return services.BuildServiceProvider();
