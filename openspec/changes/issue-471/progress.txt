@@ -83,3 +83,9 @@
 - Added a TestServer-only `OtlpRequestBodyReadProbe` startup filter. Marked requests receive a wrapped server-side body stream that records the first read, and fixture reset clears it between tests.
 - The full-slot JSON and protobuf `429` specs mark their requests and assert that the route returned without reading either body.
 - `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore` passes all 1508 UnitTests. The full SpecTests run and `npm test` continue to reproduce only the documented unrelated dispatcher flake: 3245 / 3246 specs pass; UnitTests (1508), ArchTests (32), CLI tests (1327), and definition tests (175) pass within `npm test` before it stops.
+
+### CI repair: cancellation assertion subtype
+
+- PR #221's `.NET build and test` job failed `IngestBatch_CancelledBeforeLeaseAcquire_NoSavedCounts`: `SemaphoreSlim.WaitAsync` produced `TaskCanceledException`, while the test required the exact `OperationCanceledException` type.
+- Changed the assertion to `Assert.ThrowsAnyAsync<OperationCanceledException>`, preserving the cancellation contract while accepting its standard subtype.
+- A full local SpecTests run after the change no longer reports the telemetry cancellation assertion. It reached 3245 / 3246 passing before the unrelated `AgentJobGrainSpecs.SubmitAsync_IdenticalSecondCallAfterRunning_IsIdempotent` timed out while its status remained Pending.
