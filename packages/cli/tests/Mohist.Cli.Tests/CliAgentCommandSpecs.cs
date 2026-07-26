@@ -655,7 +655,7 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
-    public async Task AgentCreate_ResolvesInstructionsFromDash()
+    public async Task AgentCreate_ResolvesInstructionsFromFileDash()
     {
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
         {
@@ -664,10 +664,27 @@ public class CliAgentCommandSpecs
         }, HttpStatusCode.Created)));
         var fileSystem = FileSystemWithProject();
 
-        var stdinExit = await RunAsync(handler, ["agent", "create", "--name", "coder", "--instructions", "-"], fileSystem: fileSystem, standardInput: new StringReader("stdin prompt"));
+        var stdinExit = await RunAsync(handler, ["agent", "create", "--name", "coder", "--instructions-file", "-"], fileSystem: fileSystem, standardInput: new StringReader("stdin prompt"));
 
         Assert.Equal(0, stdinExit);
         Assert.Equal("stdin prompt", JsonNode.Parse(handler.Requests[0].Body!)!["instructions"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task AgentCreate_RejectsInstructionsDashWithoutFileOption()
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "create", "--name", "coder", "--instructions", "-"],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--instructions-file -", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]

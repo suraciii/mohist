@@ -15,8 +15,8 @@
 
 ```bash
 mo repo list
-mo repo add server --git-url /path/to/my-server --base-branch main
-mo repo add web    --git-url /path/to/my-web    --base-branch main
+mo repo create server --git-url /path/to/my-server --base-branch main
+mo repo create web    --git-url /path/to/my-web    --base-branch main
 mo repo set-default server
 mo repo update web --base-branch develop
 mo repo delete web

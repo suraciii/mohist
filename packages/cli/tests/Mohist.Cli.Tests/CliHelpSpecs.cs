@@ -98,6 +98,20 @@ public sealed class CliHelpSpecs
     }
 
     [Fact]
+    public async Task NestedAgentJobHelp_ExcludesImplementationDetails()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["agent", "job", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("List AgentJobs for an Agent profile", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("GET", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("/api/", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task IssueViewHelp_ListsRuntimeJsonFields()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);

@@ -21,8 +21,8 @@ internal static class EpicCommands
         epic.Subcommands.Add(BuildCreate(api));
         epic.Subcommands.Add(BuildView(api));
         epic.Subcommands.Add(BuildEdit(api));
-        epic.Subcommands.Add(BuildLink(api));
-        epic.Subcommands.Add(BuildUnlink(api));
+        epic.Subcommands.Add(BuildAdd(api));
+        epic.Subcommands.Add(BuildRemove(api));
         epic.Subcommands.Add(BuildStart(api));
         epic.Subcommands.Add(BuildPause(api));
         epic.Subcommands.Add(BuildResume(api));
@@ -209,9 +209,9 @@ internal static class EpicCommands
         return cmd;
     }
 
-    private static Command BuildLink(MohistCliApi api)
+    private static Command BuildAdd(MohistCliApi api)
     {
-        var cmd = new Command("link", "Link an issue to an epic");
+        var cmd = new Command("add", "Add an issue to an epic");
         var epicArg = new Argument<int>("epic") { Description = "Epic number" };
         var issueArg = new Argument<int>("issue") { Description = "Issue number" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
@@ -228,9 +228,9 @@ internal static class EpicCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
-            return LinkAsync();
+            return AddAsync();
 
-            async Task<int> LinkAsync()
+            async Task<int> AddAsync()
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
@@ -249,9 +249,9 @@ internal static class EpicCommands
         return cmd;
     }
 
-    private static Command BuildUnlink(MohistCliApi api)
+    private static Command BuildRemove(MohistCliApi api)
     {
-        var cmd = new Command("unlink", "Unlink an issue from an epic");
+        var cmd = new Command("remove", "Remove an issue from an epic");
         var epicArg = new Argument<int>("epic") { Description = "Epic number" };
         var issueArg = new Argument<int>("issue") { Description = "Issue number" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
@@ -268,9 +268,9 @@ internal static class EpicCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
-            return UnlinkAsync();
+            return RemoveAsync();
 
-            async Task<int> UnlinkAsync()
+            async Task<int> RemoveAsync()
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);

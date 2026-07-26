@@ -312,7 +312,7 @@ mo session list --issue 42 --json id,name,status
 mo session transcript session_abc123
 
 # 从 stdin 提交长内容
-mo issue comment add 42 --body-file -
+mo issue comment create 42 --body-file -
 
 # 调整当前 Run 的变量；后续 attempt 使用新值
 mo run variable set --issue 42 agent.model openai/gpt-5

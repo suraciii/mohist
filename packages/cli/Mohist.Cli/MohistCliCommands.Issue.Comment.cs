@@ -7,13 +7,13 @@ internal static partial class IssueCommands
     private static Command BuildComment(MohistCliApi api)
     {
         var comment = new Command("comment", "Manage issue comments");
-        comment.Subcommands.Add(BuildCommentAdd(api));
+        comment.Subcommands.Add(BuildCommentCreate(api));
         return comment;
     }
 
-    private static Command BuildCommentAdd(MohistCliApi api)
+    private static Command BuildCommentCreate(MohistCliApi api)
     {
-        var cmd = new Command("add", "Add a comment to an issue");
+        var cmd = new Command("create", "Create a comment on an issue");
         var numberArg = NumberArg();
         var authorOpt = new Option<string?>("--author") { Description = "Declared comment author (1-100 characters)" };
         var bodyOpt = new Option<string?>("--body", "-b") { Description = "Comment body text (mutually exclusive with --body-file)" };

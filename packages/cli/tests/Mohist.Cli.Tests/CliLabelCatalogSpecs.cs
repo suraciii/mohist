@@ -117,7 +117,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "module", "--description", "Classifies the subsystem"], output, error, fs, executor);
+            http, ["label", "create", "module", "--description", "Classifies the subsystem"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -145,7 +145,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "module", "--description", "Classifies", "--supported-values", "auth,ui"], output, error, fs, executor);
+            http, ["label", "create", "module", "--description", "Classifies", "--supported-values", "auth,ui"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -159,7 +159,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "module", "--description", "Classifies", "--supported-values", "auth,,ui"], output, error, fs, executor);
+            http, ["label", "create", "module", "--description", "Classifies", "--supported-values", "auth,,ui"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -172,7 +172,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "Module", "--description", "Classifies"], output, error, fs, executor);
+            http, ["label", "create", "Module", "--description", "Classifies"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -185,7 +185,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "module", "--description", "   "], output, error, fs, executor);
+            http, ["label", "create", "module", "--description", "   "], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -209,7 +209,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "refactor", "--description", "Custom refactor desc"], output, error, fs, executor);
+            http, ["label", "create", "refactor", "--description", "Custom refactor desc"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("refactor", error.ToString(), StringComparison.OrdinalIgnoreCase);

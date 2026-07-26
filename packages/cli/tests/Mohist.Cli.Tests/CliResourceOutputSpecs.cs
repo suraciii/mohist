@@ -210,7 +210,7 @@ public sealed class CliResourceOutputSpecs
             }));
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["epic", "unlink", "12", "4", "--project", "proj_test", "--json", "number,title"], output, error, fs, executor);
+            http, ["epic", "remove", "12", "4", "--project", "proj_test", "--json", "number,title"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         Assert.Equal(["number", "title"], JsonNode.Parse(output.ToString())!.AsObject().Select(p => p.Key).ToArray());

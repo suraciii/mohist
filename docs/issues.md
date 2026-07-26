@@ -156,7 +156,7 @@ mo run reject --issue 42 --message "Missing error handling in proposal"  # 打�
 `reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么（审批者可以是人也可以是自动化，见 [核心概念 · Approval](concepts.md#approval审批)）。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
 
 ```bash
-mo issue comment add 42 --body "Reject because: missing error handling in proposal"
+mo issue comment create 42 --body "Reject because: missing error handling in proposal"
 mo run reject --issue 42 -m "See comment: missing error handling"
 ```
 
@@ -164,7 +164,7 @@ mo run reject --issue 42 -m "See comment: missing error handling"
 
 ```bash
 # 加评论
-mo issue comment add 42 --body "Looks good but check edge cases"
+mo issue comment create 42 --body "Looks good but check edge cases"
 
 # 删除评论目前不提供 CLI 命令；使用 Web UI 或 API。
 ```

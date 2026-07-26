@@ -10,7 +10,7 @@ internal static class RepositoryCommands
         var repository = new Command("repo", "Repository management");
 
         repository.Subcommands.Add(BuildList(api));
-        repository.Subcommands.Add(BuildAdd(api));
+        repository.Subcommands.Add(BuildCreate(api));
         repository.Subcommands.Add(BuildEdit(api));
         repository.Subcommands.Add(BuildSetDefault(api));
         repository.Subcommands.Add(BuildDelete(api));
@@ -50,9 +50,9 @@ internal static class RepositoryCommands
         return cmd;
     }
 
-    private static Command BuildAdd(MohistCliApi api)
+    private static Command BuildCreate(MohistCliApi api)
     {
-        var cmd = new Command("add", "Add a repository");
+        var cmd = new Command("create", "Create a repository");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
         var gitUrlOpt = new Option<string>("--git-url", "-u") { Description = "Git URL" };
         var baseBranchOpt = new Option<string?>("--base-branch", "-b") { Description = "Base branch" };

@@ -247,18 +247,19 @@ internal static class SessionCommands
 
             async Task<int> FollowupAsync()
             {
+                var resolvedText = await BodyInputResolver.ResolveAsync(
+                    text, textFile,
+                    new BodyInputResolver.SourceFlags("--text", "--text-file", "text"),
+                    api.FileSystem, api.StandardInput, api.Error);
+                if (resolvedText is BodyInputResolver.Result.Failure)
+                    return CommandHelpHook.RenderNearestUsage(ctx, api.Error);
+
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
 
-                var resolvedText = await BodyInputResolver.ResolveAsync(
-                    text, textFile,
-                    new BodyInputResolver.SourceFlags("--text", "--text-file", "text"),
-                    api.FileSystem, api.StandardInput, api.Error);
-                if (resolvedText is BodyInputResolver.Result.Failure)
-                    return 1;
                 var textValue = ((BodyInputResolver.Result.Success)resolvedText).Body;
                 return await api.PrintPostWithOutputAsync(
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/followup"),

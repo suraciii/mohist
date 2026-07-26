@@ -72,8 +72,8 @@ Epic 和 Issue 都用 Project 内的编号作为永久身份。命令、页面�
 ### CLI（推荐）
 
 ```bash
-mo epic link <epic-number> <issue-number>
-mo epic unlink <epic-number> <issue-number>
+mo epic add <epic-number> <issue-number>
+mo epic remove <epic-number> <issue-number>
 ```
 
 关联会把 Issue 的当前 Epic 改为指定 Epic；若它原本属于另一个 Epic，则直接完成迁移。

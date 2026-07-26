@@ -10,7 +10,7 @@ internal static class LabelCommands
         var label = new Command("label", "Issue label utilities");
 
         label.Subcommands.Add(BuildList(api));
-        label.Subcommands.Add(BuildAdd(api));
+        label.Subcommands.Add(BuildCreate(api));
         label.Subcommands.Add(BuildEdit(api));
         label.Subcommands.Add(BuildDelete(api));
 
@@ -48,9 +48,9 @@ internal static class LabelCommands
         return cmd;
     }
 
-    private static Command BuildAdd(MohistCliApi api)
+    private static Command BuildCreate(MohistCliApi api)
     {
-        var cmd = new Command("add", "Add a label definition to the project catalog");
+        var cmd = new Command("create", "Create a label definition in the project catalog");
         var keyArg = new Argument<string>("key") { Description = "Label key (lowercase, dashes allowed)" };
         var descriptionOpt = new Option<string>("--description") { Description = "Description of when to use this label" };
         var supportedValuesOpt = new Option<string?>("--supported-values")

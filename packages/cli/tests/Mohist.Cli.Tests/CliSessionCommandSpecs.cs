@@ -649,8 +649,9 @@ public class CliSessionCommandSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["session", "followup", StableSessionId], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Contains("text is required", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -664,8 +665,9 @@ public class CliSessionCommandSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["session", "followup", StableSessionId, "--text", "", "--text-file", "/tmp/t"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 

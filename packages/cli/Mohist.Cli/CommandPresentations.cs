@@ -291,6 +291,14 @@ internal static class CommandPresentations
                     Boundary: "Launch returns both the AgentJob id (work owner) and the AgentSession id (conversation owner)."));
                 CommandPresentationCatalog.Attach(Find(group, "job"), new CommandPresentation(
                     CommandCapability.Automation, "Read AgentJobs (the work result owner)"));
+                var job = Find(group, "job");
+                if (job is not null)
+                {
+                    CommandPresentationCatalog.Attach(Find(job, "list"), new CommandPresentation(
+                        CommandCapability.Automation, "List AgentJobs for an Agent profile"));
+                    CommandPresentationCatalog.Attach(Find(job, "view"), new CommandPresentation(
+                        CommandCapability.Automation, "Read an AgentJob's current status and result"));
+                }
                 CommandPresentationCatalog.Attach(Find(group, "install"), new CommandPresentation(
                     CommandCapability.Automation, "Install a built-in Agent preset"));
                 CommandPresentationCatalog.Attach(Find(group, "model"), new CommandPresentation(

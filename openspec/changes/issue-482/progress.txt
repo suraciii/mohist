@@ -185,3 +185,16 @@ Review-fix progress
   obsolete `*-stdin` options are rejected.
 - Focused CLI verification: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore`
   passed, 1378 tests.
+
+Review-fix progress (round 2)
+
+- Resource creation now uses `create`; Epic membership now uses `add` and
+  `remove`. Current documentation, packaged Skills, and CLI coverage use the
+  same forms; the previous verbs are parser-rejected.
+- Agent instructions now use `--instructions-file <path|->` for file and stdin
+  input. A bare `--instructions -` is rejected during parsing.
+- Follow-up text and Issue archive local validation now returns scoped usage
+  before Project resolution. Agent Job nested help has explicit user-facing
+  presentations and no longer reveals request details.
+- Focused CLI verification: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore`
+  passed, 1385 tests.

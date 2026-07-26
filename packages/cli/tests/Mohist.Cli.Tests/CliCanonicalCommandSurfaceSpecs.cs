@@ -226,6 +226,11 @@ public class CliCanonicalCommandSurfaceSpecs
 
     [Theory]
     [InlineData("label", "update", "module")]
+    [InlineData("label", "add", "module")]
+    [InlineData("repo", "add", "origin")]
+    [InlineData("epic", "link", "1", "2")]
+    [InlineData("epic", "unlink", "1", "2")]
+    [InlineData("issue", "comment", "add", "1")]
     [InlineData("issue", "template", "get", "feature")]
     [InlineData("issue", "template", "ls")]
     public async Task RemovedResourceVerbOrAlias_IsRejectedAsUsageFailure(params string[] args)

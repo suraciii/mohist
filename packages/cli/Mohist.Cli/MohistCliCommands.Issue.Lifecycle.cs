@@ -105,14 +105,18 @@ internal static partial class IssueCommands
             {
                 if (allCompleted && number is not null)
                 {
-                    api.Error.WriteLine("<number> and --all-completed are mutually exclusive");
-                    return 1;
+                    return CommandHelpHook.RenderUsageFailure(
+                        ctx,
+                        api.Error,
+                        "<number> and --all-completed are mutually exclusive");
                 }
 
                 if (!allCompleted && string.IsNullOrWhiteSpace(number))
                 {
-                    api.Error.WriteLine("<number> is required unless --all-completed is used");
-                    return 1;
+                    return CommandHelpHook.RenderUsageFailure(
+                        ctx,
+                        api.Error,
+                        "<number> is required unless --all-completed is used");
                 }
 
                 if (allCompleted)

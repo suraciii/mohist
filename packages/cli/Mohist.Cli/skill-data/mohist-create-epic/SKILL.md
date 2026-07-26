@@ -53,8 +53,8 @@ follow-up.)
 ### Linking issues to an epic
 
 ```bash
-mo epic link <epic-id-or-number> <issue-id-or-number>
-mo epic unlink <epic-id-or-number> <issue-id>
+mo epic add <epic-id-or-number> <issue-id-or-number>
+mo epic remove <epic-id-or-number> <issue-id>
 ```
 
 Constraint: **an issue belongs to at most one primary epic.** Linking an issue
@@ -149,7 +149,7 @@ Before creating, present to the user and wait for confirmation:
 
 1. `title`, a one-line `description` gist, and `priority`.
 2. The planned linked-issue list (numbers + titles) — or state "link later".
-3. On confirm, run `mo epic create`; then `mo epic link` for each planned issue.
+3. On confirm, run `mo epic create`; then `mo epic add` for each planned issue.
 
 After creation, also confirm the autopilot posture:
 
