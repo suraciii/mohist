@@ -2,6 +2,6 @@
 
 ## Findings
 
-- [P1] 计划遗漏了 `design/observability.md` 的现状同步。该文档的“当前差距”仍断言 `otel.db` 没有保留期限、空间上限或自动清理，接收和写入没有大小边界，状态也不能展示增长、拒绝、丢弃和降级原因（`design/observability.md:89`）。这些正是本 issue 以“资源预算验收通过”为前提、且当前实现已经具备的能力。T-001 只要求更新“可观测性和自托管文档”，没有明确修改这份设计文档；完成后仓库将同时声称资源保护未实装、又默认开启依赖这些保护的内置观测。修复任务必须将该 current-gap 段更新为真实剩余差距或删除已完成断言，并在验收条件中锁定这一同步。
+未发现阻断项。T-001 已将 `design/observability.md` 的“当前差距”同步列为明确交付和验收条件，要求移除已完成的资源保护断言，只保留真实未实装能力。默认启用、显式关闭、loopback-only OTLP 接收、Compose 端口表面和状态验证均与当前启动结构及 capability spec 一致。
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
