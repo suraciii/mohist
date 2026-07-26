@@ -17,7 +17,7 @@ internal static class ProjectWorkflowCommands
         var cmd = new Command("set-default", "Set the Project default Workflow Profile");
         var profile = new Argument<string>("profile") { Description = "Profile ID in this Project" };
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.ProjectWorkflowProfile)));
         cmd.Arguments.Add(profile); cmd.Options.Add(project); cmd.Options.Add(projectId); cmd.Options.Add(output);
         cmd.SetAction(async ctx =>
         {
@@ -40,10 +40,10 @@ internal static class ProjectWorkflowCommands
         return prompt;
     }
 
-    private static (Option<string?> Project, Option<string?> ProjectId, Option<string?> Output) AddOptions(Command cmd)
+    private static (Option<string?> Project, Option<string?> ProjectId, Option<string?> Output) AddOptions(Command cmd, MohistCliApi.TableShape shape)
     {
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(shape)));
         cmd.Options.Add(project); cmd.Options.Add(projectId); cmd.Options.Add(output);
         return (project, projectId, output);
     }
@@ -51,7 +51,7 @@ internal static class ProjectWorkflowCommands
     private static Command BuildPromptGet(MohistCliApi api)
     {
         var cmd = new Command("get", "Get Project Prompts");
-        var (project, projectId, output) = AddOptions(cmd);
+        var (project, projectId, output) = AddOptions(cmd, MohistCliApi.TableShape.WorkflowProfilePrompt);
         cmd.SetAction(async ctx =>
         {
             var (resolved, exit) = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));
@@ -68,7 +68,7 @@ internal static class ProjectWorkflowCommands
         var key = new Argument<string>("key");
         var body = new Option<string>("--body") { Description = "Prompt body, or @<file>" };
         cmd.Arguments.Add(key); cmd.Options.Add(body);
-        var (project, projectId, output) = AddOptions(cmd);
+        var (project, projectId, output) = AddOptions(cmd, MohistCliApi.TableShape.WorkflowProfilePrompt);
         cmd.SetAction(async ctx =>
         {
             var expanded = await api.ExpandAtFileAsync(ctx.GetValue(body), "--body");
@@ -87,7 +87,7 @@ internal static class ProjectWorkflowCommands
     {
         var cmd = new Command("clear", "Clear a Project Prompt");
         var key = new Argument<string>("key"); cmd.Arguments.Add(key);
-        var (project, projectId, output) = AddOptions(cmd);
+        var (project, projectId, output) = AddOptions(cmd, MohistCliApi.TableShape.WorkflowProfilePrompt);
         cmd.SetAction(async ctx =>
         {
             var (resolved, exit) = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));
@@ -102,7 +102,7 @@ internal static class ProjectWorkflowCommands
     {
         var cmd = new Command("preview", "Preview a Project Prompt");
         var key = new Argument<string>("key"); cmd.Arguments.Add(key);
-        var (project, projectId, output) = AddOptions(cmd);
+        var (project, projectId, output) = AddOptions(cmd, MohistCliApi.TableShape.WorkflowProfilePreview);
         cmd.SetAction(async ctx =>
         {
             var (resolved, exit) = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));

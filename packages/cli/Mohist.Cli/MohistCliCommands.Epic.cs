@@ -47,7 +47,7 @@ internal static class EpicCommands
     {
         var cmd = new Command("list", "List epics");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.EpicList)));
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
@@ -81,7 +81,7 @@ internal static class EpicCommands
         var descriptionOpt = new Option<string?>("--description", "-d") { Description = "Epic description" };
         var priorityOpt = new Option<string?>("--priority", "-p") { Description = "Epic priority (p0|p1|p2|p3)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(titleArg);
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(priorityOpt);
@@ -127,7 +127,7 @@ internal static class EpicCommands
         var cmd = new Command("view", "Show epic details");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.EpicShow)));
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -164,7 +164,7 @@ internal static class EpicCommands
         var descriptionOpt = new Option<string?>("--description", "-d") { Description = "New description" };
         var priorityOpt = new Option<string?>("--priority", "-p") { Description = "New priority (p0|p1|p2|p3)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(titleOpt);
         cmd.Options.Add(descriptionOpt);
@@ -215,7 +215,7 @@ internal static class EpicCommands
         var epicArg = new Argument<int>("epic") { Description = "Epic number" };
         var issueArg = new Argument<int>("issue") { Description = "Issue number" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(epicArg);
         cmd.Arguments.Add(issueArg);
         cmd.Options.Add(projectOpt);
@@ -255,7 +255,7 @@ internal static class EpicCommands
         var epicArg = new Argument<int>("epic") { Description = "Epic number" };
         var issueArg = new Argument<int>("issue") { Description = "Issue number" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(epicArg);
         cmd.Arguments.Add(issueArg);
         cmd.Options.Add(projectOpt);
@@ -294,7 +294,7 @@ internal static class EpicCommands
         var cmd = new Command("done", "Mark an epic done");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -346,7 +346,7 @@ internal static class EpicCommands
         var cmd = new Command(name, description);
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);

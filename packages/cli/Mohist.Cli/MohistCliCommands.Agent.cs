@@ -324,7 +324,7 @@ internal static class AgentCommands
         var allOpt = new Option<bool>("--all") { Description = "Include archived agents" };
         var statusOpt = new Option<string?>("--status") { Description = "Filter by status" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentList)));
 
         cmd.Options.Add(allOpt);
         cmd.Options.Add(statusOpt);
@@ -364,7 +364,7 @@ internal static class AgentCommands
         var cmd = new Command("view", "Show agent details");
         var nameOrIdArg = NameOrIdArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentShow)));
 
         cmd.Arguments.Add(nameOrIdArg);
         cmd.Options.Add(projectOpt);
@@ -572,7 +572,7 @@ internal static class AgentCommands
         var repositoryRefOpt = new Option<string?>("--repository") { Description = "Optional context reference: record the repository on the session metadata" };
         var workspacePathOpt = new Option<string?>("--workspace-path") { Description = "Optional context reference: record the workspace path on the session metadata" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionLaunch)));
 
         cmd.Arguments.Add(agentRefArg);
         cmd.Options.Add(promptOpt);
@@ -733,7 +733,7 @@ internal static class AgentCommands
         var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
         var statusOpt = new Option<string?>("--status") { Description = "Filter by job status (pending, running, completed, failed)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentJobList)));
 
         cmd.Arguments.Add(agentRefArg);
         cmd.Options.Add(statusOpt);
@@ -780,7 +780,7 @@ internal static class AgentCommands
             "Show an AgentJob's current status and terminal result. GETs .../agent-jobs/{jobId}.");
         var jobIdArg = new Argument<string>("job-id") { Description = "Agent job id returned by launch" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentJobView)));
 
         cmd.Arguments.Add(jobIdArg);
         cmd.Options.Add(projectOpt);

@@ -22,7 +22,7 @@ internal static class RepositoryCommands
     {
         var cmd = new Command("list", "List repositories");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RepoList)));
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
@@ -58,7 +58,7 @@ internal static class RepositoryCommands
         var baseBranchOpt = new Option<string?>("--base-branch", "-b") { Description = "Base branch" };
         var setDefaultOpt = new Option<bool>("--set-default", "-d") { Description = "Set as default repository" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RepoList)));
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(gitUrlOpt);
         cmd.Options.Add(baseBranchOpt);
@@ -116,7 +116,7 @@ internal static class RepositoryCommands
         var gitUrlOpt = new Option<string?>("--git-url", "-u") { Description = "Git URL" };
         var baseBranchOpt = new Option<string?>("--base-branch", "-b") { Description = "Base branch" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RepoList)));
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(gitUrlOpt);
         cmd.Options.Add(baseBranchOpt);
@@ -168,7 +168,7 @@ internal static class RepositoryCommands
         var cmd = new Command("set-default", "Set a repository as the project default");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RepoList)));
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -204,7 +204,7 @@ internal static class RepositoryCommands
         var cmd = new Command("delete", "Delete a repository");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RepoList)));
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);

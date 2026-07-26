@@ -75,7 +75,7 @@ internal static class SessionCommands
         var runOpt = new Option<string?>("--run") { Description = "Filter by Workflow run id (workflow source)" };
         var limitOpt = new Option<int?>("--limit") { Description = "Maximum number of sessions to return" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionList)));
 
         cmd.Options.Add(agentOpt);
         cmd.Options.Add(issueOpt);
@@ -149,7 +149,7 @@ internal static class SessionCommands
             "Show the unified summary of an AgentSession by its stable Session ID. GETs the project-scoped .../sessions/{sessionId} route that resolves agent-launch and workflow sessions by the same id.");
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id returned by launch or the workflow session list" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionShow)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(projectOpt);
@@ -187,7 +187,7 @@ internal static class SessionCommands
             "Show the transcript of an AgentSession by its stable Session ID. GETs the project-scoped .../sessions/{sessionId}/transcript route that resolves agent-launch and workflow sessions by the same id.");
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id returned by launch or the workflow session list" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionTranscript)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(projectOpt);
@@ -227,7 +227,7 @@ internal static class SessionCommands
         var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file)" };
         var textFileOpt = new Option<string?>("--text-file") { Description = "Read followup text from a UTF-8 file path, or - for stdin (mutually exclusive with --text)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionFollowup)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(textOpt);
@@ -283,7 +283,7 @@ internal static class SessionCommands
         var cmd = new Command(operation, description);
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionRecovery)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(projectOpt);
@@ -322,7 +322,7 @@ internal static class SessionCommands
             "Request interruption of the current Runtime execution only. Sends POST /api/projects/:projectId/agent-sessions/:sessionId/cancel and prints the resulting session state honestly. Does not cancel or rewrite the owning AgentJob lifecycle; the job remains the sole terminal authority.");
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionCancel)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(projectOpt);

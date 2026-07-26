@@ -19,7 +19,7 @@ internal static class AgentModelCommands
 
         var runtimeOpt = new Option<string?>("--runtime") { Description = "Filter by runtime (default: project's configured runtime)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.OpencodeModels)));
 
         cmd.Options.Add(runtimeOpt);
         cmd.Options.Add(projectOpt);

@@ -145,6 +145,21 @@ public sealed class CliHelpSpecs
         Assert.Empty(handler.Requests);
     }
 
+    [Theory]
+    [InlineData(new[] { "workflow", "list", "--help" }, "displayName")]
+    [InlineData(new[] { "skill", "list", "--help" }, "description")]
+    public async Task OutputSelectionHelp_ListsRuntimeJsonFields(string[] args, string expectedField)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("JSON FIELDS", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains(expectedField, output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task ActivityListHelp_ShowsDefaultLimit()
     {

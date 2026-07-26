@@ -71,8 +71,12 @@ internal static class MohistCliCommands
         return (project, projectId);
     }
 
-    internal static Option<string?> OutputOption(string defaultValue = "table", string formats = "table, json") =>
-        CreateOutputOption(defaultValue);
+    internal static Option<string?> OutputOption(ResourceDescriptor descriptor, string defaultValue = "table")
+    {
+        var option = CreateOutputOption(defaultValue);
+        CommandPresentationCatalog.AttachJsonFields(option, descriptor);
+        return option;
+    }
 
     private static Option<string?> CreateOutputOption(string defaultValue)
     {
@@ -86,12 +90,19 @@ internal static class MohistCliCommands
         return option;
     }
 
-    internal static Option<string?> JsonSelectionOption() =>
-        new("--json")
+    internal static Option<string?> JsonSelectionOption() => JsonSelectionOption(null);
+
+    internal static Option<string?> JsonSelectionOption(ResourceDescriptor? descriptor)
+    {
+        var option = new Option<string?>("--json")
         {
             Description = "Return selected fields, or list available fields when no value is supplied",
             Arity = ArgumentArity.ZeroOrOne,
         };
+        if (descriptor is not null)
+            CommandPresentationCatalog.AttachJsonFields(option, descriptor);
+        return option;
+    }
 
     internal const string NoActiveProjectMessage =
         "Run 'mo project use <name-or-id>' or pass --project <name-or-id>";

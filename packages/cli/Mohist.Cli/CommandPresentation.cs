@@ -23,6 +23,7 @@ internal sealed record CommandPresentation(
 internal static class CommandPresentationCatalog
 {
     private static readonly ConditionalWeakTable<Command, CommandPresentation> Table = new();
+    private static readonly ConditionalWeakTable<Option, ResourceDescriptor> JsonFields = new();
 
     public static void Attach(Command? command, CommandPresentation presentation)
     {
@@ -40,4 +41,13 @@ internal static class CommandPresentationCatalog
         command is not null && Table.TryGetValue(command, out var presentation) ? presentation : null;
 
     public static bool Has(Command? command) => command is not null && Table.TryGetValue(command, out _);
+
+    public static void AttachJsonFields(Option option, ResourceDescriptor descriptor)
+    {
+        JsonFields.Remove(option);
+        JsonFields.Add(option, descriptor);
+    }
+
+    public static IReadOnlyList<string>? GetJsonFields(Option option) =>
+        JsonFields.TryGetValue(option, out var descriptor) ? descriptor.Fields : null;
 }

@@ -23,7 +23,7 @@ internal static class ProjectCommands
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List all projects");
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.ProjectList)));
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
@@ -84,7 +84,7 @@ internal static class ProjectCommands
     {
         var cmd = new Command("view", "Show project details");
         var identifierArg = new Argument<string>("project") { Description = "Project name or ID" };
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.ProjectShow)));
         cmd.Arguments.Add(identifierArg);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>

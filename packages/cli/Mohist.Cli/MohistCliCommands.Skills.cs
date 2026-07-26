@@ -7,6 +7,9 @@ namespace Mohist.Cli;
 
 internal static class SkillCommands
 {
+    private static readonly ResourceDescriptor SkillListDescriptor = new(ResourceCardinality.Collection, ["name", "description"]);
+    private static readonly ResourceDescriptor SkillDescriptor = new(ResourceCardinality.Single, ["name", "description", "content"]);
+    private static readonly ResourceDescriptor SkillPathDescriptor = new(ResourceCardinality.Single, ["name", "path"]);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -74,8 +77,8 @@ internal static class SkillCommands
     private static Command BuildList(SkillAssetService assets, MohistCliApi api)
     {
         var list = new Command("list", "List Mohist built-in coder agent skills");
-        var jsonOption = MohistCliCommands.JsonSelectionOption();
-        var descriptor = new ResourceDescriptor(ResourceCardinality.Collection, ["name", "description"]);
+        var jsonOption = MohistCliCommands.JsonSelectionOption(SkillListDescriptor);
+        var descriptor = SkillListDescriptor;
         list.Options.Add(jsonOption);
         list.SetAction(async ctx =>
         {
@@ -101,7 +104,7 @@ internal static class SkillCommands
         var view = new Command("view", "Print packaged Mohist coder agent skill guidance");
         var nameArgument = new Argument<string?>("name") { Arity = ArgumentArity.ZeroOrOne, Description = "Built-in skill name" };
         var fullOption = new Option<bool>("--full") { Description = "Append packaged references and templates" };
-        var jsonOption = MohistCliCommands.JsonSelectionOption();
+        var jsonOption = MohistCliCommands.JsonSelectionOption(SkillDescriptor);
         var allOption = new Option<bool>("--all") { Description = "Print all visible built-in skills" };
 
         view.Arguments.Add(nameArgument);
@@ -113,9 +116,7 @@ internal static class SkillCommands
             var name = ctx.GetValue(nameArgument);
             var full = ctx.GetValue(fullOption);
             var all = ctx.GetValue(allOption);
-            var descriptor = new ResourceDescriptor(
-                all ? ResourceCardinality.Collection : ResourceCardinality.Single,
-                ["name", "description", "content"]);
+            var descriptor = all ? SkillDescriptor with { Cardinality = ResourceCardinality.Collection } : SkillDescriptor;
             var selection = JsonSelection.Parse(descriptor, ctx.GetResult(jsonOption) is not null, ctx.GetValue(jsonOption));
             if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                 return api.WriteJsonSelectionResult(descriptor, selection);
@@ -188,8 +189,8 @@ internal static class SkillCommands
     {
         var path = new Command("path", "Print the packaged path for a Mohist built-in skill");
         var nameArgument = new Argument<string>("name") { Description = "Built-in skill name" };
-        var jsonOption = MohistCliCommands.JsonSelectionOption();
-        var descriptor = new ResourceDescriptor(ResourceCardinality.Single, ["name", "path"]);
+        var jsonOption = MohistCliCommands.JsonSelectionOption(SkillPathDescriptor);
+        var descriptor = SkillPathDescriptor;
 
         path.Arguments.Add(nameArgument);
         path.Options.Add(jsonOption);

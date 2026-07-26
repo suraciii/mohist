@@ -117,7 +117,7 @@ internal static class EventCommands
             Description = "Maximum rows to return (1-500)",
             DefaultValueFactory = _ => 100,
         };
-        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.DeadLetterList)));
         cmd.Options.Add(handlerOpt);
         cmd.Options.Add(limitOpt);
         cmd.Options.Add(outputOpt);
@@ -158,7 +158,7 @@ internal static class EventCommands
             "redeliver",
             "Retry the failing handler recorded by a dead-letter row; this recovery action may repeat delivery side effects.");
         var idArg = new Argument<long>("id") { Description = "Dead-letter id" };
-        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.DeadLetterRedelivery)));
         cmd.Arguments.Add(idArg);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(async ctx =>

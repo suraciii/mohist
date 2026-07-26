@@ -10,7 +10,7 @@ internal static partial class IssueCommands
 
         var statusCmd = new Command("status", "Show workflow status");
         var (statusProjectOpt, statusProjectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var statusOutputOpt = MohistCliCommands.OutputOption();
+        var statusOutputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.WorkflowStatus)));
         statusCmd.Arguments.Add(numberArg);
         statusCmd.Options.Add(statusProjectOpt);
         statusCmd.Options.Add(statusProjectIdOpt);

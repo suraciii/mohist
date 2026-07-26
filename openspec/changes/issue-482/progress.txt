@@ -222,3 +222,12 @@ Review-fix progress (round 5)
   use canonical `edit` and `view` paths.
 - Focused CLI verification passed with 1394 tests; the complete `npm test`
   suite also passed.
+
+Review-fix progress (round 6)
+
+- Output-mode commands now bind their `--json` option to the same runtime
+  descriptor used for field selection; help renders those fields directly.
+- The descriptor is required by `OutputOption`, preventing new output-mode
+  commands from omitting their JSON help fields at compile time.
+- Focused CLI verification passed with 1398 tests; the complete `npm test`
+  suite also passed.

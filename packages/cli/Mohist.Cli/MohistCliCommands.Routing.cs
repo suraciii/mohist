@@ -36,7 +36,7 @@ internal static class RoutingCommands
         var cont = new Option<bool>("--continue") { Description = "Continue evaluating rules after a match." };
         var before = new Option<string?>("--before") { Description = "Insert before this rule." };
         var after = new Option<string?>("--after") { Description = "Insert after this rule." };
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RoutingRule)));
         AddProjectOptions(command, project, projectId);
         command.Options.Add(name); command.Options.Add(match); command.Options.Add(agent); command.Options.Add(prompt);
         command.Options.Add(cont); command.Options.Add(before); command.Options.Add(after);
@@ -65,7 +65,7 @@ internal static class RoutingCommands
     {
         var command = new Command("list", "List routing rules in table order.");
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RoutingRuleList)));
         AddProjectOptions(command, project, projectId); command.Options.Add(output);
         command.SetAction(async ctx =>
         {
@@ -83,7 +83,7 @@ internal static class RoutingCommands
         var command = new Command("view", "Show a routing rule.");
         var target = new Argument<string>("rule") { Description = "Rule id or name." };
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
-        var output = MohistCliCommands.OutputOption();
+        var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RoutingRule)));
         command.Arguments.Add(target); AddProjectOptions(command, project, projectId); command.Options.Add(output);
         command.SetAction(async ctx =>
         {
@@ -103,7 +103,7 @@ internal static class RoutingCommands
         var (project, projectId) = MohistCliCommands.ProjectRefOption();
         var name = new Option<string?>("--name"); var match = new Option<string?>("--match");
         var agent = new Option<string?>("--agent"); var prompt = new Option<string?>("--response-prompt");
-        var cont = new Option<bool?>("--continue"); var output = MohistCliCommands.OutputOption();
+        var cont = new Option<bool?>("--continue"); var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RoutingRule)));
         command.Arguments.Add(target); AddProjectOptions(command, project, projectId);
         command.Options.Add(name); command.Options.Add(match); command.Options.Add(agent); command.Options.Add(prompt); command.Options.Add(cont); command.Options.Add(output);
         command.SetAction(async ctx =>
@@ -125,7 +125,7 @@ internal static class RoutingCommands
     {
         var command = new Command("archive", "Archive a routing rule.");
         var target = new Argument<string>("rule"); var (project, projectId) = MohistCliCommands.ProjectRefOption();
-        var output = MohistCliCommands.OutputOption(); command.Arguments.Add(target); AddProjectOptions(command, project, projectId); command.Options.Add(output);
+        var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RoutingRule))); command.Arguments.Add(target); AddProjectOptions(command, project, projectId); command.Options.Add(output);
         command.SetAction(async ctx =>
         {
             var resolution = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId)); if (resolution.Exit != 0) return resolution.Exit;
@@ -140,7 +140,7 @@ internal static class RoutingCommands
     {
         var command = new Command("move", "Move a routing rule before or after another rule.");
         var target = new Argument<string>("rule"); var (project, projectId) = MohistCliCommands.ProjectRefOption();
-        var before = new Option<string?>("--before"); var after = new Option<string?>("--after"); var output = MohistCliCommands.OutputOption();
+        var before = new Option<string?>("--before"); var after = new Option<string?>("--after"); var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RoutingRule)));
         command.Arguments.Add(target); AddProjectOptions(command, project, projectId); command.Options.Add(before); command.Options.Add(after); command.Options.Add(output);
         command.SetAction(async ctx =>
         {
@@ -155,7 +155,7 @@ internal static class RoutingCommands
     private static Command BuildTest(MohistCliApi api)
     {
         var command = new Command("test", "Dry-run recent project events through the routing table.");
-        var (project, projectId) = MohistCliCommands.ProjectRefOption(); var last = new Option<int?>("--last") { Description = "Number of recent events (default: 20)." }; var output = MohistCliCommands.OutputOption("table");
+        var (project, projectId) = MohistCliCommands.ProjectRefOption(); var last = new Option<int?>("--last") { Description = "Number of recent events (default: 20)." }; var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RoutingRule)));
         AddProjectOptions(command, project, projectId); command.Options.Add(last); command.Options.Add(output);
         command.SetAction(async ctx =>
         {

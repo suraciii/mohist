@@ -16,7 +16,7 @@ internal static partial class IssueCommands
     {
         var cmd = new Command("list", "List available issue templates for the active project");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.IssueTemplateList)));
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
@@ -47,7 +47,7 @@ internal static partial class IssueCommands
         var cmd = new Command("view", "View a single issue template by name");
         var nameArg = new Argument<string>("name") { Description = "Template name or id (e.g. feature)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.IssueTemplateShow)));
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
