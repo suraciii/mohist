@@ -68,8 +68,13 @@ public sealed class AgentPathAmplificationSpecs
     }
 
     [Fact]
-    public async Task Activity_counts_each_repeated_transcript_materialization()
+    public async Task Activity_counts_only_preview_transcript_materialization()
     {
+        // issue-468 T-002: the activity path no longer replays transcript
+        // history to build eventSummary — amplification.transcriptRecords
+        // counts only the preview materialization, not a duplicate summary
+        // pass. Two transcript parts therefore yield transcriptRecords == 2
+        // (preview only) instead of the historical 4 (preview + summary).
         var project = await CreateProjectAsync("activity-transcript");
         var sessionId = (await InsertSessionsAsync(project.Id, count: 1, activeCount: 1)).Single();
         await InsertTranscriptPartsAsync(sessionId, 2);
@@ -80,7 +85,7 @@ public sealed class AgentPathAmplificationSpecs
         AssertAmplificationShape(amplification);
         Assert.Equal(1, amplification.GetProperty("candidates").GetInt64());
         Assert.Equal(1, amplification.GetProperty("processed").GetInt64());
-        Assert.Equal(4, amplification.GetProperty("transcriptRecords").GetInt64());
+        Assert.Equal(2, amplification.GetProperty("transcriptRecords").GetInt64());
         Assert.True(amplification.GetProperty("databaseCalls").GetInt64() > 0);
         Assert.True(amplification.GetProperty("downstreamCalls").GetInt64() > 0);
     }

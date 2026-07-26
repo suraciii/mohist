@@ -41,25 +41,38 @@ internal sealed class TranscriptAccumulator
 
     public bool HasPending => _pending is not null || _accumulatedParts.Count > 0 || _promptText is not null;
 
-    public void Accept(AgentSession session, IReadOnlyList<RuntimeEventEnvelope> rows, DateTime now)
+    public IReadOnlyList<AgentSessionTranscriptPartDelta> Accept(
+        AgentSession session,
+        IReadOnlyList<RuntimeEventEnvelope> rows,
+        DateTime now)
     {
+        var normalizedParts = new List<AgentSessionTranscriptPartDelta>();
         foreach (var row in rows)
         {
             CaptureRuntime(row);
             var textType = ToTextPartType(row.Type);
             if (textType is not null)
             {
-                AppendText(row, textType, now);
+                AppendText(row, textType, now, normalizedParts);
                 continue;
             }
 
             if (!EventTypes.Contains(row.Type))
                 continue;
 
-            FlushPendingIntoAccumulated(now);
+            FlushPendingIntoAccumulated(now, normalizedParts);
             if (row.Type == RuntimeEventTypes.SessionInput)
             {
                 CaptureInput(row);
+                normalizedParts.Add(new AgentSessionTranscriptPartDelta(
+                    TranscriptPartTypes.Input,
+                    TranscriptPartTypes.Input,
+                    AgentSessionJsonHelper.ExtractCorrelationId(row.PayloadJson),
+                    null,
+                    string.IsNullOrWhiteSpace(row.PayloadJson) ? "{}" : row.PayloadJson,
+                    row.CreatedAt,
+                    row.CreatedAt,
+                    1));
                 continue;
             }
 
@@ -67,7 +80,7 @@ internal sealed class TranscriptAccumulator
                 CaptureRecoveryRuntime(row);
 
             var type = ToTranscriptPartType(row.Type);
-            _accumulatedParts.Add(CreatePartDelta(
+            var part = CreatePartDelta(
                 row,
                 type,
                 CorrelationKey(type, row.PayloadJson),
@@ -76,8 +89,12 @@ internal sealed class TranscriptAccumulator
                 payloadJson: row.PayloadJson,
                 rawEventCount: 1,
                 firstSeenAt: row.CreatedAt,
-                lastSeenAt: row.CreatedAt));
+                lastSeenAt: row.CreatedAt);
+            _accumulatedParts.Add(part);
+            normalizedParts.Add(part);
         }
+
+        return normalizedParts;
     }
 
     public AgentSessionTranscriptFlush? BuildFlush(AgentSession session, DateTime now)
@@ -103,7 +120,11 @@ internal sealed class TranscriptAccumulator
         _inputCreatedAt = null;
     }
 
-    private void AppendText(RuntimeEventEnvelope row, string type, DateTime now)
+    private void AppendText(
+        RuntimeEventEnvelope row,
+        string type,
+        DateTime now,
+        ICollection<AgentSessionTranscriptPartDelta> normalizedParts)
     {
         var text = AgentSessionJsonHelper.ExtractText(row.PayloadJson);
         if (string.IsNullOrEmpty(text))
@@ -114,7 +135,7 @@ internal sealed class TranscriptAccumulator
             && (!string.Equals(_pending.Type, type, StringComparison.Ordinal)
                 || !string.Equals(_pending.CorrelationId, correlationId, StringComparison.Ordinal)))
         {
-            FlushPendingIntoAccumulated(row.CreatedAt);
+            FlushPendingIntoAccumulated(row.CreatedAt, normalizedParts);
         }
 
         _pending ??= new PendingTextSegment(
@@ -128,10 +149,12 @@ internal sealed class TranscriptAccumulator
         if (_pending.RawEventCount >= FlushRawEventThreshold
             || _pending.Text.Length >= FlushTextLengthThreshold
             || now - _pending.StartedAt >= FlushAgeThreshold)
-            FlushPendingIntoAccumulated(row.CreatedAt);
+            FlushPendingIntoAccumulated(row.CreatedAt, normalizedParts);
     }
 
-    private void FlushPendingIntoAccumulated(DateTime lastSeenAt)
+    private void FlushPendingIntoAccumulated(
+        DateTime lastSeenAt,
+        ICollection<AgentSessionTranscriptPartDelta>? normalizedParts = null)
     {
         if (_pending is null)
             return;
@@ -149,7 +172,7 @@ internal sealed class TranscriptAccumulator
             CreatedAt = lastSeenAt,
         };
 
-        _accumulatedParts.Add(CreatePartDelta(
+        var part = CreatePartDelta(
             row,
             _pending.Type,
             _pending.CorrelationId ?? _pending.Type,
@@ -158,8 +181,9 @@ internal sealed class TranscriptAccumulator
             payload,
             _pending.RawEventCount,
             _pending.StartedAt,
-            _pending.UpdatedAt));
-
+            _pending.UpdatedAt);
+        _accumulatedParts.Add(part);
+        normalizedParts?.Add(part);
         _pending = null;
     }
 

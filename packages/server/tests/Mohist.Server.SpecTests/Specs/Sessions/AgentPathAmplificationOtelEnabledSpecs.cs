@@ -56,6 +56,10 @@ public sealed class AgentPathAmplificationOtelEnabledSpecs : IClassFixture<OtelI
     [Fact]
     public async Task Activity_returns_truthful_local_amplification_when_otel_is_enabled()
     {
+        // issue-468 T-002: amplification.transcriptRecords no longer counts
+        // the duplicate summary-reduction pass; only the preview loader
+        // contributes, so two transcript parts yield transcriptRecords == 2
+        // (preview only) rather than the historical 4.
         var project = await CreateProjectAsync("otel-activity");
         var sessionId = (await InsertSessionsAsync(project.Id, count: 1, activeCount: 1)).Single();
         await InsertTranscriptPartsAsync(sessionId, 2);
@@ -66,7 +70,7 @@ public sealed class AgentPathAmplificationOtelEnabledSpecs : IClassFixture<OtelI
         AssertAmplificationShape(amplification);
         Assert.Equal(1, amplification.GetProperty("candidates").GetInt64());
         Assert.Equal(1, amplification.GetProperty("processed").GetInt64());
-        Assert.Equal(4, amplification.GetProperty("transcriptRecords").GetInt64());
+        Assert.Equal(2, amplification.GetProperty("transcriptRecords").GetInt64());
     }
 
     [Theory]

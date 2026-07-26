@@ -29,6 +29,8 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
 
+    public MohistDbContext CreateDbContext() => _database.CreateContext();
+
     public void Reset()
     {
         StateStore.Reset();

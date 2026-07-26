@@ -8,6 +8,11 @@ public sealed class AgentSession
     public AgentSessionMetadata Metadata { get; set; } = new();
     public required AgentSessionRuntime Runtime { get; set; }
     public AgentSessionSettings Settings { get; set; } = new();
+    [JsonInclude]
+    [JsonPropertyName("activitySummary")]
+    internal AgentSessionActivitySummaryState PersistedActivitySummary { get; set; } = AgentSessionActivitySummaryState.Empty;
+    [JsonIgnore]
+    public AgentSessionTranscriptSummary ActivitySummary => PersistedActivitySummary.Summary;
     public AgentSessionStatusSnapshot Status { get; set; } = AgentSessionStatusSnapshot.Created(DateTime.UtcNow);
 
     public static AgentSession Create(
@@ -42,6 +47,7 @@ public sealed class AgentSession
             throw new InvalidOperationException("AgentSession state requires a Runtime.");
         if (Status.CreatedAt == default)
             throw new InvalidOperationException("AgentSession state requires CreatedAt to be set.");
+        PersistedActivitySummary = (PersistedActivitySummary ?? AgentSessionActivitySummaryState.Empty).Normalize();
         Metadata.ValidateSource(allowLegacySource);
     }
 }

@@ -202,6 +202,69 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.Equal(1, result.Amplification.Processed);
     }
 
+    [Fact]
+    public async Task GetActivityAsync_GenericAgentLaunchSession_ProjectsPersistedEventSummaryOntoCard()
+    {
+        // issue-468 T-002: the activity card's eventSummary is read straight
+        // from the persisted AgentSession.ActivitySummary (issue-468 T-001),
+        // not from a transcript reduction. Persisting the summary into the
+        // session row before the request lets the assertion prove the card
+        // payload equals the persisted state byte-for-byte.
+        var project = await CreateProjectAsync();
+        var sessionId = $"session-{Guid.NewGuid():N}";
+        var persisted = new AgentSessionActivitySummaryState
+        {
+            ResolvedModel = "opencode/gpt-5",
+            FailureCategory = "context_exhaustion",
+            FailureReason = "context window exceeded",
+            ToolCallCount = 4,
+            ToolErrorCount = 2,
+        };
+
+        await InsertGenericSessionWithPersistedSummaryAsync(
+            project.Id,
+            sessionId,
+            agentId: "agent_summaryCard",
+            agentName: "summary-card-agent",
+            issueNumber: 7,
+            persisted);
+
+        var assembler = ResolveAssembler();
+        var result = await assembler.GetActivityAsync(project.Id, limit: 10);
+
+        var card = Assert.Single(result.Sessions, c => c.SessionId == sessionId);
+        Assert.Equal("opencode/gpt-5", card.EventSummary.ResolvedModel);
+        Assert.Equal("context_exhaustion", card.EventSummary.FailureCategory);
+        Assert.True(card.EventSummary.ContextExhaustion);
+        Assert.Null(card.EventSummary.ContextExhaustionSuspected);
+        Assert.Equal(4, card.EventSummary.ToolCallCount);
+        Assert.Equal(2, card.EventSummary.ToolErrorCount);
+    }
+
+    [Fact]
+    public async Task GetActivityAsync_TranscriptHistoryGrowth_DoesNotIncreaseSummaryReadWork()
+    {
+        // issue-468 T-002: amplification.transcriptRecords counts only the
+        // preview loader's materialised parts; the summary reduction pass is
+        // removed, so a session with N transcript parts yields exactly N
+        // transcriptRecords (not 2N). The follow-up growth scales linearly
+        // with the preview loader only — adding more parts without changing
+        // the persisted summary keeps the summary-read contribution at zero.
+        var project = await CreateProjectAsync();
+        var sessionId = $"session-{Guid.NewGuid():N}";
+        await InsertGenericSessionAsync(project.Id, sessionId, "agent_growth", "growth-agent", issueNumber: null);
+
+        await InsertTranscriptPartsAsync(sessionId, 3);
+        var assembler = ResolveAssembler();
+        var baseline = await assembler.GetActivityAsync(project.Id, limit: 10);
+        Assert.Equal(3, baseline.Amplification.TranscriptRecords);
+
+        await InsertTranscriptPartsAsync(sessionId, 5);
+        var after = await assembler.GetActivityAsync(project.Id, limit: 10);
+
+        Assert.Equal(8, after.Amplification.TranscriptRecords);
+    }
+
     private const string AmbiguousLegacyWorkflowRunState = """
         {
           "id": "wf-ambiguous",
@@ -293,6 +356,97 @@ public class AgentActivityFeedAssemblerSpecs
             AgentSessionId = sessionId,
             RunnerId = "test-runner",
         });
+        await db.SaveChangesAsync();
+    }
+
+    private async Task InsertGenericSessionWithPersistedSummaryAsync(
+        string projectId,
+        string sessionId,
+        string agentId,
+        string agentName,
+        int? issueNumber,
+        AgentSessionActivitySummaryState persisted)
+    {
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+            [GenericAgentSessionMetadata.AgentId] = agentId,
+            [GenericAgentSessionMetadata.AgentName] = agentName,
+        };
+        if (issueNumber.HasValue)
+            labels[AgentSessionQueryMetadataKeys.IssueNumber] = issueNumber.Value.ToString();
+
+        var started = PinnedNow;
+        var session = new AgentSession
+        {
+            Id = sessionId,
+            Runtime = new AgentSessionRuntime("test-runner", null),
+            Settings = new AgentSessionSettings("test-model"),
+            Status = new AgentSessionStatusSnapshot(
+                CreatedAt: started,
+                AgentRuntimeSessionId: sessionId,
+                LastDataAt: started.AddSeconds(1),
+                Activity: AgentSessionActivity.Active),
+            Metadata = new AgentSessionMetadata(labels),
+            PersistedActivitySummary = persisted.Normalize(),
+        };
+
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        db.AgentSessions.Add(new AgentSessionRow
+        {
+            Id = session.Id,
+            State = JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions),
+            CreatedAt = started,
+            Status = "opened",
+            AgentSessionId = sessionId,
+            RunnerId = "test-runner",
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private async Task InsertTranscriptPartsAsync(string sessionId, int count)
+    {
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+
+        var existingTurn = await db.AgentSessionTranscriptTurns
+            .Where(t => t.SessionId == sessionId)
+            .OrderByDescending(t => t.Sequence)
+            .FirstOrDefaultAsync();
+        var turn = existingTurn;
+        if (turn is null)
+        {
+            turn = new AgentSessionTranscriptTurnRow
+            {
+                SessionId = sessionId,
+                Sequence = 1,
+                StartedAt = now,
+                UpdatedAt = now,
+            };
+            db.AgentSessionTranscriptTurns.Add(turn);
+            await db.SaveChangesAsync();
+        }
+
+        var baseSequence = await db.AgentSessionTranscriptParts
+            .Where(p => p.TurnId == turn.Id)
+            .CountAsync();
+
+        for (var index = 0; index < count; index++)
+        {
+            db.AgentSessionTranscriptParts.Add(new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = baseSequence + index + 1,
+                Type = "message.delta",
+                CorrelationKey = $"part-{Guid.NewGuid():N}",
+                PayloadJson = $"{{\"text\":\"message-{index}\"}}",
+                LastSeenAt = now.AddTicks(index),
+            });
+        }
+
         await db.SaveChangesAsync();
     }
 
