@@ -12,9 +12,9 @@ namespace Mohist.Server.UnitTests.Sessions;
 public class ContextExhaustionClassifierTests
 {
     [Fact]
-    public void ClassifyClose_FailedAbove90Percent_ClassifiesAsContextExhaustion()
+    public void ClassifyTurnFailure_FailedAbove90Percent_ClassifiesAsContextExhaustion()
     {
-        var result = ContextExhaustionClassifier.ClassifyClose(
+        var result = ContextExhaustionClassifier.ClassifyTurnFailure(
             status: "failed",
             contextWindowUsed: 960_000,
             contextWindowSize: 1_000_000,
@@ -28,11 +28,11 @@ public class ContextExhaustionClassifierTests
     }
 
     [Fact]
-    public void ClassifyClose_FailedAtExactly90Percent_ClassifiesAsContextExhaustion()
+    public void ClassifyTurnFailure_FailedAtExactly90Percent_ClassifiesAsContextExhaustion()
     {
         // The boundary is inclusive: a session that closed at exactly
         // 90% has no headroom and is treated as exhausted.
-        var result = ContextExhaustionClassifier.ClassifyClose(
+        var result = ContextExhaustionClassifier.ClassifyTurnFailure(
             status: "failed",
             contextWindowUsed: 90,
             contextWindowSize: 100,
@@ -44,9 +44,9 @@ public class ContextExhaustionClassifierTests
     }
 
     [Fact]
-    public void ClassifyClose_FailedBelow90Percent_DoesNotClassify()
+    public void ClassifyTurnFailure_FailedBelow90Percent_DoesNotClassify()
     {
-        var result = ContextExhaustionClassifier.ClassifyClose(
+        var result = ContextExhaustionClassifier.ClassifyTurnFailure(
             status: "failed",
             contextWindowUsed: 70,
             contextWindowSize: 100,
@@ -58,12 +58,12 @@ public class ContextExhaustionClassifierTests
     }
 
     [Fact]
-    public void ClassifyClose_SuccessfulSessionAtHighUsage_DoesNotClassify()
+    public void ClassifyTurnFailure_SuccessfulSessionAtHighUsage_DoesNotClassify()
     {
         // Successful close at high usage is healthy (auto-compact or
         // manual recovery brought it down before completion). The
         // classifier must not retroactively call that exhaustion.
-        var result = ContextExhaustionClassifier.ClassifyClose(
+        var result = ContextExhaustionClassifier.ClassifyTurnFailure(
             status: "completed",
             contextWindowUsed: 96,
             contextWindowSize: 100,
@@ -75,9 +75,9 @@ public class ContextExhaustionClassifierTests
     }
 
     [Fact]
-    public void ClassifyClose_CancelledSession_DoesNotClassify()
+    public void ClassifyTurnFailure_CancelledSession_DoesNotClassify()
     {
-        var result = ContextExhaustionClassifier.ClassifyClose(
+        var result = ContextExhaustionClassifier.ClassifyTurnFailure(
             status: "cancelled",
             contextWindowUsed: 95,
             contextWindowSize: 100,
@@ -89,9 +89,9 @@ public class ContextExhaustionClassifierTests
     }
 
     [Fact]
-    public void ClassifyClose_FailedWithNoContextData_DoesNotClassify()
+    public void ClassifyTurnFailure_FailedWithNoContextData_DoesNotClassify()
     {
-        var result = ContextExhaustionClassifier.ClassifyClose(
+        var result = ContextExhaustionClassifier.ClassifyTurnFailure(
             status: "failed",
             contextWindowUsed: null,
             contextWindowSize: null,

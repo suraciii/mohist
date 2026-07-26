@@ -71,7 +71,7 @@ public sealed record AgentJobRuntimeSnapshot(
 /// Durable payload persisted on the AgentJob grain for a pending
 /// terminal close delivery to the owning AgentSession. The AgentJob
 /// keeps this record until the AgentSession has synchronously persisted
-/// the idempotently identified <c>session.closed</c> transcript fact
+/// the idempotently identified terminal <c>session.activity</c> transcript fact
 /// (see design decision 2). <see cref="DeliveryId"/> is the stable
 /// correlation key the AgentSession stores on the close event and uses
 /// to deduplicate retried deliveries; the format is

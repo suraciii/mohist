@@ -9,12 +9,12 @@ internal static class TranscriptEventSummaryProjector
     /// generic-session read shape. The terminal-fact selection (failure
     /// reason + failure category) follows the AgentSession transcript
     /// turn order: parts are ordered by (turn sequence, part sequence,
-    /// part id) and the latest applicable <c>session.closed</c> part
-    /// wins for both fields. That ordering is preserved even when a new
-    /// Runtime Session restarts the part-local sequence from 1; the
-    /// outer turn-sequence key wins. The remaining projections (model
-    /// resolution, tool counts) use last-write-wins by part sequence
-    /// within the input order, matching the previous behaviour.
+    /// part id) and the latest <c>session.activity</c> part carrying a
+    /// terminal status wins for both fields. That ordering is preserved
+    /// even when a new Runtime Session restarts the part-local sequence
+    /// from 1; the outer turn-sequence key wins. The remaining
+    /// projections (model resolution, tool counts) use last-write-wins
+    /// by part sequence within the input order.
     /// </summary>
     public static AgentSessionTranscriptSummary Summarize(IEnumerable<TranscriptSummaryEvent> events)
     {
@@ -24,7 +24,7 @@ internal static class TranscriptEventSummaryProjector
         var toolCallIds = new HashSet<string>(StringComparer.Ordinal);
         var failedToolCallIds = new HashSet<string>(StringComparer.Ordinal);
 
-        TranscriptSummaryEvent? latestClosed = null;
+        TranscriptSummaryEvent? latestTerminalActivity = null;
         foreach (var e in events)
         {
             if (e.Type == TranscriptPartTypes.Model)
@@ -34,7 +34,7 @@ internal static class TranscriptEventSummaryProjector
             }
             else if (e.Type == TranscriptPartTypes.SessionActivity)
             {
-                latestClosed = IsLater(latestClosed, e) ? e : latestClosed;
+                latestTerminalActivity = IsLater(latestTerminalActivity, e) ? e : latestTerminalActivity;
             }
             else if (e.Type == TranscriptPartTypes.Tool)
             {
@@ -50,13 +50,12 @@ internal static class TranscriptEventSummaryProjector
             }
         }
 
-        if (latestClosed is not null)
+        if (latestTerminalActivity is not null)
         {
-            var payload = AgentSessionJsonHelper.ParsePayload(latestClosed.PayloadJson);
+            var payload = AgentSessionJsonHelper.ParsePayload(latestTerminalActivity.PayloadJson);
             // Reason and category MUST come from the same latest fact so
             // a current failure reason cannot be paired with a category
-            // left by an older Runtime Session lineage entry
-            //.
+            // left by an older Runtime Session lineage entry.
             failureReason = AgentSessionJsonHelper.GetStringProp(payload, "failureReason");
             failureCategory = AgentSessionJsonHelper.GetStringProp(payload, "failureCategory");
         }

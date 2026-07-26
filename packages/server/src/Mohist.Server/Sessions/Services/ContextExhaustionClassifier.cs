@@ -4,17 +4,16 @@ using Mohist.Server.Infrastructure;
 namespace Mohist.Server.Sessions.Services;
 
 /// <summary>
-/// Classifies session close events as <c>context_exhaustion</c> when the
-/// final context window usage indicates the agent ran out of room.
+/// Classifies failed <c>turn.failed</c> events as <c>context_exhaustion</c>
+/// when the final context window usage indicates the agent ran out of room.
 ///
 /// <para>
-/// The classifier is a pure function over the close event payload and the
+/// The classifier is a pure function over the event payload and the
 /// last known context window metrics. It exists as a separate helper so the
 /// rule set can be unit-tested without standing up the agent session grain
-/// (the grain only needs to call
-/// <see cref="ClassifyContextExhaustion"/> on every <c>session.closed</c>
-/// runtime event and rewrite the failureCategory field when the rule
-/// matches).
+/// (the grain only needs to call <see cref="ClassifyTurnFailure(string?, long?, long?, TimeSpan?, bool)"/>
+/// on every <c>turn.failed</c> runtime event and rewrite the
+/// failureCategory field when the rule matches).
 /// </para>
 /// </summary>
 public static class ContextExhaustionClassifier
@@ -24,8 +23,8 @@ public static class ContextExhaustionClassifier
 
     /// <summary>
     /// 90% of the context window is the threshold at which a
-    /// <c>failed</c> close event is considered context exhaustion. The
-    /// boundary is inclusive (≥ 90%) so a session that closes at 90.0%
+    /// <c>failed</c> turn is considered context exhaustion. The
+    /// boundary is inclusive (≥ 90%) so a turn that fails at 90.0%
     /// is still classified as exhausted — it had no headroom left to
     /// recover. 80-90% is the warning band (handled elsewhere by the
     /// retry guard) and &lt; 90% is treated as a non-exhaustion failure.
@@ -34,8 +33,8 @@ public static class ContextExhaustionClassifier
 
     /// <summary>
     /// 85% combined with a sub-10s completion is the secondary heuristic
-    /// that flags a successful-but-suspiciously-fast session close as
-    /// suspected exhaustion (no expected output, no useful work).
+    /// that flags a suspiciously fast failed turn as suspected exhaustion
+    /// (no expected output, no useful work).
     /// </summary>
     public const double RapidCompletionUsageRatio = 0.85d;
 
@@ -47,9 +46,9 @@ public static class ContextExhaustionClassifier
     public static readonly TimeSpan RapidCompletionThreshold = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Result of evaluating a session close payload for context
-    /// exhaustion. <see cref="Category"/> is <c>null</c> when the close
-    /// event does not match any exhaustion rule, in which case the
+    /// Result of evaluating a failed-turn payload for context
+    /// exhaustion. <see cref="Category"/> is <c>null</c> when the event
+    /// does not match any exhaustion rule, in which case the
     /// caller should preserve the existing <c>failureCategory</c>
     /// already on the event (probe_timeout, prompt_missing, etc.).
     /// </summary>
@@ -59,7 +58,7 @@ public static class ContextExhaustionClassifier
         bool IsSuspected,
         bool IsExhausted);
 
-    public static ClassificationResult ClassifyClose(
+    public static ClassificationResult ClassifyTurnFailure(
         string? status,
         long? contextWindowUsed,
         long? contextWindowSize,
@@ -67,10 +66,10 @@ public static class ContextExhaustionClassifier
         bool producedExpectedOutput)
     {
         var percent = AgentSessionJsonHelper.ContextUsagePercent(contextWindowUsed, contextWindowSize);
-        return ClassifyClose(status, percent, elapsed, producedExpectedOutput);
+        return ClassifyTurnFailure(status, percent, elapsed, producedExpectedOutput);
     }
 
-    public static ClassificationResult ClassifyClose(
+    public static ClassificationResult ClassifyTurnFailure(
         string? status,
         double? contextUsagePercent,
         TimeSpan? elapsed,
@@ -102,18 +101,15 @@ public static class ContextExhaustionClassifier
     }
 
     /// <summary>
-    /// Applies the secondary rapid-completion heuristic. A session
-    /// close in under <see cref="RapidCompletionThreshold"/> without
+    /// Applies the secondary rapid-completion heuristic. A turn that
+    /// fails in under <see cref="RapidCompletionThreshold"/> without
     /// expected output is flagged as suspected context exhaustion when
     /// usage was above <see cref="RapidCompletionUsageRatio"/>.
     ///
     /// <para>
-    /// This rule applies regardless of close status: a failed session
-    /// that completed in under 10 seconds without producing expected
-    /// output at &gt;85% usage is just as suspect as a successful one.
-    /// The primary exhausted classifier handles failed sessions at
-    /// ≥90% usage; this heuristic covers everything else in the rapid
-    /// completion regime.
+    /// The primary exhausted classifier handles failures at
+    /// ≥90% usage; this heuristic covers the rapid completion regime
+    /// below that threshold.
     /// </para>
     /// </summary>
     public static ClassificationResult ClassifyRapidCompletion(
@@ -150,7 +146,7 @@ public static class ContextExhaustionClassifier
     }
 
     /// <summary>
-    /// Rewrites the <c>failureCategory</c> field on a session.closed
+    /// Rewrites the <c>failureCategory</c> field on a <c>turn.failed</c>
     /// payload when the classifier assigns one. Returns the new payload
     /// JSON (or the original JSON when no rewrite is required).
     /// </summary>
