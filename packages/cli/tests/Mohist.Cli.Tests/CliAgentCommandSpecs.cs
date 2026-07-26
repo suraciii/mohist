@@ -764,7 +764,45 @@ public class CliAgentCommandSpecs
         Assert.Equal(2, exitCode);
         Assert.Contains("prompt is required", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("mo agent launch [flags]", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo agent launch <agent> [flags]", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task AgentUpdate_MissingInstructionsFileFailsWithScopedUsageBeforeHttp()
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "edit", "reviewer", "--instructions-file", "missing.md"],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("could not read body file: missing.md", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo agent edit <name-or-id> [flags]", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task AgentUpdate_InvalidConfigFailsWithScopedUsageBeforeHttp()
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "edit", "reviewer", "--agent-config", "not-json"],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--agent-config must be valid JSON", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo agent edit <name-or-id> [flags]", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -892,8 +930,10 @@ public class CliAgentCommandSpecs
             error: error,
             fileSystem: FileSystemWithProject());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Contains($"{setFlag} cannot be used with {clearFlag}", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo agent edit <name-or-id> [flags]", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 

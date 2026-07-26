@@ -450,32 +450,41 @@ internal static class AgentCommands
 
             async Task<int> UpdateAsync()
             {
-                if (!ValidateClearSetPair(api, "--description", description is not null, "--clear-description", clearDescription)
-                    || !ValidateClearSetPair(api, "--agent-config", agentConfig is not null, "--clear-agent-config", clearAgentConfig)
-                    || !ValidateClearSetPair(api, "--skills", skills is not null, "--clear-skills", clearSkills)
-                    || !ValidateClearSetPair(api, "--max-concurrent-runs", maxConcurrentRuns is not null, "--clear-max-concurrent-runs", clearMaxConcurrentRuns))
-                    return 1;
+                var clearSetConflict = ValidateClearSetPair("--description", description is not null, "--clear-description", clearDescription)
+                    ?? ValidateClearSetPair("--agent-config", agentConfig is not null, "--clear-agent-config", clearAgentConfig)
+                    ?? ValidateClearSetPair("--skills", skills is not null, "--clear-skills", clearSkills)
+                    ?? ValidateClearSetPair("--max-concurrent-runs", maxConcurrentRuns is not null, "--clear-max-concurrent-runs", clearMaxConcurrentRuns);
+                if (clearSetConflict is not null)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, clearSetConflict);
+
+                BodyInputResolver.Result? instructionsResult = null;
+                if (instructions is not null || instructionsFile is not null)
+                {
+                    instructionsResult = await BodyInputResolver.ResolveAsync(
+                        instructions,
+                        instructionsFile,
+                        new BodyInputResolver.SourceFlags("--instructions", "--instructions-file", "Agent instructions"),
+                        api.FileSystem,
+                        api.StandardInput,
+                        TextWriter.Null);
+                    if (instructionsResult is BodyInputResolver.Result.Failure instructionsFailure)
+                        return CommandHelpHook.RenderUsageFailure(ctx, api.Error, instructionsFailure.Message);
+                }
+
+                var config = await ResolveJsonAsync(agentConfig, api, TextWriter.Null);
+                if (config is ResolveJsonResult.Invalid configFailure)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, configFailure.Message);
 
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-
                 if (resolveExit != 0) return resolveExit;
 
                 var agent = await ResolveAgentAsync(api, resolvedProjectId, nameOrId!);
                 if (agent is null)
                     return 1;
 
-                string? resolvedInstructions = null;
-                if (instructions is not null || instructionsFile is not null)
-                {
-                    resolvedInstructions = await ResolveInstructionsAsync(instructions, instructionsFile, api);
-                    if (resolvedInstructions is null)
-                        return 1;
-                }
-
-                var config = await ResolveJsonAsync(agentConfig, api);
-                if (config is ResolveJsonResult.Invalid)
-                    return 1;
+                var resolvedInstructions = instructionsResult is BodyInputResolver.Result.Success instructionsSuccess
+                    ? instructionsSuccess.Body
+                    : null;
 
                 var body = new JsonObject();
                 AddIfProvided(body, "name", name);
@@ -492,11 +501,11 @@ internal static class AgentCommands
         return cmd;
     }
 
-    private static bool ValidateClearSetPair(MohistCliApi api, string setFlag, bool setProvided, string clearFlag, bool clearProvided)
+    private static string? ValidateClearSetPair(string setFlag, bool setProvided, string clearFlag, bool clearProvided)
     {
-        if (!setProvided || !clearProvided) return true;
-        api.Error.WriteLine($"{setFlag} cannot be used with {clearFlag}");
-        return false;
+        return setProvided && clearProvided
+            ? $"{setFlag} cannot be used with {clearFlag}"
+            : null;
     }
 
     private static void AddIfProvided(JsonObject body, string property, string? value, bool provided = true)
@@ -652,21 +661,6 @@ internal static class AgentCommands
             if (result.GetResult(instructions) is not null && result.GetResult(instructionsFile) is not null)
                 result.AddError("--instructions and --instructions-file are mutually exclusive.");
         });
-    }
-
-    private static async Task<string?> ResolveInstructionsAsync(
-        string? instructions,
-        string? instructionsFile,
-        MohistCliApi api)
-    {
-        var resolved = await BodyInputResolver.ResolveAsync(
-            instructions,
-            instructionsFile,
-            new BodyInputResolver.SourceFlags("--instructions", "--instructions-file", "Agent instructions"),
-            api.FileSystem,
-            api.StandardInput,
-            api.Error);
-        return resolved is BodyInputResolver.Result.Success success ? success.Body : null;
     }
 
     private static async Task<ResolveJsonResult> ResolveJsonAsync(

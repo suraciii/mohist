@@ -106,7 +106,7 @@ internal static class CommandHelpRenderer
         }
 
         writer.WriteLine("Usage:");
-        writer.WriteLine($"    {FormatUsage(invocationPath)}");
+        writer.WriteLine($"    {FormatUsage(leaf, invocationPath)}");
         writer.WriteLine();
 
         if (leaf.Arguments.Count > 0)
@@ -182,7 +182,7 @@ internal static class CommandHelpRenderer
 
     public static void RenderGroupUsage(TextWriter writer, Command group, string[] invocationPath)
     {
-        writer.WriteLine($"Usage: {FormatUsage(invocationPath)}");
+        writer.WriteLine($"Usage: {FormatUsage(group, invocationPath)}");
         writer.WriteLine();
         writer.WriteLine($"Run `mo {string.Join(" ", invocationPath)} --help` for the full help.");
     }
@@ -215,10 +215,15 @@ internal static class CommandHelpRenderer
 
     public static bool IsLeaf(Command command) => !EnumerateVisible(command).Any();
 
-    private static string FormatUsage(string[] invocationPath)
+    private static string FormatUsage(Command command, string[] invocationPath)
     {
         var parts = new List<string>(invocationPath.Length + 4) { "mo" };
         parts.AddRange(invocationPath);
+        foreach (var argument in command.Arguments)
+        {
+            var symbol = $"<{argument.Name}>";
+            parts.Add(argument.Arity.MinimumNumberOfValues > 0 ? symbol : $"[{symbol}]");
+        }
         return string.Join(" ", parts) + " [flags]";
     }
 
@@ -234,6 +239,12 @@ internal static class CommandHelpRenderer
             sb.Append(" (required)");
         if (symbol is Option option && option.Required)
             sb.Append(" (required)");
+        if (symbol is Option optionWithDefault && optionWithDefault.HasDefaultValue)
+        {
+            var defaultValue = optionWithDefault.GetDefaultValue();
+            if (defaultValue is not null)
+                sb.Append($" (default: {defaultValue})");
+        }
         return sb.ToString();
     }
 

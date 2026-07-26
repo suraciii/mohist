@@ -22,7 +22,7 @@ namespace Mohist.Cli;
 // `--yes` bypasses it.
 internal static partial class RunCommands
 {
-    private static readonly ResourceDescriptor RunControlDescriptor = new(
+    internal static readonly ResourceDescriptor RunControlDescriptor = new(
         ResourceCardinality.Single,
         [
             "workflowRunId",

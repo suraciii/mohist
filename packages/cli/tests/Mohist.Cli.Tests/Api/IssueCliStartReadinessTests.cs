@@ -110,12 +110,13 @@ public class IssueCliStartReadinessTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
         Assert.Contains("--ready", err);
         Assert.Contains("--draft", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Usage:", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -311,12 +312,13 @@ public class IssueCliStartReadinessTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
         Assert.Contains("--ready", err);
         Assert.Contains("--draft", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Usage:", err, StringComparison.Ordinal);
     }
 
     [Fact]

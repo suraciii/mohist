@@ -219,24 +219,31 @@ internal static class CommandPresentations
             {
                 CommandPresentationCatalog.Attach(Find(group, "approve"), new CommandPresentation(
                     CommandCapability.Automation, "Pass the approval gate for a WorkflowRun",
-                    Boundary: "Address the Run by Run ID or `--issue <number>`. Project resolution only happens when --issue is used."));
+                    Boundary: "Address the Run by Run ID or `--issue <number>`. Project resolution only happens when --issue is used.",
+                    JsonFields: RunCommands.RunControlDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "reject"), new CommandPresentation(
                     CommandCapability.Automation, "Reject a Run at its approval gate",
-                    Boundary: "Reject requires a non-empty --message; the Run returns to the prior stage."));
+                    Boundary: "Reject requires a non-empty --message; the Run returns to the prior stage.",
+                    JsonFields: RunCommands.RunControlDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "retry"), new CommandPresentation(
                     CommandCapability.Automation, "Retry the current failure point of a Run",
-                    Boundary: "Retry restores the manual-retry budget; use `rerun --from-stage` for an arbitrary stage restart."));
+                    Boundary: "Retry restores the manual-retry budget; use `rerun --from-stage` for an arbitrary stage restart.",
+                    JsonFields: RunCommands.RunControlDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "rerun"), new CommandPresentation(
                     CommandCapability.Automation, "Rerun the entire Run, or from a specific stage",
-                    Boundary: "`rerun --from-stage <name>` invalidates that stage and every later stage; the value cannot be empty."));
+                    Boundary: "`rerun --from-stage <name>` invalidates that stage and every later stage; the value cannot be empty.",
+                    JsonFields: RunCommands.RunControlDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "pause"), new CommandPresentation(
                     CommandCapability.Automation, "Pause a Run (resumable via `resume`)",
-                    Note: "Pause is reversible and does not require --yes."));
+                    Note: "Pause is reversible and does not require --yes.",
+                    JsonFields: RunCommands.RunControlDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "resume"), new CommandPresentation(
-                    CommandCapability.Automation, "Resume a paused Run"));
+                    CommandCapability.Automation, "Resume a paused Run",
+                    JsonFields: RunCommands.RunControlDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "stop"), new CommandPresentation(
                     CommandCapability.Automation, "Stop a Run permanently (terminal)",
-                    Note: "Stop is irreversible; --yes is required in non-interactive mode. Use `pause` if you might want to resume later."));
+                    Note: "Stop is irreversible; --yes is required in non-interactive mode. Use `pause` if you might want to resume later.",
+                    JsonFields: RunCommands.RunControlDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "list"), new CommandPresentation(
                     CommandCapability.Automation, "List WorkflowRuns in the active Project",
                     JsonFields: ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RunList)).Fields));

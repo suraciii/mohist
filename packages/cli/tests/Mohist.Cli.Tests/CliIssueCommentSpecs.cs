@@ -65,7 +65,7 @@ public class CliIssueCommentSpecs
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Post);
         Assert.Contains("comment body is required", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("mo issue comment create [flags]", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo issue comment create <number> [flags]", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 }

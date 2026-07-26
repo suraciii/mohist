@@ -118,9 +118,10 @@ public class IssueCliBodyInputTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         Assert.Contains("issue body is required", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -140,12 +141,13 @@ public class IssueCliBodyInputTests
             files,
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
         Assert.Contains("--body", err);
         Assert.Contains("--body-file", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Usage:", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -163,11 +165,12 @@ public class IssueCliBodyInputTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
         Assert.Contains("could not read body file", err);
         Assert.Contains("missing.md", err);
+        Assert.Contains("Usage:", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -213,12 +216,13 @@ public class IssueCliBodyInputTests
             files,
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
         Assert.Contains("--body", err);
         Assert.Contains("--body-file", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Usage:", err, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -138,7 +138,7 @@ public class CliIssueUpdatePatchBodySpecs
     }
 
     [Fact]
-    public async Task IssueUpdate_BodyAndBodyFile_ConflictExitsWithCodeOne()
+    public async Task IssueUpdate_BodyAndBodyFile_ConflictExitsWithUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
         fs.AddFile("/tmp/body.md", "From file");
@@ -148,9 +148,10 @@ public class CliIssueUpdatePatchBodySpecs
             ["issue", "edit", "1", "--body", "Inline", "--body-file", "/tmp/body.md"],
             output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
         Assert.Contains("--body, --body-file", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

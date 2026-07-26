@@ -120,10 +120,24 @@ public sealed class CliHelpSpecs
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
+        Assert.Contains("mo issue view <number> [flags]", text, StringComparison.Ordinal);
         Assert.Contains("JSON FIELDS", text);
         Assert.Contains("number", text);
         Assert.Contains("workflowRunId", text);
         Assert.Contains("--json", text);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ActivityListHelp_ShowsDefaultLimit()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["activity", "list", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("--limit", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("(default: 100)", output.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
