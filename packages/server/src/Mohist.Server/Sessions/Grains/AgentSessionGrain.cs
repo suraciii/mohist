@@ -26,6 +26,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
     private bool _sessionReloadRequired;
+    private AgentSessionTranscriptSummary? _cachedSummary;
     private long _realtimeSequence;
     private IDisposable? _persistTimer;
     private bool _stateDirty;
@@ -708,6 +709,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         // evidence remains available after a restart until its own store
         // accepts it.
         _session = session;
+        _cachedSummary = null;
         if (!await FlushPendingTranscriptEvidenceAsync(session, CancellationToken.None))
             EnsurePersistenceTimer();
 
@@ -963,6 +965,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         _pendingDomainEvents.AddRange(events);
         _session = session;
+        _cachedSummary = null;
 
         EnsurePersistenceTimer();
 
@@ -1385,11 +1388,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _session = session;
     }
 
-    private Task<AgentSessionInfo> ToInfoAsync(AgentSession s)
+    private async Task<AgentSessionInfo> ToInfoAsync(AgentSession s)
     {
-        var eventSummary = s.ActivitySummary;
+        var eventSummary = await LoadEventSummaryAsync(s.Id);
         var usage = AgentSessionJsonHelper.Usage(s);
-        return Task.FromResult(new AgentSessionInfo(
+        return new AgentSessionInfo(
             s.Id,
             s.Runtime.RunnerId,
             s.Status.AgentRuntimeSessionId,
@@ -1413,7 +1416,43 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             eventSummary.ToolCallCount,
             eventSummary.ToolErrorCount,
             s.Runtime.Runtime,
-            usage.CachedWriteTokens));
+            usage.CachedWriteTokens);
+    }
+
+    private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)
+    {
+        if (_cachedSummary is not null)
+            return _cachedSummary;
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var turns = await db.AgentSessionTranscriptTurns.AsNoTracking()
+            .Where(t => t.SessionId == sessionId)
+            .ToListAsync();
+        if (turns.Count == 0)
+            return _cachedSummary = AgentSessionTranscriptSummary.Empty;
+
+        var turnSequenceByTurnId = turns.ToDictionary(t => t.Id, t => t.Sequence);
+        var turnIds = turns.Select(t => t.Id).ToList();
+        var currentRuntimeSessionId = _session?.Status.AgentRuntimeSessionId;
+
+        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
+            .Where(e => turnIds.Contains(e.TurnId))
+            .OrderBy(e => e.Sequence)
+            .ThenBy(e => e.Id)
+            .ToListAsync();
+
+        var events = parts
+            .Where(part => string.IsNullOrWhiteSpace(currentRuntimeSessionId)
+                || turns.FirstOrDefault(t => t.Id == part.TurnId) is { } t
+                    && string.Equals(t.RuntimeSessionId, currentRuntimeSessionId, StringComparison.Ordinal))
+            .Select(part => new TranscriptSummaryEvent(
+                TurnSequence: turnSequenceByTurnId.GetValueOrDefault(part.TurnId, 0),
+                Sequence: part.Sequence,
+                PartId: part.Id.ToString(),
+                Type: part.Type,
+                PayloadJson: part.PayloadJson));
+
+        return _cachedSummary = TranscriptEventSummaryProjector.Summarize(events);
     }
 
     private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;

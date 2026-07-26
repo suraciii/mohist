@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -95,7 +96,7 @@ public class AgentSessionGrainPersistSummarySpecs : AgentSessionGrainPersistence
     }
 
     [Fact]
-    public async Task FlushForTestAsync_PersistsSummaryAndReloadsIt()
+    public async Task FlushForTestAsync_PersistsSummary()
     {
         var grain = await OpenBoundGrainAsync();
 
@@ -118,14 +119,103 @@ public class AgentSessionGrainPersistSummarySpecs : AgentSessionGrainPersistence
         Assert.Equal(1, saved.ActivitySummary.ToolCallCount);
         Assert.Equal(1, saved.ActivitySummary.ToolErrorCount);
 
-        await DeactivateAsync(grain);
-
-        var reloaded = await grain.GetAsync();
+        var reloaded = await Fixture.StateStore.LoadAsync(grain.GetPrimaryKeyString());
         Assert.NotNull(reloaded);
-        Assert.Equal(saved.ActivitySummary.ResolvedModel, reloaded!.ResolvedModel);
-        Assert.Equal(saved.ActivitySummary.FailureCategory, reloaded.FailureCategory);
-        Assert.Equal(saved.ActivitySummary.ToolCallCount, reloaded.ToolCallCount);
-        Assert.Equal(saved.ActivitySummary.ToolErrorCount, reloaded.ToolErrorCount);
+        Assert.Equal(saved.ActivitySummary.ResolvedModel, reloaded!.ActivitySummary.ResolvedModel);
+        Assert.Equal(saved.ActivitySummary.FailureCategory, reloaded.ActivitySummary.FailureCategory);
+        Assert.Equal(saved.ActivitySummary.ToolCallCount, reloaded.ActivitySummary.ToolCallCount);
+        Assert.Equal(saved.ActivitySummary.ToolErrorCount, reloaded.ActivitySummary.ToolErrorCount);
+    }
+
+    [Fact]
+    public async Task RecoverMissingRuntimeSession_DoesNotExposePreviousRuntimeSummary()
+    {
+        var grain = await OpenBoundGrainAsync();
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput("model.resolved", "{\"resolvedModel\":\"model-a\"}"),
+                new AgentSessionRuntimeEventInput("tool_call.updated", "{\"toolCallId\":\"tool-a\",\"status\":\"failed\"}"),
+                new AgentSessionRuntimeEventInput("session.activity", "{\"activity\":\"idle\",\"failureCategory\":\"failure-a\",\"failureReason\":\"reason-a\"}")
+            },
+            "runtime-1"));
+        await grain.FlushForTestAsync();
+
+        var now = Fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        await using (var db = Fixture.CreateDbContext())
+        {
+            var turn = new AgentSessionTranscriptTurnRow
+            {
+                SessionId = grain.GetPrimaryKeyString(),
+                RuntimeSessionId = "runtime-1",
+                Sequence = 1,
+                PromptText = string.Empty,
+                PromptKind = "task",
+                StartedAt = now,
+                UpdatedAt = now,
+            };
+            db.AgentSessionTranscriptTurns.Add(turn);
+            await db.SaveChangesAsync();
+
+            db.AgentSessionTranscriptParts.AddRange(
+                new AgentSessionTranscriptPartRow
+                {
+                    TurnId = turn.Id,
+                    Sequence = 1,
+                    Type = "model",
+                    CorrelationKey = "model",
+                    PayloadJson = "{\"resolvedModel\":\"model-a\"}",
+                    FirstSeenAt = now,
+                    LastSeenAt = now,
+                    RawEventCount = 1,
+                },
+                new AgentSessionTranscriptPartRow
+                {
+                    TurnId = turn.Id,
+                    Sequence = 2,
+                    Type = "tool",
+                    CorrelationKey = "tool-a",
+                    CorrelationId = "tool-a",
+                    PayloadJson = "{\"toolCallId\":\"tool-a\",\"status\":\"failed\"}",
+                    FirstSeenAt = now,
+                    LastSeenAt = now,
+                    RawEventCount = 1,
+                },
+                new AgentSessionTranscriptPartRow
+                {
+                    TurnId = turn.Id,
+                    Sequence = 3,
+                    Type = "session.activity",
+                    CorrelationKey = "session.activity",
+                    PayloadJson = "{\"activity\":\"idle\",\"failureCategory\":\"failure-a\",\"failureReason\":\"reason-a\"}",
+                    FirstSeenAt = now,
+                    LastSeenAt = now,
+                    RawEventCount = 1,
+                });
+            await db.SaveChangesAsync();
+        }
+
+        var beforeRebind = await grain.GetAsync();
+        Assert.NotNull(beforeRebind);
+        Assert.Equal("model-a", beforeRebind!.ResolvedModel);
+        Assert.Equal(1, beforeRebind.ToolCallCount);
+        Assert.Equal(1, beforeRebind.ToolErrorCount);
+        Assert.Equal("failure-a", beforeRebind.FailureCategory);
+
+        var afterRebind = await grain.RecoverMissingRuntimeSessionAsync(
+            new RecoverMissingRuntimeSessionCommand(
+                "runner-1",
+                "test",
+                "runtime-1",
+                "runtime-2"));
+
+        Assert.Equal("runtime-2", afterRebind.AgentSessionId);
+        Assert.Null(afterRebind.ResolvedModel);
+        Assert.Null(afterRebind.ToolCallCount);
+        Assert.Null(afterRebind.ToolErrorCount);
+        Assert.Null(afterRebind.FailureCategory);
+        Assert.Equal("model-a", Fixture.StateStore.State!.ActivitySummary.ResolvedModel);
     }
 
     [Fact]
