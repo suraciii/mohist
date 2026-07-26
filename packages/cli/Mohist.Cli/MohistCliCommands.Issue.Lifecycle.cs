@@ -13,7 +13,7 @@ internal static partial class IssueCommands
         var cmd = new Command(name, $"{description} an issue");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -85,7 +85,7 @@ internal static partial class IssueCommands
         };
         var allCompletedOpt = new Option<bool>("--all-completed") { Description = "Archive all completed issues" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(allCompletedOpt);
         cmd.Options.Add(projectOpt);

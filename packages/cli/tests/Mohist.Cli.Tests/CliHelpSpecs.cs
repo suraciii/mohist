@@ -160,6 +160,44 @@ public sealed class CliHelpSpecs
         Assert.Empty(handler.Requests);
     }
 
+    [Theory]
+    [InlineData(new[] { "issue", "start", "--help" }, "workflowRunId")]
+    [InlineData(new[] { "issue", "done", "--help" }, "workflowRunId")]
+    [InlineData(new[] { "issue", "close", "--help" }, "workflowRunId")]
+    [InlineData(new[] { "issue", "reopen", "--help" }, "workflowRunId")]
+    [InlineData(new[] { "issue", "archive", "--help" }, "workflowRunId")]
+    [InlineData(new[] { "issue", "prereq", "add", "--help" }, "workflowRunId")]
+    [InlineData(new[] { "issue", "prereq", "remove", "--help" }, "workflowRunId")]
+    [InlineData(new[] { "issue", "watch", "add", "--help" }, "workflowRunId")]
+    [InlineData(new[] { "issue", "watch", "remove", "--help" }, "workflowRunId")]
+    [InlineData(new[] { "run", "list", "--help" }, "issueNumber")]
+    [InlineData(new[] { "run", "view", "--help" }, "currentStage")]
+    [InlineData(new[] { "run", "approve", "--help" }, "status")]
+    [InlineData(new[] { "run", "reject", "--help" }, "status")]
+    [InlineData(new[] { "run", "retry", "--help" }, "status")]
+    [InlineData(new[] { "run", "rerun", "--help" }, "status")]
+    [InlineData(new[] { "run", "pause", "--help" }, "status")]
+    [InlineData(new[] { "run", "resume", "--help" }, "status")]
+    [InlineData(new[] { "run", "stop", "--help" }, "status")]
+    [InlineData(new[] { "activity", "list", "--help" }, "provenance")]
+    [InlineData(new[] { "event", "tail", "--help" }, "specversion")]
+    [InlineData(new[] { "info", "--help" }, "platformNotice")]
+    [InlineData(new[] { "project", "variable", "list", "--help" }, "stages")]
+    [InlineData(new[] { "issue", "variable", "list", "--help" }, "stages")]
+    [InlineData(new[] { "run", "variable", "list", "--help" }, "stages")]
+    [InlineData(new[] { "epic", "close", "--help" }, "updatedAt")]
+    public async Task DirectJsonSelectionHelp_ListsRuntimeJsonFields(string[] args, string expectedField)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("JSON FIELDS", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains(expectedField, output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task ActivityListHelp_ShowsDefaultLimit()
     {

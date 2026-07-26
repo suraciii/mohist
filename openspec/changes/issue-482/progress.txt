@@ -231,3 +231,13 @@ Review-fix progress (round 6)
   commands from omitting their JSON help fields at compile time.
 - Focused CLI verification passed with 1398 tests; the complete `npm test`
   suite also passed.
+
+Review-fix progress (round 7)
+
+- Direct JSON-selection options now require their runtime resource descriptor,
+  so help always lists the fields accepted by field discovery and projection.
+- Run list and view help use their runtime descriptors; Run view now exposes
+  `id`, `status`, `currentStage`, `stages`, and `issueRef` consistently.
+- The CLI reference and packaged explore Skill use canonical command paths,
+  and `CliHelpSpecs` covers every formerly descriptor-less selection leaf.
+- Focused CLI verification passed with 1423 tests.

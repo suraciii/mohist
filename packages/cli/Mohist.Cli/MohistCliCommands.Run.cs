@@ -183,7 +183,7 @@ internal static partial class RunCommands
         {
             Description = "Declared approval operator (1-100 characters)",
         };
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
@@ -257,7 +257,7 @@ internal static partial class RunCommands
         {
             Description = "Declared rejection operator (1-100 characters)",
         };
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
@@ -332,7 +332,7 @@ internal static partial class RunCommands
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
         var (projectOpt, projectIdOpt) = ProjectOptions();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
@@ -387,7 +387,7 @@ internal static partial class RunCommands
         {
             Description = "Rerun from the specified stage (invalidates that stage and all later stages)",
         };
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
@@ -450,7 +450,7 @@ internal static partial class RunCommands
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
         var (projectOpt, projectIdOpt) = ProjectOptions();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
@@ -499,7 +499,7 @@ internal static partial class RunCommands
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
         var (projectOpt, projectIdOpt) = ProjectOptions();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
@@ -554,7 +554,7 @@ internal static partial class RunCommands
         {
             Description = "Bypass confirmation (required in non-interactive mode for this irreversible action)",
         };
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);

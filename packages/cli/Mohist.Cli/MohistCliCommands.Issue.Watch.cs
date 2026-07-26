@@ -21,7 +21,7 @@ internal static partial class IssueCommands
         var numberArg = NumberArg();
         var agentOpt = new Option<string?>("--agent") { Description = "Agent name or id" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(agentOpt);
         cmd.Options.Add(projectOpt);
@@ -73,7 +73,7 @@ internal static partial class IssueCommands
         var numberArg = NumberArg();
         var agentOpt = new Option<string?>("--agent") { Description = "Agent name or id" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(agentOpt);
         cmd.Options.Add(projectOpt);

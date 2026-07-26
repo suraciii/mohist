@@ -21,7 +21,7 @@ internal static partial class IssueCommands
             Description = "Prerequisite issue number",
         };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Arguments.Add(prereqNumberArg);
         cmd.Options.Add(projectOpt);
@@ -64,7 +64,7 @@ internal static partial class IssueCommands
             Description = "Prerequisite issue number",
         };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Arguments.Add(prereqNumberArg);
         cmd.Options.Add(projectOpt);

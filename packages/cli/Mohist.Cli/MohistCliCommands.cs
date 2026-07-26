@@ -90,17 +90,14 @@ internal static class MohistCliCommands
         return option;
     }
 
-    internal static Option<string?> JsonSelectionOption() => JsonSelectionOption(null);
-
-    internal static Option<string?> JsonSelectionOption(ResourceDescriptor? descriptor)
+    internal static Option<string?> JsonSelectionOption(ResourceDescriptor descriptor)
     {
         var option = new Option<string?>("--json")
         {
             Description = "Return selected fields, or list available fields when no value is supplied",
             Arity = ArgumentArity.ZeroOrOne,
         };
-        if (descriptor is not null)
-            CommandPresentationCatalog.AttachJsonFields(option, descriptor);
+        CommandPresentationCatalog.AttachJsonFields(option, descriptor);
         return option;
     }
 

@@ -43,11 +43,11 @@ internal static partial class RunCommands
         "failed",
     };
 
-    private static readonly ResourceDescriptor RunListDescriptor = new(
+    internal static readonly ResourceDescriptor RunListDescriptor = new(
         ResourceCardinality.Collection,
         ["id", "status", "stage", "currentStage", "issueNumber"]);
 
-    private static readonly ResourceDescriptor RunViewDescriptor = new(
+    internal static readonly ResourceDescriptor RunViewDescriptor = new(
         ResourceCardinality.Single,
         ["id", "status", "currentStage", "stages", "issueRef"]);
 
@@ -68,7 +68,7 @@ internal static partial class RunCommands
             "list",
             "List workflow runs visible in the current project scope. Derived from the project issues list (each issue with a bound run contributes one row).");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(RunListDescriptor);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
@@ -167,7 +167,7 @@ internal static partial class RunCommands
         {
             Description = "Print the Workflow Definition YAML source (mutually exclusive with --json)",
         };
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(RunViewDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);

@@ -248,10 +248,10 @@ internal static class CommandPresentations
                     JsonFields: RunCommands.RunControlDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "list"), new CommandPresentation(
                     CommandCapability.Automation, "List WorkflowRuns in the active Project",
-                    JsonFields: ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RunList)).Fields));
+                    JsonFields: RunCommands.RunListDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "view"), new CommandPresentation(
                     CommandCapability.Automation, "Read a WorkflowRun by its Run ID",
-                    JsonFields: ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.WorkflowRunDetail)).Fields));
+                    JsonFields: RunCommands.RunViewDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "logs"), new CommandPresentation(
                     CommandCapability.Automation, "Tail WorkflowRun-scoped logs"));
                 CommandPresentationCatalog.Attach(Find(group, "events"), new CommandPresentation(

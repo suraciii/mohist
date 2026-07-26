@@ -32,7 +32,7 @@ internal static class ActivityCommands
             Description = $"Maximum entries to return (1-{MaxLimit})",
             DefaultValueFactory = _ => DefaultLimit,
         };
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(ActivityListDescriptor);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(limitOpt);
