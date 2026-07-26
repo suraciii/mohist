@@ -47,7 +47,11 @@ public class CliCanonicalCommandSurfaceSpecs
             "notification", "otel", "skill", "install", "update", "info",
         ];
         foreach (var name in canonical)
-            Assert.Contains($"\n  {name} ", stdout);
+            Assert.Contains(name, stdout, StringComparison.Ordinal);
+        Assert.Contains("Work", stdout, StringComparison.Ordinal);
+        Assert.Contains("Automation", stdout, StringComparison.Ordinal);
+        Assert.Contains("Operations", stdout, StringComparison.Ordinal);
+        Assert.Contains("Tools", stdout, StringComparison.Ordinal);
     }
 
     [Fact]

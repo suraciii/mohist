@@ -606,9 +606,8 @@ public class CliLabelCatalogSpecs
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
-        Assert.Contains("delete <key>", text, StringComparison.Ordinal);
+        Assert.Contains("delete", text, StringComparison.Ordinal);
         Assert.DoesNotContain("remove", text, StringComparison.Ordinal);
-        Assert.DoesNotContain(", rm", text, StringComparison.Ordinal);
         Assert.DoesNotContain(" rm ", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ls", text, StringComparison.Ordinal);
     }

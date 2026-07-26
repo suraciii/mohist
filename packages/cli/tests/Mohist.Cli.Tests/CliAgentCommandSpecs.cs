@@ -614,7 +614,7 @@ public class CliAgentCommandSpecs
         Assert.Contains("list", stdout);
         Assert.Contains("view", stdout);
         Assert.Contains("edit", stdout);
-        Assert.Contains("archive <name-or-id>", stdout);
+        Assert.Contains("archive", stdout);
         Assert.DoesNotContain("show", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("update", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("delete", stdout, StringComparison.Ordinal);

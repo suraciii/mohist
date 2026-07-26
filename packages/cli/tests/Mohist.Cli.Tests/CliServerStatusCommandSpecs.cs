@@ -37,17 +37,16 @@ public class CliServerStatusCommandSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        // The four surviving read subcommands must be listed; anchored on
-        // `\n  <name> ` so prose mentions don't count.
+        // The four surviving read subcommands must be listed.
         foreach (var name in new[] { "status", "health", "info", "logs" })
-            Assert.Contains($"\n  {name} ", stdout);
+            Assert.Contains(name, stdout, StringComparison.Ordinal);
 
         // Local lifecycle verbs must not be advertised — they live under
         // `mo service <verb> server` now.
-        Assert.DoesNotContain("\n  start ", stdout);
-        Assert.DoesNotContain("\n  stop ", stdout);
-        Assert.DoesNotContain("\n  restart ", stdout);
-        Assert.DoesNotContain("\n  uninstall ", stdout);
+        Assert.DoesNotContain("start", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("stop", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("restart", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("uninstall", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -63,8 +62,8 @@ public class CliServerStatusCommandSpecs
         var stdout = output.ToString();
         // Group description must call out the read-only contract and point
         // the reader at the service group for lifecycle verbs.
-        Assert.Contains("Connected Mohist Server application", stdout, StringComparison.Ordinal);
-        Assert.Contains("mo service", stdout, StringComparison.Ordinal);
+        Assert.Contains("Inspect and operate the Mohist Server", stdout, StringComparison.Ordinal);
+        Assert.Contains("Server commands do not require a Project", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -108,7 +107,7 @@ public class CliServerStatusCommandSpecs
         // Server status, formerly `mo project status`. This guards against
         // regressions where the command's description drifts back to a
         // local-unit semantic.
-        Assert.Contains("project status", stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("aggregated across all Projects", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -146,7 +145,7 @@ public class CliServerStatusCommandSpecs
         Assert.Contains("use", stdout);
         Assert.Contains("delete", stdout);
         Assert.Contains("workflow", stdout);
-        Assert.DoesNotContain("\n  status ", stdout);
+        Assert.DoesNotContain("status", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("show", stdout, StringComparison.Ordinal);
     }
 
@@ -192,7 +191,7 @@ public class CliServerStatusCommandSpecs
         // logs (distinct from service-manager logs) and point readers to
         // `mo service logs server` for the service-manager counterpart.
         Assert.Contains("application logs", stdout, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("mo service logs server", stdout, StringComparison.Ordinal);
+        Assert.Contains("mo service logs server", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

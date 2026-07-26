@@ -72,17 +72,18 @@ public class CliRepositoryCommandSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("repo [command] [options]", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("repository [command] [options]", stdout, StringComparison.Ordinal);
-        Assert.Contains("  list ", stdout, StringComparison.Ordinal);
-        Assert.Contains("  add ", stdout, StringComparison.Ordinal);
-        Assert.Contains("  edit ", stdout, StringComparison.Ordinal);
-        Assert.Contains("  set-default ", stdout, StringComparison.Ordinal);
-        Assert.Contains("  delete ", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("  update ", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("  remove ", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("  rm ", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("  ls ", stdout, StringComparison.Ordinal);
+        Assert.Contains("USAGE", stdout, StringComparison.Ordinal);
+        Assert.Contains("mo repo", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("repository [command]", stdout, StringComparison.Ordinal);
+        Assert.Contains("list", stdout, StringComparison.Ordinal);
+        Assert.Contains("add", stdout, StringComparison.Ordinal);
+        Assert.Contains("edit", stdout, StringComparison.Ordinal);
+        Assert.Contains("set-default", stdout, StringComparison.Ordinal);
+        Assert.Contains("delete", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("update", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("remove", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain(" rm ", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain(" ls ", stdout, StringComparison.Ordinal);
     }
 
     [Fact]

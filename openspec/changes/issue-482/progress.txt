@@ -128,3 +128,27 @@ T-001 progress (canonical `mo` command surface)
 - `dotnet test --filter FullyQualifiedName~Mohist.Cli.Tests` → 1360 passed, 0 failed.
 - `npm test` → all workspace tests pass: 175 workflow + 1360 cli + 1455 server unit + 32 server
   arch + 3190 server spec + 5133 web + 1423 runner.
+
+T-002 progress (layered local help and usage errors)
+
+# Patterns and gotchas discovered
+
+- `System.CommandLine` help options are installed on the final command tree after all builders
+  run. Replacing their actions once in `CommandHelpHook.Install` keeps root, group, and leaf help
+  on one local rendering path without invoking handlers.
+- Parser failures can contain a partially parsed command tree. The nearest usage renderer walks
+  `CommandResult.Children` to the deepest parsed command before rendering stderr usage; this is
+  more reliable than reparsing `--help` on the command because parser errors may have already
+  consumed an invalid token.
+- JSON field help reads `ResourceOutputCatalog`; IssueShow needed an explicit catalog entry so its
+  fields match the existing IssueDescriptor (`number`, `title`, `status`, `stage`, `priority`,
+  `labels`, `body`, `repository`, `repositoryName`, `workflowRunId`).
+- Shared topics are handled by the registered local `help` command and validate before invoking
+  any command handler, so topic help works with no active Project and no HTTP responder.
+
+# Verification
+
+- Focused `CliHelpSpecs` passed, covering root, output/environment/exit-codes topics, workflow,
+  run, Issue JSON fields, unknown topic, and invalid command usage.
+- `dotnet test Mohist.sln --filter FullyQualifiedName~Mohist.Cli.Tests --no-restore` passed: 1369
+  CLI tests.

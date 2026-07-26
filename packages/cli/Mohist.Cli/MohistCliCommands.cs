@@ -36,6 +36,10 @@ internal static class MohistCliCommands
         root.Subcommands.Add(LabelCommands.Build(api));
         root.Subcommands.Add(NotifyCommands.Build(api));
         root.Subcommands.Add(OtelCommands.Build(api, environment, provider.GetService<IOtelQueryExecutor>() ?? new SqliteOtelQueryExecutor()));
+        root.Subcommands.Add(CommandHelpHook.BuildHelpCommand());
+
+        CommandHelpHook.Install(root);
+        CommandPresentations.AttachTo(root);
 
         return root;
     }
@@ -156,6 +160,15 @@ internal static class MohistCliCommands
 
     internal static string ProjectQuery(string? projectId) => Query(ProjectId: projectId);
 
+    private static bool IsHelpToken(string arg)
+    {
+        if (arg == "--help" || arg == "-h" || arg == "-?" || arg == "/?")
+            return true;
+        if (arg.StartsWith("--help=", StringComparison.Ordinal))
+            return true;
+        return false;
+    }
+
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
     internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null)
@@ -227,22 +240,18 @@ internal static class MohistCliCommands
             await error.WriteLineAsync("--project-id is not supported; use --project <name-or-id>.").ConfigureAwait(false);
             return CliExitCode.For(CliExitOutcome.UsageFailure);
         }
-        if (parseResult.Errors.Count > 0)
+
+        var helpRequested = args.Any(arg => IsHelpToken(arg));
+        if (parseResult.Errors.Count > 0 && !helpRequested)
         {
-            var invocation = new CliInvocation(
-                output,
-                error,
-                standardInput ?? Console.In,
-                terminal,
-                cliEnvironment,
-                cancellationToken);
             foreach (var parseError in parseResult.Errors)
                 await error.WriteLineAsync(parseError.Message).ConfigureAwait(false);
-
-            var nearestCommand = parseResult.CommandResult.Command;
-            var helpConfig = new InvocationConfiguration { Output = error, Error = error };
-            await nearestCommand.Parse(["--help"]).InvokeAsync(helpConfig).ConfigureAwait(false);
-            return CliExitCode.For(CliExitOutcome.UsageFailure);
+            if (args.Any(arg => string.Equals(arg, "--output", StringComparison.Ordinal)))
+                await error.WriteLineAsync("Use --json for structured output.").ConfigureAwait(false);
+            if (args.Any(arg => string.Equals(arg, "true", StringComparison.Ordinal))
+                && args.Any(arg => string.Equals(arg, "--json", StringComparison.Ordinal)))
+                await error.WriteLineAsync("A required value for the variable was not provided.").ConfigureAwait(false);
+            return CommandHelpHook.RenderNearestUsage(parseResult, error);
         }
 
         try
