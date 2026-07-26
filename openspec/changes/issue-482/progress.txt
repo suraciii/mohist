@@ -198,3 +198,11 @@ Review-fix progress (round 2)
   presentations and no longer reveals request details.
 - Focused CLI verification: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore`
   passed, 1385 tests.
+
+Review-fix progress (round 3)
+
+- Agent creation now resolves and validates instructions and Agent config locally
+  before Project resolution. Missing, unreadable, and invalid values render
+  scoped usage with exit code 2 and make no HTTP request.
+- Focused CLI verification passed with 1388 tests; the complete `npm test`
+  suite also passed.
