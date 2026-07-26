@@ -20,11 +20,14 @@ namespace Mohist.Server.AgentOps.Services;
 ///. Composes listing + active-session
 /// reconciliation + latest-event / event-summary / issue-title /
 /// task-progress / preview-card projection into a single
-/// <see cref="ActivityDto"/>. Depends one-way on the shared
-/// <see cref="ActiveSessionReconciler.ReconcileAsync"/> and
-/// <see cref="TranscriptReductions.LoadEventSummariesAsync"/> reductions
-/// and the shared <see cref="TranscriptPartLoader"/> — the core
-/// querier does not depend on this service.
+/// <see cref="ActivityDto"/>. The per-card <c>eventSummary</c> is read
+/// straight from each <see cref="AgentSessionRecord"/>'s persisted
+/// <see cref="AgentSession.ActivitySummary"/> (issue-468) so the activity
+/// polling path no longer replays transcript history to build summaries.
+/// Depends one-way on the shared
+/// <see cref="ActiveSessionReconciler.ReconcileAsync"/> reduction and the
+/// shared <see cref="TranscriptPartLoader"/> for the latest-event preview
+/// load only — the core querier does not depend on this service.
 /// </summary>
 /// <remarks>
 /// Previously these methods (and their private helpers
@@ -93,7 +96,6 @@ public sealed class AgentActivityFeedAssembler : IScopedService
 
         var sessionIds = sessions.Select(s => s.Session.Id).ToArray();
         var latestEventsLoad = await LoadLatestEventsAsync(db, sessionIds, ct);
-        var eventSummariesLoad = await TranscriptReductions.LoadEventSummariesWithCountAsync(db, sessionIds, ct);
         var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
         var taskProgressMap = await BuildTaskProgressMapAsync(sessions, ct);
 
@@ -101,7 +103,6 @@ public sealed class AgentActivityFeedAssembler : IScopedService
             .Select(record => ToActivityCard(
                 record,
                 latestEventsLoad.Projections.GetValueOrDefault(record.Session.Id),
-                eventSummariesLoad.Summaries.GetValueOrDefault(record.Session.Id),
                 IssueTitleLookup.Resolve(issueTitles, record.IssueNumber()),
                 taskProgressMap.GetValueOrDefault(record.Session.Id)))
             .ToList();
@@ -118,7 +119,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         var amplification = new AgentAmplificationDto(
             Candidates: candidatesCount,
             Processed: cards.Count,
-            TranscriptRecords: latestEventsLoad.TranscriptRecords + eventSummariesLoad.TranscriptRecords,
+            TranscriptRecords: latestEventsLoad.TranscriptRecords,
             DatabaseCalls: 0,
             DownstreamCalls: 0);
 
@@ -187,12 +188,14 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     /// activity preview, event-summary, usage). Status, usage and
     /// event-summary projections are sourced from the shared
     /// <see cref="AgentSessionDtoMapper"/> so list / summary / activity
-    /// feeds stay in lockstep.
+    /// feeds stay in lockstep; <c>eventSummary</c> is the persisted
+    /// <see cref="AgentSession.ActivitySummary"/> delivered by the
+    /// Session write path, so this assembler never replays transcript
+    /// history to build summaries (issue-468).
     /// </summary>
     private ActivityCardDto ToActivityCard(
         AgentSessionRecord record,
         TranscriptEventProjection? latestEvent,
-        AgentSessionTranscriptSummary? eventSummary,
         string issueTitle,
         ActivityTaskProgressDto? taskProgress)
     {
@@ -227,7 +230,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
                 null,
                 agentId,
                 agentName,
-                AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
+                AgentSessionDtoMapper.ToEventSummaryDto(s.ActivitySummary),
                 AgentSessionDtoMapper.ToUsageDto(s));
         }
 
@@ -249,7 +252,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
             null,
             null,
             null,
-            AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
+            AgentSessionDtoMapper.ToEventSummaryDto(s.ActivitySummary),
             AgentSessionDtoMapper.ToUsageDto(s));
     }
 

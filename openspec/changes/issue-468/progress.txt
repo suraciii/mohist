@@ -11,3 +11,14 @@
 - The persisted JSON member is private to the domain model through an included `activitySummary` state property; `AgentSession.ActivitySummary` is the read-only five-field projection used by later read-side work.
 - Reducer state keeps final model/tool parts for the open turn, sealed tool/failure identifiers, and an ordered latest activity candidate keyed by turn, part sequence, and part identifier. Same-turn tool replacements preserve the original part sequence; `session.input` seals the previous turn.
 - Full SpecTests pass after adding empty-summary, reducer, persistence/reload, and stale-binding coverage; grain tests use `List<T>` inputs because Orleans cannot deep-copy collection-expression runtime event lists.
+
+## T-002
+
+- `AgentActivityFeedAssembler.GetActivityAsync` no longer calls `TranscriptReductions.LoadEventSummariesWithCountAsync`; each card's `eventSummary` is now sourced from `record.Session.ActivitySummary` (the persisted Session summary from T-001), and `ToActivityCard` reads it directly without an injected parameter.
+- `amplification.transcriptRecords` is now `latestEventsLoad.TranscriptRecords` only — the duplicate summary pass is removed from the read path, so a session with N transcript parts contributes N records (not 2N) to amplification.
+- The remaining activity read concerns (preview loader, issue-title lookup, reconciler, workflow-progress map) are unchanged; the doc comment now states the persisted-summary read path explicitly so future readers do not re-add the transcript reduction.
+- The xunit.v3 runner does not honour `--filter`; use `-class "Mohist.Server.SpecTests.Specs.<Area>.<Type>"` (or `-method "..."`) when targeting a subset of the SpecTests assembly.
+- The two amplification specs (`AgentPathAmplificationSpecs`, `AgentPathAmplificationOtelEnabledSpecs`) rename `Activity_counts_each_repeated_transcript_materialization` to `Activity_counts_only_preview_transcript_materialization` and lower the transcriptRecords assertion from 4 to 2, asserting operation counts rather than wall-clock.
+- `AgentActivityFeedAssemblerSpecs` gains two specs that pin the new contract: persisted-summary → card eventSummary mapping, and transcript-history growth that leaves the summary-read contribution at zero (transcriptRecords == N + K, not 2N + K).
+- `AgentSessionDtoMapperCrossConsumerIdentitySpecs.UsageAndEventSummary_QuerierAndAssembler_PreserveAlignedFieldsAndHistoryDifference` is updated: `AgentSessionListAssembler.ListCurrentAsync` still reduces transcript parts (out of T-002 scope), while `AgentActivityFeedAssembler.GetActivityAsync` reads the persisted summary, so the two consumers intentionally diverge for sessions whose persisted summary has not yet been written by the grain. The shared usage / context-history delta is preserved.
+- All 3152 SpecTests, 1455 UnitTests, 32 ArchTests, 5134 web tests, and 1426 runner tests pass after the change.

@@ -58,9 +58,18 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         AssertUsageDtoScalarFieldsEqual(fromQuerierPath.Usage, fromAssemblerPath.Usage);
         Assert.Null(fromQuerierPath.Usage.ContextUsageHistory);
         Assert.NotNull(fromAssemblerPath.Usage.ContextUsageHistory);
-        AssertEventSummaryDtoEqual(fromQuerierPath.EventSummary, fromAssemblerPath.EventSummary);
+
+        // issue-468 T-002: the activity path now reads eventSummary from
+        // the persisted AgentSession.ActivitySummary (issue-468 T-001) and
+        // no longer replays transcript history. The seeded session bypasses
+        // the Session grain's reducer, so its persisted summary is empty;
+        // the activity card therefore exposes an empty eventSummary while
+        // the list path continues to compute the transcript-derived
+        // summary. The two consumers intentionally diverge until the
+        // Session grain reduces the same observations.
         Assert.True(fromQuerierPath.EventSummary.ContextExhaustionSuspected);
         Assert.Null(fromQuerierPath.EventSummary.ContextExhaustion);
+        AssertEventSummaryDtoEmpty(fromAssemblerPath.EventSummary);
     }
 
     [Fact]
@@ -302,6 +311,16 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         Assert.Equal(expected.ContextExhaustionSuspected, actual.ContextExhaustionSuspected);
         Assert.Equal(expected.ToolCallCount, actual.ToolCallCount);
         Assert.Equal(expected.ToolErrorCount, actual.ToolErrorCount);
+    }
+
+    private static void AssertEventSummaryDtoEmpty(AgentEventSummaryDto actual)
+    {
+        Assert.Null(actual.ResolvedModel);
+        Assert.Null(actual.FailureCategory);
+        Assert.Null(actual.ContextExhaustion);
+        Assert.Null(actual.ContextExhaustionSuspected);
+        Assert.Null(actual.ToolCallCount);
+        Assert.Null(actual.ToolErrorCount);
     }
 
 }
