@@ -305,11 +305,35 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         return new AgentJobReportResult(true);
     }
 
-    public Task FailAsync(string reason)
+    public Task FailAsync(string reason, string? agentId = null)
     {
         if (IsTerminal)
         {
             return Task.CompletedTask;
+        }
+
+        var resolvedAgentId = !string.IsNullOrWhiteSpace(agentId)
+            ? agentId
+            : State.Input?.AgentId ?? State.RoutedPlan?.AgentId;
+        if (string.IsNullOrWhiteSpace(resolvedAgentId))
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' cannot fail without a resolved Agent identity");
+
+        if (State.Input is null)
+        {
+            var plan = State.RoutedPlan;
+            State.Input = new AgentJobInput(
+                Prompt: plan?.Prompt ?? string.Empty,
+                ProjectId: plan?.ProjectId,
+                AgentId: resolvedAgentId,
+                AgentSessionId: plan?.SessionId,
+                IssueNumber: plan?.IssueNumber,
+                EpicNumber: plan?.EpicNumber,
+                WorkflowRunId: plan?.WorkflowRunId);
+        }
+        else if (string.IsNullOrWhiteSpace(State.Input.AgentId))
+        {
+            State.Input = State.Input with { AgentId = resolvedAgentId };
         }
 
         return EnterTerminalStateAsync(
@@ -346,6 +370,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (input is null || string.IsNullOrWhiteSpace(input.Prompt))
             throw new ArgumentException("AgentJobInput.Prompt is required", nameof(input));
+        if (string.IsNullOrWhiteSpace(input.AgentId))
+            throw new ArgumentException("AgentJobInput.AgentId is required", nameof(input));
 
         State.AgentConfigJson = SerializeAgentConfig(input.AgentConfig);
         State.Input = input with { AgentConfig = null };
@@ -389,6 +415,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     public async Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        if (string.IsNullOrWhiteSpace(plan.AgentId))
+            throw new ArgumentException("RoutedAgentLaunchPlan.AgentId is required", nameof(plan));
 
         if (State.RoutedPlan is { } existing)
         {
@@ -430,6 +458,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             Key, plan is not null, plan?.Disposition);
         if (plan is null)
             return;
+        if (string.IsNullOrWhiteSpace(plan.AgentId))
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' cannot advance without a resolved Agent identity");
 
         if (State.RunnerAccepted)
         {
@@ -803,10 +834,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             with["variant"] = JSON.SerializeToElement(input.Variant);
         // The dispatch envelope carries the
         // snapshot-fixed runtime so the runner AgentJob executor can
-        // select the right runtime (PiRuntime / OpenCodeRuntime). The
-        // raw-prompt-only validation path leaves Runtime unset on the
-        // input; in that case the runner falls back to its existing
-        // single-runtime readiness check.
+        // select the right runtime (PiRuntime / OpenCodeRuntime).
         if (!string.IsNullOrWhiteSpace(input.Runtime))
             with["runtime"] = JSON.SerializeToElement(input.Runtime);
         var withJson = JSON.Serialize(with);
@@ -823,7 +851,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
             AgentJobId: Key,
             ProjectId: string.IsNullOrWhiteSpace(input.ProjectId) ? null : input.ProjectId,
-            AgentSessionId: string.IsNullOrWhiteSpace(input.AgentSessionId) ? null : input.AgentSessionId);
+            AgentSessionId: string.IsNullOrWhiteSpace(input.AgentSessionId) ? null : input.AgentSessionId,
+            AgentId: input.AgentId);
     }
 
     private async Task ScheduleNextDispatchAsync()
@@ -1045,10 +1074,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var epic = extensions.TryGetValue(EventCatalog.Lineage.Epic, out var epi) ? epi : null;
         var workflowRunId = extensions.TryGetValue(EventCatalog.Lineage.WorkflowRunId, out var wri) ? wri : null;
         var agentId = extensions.TryGetValue(EventCatalog.Lineage.AgentId, out var aid) ? aid : null;
-        var producerFamily = string.IsNullOrWhiteSpace(agentId)
-            ? EventProducerFamily.RawAgentJob
-            : EventProducerFamily.AgentJob;
-        ProducerConformance.Assert(producerFamily, extensions, new ProducerLineageContext(
+        ProducerConformance.Assert(EventProducerFamily.AgentJob, extensions, new ProducerLineageContext(
             ProjectId: projectId,
             Issue: issue,
             Epic: epic,
@@ -1174,8 +1200,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     /// wake-up until either Runner acceptance is persisted (preparation)
     /// or the Session-close acknowledgement clears the pending payload
     /// (terminal). The tick self-cleans only when no recoverable
-    /// obligation is left — for failed agentless jobs that means waiting
-    /// for the failure-event append to succeed even when there is no
+    /// obligation is left — for failed jobs without an AgentSession that
+    /// means waiting for the failure-event append to succeed.
     /// </summary>
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {

@@ -11,7 +11,7 @@ namespace Mohist.Server.Api;
 /// Minimal validation HTTP API for the standalone Agent Jobs engine.
 ///
 /// POST <c>/api/agent-jobs/validate</c> accepts a body of
-/// <c>{ prompt, model, workspace }</c>, creates an <see cref="IAgentJobGrain"/>
+/// <c>{ prompt, agentId, model, workspace }</c>, creates an <see cref="IAgentJobGrain"/>
 /// with a generated key, dispatches it through the engine, awaits the job's
 /// terminal result, and returns the job's status/message/output/artifacts.
 ///
@@ -69,6 +69,8 @@ public static class AgentJobController
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(body.Prompt))
             errors.Add("prompt is required");
+        if (string.IsNullOrWhiteSpace(body.AgentId))
+            errors.Add("agentId is required");
         if (body.Workspace is not null && string.IsNullOrWhiteSpace(body.Workspace.Path))
             errors.Add("workspace.path is required when workspace is provided");
         if (body.JobId is { Length: > 0 } && !IsValidJobId(body.JobId))
@@ -91,7 +93,8 @@ public static class AgentJobController
             Prompt: body.Prompt!.Trim(),
             Model: string.IsNullOrWhiteSpace(body.Model) ? null : body.Model.Trim(),
             WorkspacePath: body.Workspace?.Path,
-            ProjectId: body.Workspace?.ProjectId);
+            ProjectId: body.Workspace?.ProjectId,
+            AgentId: body.AgentId!.Trim());
 
         try
         {
@@ -224,6 +227,7 @@ public static class AgentJobController
 public sealed record AgentJobValidationRequest
 {
     public string? Prompt { get; init; }
+    public string? AgentId { get; init; }
     public string? Model { get; init; }
     public string? Uses { get; init; }
     public string? JobId { get; init; }

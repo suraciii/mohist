@@ -48,7 +48,7 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// cannot accept the report (e.g., the grain reactivated in Pending
     /// status and no longer recognises the runner/work pair).
     /// </summary>
-    Task FailAsync(string reason);
+    Task FailAsync(string reason, string? agentId = null);
 }
 
 [GenerateSerializer]
@@ -220,9 +220,8 @@ public enum RoutedLaunchDisposition
 /// project-scoped <c>Agent</c> profile, the resolved snapshot (id,
 /// instructions, model, and variant) is captured here so the executed
 /// bytes are stable for the lifetime of the job — even if the Agent is
-/// edited concurrently. A raw-prompt-only AgentJob remains supported:
-/// when <see cref="AgentId"/> is null, the runner receives the bare
-/// <see cref="Prompt"/>.
+/// edited concurrently. Raw-prompt-only AgentJobs are rejected before
+/// dispatch because a failed job must retain a real Agent identity.
 /// </summary>
 [GenerateSerializer]
 public sealed record AgentJobInput(
@@ -232,9 +231,7 @@ public sealed record AgentJobInput(
     [property: Id(3)] string? ProjectId = null,
     /// <summary>
     /// Resolved execution backend snapshot captured at launch time
-    ///. Null only on raw-prompt-only validation
-    /// dispatches that never resolve an Agent profile; resolved
-    /// launches always pin the runtime (defaulting to
+    /// (issue-452 design D2). Resolved launches pin the runtime (defaulting to
     /// <c>AgentConfigSchema.OpenCodeRuntime</c>) so the runner
     /// executor can pick the right runtime and recovery reuses the
     /// snapshotted value rather than re-reading mutable Agent config.
@@ -243,9 +240,9 @@ public sealed record AgentJobInput(
     /// </summary>
     [property: Id(4)] string? Runtime = null,
     /// <summary>
-    /// Resolved Agent profile identity captured at launch time. Carried
-    /// through to dispatch for traceability. Null when the job is a
-    /// raw-prompt-only AgentJob.
+    /// Resolved Agent profile identity captured at launch time. Required
+    /// for every executable AgentJob and carried through to dispatch for
+    /// traceability.
     /// </summary>
     [property: Id(5)] string? AgentId = null,
     /// <summary>
@@ -266,8 +263,7 @@ public sealed record AgentJobInput(
     /// Minted AgentSession id used by the runner to record runtime
     /// events against a generic (non-workflow) AgentSession. Optional;
     /// when null the dispatch envelope leaves <c>AgentSessionId</c>
-    /// unset (workflow-shaped path or a raw-prompt-only validation
-    /// dispatch).
+    /// unset (workflow-shaped path).
     /// </summary>
     [property: Id(8)] string? AgentSessionId = null,
     /// <summary>

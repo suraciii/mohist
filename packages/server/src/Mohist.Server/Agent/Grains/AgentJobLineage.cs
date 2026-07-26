@@ -7,15 +7,14 @@ namespace Mohist.Server.Agent.Grains;
 
 /// <summary>
 /// Pure helper that builds the CloudEvent envelope for AgentJob terminal
-/// failures (issue-491 design D2). A resolved Agent emits
-/// <c>com.mohist.agent.job.failed</c>; a raw prompt job emits the distinct
-/// raw-job contract because it has no Agent identity to stamp. Lineage is
-/// stamped from the durable launch context (<see cref="AgentJobInput"/> +
+/// failures (issue-491 design D2). Every executable AgentJob emits
+/// <c>com.mohist.agent.job.failed</c>. Lineage is stamped from the durable
+/// launch context (<see cref="AgentJobInput"/> +
 /// <see cref="RoutedAgentLaunchPlan"/>) so the failure event never re-reads
 /// mutable Agent / Issue / Workflow state.
 ///
 /// <para>
-/// <c>agentid</c> is required only by the resolved-Agent event contract (per
+/// <c>agentid</c> is required by the event contract (per
 /// <see cref="EventProducerFamily.AgentJob"/> conformance). Issue / epic /
 /// workflow-run lineage are stamped when the launch context carries it;
 /// their absence is valid for jobs without that context. The grain's
@@ -81,13 +80,10 @@ public static class AgentJobLineage
             projectId = payload.ProjectId,
             agentId = payload.AgentId,
         }, JSON.Options);
-        var type = string.IsNullOrWhiteSpace(payload.AgentId)
-            ? EventCatalog.ReverseDns.AgentJobRawFailed
-            : EventCatalog.ReverseDns.AgentJobFailed;
         return new CloudEvent(
             id: AgentJobSessionDeliveryIds.FailureEventId(jobKey),
             source: new Uri(source, UriKind.Relative),
-            type: type,
+            type: EventCatalog.ReverseDns.AgentJobFailed,
             time: now,
             data: data,
             subject: jobKey,

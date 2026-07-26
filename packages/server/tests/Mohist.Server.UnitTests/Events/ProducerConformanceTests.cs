@@ -29,10 +29,6 @@ public sealed class ProducerConformanceTests
             Extensions(("agentid", "agent"), ("projectid", "proj"), ("issue", "42")),
             new(ProjectId: "proj", Issue: "42", AgentId: "agent"));
         ProducerConformance.Assert(
-            EventProducerFamily.RawAgentJob,
-            Extensions(("projectid", "proj")),
-            new(ProjectId: "proj"));
-        ProducerConformance.Assert(
             EventProducerFamily.Runner,
             Extensions(("runnerid", "runner"), ("projectid", "proj")),
             new(ProjectId: "proj", RunnerId: "runner"));
@@ -75,17 +71,6 @@ public sealed class ProducerConformanceTests
         };
 
         Assert.Throws<ProducerConformanceException>(() => ProducerConformance.Assert(family, extensions, context));
-    }
-
-    [Fact]
-    public void Assert_RejectsAgentIdentityOnRawAgentJob()
-    {
-        var extensions = Extensions(("agentid", "agent"));
-
-        Assert.Throws<ProducerConformanceException>(() => ProducerConformance.Assert(
-            EventProducerFamily.RawAgentJob,
-            extensions,
-            new()));
     }
 
     [Fact]

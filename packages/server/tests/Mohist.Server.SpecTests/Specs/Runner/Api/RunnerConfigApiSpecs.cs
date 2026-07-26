@@ -208,6 +208,7 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
             new
             {
                 prompt = "poll body should omit cleanup policy",
+                agentId = "agent-validation",
                 model = "openai/gpt-test",
                 jobId = jobKey,
                 workspace = new { path = "/tmp/runner-config-poll", projectId },

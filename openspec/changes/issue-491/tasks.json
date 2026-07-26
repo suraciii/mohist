@@ -20,7 +20,7 @@
       "output": "Event catalog + producer conformance + AgentJobGrain emission + RoutingDispatchHandler guard, with passing spec/unit tests",
       "dependsOn": [],
       "passes": false,
-      "notes": "Reuse the no-DbContext IEventStore.AppendAsync(CloudEvent, ct) overload so the grain keeps its grain-storage persistence story. Widen ReceiveReminder self-clean condition so agentless failed jobs keep the reminder alive until the event is emitted. Mirror issue-449's PendingSessionClose obligation pattern. Confirm at build that the watch-launch / @mention AgentJob Input retains the originating issue id (the routed path already carries it via RoutedAgentLaunchPlan.IssueNumber) so issue-scoped failures project into the inbox rather than being dropped as contextless."
+      "notes": "Reuse the no-DbContext IEventStore.AppendAsync(CloudEvent, ct) overload so the grain keeps its grain-storage persistence story. Widen ReceiveReminder self-clean condition so failed jobs without an AgentSession keep the reminder alive until the event is emitted. Mirror issue-449's PendingSessionClose obligation pattern. Confirm at build that the watch-launch / @mention AgentJob Input retains the originating issue id (the routed path already carries it via RoutedAgentLaunchPlan.IssueNumber) so issue-scoped failures project into the inbox rather than being dropped as contextless."
     },
     {
       "id": "T-002",

@@ -100,6 +100,6 @@ public abstract class AgentJobGrainTestSupport
     }
 
     protected static AgentJobInput MakeInput(string prompt, string projectId, string workspacePath = "/tmp/agent-job") =>
-        new(Prompt: prompt, WorkspacePath: workspacePath, ProjectId: projectId);
+        new(Prompt: prompt, WorkspacePath: workspacePath, ProjectId: projectId, AgentId: "agent-test");
 
 }

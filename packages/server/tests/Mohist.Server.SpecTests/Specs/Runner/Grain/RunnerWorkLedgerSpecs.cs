@@ -46,7 +46,8 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         await job.SubmitAsync(new AgentJobInput(
             Prompt: "ledger test",
             WorkspacePath: "/tmp/agent-job-ledger",
-            ProjectId: projectId));
+            ProjectId: projectId,
+            AgentId: "agent-test"));
 
         WorkDispatch? dispatch = await TestWait.ForAsync(
             () => runner.PollAsync(Services),
@@ -107,7 +108,8 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: $"agent-job-loss-work-{Guid.NewGuid():N}",
             AgentJobId: jobKey,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
         var assigned = await runner.AssignAgentJobAsync(work);
         Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assigned.Status);
 
@@ -127,7 +129,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task RunnerLoss_ContextlessAgentJob_ReactivationRetriesRawFailureEvent()
+    public async Task RunnerLoss_ContextlessAgentJob_ReactivationRetriesFailureEvent()
     {
         await ClearBacklogAsync();
         var runnerId = $"agent-job-raw-loss-runner-{Guid.NewGuid():N}";
@@ -140,9 +142,10 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
             WorkflowRunId: string.Empty,
             WorkId: $"agent-job-raw-loss-work-{Guid.NewGuid():N}",
             AgentJobId: jobKey,
-            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentId: "agent-test");
         _fixture.EventStore.ThrowOnAppend = evt =>
-            evt.Type == EventCatalog.ReverseDns.AgentJobRawFailed;
+            evt.Type == EventCatalog.ReverseDns.AgentJobFailed;
 
         try
         {
@@ -151,7 +154,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
 
             await runner.UnregisterAsync();
             Assert.DoesNotContain(_fixture.EventStore.Appended,
-                evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobRawFailed
+                evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobFailed
                     && evt.Envelope.Subject == jobKey);
 
             _fixture.EventStore.ThrowOnAppend = null;
@@ -161,9 +164,9 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
             await job.GetStatusAsync();
 
             var failure = Assert.Single(_fixture.EventStore.Appended,
-                evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobRawFailed
+                evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobFailed
                     && evt.Envelope.Subject == jobKey);
-            Assert.DoesNotContain(EventCatalog.Lineage.AgentId, failure.Envelope.Extensions.Keys);
+            Assert.Equal("agent-test", failure.Envelope.Extensions[EventCatalog.Lineage.AgentId]);
         }
         finally
         {

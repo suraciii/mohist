@@ -26,9 +26,9 @@
 - Event id `agent-job:{jobKey}:failed` is the durable dedup key — store-level
   `(source, eventId)` uniqueness already exists in the AgentJob table so
   redelivery from the reminder collapses to one envelope.
-- ProducerConformance requires `agentid` for the resolved-Agent `AgentJob`
-  family. Raw-prompt-only validation jobs use the `RawAgentJob` family and
-  `com.mohist.agent.raw-job.failed`, which deliberately has no `agentid`.
+- ProducerConformance requires `agentid` for every `AgentJob` failure. Raw
+  prompt submissions are rejected at the AgentJob and validation-route
+  boundaries before they can create a job or a failure event.
   The exception is GrainStorageSerializer-compatible via `[GenerateSerializer]`
   + `[Id(0)]` on the `Family` property.
 - ReceiveReminder self-clean widens to: `no PendingSessionClose AND no
@@ -207,9 +207,10 @@ Fixed the event and notification findings from `review.md` without modifying
 that review artifact:
 
 1. Renamed the public event contract to `com.mohist.agent.job.failed` and
-   made `agentid` mandatory for resolved-Agent failures. Raw jobs now use the
-   distinct `com.mohist.agent.raw-job.failed` contract without a fabricated
-   job-scoped `agentid`.
+   made `agentid` mandatory for every AgentJob failure. The identity is
+   carried on the AgentJob input and Runner dispatch snapshot, so runner-loss
+   recovery can fail a reactivated grain without fabricating an identity from
+   the job key.
 2. Wired the event through inbox projection and Hermes, including default-on
    Hermes delivery, failure-reason rendering, inbox subscription API mapping,
    and an enabled migration default for existing subscription rows.
