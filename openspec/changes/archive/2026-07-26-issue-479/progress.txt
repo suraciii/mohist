@@ -1,0 +1,565 @@
+## T-001: AgentJob relational read model and write-through grain persistence
+
+### Summary
+
+Added AgentJobRow (JSON State blob + stored computed columns) mirroring the
+AgentSession pattern, with a write-through mirror in AgentJobGrain.SaveAsync
+that keeps [PersistentState("agent-job")] as the authoritative load/recovery
+source.
+
+### Files Added
+
+- `Infrastructure/Data/AgentJobs/AgentJobRow.cs` — row with JobKey (PK),
+  State (JSON blob), and stored computed columns (ProjectId, AgentId, Status,
+  SubmittedAt, TerminalAt) projected from State via json_extract.
+- `Infrastructure/Data/AgentJobs/AgentJobStore.cs` — IAgentJobStore +
+  AgentJobStore (LoadAsync(key) returns JSON string, SaveAsync(key, json)
+  upserts the row). Works with JSON strings, NOT typed AgentJobState, to
+  avoid an Infrastructure.Data → Agent.Grains dependency (arch rule).
+- `Agent/Services/AgentJobQuerier.cs` — ListByAgentAsync(projectId, agentId,
+  statusSet?, limit) + GetByKeyAsync(jobKey). Returns AgentJobListItem records.
+- `Infrastructure/Data/Migrations/20260725122740_AddAgentJobsTable.cs` —
+  CreateTable AgentJobs with computed columns + composite index
+  IX_AgentJobs_AgentId_ProjectId_SubmittedAt.
+- Migration `.Designer.cs` delegating to MohistDbContextModelSnapshot.BuildModelCore.
+- `tests/.../Agent/Storage/AgentJobStoreSpecs.cs` — 11 specs covering store
+  upsert/load/computed-columns and querier list-by-agent (recency, status
+  filter, empty, cross-agent/project isolation) + get-by-key (hit/miss).
+- `tests/.../Agent/Grain/AgentJobWriteThroughMirrorSpecs.cs` — 5 specs
+  covering grain write-through mirror on submit, runner-acceptance, terminal
+  (completed + failed), and [PersistentState] remains authoritative.
+
+### Files Modified
+
+- `Agent/Grains/AgentJobState.cs` — added [Id(16)] TerminalAt field (set on
+  terminal transition, never cleared). Needed because PendingSessionClose is
+  cleared after delivery, which would null the computed column.
+- `Agent/Grains/AgentJobGrain.cs` — added optional IAgentJobStore constructor
+  param; SaveAsync now writes grain state THEN mirrors to AgentJobRow
+  (best-effort: log + swallow on failure). [PersistentState] retained
+  unchanged. EnterTerminalStateAsync sets State.TerminalAt.
+- `Infrastructure/Data/Db/MohistDbContext.cs` — added DbSet<AgentJobRow> +
+  OnModelCreating mapping with json_extract stored computed columns and
+  composite index (AgentId, ProjectId, SubmittedAt).
+- `Infrastructure/Data/Migrations/MohistDbContextModelSnapshot.cs` — added
+  AgentJobRow entity to BuildModelCore.
+- `Infrastructure/Hosting/MohistServiceRegistration.cs` — registered
+  IAgentJobStore → AgentJobStore (scoped).
+- `tests/.../Support/GrainTestConfig.cs` — registered IAgentJobStore in the
+  test silo so grain spec tests exercise the mirror write.
+
+### Codebase Patterns
+
+- **json_extract stored computed columns**: the State JSON is serialized with
+  `Infrastructure.JSON.Options` (camelCase Web defaults +
+  JsonStringEnumConverter(CamelCase)). json_extract paths:
+  `$.input.projectId`, `$.input.agentId`, `$.status`, `$.submittedAt`,
+  `$.terminalAt`.
+- **Migration designer delegation**: the project uses a custom
+  `MohistDbContextModelSnapshot.BuildModelCore` public static method that all
+  migration `.Designer.cs` files delegate to. Do NOT use `dotnet ef migrations
+  add` directly — it reformats the entire snapshot and removes BuildModelCore.
+  Instead, run it, then manually: (1) revert the snapshot, (2) add the new
+  entity to BuildModelCore, (3) create the designer file delegating to
+  BuildModelCore.
+- **Arch rule: Infrastructure.Data must not depend on Application Layer**
+  (Agent.Grains, Agent.Services). AgentJobStore works with JSON strings, not
+  typed AgentJobState, to avoid this dependency. The grain serializes the
+  state before calling the store.
+- **AgentJobGrainFixture** is in `[Collection("AgentJobGrain")]` and shares
+  an in-process Orleans cluster + in-memory SQLite across specs in the
+  collection. The fixture now registers IAgentJobStore so the mirror write
+  is exercised by all grain specs.
+- **Test file size ratchet**: ArchTests enforces a 24,000-byte limit on test
+  files. AgentJobGrainSpecs.cs was already near the limit; new mirror specs
+  are in a separate file (AgentJobWriteThroughMirrorSpecs.cs).
+
+### Decisions / Gotchas
+
+- **TerminalAt field**: initially used `$.pendingSessionClose.recordedAt` for
+  the TerminalAt computed column, but PendingSessionClose is cleared after
+  delivery (ClearPendingAndReminderAsync), which would null the column. Added
+  a dedicated [Id(16)] TerminalAt to AgentJobState, set in
+  EnterTerminalStateAsync and never cleared.
+- **Store interface uses JSON strings**: `IAgentJobStore.LoadAsync(key)`
+  returns `string?` (the State JSON), not `AgentJobState?`. The caller
+  deserializes if needed. This keeps Infrastructure.Data free of
+  Agent.Grains dependencies.
+- **Mirror write is best-effort**: failures are logged and swallowed so the
+  grain's authoritative [PersistentState] path is never blocked by a
+  relational write failure. The recovery reminder re-writes the row on the
+  next transition.
+
+### Verification / follow-up
+
+- `AgentJobQuerier.ListByAgentAsync` now applies a deterministic JobKey tie-breaker after descending SubmittedAt ordering.
+- Mirror specs observe the relational row while submission is still Pending, and deserialize completed/failed row State to assert every AgentJobTerminalResult field.
+- Store specs cover failed terminal-result round-trip, list limit, and equal-timestamp ordering.
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore` passed with 3107 tests.
+- `npm run build` passed with zero .NET warnings/errors; final `npm test` passed across server, CLI, Web, and Runner. A few earlier full-suite attempts hit the pre-existing runner pickup race recorded below; a warm rerun passed.
+
+## T-002: AgentJob read API surface and mo agent job CLI
+
+### Summary
+
+Exposed AgentJob status + terminal result over HTTP (list reads the relational
+mirror; view reads the grain directly so detail is authoritative) and added the
+`mo agent job list <agent>` / `mo agent job view <job-id>` CLI subgroup.
+
+### Files Added
+
+- `Api/AgentJobReadRoutes.cs` — `MapAgentJobReadRoutes` + DTOs
+  (`AgentJobListItemDto`, `AgentJobViewDto`) + internal handlers
+  `HandleListAsync` / `HandleViewAsync` (unit-testable without HTTP). View
+  enforces project isolation from `snapshot.ProjectId`; non-terminal jobs show
+  status without asserting a terminal result.
+- `tests/.../Agent/Api/AgentJobReadRoutesSpecs.cs` — 10 specs: list (recency +
+  fields, empty, unknown-agent 404, status filter), view (completed, failed,
+  non-terminal, unknown-id 404, cross-project 404, pre-cutover real-state) via
+  injected fakes (in-memory SQLite querier + fake grain + SingleAgentJobGrainFactory).
+- `packages/cli/tests/.../CliAgentJobCommandSpecs.cs` — 7 specs: list table,
+  empty notice, unknown-agent error, view table (terminal fields), view
+  non-terminal, unknown-job 404, --json projection.
+
+### Files Modified
+
+- `Agent/Grains/IAgentJobGrain.cs` — added append-only `[Id(7)] string? ProjectId`
+  to `AgentJobRuntimeSnapshot` (backward-compatible; existing 4-arg fake
+  constructors still compile). Needed for view-route project isolation.
+- `Agent/Grains/AgentJobGrain.cs` — `GetRuntimeSnapshotAsync` populates
+  ProjectId from `State.Input?.ProjectId ?? State.RoutedPlan?.ProjectId`.
+- `Infrastructure/Hosting/MohistApiRegistration.cs` — registered
+  `MapAgentJobReadRoutes` next to `MapAgentJobRoutes`.
+- CLI: `MohistCliApi.cs` (TableShape: AgentJobList, AgentJobView),
+  `ResourceOutput.cs` (cardinality + field arms), `TableRenderer.cs` +
+  `TableRenderer.Entities.cs` (RenderAgentJobList/View + dispatch),
+  `MohistCliCommands.Agent.cs` (BuildJob subgroup + list/view commands).
+
+### Codebase Patterns (additions)
+
+- **Read-route testability**: extract handler logic into `internal static
+  HandleListAsync/HandleViewAsync` taking resolved `ProjectInfo` (+ queriers /
+  IGrainFactory). The route lambda only does filter wiring +
+  `context.GetResolvedProject()`. Handlers are tested directly — no HTTP, no
+  real process. Mirrors the existing `AgentJobController.HandleValidateAsync`
+  pattern.
+- **Project isolation on view**: the grain key is a global GUID for manual
+  launches, so isolation is enforced at the handler from grain state, not the
+  route. An unknown job id → empty grain → `snapshot.ProjectId == null` → 404.
+  No separate "exists" probe needed.
+- **Non-terminal view does not assert a terminal result**: terminal-result
+  fields are populated ONLY when `GetStatusAsync()` returns Completed/Failed;
+  pending/running leaves them null (never fabricated). `GetTerminalResultAsync`
+  alone is insufficient because it synthesises a result mirroring current
+  status (and copies FailureReason) for non-terminal jobs.
+- **list DTO agentName**: the row carries only AgentId; agentName is filled
+  from the already-resolved `AgentInfo.Name` (constant across the
+  agent-scoped list — the query filters by that agentId).
+
+### Decisions / Gotchas
+
+- **AgentJobRuntimeSnapshot ProjectId**: chose to extend the existing snapshot
+  (append-only `[Id(7)]`) rather than add a new grain method. Backward-
+  compatible with all existing fake-grain constructors; the snapshot is the
+  natural "read view" of job state. `GetStatusAsync`+`GetTerminalResultAsync`
+  remain the status/result reads; the snapshot supplies the project id.
+- **`submittedAt` wire format**: `DateTimeOffset` with `+00:00` offset
+  serializes via JSON.Options (Web defaults) as `2026-07-25T12:00:00+00:00`,
+  NOT `...Z`. Assert with `Contains("2026-07-25T12:00:00")` (mirrors T-001).
+- **Running this workspace's .NET builds/tests**: the server csproj has a
+  post-build Target that runs `npm run build -w packages/web` UNLESS
+  `-p:SkipWebBuild=true` is passed. Building a server test project
+  transitively rebuilds the server → must use `-p:SkipWebBuild=true` (the repo
+  `npm run build`/`npm test` scripts already do). A fresh workspace also needs
+  `npm ci` before `npm run build`/`npm test` resolve web/runner deps.
+- **MTP test filtering**: `dotnet test --filter "FullyQualifiedName~X"` is
+  forwarded as a VSTest filter and IGNORED by Microsoft.Testing.Platform (runs
+  the whole suite). Test names are in the UTF-16LE log at
+  `TestResults/*.log` (convert with `iconv -f UTF-16LE -t UTF-8`).
+
+## T-003: Launch returns both identities and mo agent launch CLI
+
+### Summary
+
+Surfaced the AgentJob identity the launcher already mints (manual-launch
+`agent-job-launch-{guid}`, mention `CommentJobKey`) by adding `JobKey` to
+`AgentLaunchResult`, propagating it through `LaunchAsync` /
+`LaunchMentionAsync`, and exposing it as `jobId` (+ `jobUrl`) in the launch
+HTTP 201 response. Relocated the CLI launch command from
+`mo agent session launch <agent>` to `mo agent launch <agent>` and updated
+the table shape to print both the job id and the session id. No launch
+pipeline behaviour changes — only the returned identity + the command
+location. The T-002 view route accepts the launched jobId verbatim (no id
+translation, by design D1).
+
+### Files Added
+
+- `tests/.../Specs/Agent/Api/AgentSessionLaunchJobIdentitySpecs.cs` — 2 specs:
+  launched jobId round-trips through the view route (no id translation),
+  and exactly-one-job + exactly-one-session + one dispatch per launch.
+
+### Files Modified
+
+- `Agent/Services/IAgentLauncher.cs` — added `JobKey` to `AgentLaunchResult`
+  (between SessionId and AgentId). Routed path already returned its key via
+  `RoutedAgentLaunchOutcome.JobKey`, unchanged.
+- `Agent/Services/AgentLauncher.cs` — `LaunchAsync` and `LaunchMentionAsync`
+  return the `jobKey` they already compute. The manual-launch key
+  `agent-job-launch-{guid}` was minted in `ResolveSessionAndJobKeys` and
+  discarded; now it is propagated.
+- `Api/AgentSessionLaunchRoutes.cs` — `AgentSessionLaunchResponse` gains
+  `JobId` + `JobUrl` (project-scoped `/agent-jobs/{jobId}`); 201 handler
+  composes them from `AgentLaunchResult.JobKey`. Domain gates unchanged
+  (whitespace prompt → 400 before any entity; unknown agent → 404;
+  archived agent → 409; invalid context ref → error).
+- CLI: `MohistCliCommands.Agent.cs` (BuildSessionLaunch renamed to
+  BuildLaunch, registered directly under `agent`; removed from the session
+  subgroup; description updated to mention both identities),
+  `ResourceOutput.cs` (AgentSessionLaunch fields now include `jobId`),
+  `TableRenderer.Entities.cs` (RenderAgentSessionLaunch prints
+  `job id:`, `session id:`, `agent id:`, `agent name:`, `status:`).
+- `tests/.../Support/RoutingDispatchTestSupport.cs` — RecordingAgentLauncher
+  fake returns a deterministic `mention-job-{sequence}` JobKey.
+- `tests/.../Agent/Api/AgentSessionLaunchRoutesSpecs.cs` — existing 201 spec
+  extended to assert `jobId` non-empty + `agent-job-launch-` prefix + the
+  `jobUrl` link; the session-record probe was removed (the identity +
+  snapshot assertions are enough and keep the file under the size ratchet).
+- `tests/Mohist.Cli.Tests/CliAgentSessionCommandSpecs.cs` — renamed all
+  `SessionLaunch_*` tests to `Launch_*`; updated command path from
+  `["agent", "session", "launch", ...]` to `["agent", "launch", ...]`;
+  added `jobId` to responder payloads; new assertions for `job id:` output;
+  added `AgentHelp_ListsLaunchDirectlyUnderAgent` and
+  `SessionHelp_DoesNotListLaunchAsASubcommand`.
+- `docs/cli-reference.md` — removed the "Agent launch 只返回 Session" gap
+  note (line 352 area); added a closed entry describing the relocated
+  `mo agent launch` + jobId/sessionId surface.
+
+### Codebase Patterns (additions)
+
+- **Identity propagation over re-derivation**: the launcher mints the
+  AgentJob key once and propagates it through `AgentLaunchResult.JobKey`
+  rather than having the HTTP layer re-derive it from session labels. The
+  spec forbids an id-translation gap; the same `jobId` is accepted verbatim
+  by the T-002 view route.
+- **Test file size ratchet workaround**: adding 2 new server specs to
+  `AgentSessionLaunchRoutesSpecs.cs` pushed it past the 24,000-byte ArchTest
+  ratchet. Pattern from T-001/T-002: extract new specs into a sibling file
+  (`AgentSessionLaunchJobIdentitySpecs.cs`) extending the same
+  `AgentSessionLaunchRoutesTestSupport` base. The original 201 spec stays
+  in place; only the new identity + exactly-once specs move out.
+- **Substring matches in help tests**: when asserting a subcommand is NOT
+  listed, match the subcommand's distinct description text
+  (`"Launch a generic AgentSession"`) rather than the bare command word,
+  because the parent group's own description may contain the word as a
+  substring (`session`'s description says "launched from an Agent profile").
+
+### Decisions / Gotchas
+
+- **JobUrl format**: chose `/api/projects/{projectId}/agent-jobs/{jobId}`
+  to match the T-002 view route. Manual-launch keys are global GUIDs, but
+  the URL still scopes by project for consistency with the rest of the
+  product surface (the view route enforces project isolation from grain
+  state).
+- **AgentLaunchResult field order**: inserted `JobKey` between `SessionId`
+  and `AgentId` to keep "identity first" grouping (SessionId, JobKey are
+  the two minted ids; AgentId/AgentName echo the resolved profile).
+- **Flaky pre-existing tests**: `RunningJob_WithoutReport_JobTimeout_TransitionsToFailed`,
+  `ReportResultAsync_TransitionsRunningToFailed_OnFailure`, and
+  `Compact_PreservesBindingAndLineageAndRecordsOnlyCompaction` flake on
+  cold runs with "Timed out waiting for status == Running, Last value:
+  Pending" (runner dispatch pickup race) or recovery-grain GUID mismatch.
+  They pass on the next run and are unrelated to T-003 (no recovery /
+  report-result code touched).
+- **Stale test logs after editing test files**: MTP VSTest filters are
+  ignored by Microsoft.Testing.Platform; `--filter` runs the whole suite.
+  When a test edit isn't picked up, rerun `dotnet test` WITHOUT
+  `--no-build` to force a rebuild before re-reading the log.
+
+## T-004: Source-agnostic unified session read route
+
+### Summary
+
+Added a project-scoped route group `/api/projects/{projectRef}/sessions`
+with `GET /{sessionId}` (show) and `GET /{sessionId}/transcript` that
+resolve an AgentSession by id WITHOUT the `source-kind == agent-launch`
+gate that `FindGenericSessionAsync` applies — so an agent-launch session
+and a workflow-originated session resolve by the same stable id. Added
+`GET /` (list) accepting `?agent=`, `?issue=`, `?run=` filters that
+delegate to the existing querier methods
+(`ListAgentSessionsAsync` / `ListSummariesByIssueAsync` /
+`ListByWorkflowAsync`) and map each result to a unified list DTO. The
+older `agent-sessions/{id}` GET stays for the agent-launch transcript
+link until T-005 switches the CLI over.
+
+### Files Added
+
+- `Api/UnifiedSessionRoutes.cs` — `MapUnifiedSessionRoutes` + DTOs are
+  in AgentSessionReadModels.cs (see arch note below). Internal handlers
+  `HandleListAsync` / `HandleShowAsync` / `HandleTranscriptAsync`
+  (unit-testable without HTTP). List branches on which filter is present,
+  rejects no-filter with 400 `session_filter_required`. `?run=` is
+  project-scoped: post-filters `ListByWorkflowAsync` results by the
+  DTO's `ProjectId` so a run belonging to another project yields an
+  empty list (no cross-project leak).
+- `tests/.../Specs/Sessions/UnifiedSessionRoutesSpecs.cs` — 15 specs:
+  show by both sources + source-specific-field JSON contract (agent
+  fields absent for workflow and vice-versa), unknown-id 404,
+  cross-project 404; transcript by both sources + 404s; list by each
+  filter (`?agent=`, `?issue=`, `?run=`), unknown-agent 404, cross-
+  project-run empty, no-filter 400. All via injected fakes + in-memory
+  SQLite (handlers called directly, no HTTP, no real process).
+
+### Files Modified
+
+- `Sessions/AgentSessionReadModels.cs` — added `UnifiedSessionSummaryDto`,
+  `UnifiedSessionListItemDto`, `UnifiedSessionContextRefsDto`. Co-located
+  here (NOT a new root file) because the ArchTest
+  `FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices` only
+  allows `AgentSessionReadModels.cs` as a root file under `Sessions/`.
+- `Sessions/Services/AgentSessionQuerier.cs` — added
+  `GetUnifiedSessionSummaryAsync` / `GetUnifiedSessionTranscriptAsync`
+  + private `FindUnifiedSessionAsync` (reads row by id via
+  `ListByIdsAsync`, enforces project + known-source-kind). The unified
+  summary branches on `source-kind` to populate source-specific identity
+  only for its source (absent-when-empty via
+  `JSON.Options.DefaultIgnoreCondition = WhenWritingNull`).
+- `Infrastructure/Hosting/MohistApiRegistration.cs` — registered
+  `MapUnifiedSessionRoutes` next to `MapWorkflowSessionRoutes`.
+
+### Codebase Patterns (additions)
+
+- **Unified DTO placement**: the `Sessions/` feature root permits only
+  `AgentSessionReadModels.cs` as a non-Domain/Grains/Services file
+  (ArchTest `FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices`).
+  Put new session read-model DTOs in that file rather than a new root
+  file; do NOT widen the arch allowlist for a single DTO family.
+- **Source-specific identity via absent-when-empty**: the unified DTOs
+  declare agent fields (`agentId`/`agentName`) AND workflow fields
+  (`workflowRunId`/`sessionName`) as nullable strings; the builder
+  populates only the branch matching the resolved `source-kind`, and
+  `WhenWritingNull` omits the others from the wire. A contract spec
+  asserts the absent fields never appear in the JSON (not just null).
+- **Read-route testability**: handlers are `internal static` taking the
+  resolved `ProjectInfo` + queriers (mirrors T-002's
+  `AgentJobReadRoutes.HandleListAsync`/`HandleViewAsync`). The route
+  lambda only does filter wiring + `context.GetResolvedProject()`.
+- **`?run=` project scoping**: `ListByWorkflowAsync(workflowRunId)` is
+  NOT project-scoped, but every session row carries the `project-id`
+  label (projected onto `WorkflowSessionDto.ProjectId`). The handler
+  post-filters the returned DTOs by `ProjectId == project.Id` so a run
+  from another project yields an empty list — resolves the design open
+  question by resolving project from the route, not from the run.
+
+### Decisions / Gotchas
+
+- **Unified context-refs reads both label sets**: `BuildUnifiedContextRefs`
+  composes `AgentSessionContextRefs.TryBuild` (agent-launch labels) with
+  the workflow `issue-number` label (`record.IssueNumber()`) so a
+  workflow session surfaces its issue association too. Workflow sessions
+  have no agent-launch context labels, so their epic/repo/workspace are
+  null and the envelope carries just the issue number.
+- **List no-filter → 400**: the unified list requires exactly one of
+  `agent`/`issue`/`run`. An empty list with no filter would be a costly
+  project-wide scan, so it is rejected up-front with
+  `session_filter_required`.
+- **`?issue=` returns workflow sessions only**: `ListSummariesByIssueAsync`
+  filters by the workflow `mohist.io/issue-number` label (agent-launch
+  sessions use a distinct `mohist.io/agent-launch/issue-number` label).
+  This matches the existing per-source semantics; the unified route maps
+  the result to the unified DTO rather than merging sources here.
+- **Flaky pre-existing tests**:
+  `ReportResultAsync_TransitionsRunningToFailed_OnFailure`,
+  `RunningJob_WithoutReport_JobTimeout_TransitionsToFailed`, and
+  `Compact_PreservesBindingAndLineageAndRecordsOnlyCompaction` (same set
+  as T-003's note) still flake on cold runs with the runner-dispatch
+  "Timed out waiting for status == Running, Last value: Pending" race.
+  Unrelated to T-004 (no AgentJob grain / dispatch / report-result /
+  compact code touched); they pass on the next run.
+- **Verifying new tests actually run under MTP**: MTP ignores
+  `--filter`, so to confirm a new spec class isn't silently skipped,
+  temporarily add `Assert.Fail("SANITY...")` to one test, rebuild, and
+  confirm that test name appears in the UTF-16LE log's `failed ` lines.
+  Then revert. (The whole suite passing with 0 failures is insufficient
+  proof alone — a non-discovered class would just lower the total.)
+
+### T-002 verification rerun
+
+- Re-audited every AgentJob read spec scenario and T-002 acceptance criterion against the committed server routes, grain-backed project isolation, CLI commands, renderers, and tests; no gaps found.
+- Focused verification passed: server specs 3107/3107 and CLI tests 1383/1383.
+- `npm run build` passed with zero .NET warnings/errors. The first `npm test` attempt hit the documented unrelated runner-dispatch pickup race in `SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch`; the immediate full rerun passed across server, CLI, Web, and Runner.
+
+### T-003 verification rerun
+
+- Audited the existing T-003 implementation against all agent-launch requirements: manual and mention `AgentLaunchResult.JobKey`, routed `RoutedAgentLaunchOutcome.JobKey`, launch `jobId`/`jobUrl`, direct `mo agent launch`, table output, HTTP post, preserved gates, and docs/design alignment.
+- Added direct launcher coverage for non-empty manual/trigger JobKey values and the comment-anchored mention JobKey; no launch pipeline code changed.
+- Focused verification passed after one documented pre-existing server dispatch-pickup retry: 3108/3108 server specs and 1383/1383 CLI tests.
+- `npm run build` passed with 0 .NET warnings/errors. `npm test` passed: 175 workflow-definition tests, 1383 CLI tests, 1455 server unit tests, 32 architecture tests, 3108 server specs, 5130 Web tests (1 skipped), and 1426 Runner tests.
+
+### T-004 list-contract repair
+
+- The issue-filtered unified list continues to delegate to `ListSummariesByIssueAsync` as required by D4; `AgentSessionSummaryDto` now carries the workflow run identity so the unified projection does not drop `workflowRunId`.
+- Workflow list projections now include issue context references for both `?issue=` and `?run=`; source-specific fields remain absent for the opposite source.
+- Added assertions for workflow run identity, session name, and context references on both workflow list paths.
+- Regression verification passed: server specs 3108/3108 and `npm run build` passed with zero .NET warnings/errors. The first baseline suite run had one unrelated runner-dispatch pickup race; the immediate rerun passed.
+
+## T-005: Top-level mo session CLI and retirement of duplicate session groups
+
+### Summary
+
+Added the top-level `mo session` command group (list / show / transcript /
+followup / compact / reset / cancel), retired the source-specific
+`mo agent session` and `mo issue session` subgroups, and aligned docs and
+ownership tables. Source is now a discovery filter (`list --agent |
+--issue | --run`), not a separate capability set. `session cancel`
+requests runtime interruption only and never touches the owning AgentJob
+lifecycle (the job remains the sole terminal authority — design D6).
+
+### Files Added
+
+- `Mohist.Cli/MohistCliCommands.Session.cs` — `SessionCommands.Build(api)`
+  with the seven subcommands. `show` / `transcript` hit the T-004
+  unified `/api/projects/{projectRef}/sessions/{sessionId}[/transcript]`
+  routes. `followup` / `compact` / `reset` / `cancel` hit the existing
+  id-keyed `/api/projects/{projectRef}/agent-sessions/{sessionId}/…`
+  routes (which already resolve canonically by id for both sources).
+  `list` requires exactly one of `--agent` / `--issue` / `--run` and
+  forwards a project-scoped query to the unified list route.
+- `packages/cli/tests/Mohist.Cli.Tests/CliSessionCommandSpecs.cs` — 41
+  specs covering help, command-not-found for the retired subgroups, show
+  and transcript for both sources, list by each filter (incl. no-filter
+  400 and multi-filter 400), followup (text/file/stdin, mutual
+  exclusion, unknown session, terminal-session conflict,
+  no-touch-AgentJob-routes), cancel (state honestly, no-touch-job,
+  unknown session, project override, server-unavailable), and recovery
+  (compact/reset, not-found).
+
+### Files Modified
+
+- `Mohist.Cli/MohistCliApi.cs` — added `TableShape.SessionList`,
+  `SessionShow`, `SessionTranscript`, `SessionFollowup`, `SessionCancel`
+  to the public enum.
+- `Mohist.Cli/ResourceOutput.cs` — registered the new shapes
+  (Collection cardinality for `SessionList`; per-shape field lists).
+- `Mohist.Cli/TableRenderer.cs` — dispatch cases for the five new
+  shapes.
+- `Mohist.Cli/TableRenderer.Entities.cs` — `RenderSessionList`,
+  `RenderSessionShow`, `RenderSessionTranscript`, `RenderSessionFollowup`,
+  `RenderSessionCancel`, plus a `FormatSessionOwner` helper that picks
+  `agentName (agentId)` for agent-launch rows and `workflowRunId/name`
+  for workflow rows. Reused the existing `FormatTokenUsage` helper in
+  `TableRenderer.Issues.cs` (no duplicate added).
+- `Mohist.Cli/MohistCliCommands.cs` — `root.Subcommands.Add(SessionCommands.Build(api));`
+  registered directly under root.
+- `Mohist.Cli/MohistCliCommands.Agent.cs` — removed
+  `BuildSession` and the seven `BuildSession{List,Show,Transcript,
+  Compact,Reset,Followup,Cancel}` helpers. Also removed the now-orphaned
+  `ProjectAgentSessionsPath` helper.
+- `Mohist.Cli/MohistCliCommands.Issue.cs` — removed
+  `BuildSessions` and `BuildSession` registrations.
+- `Mohist.Cli/MohistCliCommands.Issue.Session.cs` — DELETED (whole
+  file retired; the per-issue session commands are now top-level
+  `mo session <verb> <session-id>`).
+- `packages/cli/tests/Mohist.Cli.Tests/CliAgentSessionCommandSpecs.cs` —
+  DELETED. Its scenarios are covered by the new top-level
+  `CliSessionCommandSpecs`.
+- `packages/cli/tests/Mohist.Cli.Tests/CliIssueSessionSpecs.cs` —
+  DELETED. Same as above; top-level tests cover both sources via the
+  unified route.
+- `packages/cli/tests/Mohist.Cli.Tests/CliAgentSessionRecoverySpecs.cs` —
+  renamed test paths from `["agent", "session", "compact|reset", …]`
+  to `["session", "compact|reset", …]` (the route URLs and stable
+  session-id assertions are unchanged — the same id-keyed
+  `agent-sessions/{id}/…` action routes are hit either way).
+- `packages/cli/tests/Mohist.Cli.Tests/CliRootCommandShapeTests.cs` —
+  added `session` to the required top-level resource groups
+  (`Root_Help_ListsResourceGroupsAndInfoOnly_NoBareVerbs`).
+- `packages/cli/tests/Mohist.Cli.Tests/Api/IssueCliProjectRefAndOutputTests.cs`
+  — replaced the two `mo issue sessions` tests with
+  `SessionList_Help_…` and `SessionList_ByIssue_ByProjectName_…`
+  asserting the new unified route shape
+  (`/api/projects/{projectRef}/sessions?issue={n}`).
+- `packages/cli/tests/Mohist.Cli.Tests/Project/Api/NoActiveProjectMessageTests.cs`
+  — replaced `IssueSessions_NoProjectAndNoActiveProject_…` with
+  `SessionList_ByIssue_NoProjectAndNoActiveProject_…` (same diagnostic,
+  new command path).
+- `docs/cli-reference.md` — closed the line-346 gap note
+  ("AgentSession currently scattered across Issue and Agent paths…")
+  and added a closed entry under "已闭合" describing the unified
+  top-level `mo session` group.
+- `docs/agents.md` — `## AgentSession 来源` section now documents the
+  `mo session …` addressing surface (show/transcript/followup/compact/
+  reset/cancel/list) and the cancel-only-runtime guarantee.
+
+### Codebase Patterns (additions)
+
+- **URL construction in helpers**: `MohistCliCommands.Agent.cs` has a
+  `ProjectAgentsPath(projectId, path)` helper that adds a leading
+  `/` if `path` is non-empty but ALSO when `path == ""` — the helper
+  returns `/api/projects/{id}/sessions` only if you pass a non-`"/"`
+  prefix. The first attempt at `ProjectSessionsPath(id, "")` returned
+  `/api/projects/{id}/sessions/` (trailing slash) because the
+  conditional added the leading `/`. For the list path the
+  test-only URL is built directly as
+  `$"/api/projects/{…}/sessions{query}"` to keep the trailing-slash
+  out (the server's `MapGet("/")` normalizes either form). Keep this
+  pattern in mind for any future top-level list commands.
+- **Unified show-render owner**: `RenderSessionShow` branches on
+  `data["source"]` to render either `agent: <id> (<name>)` (agent-launch)
+  or `workflow run: <id>` + `session name: <name>` (workflow). The
+  `FormatSessionOwner` helper applies the same branching to the list
+  table. Absent-when-empty from the server side keeps the wire shape
+  clean — the renderer just checks for the present field.
+- **Test file size**: CLI tests have no 24KB ratchet (that's a
+  server-side ArchTest). Deleting `CliAgentSessionCommandSpecs.cs`
+  (60KB) + `CliIssueSessionSpecs.cs` (37KB) and adding a focused
+  40-spec `CliSessionCommandSpecs.cs` actually shrinks the CLI test
+  suite while exercising the new contract end-to-end.
+- **Mutual-exclusion shared helper**: `BodyInputResolver.SourceFlags`
+  is the canonical pattern for `--text | --text-file | --text-stdin`
+  mutual-exclusion. The new top-level followup uses the same helper,
+  so the existing mutual-exclusion / empty-text / blank-inline-with-
+  file cases are all test-covered by their existing assertions.
+
+### Decisions / Gotchas
+
+- **Server URL handling**: the T-004 unified list is registered as
+  `MapGet("/", ...)` under `/api/projects/{projectRef}/sessions`.
+  Either `/sessions` or `/sessions/` hits the same route, but the
+  HttpClient preserves whatever the CLI sends. Build the URL without
+  a trailing slash to match the agent's `mo session list --issue 42`
+  expectation (and the agent's mental model). The test expectations
+  in `IssueCliProjectRefAndOutputTests` and `CliSessionCommandSpecs`
+  were updated to match.
+- **No filter → 400 in CLI**: the server's T-004 route also rejects
+  no-filter with `session_filter_required`. The CLI short-circuits
+  the same way (with a clearer "one of --agent, --issue, --run is
+  required" message) and returns exit code 1 with no HTTP call. This
+  is consistent with the existing pattern in `MohistCliCommands`
+  (e.g. `--output json` validation).
+- **Cancel-only-runtime assertion**: the test
+  `SessionCancel_OnlyHitsCancelRoute_DoesNotTouchAgentJobRoutes`
+  asserts the single request path is the `/agent-sessions/{id}/cancel`
+  POST and explicitly checks the path does NOT contain `/agent-jobs/`,
+  `/jobs/`, `/dispatch`, or `/runs`. This pins the D6 invariant at
+  the CLI boundary (the server already enforces job-lifecycle
+  ownership separately).
+- **Existing recovery tests**: the compact/reset tests in
+  `CliAgentSessionRecoverySpecs` were renamed to use the new top-level
+  `session compact|reset` path. The HTTP route URL
+  (`/api/projects/{projectRef}/agent-sessions/{id}/compact|reset`)
+  is unchanged because followup/compact/reset/cancel already resolved
+  canonically by id for both sources.
+- **Pre-existing flaky test (re-confirmed)**: the first full-suite
+  run hit the documented
+  `SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch`
+  race; the immediate rerun passed with 3108/3108 server specs.
+
+### Verification
+
+- `npm run build` passed with zero .NET warnings/errors.
+- `npm test` passed end-to-end after a documented pre-existing runner
+  race retry: 175 workflow-definition, 1321 CLI (incl. 41 new
+  CliSessionCommandSpecs, the renamed CliAgentSessionRecoverySpecs, and
+  the updated CliRootCommandShapeTests / IssueCliProjectRefAndOutputTests
+  / NoActiveProjectMessageTests), 1455 server unit, 3108 server spec,
+  32 arch, 5130 web (1 skipped), 1426 runner.

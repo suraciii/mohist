@@ -11,6 +11,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Issue.Services;
@@ -106,6 +107,7 @@ public static class MohistServiceRegistration
         services.AddScoped<AgentSessionReconcileQuerier>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
+        services.AddScoped<IAgentJobStore, AgentJobStore>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<IEventStore, EventStore>();
         services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();

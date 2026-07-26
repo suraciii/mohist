@@ -80,6 +80,7 @@ public class AgentLauncherSpecs
         }
 
         Assert.False(string.IsNullOrWhiteSpace(result.SessionId));
+        Assert.False(string.IsNullOrWhiteSpace(result.JobKey));
         Assert.Equal(agent.Id, result.AgentId);
         Assert.Equal("trigger-merge-agent", result.AgentName);
 
@@ -248,6 +249,8 @@ public class AgentLauncherSpecs
                 triggerLabels: null);
         }
 
+        Assert.False(string.IsNullOrWhiteSpace(result.JobKey));
+        Assert.StartsWith("agent-job-launch-", result.JobKey, StringComparison.Ordinal);
         var record = await LoadSessionByIdAsync(result.SessionId);
         Assert.NotNull(record);
 
@@ -320,6 +323,33 @@ public class AgentLauncherSpecs
         Assert.NotNull(record);
         Assert.Null(record!.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerEventId));
         Assert.Null(record.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerRuleId));
+    }
+
+    [Fact]
+    public async Task LaunchMention_ReturnsCommentAnchoredJobKey()
+    {
+        var projectId = await CreateProjectAsync("launcher-mention-job-key");
+        var agent = await CreateAgentAsync(projectId, "mention-job-key-agent");
+        const string commentId = "comment-job-key";
+        const string eventId = "event-job-key";
+
+        AgentLaunchResult result;
+        string expectedJobKey;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+            var resolver = scope.ServiceProvider.GetRequiredService<AgentSessionResolver>();
+            expectedJobKey = resolver.CommentJobKey(projectId, commentId, agent.Id);
+            result = await launcher.LaunchMentionAsync(
+                agent,
+                prompt: "mention launch",
+                new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null),
+                commentId,
+                eventId);
+        }
+
+        Assert.False(string.IsNullOrWhiteSpace(result.JobKey));
+        Assert.Equal(expectedJobKey, result.JobKey);
     }
 
     [Theory]

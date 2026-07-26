@@ -110,6 +110,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
         return new AgentLaunchResult(
             SessionId: sessionId,
+            JobKey: jobKey,
             AgentId: agent.Id,
             AgentName: agent.Name);
     }
@@ -291,6 +292,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
         return new AgentLaunchResult(
             SessionId: sessionId,
+            JobKey: jobKey,
             AgentId: agent.Id,
             AgentName: agent.Name);
     }

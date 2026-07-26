@@ -42,7 +42,9 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.DeadLetterList or
             MohistCliApi.TableShape.OpencodeModels or
             MohistCliApi.TableShape.RunList or
-            MohistCliApi.TableShape.ActivityList => ResourceCardinality.Collection,
+            MohistCliApi.TableShape.ActivityList or
+            MohistCliApi.TableShape.AgentJobList or
+            MohistCliApi.TableShape.SessionList => ResourceCardinality.Collection,
             _ => ResourceCardinality.Single,
         };
 
@@ -65,9 +67,18 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.AgentSessionShow =>
                 ["sessionId", "agentId", "agentName", "status", "createdAt", "lastActivityAt", "resolvedModel", "failureReason", "failureCategory", "toolCallCount", "toolErrorCount", "contextRefs", "usage"],
             MohistCliApi.TableShape.AgentSessionTranscript => ["turns", "partCount", "firstActivityAt", "lastActivityAt"],
-            MohistCliApi.TableShape.AgentSessionLaunch => ["sessionId", "agentId", "agentName", "status"],
+            MohistCliApi.TableShape.AgentSessionLaunch => ["jobId", "sessionId", "agentId", "agentName", "status"],
+            MohistCliApi.TableShape.AgentJobList => ["jobId", "agentId", "agentName", "status", "submittedAt", "terminalAt"],
+            MohistCliApi.TableShape.AgentJobView => ["jobId", "status", "message", "output", "artifactUploadIds", "failureReason", "exitCode"],
             MohistCliApi.TableShape.AgentSessionFollowup => ["status"],
             MohistCliApi.TableShape.AgentSessionCancel => ["state", "status", "reason"],
+            MohistCliApi.TableShape.SessionList =>
+                ["id", "source", "agentId", "agentName", "workflowRunId", "sessionName", "activity", "lastActivityAt", "model", "contextRefs"],
+            MohistCliApi.TableShape.SessionShow =>
+                ["id", "source", "agentId", "agentName", "workflowRunId", "sessionName", "activity", "createdAt", "lastActivityAt", "model", "contextRefs", "usage"],
+            MohistCliApi.TableShape.SessionTranscript => ["turns", "partCount", "firstActivityAt", "lastActivityAt"],
+            MohistCliApi.TableShape.SessionFollowup => ["status"],
+            MohistCliApi.TableShape.SessionCancel => ["state", "status", "reason"],
             MohistCliApi.TableShape.SessionRecovery =>
                 ["id", "status", "contextWindowSize", "contextWindowUsed", "contextUsagePercent", "contextWindowUsedBefore", "operation", "wasCompacted"],
             MohistCliApi.TableShape.IssueTemplateList => ["id", "name", "description", "source"],

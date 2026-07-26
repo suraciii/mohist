@@ -113,11 +113,19 @@ public interface IAgentLauncher
 /// Result of a generic AgentSession launch. Carries the minted
 /// session id (caller-observable identity) and the agent identity
 /// fields the HTTP manual launch path surfaces verbatim in its 201
-/// response. The <c>TranscriptUrl</c> is composed by the HTTP layer
-/// because it depends on route addressing, which the launcher does not own.
+/// response. The <c>JobKey</c> is the AgentJob grain key the launcher
+/// minted for this launch (manual <c>agent-job-launch-{guid}</c>,
+/// mention <c>CommentJobKey</c>); the routed path returns its key via
+/// <see cref="RoutedAgentLaunchOutcome.JobKey"/>. Surfacing the identity
+/// does not change how many entities a launch creates or how dispatch
+/// happens — a launch still creates exactly one AgentJob and one
+/// AgentSession and issues exactly one dispatch. The
+/// <c>TranscriptUrl</c> is composed by the HTTP layer because it depends
+/// on route addressing, which the launcher does not own.
 /// </summary>
 public sealed record AgentLaunchResult(
     string SessionId,
+    string JobKey,
     string AgentId,
     string AgentName);
 

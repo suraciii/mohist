@@ -4,6 +4,7 @@ using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -72,6 +73,7 @@ public class MohistDbContext : DbContext
     public DbSet<InboxSubscriptionRow> InboxSubscriptions { get; set; } = null!;
     public DbSet<TaskLogEntryRow> TaskLogEntries { get; set; } = null!;
     public DbSet<TaskLogBatchRow> TaskLogBatches { get; set; } = null!;
+    public DbSet<AgentJobRow> AgentJobs { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -235,6 +237,26 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.PromptKind).HasMaxLength(64).IsRequired();
             entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();
             entity.HasIndex(e => new { e.SessionId, e.RuntimeSessionId, e.Sequence });
+        });
+
+        modelBuilder.Entity<AgentJobRow>(entity =>
+        {
+            entity.ToTable("AgentJobs");
+            entity.HasKey(e => e.JobKey);
+            entity.Property(e => e.JobKey).HasMaxLength(512);
+            entity.Property(e => e.State).IsRequired();
+            entity.Property(e => e.ProjectId)
+                .HasComputedColumnSql("""json_extract("State", '$.input.projectId')""", stored: true);
+            entity.Property(e => e.AgentId)
+                .HasComputedColumnSql("""json_extract("State", '$.input.agentId')""", stored: true);
+            entity.Property(e => e.Status)
+                .HasComputedColumnSql("""json_extract("State", '$.status')""", stored: true);
+            entity.Property(e => e.SubmittedAt)
+                .HasComputedColumnSql("""json_extract("State", '$.submittedAt')""", stored: true);
+            entity.Property(e => e.TerminalAt)
+                .HasComputedColumnSql("""json_extract("State", '$.terminalAt')""", stored: true);
+            entity.HasIndex(e => new { e.AgentId, e.ProjectId, e.SubmittedAt })
+                .HasDatabaseName("IX_AgentJobs_AgentId_ProjectId_SubmittedAt");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptPartRow>(entity =>

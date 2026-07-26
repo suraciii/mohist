@@ -46,26 +46,21 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
             var sessionId = data.GetProperty("sessionId").GetString();
             Assert.False(string.IsNullOrWhiteSpace(sessionId));
+            // The launch surfaces BOTH the AgentJob identity and the
+            // AgentSession identity; jobId is the grain key minted by
+            // the launcher, no id translation.
+            var jobId = data.GetProperty("jobId").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(jobId));
+            Assert.StartsWith("agent-job-launch-", jobId!, StringComparison.Ordinal);
             Assert.Equal(agent.Id, data.GetProperty("agentId").GetString());
             Assert.Equal("reviewer", data.GetProperty("agentName").GetString());
             Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("status").GetString()));
             Assert.Equal(
                 $"/api/projects/{projectId}/agent-sessions/{sessionId}/transcript",
                 data.GetProperty("transcriptUrl").GetString());
-
-            var query = await GetAgentSessionQueryAsync();
-            var record = await query.FirstByLabelsAsync(
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-                    [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
-                });
-            Assert.NotNull(record);
-            Assert.Equal(sessionId, record!.Session.Id);
-            Assert.Equal(agent.Id, record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
-
-            Assert.Equal("reviewer", record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentName));
-            Assert.Equal(projectId, record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId));
+            Assert.Equal(
+                $"/api/projects/{projectId}/agent-jobs/{jobId}",
+                data.GetProperty("jobUrl").GetString());
 
             var snapshot = await FindAgentJobSnapshotAsync(sessionId!);
             Assert.NotNull(snapshot);
