@@ -244,7 +244,7 @@ describe("ServerConnection.poll", () => {
     fetchMock.mockResolvedValueOnce(
       mockResponse({
         status: 200,
-        body: JSON.stringify({
+        body: JSON.stringify({ dispatches: [{
           workflowRunId: "",
           workId: "agent-work-1",
           workType: "agent-job",
@@ -255,7 +255,7 @@ describe("ServerConnection.poll", () => {
           title: "Agent Job",
           ownerKind: "agent-job",
           agentJobId: "agent-job-abc",
-        }),
+        }] }),
       }),
     )
     const connection = new ServerConnection(options())
@@ -273,7 +273,7 @@ describe("ServerConnection.poll", () => {
     fetchMock.mockResolvedValueOnce(
       mockResponse({
         status: 200,
-        body: JSON.stringify({
+        body: JSON.stringify({ dispatches: [{
           workflowRunId: "",
           workId: "agent-work-2",
           workType: "agent-job",
@@ -286,7 +286,7 @@ describe("ServerConnection.poll", () => {
           agentJobId: "agent-job-xyz",
           projectId: "project-launch",
           agentSessionId: "session-abc",
-        }),
+        }] }),
       }),
     )
     const connection = new ServerConnection(options())
@@ -304,7 +304,7 @@ describe("ServerConnection.poll", () => {
     fetchMock.mockResolvedValueOnce(
       mockResponse({
         status: 200,
-        body: JSON.stringify({
+        body: JSON.stringify({ dispatches: [{
           workflowRunId: "wf-1",
           workId: "work-1",
           workType: "task",
@@ -316,7 +316,7 @@ describe("ServerConnection.poll", () => {
           ownerKind: "workflow",
           projectId: "project-wf",
           issueNumber: 7,
-        }),
+        }] }),
       }),
     )
     const connection = new ServerConnection(options())
@@ -335,7 +335,7 @@ describe("ServerConnection.poll", () => {
     fetchMock.mockResolvedValueOnce(
       mockResponse({
         status: 200,
-        body: JSON.stringify({
+        body: JSON.stringify({ dispatches: [{
           workflowRunId: "",
           workId: "agent-work-3",
           workType: "agent-job",
@@ -347,7 +347,7 @@ describe("ServerConnection.poll", () => {
           ownerKind: "agent-job",
           agentJobId: "agent-job-no-session",
           projectId: "project-raw",
-        }),
+        }] }),
       }),
     )
     const connection = new ServerConnection(options())

@@ -55,9 +55,7 @@ export type FollowupTargetResolver = (target: SessionTarget) => FollowupTargetRe
  * `ReceiveFollowup` SignalR payload. The runner
  * branches on `kind` to pick the right runtime-events endpoint
  * (`workflow:` / `generic:`) and the right server-side
- * runtime endpoint. Older runners that only know workflow followups
- * can keep reading the top-level `workflowRunId` / `sessionName`
- * fields the server still populates for the issue-scoped route.
+ * runtime endpoint.
  *
  * The `binding` field carries the persisted AgentSession binding
  * (the same source the Workflow path already uses): the resolver
@@ -78,15 +76,10 @@ export interface ReceiveFollowupSessionTarget {
 
 /**
  * Unified payload delivered by the server-side `ReceiveFollowup` SignalR
- * method. Workflow followups continue to populate the top-level
- * `workflowRunId` / `sessionName` fields so older runners keep working;
- * generic followups carry `target.kind === "generic"` and a `sessionId`
- * instead. The `text` field is always present and non-empty (the server
+ * method. The `text` field is always present and non-empty (the server
  * rejects empty / whitespace text with 400 before pushing).
  */
 export interface ReceiveFollowupPayload {
-  workflowRunId?: string
-  sessionName?: string
   target?: ReceiveFollowupSessionTarget
   text: string
   operationId?: string
@@ -136,24 +129,11 @@ export interface CancelAgentSessionReply {
 }
 
 // Derives a discriminated `SessionTarget` from the
-// unified `ReceiveFollowup` SignalR payload. Prefers the `target` field
-// when present; falls back to the legacy top-level `workflowRunId` /
-// `sessionName` fields so older server builds (which only populate the
-// top-level fields on the issue-scoped route) keep working against the
-// workflow followup path. Returns `null` when neither carries a usable
-// target — the caller drops the message silently, matching the existing
-// "unknown session" contract.
+// unified `ReceiveFollowup` SignalR payload. Returns `null` when the
+// payload carries no usable target — the caller drops the message
+// silently, matching the existing "unknown session" contract.
 export function resolveSessionTarget(payload: ReceiveFollowupPayload): SessionTarget | null {
-  const target = payload.target
-  if (target) {
-    return sessionTargetFromWireTarget(target)
-  }
-
-  // Legacy fallback for older server builds (no `target` field).
-  if (payload.workflowRunId && payload.sessionName) {
-    return { kind: "workflow", projectId: "", workflowRunId: payload.workflowRunId, sessionName: payload.sessionName }
-  }
-  return null
+  return sessionTargetFromWireTarget(payload.target)
 }
 
 export function sessionTargetFromWireTarget(target: ReceiveFollowupSessionTarget | null | undefined): SessionTarget | null {

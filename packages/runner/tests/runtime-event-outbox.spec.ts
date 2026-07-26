@@ -9,7 +9,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   createAgentSessionRuntimeEventOutbox,
-  LEGACY_FOLLOWUP_FAILURE_FILE,
   nextTemporaryFilePath,
   RUNTIME_EVENT_OUTBOX_FILE,
   type AgentSessionRuntimeEventOutbox,
@@ -21,7 +20,7 @@ import type { AgentSessionRuntimeEventReceipt } from "../src/server/connection.j
 
 class RecordingFileSystem implements RuntimeEventOutboxFileSystem {
   readonly textStore = new Map<string, string>()
-  readonly journal: Array<{ kind: "write" | "migrate"; path: string }> = []
+  readonly journal: Array<{ kind: "write"; path: string }> = []
   failNextWrite: (() => Error) | null = null
   failNextRead: (() => Error) | null = null
 
@@ -42,12 +41,6 @@ class RecordingFileSystem implements RuntimeEventOutboxFileSystem {
     }
     this.textStore.set(path, body)
     this.journal.push({ kind: "write", path })
-  }
-
-  async markMigrated(path: string): Promise<void> {
-    this.textStore.set(`${path}.migrated`, this.textStore.get(path) ?? "")
-    this.textStore.delete(path)
-    this.journal.push({ kind: "migrate", path })
   }
 
   body(path: string): string | null {
@@ -92,7 +85,6 @@ function makeOutbox(options: {
   fileSystem?: RecordingFileSystem
   deliver?: RuntimeEventDelivery
   filePath?: string
-  legacyFilePath?: string | null
   randomId?: () => string
   deliveryTimeoutMs?: number
   retryDelayMs?: number
@@ -107,7 +99,6 @@ function makeOutbox(options: {
     fileSystem,
     deliver: options.deliver,
     filePath: options.filePath ?? RUNTIME_EVENT_OUTBOX_FILE,
-    legacyFilePath: options.legacyFilePath ?? null,
     randomId,
     deliveryTimeoutMs: options.deliveryTimeoutMs ?? 100,
     retryDelayMs: options.retryDelayMs ?? 100,
@@ -723,65 +714,6 @@ describe("AgentSessionRuntimeEventOutbox — autonomous health recovery", () => 
     await outbox.recover()
 
     expect(outbox.ready()).toBe(true)
-  })
-})
-
-describe("AgentSessionRuntimeEventOutbox — legacy migration", () => {
-  it("imports every valid v1 followup-failure entry as a successful-response terminal record", async () => {
-    const fileSystem = new RecordingFileSystem()
-    fileSystem.textStore.set(LEGACY_FOLLOWUP_FAILURE_FILE, JSON.stringify({
-      version: 1,
-      entries: [
-        {
-          operationId: "op-1",
-          target: { kind: "generic", projectId: "proj-1", sessionId: "gen-1" },
-          runtimeSessionId: "ses_1",
-          status: "failed",
-          error: "prompt rejected",
-          completedAt: "2026-01-01T00:00:00.000Z",
-        },
-        {
-          operationId: "op-2",
-          target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wf-1", sessionName: "plan" },
-          runtimeSessionId: "ses_2",
-          status: "completed",
-          error: null,
-          completedAt: "2026-01-01T00:00:01.000Z",
-        },
-      ],
-    }))
-
-    const { outbox } = makeOutbox({ fileSystem })
-    await outbox.load()
-    const records = outbox.snapshot()
-    expect(records).toHaveLength(2)
-    const op1 = records.find((r) => r.id === "legacy-followup-terminal:op-1")
-    const op2 = records.find((r) => r.id === "legacy-followup-terminal:op-2")
-    expect(op1?.event.type).toBe("session.activity")
-    expect(op1?.acknowledgementPolicy).toBe("successful-response")
-    expect(op2?.event.type).toBe("session.activity")
-    expect(op2?.target).toMatchObject({ kind: "workflow" })
-  })
-
-  it("import failure after snapshot write retries the load without losing the imported record", async () => {
-    const fileSystem = new RecordingFileSystem()
-    fileSystem.textStore.set(LEGACY_FOLLOWUP_FAILURE_FILE, JSON.stringify({
-      version: 1,
-      entries: [
-        {
-          operationId: "op-3",
-          target: { kind: "generic", projectId: "proj-1", sessionId: "gen-1" },
-          runtimeSessionId: "ses_1",
-          status: "failed",
-          error: "boom",
-          completedAt: "2026-01-01T00:00:00.000Z",
-        },
-      ],
-    }))
-
-    const { outbox } = makeOutbox({ fileSystem })
-    await outbox.load()
-    expect(outbox.snapshot()).toHaveLength(1)
   })
 })
 

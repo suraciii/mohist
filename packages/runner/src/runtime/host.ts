@@ -8,7 +8,6 @@ import { WorkspaceRegistry } from "./workspace-registry.js"
 import {
   createAgentSessionRuntimeEventOutbox,
   RUNTIME_EVENT_OUTBOX_FILE,
-  LEGACY_FOLLOWUP_FAILURE_FILE,
   type AgentSessionRuntimeEventOutbox,
 } from "../server/runtime-event-outbox.js"
 import { createServerRuntimeEventDelivery } from "../server/runtime-event-delivery.js"
@@ -175,7 +174,6 @@ export class RunnerHost {
     this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
     this.agentSessionRuntimeEventOutbox = createAgentSessionRuntimeEventOutbox({
       filePath: `${options.runnerRoot}/${RUNTIME_EVENT_OUTBOX_FILE}`,
-      legacyFilePath: `${options.runnerRoot}/${LEGACY_FOLLOWUP_FAILURE_FILE}`,
       deliver: createServerRuntimeEventDelivery({ connection: this.connection }),
     })
     this.bindingConvergence = new BindingConvergence({
@@ -658,9 +656,6 @@ export class RunnerHost {
     } finally {
       clearTimeout(timeout)
     }
-    // Accepted or Stale both terminate the retry (the owner acked). Any
-    // other response shape from the legacy compat endpoint is also
-    // treated as an ack: the result is delivered, do not re-report.
     this.awaitingAck.delete(key)
   }
 

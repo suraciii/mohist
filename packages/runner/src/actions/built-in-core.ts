@@ -52,7 +52,7 @@ export async function artifactExistsAction(inputs: JsonObject, host: ActionHost)
 
 export async function markerAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
   const path = resolveActionPath(host.workDir, stringInput(inputs, "path"))
-  const expect = stringInput(inputs, "expect") ?? stringInput(inputs, "contains")
+  const expect = stringInput(inputs, "expect")
   if (!path || !expect) return fail("invalid-input", "Marker check requires 'path' and 'expect'")
   if (!exists(path)) return fail("artifact-missing", `Marker file missing: ${path}`)
   const content = await readText(path)

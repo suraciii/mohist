@@ -96,7 +96,6 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       inputs: {
         path: { types: ["string"], required: true, description: "Path to read" },
         expect: { types: ["string"], description: "Marker text to match" },
-        contains: { types: ["string"], description: "Legacy alias of expect" },
       },
       outputs: [
         { name: "kind", description: "Output kind discriminator" },

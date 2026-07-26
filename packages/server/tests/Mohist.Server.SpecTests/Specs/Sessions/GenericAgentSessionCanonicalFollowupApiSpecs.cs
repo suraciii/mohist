@@ -56,8 +56,6 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
             Assert.Equal("ReceiveFollowup", sent.Method);
 
             var payload = JsonSerializer.SerializeToElement(sent.Arguments.Single());
-            Assert.Equal(workflowRunId, payload.GetProperty("workflowRunId").GetString());
-            Assert.Equal(sessionName, payload.GetProperty("sessionName").GetString());
             Assert.Equal("ship it", payload.GetProperty("text").GetString());
 
             var target = payload.GetProperty("target");
