@@ -281,8 +281,7 @@ internal static class AgentCommands
             {
                 if (string.IsNullOrWhiteSpace(name))
                 {
-                    api.Error.WriteLine("--name is required");
-                    return 1;
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--name is required");
                 }
 
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
@@ -586,21 +585,20 @@ internal static class AgentCommands
 
             async Task<int> LaunchAsync()
             {
+                var resolvedPrompt = await BodyInputResolver.ResolveAsync(
+                    prompt, promptFile,
+                    new BodyInputResolver.SourceFlags("--prompt", "--prompt-file", "prompt"),
+                    api.FileSystem, api.StandardInput, TextWriter.Null);
+                if (resolvedPrompt is BodyInputResolver.Result.Failure promptFailure)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, promptFailure.Message);
+
                 var (mode, exit) = api.ResolveOutputMode(output);
 
                 if (exit != 0) return exit;
 
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-
                 if (resolveExit != 0) return resolveExit;
 
-                var resolvedPrompt = await BodyInputResolver.ResolveAsync(
-                    prompt, promptFile,
-                    new BodyInputResolver.SourceFlags("--prompt", "--prompt-file", "prompt"),
-                    api.FileSystem, api.StandardInput, api.Error);
-                if (resolvedPrompt is BodyInputResolver.Result.Failure)
-                    return 1;
                 var promptText = ((BodyInputResolver.Result.Success)resolvedPrompt).Body;
 
                 var contextRefs = BuildLaunchContext(issueRef, epicRef, repositoryRef, workspacePath);

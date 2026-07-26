@@ -701,12 +701,33 @@ public class CliAgentCommandSpecs
         var conflictError = new StringWriter();
         var conflictExit = await RunAsync(conflictHandler, ["agent", "create", "--name", "reviewer", "--instructions", "prompt"], error: conflictError, fileSystem: FileSystemWithProject());
 
-        Assert.Equal(1, missingExit);
+        Assert.Equal(2, missingExit);
         Assert.Contains("--name is required", missingError.ToString());
+        Assert.Contains("Usage:", missingError.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo agent create [flags]", missingError.ToString(), StringComparison.Ordinal);
         Assert.Empty(missingHandler.Requests);
         Assert.NotEqual(0, conflictExit);
         Assert.Contains("Agent name 'reviewer' is already used", conflictError.ToString());
         Assert.Contains("AGENT_NAME_CONFLICT", conflictError.ToString());
+    }
+
+    [Fact]
+    public async Task AgentLaunch_MissingPromptFailsWithScopedUsageBeforeHttp()
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "launch", "reviewer"],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("prompt is required", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo agent launch [flags]", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]

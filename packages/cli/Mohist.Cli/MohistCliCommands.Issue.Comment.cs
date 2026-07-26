@@ -36,31 +36,34 @@ internal static partial class IssueCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
-            var bodyProvided = ctx.GetResult(bodyOpt) is not null;
-            var bodyFileProvided = ctx.GetResult(bodyFileOpt) is not null;
             return AddAsync();
 
             async Task<int> AddAsync()
             {
                 if (string.IsNullOrWhiteSpace(author))
                 {
-                    api.Error.WriteLine("--author is required and must not be blank.");
-                    return 1;
+                    return CommandHelpHook.RenderUsageFailure(
+                        ctx, api.Error, "--author is required and must not be blank.");
                 }
                 var normalizedAuthor = author.Trim();
                 if (normalizedAuthor.Length > 100)
                 {
-                    api.Error.WriteLine("--author must be 100 characters or fewer.");
-                    return 1;
+                    return CommandHelpHook.RenderUsageFailure(
+                        ctx, api.Error, "--author must be 100 characters or fewer.");
                 }
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
+                var resolved = await BodyInputResolver.ResolveAsync(
+                    body, bodyFile,
+                    new BodyInputResolver.SourceFlags("--body", "--body-file", "comment body"),
+                    api.FileSystem, api.StandardInput, TextWriter.Null);
+                if (resolved is BodyInputResolver.Result.Failure bodyFailure)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, bodyFailure.Message);
+
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
-                var resolved = await BodyInputResolver.ResolveAsync(
-                    body, bodyFile, api.FileSystem, api.StandardInput, api.Error);
-                if (resolved is BodyInputResolver.Result.Failure)
-                    return 1;
+
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
+
                 var bodyText = ((BodyInputResolver.Result.Success)resolved).Body;
                 var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/comments");
                 return await api.PrintPostWithOutputAsync(

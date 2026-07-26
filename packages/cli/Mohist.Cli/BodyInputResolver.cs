@@ -45,10 +45,10 @@ internal static class BodyInputResolver
         var providedCount = (hasInline ? 1 : 0) + (hasFile ? 1 : 0);
         if (providedCount == 0)
         {
-            await error.WriteLineAsync(
-                $"{flags.BodyKind} is required (use {flags.InlineFlag} or {flags.FileFlag})")
+            var message = $"{flags.BodyKind} is required (use {flags.InlineFlag} or {flags.FileFlag})";
+            await error.WriteLineAsync(message)
                 .ConfigureAwait(false);
-            return new Result.Failure($"{flags.BodyKind} is required");
+            return new Result.Failure(message);
         }
 
         if (providedCount > 1)
@@ -56,10 +56,10 @@ internal static class BodyInputResolver
             var provided = new List<string>();
             if (hasInline) provided.Add(flags.InlineFlag);
             if (hasFile) provided.Add(flags.FileFlag);
-            await error.WriteLineAsync(
-                $"the following options are mutually exclusive: {string.Join(", ", provided)}; pass only one")
+            var message = $"the following options are mutually exclusive: {string.Join(", ", provided)}; pass only one";
+            await error.WriteLineAsync(message)
                 .ConfigureAwait(false);
-            return new Result.Failure($"mutually exclusive body sources: {string.Join(", ", provided)}");
+            return new Result.Failure(message);
         }
 
         string resolved;
@@ -81,18 +81,19 @@ internal static class BodyInputResolver
             }
             catch (Exception ex)
             {
-                await error.WriteLineAsync($"could not read body file: {bodyFile} ({ex.Message})")
+                var message = $"could not read body file: {bodyFile} ({ex.Message})";
+                await error.WriteLineAsync(message)
                     .ConfigureAwait(false);
-                return new Result.Failure($"could not read body file: {bodyFile}");
+                return new Result.Failure(message);
             }
         }
 
         if (string.IsNullOrWhiteSpace(resolved))
         {
-            await error.WriteLineAsync(
-                $"{flags.BodyKind} is required (resolved body is empty)")
+            var message = $"{flags.BodyKind} is required (resolved body is empty)";
+            await error.WriteLineAsync(message)
                 .ConfigureAwait(false);
-            return new Result.Failure($"{flags.BodyKind} is required");
+            return new Result.Failure(message);
         }
 
         return new Result.Success(resolved);

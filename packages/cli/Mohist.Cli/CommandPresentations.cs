@@ -190,6 +190,12 @@ internal static class CommandPresentations
                     CommandCapability.Work, "List the Issue branch commits"));
                 CommandPresentationCatalog.Attach(Find(group, "comment"), new CommandPresentation(
                     CommandCapability.Work, "Read or add Issue comments"));
+                var comment = Find(group, "comment");
+                if (comment is not null)
+                {
+                    CommandPresentationCatalog.Attach(Find(comment, "create"), new CommandPresentation(
+                        CommandCapability.Work, "Add a comment to an Issue"));
+                }
                 CommandPresentationCatalog.Attach(Find(group, "template"), new CommandPresentation(
                     CommandCapability.Work, "Inspect Issue templates"));
                 CommandPresentationCatalog.Attach(Find(group, "watch"), new CommandPresentation(
