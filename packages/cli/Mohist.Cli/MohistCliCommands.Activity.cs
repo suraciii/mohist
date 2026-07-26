@@ -8,7 +8,7 @@ internal static class ActivityCommands
     private const int DefaultLimit = 100;
     private const int MaxLimit = 200;
 
-    private static readonly ResourceDescriptor ActivityListDescriptor = new(
+    internal static readonly ResourceDescriptor ActivityListDescriptor = new(
         ResourceCardinality.Collection,
         ["id", "provenance", "scope", "kind", "time", "title", "description", "eventType", "issueNumber", "workflowRunId", "sessionId", "runnerId", "status"]);
 

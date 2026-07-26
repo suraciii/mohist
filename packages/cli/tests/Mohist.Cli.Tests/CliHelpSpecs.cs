@@ -136,8 +136,23 @@ public sealed class CliHelpSpecs
         var exitCode = await MohistCliCommands.RunAsync(http, ["activity", "list", "--help"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("--limit", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("(default: 100)", output.ToString(), StringComparison.Ordinal);
+        var text = output.ToString();
+        Assert.Contains("--limit", text, StringComparison.Ordinal);
+        Assert.Contains("(default: 100)", text, StringComparison.Ordinal);
+        Assert.Contains("provenance", text, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task IssueEditHelp_SeparatesLongOptionNamesFromDescriptions()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["issue", "edit", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("--inherit-workflow-profile Clear the explicit Profile", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--stage-model-variants Per-stage model variant map", output.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 

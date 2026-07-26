@@ -206,3 +206,11 @@ Review-fix progress (round 3)
   scoped usage with exit code 2 and make no HTTP request.
 - Focused CLI verification passed with 1388 tests; the complete `npm test`
   suite also passed.
+
+Review-fix progress (round 4)
+
+- Activity help now reads its JSON fields from the runtime Activity descriptor,
+  and long option names retain a separator before their descriptions.
+- `CliHelpSpecs` covers Activity JSON fields and long Issue edit option layout.
+- Focused CLI verification passed with 1392 tests; the complete `npm test`
+  suite also passed.

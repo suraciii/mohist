@@ -545,7 +545,8 @@ internal static class CommandPresentations
                 CommandPresentationCatalog.Attach(Find(group, "list"), new CommandPresentation(
                     CommandCapability.Operations, "List Activity entries in the active Project",
                     Boundary: "Activity has bounded recorded and snapshot views across Project and global scope.",
-                    Note: "Each entry includes its provenance and scope."));
+                    Note: "Each entry includes its provenance and scope.",
+                    JsonFields: ActivityCommands.ActivityListDescriptor.Fields));
             }
         }
     }

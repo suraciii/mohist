@@ -233,7 +233,7 @@ internal static class CommandHelpRenderer
         var name = symbol is Option && !symbol.Name.StartsWith("-", StringComparison.Ordinal)
             ? $"--{symbol.Name}"
             : symbol.Name;
-        sb.Append(name.PadRight(20));
+        sb.Append(name.Length < 20 ? name.PadRight(20) : $"{name} ");
         sb.Append(symbol.Description ?? string.Empty);
         if (symbol is Argument argument && argument.Arity.MinimumNumberOfValues > 0)
             sb.Append(" (required)");
