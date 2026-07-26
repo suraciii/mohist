@@ -36,3 +36,31 @@
 - The route handler has not been touched inside the `try` block in a way that T-002 must preserve: the body has been fully read and stored in `bodyBytes` before T-002's call, so a block planner only needs the decoded byte payload.
 - `OtlpIngestGate.TryAcquireRequestLease` and `ReleaseRequestLease` are the only public surface the writer-lease consumer needs; `BlockNextRequestLease` / `ReleaseNextRequestSignal` remain internal test seams.
 - Decompression is enabled in `MohistHostFactory.Build` between `UseOtelPortIsolation` and `UseResponseCompression`. T-002 does not need to re-order middleware.
+
+## T-002 Persist OTLP traces in linear bounded write blocks
+
+### Codebase patterns
+
+- `TraceIngester` exposes an internal `transactionStarted` callback that fires once per SQL transaction begin. The bounded write path reuses it to count blocks and to inject deterministic failure (a callback that throws triggers the established rollback path with retryable outcome semantics).
+- `OtlpWriterLease` is a `readonly struct`; `default(OtlpWriterLease)` is a no-op when the ingester is constructed without a gate, so the same ingester works in unit tests and production.
+- `InMemoryOtelDb.Create()` already sets up the existing schema; T-002 adds two new DDL entries (`idx_spans_trace_start`, `idx_spans_trace_end`) and the factory is updated to match so in-memory and on-disk stores are aligned.
+- `TraceIngester.Planner` is an internal test seam returning the singleton `OtlpWriteBlockPlanner`; the public ingest path calls `IngestBatch`, which now plans then commits blocks in one go.
+
+### Decisions and gotchas
+
+- The block planner is a pure function of the `PreparedIngestBatch` — no DB access, no IO. This keeps the planner testable in isolation and avoids a second pass through the connection pool. It is exposed through `TraceIngester.Planner` so unit tests can exercise partitioning without a database.
+- A single normalized Span whose persisted-data weight alone exceeds `OtlpWriteBlockPlanner.MaxBlockBytes` is *not* placed in any block; the planner increments `OversizedDropped`, closes the prior block, and continues. The non-retryable classification flows into `ClassifiedBatchTotals.MalformedDropped` so `IngestOutcomeBuilder` produces a `PartialSuccess` disposition and the response writer's `partial_success.rejectedSpans` carries the combined refused + dropped count.
+- The block writer preserves `INSERT OR REPLACE` semantics: each block reads prior `(trace_id, span_id)` identities in one tuple-IN query, inserts or replaces every row, and adds *only* the new identities to the trace's `span_count`. The trace header update is a single `UPDATE` per affected trace (an additive composite-indexed `ORDER BY ... LIMIT 1` for the bounds). Work grows with affected traces, not with the incoming Span count.
+- A new trace header is inserted only when the trace does not already exist; the existing trace path is a plain `UPDATE`. This avoids the silent double-count that happens if an `INSERT OR IGNORE` is followed by an `UPDATE` (the prior bug the spec calls out for the operation-count assertion).
+- The writer lease is acquired with `using var writerLease = ...` around the entire block loop so an early cancellation releases the lease before the route handler returns. The lease is a synchronous `IDisposable`, so the await is followed by a manual `try/finally` rather than `await using` (the latter requires `IAsyncDisposable`).
+- `Microsoft.Data.Sqlite` does not reliably support reusing a single named parameter across two SQL statements in the same command text. The trace-header helper therefore issues two separate `Command`s (one `INSERT` and one `UPDATE`) instead of a single batched text. The cost is a small additional round-trip per affected trace, but the deterministic correctness is what the spec asks for.
+- The existing `transactionStarted` callback runs *after* `BeginTransaction` and *before* the block writes. Tests use it as both a block counter and a fault-injection point. Throwing from it produces the same `RolledBack` outcome as a write failure, so the retryable/cancelled semantics are reused for free.
+- The bounded-blocks tests live in `SpecTests` rather than `UnitTests` because the assertions need an in-memory `OtelDb` + `OtlpIngestGate` pair; `UnitTests` does not reference `SpecTests.Support.InMemoryOtelDb`. The plannertests, by contrast, are pure data and live in `UnitTests`.
+- ArchTests enforces a 24,000-byte ratchet on individual C# test files. The bounded-write spec file is split into one `TraceIngesterBoundedWriteSpecs` and one `OtlpRoutesBoundedWriteSpecs`; each stays under the limit while still covering all the spec scenarios.
+- The spec file naming must end with `Specs` or `Collection`; the bounded-write tests were originally `BoundedWriteTests` and tripped the rule. Renamed to `BoundedWriteSpecs` and the existing `TraceIngesterSpecs` collection is unaffected.
+
+### Verified
+
+- 1506 / 1506 unit tests pass (new: 9 `OtlpWriteBlockPlannerTests`).
+- 3246 / 3246 spec tests pass (new: 10 `TraceIngesterBoundedWriteSpecs` and 4 `OtlpRoutesBoundedWriteSpecs`).
+- 32 / 32 arch tests pass; `npm test` passes end-to-end; `npm run typecheck` passes for both `web` and `runner`; `dotnet build /p:TreatWarningsAsErrors=true` is clean.

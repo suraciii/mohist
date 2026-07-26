@@ -33,13 +33,15 @@ public sealed class TraceIngester
     private readonly ILogger<TraceIngester> _logger;
     private readonly RuntimeObservability? _runtime;
     private readonly IIngestProtectionDecision _protection;
+    private readonly IOtlpIngestGate? _gate;
+    private readonly OtlpWriteBlockPlanner _planner;
     private readonly Action? _transactionStarted;
 
     /// <summary>OTLP-defined service.name attribute key.</summary>
     public const string ServiceNameAttributeKey = "service.name";
 
     public TraceIngester(OtelDb db, ILogger<TraceIngester> logger)
-        : this(db, logger, null, null, null)
+        : this(db, logger, null, null, null, null)
     {
     }
 
@@ -48,7 +50,8 @@ public sealed class TraceIngester
         ILogger<TraceIngester> logger,
         RuntimeObservability? runtime,
         IIngestProtectionDecision? protection = null,
-        Action? transactionStarted = null)
+        Action? transactionStarted = null,
+        IOtlpIngestGate? gate = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(logger);
@@ -57,7 +60,17 @@ public sealed class TraceIngester
         _runtime = runtime;
         _protection = protection ?? new AcceptAllIngestProtectionDecision();
         _transactionStarted = transactionStarted;
+        _gate = gate;
+        _planner = new OtlpWriteBlockPlanner();
     }
+
+    /// <summary>
+    /// Test seam that exposes the protected block planner so unit
+    /// tests can exercise partitioning without round-tripping
+    /// through the database. Production code paths route through
+    /// <see cref="IngestBatch(OtlpTraceRequest?, CancellationToken)"/>.
+    /// </summary>
+    internal OtlpWriteBlockPlanner Planner => _planner;
 
     /// <summary>
     /// Ingest one OTLP HTTP/JSON trace export payload. Returns the
@@ -88,47 +101,354 @@ public sealed class TraceIngester
     internal IngestOutcome IngestBatch(OtlpTraceRequest? request, CancellationToken ct = default)
     {
         var prepared = Prepare(request);
-        if (prepared.ParsedSpans.Length == 0)
+        var plan = _planner.Plan(prepared);
+        var emptyClassification = new ClassifiedBatchTotals(
+            plan.TotalAccepted,
+            plan.ProtectionRejected,
+            plan.MalformedDropped + plan.OversizedDropped,
+            0);
+
+        if (plan.Blocks.Length == 0)
         {
-            var empty = IngestOutcomeBuilder.Build(prepared.Classification, IngestWriteResult.NotAttempted());
+            var empty = IngestOutcomeBuilder.Build(emptyClassification, IngestWriteResult.NotAttempted());
             _runtime?.RecordIngest(empty);
             return empty;
         }
 
+        return IngestPlannedAsync(plan, ct).GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Async-only ingestion path used by the request loop. The
+    /// synchronous overload delegates here by blocking on the
+    /// returned task; production ingestion is server-initiated and
+    /// synchronous, so the wrapper is the only caller.
+    /// </summary>
+    internal async Task<IngestOutcome> IngestPlannedAsync(OtlpWritePlan plan, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (plan.Blocks.Length == 0)
+        {
+            var emptyClassification = new ClassifiedBatchTotals(
+                plan.TotalAccepted,
+                plan.ProtectionRejected,
+                plan.MalformedDropped + plan.OversizedDropped,
+                0);
+            var empty = IngestOutcomeBuilder.Build(emptyClassification, IngestWriteResult.NotAttempted());
+            _runtime?.RecordIngest(empty);
+            return empty;
+        }
+
+        var writerLease = _gate is null
+            ? new OtlpWriterLease()
+            : await _gate.AcquireWriterLeaseAsync(ct).ConfigureAwait(false);
+        try
+        {
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (var block in plan.Blocks)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    CommitBlock(block, ct);
+                }
+
+                var finalClassification = new ClassifiedBatchTotals(
+                    plan.TotalAccepted,
+                    plan.ProtectionRejected,
+                    plan.MalformedDropped + plan.OversizedDropped,
+                    0);
+                var committed = IngestOutcomeBuilder.Build(finalClassification, IngestWriteResult.Committed());
+                _runtime?.RecordIngest(committed);
+                return committed;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                var cancelledClassification = new ClassifiedBatchTotals(
+                    plan.TotalAccepted,
+                    plan.ProtectionRejected,
+                    plan.MalformedDropped + plan.OversizedDropped,
+                    0);
+                var cancelled = IngestOutcomeBuilder.Build(cancelledClassification, IngestWriteResult.Cancelled());
+                _runtime?.RecordIngest(cancelled);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                var rolledBackClassification = new ClassifiedBatchTotals(
+                    plan.TotalAccepted,
+                    plan.ProtectionRejected,
+                    plan.MalformedDropped + plan.OversizedDropped,
+                    0);
+                var rolledBack = IngestOutcomeBuilder.Build(
+                    rolledBackClassification,
+                    IngestWriteResult.RolledBack(ex.Message));
+                _runtime?.RecordIngest(rolledBack);
+                return rolledBack;
+            }
+        }
+        finally
+        {
+            writerLease.Dispose();
+        }
+    }
+
+    private void CommitBlock(OtlpWriteBlock block, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
         using var connection = _db.OpenReadWriteConnection();
         using var transaction = connection.BeginTransaction();
         _transactionStarted?.Invoke();
-
         try
         {
-            ct.ThrowIfCancellationRequested();
-            foreach (var item in prepared.ParsedSpans)
-            {
-                ct.ThrowIfCancellationRequested();
-                UpsertSpan(connection, transaction, item.Span, item.ServiceName, item.ResourceAttributesJson);
-            }
-
+            UpsertBlock(connection, transaction, block, ct);
             transaction.Commit();
-            var committed = IngestOutcomeBuilder.Build(prepared.Classification, IngestWriteResult.Committed());
-            _runtime?.RecordIngest(committed);
-            return committed;
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch
         {
             transaction.Rollback();
-            var cancelled = IngestOutcomeBuilder.Build(prepared.Classification, IngestWriteResult.Cancelled());
-            _runtime?.RecordIngest(cancelled);
             throw;
         }
-        catch (Exception ex)
+    }
+
+    private void UpsertBlock(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        OtlpWriteBlock block,
+        CancellationToken ct)
+    {
+        var spans = block.Spans;
+
+        // Assign a single service-name per (trace_id) — the first
+        // received one wins, so subsequent same-Trace duplicates
+        // preserve the originally stored service name. The grouping
+        // also lets us fetch existing service names in batches
+        // instead of one round-trip per Span.
+        var grouped = new Dictionary<string, GroupedTraceBatch>(StringComparer.Ordinal);
+        foreach (var prepared in spans)
         {
-            transaction.Rollback();
-            var rolledBack = IngestOutcomeBuilder.Build(
-                prepared.Classification,
-                IngestWriteResult.RolledBack(ex.Message));
-            _runtime?.RecordIngest(rolledBack);
-            return rolledBack;
+            if (!grouped.TryGetValue(prepared.Span.TraceId, out var group))
+            {
+                group = new GroupedTraceBatch(prepared.ServiceName);
+                grouped[prepared.Span.TraceId] = group;
+            }
+            group.IdentityBySpan[prepared.Span.SpanId] = prepared;
         }
+
+        // Fetch existing (trace_id, span_id) identities so the count
+        // delta only grows for new identities. Existing identities
+        // are still replaced by the later incoming attributes.
+        var identities = new List<string>(spans.Length);
+        foreach (var prepared in spans)
+            identities.Add($"{prepared.Span.TraceId}\u0001{prepared.Span.SpanId}");
+
+        var existing = new HashSet<string>(StringComparer.Ordinal);
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = transaction;
+            var placeholders = new string[spans.Length];
+            for (var i = 0; i < spans.Length; i++)
+                placeholders[i] = $"($t{i}, $s{i})";
+            cmd.CommandText = $"""
+                SELECT {OtelDb.SpansTraceIdColumn}, {OtelDb.SpansSpanIdColumn}
+                FROM {OtelDb.SpansTable}
+                WHERE ({OtelDb.SpansTraceIdColumn}, {OtelDb.SpansSpanIdColumn}) IN ({string.Join(", ", placeholders)});
+                """;
+            for (var i = 0; i < spans.Length; i++)
+            {
+                cmd.Parameters.AddWithValue($"$t{i}", spans[i].Span.TraceId);
+                cmd.Parameters.AddWithValue($"$s{i}", spans[i].Span.SpanId);
+            }
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+                existing.Add($"{reader.GetString(0)}\u0001{reader.GetString(1)}");
+        }
+
+        // Replace each Span row. INSERT OR REPLACE preserves the
+        // deterministic-truth contract: a later received row wins
+        // for the same identity, so corrections self-heal.
+        foreach (var prepared in spans)
+        {
+            ct.ThrowIfCancellationRequested();
+            UpsertSpanRow(connection, transaction, prepared.Span, prepared.ServiceName, prepared.ResourceAttributesJson);
+        }
+
+        // Refresh each affected Trace once. The Trace header's
+        // span_count grows by the number of *new* identities in this
+        // block; bounds use indexed ORDER BY ... LIMIT 1 reads so
+        // the work is bounded by the distinct affected Traces rather
+        // than by the incoming Span count.
+        foreach (var (traceId, group) in grouped)
+        {
+            ct.ThrowIfCancellationRequested();
+            var newIdentityCount = 0;
+            foreach (var prepared in group.IdentityBySpan.Values)
+            {
+                if (!existing.Contains($"{prepared.Span.TraceId}\u0001{prepared.Span.SpanId}"))
+                    newIdentityCount++;
+            }
+
+            UpsertTraceHeader(
+                connection,
+                transaction,
+                traceId,
+                group.ServiceName,
+                newIdentityCount);
+        }
+    }
+
+    private static void UpsertSpanRow(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        NormalizedIngestSpan span,
+        string serviceName,
+        string? resourceAttributesJson)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = $"""
+            INSERT OR REPLACE INTO {OtelDb.SpansTable} (
+                {OtelDb.SpansTraceIdColumn},
+                {OtelDb.SpansSpanIdColumn},
+                {OtelDb.SpansParentSpanIdColumn},
+                {OtelDb.SpansNameColumn},
+                {OtelDb.SpansKindColumn},
+                {OtelDb.SpansStartTimeColumn},
+                {OtelDb.SpansEndTimeColumn},
+                {OtelDb.SpansAttributesColumn},
+                {OtelDb.SpansStatusCodeColumn},
+                {OtelDb.SpansStatusMessageColumn},
+                {OtelDb.SpansResourceAttributesColumn}
+            ) VALUES (
+                $trace_id, $span_id, $parent_span_id, $name, $kind,
+                $start_time, $end_time, $attributes,
+                $status_code, $status_message, $resource_attributes
+            );
+            """;
+        cmd.Parameters.AddWithValue("$trace_id", span.TraceId);
+        cmd.Parameters.AddWithValue("$span_id", span.SpanId);
+        cmd.Parameters.AddWithValue("$parent_span_id", (object?)span.ParentSpanId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$name", span.Name);
+        cmd.Parameters.AddWithValue("$kind", span.Kind);
+        cmd.Parameters.AddWithValue("$start_time", span.StartTime);
+        cmd.Parameters.AddWithValue("$end_time", span.EndTime);
+        cmd.Parameters.AddWithValue("$attributes", (object?)span.AttributesJson ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$status_code", span.StatusCode);
+        cmd.Parameters.AddWithValue("$status_message", (object?)span.StatusMessage ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$resource_attributes", (object?)resourceAttributesJson ?? DBNull.Value);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static void UpsertTraceHeader(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        string traceId,
+        string serviceName,
+        int newIdentityCount)
+    {
+        // An existing trace keeps its first-stored service name and
+        // absorbs a new identity count via a single-row UPDATE.
+        // A new trace is initialized with the first encountered
+        // service name and the same indexes give the starting bounds.
+        // The deterministic ORDER BY ... LIMIT 1 reads use the
+        // additive (trace_id, start_time) / (trace_id, end_time)
+        // indexes, so the work grows with the affected Trace count
+        // rather than the incoming Span count.
+        if (TraceHeaderExists(connection, transaction, traceId))
+        {
+            UpdateTraceHeaderBoundsAndCount(connection, transaction, traceId, newIdentityCount);
+        }
+        else
+        {
+            InsertTraceHeader(connection, transaction, traceId, serviceName, newIdentityCount);
+        }
+    }
+
+    private static bool TraceHeaderExists(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        string traceId)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = $"SELECT 1 FROM {OtelDb.TracesTable} WHERE {OtelDb.TracesTraceIdColumn} = $trace_id";
+        cmd.Parameters.AddWithValue("$trace_id", traceId);
+        var result = cmd.ExecuteScalar();
+        return result is not null;
+    }
+
+    private static void InsertTraceHeader(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        string traceId,
+        string serviceName,
+        int initialCount)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = $"""
+            INSERT INTO {OtelDb.TracesTable} (
+                {OtelDb.TracesTraceIdColumn},
+                {OtelDb.TracesServiceNameColumn},
+                {OtelDb.TracesStartTimeColumn},
+                {OtelDb.TracesEndTimeColumn},
+                {OtelDb.TracesSpanCountColumn}
+            ) VALUES (
+                $trace_id, $service_name,
+                (SELECT {OtelDb.SpansStartTimeColumn} FROM {OtelDb.SpansTable}
+                    WHERE {OtelDb.SpansTraceIdColumn} = $trace_id
+                    ORDER BY {OtelDb.SpansStartTimeColumn} ASC LIMIT 1),
+                (SELECT {OtelDb.SpansEndTimeColumn} FROM {OtelDb.SpansTable}
+                    WHERE {OtelDb.SpansTraceIdColumn} = $trace_id
+                    ORDER BY {OtelDb.SpansEndTimeColumn} DESC LIMIT 1),
+                $initial_count
+            );
+            """;
+        cmd.Parameters.AddWithValue("$trace_id", traceId);
+        cmd.Parameters.AddWithValue("$service_name", serviceName);
+        cmd.Parameters.AddWithValue("$initial_count", initialCount);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static void UpdateTraceHeaderBoundsAndCount(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        string traceId,
+        int newIdentityCount)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = $"""
+            UPDATE {OtelDb.TracesTable}
+            SET
+                {OtelDb.TracesEndTimeColumn} = (
+                    SELECT {OtelDb.SpansEndTimeColumn} FROM {OtelDb.SpansTable}
+                    WHERE {OtelDb.SpansTraceIdColumn} = $trace_id
+                    ORDER BY {OtelDb.SpansEndTimeColumn} DESC LIMIT 1
+                ),
+                {OtelDb.TracesStartTimeColumn} = (
+                    SELECT {OtelDb.SpansStartTimeColumn} FROM {OtelDb.SpansTable}
+                    WHERE {OtelDb.SpansTraceIdColumn} = $trace_id
+                    ORDER BY {OtelDb.SpansStartTimeColumn} ASC LIMIT 1
+                ),
+                {OtelDb.TracesSpanCountColumn} = {OtelDb.TracesSpanCountColumn} + $new_count
+            WHERE {OtelDb.TracesTraceIdColumn} = $trace_id;
+            """;
+        cmd.Parameters.AddWithValue("$trace_id", traceId);
+        cmd.Parameters.AddWithValue("$new_count", newIdentityCount);
+        cmd.ExecuteNonQuery();
+    }
+
+    private sealed class GroupedTraceBatch
+    {
+        public GroupedTraceBatch(string serviceName)
+        {
+            ServiceName = serviceName;
+            IdentityBySpan = new Dictionary<string, PreparedIngestSpan>(StringComparer.Ordinal);
+        }
+
+        public string ServiceName { get; }
+        public Dictionary<string, PreparedIngestSpan> IdentityBySpan { get; }
     }
 
     public PreparedIngestBatch Prepare(OtlpTraceRequest? request)
@@ -208,86 +528,6 @@ public sealed class TraceIngester
             StatusMessage: string.IsNullOrEmpty(span.Status?.Message) ? null : span.Status!.Message,
             AttributesJson: SerializeKeyValues(span.Attributes));
         return true;
-    }
-
-    private void UpsertSpan(
-        Microsoft.Data.Sqlite.SqliteConnection connection,
-        Microsoft.Data.Sqlite.SqliteTransaction transaction,
-        NormalizedIngestSpan span,
-        string serviceName,
-        string? resourceAttributesJson)
-    {
-        // Span upsert — primary key (trace_id, span_id) guarantees idempotency.
-        using (var cmd = connection.CreateCommand())
-        {
-            cmd.Transaction = transaction;
-            cmd.CommandText = $"""
-                INSERT OR REPLACE INTO {OtelDb.SpansTable} (
-                    {OtelDb.SpansTraceIdColumn},
-                    {OtelDb.SpansSpanIdColumn},
-                    {OtelDb.SpansParentSpanIdColumn},
-                    {OtelDb.SpansNameColumn},
-                    {OtelDb.SpansKindColumn},
-                    {OtelDb.SpansStartTimeColumn},
-                    {OtelDb.SpansEndTimeColumn},
-                    {OtelDb.SpansAttributesColumn},
-                    {OtelDb.SpansStatusCodeColumn},
-                    {OtelDb.SpansStatusMessageColumn},
-                    {OtelDb.SpansResourceAttributesColumn}
-                ) VALUES (
-                    $trace_id, $span_id, $parent_span_id, $name, $kind,
-                    $start_time, $end_time, $attributes,
-                    $status_code, $status_message, $resource_attributes
-                );
-                """;
-            cmd.Parameters.AddWithValue("$trace_id", span.TraceId);
-            cmd.Parameters.AddWithValue("$span_id", span.SpanId);
-            cmd.Parameters.AddWithValue("$parent_span_id", (object?)span.ParentSpanId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$name", span.Name);
-            cmd.Parameters.AddWithValue("$kind", span.Kind);
-            cmd.Parameters.AddWithValue("$start_time", span.StartTime);
-            cmd.Parameters.AddWithValue("$end_time", span.EndTime);
-            cmd.Parameters.AddWithValue("$attributes", (object?)span.AttributesJson ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$status_code", span.StatusCode);
-            cmd.Parameters.AddWithValue("$status_message", (object?)span.StatusMessage ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$resource_attributes", (object?)resourceAttributesJson ?? DBNull.Value);
-            cmd.ExecuteNonQuery();
-        }
-
-        // Trace header upsert — recompute span_count and the trace-level
-        // time bounds from the fresh state so retries self-heal. The
-        // service_name follows first-resource-wins per design.md
-        // Decision 4: when the trace already exists we keep its existing
-        // service_name rather than overwriting it with the new batch's.
-        using (var cmd = connection.CreateCommand())
-        {
-            cmd.Transaction = transaction;
-            cmd.CommandText = $"""
-                INSERT INTO {OtelDb.TracesTable} (
-                    {OtelDb.TracesTraceIdColumn},
-                    {OtelDb.TracesServiceNameColumn},
-                    {OtelDb.TracesStartTimeColumn},
-                    {OtelDb.TracesEndTimeColumn},
-                    {OtelDb.TracesSpanCountColumn}
-                )
-                SELECT
-                    s.{OtelDb.SpansTraceIdColumn},
-                    $service_name,
-                    MIN(s.{OtelDb.SpansStartTimeColumn}),
-                    MAX(s.{OtelDb.SpansEndTimeColumn}),
-                    COUNT(*)
-                FROM {OtelDb.SpansTable} s
-                WHERE s.{OtelDb.SpansTraceIdColumn} = $trace_id
-                GROUP BY s.{OtelDb.SpansTraceIdColumn}
-                ON CONFLICT({OtelDb.TracesTraceIdColumn}) DO UPDATE SET
-                    {OtelDb.TracesStartTimeColumn} = MIN({OtelDb.TracesTable}.{OtelDb.TracesStartTimeColumn}, excluded.{OtelDb.TracesStartTimeColumn}),
-                    {OtelDb.TracesEndTimeColumn} = MAX({OtelDb.TracesTable}.{OtelDb.TracesEndTimeColumn}, excluded.{OtelDb.TracesEndTimeColumn}),
-                    {OtelDb.TracesSpanCountColumn} = (SELECT COUNT(*) FROM {OtelDb.SpansTable} WHERE {OtelDb.SpansTraceIdColumn} = {OtelDb.TracesTable}.{OtelDb.TracesTraceIdColumn});
-                """;
-            cmd.Parameters.AddWithValue("$service_name", serviceName);
-            cmd.Parameters.AddWithValue("$trace_id", span.TraceId);
-            cmd.ExecuteNonQuery();
-        }
     }
 
     internal static bool TryConvertUnixNanoToUtcIso(string? raw, out string iso)
