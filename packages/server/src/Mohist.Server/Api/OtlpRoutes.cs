@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -37,7 +38,7 @@ public static class OtlpRoutes
 
         var group = app.MapGroup("");
 
-        group.MapPost(OtlpTracesPath, async (HttpContext context, TraceIngester ingester, OtlpTraceResponseWriter writer, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        group.MapPost(OtlpTracesPath, async (HttpContext context, TraceIngester ingester, OtlpTraceResponseWriter writer, IOtlpIngestGate gate, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("Mohist.Server.Api.OtlpRoutes");
 
@@ -59,68 +60,103 @@ public static class OtlpRoutes
                 return Results.Empty;
             }
 
-            string? body = null;
-            byte[]? protobufBody = null;
-            try
+            var admission = gate.TryAcquireRequestLease();
+            if (!admission.Admitted)
             {
-                if (isProtobuf)
-                {
-                    using var memory = new MemoryStream();
-                    await request.Body.CopyToAsync(memory, ct);
-                    protobufBody = memory.ToArray();
-                }
-                else
-                {
-                    using var reader = new StreamReader(request.Body);
-                    body = await reader.ReadToEndAsync(ct);
-                }
-            }
-            catch (IOException ex)
-            {
-                logger.LogDebug(ex, "Failed to read OTLP request body.");
-                await writer.WriteInvalidArgumentAsync(
-                    context.Response,
-                    contentType,
-                    "Failed to read request body.");
+                logger.LogDebug(
+                    "Rejecting OTLP request: temporary admission pressure (retry after {RetryAfter}s).",
+                    admission.RetryAfterSeconds);
+                await writer.WriteTemporaryAdmissionAsync(context.Response, contentType, admission.RetryAfterSeconds);
                 return Results.Empty;
             }
 
-            IngestOutcome outcome;
             try
             {
-                if (isProtobuf)
-                {
-                    outcome = ingester.IngestBatch(OtlpProtobufTraceParser.Parse(protobufBody!), ct);
-                }
-                else
-                {
-                    var parsed = JsonSerializer.Deserialize<OtlpTraceRequest>(body!, OtlpJsonSerializer.Options())
-                        ?? throw new JsonException("The OTLP request must be a JSON object.");
-                    outcome = ingester.IngestBatch(parsed, ct);
-                }
+                return await HandleAdmittedAsync(context, ingester, writer, logger, contentType, isProtobuf, ct);
             }
-            catch (JsonException ex)
+            finally
             {
-                logger.LogDebug(ex, "OTLP request body is not valid JSON.");
-                await writer.WriteInvalidArgumentAsync(context.Response, contentType, ex.Message);
-                return Results.Empty;
+                gate.ReleaseRequestLease();
             }
-            catch (InvalidProtocolBufferException ex)
-            {
-                logger.LogDebug(ex, "OTLP request body is not valid protobuf.");
-                await writer.WriteInvalidArgumentAsync(context.Response, contentType, ex.Message);
-                return Results.Empty;
-            }
-
-            logger.LogDebug(
-                "OTLP ingest classified {SpanCount} parsed span(s); responding with {Disposition}.",
-                outcome.Received,
-                outcome.ResponseDisposition);
-            await writer.WriteOutcomeAsync(context.Response, contentType, outcome);
-            return Results.Empty;
         });
 
         return app;
+    }
+
+    internal static async Task<IResult> HandleAdmittedAsync(
+        HttpContext context,
+        TraceIngester ingester,
+        OtlpTraceResponseWriter writer,
+        ILogger logger,
+        string? contentType,
+        bool isProtobuf,
+        CancellationToken ct)
+    {
+        var request = context.Request;
+        var maxBytes = LimitedOtlpBodyReader.DefaultMaxBytes;
+        var bodyReader = new LimitedOtlpBodyReader(request.Body, maxBytes);
+
+        byte[]? bodyBytes;
+        try
+        {
+            bodyBytes = await bodyReader.ReadAllAsync(ct);
+        }
+        catch (OtlpBodyTooLargeException)
+        {
+            logger.LogDebug(
+                "Rejecting OTLP request: decoded body exceeded {MaxBytes} bytes.",
+                maxBytes);
+            await writer.WriteDecodedSizeExceededAsync(context.Response, contentType);
+            return Results.Empty;
+        }
+        catch (IOException ex)
+        {
+            logger.LogDebug(ex, "Failed to read OTLP request body.");
+            await writer.WriteInvalidArgumentAsync(
+                context.Response,
+                contentType,
+                "Failed to read request body.");
+            return Results.Empty;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+
+        IngestOutcome outcome;
+        try
+        {
+            if (isProtobuf)
+            {
+                outcome = ingester.IngestBatch(OtlpProtobufTraceParser.Parse(bodyBytes!), ct);
+            }
+            else
+            {
+                var json = Encoding.UTF8.GetString(bodyBytes!);
+                var parsed = JsonSerializer.Deserialize<OtlpTraceRequest>(json, OtlpJsonSerializer.Options())
+                    ?? throw new JsonException("The OTLP request must be a JSON object.");
+                outcome = ingester.IngestBatch(parsed, ct);
+            }
+        }
+        catch (JsonException ex)
+        {
+            logger.LogDebug(ex, "OTLP request body is not valid JSON.");
+            await writer.WriteInvalidArgumentAsync(context.Response, contentType, ex.Message);
+            return Results.Empty;
+        }
+        catch (InvalidProtocolBufferException ex)
+        {
+            logger.LogDebug(ex, "OTLP request body is not valid protobuf.");
+            await writer.WriteInvalidArgumentAsync(context.Response, contentType, ex.Message);
+            return Results.Empty;
+        }
+
+        logger.LogDebug(
+            "OTLP ingest classified {SpanCount} parsed span(s); responding with {Disposition}.",
+            outcome.Received,
+            outcome.ResponseDisposition);
+        await writer.WriteOutcomeAsync(context.Response, contentType, outcome);
+        return Results.Empty;
     }
 
     private static string? ResolveContentType(string? raw)
@@ -130,5 +166,4 @@ public static class OtlpRoutes
         var semi = raw.IndexOf(';');
         return semi < 0 ? raw.Trim() : raw[..semi].Trim();
     }
-
 }

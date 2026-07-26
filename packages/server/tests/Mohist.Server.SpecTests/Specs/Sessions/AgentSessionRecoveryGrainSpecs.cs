@@ -26,7 +26,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
 
         var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "summary"));
 
-        var state = Assert.IsType<AgentSession>(_fixture.StateStore.State);
+        var state = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
         Assert.Equal(sessionId, state.Id);
         Assert.Equal("runtime-before-compact", state.Status.AgentRuntimeSessionId);
         Assert.Equal("opencode", state.Runtime.Runtime);
@@ -47,7 +47,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
             ExpectedRuntimeSessionId: "runtime-before-reset",
             ReplacementRuntimeSessionId: "runtime-after-reset"));
 
-        var state = Assert.IsType<AgentSession>(_fixture.StateStore.State);
+        var state = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
         Assert.Equal(sessionId, state.Id);
         Assert.Equal("runtime-after-reset", state.Status.AgentRuntimeSessionId);
         Assert.Equal("opencode", state.Runtime.Runtime);
@@ -94,7 +94,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal(saveCountBefore, _fixture.StateStore.SaveCount);
         Assert.Equal(eventCountBefore, _fixture.StateStore.Events.Count);
 
-        var state = Assert.IsType<AgentSession>(_fixture.StateStore.State);
+        var state = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
         Assert.Equal("runtime-current", state.Status.AgentRuntimeSessionId);
     }
 
@@ -315,7 +315,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Contains(sessionId, compactException.Message, StringComparison.Ordinal);
         Assert.Equal(saveCountBefore, _fixture.StateStore.SaveCount);
         Assert.Equal(eventCountBefore, _fixture.StateStore.Events.Count);
-        Assert.Equal("runtime-active", _fixture.StateStore.State!.Status.AgentRuntimeSessionId);
+        Assert.Equal("runtime-active", (await _fixture.StateStore.LoadAsync(sessionId))!.Status.AgentRuntimeSessionId);
     }
 
     [Fact]
@@ -341,7 +341,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
             "runtime-followup"));
 
         // The rejection did not create a turn and its matching lease is cleared.
-        var state = Assert.IsType<AgentSession>(_fixture.StateStore.State);
+        var state = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
         Assert.Null(state.Status.PendingFollowup);
         Assert.Equal(AgentSessionActivity.Idle, state.Status.Activity);
         var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "summary"));
@@ -352,7 +352,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     [Fact]
     public async Task Compact_AfterAcceptedFollowupIsLost_ExpiresTheLeaseWithoutSynthesizingATerminalEvent()
     {
-        var (grain, _) = await CreateAttachedSessionAsync("runtime-lost-followup");
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-lost-followup");
         var followup = await grain.BeginFollowupAsync();
         await grain.ConfirmFollowupAsync(followup.OperationId!);
         await grain.AbandonFollowupAsync(followup.OperationId!);
@@ -364,7 +364,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "available"));
 
         Assert.True(result.WasCompacted);
-        Assert.Empty(_fixture.StateStore.State!.Status.PendingFollowups!);
+        Assert.Empty((await _fixture.StateStore.LoadAsync(sessionId))!.Status.PendingFollowups!);
     }
 
     [Fact]

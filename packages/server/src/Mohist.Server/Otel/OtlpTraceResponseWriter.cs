@@ -9,6 +9,10 @@ public sealed class OtlpTraceResponseWriter
 {
     public const string JsonContentType = "application/json";
     public const string ProtobufContentType = "application/x-protobuf";
+    public const int ResourceExhaustedCode = 8;
+    public const string DecodedSizeExceededMessage = "Decoded telemetry request exceeds 16 MiB.";
+    public const string TemporaryAdmissionMessage = "Telemetry receiver is at capacity.";
+    public const int RetryAfterSeconds = 1;
 
     public Task WriteSuccessAsync(HttpResponse response, string? requestContentType) =>
         WriteAsync(response, requestContentType, StatusCodes.Status200OK, null);
@@ -32,6 +36,12 @@ public sealed class OtlpTraceResponseWriter
 
     public Task WriteUnsupportedMediaAsync(HttpResponse response, string? message) =>
         WriteStatusAsync(response, JsonContentType, StatusCodes.Status415UnsupportedMediaType, 3, message ?? "Unsupported media type.");
+
+    public Task WriteDecodedSizeExceededAsync(HttpResponse response, string? requestContentType) =>
+        WriteResourceExhaustedAsync(response, requestContentType, StatusCodes.Status413PayloadTooLarge, DecodedSizeExceededMessage, retryAfterSeconds: null);
+
+    public Task WriteTemporaryAdmissionAsync(HttpResponse response, string? requestContentType, int retryAfterSeconds = RetryAfterSeconds) =>
+        WriteResourceExhaustedAsync(response, requestContentType, StatusCodes.Status429TooManyRequests, TemporaryAdmissionMessage, retryAfterSeconds);
 
     private Task WritePartialSuccessAsync(HttpResponse response, string? requestContentType, IngestOutcome outcome)
     {
@@ -96,6 +106,20 @@ public sealed class OtlpTraceResponseWriter
         int code,
         string message) =>
         WriteStatusCoreAsync(response, requestContentType, statusCode, code, message);
+
+    private Task WriteResourceExhaustedAsync(
+        HttpResponse response,
+        string? requestContentType,
+        int statusCode,
+        string message,
+        int? retryAfterSeconds)
+    {
+        if (retryAfterSeconds is int seconds && seconds > 0)
+        {
+            response.Headers.RetryAfter = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return WriteStatusCoreAsync(response, requestContentType, statusCode, ResourceExhaustedCode, message);
+    }
 
     private async Task WriteStatusCoreAsync(
         HttpResponse response,

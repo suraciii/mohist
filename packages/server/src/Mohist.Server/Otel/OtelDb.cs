@@ -48,6 +48,8 @@ public sealed class OtelDb
     public const string TracesStartIndex = "idx_traces_start";
     public const string TracesEndIndex = "idx_traces_end";
     public const string SpansTraceIndex = "idx_spans_trace";
+    public const string SpansTraceStartIndex = "idx_spans_trace_start";
+    public const string SpansTraceEndIndex = "idx_spans_trace_end";
 
     private const string CreateTracesTable = """
         CREATE TABLE IF NOT EXISTS traces (
@@ -87,6 +89,12 @@ public sealed class OtelDb
 
     private const string CreateSpansTraceIndex =
         "CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id);";
+
+    private const string CreateSpansTraceStartIndex =
+        "CREATE INDEX IF NOT EXISTS idx_spans_trace_start ON spans(trace_id, start_time);";
+
+    private const string CreateSpansTraceEndIndex =
+        "CREATE INDEX IF NOT EXISTS idx_spans_trace_end ON spans(trace_id, end_time);";
 
     /// <summary>
     /// Bounded <c>incremental_vacuum</c> page cap used by the online
@@ -316,6 +324,8 @@ public sealed class OtelDb
             ExecuteNonQuery(connection, CreateTracesStartIndex);
             ExecuteNonQuery(connection, CreateTracesEndIndex);
             ExecuteNonQuery(connection, CreateSpansTraceIndex);
+            ExecuteNonQuery(connection, CreateSpansTraceStartIndex);
+            ExecuteNonQuery(connection, CreateSpansTraceEndIndex);
 
             _initialized = true;
         }

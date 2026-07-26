@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using Microsoft.AspNetCore.RequestDecompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.AspNetCore.ResponseCompression;
@@ -207,7 +208,17 @@ public static class MohistServiceRegistration
         services.AddSingleton<OtelCollectorStatus>();
         services.AddSingleton<IIngestProtectionDecision, BudgetAwareIngestProtectionDecision>();
         services.AddSingleton<OtlpTraceResponseWriter>();
-        services.AddSingleton<TraceIngester>();
+        services.AddSingleton<OtlpIngestGate>();
+        services.AddSingleton<IOtlpIngestGate>(provider => provider.GetRequiredService<OtlpIngestGate>());
+        services.AddSingleton<TraceIngester>(sp =>
+            new TraceIngester(
+                sp.GetRequiredService<OtelDb>(),
+                sp.GetRequiredService<ILogger<TraceIngester>>(),
+                sp.GetService<RuntimeObservability>(),
+                sp.GetService<IIngestProtectionDecision>(),
+                transactionStarted: null,
+                gate: sp.GetRequiredService<IOtlpIngestGate>()));
+        services.AddRequestDecompression();
         services.AddSingleton<TraceQuerier>();
         services.AddSingleton<IOtelQueryExecutor>(provider => provider.GetRequiredService<TraceQuerier>());
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();

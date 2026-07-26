@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -134,6 +135,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<FakeOtelQueryExecutor>();
             services.AddSingleton<IOtelQueryExecutor>(provider =>
                 provider.GetRequiredService<FakeOtelQueryExecutor>());
+            services.AddSingleton<OtlpRequestBodyReadProbe>();
+            services.AddSingleton<IStartupFilter, OtlpRequestBodyProbeStartupFilter>();
         });
     }
 
@@ -196,6 +199,59 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
 
     public Task EnsureSchemaAsync() => Task.CompletedTask;
 
+}
+
+public sealed class OtlpRequestBodyReadProbe
+{
+    public const string HeaderName = "X-Mohist-Test-Probe-Body";
+
+    private int _readCount;
+
+    public bool WasRead => Volatile.Read(ref _readCount) != 0;
+
+    public void Reset() => Interlocked.Exchange(ref _readCount, 0);
+
+    public Stream Wrap(Stream inner) => new ReadProbeStream(inner, this);
+
+    private void RecordRead() => Interlocked.Increment(ref _readCount);
+
+    private sealed class ReadProbeStream(Stream inner, OtlpRequestBodyReadProbe probe) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            probe.RecordRead();
+            return inner.Read(buffer, offset, count);
+        }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            probe.RecordRead();
+            return inner.ReadAsync(buffer, cancellationToken);
+        }
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => inner.SetLength(value);
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+    }
+}
+
+public sealed class OtlpRequestBodyProbeStartupFilter(OtlpRequestBodyReadProbe probe) : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Use(async (context, continuation) =>
+        {
+            if (context.Request.Headers.ContainsKey(OtlpRequestBodyReadProbe.HeaderName))
+                context.Request.Body = probe.Wrap(context.Request.Body);
+            await continuation();
+        });
+        next(app);
+    };
 }
 
 public sealed class FakeOtelQueryExecutor : IOtelQueryExecutor
