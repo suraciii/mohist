@@ -387,3 +387,10 @@ link until T-005 switches the CLI over.
 - Re-audited every AgentJob read spec scenario and T-002 acceptance criterion against the committed server routes, grain-backed project isolation, CLI commands, renderers, and tests; no gaps found.
 - Focused verification passed: server specs 3107/3107 and CLI tests 1383/1383.
 - `npm run build` passed with zero .NET warnings/errors. The first `npm test` attempt hit the documented unrelated runner-dispatch pickup race in `SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch`; the immediate full rerun passed across server, CLI, Web, and Runner.
+
+### T-003 verification rerun
+
+- Audited the existing T-003 implementation against all agent-launch requirements: manual and mention `AgentLaunchResult.JobKey`, routed `RoutedAgentLaunchOutcome.JobKey`, launch `jobId`/`jobUrl`, direct `mo agent launch`, table output, HTTP post, preserved gates, and docs/design alignment.
+- Added direct launcher coverage for non-empty manual/trigger JobKey values and the comment-anchored mention JobKey; no launch pipeline code changed.
+- Focused verification passed after one documented pre-existing server dispatch-pickup retry: 3108/3108 server specs and 1383/1383 CLI tests.
+- `npm run build` passed with 0 .NET warnings/errors. `npm test` passed: 175 workflow-definition tests, 1383 CLI tests, 1455 server unit tests, 32 architecture tests, 3108 server specs, 5130 Web tests (1 skipped), and 1426 Runner tests.
