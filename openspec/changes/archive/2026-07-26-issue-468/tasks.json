@@ -1,0 +1,44 @@
+{
+  "project": "mohist-local",
+  "description": "Persist AgentSession activity summaries at the Session write boundary and use them to serve activity cards without replaying transcript history for event summaries.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Persist incremental AgentSession event summaries",
+      "spec": "specs/agent-activity-persistent-summary/spec.md#durable-session-event-summary",
+      "description": "Add restart-safe activity-summary state and a pure reducer in the Session module. Reduce the normalized per-turn transcript-part mutations used by TranscriptAccumulator, retaining sealed tool/failure history, current-turn final parts, and ordered session-activity candidates before the existing state save.",
+      "acceptanceCriteria": [
+        "Persisted AgentSession state exposes an empty summary when no applicable Runtime observations exist.",
+        "The persisted summary follows final per-turn tool state: a failed observation followed by a completed final part in the same turn is not an error, while a sealed failed part remains counted after a later turn completes the same identifier.",
+        "Every session-activity part participates in the persisted `(turn sequence, part sequence, part identifier)` ordering; the latest candidate supplies both failure fields and clears both when it carries neither value.",
+        "Reducer and Session grain persistence/reload tests cover cross-turn tool reuse, same-turn replacement, activity-pair ordering/clearing, and rejected stale-binding observations using fakes and deterministic time, with no real Runtime, filesystem, or wall-clock assertions."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Persisted AgentSession activity-summary state with per-turn reducer bookkeeping, grain write-path integration, and focused Session tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the summary inside AgentSession State JSON; no EF migration, transcript backfill, or activity-read fallback is part of this task."
+    },
+    {
+      "id": "T-002",
+      "title": "Serve activity cards from persisted Session summaries",
+      "spec": "specs/agent-activity-persistent-summary/spec.md#activity-feed-uses-persisted-session-summaries",
+      "description": "Switch the AgentOps activity assembler to map each card's eventSummary from the Session summary delivered by T-001. Remove the batch transcript-summary reduction while preserving preview, reconciliation, issue-title, workflow-progress, waiting-card, response-schema, canonical-route, and alias-route behavior.",
+      "acceptanceCriteria": [
+        "Both activity routes return card eventSummary values equivalent to the persisted Session summary and remain equivalent for the same project and limit.",
+        "Existing activity-card selection, ordering, limits, preview, usage, agent attribution, waiting cards, and workflow progress remain unchanged.",
+        "The activity summary path does not load or reduce transcript parts to build eventSummary, and amplification.transcriptRecords excludes that removed work.",
+        "AgentOps/API and amplification specs pass with controlled transcript history using operation counters rather than elapsed-time assertions."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Activity feed assembled from persisted summaries, updated amplification accounting, and AgentOps/Session spec coverage.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Transcript detail endpoints and latest-activity preview remain transcript-backed; this task removes only the duplicate summary reduction."
+    }
+  ]
+}

@@ -58,6 +58,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         _sessionReloadRequired = false;
         _session = await _stateStore.LoadAsync(SessionId);
+        if (_session is not null)
+            _session.PersistedActivitySummary = (_session.PersistedActivitySummary ?? AgentSessionActivitySummaryState.Empty).Normalize();
         if (_session?.Status.PendingTranscriptEvidence?.Count > 0)
             EnsurePersistenceTimer();
     }
@@ -707,6 +709,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         // evidence remains available after a restart until its own store
         // accepts it.
         _session = session;
+        _cachedSummary = null;
         if (!await FlushPendingTranscriptEvidenceAsync(session, CancellationToken.None))
             EnsurePersistenceTimer();
 
@@ -955,7 +958,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 group.Count());
         }
 
-        _transcript.Accept(session, allEntries, now);
+        var normalizedParts = _transcript.Accept(session, allEntries, now);
+        session.PersistedActivitySummary = AgentSessionActivitySummaryReducer.Reduce(
+            session.PersistedActivitySummary,
+            normalizedParts);
 
         _pendingDomainEvents.AddRange(events);
         _session = session;
@@ -1349,7 +1355,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (_session is not null) return _session;
 
         _session = await _stateStore.LoadAsync(SessionId);
-        return _session ?? throw new InvalidOperationException($"Agent session {SessionId} does not exist.");
+        if (_session is null)
+            throw new InvalidOperationException($"Agent session {SessionId} does not exist.");
+        _session.PersistedActivitySummary = (_session.PersistedActivitySummary ?? AgentSessionActivitySummaryState.Empty).Normalize();
+        return _session;
     }
 
     private void RejectIfReloadRequired()
@@ -1384,27 +1393,27 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var eventSummary = await LoadEventSummaryAsync(s.Id);
         var usage = AgentSessionJsonHelper.Usage(s);
         return new AgentSessionInfo(
-        s.Id,
-        s.Runtime.RunnerId,
-        s.Status.AgentRuntimeSessionId,
-        AgentSessionJsonHelper.ActivityName(s),
-        s.Settings.Model,
-        s.Runtime.WorkDir,
-        s.Status.CreatedAt.ToString("o"),
-        s.Status.BoundAt?.ToString("o"),
-        s.Status.LastDataAt?.ToString("o"),
-        eventSummary.ResolvedModel,
-        usage.InputTokens,
-        usage.OutputTokens,
-        usage.TotalTokens,
-        usage.CachedReadTokens,
-        usage.ThoughtTokens,
-        usage.CostAmount,
-        usage.CostCurrency,
-        usage.ContextWindowUsed,
-        usage.ContextWindowSize,
-        eventSummary.FailureCategory,
-        eventSummary.ToolCallCount,
+            s.Id,
+            s.Runtime.RunnerId,
+            s.Status.AgentRuntimeSessionId,
+            AgentSessionJsonHelper.ActivityName(s),
+            s.Settings.Model,
+            s.Runtime.WorkDir,
+            s.Status.CreatedAt.ToString("o"),
+            s.Status.BoundAt?.ToString("o"),
+            s.Status.LastDataAt?.ToString("o"),
+            eventSummary.ResolvedModel,
+            usage.InputTokens,
+            usage.OutputTokens,
+            usage.TotalTokens,
+            usage.CachedReadTokens,
+            usage.ThoughtTokens,
+            usage.CostAmount,
+            usage.CostCurrency,
+            usage.ContextWindowUsed,
+            usage.ContextWindowSize,
+            eventSummary.FailureCategory,
+            eventSummary.ToolCallCount,
             eventSummary.ToolErrorCount,
             s.Runtime.Runtime,
             usage.CachedWriteTokens);
@@ -1421,6 +1430,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             .ToListAsync();
         if (turns.Count == 0)
             return _cachedSummary = AgentSessionTranscriptSummary.Empty;
+
         var turnSequenceByTurnId = turns.ToDictionary(t => t.Id, t => t.Sequence);
         var turnIds = turns.Select(t => t.Id).ToList();
         var currentRuntimeSessionId = _session?.Status.AgentRuntimeSessionId;
@@ -1441,6 +1451,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 PartId: part.Id.ToString(),
                 Type: part.Type,
                 PayloadJson: part.PayloadJson));
+
         return _cachedSummary = TranscriptEventSummaryProjector.Summarize(events);
     }
 
