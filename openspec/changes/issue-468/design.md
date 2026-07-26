@@ -8,7 +8,7 @@ An AgentSession already owns the accepted Runtime observations, its activity, us
 
 **Goals:**
 - Persist an incremental, restart-safe event summary in AgentSession state when accepted Runtime observations change it.
-- Preserve the existing event-summary semantics: most recently resolved model, one current state per tool-call identifier, and a failure reason/category pair from the latest `session.activity` fact.
+- Preserve the existing event-summary semantics: most recently resolved model, final tool-part state within each turn, monotonic failed-tool history across sealed turns, and a failure reason/category pair from the latest `session.activity` part.
 - Make activity-card `eventSummary` a projection of the persisted Session summary, without changing the activity response schema or its route aliases.
 - Remove transcript materialization performed solely for activity-card summaries and keep amplification counters aligned with work actually done.
 
@@ -22,15 +22,17 @@ An AgentSession already owns the accepted Runtime observations, its activity, us
 
 ### Keep the summary inside AgentSession state
 
-Add a private persisted activity-summary state to `AgentSession`. It contains the public `AgentSessionTranscriptSummary` values plus the minimum reducer state needed to update them correctly after a grain restart: the latest state for each tool-call identifier and the latest terminal activity fact. The public summary keeps `resolvedModel`, `failureCategory`, `failureReason`, `toolCallCount`, and `toolErrorCount`; card DTO mapping continues to use `AgentSessionDtoMapper`.
+Add a private persisted activity-summary state to `AgentSession`. It contains the public `AgentSessionTranscriptSummary` values plus the minimum reducer state needed to update them correctly after a grain restart: sealed-turn tool and failed-tool identifier sets, the current turn's final normalized part state and ordering, and the latest `session.activity` part candidate. The public summary keeps `resolvedModel`, `failureCategory`, `failureReason`, `toolCallCount`, and `toolErrorCount`; card DTO mapping continues to use `AgentSessionDtoMapper`.
 
-The reducer receives normalized transcript-part types and payloads from accepted Runtime observations. Model observations replace the resolved model only when they carry one. Tool observations overwrite the stored state for their identifier, so started, updated, completed, repeated, and failed observations yield the same distinct-call and error counts as the current final transcript-part reduction. Each `session.activity` observation replaces failure reason and category together, preventing a category from one fact being paired with a reason from another.
+The reducer consumes the same normalized part mutations and correlation keys that `TranscriptAccumulator` uses for persistence, rather than raw Runtime events. Within the open turn, a later mutation replaces that part's payload; when `session.input` seals the turn, its final tool parts are merged into the durable seen-tool and failed-tool sets. A failure recorded in a sealed turn is never removed by a later turn, while a failed observation followed by a completed final part in the same open turn is not counted as an error. The reducer uses the projector's identifier extraction and its per-part fallback rule.
 
-Alternative considered: persist only the five displayed fields. Rejected because it cannot distinguish a repeated tool observation from a distinct tool after restart. Alternative considered: add a summary table and tool-call child table. Rejected because it creates a second persistence model and transaction boundary for a compact Session-owned projection; the existing `State` JSON is already the durable aggregate representation.
+Every `session.activity` part, not only a terminal one, is a failure-pair candidate. The reducer stores the candidate with the same `(turn sequence, part sequence, part identifier)` order as the normalized transcript part stream; the latest candidate supplies both failure fields, including clearing both when its payload has neither value. This preserves the current projector's behavior and prevents a category from one fact being paired with a reason from another.
+
+Alternative considered: persist only the five displayed fields. Rejected because it cannot distinguish repeated tool observations, final same-turn state, and sealed historical failures after restart. Alternative considered: add a summary table and tool-call child table. Rejected because it creates a second persistence model and transaction boundary for a compact Session-owned projection; the existing `State` JSON is already the durable aggregate representation.
 
 ### Update the summary on accepted observations
 
-`AgentSessionGrain.AppendEventsAsync` applies the reducer to the accepted, normalized Runtime observations before marking Session state dirty. The resulting summary is saved by the existing Session state-and-domain-event transaction. Rejected or stale-binding observations do not change it. The summary therefore represents accepted Session facts even if deferred transcript persistence must retry later.
+`AgentSessionGrain.AppendEventsAsync` obtains the normalized mutations from `TranscriptAccumulator`, applies them to the summary state, and seals the prior turn through the same input boundary that flushes its transcript data before marking Session state dirty. The resulting summary is saved by the existing Session state-and-domain-event transaction. Rejected or stale-binding observations do not change it. The summary therefore represents accepted Session facts even if deferred transcript persistence must retry later.
 
 Alternative considered: recalculate the summary from transcript rows after every flush. Rejected because transcript and Session state currently commit through independent stores, and a flush retry would make the summary stale or require another cross-store coordination path.
 
@@ -48,13 +50,13 @@ Alternative considered: lazy backfill on the first activity read. Rejected becau
 
 ### Verify behavior at reducer and API boundaries
 
-Add focused Session unit tests for model replacement, tool-state replacement/deduplication, terminal-fact pairing, persistence/reload, and rejected stale events. Add or update Session/AgentOps specs for activity-card output and canonical/alias parity. Extend the existing amplification specs with controlled transcript populations and operation counters, asserting that summary construction adds no transcript records. Tests use the existing fake clock and in-memory SQLite; they do not use wall-clock measurements.
+Add focused Session unit tests for model replacement; same-turn tool failure followed by completion; a sealed failed tool followed by completion in a later turn; session-activity candidate ordering and pair clearing; persistence/reload; and rejected stale events. Add or update Session/AgentOps specs for activity-card output and canonical/alias parity. Extend the existing amplification specs with controlled transcript populations and operation counters, asserting that summary construction adds no transcript records. Tests use the existing fake clock and in-memory SQLite; they do not use wall-clock measurements.
 
 ## Risks / Trade-offs
 
 - [The persisted summary can lead deferred transcript evidence after a transcript-store failure.] -> The summary represents accepted Session observations by design; retry retains the transcript accumulator, and activity preview remains independently best-effort evidence.
-- [Per-tool reducer state grows with distinct tool calls.] -> Retain only identifier and latest failed/not-failed state, not tool payloads or output; transcript remains the detailed audit record.
-- [An event mapping drift can make the reducer differ from transcript semantics.] -> Centralize normalized-part reduction in one pure reducer and cover the existing model/tool/terminal ordering matrix with unit tests.
+- [Per-tool reducer state grows with distinct tool calls.] -> Retain only sealed identifier sets and the current turn's final part metadata, never tool payloads or output; transcript remains the detailed audit record.
+- [An event mapping drift can make the reducer differ from transcript semantics.] -> Centralize normalized-part reduction in one pure reducer and cover the existing model/tool/session-activity ordering matrix with unit tests.
 - [Pre-deployment Sessions have no stored summary.] -> Normalize missing state to empty and do not add polling fallback; this is an explicit no-compatibility decision for the actively developed project.
 - [Preview reads still scale with transcript parts.] -> This change removes only the duplicate event-summary reduction; selecting a bounded latest preview is separate work and remains observable through `transcriptRecords`.
 

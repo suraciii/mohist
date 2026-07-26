@@ -6,17 +6,17 @@
       "id": "T-001",
       "title": "Persist incremental AgentSession event summaries",
       "spec": "specs/agent-activity-persistent-summary/spec.md#durable-session-event-summary",
-      "description": "Add restart-safe activity-summary state and a pure reducer in the Session module. Apply normalized accepted Runtime observations before the existing state save so model resolution, current tool states, and paired terminal failure facts persist without depending on transcript-flush success.",
+      "description": "Add restart-safe activity-summary state and a pure reducer in the Session module. Reduce the normalized per-turn transcript-part mutations used by TranscriptAccumulator, retaining sealed tool/failure history, current-turn final parts, and ordered session-activity candidates before the existing state save.",
       "acceptanceCriteria": [
         "Persisted AgentSession state exposes an empty summary when no applicable Runtime observations exist.",
-        "Accepted model, tool, and session-activity observations persist the resolved model, distinct tool count, failed tool count, and failure reason/category from the same latest activity fact.",
-        "Repeated and updated observations for one tool-call identifier do not inflate counts after Session reload; rejected stale-binding observations do not mutate the summary.",
-        "Focused reducer and Session grain persistence/reload tests pass using fakes and deterministic time, with no real Runtime, filesystem, or wall-clock assertions."
+        "The persisted summary follows final per-turn tool state: a failed observation followed by a completed final part in the same turn is not an error, while a sealed failed part remains counted after a later turn completes the same identifier.",
+        "Every session-activity part participates in the persisted `(turn sequence, part sequence, part identifier)` ordering; the latest candidate supplies both failure fields and clears both when it carries neither value.",
+        "Reducer and Session grain persistence/reload tests cover cross-turn tool reuse, same-turn replacement, activity-pair ordering/clearing, and rejected stale-binding observations using fakes and deterministic time, with no real Runtime, filesystem, or wall-clock assertions."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Persisted AgentSession activity-summary state, incremental reducer, grain write-path integration, and focused Session tests.",
+      "output": "Persisted AgentSession activity-summary state with per-turn reducer bookkeeping, grain write-path integration, and focused Session tests.",
       "dependsOn": [],
       "passes": false,
       "notes": "Keep the summary inside AgentSession State JSON; no EF migration, transcript backfill, or activity-read fallback is part of this task."
