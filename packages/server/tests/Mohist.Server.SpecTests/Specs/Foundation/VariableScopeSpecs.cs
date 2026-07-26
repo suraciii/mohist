@@ -172,7 +172,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task MohistWorkflowDispatchesAgentWorkWithoutExecutingAgent()
     {
-        await StartWorkflowAsync(Mohist.Server.Issue.Services.WorkflowProfiles.MohistWorkflow.Definition);
+        await StartWorkflowAsync(Mohist.Server.Workflow.Services.WorkflowProfileCatalog.Definition);
 
         var (prepare, prepareRunner) = await PollWorkAnyAsync();
         Assert.Equal("task", prepare.WorkType);

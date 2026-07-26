@@ -10,6 +10,8 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 
 public class MohistGithubPrIssueWorkflowProfileSpecs
 {
+    private static WorkflowDefinition GithubPrDefinition => WorkflowProfileCatalog.GithubPrWorkflowDefinition;
+
     private static IssueWorkflowProfileRegistry BuildRegistry() =>
         new(new FakePromptLoader(), new FakeDbContextFactory());
 
@@ -54,8 +56,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     {
         var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
 
-        Assert.Same(MohistWorkflow.GithubPrWorkflowDefinition, profile.Definition);
-        Assert.NotSame(MohistWorkflow.Definition, profile.Definition);
+        Assert.Same(GithubPrDefinition, profile.Definition);
+        Assert.NotSame(WorkflowProfileCatalog.Definition, profile.Definition);
         Assert.Equal("mohist/github-pr", profile.Id);
     }
 
@@ -68,7 +70,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         Assert.Equal("mohist/github-pr", profile.Id);
         Assert.False(profile.IsDefault);
-        Assert.Same(MohistWorkflow.GithubPrWorkflowDefinition, profile.Definition);
+        Assert.Same(GithubPrDefinition, profile.Definition);
     }
 
     [Fact]
@@ -156,7 +158,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_StagesFollowPlanBuildCheckIntegrateOrder()
     {
-        var definition = MohistWorkflow.GithubPrWorkflowDefinition;
+        var definition = GithubPrDefinition;
 
         Assert.Equal(new[] { "plan", "build", "check", "integrate" }, definition.Stages.Select(s => s.Stage).ToArray());
     }
@@ -164,7 +166,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_PlanStage_OpensDraftPrAsLastTask()
     {
-        var plan = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "plan");
+        var plan = GithubPrDefinition.Stages.Single(s => s.Stage == "plan");
 
         var orderedIds = plan.Tasks.Select(t => t.Id).ToArray();
         Assert.Equal(
@@ -187,7 +189,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_ApprovalFeedbackPublishesBeforeChecksResume()
     {
-        var feedback = MohistWorkflow.GithubPrWorkflowDefinition.Approval!.Feedback!;
+        var feedback = GithubPrDefinition.Approval!.Feedback!;
         var tasks = feedback.Tasks!;
 
         Assert.Equal(new[] { "apply-feedback", "publish-feedback" }, tasks.Select(task => task.Id).ToArray());
@@ -201,7 +203,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_PlanStage_SelfReviewUsesFailIfMarkerAndRetrySelf()
     {
-        var plan = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "plan");
+        var plan = GithubPrDefinition.Stages.Single(s => s.Stage == "plan");
 
         var selfReview = plan.Tasks.Single(t => t.Id == "self-review");
         Assert.Equal("mohist/opencode", selfReview.Uses);
@@ -226,7 +228,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_PlanStage_HasSingleOpenspecArtifactsCheck()
     {
-        var plan = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "plan");
+        var plan = GithubPrDefinition.Stages.Single(s => s.Stage == "plan");
 
         Assert.Single(plan.Checks);
         var check = plan.Checks.Single();
@@ -245,7 +247,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void LocalWorkflowDefinition_PlanStage_HasSingleOpenspecArtifactsCheck()
     {
-        var plan = MohistWorkflow.Definition.Stages.Single(s => s.Stage == "plan");
+        var plan = WorkflowProfileCatalog.Definition.Stages.Single(s => s.Stage == "plan");
 
         var checkNames = plan.Checks.Select(c => c.Id).ToArray();
         Assert.Equal(new[] { "plan-artifacts", "health" }, checkNames);
@@ -272,8 +274,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_BuildStage_PreservesLoadTasksAndVerify()
     {
-        var def = MohistWorkflow.Definition;
-        var pr = MohistWorkflow.GithubPrWorkflowDefinition;
+        var def = WorkflowProfileCatalog.Definition;
+        var pr = GithubPrDefinition;
 
         var prBuild = pr.Stages.Single(s => s.Stage == "build");
         var defBuild = def.Stages.Single(s => s.Stage == "build");
@@ -301,7 +303,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_CheckStage_SynchronizesAfterReviewBeforePublishingAndVerifying()
     {
-        var check = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "check");
+        var check = GithubPrDefinition.Stages.Single(s => s.Stage == "check");
 
         var orderedIds = check.Tasks.Select(t => t.Id).ToArray();
         Assert.Equal(new[] { "workspace-prepare", "ai-review", "rebase", "push", "mark-pr-ready", "verify-pr-checks" }, orderedIds);
@@ -371,7 +373,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_IntegrateStage_DeliversViaArchivePushMergePr()
     {
-        var integrate = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "integrate");
+        var integrate = GithubPrDefinition.Stages.Single(s => s.Stage == "integrate");
 
         var orderedIds = integrate.Tasks.Select(t => t.Id).ToArray();
         Assert.Equal(new[] { "workspace-prepare", "archive-change", "push", "merge-pr" }, orderedIds);
@@ -405,7 +407,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_MergePrRecovery_DeclaresBaseMovedAndPrChecksFailedHandlers()
     {
-        var mergePr = MohistWorkflow.GithubPrWorkflowDefinition
+        var mergePr = GithubPrDefinition
             .Stages.Single(s => s.Stage == "integrate")
             .Tasks.Single(t => t.Id == "merge-pr");
 
@@ -466,7 +468,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_TaskIdsHaveNoStagePrefixesAndRecoveryUsesRecover()
     {
-        var definition = MohistWorkflow.GithubPrWorkflowDefinition;
+        var definition = GithubPrDefinition;
 
         var allTaskIds = definition.Stages
             .SelectMany(s => s.Tasks.Select(t => t.Id))
@@ -493,7 +495,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_AllTaskPromptsAreNamedReferences()
     {
-        var definition = MohistWorkflow.GithubPrWorkflowDefinition;
+        var definition = GithubPrDefinition;
 
         var inlinePromptTasks = new List<(string Stage, string Task, string Prompt)>();
         foreach (var stage in definition.Stages)
@@ -533,7 +535,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void GithubPrWorkflowDefinition_DoesNotReferenceRemovedActions()
     {
-        var definition = MohistWorkflow.GithubPrWorkflowDefinition;
+        var definition = GithubPrDefinition;
         var integrateStage = definition.Stages.Single(s => s.Stage == "integrate");
 
         var usedActionIds = CollectAllTasks(integrateStage)
@@ -638,7 +640,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var def = ProjectWorkflowProfileManager.GetSystemTemplateDefinition("mohist/github-pr");
 
         Assert.NotNull(def);
-        Assert.Same(MohistWorkflow.GithubPrWorkflowDefinition, def);
+        Assert.Same(GithubPrDefinition, def);
     }
 
     [Fact]

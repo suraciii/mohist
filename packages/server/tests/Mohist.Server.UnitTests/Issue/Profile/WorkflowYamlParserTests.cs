@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -24,7 +23,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_CheckLevelRepairFieldsThrowSchemaDiagnostic()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: build
             tasks: []
@@ -51,7 +50,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_CheckRepairWithVerifyTaskStillThrows()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: build
             tasks: []
@@ -82,7 +81,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_TaskWithNeutralArtifactMarker_ParsesSuccessfully()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: build
             tasks:
@@ -130,7 +129,7 @@ public class WorkflowYamlParserTests
             checks: []
         """;
 
-        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml(yaml));
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml(yaml));
         Assert.Contains("verdict marker", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("markers[0]", ex.Message);
     }
@@ -138,7 +137,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_PreservesTaskArtifactCapturePaths()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: plan
             tasks:
@@ -185,7 +184,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_TaskArtifactsAreNotMergedIntoWith()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: plan
             tasks:
@@ -213,7 +212,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_WithExpectFilesAloneDoesNotCreateArtifactCapture()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: plan
             tasks:
@@ -239,7 +238,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_AcceptsSamePathInExpectMarkersAndArtifacts()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: plan
             tasks:
@@ -272,7 +271,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_TaskArtifactFileEntryWithoutPathThrows()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: plan
             tasks:
@@ -293,7 +292,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_RecoveryTaskArtifactsAreIsolated()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: check
             tasks:
@@ -330,7 +329,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_AllowsLastRecoveryHandlerWithoutWhenAndOmitsItOnRoundTrip()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: build
             tasks:
@@ -362,7 +361,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_RejectsDefaultRecoveryHandlerBeforeExplicitHandler()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: build
             tasks:
@@ -383,7 +382,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_DefinitionDoesNotCarryDescription()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: build
             tasks: []
@@ -396,7 +395,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_DefinitionDescriptionIsRejected()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""
         description: Simple description
         stages:
           - stage: build
@@ -410,7 +409,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_ParsesApprovalFeedbackTasksConfig()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         approval:
           feedback:
             tasks:
@@ -442,7 +441,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_ApprovalSectionAbsent_ReturnsNullApproval()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: build
             tasks: []
@@ -455,7 +454,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_ApprovalFeedbackTaskMissingId_Throws()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""
         approval:
           feedback:
             tasks:
@@ -473,7 +472,7 @@ public class WorkflowYamlParserTests
     [Fact]
     public void WorkflowYamlParser_ApprovalFeedbackTaskMissingTitle_Throws()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         approval:
           feedback:
             tasks:

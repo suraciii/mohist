@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -12,7 +11,7 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_LoadsFromYaml()
     {
-        var definition = MohistWorkflow.Definition;
+        var definition = WorkflowProfileCatalog.Definition;
 
         Assert.Equal(["plan", "build", "check", "integrate"], definition.Stages.Select(s => s.Stage).ToArray());
         Assert.True(definition.Stages[0].RequiresApproval);
@@ -70,7 +69,7 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_IntegrateStageHasSinglePublishOwner()
     {
-        var definition = MohistWorkflow.Definition;
+        var definition = WorkflowProfileCatalog.Definition;
         var integrate = definition.Stages.Single(s => s.Stage == "integrate");
 
         AssertSinglePushOwnerInvariant(integrate);
@@ -79,7 +78,7 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_IntegrateStageWithDuplicatePublishTask_FailsSinglePushOwnerInvariant()
     {
-        var ex = Assert.ThrowsAny<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        var ex = Assert.ThrowsAny<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: integrate
             tasks:
@@ -101,7 +100,7 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_BuildStageTaskTemplateUsesAcpAgentWithPromptLoaderSpec()
     {
-        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[1];
+        var loadTask = WorkflowProfileCatalog.Definition.Stages[1].Tasks[1];
         var withJson = JsonSerializer.Serialize(loadTask.With);
 
         Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
@@ -116,7 +115,7 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_BuildStagePromptLoaderConfigExposesFileItemsAndBase()
     {
-        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[1];
+        var loadTask = WorkflowProfileCatalog.Definition.Stages[1].Tasks[1];
         var with = loadTask.With ?? throw new InvalidOperationException("load-tasks must have a with map");
         var taskElement = with["task"] ?? throw new InvalidOperationException("load-tasks with must contain 'task'");
         var taskTemplate = taskElement.GetProperty("with");
@@ -132,7 +131,7 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_BuildStageRetainsExistingLoaderKeys()
     {
-        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[1];
+        var loadTask = WorkflowProfileCatalog.Definition.Stages[1].Tasks[1];
         var with = loadTask.With ?? throw new InvalidOperationException("load-tasks must have a with map");
         var pathElement = with["path"] ?? throw new InvalidOperationException("load-tasks with must contain 'path'");
 
@@ -144,13 +143,13 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_PlanCheckIntegrateStagesAreUnchanged()
     {
-        var yaml = WorkflowYamlSerializer.ToYaml(MohistWorkflow.Definition);
+        var yaml = WorkflowYamlSerializer.ToYaml(WorkflowProfileCatalog.Definition);
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
 
-        Assert.Equal(MohistWorkflow.Definition.Stages[0].Tasks.Select(t => t.Id), reparsed.Stages[0].Tasks.Select(t => t.Id));
-        Assert.Equal(MohistWorkflow.Definition.Stages[0].Tasks.Select(t => t.Uses), reparsed.Stages[0].Tasks.Select(t => t.Uses));
-        Assert.Equal(MohistWorkflow.Definition.Stages[2].Tasks.Select(t => t.Id), reparsed.Stages[2].Tasks.Select(t => t.Id));
-        Assert.Equal(MohistWorkflow.Definition.Stages[3].Tasks.Select(t => t.Id), reparsed.Stages[3].Tasks.Select(t => t.Id));
+        Assert.Equal(WorkflowProfileCatalog.Definition.Stages[0].Tasks.Select(t => t.Id), reparsed.Stages[0].Tasks.Select(t => t.Id));
+        Assert.Equal(WorkflowProfileCatalog.Definition.Stages[0].Tasks.Select(t => t.Uses), reparsed.Stages[0].Tasks.Select(t => t.Uses));
+        Assert.Equal(WorkflowProfileCatalog.Definition.Stages[2].Tasks.Select(t => t.Id), reparsed.Stages[2].Tasks.Select(t => t.Id));
+        Assert.Equal(WorkflowProfileCatalog.Definition.Stages[3].Tasks.Select(t => t.Id), reparsed.Stages[3].Tasks.Select(t => t.Id));
         Assert.True(reparsed.Stages[0].RequiresApproval);
         Assert.True(reparsed.Stages[2].RequiresApproval);
     }
@@ -158,7 +157,7 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_TaskVerdictMarkersDeclareFailIf()
     {
-        var definition = MohistWorkflow.Definition;
+        var definition = WorkflowProfileCatalog.Definition;
 
         var verdictTasks = definition.Stages
             .SelectMany(s => s.Tasks)
@@ -205,7 +204,7 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_DeclaresExpectedArtifactCapturePaths()
     {
-        var definition = MohistWorkflow.Definition;
+        var definition = WorkflowProfileCatalog.Definition;
 
         var plan = definition.Stages[0];
         AssertArtifactPaths(plan.Tasks.Single(t => t.Id == "proposal"), "proposal.md");
@@ -226,7 +225,7 @@ public class MohistWorkflowDefinitionTests
         // verdicts so a failing review does not loop the action
         // forever. This is the spec's canonical YAML shape for the
         // check repair loop motivating scenario.
-        var definition = MohistWorkflow.Definition;
+        var definition = WorkflowProfileCatalog.Definition;
         var check = definition.Stages[2];
         var aiReview = check.Tasks.Single(t => t.Id == "ai-review");
 
@@ -243,7 +242,7 @@ public class MohistWorkflowDefinitionTests
         // recover:fix-review-findings (auto-fix) recovery task and retries
         // ai-review (re-review) via retrySelf: true. The check stage
         // carries only health and merge-ready checks, no review-passed.
-        var definition = MohistWorkflow.Definition;
+        var definition = WorkflowProfileCatalog.Definition;
         var check = definition.Stages[2];
         Assert.DoesNotContain(check.Checks, c => c.Id == "review-passed");
 
@@ -372,7 +371,7 @@ public class MohistWorkflowDefinitionTests
                 checks: []
             """;
 
-        Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml(descriptionOnlyYaml));
+        Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml(descriptionOnlyYaml));
     }
 
     [Fact]
@@ -383,7 +382,7 @@ public class MohistWorkflowDefinitionTests
         // workflow profile YAML from carrying risk_level, typical_duration,
         // suitable_for, avoid_for, tags, or default_approval_policy — those
         // belong inside the natural-language description.
-        var yaml = WorkflowYamlSerializer.ToYaml(MohistWorkflow.Definition);
+        var yaml = WorkflowYamlSerializer.ToYaml(WorkflowProfileCatalog.Definition);
 
         var forbidden = new[]
         {
@@ -406,7 +405,7 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_DeclaresApprovalFeedbackTaskConfig()
     {
-        var definition = MohistWorkflow.Definition;
+        var definition = WorkflowProfileCatalog.Definition;
 
         Assert.NotNull(definition.Approval);
         Assert.NotNull(definition.Approval!.Feedback);

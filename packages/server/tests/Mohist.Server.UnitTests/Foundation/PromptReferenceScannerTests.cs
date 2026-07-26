@@ -1,6 +1,6 @@
 using System.Text.Json;
-using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Xunit;
 
@@ -8,7 +8,7 @@ namespace Mohist.Server.UnitTests.Foundation;
 
 public class PromptReferenceScannerTests
 {
-    private static WorkflowDefinition Parse(string yaml) => MohistWorkflow.ParseYaml(yaml);
+    private static WorkflowDefinition Parse(string yaml) => WorkflowYamlSerializer.FromYaml(yaml);
 
     [Fact]
     public void Scan_TaskWithPromptReference_ReturnsTopLevelKey()

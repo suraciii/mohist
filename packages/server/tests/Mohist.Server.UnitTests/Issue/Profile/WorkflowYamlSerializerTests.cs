@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -50,10 +49,10 @@ public class WorkflowYamlSerializerTests
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsDomainDefinition()
     {
-        var yaml = WorkflowYamlSerializer.ToYaml(MohistWorkflow.Definition);
+        var yaml = WorkflowYamlSerializer.ToYaml(WorkflowProfileCatalog.Definition);
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
 
-        Assert.Equal(MohistWorkflow.Definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
+        Assert.Equal(WorkflowProfileCatalog.Definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
         Assert.Contains("options: ${{ vars.agent }}", yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
         Assert.DoesNotContain("repairTask:", yaml);
@@ -97,7 +96,7 @@ public class WorkflowYamlSerializerTests
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsTaskArtifactCapture()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: plan
             tasks:
@@ -128,7 +127,7 @@ public class WorkflowYamlSerializerTests
     [Fact]
     public void WorkflowYamlSerializer_ValidatesLegacyInputForPiInlineAgent()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: build
             tasks:
@@ -145,7 +144,7 @@ public class WorkflowYamlSerializerTests
     [Fact]
     public void WorkflowYamlSerializer_EmitsPureDefinitionWithoutProfileFields()
     {
-        var definition = MohistWorkflow.Definition;
+        var definition = WorkflowProfileCatalog.Definition;
         var yaml = WorkflowYamlSerializer.ToYaml(definition);
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
 
@@ -159,7 +158,7 @@ public class WorkflowYamlSerializerTests
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsApprovalFeedbackTaskConfig()
     {
-        var yaml = WorkflowYamlSerializer.ToYaml(MohistWorkflow.Definition);
+        var yaml = WorkflowYamlSerializer.ToYaml(WorkflowProfileCatalog.Definition);
 
         Assert.Contains("approval:", yaml);
         Assert.Contains("feedback:", yaml);
@@ -181,7 +180,7 @@ public class WorkflowYamlSerializerTests
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsWithoutApprovalSection_WhenAbsent()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var definition = WorkflowYamlSerializer.FromYaml("""
         stages:
           - stage: build
             tasks: []
