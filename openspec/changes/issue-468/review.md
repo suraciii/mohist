@@ -1,11 +1,11 @@
 # Review Findings
 
-## P1: Id-less tool updates are counted as separate calls instead of one final transcript part
+## P1: Persisted summary duplicates unbounded tool output in AgentSession state
 
-`packages/server/src/Mohist.Server/Sessions/Services/AgentSessionActivitySummaryReducer.cs:41-45` gives every tool mutation that has neither a tool-call id nor a correlation id a synthetic, incrementing key (`tool:1`, `tool:2`, and so on). The reducer therefore retains each such mutation in `CurrentTurnParts` and counts all of them at lines 77-84.
+`AgentSessionActivitySummaryReducer.CreatePart` stores each open-turn tool mutation's complete `PayloadJson` in `AgentSessionActivitySummaryPart` (`packages/server/src/Mohist.Server/Sessions/Services/AgentSessionActivitySummaryReducer.cs:45-50` and `99-114`). That state is serialized in `AgentSession.State` through `PersistedActivitySummary`, so a `tool_call.completed` payload containing `rawOutput` is copied into the Session document in addition to the transcript record.
 
-That is not the normalized transcript's semantics. `TranscriptAccumulator` gives those mutations the common correlation key `tool`, and `AgentSessionTranscriptStore.SavePartsAsync` upserts rows by `(Type, CorrelationKey)` (`packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionTranscriptStore.cs:112-135`). Several id-less updates in the same turn consequently persist as one final `tool` part. Before this change, `TranscriptEventSummaryProjector` reduced that persisted final part and counted one fallback identifier. After this change, the activity card can report multiple tool calls and retain an obsolete failed state when an id-less failed update is followed by an id-less completed update in the same turn.
+This directly conflicts with the design's bounded-state rule: current-turn reducer state must retain final part metadata only and "never tool payloads or output" (`openspec/changes/issue-468/design.md`, Risks / Trade-offs). Tool output can be arbitrarily large, so this change makes ordinary Session state writes and activity-card reads grow with a tool result even though the summary only needs the final failure flag plus a stable identifier. It undermines the issue's polling and resource-bound goals.
 
-Use the transcript part's correlation/upsert semantics for the fallback key so same-turn id-less updates replace the current summary part, and add a reducer/grain regression test for failed then completed id-less tool updates. This is required by the durable-summary requirement to preserve final per-turn tool state and existing event-summary semantics.
+Replace the persisted raw payload with the minimum reducer metadata needed for the final-state calculation, such as `isFailed` on `AgentSessionActivitySummaryPart`; retain the tool identifier and correlation key for replacement/deduplication. Add coverage that sends a completed tool event with a large `rawOutput` and asserts the serialized Session summary state does not contain that output while the tool counts remain correct.
 
 <promise>FAIL</promise>
