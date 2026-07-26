@@ -115,7 +115,7 @@ Plan 阶段通常 5-20 分钟（取决于 issue 复杂度和模型速度）。�
 
 - Web UI issue 详情页看实时进度
 - `mo issue logs 1` 看详细日志
-- `mo issue show 1` 看当前状态
+- `mo issue view 1` 看当前状态
 
 Plan 完成后，issue 会停在 **awaiting approval** 状态，表示 workflow 正在等待审批决策。
 

@@ -8,14 +8,13 @@ internal static partial class IssueCommands
         ResourceCardinality.Collection,
         ["number", "title", "status", "stage", "priority", "labels"]);
 
-    private static readonly ResourceDescriptor IssueDescriptor = new(
+    internal static readonly ResourceDescriptor IssueDescriptor = new(
         ResourceCardinality.Single,
         ["number", "title", "status", "stage", "priority", "labels", "body", "repository", "repositoryName", "workflowRunId"]);
 
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List issues");
-        cmd.Aliases.Add("ls");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var stageOpt = MohistCliCommands.StageOption();
         var labelOpt = MohistCliCommands.LabelFilterOption();
@@ -24,7 +23,7 @@ internal static partial class IssueCommands
         var parentOpt = new Option<int?>("--parent") { Description = "Filter by parent issue number" };
         var allOpt = new Option<bool>("--all") { Description = "Show all issues" };
         var archivedOpt = new Option<bool>("--archived") { Description = "Show archived issues" };
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueListDescriptor);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(stageOpt);
@@ -84,12 +83,12 @@ internal static partial class IssueCommands
         return cmd;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("show", "Show issue details");
+        var cmd = new Command("view", "Show issue details");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);

@@ -6,7 +6,7 @@ namespace Mohist.Cli;
 
 internal static class EpicCommands
 {
-    private static readonly ResourceDescriptor EpicDescriptor = new(
+    internal static readonly ResourceDescriptor EpicDescriptor = new(
         ResourceCardinality.Single,
         ["number", "title", "description", "status", "state", "priority", "createdAt", "updatedAt"]);
 
@@ -19,10 +19,10 @@ internal static class EpicCommands
 
         epic.Subcommands.Add(BuildList(api));
         epic.Subcommands.Add(BuildCreate(api));
-        epic.Subcommands.Add(BuildShow(api));
-        epic.Subcommands.Add(BuildUpdate(api));
-        epic.Subcommands.Add(BuildLink(api));
-        epic.Subcommands.Add(BuildUnlink(api));
+        epic.Subcommands.Add(BuildView(api));
+        epic.Subcommands.Add(BuildEdit(api));
+        epic.Subcommands.Add(BuildAdd(api));
+        epic.Subcommands.Add(BuildRemove(api));
         epic.Subcommands.Add(BuildStart(api));
         epic.Subcommands.Add(BuildPause(api));
         epic.Subcommands.Add(BuildResume(api));
@@ -47,7 +47,7 @@ internal static class EpicCommands
     {
         var cmd = new Command("list", "List epics");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.EpicList)));
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
@@ -81,7 +81,7 @@ internal static class EpicCommands
         var descriptionOpt = new Option<string?>("--description", "-d") { Description = "Epic description" };
         var priorityOpt = new Option<string?>("--priority", "-p") { Description = "Epic priority (p0|p1|p2|p3)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(titleArg);
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(priorityOpt);
@@ -122,12 +122,12 @@ internal static class EpicCommands
         return cmd;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("show", "Show epic details");
+        var cmd = new Command("view", "Show epic details");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.EpicShow)));
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -156,15 +156,15 @@ internal static class EpicCommands
         return cmd;
     }
 
-    private static Command BuildUpdate(MohistCliApi api)
+    private static Command BuildEdit(MohistCliApi api)
     {
-        var cmd = new Command("update", "Update an epic");
+        var cmd = new Command("edit", "Update an epic");
         var numberArg = NumberArg();
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
         var descriptionOpt = new Option<string?>("--description", "-d") { Description = "New description" };
         var priorityOpt = new Option<string?>("--priority", "-p") { Description = "New priority (p0|p1|p2|p3)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(titleOpt);
         cmd.Options.Add(descriptionOpt);
@@ -209,13 +209,13 @@ internal static class EpicCommands
         return cmd;
     }
 
-    private static Command BuildLink(MohistCliApi api)
+    private static Command BuildAdd(MohistCliApi api)
     {
-        var cmd = new Command("link", "Link an issue to an epic");
+        var cmd = new Command("add", "Add an issue to an epic");
         var epicArg = new Argument<int>("epic") { Description = "Epic number" };
         var issueArg = new Argument<int>("issue") { Description = "Issue number" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(epicArg);
         cmd.Arguments.Add(issueArg);
         cmd.Options.Add(projectOpt);
@@ -228,9 +228,9 @@ internal static class EpicCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
-            return LinkAsync();
+            return AddAsync();
 
-            async Task<int> LinkAsync()
+            async Task<int> AddAsync()
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
@@ -249,13 +249,13 @@ internal static class EpicCommands
         return cmd;
     }
 
-    private static Command BuildUnlink(MohistCliApi api)
+    private static Command BuildRemove(MohistCliApi api)
     {
-        var cmd = new Command("unlink", "Unlink an issue from an epic");
+        var cmd = new Command("remove", "Remove an issue from an epic");
         var epicArg = new Argument<int>("epic") { Description = "Epic number" };
         var issueArg = new Argument<int>("issue") { Description = "Issue number" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(epicArg);
         cmd.Arguments.Add(issueArg);
         cmd.Options.Add(projectOpt);
@@ -268,9 +268,9 @@ internal static class EpicCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
-            return UnlinkAsync();
+            return RemoveAsync();
 
-            async Task<int> UnlinkAsync()
+            async Task<int> RemoveAsync()
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
@@ -294,7 +294,7 @@ internal static class EpicCommands
         var cmd = new Command("done", "Mark an epic done");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -346,7 +346,7 @@ internal static class EpicCommands
         var cmd = new Command(name, description);
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -383,7 +383,7 @@ internal static class EpicCommands
         var cmd = new Command("close", "Close an epic");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);

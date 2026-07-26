@@ -144,7 +144,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     }
 
     [Fact]
-    public async Task IssueCreate_StageModelsInvalidJson_ExitsWithCodeOne()
+    public async Task IssueCreate_StageModelsInvalidJson_ExitsWithUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
@@ -152,14 +152,15 @@ public class CliIssueExecutionConfigFlagsSpecs
             http, ["issue", "create", "My issue", "--body", "Hello", "--stage-models", "not-json"],
             output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Post);
         Assert.Contains("--stage-models", error.ToString());
         Assert.Contains("invalid JSON", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task IssueCreate_StageModelsFileMissing_ExitsWithCodeOne()
+    public async Task IssueCreate_StageModelsFileMissing_ExitsWithUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
@@ -167,10 +168,11 @@ public class CliIssueExecutionConfigFlagsSpecs
             http, ["issue", "create", "My issue", "--body", "Hello", "--stage-models", "@/tmp/does-not-exist.json"],
             output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Post);
         var stderr = error.ToString();
         Assert.Contains("--stage-models", stderr);
+        Assert.Contains("Usage:", stderr, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -195,7 +197,7 @@ public class CliIssueExecutionConfigFlagsSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "1", "--stage-models", "{\"plan\":\"openai/gpt-5\"}"],
+            ["issue", "edit", "1", "--stage-models", "{\"plan\":\"openai/gpt-5\"}"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -217,7 +219,7 @@ public class CliIssueExecutionConfigFlagsSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "1", "--stage-model-variants", "@/tmp/variants.json"],
+            ["issue", "edit", "1", "--stage-model-variants", "@/tmp/variants.json"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -248,7 +250,7 @@ public class CliIssueExecutionConfigFlagsSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--repo", "WEB", "--json", "number,repositoryName"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--repo", "WEB", "--json", "number,repositoryName"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patch = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
@@ -259,18 +261,19 @@ public class CliIssueExecutionConfigFlagsSpecs
     }
 
     [Fact]
-    public async Task IssueUpdate_StageModelsInvalidJson_ExitsWithCodeOne()
+    public async Task IssueUpdate_StageModelsInvalidJson_ExitsWithUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--stage-models", "not-json"],
+            http, ["issue", "edit", "1", "--stage-models", "not-json"],
             output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
         Assert.Contains("--stage-models", error.ToString());
         Assert.Contains("invalid JSON", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -279,7 +282,7 @@ public class CliIssueExecutionConfigFlagsSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--title", "X"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--title", "X"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);

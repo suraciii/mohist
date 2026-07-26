@@ -27,7 +27,7 @@ mo issue create "web: 订阅管理页"             --parent 42 --repo web
 mo issue prereq add 44 43
 ```
 
-- 也可以把已有的 backlog issue 挂为子 issue：`mo issue update 43 --parent 42`；解除用 `mo issue update 43 --parent none`。
+- 也可以把已有的 backlog issue 挂为子 issue：`mo issue edit 43 --parent 42`；解除用 `mo issue edit 43 --parent none`。
 - 子 issue 创建时不指定 priority 就继承父 issue 的。
 - 拆分是你（或帮你操作的外部 agent）的决策，Mohist 不做自动拆分。
 - 子 issue 进入 Plan 阶段时，父 issue 的标题与描述会作为背景上下文提供给 Inline Agent——共享背景不需要往每个子 issue 复制。

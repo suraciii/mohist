@@ -53,8 +53,8 @@ follow-up.)
 ### Linking issues to an epic
 
 ```bash
-mo epic link <epic-id-or-number> <issue-id-or-number>
-mo epic unlink <epic-id-or-number> <issue-id>
+mo epic add <epic-id-or-number> <issue-id-or-number>
+mo epic remove <epic-id-or-number> <issue-id>
 ```
 
 Constraint: **an issue belongs to at most one primary epic.** Linking an issue
@@ -109,7 +109,7 @@ A `running` epic can be observable-but-not-advancing when there are still open
 linked issues but **no startable next issue right now** (e.g. waiting on a
 dependency, next issue is blocked). This **running-but-idle** is NOT a separate
 state — the epic's `status` stays `running`, and `progress.nextIssueReason` in
-`mo epic show` explains why. Use it to decide whether to wait, set
+`mo epic view` explains why. Use it to decide whether to wait, set
 prerequisites, or `Pause` to stop the autopilot until you can unblock it.
 
 ```bash
@@ -119,13 +119,13 @@ mo epic pause  <epic-id-or-number>   # running → paused (current issue keeps r
 mo epic resume <epic-id-or-number>   # paused → running
 
 # Check why a running epic is idle
-mo epic show <epic-id-or-number>     # inspect progress.nextIssue + nextIssueReason
+mo epic view <epic-id-or-number>     # inspect progress.nextIssue + nextIssueReason
 ```
 
 **Recommend autopilot over manual per-issue starts.** Manually `mo issue start`
 ing each member defeats the milestone model — you lose the running-but-idle
 signal, the idempotent retry, and the auto-advancement on terminal. Use Start
-once, then watch `mo epic show`; only fall back to manual issue commands when
+once, then watch `mo epic view`; only fall back to manual issue commands when
 the autopilot is `paused` and you specifically want to start one out of order.
 
 ### Lifecycle: terminal (done / close)
@@ -149,7 +149,7 @@ Before creating, present to the user and wait for confirmation:
 
 1. `title`, a one-line `description` gist, and `priority`.
 2. The planned linked-issue list (numbers + titles) — or state "link later".
-3. On confirm, run `mo epic create`; then `mo epic link` for each planned issue.
+3. On confirm, run `mo epic create`; then `mo epic add` for each planned issue.
 
 After creation, also confirm the autopilot posture:
 

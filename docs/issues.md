@@ -21,7 +21,7 @@ mo issue create "Fix login bug" --body "Users can't login on Safari"
 mo issue create "Refactor auth module" --body-file ./issue-body.md
 
 # 从 stdin
-cat ./my-issue.md | mo issue create "My issue" --body-stdin
+cat ./my-issue.md | mo issue create "My issue" --body-file -
 
 # 指定优先级和标签
 mo issue create "Critical fix" --priority p0 --label kind=bug
@@ -113,7 +113,7 @@ mo issue list --archived
 mo issue list --all
 
 # 详情
-mo issue show 42
+mo issue view 42
 ```
 
 Web UI 上点 issue card 进详情页，能看到：
@@ -156,7 +156,7 @@ mo run reject --issue 42 --message "Missing error handling in proposal"  # 打�
 `reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么（审批者可以是人也可以是自动化，见 [核心概念 · Approval](concepts.md#approval审批)）。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
 
 ```bash
-mo issue comment add 42 --body "Reject because: missing error handling in proposal"
+mo issue comment create 42 --body "Reject because: missing error handling in proposal"
 mo run reject --issue 42 -m "See comment: missing error handling"
 ```
 
@@ -164,7 +164,7 @@ mo run reject --issue 42 -m "See comment: missing error handling"
 
 ```bash
 # 加评论
-mo issue comment add 42 --body "Looks good but check edge cases"
+mo issue comment create 42 --body "Looks good but check edge cases"
 
 # 删除评论目前不提供 CLI 命令；使用 Web UI 或 API。
 ```
@@ -248,7 +248,7 @@ Done 之后，issue 还会留在看板的 Done 列。归档后从看板移走：
 
 ```bash
 mo issue archive 42
-mo issue unarchive 42    # 反悔
+mo issue restore 42      # 反悔
 mo issue list --archived  # 看归档列表
 ```
 
@@ -259,10 +259,10 @@ Web UI 上有 Archive 页。
 没启动的 issue 可以随便改：
 
 ```bash
-mo issue update 42 --title "New title"
-mo issue update 42 --body-file ./new-body.md
-mo issue update 42 --priority p1
-mo issue update 42 --label kind=bug --label area=web
+mo issue edit 42 --title "New title"
+mo issue edit 42 --body-file ./new-body.md
+mo issue edit 42 --priority p1
+mo issue edit 42 --label kind=bug --label area=web
 ```
 
 启动后的 issue 改 body 要谨慎——Inline Agent 已经基于旧 body 在工作。

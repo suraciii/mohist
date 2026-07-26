@@ -19,7 +19,7 @@ public sealed class SkillsInstallTests
         var assets = BuildDefaultAssetService();
 
         var exitCode = await BuildRootCommand(stdout, assets: assets)
-            .Parse(["skills", "install"])
+            .Parse(["skill", "install"])
             .InvokeAsync();
 
         Assert.Equal(0, exitCode);
@@ -39,7 +39,7 @@ public sealed class SkillsInstallTests
 
         var assets = BuildDefaultAssetService();
         var exitCode = await BuildRootCommand()
-            .Parse(["skills", "install", "--path", targetRoot])
+            .Parse(["skill", "install", "--path", targetRoot])
             .InvokeAsync();
 
         Assert.Equal(0, exitCode);
@@ -54,7 +54,7 @@ public sealed class SkillsInstallTests
 
         var assets = BuildDefaultAssetService();
         var exitCode = await BuildRootCommand()
-            .Parse(["skills", "install", "--claude"])
+            .Parse(["skill", "install", "--claude"])
             .InvokeAsync();
 
         Assert.Equal(0, exitCode);
@@ -76,7 +76,7 @@ public sealed class SkillsInstallTests
 
         var assets = BuildDefaultAssetService();
         var exitCode = await BuildRootCommand()
-            .Parse(["skills", "install"])
+            .Parse(["skill", "install"])
             .InvokeAsync();
 
         Assert.Equal(0, exitCode);
@@ -95,7 +95,7 @@ public sealed class SkillsInstallTests
 
         var assets = BuildDefaultAssetService();
         var exitCode = await BuildRootCommand()
-            .Parse(["skills", "install"])
+            .Parse(["skill", "install"])
             .InvokeAsync();
 
         Assert.Equal(0, exitCode);
@@ -115,7 +115,7 @@ public sealed class SkillsInstallTests
         {
             var assets = BuildDefaultAssetService();
             var exitCode = await BuildRootCommand(stdout, stderr, assets)
-                .Parse(["skills", "install", "--hermes"])
+                .Parse(["skill", "install", "--hermes"])
                 .InvokeAsync();
 
             Assert.Equal(0, exitCode);
@@ -149,13 +149,13 @@ public sealed class SkillsInstallTests
             var assets = BuildDefaultAssetService();
 
             var firstExit = await BuildRootCommand()
-                .Parse(["skills", "install", "--hermes"])
+                .Parse(["skill", "install", "--hermes"])
                 .InvokeAsync();
             Assert.Equal(0, firstExit);
             using var secondStdout = new StringWriter();
             using var secondStderr = new StringWriter();
             var secondExit = await BuildRootCommand(secondStdout, secondStderr, assets)
-                .Parse(["skills", "install", "--hermes"])
+                .Parse(["skill", "install", "--hermes"])
                 .InvokeAsync();
             Assert.Equal(0, secondExit);
             var secondOutput = secondStdout.ToString() + secondStderr.ToString();
@@ -188,7 +188,7 @@ public sealed class SkillsInstallTests
         try
         {
             var assets = BuildDefaultAssetService();
-            var normalizedArgs = args.Select(arg => arg == "repo" ? repoPath : arg).Prepend("install").Prepend("skills").ToArray();
+            var normalizedArgs = args.Select(arg => arg == "repo" ? repoPath : arg).Prepend("install").Prepend("skill").ToArray();
             var exitCode = await BuildRootCommand(stdout, stderr, assets)
                 .Parse(normalizedArgs)
                 .InvokeAsync();
@@ -218,7 +218,7 @@ public sealed class SkillsInstallTests
         {
             var assets = BuildDefaultAssetService();
             var exitCode = await BuildRootCommand()
-                .Parse(["skills", "install", "--hermes"])
+                .Parse(["skill", "install", "--hermes"])
                 .InvokeAsync();
 
             Assert.Equal(0, exitCode);
@@ -241,7 +241,7 @@ public sealed class SkillsInstallTests
 
         var assets = BuildDefaultAssetService();
         var exitCode = await BuildRootCommand()
-            .Parse(["skills", "install"])
+            .Parse(["skill", "install"])
             .InvokeAsync();
 
         Assert.Equal(0, exitCode);
@@ -322,7 +322,7 @@ public sealed class SkillsInstallTests
         Assert.Contains("---", content);
         Assert.Contains($"name: {name}", content);
         Assert.Contains($"description: {ReadPackagedDescription(name)}", content);
-        Assert.Contains($"mo skills get {name}", content);
+        Assert.Contains($"mo skill view {name}", content);
         Assert.DoesNotContain("<artifact", content);
     }
 

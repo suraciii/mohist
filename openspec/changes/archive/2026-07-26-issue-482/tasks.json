@@ -1,0 +1,64 @@
+{
+  "project": "Mohist",
+  "description": "Converge the mo command language, layered help, and packaged Mohist Skill on one canonical CLI surface.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Migrate mo to the canonical command surface",
+      "spec": "specs/cli-command-language/spec.md#canonical-command-forms-and-verbs",
+      "description": "Refactor the System.CommandLine registrations to expose the canonical areas, verbs, ownership paths, project selector, and JSON vocabulary while retaining existing handler and resource-output behavior. Remove obsolete aliases and root areas, migrate all affected CLI tests and user-facing command examples, and add regression coverage for canonical paths and local rejection of removed paths.",
+      "acceptanceCriteria": [
+        "The migrated root exposes the canonical domain and operations areas, including singular `skill`; `skills`, `repository`, `opencode`, `config`, and removed resource-verb aliases do not parse.",
+        "Resource views and edits, Run controls, Session lookup, Workflow Profile selection, Project selection, and JSON field discovery use the command paths required by the command-language spec.",
+        "Removed paths exit with usage failure and make no remote request; canonical paths preserve their prior request and response semantics.",
+        "Affected CLI spec tests are migrated to canonical invocations, new command-surface regression tests pass, `dotnet test Mohist.sln --filter FullyQualifiedName~Mohist.Cli.Tests` passes, and root `npm test` passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Canonical System.CommandLine tree, migrated CLI documentation/examples, and CLI contract coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not add compatibility aliases or change server and runner contracts."
+    },
+    {
+      "id": "T-002",
+      "title": "Deliver layered local CLI help and usage errors",
+      "spec": "specs/cli-help/spec.md#local-and-side-effect-free-help",
+      "description": "Attach presentation metadata to the final command tree and implement one local renderer for root, group, leaf, shared-topic, and parse-error help. Register `mo help <topic>` for the bounded `output`, `environment`, and `exit-codes` topics; render command-derived arguments, options, and JSON fields; route parser failures to nearest-command usage on stderr with exit code 2; and update documentation only where help behavior is described.",
+      "acceptanceCriteria": [
+        "Root help presents the Work, Automation, Operations, and Tools capability groups without leaf flags or expanded subcommand trees.",
+        "`mo help output`, `mo help environment`, and `mo help exit-codes` each render their shared local rule without Project resolution or an HTTP request; an unknown topic returns exit code 2 with scoped `mo help` usage on stderr.",
+        "Group and leaf help describe the required resource boundaries, legal invocation details, relevant distinctions, and JSON fields without internal or migration detail.",
+        "Every help path completes without Project resolution, HTTP requests, prompts, or side effects; parse and removed-path failures emit scoped stderr usage with exit code 2.",
+        "Focused help and parser-error specs cover root, all shared topics, workflow, run, a resource leaf, and an invalid command; `dotnet test Mohist.sln --filter FullyQualifiedName~Mohist.Cli.Tests` passes, followed by root `npm test`."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Command presentation metadata, local help/error renderer, and layered-help CLI contract coverage.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Use the registered command and resource descriptors as the syntax and JSON-field authority; do not create a second command catalog."
+    },
+    {
+      "id": "T-003",
+      "title": "Migrate the packaged Mohist Skill to progressive disclosure",
+      "spec": "specs/mohist-skill/spec.md#mohist-skill-is-a-decision-entry-point",
+      "description": "Rewrite the packaged Mohist entry Skill around scope, first read, scenario routing, hard decisions, and CLI handoff using canonical commands. Keep detailed scenario procedures in sibling Skills, remove copied command tables and implementation guidance, and validate every fenced `mo` example against the built command tree without invoking handlers.",
+      "acceptanceCriteria": [
+        "The entry Skill directs existing Issue and Run work to current canonical reads, routes issue/epic/exploration scenarios to sibling Skills, and states the required recovery distinctions.",
+        "The Skill contains no complete lifecycle table, common-flag inventory, service or test startup instructions, source paths, compatibility history, or obsolete command path.",
+        "Every fenced `mo` example in packaged Skill guidance parses against the canonical command tree, while removed aliases and obsolete areas fail the same parser checks.",
+        "Skill command and content tests pass, `dotnet test Mohist.sln --filter FullyQualifiedName~Mohist.Cli.Tests` passes, and root `npm test` passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Progressively disclosed packaged Mohist Skill and parser-backed Skill guidance tests.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "The Skill delegates exact syntax to leaf help and must not become a second CLI reference."
+    }
+  ]
+}

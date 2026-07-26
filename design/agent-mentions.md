@@ -74,7 +74,7 @@ author 是声明而非认证：人故意用 Agent 的名字署名，其评论同
 ## Examples
 
 ```text
-# owner 在 issue #42 的评论区写道（Web 或 mo issue comment add 均可）：
+# owner 在 issue #42 的评论区写道（Web 或 mo issue comment create 均可）：
 @supervisor 监督并推进这个issue
 
 # 系统：supervisor 启动一次 AgentJob，prompt 为该评论全文，上下文为 issue #42。

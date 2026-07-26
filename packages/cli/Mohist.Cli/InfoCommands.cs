@@ -42,7 +42,7 @@ internal static class InfoCommands
         {
             Description = "Append supplementary sections (skills, git remote, opencode, env, OS, capacity, disk)",
         };
-        var jsonOption = MohistCliCommands.JsonSelectionOption();
+        var jsonOption = MohistCliCommands.JsonSelectionOption(Descriptor);
         info.Options.Add(verboseOption);
         info.Options.Add(jsonOption);
         var collector = provider.GetService<InfoCollector>();

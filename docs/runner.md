@@ -116,7 +116,7 @@ mo service logs runner          # runner 受管服务的运维日志（service-m
 ```bash
 mo issue logs <number>
 mo issue events <number>     # 事件流
-mo issue sessions <number>   # AgentSession 记录
+mo session list --issue <number>  # 该 Issue 的 AgentSession 记录
 ```
 
 ### 常见 Runner 问题

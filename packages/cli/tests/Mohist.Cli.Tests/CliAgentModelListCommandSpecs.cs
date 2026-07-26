@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class CliOpencodeModelsCommandSpecs
+public class CliAgentModelListCommandSpecs
 {
     private const string ActiveProjectId = "proj_test";
 
@@ -34,7 +34,7 @@ public class CliOpencodeModelsCommandSpecs
     }
 
     [Fact]
-    public async Task OpencodeModels_Table_PrintsOneIdPerLineWithNoDecoration()
+    public async Task AgentModelList_Table_PrintsOneIdPerLineWithNoDecoration()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -44,7 +44,7 @@ public class CliOpencodeModelsCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models"], output, error, fileSystem, executor, env);
+            http, ["agent", "model", "list"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -60,7 +60,7 @@ public class CliOpencodeModelsCommandSpecs
     }
 
     [Fact]
-    public async Task OpencodeModels_Table_OmitsBlankLinesForEachModelId()
+    public async Task AgentModelList_Table_OmitsBlankLinesForEachModelId()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -70,7 +70,7 @@ public class CliOpencodeModelsCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models",], output, error, fileSystem, executor, env);
+            http, ["agent", "model", "list",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -79,7 +79,7 @@ public class CliOpencodeModelsCommandSpecs
     }
 
     [Fact]
-    public async Task OpencodeModels_SelectedJson_EmitsModelResources()
+    public async Task AgentModelList_SelectedJson_EmitsModelResources()
     {
         var variants = new
         {
@@ -94,7 +94,7 @@ public class CliOpencodeModelsCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models", "--json", "id"], output, error, fileSystem, executor, env);
+            http, ["agent", "model", "list", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -108,14 +108,14 @@ public class CliOpencodeModelsCommandSpecs
     }
 
     [Fact]
-    public async Task OpencodeModels_NoActiveProject_FailsWithStandardError()
+    public async Task AgentModelList_NoActiveProject_FailsWithStandardError()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv(
             (_, _) => throw new InvalidOperationException("API must not be called without an active project"),
             activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models"], output, error, fileSystem, executor, env);
+            http, ["agent", "model", "list"], output, error, fileSystem, executor, env);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("No project resolved", error.ToString(), StringComparison.Ordinal);
@@ -124,14 +124,14 @@ public class CliOpencodeModelsCommandSpecs
     }
 
     [Fact]
-    public async Task OpencodeModels_NoActiveProjectWithJsonFlag_StillFailsWithStandardError()
+    public async Task AgentModelList_NoActiveProjectWithJsonFlag_StillFailsWithStandardError()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv(
             (_, _) => throw new InvalidOperationException("API must not be called without an active project"),
             activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models", "--json", "id"], output, error, fileSystem, executor, env);
+            http, ["agent", "model", "list", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("No project resolved", error.ToString(), StringComparison.Ordinal);
@@ -139,7 +139,7 @@ public class CliOpencodeModelsCommandSpecs
     }
 
     [Fact]
-    public async Task OpencodeModels_ExplicitProjectFlag_ResolvesAndCallsEndpoint()
+    public async Task AgentModelList_ExplicitProjectFlag_ResolvesAndCallsEndpoint()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -149,7 +149,7 @@ public class CliOpencodeModelsCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models", "--project", "proj_other"], output, error, fileSystem, executor, env);
+            http, ["agent", "model", "list", "--project", "proj_other"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -157,30 +157,42 @@ public class CliOpencodeModelsCommandSpecs
     }
 
     [Fact]
-    public async Task Opencode_Help_ListsModelsSubcommand()
+    public async Task AgentModel_Help_ListsListSubcommand()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "--help"], output, error, fileSystem, executor, env);
+            http, ["agent", "model", "--help"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("models", stdout, StringComparison.Ordinal);
+        Assert.Contains("list", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task OpencodeModels_Help_ExplainsCopyPasteContract()
+    public async Task AgentModelList_Help_ExplainsCopyPasteContract()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models", "--help"], output, error, fileSystem, executor, env);
+            http, ["agent", "model", "list", "--help"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("--model", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OpencodeGroup_IsNotRegistered()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["opencode", "models"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 }

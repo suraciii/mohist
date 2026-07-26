@@ -28,7 +28,7 @@ internal static partial class RunCommands
         var issueOpt = IssueOption();
         var (projectOpt, projectIdOpt) = ProjectOptions();
         var stageOpt = MohistCliCommands.StageOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(FeedbackListDescriptor);
         command.Arguments.Add(runIdArg);
         command.Options.Add(issueOpt);
         command.Options.Add(projectOpt);
@@ -76,7 +76,7 @@ internal static partial class RunCommands
         var feedbackOpt = new Option<string?>("--feedback") { Description = "Feedback id" };
         var latestOpt = new Option<bool>("--latest") { Description = "Show the most recent feedback record" };
         var stageOpt = MohistCliCommands.StageOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(FeedbackViewDescriptor);
         command.Arguments.Add(runIdArg);
         command.Options.Add(issueOpt);
         command.Options.Add(projectOpt);

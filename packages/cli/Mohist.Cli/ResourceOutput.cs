@@ -52,6 +52,8 @@ internal static class ResourceOutputCatalog
         {
             MohistCliApi.TableShape.ProjectList => ["id", "name", "repository", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.ProjectShow => ["id", "name", "repository", "workflowProfile", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.IssueList => ["number", "title", "status", "stage", "priority", "labels"],
+            MohistCliApi.TableShape.IssueShow => ["number", "title", "status", "stage", "priority", "labels", "body", "repository", "repositoryName", "workflowRunId"],
             MohistCliApi.TableShape.RepoList => ["name", "gitUrl", "baseBranch", "isDefault", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.FeedbackList or MohistCliApi.TableShape.FeedbackShow =>
                 ["id", "issueNumber", "workflowRunId", "stage", "status", "body", "createdAt", "resolution", "updatedAt"],

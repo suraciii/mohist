@@ -60,7 +60,7 @@ mo agent install supervisor
 安装只检查、不修复；检查失败不影响安装，但必须在输出中明确提示：
 
 - 默认仓库的工作区里 Agent 能否发现 `mohist` skill stub（`.agents/skills/mohist`）。
-  缺失时提示用户执行 `mo skills install --path <repo>`。
+  缺失时提示用户执行 `mo skill install --path <repo>`。
 - 监管依赖 owner 保留默认通知（审批请求、失败、完成）。通知已关闭时提示用户
   评估：Agent 停手时 owner 只能靠主动查看发现。
 
@@ -184,7 +184,7 @@ created agent: supervisor
 created routing rule: supervisor-approval (position 1)
 created routing rule: supervisor-failure (position 2)
 warning: .agents/skills/mohist not found in repository 'web-app';
-         run `mo skills install --path web-app` so the agent can discover the mo command surface
+         run `mo skill install --path web-app` so the agent can discover the mo command surface
 ```
 
 重复安装（用户已编辑过身份指令，不被覆盖）：

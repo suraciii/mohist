@@ -4,7 +4,7 @@ set -euo pipefail
 # Mohist CLI 本地安装脚本
 # 将 mo 命令作为单文件可执行程序安装到 ~/.local/bin
 # 并将 publish 输出的 packaged skill assets 同步到
-# ~/.mohist/cli/skill-data，保证 mo skills get 等命令在
+# ~/.mohist/cli/skill-data，保证 mo skill view 等命令在
 # 安装后不需要设置 MOHIST_SKILLS_DIR 即可工作。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

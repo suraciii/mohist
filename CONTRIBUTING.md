@@ -179,8 +179,7 @@ Agent 输出捕获在服务端日志中。
 ### Debug 模式
 
 ```bash
-# 设置日志级别
-mo config logLevel DEBUG
+# 通过服务端配置调整日志级别；细节见 Mohist 服务端配置文档。
 ```
 
 ## License

@@ -23,7 +23,7 @@ public class ProjectCliRepositoryTests
     [Fact]
     public void RepoAddHelp_DocumentsProjectAndProjectIdOptions()
     {
-        var help = RenderHelp(["repo", "add", "--help"]);
+        var help = RenderHelp(["repo", "create", "--help"]);
 
         Assert.Contains("--project", help);
         Assert.DoesNotContain("--project-id", help);
@@ -35,7 +35,7 @@ public class ProjectCliRepositoryTests
     [Fact]
     public void RepoUpdateHelp_DocumentsProjectAndProjectIdOptions()
     {
-        var help = RenderHelp(["repo", "update", "--help"]);
+        var help = RenderHelp(["repo", "edit", "--help"]);
 
         Assert.Contains("--project", help);
         Assert.DoesNotContain("--project-id", help);
@@ -66,16 +66,18 @@ public class ProjectCliRepositoryTests
 
         Assert.Contains("list", help);
         Assert.Contains("create", help);
-        Assert.Contains("show", help);
+        Assert.Contains("view", help);
         Assert.Contains("use", help);
         Assert.Contains("delete", help);
         Assert.DoesNotContain("repo", help);
+        Assert.DoesNotContain("show", help);
+        Assert.DoesNotContain("update", help);
     }
 
     [Fact]
     public void RepoHelp_DoesNotAdvertiseNameOption()
     {
-        var help = RenderHelp(["repo", "add", "--help"]);
+        var help = RenderHelp(["repo", "create", "--help"]);
 
         Assert.DoesNotContain("--name", help);
         Assert.DoesNotContain("--path", help);
@@ -94,7 +96,7 @@ public class ProjectCliRepositoryTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["repo", "add", "api", "--project", "mohist-local", "--git-url", "git@example.com:api.git"],
+            ["repo", "create", "api", "--project", "mohist-local", "--git-url", "git@example.com:api.git"],
             output,
             error,
             new FakeFileSystem(),

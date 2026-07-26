@@ -15,7 +15,7 @@ An issue body's shape comes from a built-in template, not from this skill. Disco
 
 ```bash
 mo issue template list          # metadata only: id, name, description
-mo issue template get <id>      # full body, with per-section guidance comments
+mo issue template view <id>     # full body, with per-section guidance comments
 ```
 
 Select by reading the **descriptions** and applying one boundary question — *does external behavior change?*
@@ -26,7 +26,7 @@ Select by reading the **descriptions** and applying one boundary question — *d
 | Behavior **deviates from correct** — an invariant is violated (functional or non-functional bug) | `bug` |
 | External behavior **unchanged**; value is internal (refactor, test coverage, optimization) | `refactor` |
 
-Once selected, `mo issue template get <id>` returns the raw body. It is markdown with two things per section: an HTML comment (`<!-- ... -->`) carrying the per-section writing instructions, and a `<placeholder>` line. **Read the comments — they tell you exactly what to write and what to forbid in that section.** Fill the body by replacing each `<placeholder>` with the matching piece of the requirement clarification from `mohist-explore`. The HTML comments may be left in place (they are hidden in rendered markdown; they do not need stripping).
+Once selected, `mo issue template view <id>` returns the raw body. It is markdown with two things per section: an HTML comment (`<!-- ... -->`) carrying the per-section writing instructions, and a `<placeholder>` line. **Read the comments — they tell you exactly what to write and what to forbid in that section.** Fill the body by replacing each `<placeholder>` with the matching piece of the requirement clarification from `mohist-explore`. The HTML comments may be left in place (they are hidden in rendered markdown; they do not need stripping).
 
 ## Universal writing rules (apply to every section, stated once here)
 
@@ -62,7 +62,7 @@ Write the filled body to a temp file and hand it to `mo issue create <title> --b
 Before recommending a workflow, discover what is available:
 
 ```bash
-mo project workflow profile list --described
+mo workflow list
 ```
 
 This prints each enabled workflow profile's `id`, display name, and natural-language description, for example:
@@ -81,8 +81,8 @@ Use this output as the source of truth for the `id` of any profile you write int
 
 Pick `recommended_workflow` using **default or operator choice** — there is no tag-based scoring. Concretely:
 
-1. **Default profile for the project.** The project is configured with a default workflow profile (the operator's standing choice for issues on this project). Use that id if it appears in the `--described` output as enabled. This is the recommended path.
-2. **Operator-chosen enabled id.** If the operator explicitly names a profile (in this turn, or in prior context for this issue), use that id — provided it is enabled in the `--described` output. Reject the operator's choice politely if the id is not enabled, and ask them to enable it or pick another.
+1. **Default profile for the project.** The project is configured with a default workflow profile (the operator's standing choice for issues on this project). Use that id if it appears in the `mo workflow list` output as enabled. This is the recommended path.
+2. **Operator-chosen enabled id.** If the operator explicitly names a profile (in this turn, or in prior context for this issue), use that id — provided it is enabled in the `mo workflow list` output. Reject the operator's choice politely if the id is not enabled, and ask them to enable it or pick another.
 3. **First enabled profile as last resort.** If there is no project default and the operator has not chosen one, the first enabled profile, else fail with an actionable error.
 
 Do not score profiles against content keywords. Do not look for suitability tags. The natural-language description exists to tell a human reader what the profile does; it is not a scoring input for the agent.
@@ -95,7 +95,7 @@ If workflow discovery is unavailable, stop before writing frontmatter and ask th
 
 - Default profile used: e.g. `Using the project's default workflow profile.` or `Selected the project's configured default workflow.`
 - Operator-chosen id: e.g. `Using mohist/github-pr per your instruction.` or `Selected mohist/github-pr as you requested for this issue.`
-- First-enabled fallback: e.g. `No project default is configured; using the first enabled workflow returned by mo project workflow profile list --described.`
+- First-enabled fallback: e.g. `No project default is configured; using the first enabled workflow returned by mo workflow list.`
 
 Keep it to one sentence. The YAML `|` block scalar is the right tool if the sentence wraps across two lines. Do not pad the reason with restatements of the profile's own description — the description already lives in the system, not the frontmatter.
 
@@ -117,7 +117,7 @@ Supported fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `recommended_workflow` | yes | Profile id from `mo project workflow profile list --described`, chosen by the default-or-operator rule above (or the first enabled profile as last resort). |
+| `recommended_workflow` | yes | Profile id from `mo workflow list`, chosen by the default-or-operator rule above (or the first enabled profile as last resort). |
 | `recommended_workflow_reason` | yes | One short natural-language sentence explaining the choice (default, operator-chosen, or first-enabled fallback). Multi-line values use the YAML `\|` block scalar. |
 | `risk` | yes | One of `low`, `medium`, `high`. |
 
@@ -164,10 +164,10 @@ Never run `mo issue create --body-file` without confirmation. The body file is a
 
 - [ ] The issue passes the Scope gate defined in `mohist-explore` (one-sentence standalone value, every scope item serves that sentence, stop-here test) — **regardless of how the requirement content was produced**. If a check fails, fix the split before creating; do not create an issue that only has value together with a sibling.
 - [ ] `mo issue template list` was run; a template selected via the boundary question (behavior changes / deviates / unchanged).
-- [ ] `mo issue template get <id>` was run; the per-section guidance comments were read and followed.
+- [ ] `mo issue template view <id>` was run; the per-section guidance comments were read and followed.
 - [ ] Each `<placeholder>` in the body is replaced by content from the `mohist-explore` clarification; no placeholder remains.
 - [ ] The body obeys the universal writing rules: literal, product source language, no source paths, planner-actionable.
-- [ ] `mo project workflow profile list --described` was run and parsed.
+- [ ] `mo workflow list` was run and parsed.
 - [ ] `recommended_workflow` is populated (project default, operator-chosen enabled id, or first enabled profile).
 - [ ] `recommended_workflow_reason` is one natural-language sentence explaining the choice (default, operator, or first-enabled fallback) — no tag citations.
 - [ ] `risk` is `low`, `medium`, or `high`, with the driver noted in the body.

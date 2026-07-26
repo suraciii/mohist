@@ -42,7 +42,7 @@ internal static class ServerCommands
             "info",
             "Show server-side system diagnostics (identity, source, install, update, services, paths). Distinct from 'mo info' (CLI-local environment).");
 
-        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SystemInfo)));
 
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
@@ -93,7 +93,7 @@ internal static class RunnerCommands
             Description = "Filter runners by scope (all, global, project)",
             DefaultValueFactory = _ => "all",
         };
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RunnerList)));
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(scopeOpt);
@@ -139,7 +139,7 @@ internal static class RunnerCommands
         var cmd = new Command("view", "Show a single runner's full detail (read-only)");
         var runnerIdArg = new Argument<string>("runner-id") { Description = "Runner identifier" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RunnerShow)));
         cmd.Arguments.Add(runnerIdArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -179,7 +179,7 @@ internal static class RunnerCommands
     {
         var cmd = new Command("status", "Show online runner summary (id, heartbeat, idle/busy state)");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RunnerList)));
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);

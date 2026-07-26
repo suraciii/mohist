@@ -27,7 +27,7 @@ issue template 定义"一个 issue 的 body 长什么样"，与 Issue 选择的 
 |---|---|---|
 | ① 拉目录 | `GET /issue-templates`（只 metadata） | `mo issue template list`（只 metadata） |
 | ② 判断选哪个 | 人看下拉框 | AI 读 description 判断（**非程序匹配**） |
-| ③ 拿完整 | `GET /issue-templates/{id}` → body | `mo issue template get <id>` → body，按 body 内注释指令填充各 section |
+| ③ 拿完整 | `GET /issue-templates/{id}` → body | `mo issue template view <id>` → body，按 body 内注释指令填充各 section |
 
 核心：**② 发生在 agent/人脑里，喂给它的是 metadata；body 只在选定后才加载。** 因此加载分两段，发现层绝不读 body（仿 skill 发现机制）：
 

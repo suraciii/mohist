@@ -4,7 +4,7 @@ namespace Mohist.Cli;
 
 internal static partial class IssueCommands
 {
-    private static readonly ResourceDescriptor ArchiveCompletedDescriptor = new(
+    internal static readonly ResourceDescriptor ArchiveCompletedDescriptor = new(
         ResourceCardinality.Single,
         ["archived", "skipped", "skippedNumbers", "message"]);
 
@@ -13,7 +13,7 @@ internal static partial class IssueCommands
         var cmd = new Command(name, $"{description} an issue");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -85,7 +85,7 @@ internal static partial class IssueCommands
         };
         var allCompletedOpt = new Option<bool>("--all-completed") { Description = "Archive all completed issues" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(allCompletedOpt);
         cmd.Options.Add(projectOpt);
@@ -105,14 +105,18 @@ internal static partial class IssueCommands
             {
                 if (allCompleted && number is not null)
                 {
-                    api.Error.WriteLine("<number> and --all-completed are mutually exclusive");
-                    return 1;
+                    return CommandHelpHook.RenderUsageFailure(
+                        ctx,
+                        api.Error,
+                        "<number> and --all-completed are mutually exclusive");
                 }
 
                 if (!allCompleted && string.IsNullOrWhiteSpace(number))
                 {
-                    api.Error.WriteLine("<number> is required unless --all-completed is used");
-                    return 1;
+                    return CommandHelpHook.RenderUsageFailure(
+                        ctx,
+                        api.Error,
+                        "<number> is required unless --all-completed is used");
                 }
 
                 if (allCompleted)

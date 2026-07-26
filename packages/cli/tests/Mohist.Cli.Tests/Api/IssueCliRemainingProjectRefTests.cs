@@ -22,7 +22,7 @@ public class IssueCliRemainingProjectRefTests
     [Fact]
     public void IssueUpdate_Help_ListsProjectAndProjectIdOptions()
     {
-        var help = RenderHelp(["issue", "update", "--help"]);
+        var help = RenderHelp(["issue", "edit", "--help"]);
 
         Assert.Contains("--project", help);
         Assert.DoesNotContain("--project-id", help);
@@ -35,7 +35,7 @@ public class IssueCliRemainingProjectRefTests
     [InlineData("reopen")]
     [InlineData("rebase")]
     [InlineData("archive")]
-    [InlineData("unarchive")]
+    [InlineData("restore")]
     [InlineData("logs")]
     [InlineData("events")]
     [InlineData("diff")]
@@ -68,7 +68,7 @@ public class IssueCliRemainingProjectRefTests
     [Fact]
     public void IssueUpdate_Help_DoesNotAdvertiseOutputOption()
     {
-        var help = RenderHelp(["issue", "update", "--help"]);
+        var help = RenderHelp(["issue", "edit", "--help"]);
 
         Assert.DoesNotContain("--output", help);
     }
@@ -178,7 +178,7 @@ public class IssueCliRemainingProjectRefTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "update", "83", "--title", "Updated", "--project", "mohist-local"],
+            ["issue", "edit", "83", "--title", "Updated", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),

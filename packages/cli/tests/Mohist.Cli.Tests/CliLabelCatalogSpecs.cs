@@ -117,7 +117,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "module", "--description", "Classifies the subsystem"], output, error, fs, executor);
+            http, ["label", "create", "module", "--description", "Classifies the subsystem"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -145,7 +145,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "module", "--description", "Classifies", "--supported-values", "auth,ui"], output, error, fs, executor);
+            http, ["label", "create", "module", "--description", "Classifies", "--supported-values", "auth,ui"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -159,7 +159,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "module", "--description", "Classifies", "--supported-values", "auth,,ui"], output, error, fs, executor);
+            http, ["label", "create", "module", "--description", "Classifies", "--supported-values", "auth,,ui"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -172,7 +172,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "Module", "--description", "Classifies"], output, error, fs, executor);
+            http, ["label", "create", "Module", "--description", "Classifies"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -185,7 +185,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "module", "--description", "   "], output, error, fs, executor);
+            http, ["label", "create", "module", "--description", "   "], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -209,14 +209,14 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "add", "refactor", "--description", "Custom refactor desc"], output, error, fs, executor);
+            http, ["label", "create", "refactor", "--description", "Custom refactor desc"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("refactor", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task LabelRemove_RemovesDefinition()
+    public async Task LabelDelete_RemovesDefinition()
     {
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
@@ -229,7 +229,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "remove", "module"], output, error, fs, executor);
+            http, ["label", "delete", "module"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -238,7 +238,7 @@ public class CliLabelCatalogSpecs
     }
 
     [Fact]
-    public async Task LabelRemove_MissingKey_Succeeds()
+    public async Task LabelDelete_MissingKey_Succeeds()
     {
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
@@ -251,14 +251,14 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "remove", "nonexistent"], output, error, fs, executor);
+            http, ["label", "delete", "nonexistent"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(error.ToString());
     }
 
     [Fact]
-    public async Task LabelRemove_SystemKey_Fails()
+    public async Task LabelDelete_SystemKey_Fails()
     {
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
@@ -274,32 +274,22 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "remove", "refactor"], output, error, fs, executor);
+            http, ["label", "delete", "refactor"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("refactor", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task LabelRemove_Alias_Rm_Works()
+    public async Task LabelRemove_Alias_Rm_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
-        handler.SetResponder(async (req, _) =>
-        {
-            if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
-            {
-                return new HttpResponseMessage(HttpStatusCode.NoContent);
-            }
-            return RecordingHttpHandler.Json(new { success = true, data = new { } });
-        });
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "rm", "module"], output, error, fs, executor);
 
-        Assert.Equal(0, exitCode);
-        var req = handler.Requests.Last();
-        Assert.Equal(HttpMethod.Delete, req.Method);
-        Assert.Contains("/labels/catalog/module", req.RequestUri?.PathAndQuery ?? "");
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -320,7 +310,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module", "--description", "New desc"], output, error, fs, executor);
+            http, ["label", "edit", "module", "--description", "New desc"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -350,7 +340,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module", "--supported-values", "auth,ui,persistence"], output, error, fs, executor);
+            http, ["label", "edit", "module", "--supported-values", "auth,ui,persistence"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -381,7 +371,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module", "--description", "Updated", "--supported-values", "auth,ui"], output, error, fs, executor);
+            http, ["label", "edit", "module", "--description", "Updated", "--supported-values", "auth,ui"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
@@ -400,7 +390,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "Module", "--description", "Whatever"], output, error, fs, executor);
+            http, ["label", "edit", "Module", "--description", "Whatever"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -413,7 +403,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module", "--description", "   "], output, error, fs, executor);
+            http, ["label", "edit", "module", "--description", "   "], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -426,7 +416,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module"], output, error, fs, executor);
+            http, ["label", "edit", "module"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -440,7 +430,7 @@ public class CliLabelCatalogSpecs
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "module", "--supported-values", "auth,,ui"], output, error, fs, executor);
+            http, ["label", "edit", "module", "--supported-values", "auth,,ui"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -464,7 +454,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "unknown", "--description", "Anything"], output, error, fs, executor);
+            http, ["label", "edit", "unknown", "--description", "Anything"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("unknown", error.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -487,7 +477,7 @@ public class CliLabelCatalogSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "update", "refactor", "--description", "Trying to change"], output, error, fs, executor);
+            http, ["label", "edit", "refactor", "--description", "Trying to change"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("refactor", error.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -538,81 +528,27 @@ public class CliLabelCatalogSpecs
     }
 
     [Fact]
-    public async Task LabelDelete_RemoveAlias_ProducesIdenticalRequestAndOutput()
+    public async Task LabelRemove_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
-        handler.SetResponder(async (req, _) =>
-        {
-            if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
-            {
-                return new HttpResponseMessage(HttpStatusCode.NoContent);
-            }
-            return RecordingHttpHandler.Json(new { success = true, data = new { } });
-        });
 
-        var canonicalExit = await MohistCliCommands.RunAsync(
-            http, ["label", "delete", "module", "--project", "proj_other"], output, error, fs, executor);
-        var canonicalStdout = output.ToString();
-        var canonicalStderr = error.ToString();
-        var canonicalRequests = handler.Requests.ToList();
-
-        output.GetStringBuilder().Clear();
-        error.GetStringBuilder().Clear();
-
-        var aliasExit = await MohistCliCommands.RunAsync(
+        var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "remove", "module", "--project", "proj_other"], output, error, fs, executor);
-        var aliasStdout = output.ToString();
-        var aliasStderr = error.ToString();
-        var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();
 
-        Assert.Equal(canonicalExit, aliasExit);
-        Assert.Equal(canonicalStdout, aliasStdout);
-        Assert.Equal(canonicalStderr, aliasStderr);
-        Assert.Equal(canonicalRequests.Count, aliasRequests.Count);
-        for (var i = 0; i < canonicalRequests.Count; i++)
-        {
-            Assert.Equal(canonicalRequests[i].Method, aliasRequests[i].Method);
-            Assert.Equal(canonicalRequests[i].RequestUri, aliasRequests[i].RequestUri);
-        }
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
-    public async Task LabelDelete_RmAlias_ProducesIdenticalRequestAndOutput()
+    public async Task LabelRm_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
-        handler.SetResponder(async (req, _) =>
-        {
-            if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
-            {
-                return new HttpResponseMessage(HttpStatusCode.NoContent);
-            }
-            return RecordingHttpHandler.Json(new { success = true, data = new { } });
-        });
 
-        var canonicalExit = await MohistCliCommands.RunAsync(
-            http, ["label", "delete", "module", "--project", "proj_other"], output, error, fs, executor);
-        var canonicalStdout = output.ToString();
-        var canonicalStderr = error.ToString();
-        var canonicalRequests = handler.Requests.ToList();
-
-        output.GetStringBuilder().Clear();
-        error.GetStringBuilder().Clear();
-
-        var aliasExit = await MohistCliCommands.RunAsync(
+        var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "rm", "module", "--project", "proj_other"], output, error, fs, executor);
-        var aliasStdout = output.ToString();
-        var aliasStderr = error.ToString();
-        var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();
 
-        Assert.Equal(canonicalExit, aliasExit);
-        Assert.Equal(canonicalStdout, aliasStdout);
-        Assert.Equal(canonicalStderr, aliasStderr);
-        Assert.Equal(canonicalRequests.Count, aliasRequests.Count);
-        for (var i = 0; i < canonicalRequests.Count; i++)
-        {
-            Assert.Equal(canonicalRequests[i].Method, aliasRequests[i].Method);
-            Assert.Equal(canonicalRequests[i].RequestUri, aliasRequests[i].RequestUri);
-        }
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -661,7 +597,7 @@ public class CliLabelCatalogSpecs
     }
 
     [Fact]
-    public async Task Label_HelpAdvertisesDeleteWithRemoveAndRmAliases()
+    public async Task Label_HelpAdvertisesDeleteAsCanonicalAction()
     {
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
@@ -670,7 +606,9 @@ public class CliLabelCatalogSpecs
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
-        Assert.Contains("delete, remove, rm <key>", text);
-        Assert.DoesNotContain("remove, rm <key>", text.Replace("delete, remove, rm <key>", ""));
+        Assert.Contains("delete", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("remove", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(" rm ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ls", text, StringComparison.Ordinal);
     }
 }

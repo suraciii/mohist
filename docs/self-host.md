@@ -222,8 +222,7 @@ mkcert -install
 mkcert mohist.local your-server-ip
 
 # 配 Mohist server 用这个证书
-mo config set server.tls.cert /path/to/cert.pem
-mo config set server.tls.key /path/to/key.pem
+# 通过 server 的 TLS / 证书由 server 配置文件管理；参考 `mo server --help` 和 Mohist 服务端配置文档。
 ```
 
 ## 方案 B：Tailscale / WireGuard VPN（推荐 - 简单）
@@ -267,7 +266,7 @@ Mohist 的数据分两类：
 ### 1. 必须备份
 
 - **Mohist database**（SQLite）：包含所有 issue、epic、workflow state、events
-  - systemd 模式：位置看 `mo config list` 的 storage 配置，默认 `~/.mohist/mohist.db`
+  - systemd 模式：位置由服务端配置文件指定，默认 `~/.mohist/mohist.db`
   - Docker 模式：卷 `/data/.mohist/mohist.db`，备份见上文「Docker 模式 → 数据持久化」
 
 - **你的项目仓库**：含所有 issue 产物（`openspec/changes/`）

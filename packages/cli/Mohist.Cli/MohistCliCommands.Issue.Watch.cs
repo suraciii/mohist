@@ -21,7 +21,7 @@ internal static partial class IssueCommands
         var numberArg = NumberArg();
         var agentOpt = new Option<string?>("--agent") { Description = "Agent name or id" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(agentOpt);
         cmd.Options.Add(projectOpt);
@@ -73,7 +73,7 @@ internal static partial class IssueCommands
         var numberArg = NumberArg();
         var agentOpt = new Option<string?>("--agent") { Description = "Agent name or id" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(agentOpt);
         cmd.Options.Add(projectOpt);
@@ -126,7 +126,7 @@ internal static partial class IssueCommands
             "List the issue's watching and muted Agents as two distinct groups");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.IssueWatchList)));
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);

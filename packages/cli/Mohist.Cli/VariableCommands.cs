@@ -58,7 +58,7 @@ internal static class VariableCommands
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var stageOpt = StageOpt();
         var effectiveOpt = scope == VariableScopeKind.Run ? EffectiveOpt() : null;
-        var jsonOpt = MohistCliCommands.JsonSelectionOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(VariableBundleDescriptor);
 
         var numberArg = scope == VariableScopeKind.Issue ? NumberArg() : null;
         var runIdArg = scope == VariableScopeKind.Run ? RunIdArg() : null;

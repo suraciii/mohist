@@ -11,9 +11,9 @@ public class CliIssueCommandSpecs
     public static IEnumerable<object[]> RemovedRepositoryOptionCases()
     {
         yield return [new[] { "issue", "create", "Title", "--repository", "web" }];
-        yield return [new[] { "issue", "update", "1", "--repository", "web" }];
+        yield return [new[] { "issue", "edit", "1", "--repository", "web" }];
         yield return [new[] { "issue", "list", "--repository", "web" }];
-        yield return [new[] { "issue", "show", "1", "--repository", "web" }];
+        yield return [new[] { "issue", "view", "1", "--repository", "web" }];
     }
 
     [Theory]
@@ -137,7 +137,7 @@ public class CliIssueCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "7"], output, error, fileSystem, executor);
+            http, ["issue", "view", "7"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("repository: web", output.ToString(), StringComparison.Ordinal);
@@ -233,6 +233,21 @@ public class CliIssueCommandSpecs
         Assert.Contains("\"message\": \"Archived 3 completed issues, skipped 0\"", stdout, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(new[] { "issue", "archive", "42", "--json" }, "number")]
+    [InlineData(new[] { "issue", "archive", "--all-completed", "--json" }, "archived")]
+    public async Task ArchiveJsonDiscovery_UsesFieldsForSelectedInvocation(string[] args, string expectedField)
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called for JSON discovery"));
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(expectedField, output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task ArchiveAllCompleted_NoProject_FailsClearly()
     {
@@ -257,8 +272,9 @@ public class CliIssueCommandSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "archive", "42", "--all-completed"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -271,8 +287,9 @@ public class CliIssueCommandSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "archive"], output, error, fileSystem, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Contains("<number> is required", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 

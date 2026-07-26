@@ -21,12 +21,13 @@ internal static class AgentCommands
 
         agent.Subcommands.Add(BuildCreate(api));
         agent.Subcommands.Add(BuildList(api));
-        agent.Subcommands.Add(BuildShow(api));
-        agent.Subcommands.Add(BuildUpdate(api));
+        agent.Subcommands.Add(BuildView(api));
+        agent.Subcommands.Add(BuildEdit(api));
         agent.Subcommands.Add(BuildArchive(api));
         agent.Subcommands.Add(BuildLaunch(api));
         agent.Subcommands.Add(BuildJob(api));
         agent.Subcommands.Add(BuildInstall(api));
+        agent.Subcommands.Add(AgentModelCommands.Build(api));
 
         return agent;
     }
@@ -246,8 +247,8 @@ internal static class AgentCommands
     {
         var cmd = new Command("create", "Create a new agent");
         var nameOpt = new Option<string?>("--name") { Description = "Agent name" };
-        var instructionsOpt = new Option<string?>("--instructions") { Description = "Agent instructions (literal text, @file, or - with --instructions-stdin)" };
-        var instructionsStdinOpt = new Option<bool>("--instructions-stdin") { Description = "Read agent instructions from stdin" };
+        var instructionsOpt = new Option<string?>("--instructions") { Description = "Agent instructions as literal text" };
+        var instructionsFileOpt = new Option<string?>("--instructions-file") { Description = "Read Agent instructions from a UTF-8 file path, or - for stdin" };
         var descriptionOpt = new Option<string?>("--description") { Description = "Agent description" };
         var agentConfigOpt = new Option<string?>("--agent-config") { Description = "Agent config JSON or @file" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
@@ -256,7 +257,7 @@ internal static class AgentCommands
 
         cmd.Options.Add(nameOpt);
         cmd.Options.Add(instructionsOpt);
-        cmd.Options.Add(instructionsStdinOpt);
+        cmd.Options.Add(instructionsFileOpt);
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(agentConfigOpt);
         cmd.Options.Add(skillsOpt);
@@ -267,7 +268,7 @@ internal static class AgentCommands
         {
             var name = ctx.GetValue(nameOpt);
             var instructions = ctx.GetValue(instructionsOpt);
-            var instructionsStdin = ctx.GetValue(instructionsStdinOpt);
+            var instructionsFile = ctx.GetValue(instructionsFileOpt);
             var description = ctx.GetValue(descriptionOpt);
             var agentConfig = ctx.GetValue(agentConfigOpt);
             var skills = ctx.GetValue(skillsOpt);
@@ -280,22 +281,27 @@ internal static class AgentCommands
             {
                 if (string.IsNullOrWhiteSpace(name))
                 {
-                    api.Error.WriteLine("--name is required");
-                    return 1;
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--name is required");
                 }
 
+                var instructionsResult = await BodyInputResolver.ResolveAsync(
+                    instructions,
+                    instructionsFile,
+                    new BodyInputResolver.SourceFlags("--instructions", "--instructions-file", "Agent instructions"),
+                    api.FileSystem,
+                    api.StandardInput,
+                    TextWriter.Null);
+                if (instructionsResult is BodyInputResolver.Result.Failure instructionsFailure)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, instructionsFailure.Message);
+
+                var config = await ResolveJsonAsync(agentConfig, api, TextWriter.Null);
+                if (config is ResolveJsonResult.Invalid configFailure)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, configFailure.Message);
+
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-
                 if (resolveExit != 0) return resolveExit;
 
-                var resolvedInstructions = await ResolveInstructionsAsync(instructions, instructionsStdin, api);
-                if (resolvedInstructions is null)
-                    return 1;
-
-                var config = await ResolveJsonAsync(agentConfig, api);
-                if (config is ResolveJsonResult.Invalid)
-                    return 1;
+                var resolvedInstructions = ((BodyInputResolver.Result.Success)instructionsResult).Body;
 
                 return await PrintAgentIdAsync(api, ProjectAgentsPath(resolvedProjectId, "/agents"), new
                 {
@@ -308,17 +314,17 @@ internal static class AgentCommands
                 });
             }
         });
+        AddInstructionsInputValidation(cmd, instructionsOpt, instructionsFileOpt);
         return cmd;
     }
 
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List agents");
-        cmd.Aliases.Add("ls");
         var allOpt = new Option<bool>("--all") { Description = "Include archived agents" };
         var statusOpt = new Option<string?>("--status") { Description = "Filter by status" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentList)));
 
         cmd.Options.Add(allOpt);
         cmd.Options.Add(statusOpt);
@@ -353,12 +359,12 @@ internal static class AgentCommands
         return cmd;
     }
 
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("show", "Show agent details");
+        var cmd = new Command("view", "Show agent details");
         var nameOrIdArg = NameOrIdArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentShow)));
 
         cmd.Arguments.Add(nameOrIdArg);
         cmd.Options.Add(projectOpt);
@@ -393,14 +399,14 @@ internal static class AgentCommands
         return cmd;
     }
 
-    private static Command BuildUpdate(MohistCliApi api)
+    private static Command BuildEdit(MohistCliApi api)
     {
-        var cmd = new Command("update", "Update an agent");
+        var cmd = new Command("edit", "Update an agent");
         var nameOrIdArg = NameOrIdArg();
         var nameOpt = new Option<string?>("--name") { Description = "New agent name" };
         var descriptionOpt = new Option<string?>("--description") { Description = "New agent description" };
-        var instructionsOpt = new Option<string?>("--instructions") { Description = "New agent instructions (literal text, @file, or - with --instructions-stdin)" };
-        var instructionsStdinOpt = new Option<bool>("--instructions-stdin") { Description = "Read new agent instructions from stdin" };
+        var instructionsOpt = new Option<string?>("--instructions") { Description = "New Agent instructions as literal text" };
+        var instructionsFileOpt = new Option<string?>("--instructions-file") { Description = "Read new Agent instructions from a UTF-8 file path, or - for stdin" };
         var agentConfigOpt = new Option<string?>("--agent-config") { Description = "New agent config JSON or @file" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
         var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Maximum concurrent runs" };
@@ -414,7 +420,7 @@ internal static class AgentCommands
         cmd.Options.Add(nameOpt);
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(instructionsOpt);
-        cmd.Options.Add(instructionsStdinOpt);
+        cmd.Options.Add(instructionsFileOpt);
         cmd.Options.Add(agentConfigOpt);
         cmd.Options.Add(skillsOpt);
         cmd.Options.Add(maxConcurrentRunsOpt);
@@ -430,7 +436,7 @@ internal static class AgentCommands
             var name = ctx.GetValue(nameOpt);
             var description = ctx.GetValue(descriptionOpt);
             var instructions = ctx.GetValue(instructionsOpt);
-            var instructionsStdin = ctx.GetValue(instructionsStdinOpt);
+            var instructionsFile = ctx.GetValue(instructionsFileOpt);
             var agentConfig = ctx.GetValue(agentConfigOpt);
             var skills = ctx.GetValue(skillsOpt);
             var maxConcurrentRuns = ctx.GetValue(maxConcurrentRunsOpt);
@@ -444,32 +450,41 @@ internal static class AgentCommands
 
             async Task<int> UpdateAsync()
             {
-                if (!ValidateClearSetPair(api, "--description", description is not null, "--clear-description", clearDescription)
-                    || !ValidateClearSetPair(api, "--agent-config", agentConfig is not null, "--clear-agent-config", clearAgentConfig)
-                    || !ValidateClearSetPair(api, "--skills", skills is not null, "--clear-skills", clearSkills)
-                    || !ValidateClearSetPair(api, "--max-concurrent-runs", maxConcurrentRuns is not null, "--clear-max-concurrent-runs", clearMaxConcurrentRuns))
-                    return 1;
+                var clearSetConflict = ValidateClearSetPair("--description", description is not null, "--clear-description", clearDescription)
+                    ?? ValidateClearSetPair("--agent-config", agentConfig is not null, "--clear-agent-config", clearAgentConfig)
+                    ?? ValidateClearSetPair("--skills", skills is not null, "--clear-skills", clearSkills)
+                    ?? ValidateClearSetPair("--max-concurrent-runs", maxConcurrentRuns is not null, "--clear-max-concurrent-runs", clearMaxConcurrentRuns);
+                if (clearSetConflict is not null)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, clearSetConflict);
+
+                BodyInputResolver.Result? instructionsResult = null;
+                if (instructions is not null || instructionsFile is not null)
+                {
+                    instructionsResult = await BodyInputResolver.ResolveAsync(
+                        instructions,
+                        instructionsFile,
+                        new BodyInputResolver.SourceFlags("--instructions", "--instructions-file", "Agent instructions"),
+                        api.FileSystem,
+                        api.StandardInput,
+                        TextWriter.Null);
+                    if (instructionsResult is BodyInputResolver.Result.Failure instructionsFailure)
+                        return CommandHelpHook.RenderUsageFailure(ctx, api.Error, instructionsFailure.Message);
+                }
+
+                var config = await ResolveJsonAsync(agentConfig, api, TextWriter.Null);
+                if (config is ResolveJsonResult.Invalid configFailure)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, configFailure.Message);
 
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-
                 if (resolveExit != 0) return resolveExit;
 
                 var agent = await ResolveAgentAsync(api, resolvedProjectId, nameOrId!);
                 if (agent is null)
                     return 1;
 
-                string? resolvedInstructions = null;
-                if (!string.IsNullOrWhiteSpace(instructions) || instructionsStdin)
-                {
-                    resolvedInstructions = await ResolveInstructionsAsync(instructions, instructionsStdin, api);
-                    if (resolvedInstructions is null)
-                        return 1;
-                }
-
-                var config = await ResolveJsonAsync(agentConfig, api);
-                if (config is ResolveJsonResult.Invalid)
-                    return 1;
+                var resolvedInstructions = instructionsResult is BodyInputResolver.Result.Success instructionsSuccess
+                    ? instructionsSuccess.Body
+                    : null;
 
                 var body = new JsonObject();
                 AddIfProvided(body, "name", name);
@@ -482,14 +497,15 @@ internal static class AgentCommands
                 return await api.PrintPatchAsync(ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}"), body);
             }
         });
+        AddInstructionsInputValidation(cmd, instructionsOpt, instructionsFileOpt);
         return cmd;
     }
 
-    private static bool ValidateClearSetPair(MohistCliApi api, string setFlag, bool setProvided, string clearFlag, bool clearProvided)
+    private static string? ValidateClearSetPair(string setFlag, bool setProvided, string clearFlag, bool clearProvided)
     {
-        if (!setProvided || !clearProvided) return true;
-        api.Error.WriteLine($"{setFlag} cannot be used with {clearFlag}");
-        return false;
+        return setProvided && clearProvided
+            ? $"{setFlag} cannot be used with {clearFlag}"
+            : null;
     }
 
     private static void AddIfProvided(JsonObject body, string property, string? value, bool provided = true)
@@ -510,7 +526,6 @@ internal static class AgentCommands
     private static Command BuildArchive(MohistCliApi api)
     {
         var cmd = new Command("archive", "Archive an agent");
-        cmd.Aliases.Add("delete");
         var nameOrIdArg = NameOrIdArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
 
@@ -550,20 +565,18 @@ internal static class AgentCommands
             "launch",
             "Launch a generic AgentSession from an Agent profile. Returns both the AgentJob id (the work owner) and the AgentSession id (the conversation owner). Sends POST /api/projects/:projectId/agents/:agentId/sessions.");
         var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
-        var promptOpt = new Option<string?>("--prompt") { Description = "Prompt text (mutually exclusive with --prompt-file and --prompt-stdin)" };
-        var promptFileOpt = new Option<string?>("--prompt-file") { Description = "Read prompt from a UTF-8 file path (recommended for long prompts; mutually exclusive with --prompt and --prompt-stdin)" };
-        var promptStdinOpt = new Option<bool>("--prompt-stdin") { Description = "Read prompt from stdin (mutually exclusive with --prompt and --prompt-file)" };
+        var promptOpt = new Option<string?>("--prompt") { Description = "Prompt text (mutually exclusive with --prompt-file)" };
+        var promptFileOpt = new Option<string?>("--prompt-file") { Description = "Read prompt from a UTF-8 file path, or - for stdin (mutually exclusive with --prompt)" };
         var issueRefOpt = new Option<int?>("--issue") { Description = "Optional context reference: record the issue number on the session metadata" };
         var epicRefOpt = new Option<string?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
         var repositoryRefOpt = new Option<string?>("--repository") { Description = "Optional context reference: record the repository on the session metadata" };
         var workspacePathOpt = new Option<string?>("--workspace-path") { Description = "Optional context reference: record the workspace path on the session metadata" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionLaunch)));
 
         cmd.Arguments.Add(agentRefArg);
         cmd.Options.Add(promptOpt);
         cmd.Options.Add(promptFileOpt);
-        cmd.Options.Add(promptStdinOpt);
         cmd.Options.Add(issueRefOpt);
         cmd.Options.Add(epicRefOpt);
         cmd.Options.Add(repositoryRefOpt);
@@ -576,7 +589,6 @@ internal static class AgentCommands
             var agentRef = ctx.GetValue(agentRefArg);
             var prompt = ctx.GetValue(promptOpt);
             var promptFile = ctx.GetValue(promptFileOpt);
-            var promptStdin = ctx.GetValue(promptStdinOpt);
             var issueRef = ctx.GetValue(issueRefOpt);
             var epicRef = ctx.GetValue(epicRefOpt);
             var repositoryRef = ctx.GetValue(repositoryRefOpt);
@@ -588,21 +600,20 @@ internal static class AgentCommands
 
             async Task<int> LaunchAsync()
             {
+                var resolvedPrompt = await BodyInputResolver.ResolveAsync(
+                    prompt, promptFile,
+                    new BodyInputResolver.SourceFlags("--prompt", "--prompt-file", "prompt"),
+                    api.FileSystem, api.StandardInput, TextWriter.Null);
+                if (resolvedPrompt is BodyInputResolver.Result.Failure promptFailure)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, promptFailure.Message);
+
                 var (mode, exit) = api.ResolveOutputMode(output);
 
                 if (exit != 0) return exit;
 
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-
-
                 if (resolveExit != 0) return resolveExit;
 
-                var resolvedPrompt = await BodyInputResolver.ResolveAsync(
-                    prompt, promptFile, promptStdin,
-                    new BodyInputResolver.SourceFlags("--prompt", "--prompt-file", "--prompt-stdin", "prompt"),
-                    api.FileSystem, api.StandardInput, api.Error);
-                if (resolvedPrompt is BodyInputResolver.Result.Failure)
-                    return 1;
                 var promptText = ((BodyInputResolver.Result.Success)resolvedPrompt).Body;
 
                 var contextRefs = BuildLaunchContext(issueRef, epicRef, repositoryRef, workspacePath);
@@ -634,35 +645,33 @@ internal static class AgentCommands
         };
     }
 
-    private static async Task<string?> ResolveInstructionsAsync(string? instructions, bool instructionsStdin, MohistCliApi api)
+    private static void AddInstructionsInputValidation(
+        Command command,
+        Option<string?> instructions,
+        Option<string?> instructionsFile)
     {
-        string? inline = null;
-        string? file = null;
-        var stdin = instructionsStdin;
+        command.Validators.Add(result =>
+        {
+            if (string.Equals(result.GetValue(instructions), "-", StringComparison.Ordinal))
+            {
+                result.AddError("--instructions - is not supported; use --instructions-file - for stdin.");
+                return;
+            }
 
-        if (string.Equals(instructions, "-", StringComparison.Ordinal))
-        {
-            return await api.StandardInput.ReadToEndAsync();
-        }
-        else if (instructions?.StartsWith('@') == true)
-        {
-            instructions = instructions[1..];
-            file = instructions;
-        }
-        else
-        {
-            inline = instructions;
-        }
-
-        var resolved = await BodyInputResolver.ResolveAsync(inline, file, stdin, api.FileSystem, api.StandardInput, api.Error);
-        return resolved is BodyInputResolver.Result.Success success ? success.Body : null;
+            if (result.GetResult(instructions) is not null && result.GetResult(instructionsFile) is not null)
+                result.AddError("--instructions and --instructions-file are mutually exclusive.");
+        });
     }
 
-    private static async Task<ResolveJsonResult> ResolveJsonAsync(string? value, MohistCliApi api)
+    private static async Task<ResolveJsonResult> ResolveJsonAsync(
+        string? value,
+        MohistCliApi api,
+        TextWriter? error = null)
     {
         if (string.IsNullOrWhiteSpace(value))
             return new ResolveJsonResult.Valid(null);
 
+        error ??= api.Error;
         var text = value;
         if (value.StartsWith('@'))
         {
@@ -672,8 +681,9 @@ internal static class AgentCommands
             }
             catch (Exception ex)
             {
-                api.Error.WriteLine($"could not read agent config file: {value[1..]} ({ex.Message})");
-                return new ResolveJsonResult.Invalid();
+                var message = $"could not read agent config file: {value[1..]} ({ex.Message})";
+                error.WriteLine(message);
+                return new ResolveJsonResult.Invalid(message);
             }
         }
 
@@ -683,8 +693,9 @@ internal static class AgentCommands
         }
         catch (JsonException ex)
         {
-            api.Error.WriteLine($"--agent-config must be valid JSON ({ex.Message})");
-            return new ResolveJsonResult.Invalid();
+            var message = $"--agent-config must be valid JSON ({ex.Message})";
+            error.WriteLine(message);
+            return new ResolveJsonResult.Invalid(message);
         }
     }
 
@@ -719,11 +730,10 @@ internal static class AgentCommands
         var cmd = new Command(
             "list",
             "List AgentJobs for a given Agent profile. Resolves the agent ref client-side, then GETs .../agents/{agentId}/jobs.");
-        cmd.Aliases.Add("ls");
         var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
         var statusOpt = new Option<string?>("--status") { Description = "Filter by job status (pending, running, completed, failed)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentJobList)));
 
         cmd.Arguments.Add(agentRefArg);
         cmd.Options.Add(statusOpt);
@@ -770,7 +780,7 @@ internal static class AgentCommands
             "Show an AgentJob's current status and terminal result. GETs .../agent-jobs/{jobId}.");
         var jobIdArg = new Argument<string>("job-id") { Description = "Agent job id returned by launch" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption("table");
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentJobView)));
 
         cmd.Arguments.Add(jobIdArg);
         cmd.Options.Add(projectOpt);
@@ -903,7 +913,7 @@ internal static class AgentCommands
 
         public sealed record Valid(JsonNode? Value) : ResolveJsonResult;
 
-        public sealed record Invalid : ResolveJsonResult;
+        public sealed record Invalid(string Message) : ResolveJsonResult;
     }
 
     internal sealed record AgentRef(string Id, string Name)

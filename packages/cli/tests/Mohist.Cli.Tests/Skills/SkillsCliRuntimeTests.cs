@@ -13,7 +13,7 @@ public sealed class SkillsCliRuntimeTests
     {
         var files = new FakeFileSystem();
         var environment = new MockEnvironmentVariableProvider();
-        var (exitCode, _, stderr) = await InvokeSkillsAsync(files, environment, "skills", "--help");
+        var (exitCode, _, stderr) = await InvokeSkillsAsync(files, environment, "skill", "--help");
 
         Assert.True(exitCode == 0, $"exit={exitCode} stderr:\n{stderr}");
         Assert.DoesNotContain("Unable to resolve service for type 'System.IO.TextWriter'", stderr);
@@ -34,7 +34,7 @@ public sealed class SkillsCliRuntimeTests
             $"---\nname: mohist-explore\ndescription: {DescriptionFor("mohist-explore")}\n---\n\n# explore\n");
         environment[SkillAssetRootResolver.OverrideEnvironmentVariable] = overrideRoot;
 
-        var (exitCode, stdout, stderr) = await InvokeSkillsAsync(files, environment, "skills", "get", "mohist");
+        var (exitCode, stdout, stderr) = await InvokeSkillsAsync(files, environment, "skill", "view", "mohist");
 
         Assert.True(exitCode == 0, $"exit={exitCode} stdout:\n{stdout}\n\nstderr:\n{stderr}");
         Assert.Contains("name: mohist", stdout);

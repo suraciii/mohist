@@ -50,7 +50,7 @@ public class CliIssueUpdatePatchBodySpecs
         fs.AddFile("/tmp/body.md", "Updated body content");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--body-file", "/tmp/body.md"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--body-file", "/tmp/body.md"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -69,7 +69,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--body", "Inline body"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--body", "Inline body"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -85,7 +85,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "stream=backend", "-l", "module=auth"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "stream=backend", "-l", "module=auth"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -109,7 +109,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "-l", "stream=backend"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "-l", "stream=backend"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -125,7 +125,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1"], output, error, fs, executor);
+            http, ["issue", "edit", "1"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -138,52 +138,51 @@ public class CliIssueUpdatePatchBodySpecs
     }
 
     [Fact]
-    public async Task IssueUpdate_BodyAndBodyFile_ConflictExitsWithCodeOne()
+    public async Task IssueUpdate_BodyAndBodyFile_ConflictExitsWithUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
         fs.AddFile("/tmp/body.md", "From file");
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "1", "--body", "Inline", "--body-file", "/tmp/body.md"],
+            ["issue", "edit", "1", "--body", "Inline", "--body-file", "/tmp/body.md"],
             output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
-        Assert.Contains("--body, --body-file, --body-stdin", error.ToString());
+        Assert.Contains("--body, --body-file", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task IssueUpdate_BodyAndBodyStdin_ConflictExitsWithCodeOne()
+    public async Task IssueUpdate_BodyStdin_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "1", "--body", "Inline", "--body-stdin"],
+            ["issue", "edit", "1", "--body-stdin"],
             output, error, fs, executor,
             standardInput: new StringReader("from stdin"));
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
-        Assert.Contains("--body, --body-file, --body-stdin", error.ToString());
+        Assert.Contains("--body-stdin", error.ToString());
     }
 
     [Fact]
-    public async Task IssueUpdate_BodyFileAndBodyStdin_ConflictExitsWithCodeOne()
+    public async Task IssueUpdate_BodyFileDash_ReadsStandardInput()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
-        fs.AddFile("/tmp/body.md", "From file");
-
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "1", "--body-file", "/tmp/body.md", "--body-stdin"],
+            ["issue", "edit", "1", "--body-file", "-"],
             output, error, fs, executor,
             standardInput: new StringReader("from stdin"));
 
-        Assert.Equal(1, exitCode);
-        Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
-        Assert.Contains("--body, --body-file, --body-stdin", error.ToString());
+        Assert.Equal(0, exitCode);
+        var patch = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
+        Assert.Equal("from stdin", JsonNode.Parse(patch.Body!)!["body"]?.GetValue<string>());
     }
 
     [Fact]
@@ -192,7 +191,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--title", "New title"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--title", "New title"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -209,7 +208,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--priority", "p1"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--priority", "p1"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -226,7 +225,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--ready"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--ready"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -241,7 +240,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--draft"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--draft"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
@@ -256,7 +255,7 @@ public class CliIssueUpdatePatchBodySpecs
         var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--title", "X"], output, error, fs, executor);
+            http, ["issue", "edit", "1", "--title", "X"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);

@@ -11,24 +11,24 @@ namespace Mohist.Cli.Tests.Api;
 public class IssueCliBodyInputTests
 {
     [Fact]
-    public void IssueCreate_Help_ListsAllThreeBodyOptionsAndMutualExclusion()
+    public void IssueCreate_Help_ListsCanonicalBodyOptions()
     {
         var help = RenderHelp(["issue", "create", "--help"]);
 
         Assert.Contains("--body", help);
         Assert.Contains("--body-file", help);
-        Assert.Contains("--body-stdin", help);
+        Assert.DoesNotContain("--body-stdin", help);
         Assert.Contains("mutually exclusive", help, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void IssueUpdate_Help_ListsAllThreeBodyOptionsAndMutualExclusion()
+    public void IssueUpdate_Help_ListsCanonicalBodyOptions()
     {
-        var help = RenderHelp(["issue", "update", "--help"]);
+        var help = RenderHelp(["issue", "edit", "--help"]);
 
         Assert.Contains("--body", help);
         Assert.Contains("--body-file", help);
-        Assert.Contains("--body-stdin", help);
+        Assert.DoesNotContain("--body-stdin", help);
         Assert.Contains("mutually exclusive", help, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -81,7 +81,7 @@ public class IssueCliBodyInputTests
     }
 
     [Fact]
-    public async Task IssueCreate_BodyStdin_DrainsStdinAndSendsContents()
+    public async Task IssueCreate_BodyFileDash_DrainsStdinAndSendsContents()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "id": "issue_1", "number": 1 } }""");
@@ -91,7 +91,7 @@ public class IssueCliBodyInputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "create", "Title", "--body-stdin", "--project", "mohist-local"],
+            ["issue", "create", "Title", "--body-file", "-", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -118,9 +118,10 @@ public class IssueCliBodyInputTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         Assert.Contains("issue body is required", error.ToString());
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -140,12 +141,13 @@ public class IssueCliBodyInputTests
             files,
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
         Assert.Contains("--body", err);
         Assert.Contains("--body-file", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Usage:", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -163,11 +165,12 @@ public class IssueCliBodyInputTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
         Assert.Contains("could not read body file", err);
         Assert.Contains("missing.md", err);
+        Assert.Contains("Usage:", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -182,7 +185,7 @@ public class IssueCliBodyInputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "update", "1", "--body-file", "body.md", "--project", "mohist-local"],
+            ["issue", "edit", "1", "--body-file", "body.md", "--project", "mohist-local"],
             output,
             error,
             files,
@@ -207,18 +210,19 @@ public class IssueCliBodyInputTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "update", "1", "--body", "a", "--body-file", "b.md", "--project", "mohist-local"],
+            ["issue", "edit", "1", "--body", "a", "--body-file", "b.md", "--project", "mohist-local"],
             output,
             error,
             files,
             new NoopCommandExecutor());
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
         Assert.Contains("--body", err);
         Assert.Contains("--body-file", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Usage:", err, StringComparison.Ordinal);
     }
 
     [Fact]
