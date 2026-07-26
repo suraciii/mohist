@@ -214,3 +214,11 @@ Review-fix progress (round 4)
 - `CliHelpSpecs` covers Activity JSON fields and long Issue edit option layout.
 - Focused CLI verification passed with 1392 tests; the complete `npm test`
   suite also passed.
+
+Review-fix progress (round 5)
+
+- Issue create and edit help now use the runtime Issue descriptor's JSON fields.
+- Remaining public command examples and the checked-in Mohist discovery stub now
+  use canonical `edit` and `view` paths.
+- Focused CLI verification passed with 1394 tests; the complete `npm test`
+  suite also passed.

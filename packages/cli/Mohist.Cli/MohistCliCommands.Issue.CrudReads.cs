@@ -8,7 +8,7 @@ internal static partial class IssueCommands
         ResourceCardinality.Collection,
         ["number", "title", "status", "stage", "priority", "labels"]);
 
-    private static readonly ResourceDescriptor IssueDescriptor = new(
+    internal static readonly ResourceDescriptor IssueDescriptor = new(
         ResourceCardinality.Single,
         ["number", "title", "status", "stage", "priority", "labels", "body", "repository", "repositoryName", "workflowRunId"]);
 

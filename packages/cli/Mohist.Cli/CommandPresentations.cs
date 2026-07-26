@@ -156,14 +156,16 @@ internal static class CommandPresentations
                     Boundary: "List reads are scoped to one Project; --archived / --all toggle what is included."));
                 CommandPresentationCatalog.Attach(Find(group, "create"), new CommandPresentation(
                     CommandCapability.Work, "Create a new Issue in the active Project",
-                    Boundary: "New Issues start as drafts unless --ready is supplied; workflow profile is selected via --workflow-profile."));
+                    Boundary: "New Issues start as drafts unless --ready is supplied; workflow profile is selected via --workflow-profile.",
+                    JsonFields: IssueCommands.IssueDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "view"), new CommandPresentation(
                     CommandCapability.Work, "Read a single Issue by its number",
                     Boundary: "Issue view returns the canonical Issue record; resource-result commands list --json fields when called with no value.",
                     JsonFields: ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.IssueShow)).Fields));
                 CommandPresentationCatalog.Attach(Find(group, "edit"), new CommandPresentation(
                     CommandCapability.Work, "Edit an Issue by its number",
-                    Boundary: "Edits patch a single Issue; combining --ready and --draft is rejected locally."));
+                    Boundary: "Edits patch a single Issue; combining --ready and --draft is rejected locally.",
+                    JsonFields: IssueCommands.IssueDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "start"), new CommandPresentation(
                     CommandCapability.Work, "Mark an Issue as started",
                     Boundary: "Issue lifecycle lives under `issue`; Run control belongs to `mo run`."));
