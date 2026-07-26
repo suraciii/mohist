@@ -79,8 +79,9 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
             Assert.Equal("conn-followup-1", sent.ConnectionId);
             Assert.Equal("ReceiveFollowup", sent.Method);
             var payload = JsonSerializer.SerializeToElement(sent.Arguments.Single());
-            Assert.Equal(workflowRunId, payload.GetProperty("workflowRunId").GetString());
-            Assert.Equal("plan", payload.GetProperty("sessionName").GetString());
+            var wireTarget = payload.GetProperty("target");
+            Assert.Equal(workflowRunId, wireTarget.GetProperty("workflowRunId").GetString());
+            Assert.Equal("plan", wireTarget.GetProperty("sessionName").GetString());
             Assert.Equal("加个登出", payload.GetProperty("text").GetString());
 
             var tasksAfter = await GetWorkflowTaskSnapshotAsync(project.Id, issue.Number);

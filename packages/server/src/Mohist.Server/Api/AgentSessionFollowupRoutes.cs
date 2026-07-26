@@ -164,9 +164,7 @@ public static class AgentSessionFollowupRoutes
                 sessionId = target.SessionId,
                 binding,
             };
-        object payload = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
-            ? new { workflowRunId = target.WorkflowRunId, sessionName = target.SessionName, target = wireTarget, text, operationId = reservation.OperationId }
-            : new { target = wireTarget, text, operationId = reservation.OperationId };
+        object payload = new { target = wireTarget, text, operationId = reservation.OperationId };
 
         RunnerFollowupDeliveryResult? delivery;
         try

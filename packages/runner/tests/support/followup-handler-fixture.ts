@@ -177,13 +177,11 @@ export function makeFakeRuntime(): FakeRuntimeHandles {
 
 /**
  * Recording in-memory filesystem used by outbox tests. It stores the
- * latest snapshot body per path and exposes a small journal so tests
- * can drive crash / restart scenarios without touching the Node
- * filesystem adapter.
+ * latest snapshot body per path so tests can drive crash / restart
+ * scenarios without touching the Node filesystem adapter.
  */
 export class RecordingOutboxFileSystem implements RuntimeEventOutboxFileSystem {
   private readonly textStore = new Map<string, string>()
-  private readonly journal: Array<{ kind: "write" | "migrate"; path: string }> = []
   /** Set to a thunk to make the next write fail; cleared after firing. */
   public failNextWrite: ((error: Error) => void) | null = null
 
@@ -198,21 +196,10 @@ export class RecordingOutboxFileSystem implements RuntimeEventOutboxFileSystem {
       fail(new Error("injected write failure"))
     }
     this.textStore.set(path, body)
-    this.journal.push({ kind: "write", path })
-  }
-
-  async markMigrated(path: string): Promise<void> {
-    this.textStore.set(`${path}.migrated`, this.textStore.get(path) ?? "")
-    this.textStore.delete(path)
-    this.journal.push({ kind: "migrate", path })
   }
 
   body(path: string): string | null {
     return this.textStore.get(path) ?? null
-  }
-
-  getJournal(): ReadonlyArray<{ kind: "write" | "migrate"; path: string }> {
-    return this.journal
   }
 }
 
@@ -221,7 +208,6 @@ export interface BuildOutboxOptions {
   deliver?: RuntimeEventDelivery
   deliveryDelayMs?: number
   filePath?: string
-  legacyFilePath?: string | null
 }
 
 export function buildRecordingOutbox(options: BuildOutboxOptions = {}): RecordingOutbox {
@@ -233,7 +219,6 @@ export function buildRecordingOutbox(options: BuildOutboxOptions = {}): Recordin
   const bodies = new Map<string, string>()
   const deliveryDelayMs = options.deliveryDelayMs ?? 0
   const filePath = options.filePath ?? ".mohist/runner-state/runtime-events.json"
-  const legacyFilePath = options.legacyFilePath ?? ".mohist/runner-state/followup-failures.json"
   const fileSystem = options.fileSystem ?? new RecordingOutboxFileSystem()
   const customDeliver = options.deliver
   let idCounter = 0
@@ -306,7 +291,6 @@ export function buildRecordingOutbox(options: BuildOutboxOptions = {}): Recordin
       return [...records]
     },
   }
-  void legacyFilePath
   return {
     outbox,
     records: recordsProxy(records),

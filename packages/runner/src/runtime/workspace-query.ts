@@ -5,8 +5,7 @@ import { isAbsolute, relative, resolve } from "node:path"
 // dispatch put into the worktree (e.g. `mohist/run-${workflowRunId}`);
 // `baseBranch` is the upstream branch the server-side review APIs diff
 // against. `issueNumber` is preserved for log/telemetry only — it is NOT
-// used to derive a head ref. The legacy `mo/issue-${issueNumber}` branch
-// is no longer materialized and MUST NOT be used as a fallback.
+// used to derive a head ref.
 export interface WorkspaceQuery {
   workflowRunId?: string | null
   projectId?: string | null
@@ -27,8 +26,8 @@ type ResolvedWorkspaceQuery =
 // `branch` is missing — the server-side review APIs surface that as
 // `branch_missing` rather than the handler falling through to a phantom
 // ref. The resolver MUST NOT synthesize a head ref from `issueNumber`:
-// the legacy `mo/issue-${N}` worktree branch is no longer created by the
-// runner, so a phantom `mo/issue-${N}` ref would never resolve.
+// the runner only ever creates `mohist/run-${workflowRunId}` refs, so a
+// synthesized ref would never resolve.
 export function resolveWorkspaceQuery(
   query: WorkspaceQuery | null | undefined,
 ): ResolvedWorkspaceQuery | null {

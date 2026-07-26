@@ -33,21 +33,11 @@
 //     and kicks network delivery.
 //   - `stop()` cancels network and local-persistence retry timers and
 //     in-flight HTTP attempts but never deletes durable records.
-//
-// The legacy `.mohist/runner-state/followup-failures.json` v1 file
-// is imported at first load. Each entry becomes a `successful-response`
-// terminal record with deterministic ID
-// `legacy-followup-terminal:{operationId}`. The legacy file is renamed
-// to a `.migrated` sentinel only after the new snapshot is durable,
-// making the import replay-safe across crashes.
 
 import { errorMessage } from "../core/errors.js"
 import type { AgentSessionRuntimeEventReceipt } from "./connection.js"
-import type { SessionTarget } from "./session-target.js"
 
 export const RUNTIME_EVENT_OUTBOX_FILE = ".mohist/runner-state/runtime-events.json"
-export const LEGACY_FOLLOWUP_FAILURE_FILE = ".mohist/runner-state/followup-failures.json"
-const LEGACY_FOLLOWUP_FAILURE_VERSION = 1
 const RUNTIME_EVENT_OUTBOX_VERSION = 1
 const DEFAULT_DELIVERY_TIMEOUT_MS = 5_000
 const DEFAULT_RETRY_DELAY_MS = 2_000
@@ -101,7 +91,6 @@ export interface RuntimeEventEntry {
 export interface AgentSessionRuntimeEventOutboxOptions {
   readonly fileSystem?: RuntimeEventOutboxFileSystem
   readonly filePath?: string
-  readonly legacyFilePath?: string | null
   readonly deliver?: RuntimeEventDelivery
   readonly deliveryTimeoutMs?: number
   readonly retryDelayMs?: number
@@ -144,7 +133,6 @@ const defaultRuntimeEventOutboxTimer: RuntimeEventOutboxTimer = {
 export interface RuntimeEventOutboxFileSystem {
   readText(path: string): Promise<string | null>
   writeAtomicText(path: string, body: string): Promise<void>
-  markMigrated(path: string): Promise<void>
 }
 
 export interface RuntimeEventDelivery {
@@ -213,11 +201,6 @@ export class NodeRuntimeEventOutboxFileSystem implements RuntimeEventOutboxFileS
     })
     await rename(temporary, path)
   }
-
-  async markMigrated(path: string): Promise<void> {
-    const { rename } = await import("node:fs/promises")
-    await rename(path, `${path}.migrated`)
-  }
 }
 
 export function nextTemporaryFilePath(path: string): string {
@@ -235,7 +218,6 @@ let sharedSequenceCounter = 0
 
 class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutbox {
   private readonly filePath: string
-  private readonly legacyFilePath: string | null
   private readonly fileSystem: RuntimeEventOutboxFileSystem
   private readonly deliver: RuntimeEventDelivery
   private readonly deliveryTimeoutMs: number
@@ -276,7 +258,6 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.now = options.clock ?? (() => new Date())
     this.timer = options.timer ?? defaultRuntimeEventOutboxTimer
     this.filePath = options.filePath ?? RUNTIME_EVENT_OUTBOX_FILE
-    this.legacyFilePath = options.legacyFilePath ?? LEGACY_FOLLOWUP_FAILURE_FILE
   }
 
   ready(): boolean {
@@ -306,16 +287,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     }
     if (raw === null) {
       this.healthy = true
-      try {
-        await this.importLegacyFileIfPresent()
-        this.recoveryRequiresLoad = false
-      } catch (error) {
-        this.healthy = false
-        this.recoveryRequiresLoad = true
-        this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
-        this.scheduleLocalRetry()
-        return
-      }
+      this.recoveryRequiresLoad = false
       return
     }
     const snapshot = parseSnapshot(raw)
@@ -333,16 +305,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     for (const entry of snapshot.entries) this.records.set(entry.id, entry)
     this.enforceRetentionCap()
     this.healthy = true
-    try {
-      await this.importLegacyFileIfPresent()
-      this.recoveryRequiresLoad = false
-    } catch (error) {
-      this.healthy = false
-      this.recoveryRequiresLoad = true
-      this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
-      this.scheduleLocalRetry()
-      return
-    }
+    this.recoveryRequiresLoad = false
   }
 
   async enqueueBeforeExecution(
@@ -655,54 +618,6 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private requireLoaded(op: string): void {
     if (!this.loaded) throw new Error(`runtime-event outbox is not loaded; cannot ${op}`)
   }
-
-  private async importLegacyFileIfPresent(): Promise<void> {
-    if (!this.legacyFilePath) return
-    let raw: string | null
-    try {
-      raw = await this.fileSystem.readText(this.legacyFilePath)
-    } catch (error) {
-      this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
-      throw error
-    }
-    if (raw === null) return
-    const parsed = parseLegacyFailureOutbox(raw)
-    if (parsed === null) return
-    let mutated = false
-    for (const entry of parsed.entries) {
-      const id = `legacy-followup-terminal:${entry.operationId}`
-      if (this.records.has(id)) continue
-      const sequence = this.monotonicSequence()
-      const type = "session.activity"
-      const payload: Record<string, unknown> = {
-        activity: entry.status === "failed" ? "unknown" : "idle",
-        source: "followup",
-        operationId: entry.operationId,
-        runtimeSessionId: entry.runtimeSessionId,
-        completedAt: entry.completedAt,
-      }
-      if (entry.error) payload.failureReason = entry.error
-      const target = legacyTargetToRuntimeTarget(entry.target)
-      this.records.set(id, {
-        id,
-        producerFamily: target.kind === "workflow" ? "workflow-session" : "generic-followup",
-        target,
-        runtimeSessionId: entry.runtimeSessionId,
-        work: null,
-        event: { type, payload },
-        acknowledgementPolicy: "successful-response",
-        sequence,
-        enqueuedAt: this.now().toISOString(),
-      })
-      mutated = true
-    }
-    if (mutated) await this.enqueueSnapshotWrite()
-    try {
-      await this.fileSystem.markMigrated(this.legacyFilePath)
-    } catch {
-      // Already migrated or missing file — best effort.
-    }
-  }
 }
 
 interface GroupSnapshot {
@@ -890,90 +805,6 @@ function cloneInternal(record: InternalRecord): InternalRecord {
     sequence: record.sequence,
     enqueuedAt: record.enqueuedAt,
   }
-}
-
-interface LegacyFailureRecord {
-  readonly operationId: string
-  readonly target: SessionTarget
-  readonly runtimeSessionId: string
-  readonly status: "completed" | "failed"
-  readonly error: string | null
-  readonly completedAt: string
-}
-
-interface LegacyFailureOutboxShape {
-  version: number
-  entries: LegacyFailureRecord[]
-}
-
-function parseLegacyFailureOutbox(raw: string): LegacyFailureOutboxShape | null {
-  try {
-    const value = JSON.parse(raw) as unknown
-    if (!isPlainObject(value) || value["version"] !== LEGACY_FOLLOWUP_FAILURE_VERSION || !Array.isArray(value["entries"])) {
-      return null
-    }
-    const entries: LegacyFailureRecord[] = []
-    for (const item of value["entries"]) {
-      const parsed = parseLegacyRecord(item)
-      if (!parsed) return null
-      entries.push(parsed)
-    }
-    return { version: LEGACY_FOLLOWUP_FAILURE_VERSION, entries }
-  } catch {
-    return null
-  }
-}
-
-function parseLegacyRecord(value: unknown): LegacyFailureRecord | null {
-  if (!isPlainObject(value)) return null
-  const operationId = value["operationId"]
-  const target = value["target"]
-  const runtimeSessionId = value["runtimeSessionId"]
-  const status = value["status"]
-  const error = value["error"]
-  const completedAt = value["completedAt"]
-  if (typeof operationId !== "string"
-    || !isLegacySessionTarget(target)
-    || typeof runtimeSessionId !== "string"
-    || (status !== "completed" && status !== "failed")
-    || (error !== null && typeof error !== "string")
-    || typeof completedAt !== "string") {
-    return null
-  }
-  return {
-    operationId,
-    target,
-    runtimeSessionId,
-    status,
-    error,
-    completedAt,
-  }
-}
-
-function isLegacySessionTarget(value: unknown): value is SessionTarget {
-  if (!isPlainObject(value)) return false
-  if (value["kind"] === "workflow") {
-    return typeof value["projectId"] === "string"
-      && typeof value["workflowRunId"] === "string"
-      && typeof value["sessionName"] === "string"
-  }
-  if (value["kind"] === "generic") {
-    return typeof value["projectId"] === "string"
-      && typeof value["sessionId"] === "string"
-  }
-  return false
-}
-
-function legacyTargetToRuntimeTarget(target: SessionTarget): RuntimeEventTarget {
-  if (target.kind === "workflow") {
-    return {
-      kind: "workflow",
-      projectId: target.projectId,
-      workflowRunId: target.workflowRunId,
-      sessionName: target.sessionName,
-    }
-  }
-  return { kind: "generic", projectId: target.projectId, sessionId: target.sessionId }
 }
 
 async function defaultDelivery(_record: RuntimeEventRecord, _signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {

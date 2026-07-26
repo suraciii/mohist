@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest"
 import { resolveSessionTarget, type ReceiveFollowupPayload } from "../src/server/runner-signalr.js"
 
 describe("resolveSessionTarget", () => {
-  it("PrefersTargetField_WhenPresent", () => {
+  it("ResolvesTargetField", () => {
     const payload: ReceiveFollowupPayload = {
-      workflowRunId: "wr-ignored",
-      sessionName: "name-ignored",
       target: { kind: "generic", projectId: "proj-1", sessionId: "gen-1" },
       text: "x",
     }
@@ -61,21 +59,7 @@ describe("resolveSessionTarget", () => {
     expect(resolveSessionTarget(payload)).toBeNull()
   })
 
-  it("FallsBackToLegacyWorkflowTopLevelFields_WhenNoTarget", () => {
-    const payload: ReceiveFollowupPayload = {
-      workflowRunId: "wr-1",
-      sessionName: "work-1",
-      text: "x",
-    }
-    expect(resolveSessionTarget(payload)).toEqual({
-      kind: "workflow",
-      projectId: "",
-      workflowRunId: "wr-1",
-      sessionName: "work-1",
-    })
-  })
-
-  it("ReturnsNull_WhenNoTargetAndNoLegacyFields", () => {
+  it("ReturnsNull_WhenNoTarget", () => {
     const payload: ReceiveFollowupPayload = { text: "x" }
     expect(resolveSessionTarget(payload)).toBeNull()
   })

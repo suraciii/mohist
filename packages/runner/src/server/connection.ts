@@ -45,13 +45,8 @@ export class ServerConnection {
     })
     if (response.status === 204) return []
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
-    const payload = (await response.json()) as { dispatches?: WorkDispatchResponse[] } | WorkDispatchResponse
-    // Tolerate both the new envelope `{ dispatches: [...] }` and a legacy
-    // single-object response during a rolling update.
-    const list = Array.isArray(payload) ? payload
-      : "dispatches" in payload && Array.isArray(payload.dispatches) ? payload.dispatches
-      : [payload as WorkDispatchResponse]
-    return list.map(parseDispatchWorkItem)
+    const payload = (await response.json()) as { dispatches?: WorkDispatchResponse[] }
+    return (payload.dispatches ?? []).map(parseDispatchWorkItem)
   }
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
