@@ -34,6 +34,18 @@ public class MohistOpenTelemetryRegistrationSpecs
     }
 
     [Fact]
+    public void MissingEnablement_RegistersOpenTelemetryServices()
+    {
+        var config = new ConfigurationBuilder().Build();
+
+        var services = new ServiceCollection();
+        services.AddMohistOpenTelemetry(config);
+
+        Assert.Contains(services, d => d.ImplementationType?.FullName == "OpenTelemetry.Extensions.Hosting.Implementation.TelemetryHostedService");
+        Assert.Contains(services, d => d.ServiceType.FullName == "OpenTelemetry.Trace.TracerProvider");
+    }
+
+    [Fact]
     public void Disabled_ActivityCapturedByProcessorIsZero_NoPipelineExists()
     {
         // The master switch must guarantee no tracer provider was ever

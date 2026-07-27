@@ -68,10 +68,10 @@ public sealed class OtelOptions
     /// <summary>
     /// Master switch for the entire OTel subsystem. When <c>false</c> the
     /// OTLP port is not bound and <c>/otel/api/*</c> routes are not
-    /// registered. Defaults to <c>false</c> until the collector's resource
-    /// limits and degradation reporting are complete.
+    /// registered. Built-in observability is enabled unless explicitly
+    /// disabled.
     /// </summary>
-    public bool Enabled { get; set; }
+    public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// Maximum age a Trace may remain in the observation store before the

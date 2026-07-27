@@ -10,6 +10,19 @@ namespace Mohist.Server.UnitTests.Telemetry;
 public sealed class OtelStatusDtoTests
 {
     [Fact]
+    public void DefaultOptions_StatusIsNeverOff()
+    {
+        var since = new DateTimeOffset(2026, 7, 23, 12, 0, 0, TimeSpan.Zero);
+        var runtime = new RuntimeObservability(
+            new OtelOptions(),
+            new RuntimeEpoch(since),
+            new FakeTimeProvider(since));
+
+        Assert.NotEqual("off", runtime.GetSnapshot().StatusName);
+        runtime.Dispose();
+    }
+
+    [Fact]
     public void OffSnapshot_PreservesNullableFieldsAndFixedBudget()
     {
         var since = new DateTimeOffset(2026, 7, 23, 12, 0, 0, TimeSpan.Zero);

@@ -43,16 +43,13 @@ public sealed class MohistHostFactory : IMohistHostFactory
     {
         ArgumentNullException.ThrowIfNull(epoch);
         var configuration = (_primaryBuilder ?? throw new InvalidOperationException("Primary builder has already been consumed.")).Configuration;
-        var enabled = configuration.GetValue<bool>("Mohist:Otel:Enabled");
-        var bindHost = configuration["Mohist:Otel:BindHost"];
-        if (string.IsNullOrWhiteSpace(bindHost))
-            bindHost = "localhost";
-        var portValue = configuration["Mohist:Otel:Port"];
-        var port = int.TryParse(portValue, out var parsedPort)
-            ? parsedPort
-            : Mohist.Server.Otel.OtelOptions.DefaultPort;
+        var otelOptions = configuration
+            .GetSection(Mohist.Server.Otel.OtelOptions.SectionName)
+            .Get<Mohist.Server.Otel.OtelOptions>()
+            ?? new Mohist.Server.Otel.OtelOptions();
+        var enabled = otelOptions.Enabled;
         var listenerIntent = enabled
-            ? new OtelListenerIntent(bindHost, port)
+            ? new OtelListenerIntent(otelOptions.BindHost, otelOptions.Port)
             : null;
         return MohistHostPlan.Primary(epoch, enabled, listenerIntent);
     }

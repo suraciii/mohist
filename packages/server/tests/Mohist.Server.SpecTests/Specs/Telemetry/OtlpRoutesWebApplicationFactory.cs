@@ -41,6 +41,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     private readonly OtelDb _otelDb;
     private readonly int _siloPort;
     private readonly int _gatewayPort;
+    private readonly bool? _otelEnabled;
 
     public int OtlpPort { get; }
     public FakeOtelQueryExecutor FakeQueryExecutor => Services.GetRequiredService<FakeOtelQueryExecutor>();
@@ -52,7 +53,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         string systemUpdateStatePath,
         int otlpPort = 4318,
         int? siloPort = null,
-        int? gatewayPort = null)
+        int? gatewayPort = null,
+        bool? otelEnabled = null)
     {
         _connectionString = connectionString;
         _runnerRoot = runnerRoot;
@@ -60,6 +62,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         OtlpPort = otlpPort;
         _siloPort = siloPort ?? EndpointOptions.DEFAULT_SILO_PORT;
         _gatewayPort = gatewayPort ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
+        _otelEnabled = otelEnabled;
         (_otelDb, _otelKeeper) = InMemoryOtelDb.Create();
     }
 
@@ -73,24 +76,22 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
         builder.UseSetting("Mohist:ArtifactStorage:Root", "/mohist-tests/otel/artifacts");
-        builder.UseSetting("Mohist:Otel:Enabled", "false");
+        if (_otelEnabled is { } otelEnabled)
+            builder.UseSetting("Mohist:Otel:Enabled", otelEnabled ? "true" : "false");
         builder.UseSetting("Mohist:Otel:Port", OtlpPort.ToString());
-        builder.UseSetting("Mohist:Otel:Enabled", "true");
         builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:3456");
         builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.UseSetting("Mohist:Silo:GatewayPort", _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
-            config.AddInMemoryCollection(new Dictionary<string, string?>
+            var values = new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = "/mohist-tests/otel/artifacts",
-                ["Mohist:Otel:Enabled"] = "false",
                 ["Mohist:Otel:Port"] = OtlpPort.ToString(),
-                ["Mohist:Otel:Enabled"] = "true",
                 ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
@@ -98,7 +99,10 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
                 ["Mohist:AgentJob:JobTimeout"] = "00:00:08",
                 ["Mohist:Notifications:Hermes:WebhookUrl"] = null,
-            });
+            };
+            if (_otelEnabled is { } otelEnabled)
+                values["Mohist:Otel:Enabled"] = otelEnabled ? "true" : "false";
+            config.AddInMemoryCollection(values);
         });
 
         builder.ConfigureTestServices(services =>
@@ -127,7 +131,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                     .UseSqlite(_connectionString));
             services.RemoveAll<OtelDb>();
             services.AddSingleton(_otelDb);
-            services.PostConfigure<OtelOptions>(options => options.Enabled = true);
             services.RemoveAll<TimeProvider>();
             TimeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 7, 21, 0, 0, 0, TimeSpan.Zero));
             services.AddSingleton<TimeProvider>(TimeProvider);

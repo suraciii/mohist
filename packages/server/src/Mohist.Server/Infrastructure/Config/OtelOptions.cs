@@ -31,12 +31,11 @@ public sealed class OtelOptions
 
     /// <summary>
     /// Master switch for the entire OpenTelemetry tracing capability.
-    /// Defaults to <c>false</c> until the local collector's resource limits
-    /// and degradation reporting are complete. Set to <c>true</c> in
-    /// <c>~/.mohist/config.jsonc</c> or via <c>MOHIST__Otel__Enabled=true</c>
-    /// to opt in.
+    /// Built-in observability is enabled unless explicitly disabled in
+    /// <c>~/.mohist/config.jsonc</c> or via
+    /// <c>MOHIST__Otel__Enabled=false</c>.
     /// </summary>
-    public bool Enabled { get; set; }
+    public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// OTLP HTTP endpoint the trace exporter posts to. Overridable via

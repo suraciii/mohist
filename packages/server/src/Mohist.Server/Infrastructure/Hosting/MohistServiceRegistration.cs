@@ -170,6 +170,10 @@ public static class MohistServiceRegistration
         services.TryAddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName));
         services.Configure<CleanupPolicyOptions>(configuration.GetSection(CleanupPolicyOptions.SectionName));
+        var otelOptions = configuration
+            .GetSection(Mohist.Server.Otel.OtelOptions.SectionName)
+            .Get<Mohist.Server.Otel.OtelOptions>()
+            ?? new Mohist.Server.Otel.OtelOptions();
         services.Configure<Mohist.Server.Otel.OtelOptions>(configuration.GetSection(Mohist.Server.Otel.OtelOptions.SectionName));
         services.PostConfigure<Mohist.Server.Otel.OtelOptions>(options =>
         {
@@ -208,7 +212,8 @@ public static class MohistServiceRegistration
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelStorageRecoveryMaintenance>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelRetentionMaintenance>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IOtelMaintenanceCallback, OtelStorageMaintenance>());
-        services.AddHostedService<OtelDiagnosticsSampler>();
+        if (otelOptions.Enabled)
+            services.AddHostedService<OtelDiagnosticsSampler>();
         services.AddSingleton<OtelCollectorStatus>();
         services.AddSingleton<IIngestProtectionDecision, BudgetAwareIngestProtectionDecision>();
         services.AddSingleton<OtlpTraceResponseWriter>();
