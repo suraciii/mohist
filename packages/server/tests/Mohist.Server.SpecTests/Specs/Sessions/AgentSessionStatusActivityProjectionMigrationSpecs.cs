@@ -9,7 +9,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 /// <summary>
-/// Issue-467 T-001: assert the STORED <c>Activity</c> projection and
+/// Issue-467 T-001: assert the VIRTUAL <c>Activity</c> projection and
 /// the matching <c>IX_AgentSessions_StatusProject_SourceKind_Activity_CreatedAt</c>
 /// composite index from
 /// <c>20260726111353_AddAgentSessionStatusActivityProjection</c> land
@@ -26,7 +26,7 @@ public class AgentSessionStatusActivityProjectionMigrationSpecs
     private const string MigrationName = "20260726111353_AddAgentSessionStatusActivityProjection";
 
     [Fact]
-    public async Task Up_AddsStoredActivityComputedColumnDerivedFromStateJson()
+    public async Task Up_AddsVirtualActivityComputedColumnDerivedFromStateJson()
     {
         await using var database = CreateDatabase();
         await using var context = database.CreateDbContext();
@@ -36,6 +36,7 @@ public class AgentSessionStatusActivityProjectionMigrationSpecs
 
         var columns = await ReadColumnNamesAsync(context, "AgentSessions");
         Assert.Contains("Activity", columns);
+        Assert.Equal(2, await ReadColumnHiddenFlagAsync(context, "AgentSessions", "Activity"));
     }
 
     [Fact]
@@ -100,7 +101,7 @@ public class AgentSessionStatusActivityProjectionMigrationSpecs
 
         await using var read = database.CreateDbContext();
         var row = await read.AgentSessions.AsNoTracking().SingleAsync(r => r.Id == "s_status_activity");
-        // STORED projection LOWERs the activity value, matching the
+        // VIRTUAL projection LOWERs the activity value, matching the
         // existing Status column convention.
         Assert.Equal("active", row.Activity);
     }
@@ -119,6 +120,20 @@ public class AgentSessionStatusActivityProjectionMigrationSpecs
             result.Add(reader.GetString(0));
         }
         return result;
+    }
+
+    private static async Task<int> ReadColumnHiddenFlagAsync(
+        MohistDbContext context, string tableName, string columnName)
+    {
+        var connection = context.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT hidden FROM pragma_table_xinfo('{tableName}') WHERE name = $column";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "$column";
+        parameter.Value = columnName;
+        command.Parameters.Add(parameter);
+
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
     private static async Task<IDictionary<string, string[]>> ReadIndexesAsync(
