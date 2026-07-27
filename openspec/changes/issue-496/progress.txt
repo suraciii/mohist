@@ -41,3 +41,10 @@
 - Web transcript projections read terminal status from `session.activity`: completed remains routine, while failed, timeout, and cancelled entries retain failure attention and detail. The typed live-event contract includes the terminal fields.
 - Restored `mohist/local` verify timeout and its profile definition assertion to 300000 ms, preserving the repository five-minute CI-job budget.
 - Verification: Web typecheck, 5141 Web tests (one skipped), FSD boundary check, Runner typecheck, and 1427 Runner tests pass. Full Server SpecTests run the new routed-feed coverage successfully but repeatedly hit the pre-existing `AgentJobGrainSpecs.SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch` dispatch race (3257/3258); no issue-496 test failed in the final run.
+
+## Review fixes (terminal durability)
+
+- `AppendTerminalCloseAsync` now synchronously flushes the terminal `session.activity` before acknowledging an AgentJob delivery. A failed transcript write throws to the AgentJob, so its durable `PendingSessionClose` stays available for reminder, activation, or report-replay retry. Superseded-runtime closes remain acknowledged without a write.
+- Terminal activity payloads now retain `recordedAt` from the AgentJob's authoritative terminal timestamp. Routed Issue-feed coverage asserts that timestamp is exposed alongside the existing failure context.
+- Added `AgentJobTerminalTranscriptPersistenceSpecs` to verify a failed terminal transcript write preserves the pending close, and a report replay persists exactly one canonical terminal activity before clearing the obligation. The oversized terminal-delivery test was split to keep all C# spec files within the 24KB ratchet.
+- Verification: `dotnet test packages/server/tests/Mohist.Server.ArchTests` passes 33/33. `npm test` passes definition (175), CLI (1432), unit (1527), and architecture (33) suites; SpecTests run the new coverage but again hit the documented pre-existing `AgentJobGrainSpecs.SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch` dispatch race (3258/3259).
