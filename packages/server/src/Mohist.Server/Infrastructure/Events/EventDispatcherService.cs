@@ -25,7 +25,7 @@ public sealed class EventDispatcherService
         TimeProvider time,
         IOptions<EventDispatcherOptions> options,
         ILogger<EventDispatcherService> log,
-        IEventPushQueue? pushQueue = null)
+        IEventPushQueue pushQueue)
     {
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _subscriptions = (subscriptions ?? throw new ArgumentNullException(nameof(subscriptions))).ToList();
@@ -33,7 +33,7 @@ public sealed class EventDispatcherService
         _time = time ?? throw new ArgumentNullException(nameof(time));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _log = log;
-        _pushQueue = pushQueue ?? NullEventPushQueue.Instance;
+        _pushQueue = pushQueue ?? throw new ArgumentNullException(nameof(pushQueue));
 
         if (_options.BatchSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(options), "BatchSize must be positive");

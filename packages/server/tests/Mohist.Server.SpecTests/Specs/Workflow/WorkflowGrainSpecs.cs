@@ -67,7 +67,8 @@ public abstract class WorkflowGrainSpecs
                 promptLoader,
                 new PromptTemplateEngine(),
                 WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-                new Mohist.Server.Workflow.Services.WorkflowRunProfileManager(factory)),
+                new Mohist.Server.Workflow.Services.WorkflowRunProfileManager(factory),
+                new Mohist.Server.Workflow.Services.WorkflowProfileProvider(factory, NullActionCatalogSource.Instance)),
             new WorkflowArtifactQuerier(factory));
     }
 

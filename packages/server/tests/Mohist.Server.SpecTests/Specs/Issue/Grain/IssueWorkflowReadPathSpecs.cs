@@ -196,7 +196,8 @@ public class IssueWorkflowReadPathSpecs
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<TimeProvider>(),
-            services.GetRequiredService<ILogger<IssueGrain>>());
+            services.GetRequiredService<ILogger<IssueGrain>>(),
+            new FakeWorkflowProfileProvider());
     }
 
     private static async Task SeedIssueAsync(
@@ -285,7 +286,7 @@ public class IssueWorkflowReadPathSpecs
             IGrainFactory grainFactory,
             ILogger<IssueStore> log)
         {
-            _delegate = new IssueStore(dbFactory, new NoopEventStore(), grainFactory, log);
+            _delegate = new IssueStore(dbFactory, new NoopEventStore(), grainFactory, log, NoopBackgroundTaskLauncher.Instance);
         }
 
         public IReadOnlyList<string> SaveCalls => _saveCalls;

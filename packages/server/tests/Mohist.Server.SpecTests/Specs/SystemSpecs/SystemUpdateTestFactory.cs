@@ -99,7 +99,8 @@ internal static class SystemUpdateTestFactory
             configuration,
             managedAssets ?? new InMemoryManagedAssetCatalog(),
             NullLogger<SystemUpdateService>.Instance,
-            time);
+            time,
+            NoopBackgroundTaskLauncher.Instance);
         return (service, time);
     }
 

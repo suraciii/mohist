@@ -33,7 +33,8 @@ public class EventDispatcherConcurrencyTests
             deadLetters,
             new FakeTimeProvider(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero)),
             Options.Create(new EventDispatcherOptions()),
-            NullLogger<EventDispatcherService>.Instance);
+            NullLogger<EventDispatcherService>.Instance,
+            NullEventPushQueue.Instance);
         events.Enqueue(FakeEventStore.Build("test.event", "/test/source"));
 
         var firstDispatch = dispatcher.DispatchAsync(CancellationToken.None);

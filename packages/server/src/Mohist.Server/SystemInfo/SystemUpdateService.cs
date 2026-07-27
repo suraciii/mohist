@@ -40,7 +40,7 @@ public sealed class SystemUpdateService : ISingletonService
         IManagedAssetCatalog managedAssets,
         ILogger<SystemUpdateService> logger,
         TimeProvider time,
-        IBackgroundTaskLauncher? backgroundTasks = null)
+        IBackgroundTaskLauncher backgroundTasks)
     {
         _getSystemInfo = getSystemInfo;
         _store = store;
@@ -50,7 +50,7 @@ public sealed class SystemUpdateService : ISingletonService
         _managedAssets = managedAssets;
         _logger = logger;
         _time = time;
-        _backgroundTasks = backgroundTasks ?? new BackgroundTaskLauncher();
+        _backgroundTasks = backgroundTasks;
     }
 
     public async Task<(bool Started, string? Error, string? Code, SystemUpdateStatusResponse? Status)> StartAsync(SystemUpdateRequest request, CancellationToken cancellationToken = default)

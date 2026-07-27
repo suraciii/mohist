@@ -126,7 +126,8 @@ public static class WorkflowGrainTestHelpers
                 promptLoader,
                 new PromptTemplateEngine(),
                 CreateEmptyConfigService(),
-                new WorkflowRunProfileManager(factory)),
+                new WorkflowRunProfileManager(factory),
+                new FakeWorkflowProfileProvider()),
             new WorkflowArtifactQuerier(factory));
     }
 

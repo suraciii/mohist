@@ -206,7 +206,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     private IssueStore CreateStore(IEventStore events) =>
-        new(_dbFactory, events, _grainFactory, NullLogger<IssueStore>.Instance);
+        new(_dbFactory, events, _grainFactory, NullLogger<IssueStore>.Instance, NoopBackgroundTaskLauncher.Instance);
 
     private static string Key(int number) => GrainKey.Issue(new IssueKey(ProjectId, number));
 

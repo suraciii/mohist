@@ -30,7 +30,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
 {
     private readonly IPersistentState<WorkflowProfileCoordinatorState> _state;
     private readonly IGrainFactory _grains;
-    private readonly IWorkflowProfileProvider? _provider;
+    private readonly IWorkflowProfileProvider _provider;
     private readonly WorkflowProfileDeletionBlockerQuery? _blockerQuery;
     private readonly ILogger<WorkflowProfileReferenceCoordinatorGrain> _log;
 
@@ -38,7 +38,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         [PersistentState("workflow-profile-coordinator")] IPersistentState<WorkflowProfileCoordinatorState> state,
         IGrainFactory grains,
         ILogger<WorkflowProfileReferenceCoordinatorGrain> log,
-        IWorkflowProfileProvider? provider = null,
+        IWorkflowProfileProvider provider,
         WorkflowProfileDeletionBlockerQuery? blockerQuery = null)
     {
         _state = state;
@@ -77,7 +77,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("commandId is required", nameof(commandId));
 
-        if (_provider is not null && !await _provider.ContainsAsync(payload.ProjectId, payload.ProfileId))
+        if (!await _provider.ContainsAsync(payload.ProjectId, payload.ProfileId))
         {
             return new WorkflowProfileReferenceResult(
                 WorkflowProfileReferenceResultCode.ProfileUnknown,
@@ -114,7 +114,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("commandId is required", nameof(commandId));
 
-        if (_provider is not null && !await _provider.ContainsAsync(payload.ProjectId, payload.ProfileId))
+        if (!await _provider.ContainsAsync(payload.ProjectId, payload.ProfileId))
         {
             return new WorkflowProfileReferenceResult(
                 WorkflowProfileReferenceResultCode.ProfileUnknown,
@@ -185,8 +185,6 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
 
         try
         {
-            if (_provider is null)
-                throw new InvalidOperationException("WorkflowProfileProvider is unavailable");
             var deleted = await _provider.DeleteAsync(payload.ProjectId, payload.ProfileId);
             await ClearFenceAsync(commandId);
             return new WorkflowProfileReferenceResult(
@@ -287,8 +285,6 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
                 case WorkflowProfileCommandPayloadKinds.DeleteProfile:
                 {
                     var p = (WorkflowProfileCommandPayload.DeleteProfile)payload;
-                    if (_provider is null)
-                        throw new InvalidOperationException("WorkflowProfileProvider is unavailable");
                     await _provider.DeleteAsync(p.ProjectId, p.ProfileId);
                     break;
                 }

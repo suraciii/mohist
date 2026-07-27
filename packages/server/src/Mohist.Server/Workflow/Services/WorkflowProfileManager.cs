@@ -32,7 +32,7 @@ public class WorkflowProfileManager : IScopedService
     private readonly PromptTemplateEngine _engine;
     private readonly ConfigService _configService;
     private readonly WorkflowRunProfileManager _runProfileManager;
-    private readonly IWorkflowProfileProvider? _profileProvider;
+    private readonly IWorkflowProfileProvider _profileProvider;
 
     public WorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
@@ -40,7 +40,7 @@ public class WorkflowProfileManager : IScopedService
         PromptTemplateEngine engine,
         ConfigService configService,
         WorkflowRunProfileManager runProfileManager,
-        IWorkflowProfileProvider? profileProvider = null)
+        IWorkflowProfileProvider profileProvider)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
@@ -63,8 +63,7 @@ public class WorkflowProfileManager : IScopedService
             resolvedContext.RunExists);
 
         var boundProfileId = await LoadBoundProfileIdAsync(db, runId);
-        if (_profileProvider is not null
-            && !string.IsNullOrWhiteSpace(boundProfileId)
+        if (!string.IsNullOrWhiteSpace(boundProfileId)
             && !string.IsNullOrWhiteSpace(context.ProjectId))
         {
             var definition = await _profileProvider.GetDefinitionAsync(context.ProjectId!, boundProfileId!);
@@ -184,11 +183,9 @@ public class WorkflowProfileManager : IScopedService
         string? projectId,
         int? issueNumber)
     {
-        if (_profileProvider is null || string.IsNullOrWhiteSpace(projectId))
-        {
-            var legacy = await LoadStructureAsync(runId, projectId, issueNumber);
-            return legacy with { Id = string.Empty };
-        }
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new InvalidOperationException(
+                $"Workflow '{runId}' has no project context for profile startup resolution");
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var issueSelection = issueNumber is > 0
@@ -434,9 +431,10 @@ public class WorkflowProfileManager : IScopedService
 
     private async Task<ResolvedTemplate> LoadBoundTemplateAsync(string runId, string profileId, string? projectId)
     {
-        if (_profileProvider is null || string.IsNullOrWhiteSpace(projectId))
-            return await LoadTemplateAsync(runId, projectId);
-        var definition = await _profileProvider.GetDefinitionAsync(projectId!, profileId);
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new InvalidOperationException(
+                $"Workflow '{runId}' has no project context for bound Profile '{profileId}'");
+        var definition = await _profileProvider.GetDefinitionAsync(projectId, profileId);
         if (definition is null)
             throw new InvalidOperationException($"Workflow '{runId}' has no current definition for bound Profile '{profileId}'");
         return ResolvedTemplate.FromProfile(new WorkflowProfile(profileId, profileId, string.Empty, definition));

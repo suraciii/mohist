@@ -241,6 +241,7 @@ public class IssueCommentEventSpecs
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<TimeProvider>(),
-            services.GetRequiredService<ILogger<IssueGrain>>());
+            services.GetRequiredService<ILogger<IssueGrain>>(),
+            new FakeWorkflowProfileProvider());
     }
 }

@@ -172,7 +172,7 @@ public class EventDispatcherImmediateTriggerSpecs
                 scope.ServiceProvider.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<Mohist.Server.Infrastructure.Data.Db.MohistDbContext>>(),
                 _fixture.EventStore,
                 brokenFactory,
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<WorkflowRunStore>.Instance);
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
             var run = BuildRun($"wr_lost_poke_{Guid.NewGuid():N}", eventId, issueId);
             await runStore.SaveAsync(run, [new WorkflowRunCompleted()]);
         }

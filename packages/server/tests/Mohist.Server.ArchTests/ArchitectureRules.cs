@@ -573,6 +573,98 @@ public class ArchitectureRules
             "Offenders: " + string.Join(", ", offenders));
     }
 
+    // issue-500 T-002: the production composition root always registers
+    // IWorkflowProfileProvider, IEventPushQueue, IBackgroundTaskLauncher,
+    // IAgentJobStore, and IAgentJobDispatchObserver, so the audited
+    // consumers MUST declare each of these as a required (non-nullable)
+    // dependency. A `IFoo? = null` parameter (or a null-coalescing
+    // fallback inside the constructor body) re-introduces an
+    // absent-collaborator branch the cluster never executes in
+    // production. Tests that need to construct these components
+    // directly MUST supply an explicit fake named
+    // (NoopBackgroundTaskLauncher.Instance, NullEventPushQueue.Instance,
+    // NoopAgentJobDispatchObserver.Instance, FakeWorkflowProfileProvider, …).
+    // The scanned constructors list reflects the 2026-07 production
+    // audit; new audited consumers must be added here so the guard
+    // covers them.
+    [Fact]
+    public void AuditedConsumers_DoNotReintroduceNullableRequiredCollaborators()
+    {
+        var providerType = typeof(Mohist.Server.Workflow.Services.IWorkflowProfileProvider);
+        var pushQueueType = typeof(Mohist.Server.Infrastructure.Events.IEventPushQueue);
+        var backgroundLauncherType = typeof(Mohist.Server.Infrastructure.IBackgroundTaskLauncher);
+        var agentJobStoreType = typeof(Mohist.Server.Infrastructure.Data.AgentJobs.IAgentJobStore);
+        var agentJobObserverType = typeof(Mohist.Server.Agent.Grains.IAgentJobDispatchObserver);
+
+        var auditedConsumers = new[]
+        {
+            // IWorkflowProfileProvider — Issue grain, WorkflowProfileManager,
+            // coordinator grains that own a binding-or-deletion probe.
+            typeof(Mohist.Server.Issue.Grains.IssueGrain),
+            typeof(Mohist.Server.Workflow.Services.WorkflowProfileManager),
+            typeof(Mohist.Server.Workflow.Grains.WorkflowProfileReferenceCoordinatorGrain),
+            typeof(Mohist.Server.Workflow.Grains.Coordinator.ProjectWorkflowProfileBindingParticipantProxy),
+            // IEventPushQueue — the dispatcher service. Composition selects
+            // EventPushQueue or NullEventPushQueue; no nullable fallback.
+            typeof(Mohist.Server.Infrastructure.Events.EventDispatcherService),
+            // IBackgroundTaskLauncher — required background-task sink.
+            typeof(Mohist.Server.Infrastructure.Data.Workflow.WorkflowRunStore),
+            typeof(Mohist.Server.Infrastructure.Data.Issue.IssueStore),
+            typeof(Mohist.Server.Infrastructure.Data.Sessions.AgentSessionStore),
+            typeof(Mohist.Server.SystemInfo.SystemUpdateService),
+            typeof(Mohist.Server.Notifications.BackgroundHermesIssueNotificationDispatcher),
+            // IAgentJobStore / IAgentJobDispatchObserver — AgentJob grain.
+            typeof(Mohist.Server.Agent.Grains.AgentJobGrain),
+        };
+
+        var auditedTypes = new[]
+        {
+            providerType,
+            pushQueueType,
+            backgroundLauncherType,
+            agentJobStoreType,
+            agentJobObserverType,
+        };
+
+        var offenders = new List<string>();
+        var nullabilityContext = new System.Reflection.NullabilityInfoContext();
+
+        foreach (var consumer in auditedConsumers)
+        {
+            var constructors = consumer.GetConstructors(
+                System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Instance);
+
+            foreach (var ctor in constructors)
+            {
+                foreach (var parameter in ctor.GetParameters())
+                {
+                    if (!auditedTypes.Contains(parameter.ParameterType))
+                        continue;
+
+                    var info = nullabilityContext.Create(parameter);
+                    if (info.WriteState != System.Reflection.NullabilityState.Nullable)
+                        continue;
+
+                    var declaringType = ctor.DeclaringType?.FullName ?? consumer.FullName;
+                    var parameterTypeName = parameter.ParameterType.FullName ?? parameter.ParameterType.Name;
+                    offenders.Add(
+                        $"{declaringType}.{ctor.Name}: parameter '{parameter.Name}' of type '{parameterTypeName}' is nullable; " +
+                        "the audited collaborator is registered by the production composition root and must be required.");
+                }
+            }
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            "Audited collaborators (IWorkflowProfileProvider, IEventPushQueue, " +
+            "IBackgroundTaskLauncher, IAgentJobStore, IAgentJobDispatchObserver) " +
+            "MUST be required dependencies for the consumers listed in " +
+            "AuditedConsumers_DoNotReintroduceNullableRequiredCollaborators. " +
+            "Offenders: " + string.Join("; ", offenders));
+    }
+
     [Fact]
     public void Api_ShouldNotDependOnOrleans()
     {

@@ -185,7 +185,8 @@ public class IssueGrainEventSaveFailureSpecs
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<TimeProvider>(),
-            services.GetRequiredService<ILogger<IssueGrain>>());
+            services.GetRequiredService<ILogger<IssueGrain>>(),
+            new FakeWorkflowProfileProvider());
     }
 
     private static async Task SeedIssueAsync(
@@ -232,7 +233,8 @@ public class IssueGrainEventSaveFailureSpecs
                 scopeFactory.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
                 scopeFactory.GetRequiredService<IEventStore>(),
                 scopeFactory.GetRequiredService<IGrainFactory>(),
-                scopeFactory.GetRequiredService<ILoggerFactory>().CreateLogger<IssueStore>());
+                scopeFactory.GetRequiredService<ILoggerFactory>().CreateLogger<IssueStore>(),
+                NoopBackgroundTaskLauncher.Instance);
             _eventsSaveFailures = failEventsSaveOnce ? 1 : 0;
         }
 

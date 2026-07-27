@@ -58,7 +58,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_CommitsStateAndLifecycleEventRowsTogether()
     {
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_ok");
 
         await store.SaveAsync(session.Id, session, [
@@ -79,7 +79,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_EventRowWriteFailure_RollsBackStateAndEvents_AndDoesNotSwallow()
     {
-        var store = new AgentSessionStore(_dbFactory, new AgentSessionTransactionalThrowingEventStore(), _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, new AgentSessionTransactionalThrowingEventStore(), _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_fail");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -97,7 +97,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_CrashAfterCommit_LifecycleEventRowsRemainDurableOnFreshDbContext()
     {
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_crash");
 
         await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("runtime-1", null)]);
@@ -120,7 +120,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_StampsSourceAndSubjectOnEveryLifecycleEnvelope()
     {
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_identity");
 
         await store.SaveAsync(session.Id, session, [
@@ -153,7 +153,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         // sessionid, and agentid on every agent-session.* envelope. The
         // stamp source is the session's own Metadata.Labels — no
         // cross-aggregate query.
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_agent_launch", BuildAgentLaunchLabels(
             projectId: "proj_agent_launch",
             agentId: "agent_lineage_1"));
@@ -180,7 +180,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_AgentLaunchSessionWithLocalContext_StampsIssueAndEpicLineage()
     {
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_agent_launch_issue", BuildAgentLaunchLabels(
             projectId: "proj_agent_launch",
             agentId: "agent_lineage_1",
@@ -212,7 +212,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         // issue number, workflow run id, and stage name additionally
         // stamps issue, workflowrunid, and stage — but never agentid,
         // which is reserved for agent-launch sessions.
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_workflow", BuildWorkflowOriginLabels(
             projectId: "proj_workflow_origin",
             workflowRunId: "wr_lineage_42",
@@ -250,7 +250,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_WorkflowOriginSession_StampsEpicFromLocalMetadata()
     {
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_workflow_epic", BuildWorkflowOriginLabels(
             projectId: "proj_workflow_origin",
             workflowRunId: "wr_lineage_42",
@@ -281,7 +281,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         // T-005 / D6: absent affiliation is omitted, never an empty
         // value. A workflow session whose labels lack the issue-number
         // label does NOT stamp `issue` (the key is entirely absent).
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_workflow_no_issue", BuildWorkflowOriginLabels(
             projectId: "proj_workflow_no_issue",
             workflowRunId: "wr_no_issue",
@@ -312,7 +312,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         // carries no project-id label) does NOT stamp projectid.
         // sessionid is still stamped from the session's own id; absent
         // affiliation is omitted, never an empty value.
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_no_project", new AgentSessionMetadata());
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -326,7 +326,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     {
         // Drives both an agent-launch and a workflow-origin session through
         // the production path. Each producer stamps its own session context.
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
 
         var agentLaunch = BuildSession("agent_txn_conformance_agent", BuildAgentLaunchLabels(
             projectId: "proj_conf_agent",
@@ -364,7 +364,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_NoEvents_StillCommitsStateRow()
     {
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_state_only", new AgentSessionMetadata());
 
         await store.SaveAsync(session.Id, session, []);
@@ -377,7 +377,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_OnlyNullEventsWithoutProjectLabel_StillCommitsStateRow()
     {
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_state_only_no_project", new AgentSessionMetadata());
 
         await store.SaveAsync(session.Id, session, [null!]);
@@ -394,7 +394,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         // still exist for callers that haven't recorded any domain
         // events (e.g. an OpenAsync that does not transition). It
         // continues to commit the state row cleanly.
-        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var session = BuildSession("agent_txn_no_events_path");
 
         await store.SaveAsync(session.Id, session);

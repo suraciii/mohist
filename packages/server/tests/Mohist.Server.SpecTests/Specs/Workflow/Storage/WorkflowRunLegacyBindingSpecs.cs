@@ -19,7 +19,8 @@ public sealed class WorkflowRunLegacyBindingSpecs
             factory,
             new EventStore(factory, NullLogger<EventStore>.Instance),
             new NullEventDispatchGrainFactory(),
-            NullLogger<WorkflowRunStore>.Instance);
+            NullLogger<WorkflowRunStore>.Instance,
+            NoopBackgroundTaskLauncher.Instance);
 
         await using (var db = factory.CreateDbContext())
         {

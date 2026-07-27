@@ -290,8 +290,9 @@ internal static class InboxProjectionTestSupport
                     factory,
                     new NoopEventStore(),
                     new NullDispatchGrainFactory(),
-                    NullLogger<WorkflowRunStore>.Instance));
-                services.AddScoped<IIssueStore>(sp => new IssueStore(factory, new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<IssueStore>.Instance));
+                    NullLogger<WorkflowRunStore>.Instance,
+                    NoopBackgroundTaskLauncher.Instance));
+                services.AddScoped<IIssueStore>(sp => new IssueStore(factory, new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<IssueStore>.Instance, NoopBackgroundTaskLauncher.Instance));
                 services.AddScoped<IStateStore<DomainIssue>>(sp => sp.GetRequiredService<IIssueStore>());
                 configureServices?.Invoke(services);
                 return services.BuildServiceProvider();

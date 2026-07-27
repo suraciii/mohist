@@ -39,7 +39,7 @@ public class WorkflowRunStoreSpecs
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
-        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
 
         var run = new WorkflowRun
         {
@@ -75,7 +75,7 @@ public class WorkflowRunStoreSpecs
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
-        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
 
         var run = CreateRun("wr_owned_lineage", epicNumber: 2);
         await store.SaveAsync(run, [new WorkflowRunStarted()]);
@@ -90,7 +90,7 @@ public class WorkflowRunStoreSpecs
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
-        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var run = CreateRun("wr_terminal_insert", epicNumber: null);
         run.Status = WorkflowRunStatus.Completed;
         run.WorkflowProfileId = "delivery/review";
@@ -108,7 +108,7 @@ public class WorkflowRunStoreSpecs
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
-        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var run = CreateRun("wr_profile_blocker", epicNumber: null);
         run.Status = WorkflowRunStatus.Completed;
         run.WorkflowProfileId = "delivery/review";
@@ -135,7 +135,7 @@ public class WorkflowRunStoreSpecs
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
-        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
 
         var run = new WorkflowRun
         {
@@ -163,7 +163,7 @@ public class WorkflowRunStoreSpecs
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
-        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
 
         var run = new WorkflowRun
         {
@@ -187,7 +187,7 @@ public class WorkflowRunStoreSpecs
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
-        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
 
         var run = new WorkflowRun
         {
@@ -224,7 +224,7 @@ public class WorkflowRunStoreSpecs
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
-        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var run = new WorkflowRun
         {
             Id = WorkflowRunId,
@@ -259,7 +259,7 @@ public class WorkflowRunStoreSpecs
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
-        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var run = CreateLegacyExhaustedRecoveryRun();
 
         await using (var db = factory.CreateDbContext())
@@ -302,7 +302,7 @@ public class WorkflowRunStoreSpecs
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
-        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
         var run = CreateLegacySameDefinitionAcrossStagesRun();
 
         await using (var db = factory.CreateDbContext())

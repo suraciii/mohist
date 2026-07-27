@@ -1,10 +1,12 @@
 {
-  "Mohist.Server.ArchTests/ArchitectureRules.cs": 37000,
+  "Mohist.Server.ArchTests/ArchitectureRules.cs": 42000,
   "Mohist.Server.SpecTests/Specs/Agent/Api/AgentJobRoutesSpecs.cs": 26286,
   "Mohist.Server.SpecTests/Specs/AgentOps/AgentUsageReporterSpecs.cs": 33354,
   "Mohist.Server.SpecTests/Specs/Api/ProjectEventsApiSpecs.cs": 33599,
   "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicLifecycleSpecs.cs": 32966,
-  "Mohist.Server.SpecTests/Specs/Events/Inbox/InboxProjectionHandlerSpecs.cs": 42035,
+  "Mohist.Server.SpecTests/Specs/Events/Inbox/InboxProjectionHandlerSpecs.cs": 42071,
+  "Mohist.Server.SpecTests/Specs/Events/TransactionalEventAppendSpecs.cs": 24361,
+  "Mohist.Server.SpecTests/Specs/Workflow/Storage/WorkflowRunStoreSpecs.cs": 24103,
   "Mohist.Server.SpecTests/Specs/Events/Issue/IssueCompositeHandlersSpecs.cs": 26566,
   "Mohist.Server.SpecTests/Specs/Issue/Api/IssueArchivedDetailApiSpecs.cs": 25434,
   "Mohist.Server.SpecTests/Specs/Issue/Api/IssueCreationSpecs.cs": 36623,
@@ -29,7 +31,7 @@
   "Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowRetrySpecs.cs": 27090,
   "Mohist.Server.SpecTests/Support/DispatcherFixture.cs": 33999,
   "Mohist.Server.UnitTests/Foundation/VariableBundleTests.cs": 27944,
-  "Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs": 41204,
+  "Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs": 41201,
   "Mohist.Server.UnitTests/Workflow/Services/ActionContractValidatorTests.cs": 29000,
   "Mohist.Server.SpecTests/Specs/Workflow/ProfileActionValidationSpecs.cs": 26000
 }

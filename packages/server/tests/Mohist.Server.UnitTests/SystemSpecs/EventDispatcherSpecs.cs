@@ -50,7 +50,8 @@ public class EventDispatcherSpecs
                 BaseBackoff = baseBackoff ?? TimeSpan.FromSeconds(1),
                 MaxBackoff = maxBackoff ?? TimeSpan.FromSeconds(30),
             }),
-            NullLogger<EventDispatcherService>.Instance);
+            NullLogger<EventDispatcherService>.Instance,
+            NullEventPushQueue.Instance);
     }
 
     [Fact]
@@ -1002,7 +1003,8 @@ public class EventDispatcherSpecs
             dlq,
             time,
             Options.Create(new EventDispatcherOptions { BatchSize = 0, MaxAttempts = 1 }),
-            NullLogger<EventDispatcherService>.Instance));
+            NullLogger<EventDispatcherService>.Instance,
+            NullEventPushQueue.Instance));
 
         Assert.Throws<ArgumentOutOfRangeException>(() => new EventDispatcherService(
             events,
@@ -1010,7 +1012,8 @@ public class EventDispatcherSpecs
             dlq,
             time,
             Options.Create(new EventDispatcherOptions { BatchSize = 10, MaxAttempts = 0 }),
-            NullLogger<EventDispatcherService>.Instance));
+            NullLogger<EventDispatcherService>.Instance,
+            NullEventPushQueue.Instance));
     }
 
     private static Task DispatchDynamic(object handler, CloudEvent evt, CancellationToken ct)

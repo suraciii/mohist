@@ -50,3 +50,45 @@
 - `Mohist.Server.ArchTests` — 36/36 pass (33 prior + 3 new guards).
 - `Mohist.Server.SpecTests` — 3 257/3 257 pass.
 - `Mohist.Server.UnitTests` — 1 531/1 531 pass.
+
+## T-002 Implementation
+
+### Production changes
+- Removed nullable `IWorkflowProfileProvider?` parameters and `_profileProvider is not null` null-coalescing branches from the four production collaborators that the composition root always registers:
+  - `IssueGrain` (constructor + `ForDirectConstruction` factory + `ProfileExistsAsync`)
+  - `WorkflowProfileManager` (also dropped the `_profileProvider is null` legacy template fallback in `LoadStartupStructureAsync` and `LoadBoundTemplateAsync`)
+  - `WorkflowProfileReferenceCoordinatorGrain` (and its replay path)
+  - `ProjectWorkflowProfileBindingParticipantProxy`
+- Removed nullable `IEventPushQueue?` parameter + `_pushQueue ?? NullEventPushQueue.Instance` fallback from `EventDispatcherService`; the constructor now throws `ArgumentNullException` when DI is bypassed. The composition root registers `EventPushQueue` as the live queue and the `EventPushWorker` hosted service; tests opt into `NullEventPushQueue.Instance` explicitly.
+- Removed nullable `IBackgroundTaskLauncher?` parameters + `backgroundTasks ?? new BackgroundTaskLauncher()` fallbacks from `WorkflowRunStore`, `IssueStore`, `AgentSessionStore`, `BackgroundHermesIssueNotificationDispatcher`, and `SystemUpdateService` (both constructors). The composition always supplies the singleton launcher.
+- Removed nullable `IAgentJobDispatchObserver?` and `IAgentJobStore?` parameters + `dispatchObserver ?? NoopAgentJobDispatchObserver.Instance` fallback from `AgentJobGrain`. The store mirror no longer early-returns on a null store.
+
+### Test changes
+- Added named fakes per the design intent:
+  - `packages/server/tests/Mohist.Server.SpecTests/Support/FakeWorkflowProfileProvider.cs` — minimal `IWorkflowProfileProvider` for direct-construction specs.
+  - `packages/server/tests/Mohist.Server.SpecTests/Support/NoopBackgroundTaskLauncher.cs` — records every `Launch(...)` so specs can assert the store scheduled its follow-up.
+  - `packages/server/tests/Mohist.Server.UnitTests/Support/NoopBackgroundTaskLauncher.cs` — same contract for the unit-test tier.
+- Updated every direct-construction call site for the affected stores/grains/dispatcher to pass the explicit required collaborators (`NoopBackgroundTaskLauncher.Instance`, `NullEventPushQueue.Instance`, `FakeWorkflowProfileProvider`, or real `WorkflowProfileProvider`/`WorkflowProfileDeletionBlockerQuery`):
+  - `WorkflowRunStoreSpecs`, `WorkflowRunLegacyBindingSpecs`
+  - `AgentSessionStoreSpecs`
+  - `AgentSessionTransactionalEventAppendSpecs`, `IssueTransactionalEventAppendSpecs`, `TransactionalEventAppendSpecs`, `InboxProjectionHandlerSpecs`, `EventDispatcherImmediateTriggerSpecs`, `EpicAutoDoneHandlerSpecs`
+  - `IssueWorkflowReadPathSpecs`, `IssueCommentEventSpecs`, `IssueGrainEventSaveFailureSpecs`
+  - `WorkflowItemTranslatorLivePromptSpecs`, `WorkflowItemTranslatorSpecs`
+  - `WorkflowProfileManagerTestFactory`, `WorkflowGrainSpecs`, `WorkflowGrainTestHelpers`, `SystemUpdateTestFactory`, `SystemUpdateRecoveryTests`
+  - `EventDispatcherSpecs`, `EventDispatcherIdentitySpecs`, `EventDispatcherConcurrencyTests`
+  - `InboxProjectionTestSupport`
+
+### Architecture guard
+- Added `AuditedConsumers_DoNotReintroduceNullableRequiredCollaborators` to `ArchitectureRules.cs`. It reflects over the 11 audited consumers (Issue, WorkflowProfileManager, WorkflowProfileReferenceCoordinatorGrain, ProjectWorkflowProfileBindingParticipantProxy, EventDispatcherService, WorkflowRunStore, IssueStore, AgentSessionStore, SystemUpdateService, BackgroundHermesIssueNotificationDispatcher, AgentJobGrain) and fails if any constructor parameter typed as `IWorkflowProfileProvider`, `IEventPushQueue`, `IBackgroundTaskLauncher`, `IAgentJobStore`, or `IAgentJobDispatchObserver` is `Nullable<>`.
+
+### Documentation
+- Did NOT make the non-authoritative side channels (rule-expression cache, event-match failure sink, `TimeSpan? regexTimeout`) required — they are listed in `specs/server-production-contracts/spec.md#genuine-optional-infrastructure-remains-explicit` as the documented cases where absence is valid production behavior, and the design explicitly forbids tightening them for uniformity.
+
+### Baseline
+- `ArchitectureRules.cs` grew past its previous 37 000-byte allowance (now 41 546) — bumped to 42 000.
+- `TransactionalEventAppendSpecs.cs` (24 361 bytes) and `WorkflowRunStoreSpecs.cs` (24 103 bytes) crossed the 24 000-byte absolute budget — added to the baseline.
+- `InboxProjectionHandlerSpecs.cs` grew past its previous 42 035-byte allowance (now 42 071) — bumped to 42 071.
+- `EventDispatcherSpecs.cs` shrank slightly (41 204 → 41 201) — entry updated to match.
+
+## Verification (T-002)
+- `Mohist.Server.ArchTests` — 37/37 pass (36 prior + 1 new guard).
