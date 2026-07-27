@@ -64,7 +64,7 @@ describe("mohist/merge-github-pr action", () => {
 
     expect(result.error).toBeUndefined()
     expect(moCalls).toEqual([
-      "mo issue show 248 --project-id proj_1 --output json",
+      "mo issue show 248 --project proj_1 --json title,body",
     ])
     expect(ghCalls).toEqual([
       "gh --version",
