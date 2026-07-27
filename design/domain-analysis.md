@@ -48,6 +48,7 @@ Cross-domain read-only reports (activity feed, delivery cost, cross-aggregate bo
 
 - Artifact: belongs to Workflow. No independent problem class.
 - OpenSpec: external tool. Never a domain concept.
+- External Agent hosts, Skills, CLI, and Web UI are interaction adapters, not business domains.
 - Generic: Label, User, SystemInfo — infrastructure.
 - Technical layers: Events, Api, Infrastructure — not business domains.
 

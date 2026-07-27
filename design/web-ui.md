@@ -1,6 +1,19 @@
 # Web UI
 
-Local management interface. Observe state, execute user actions (approve, start, pause, etc.).
+Mohist's backup operation and visualization plane. It presents authoritative execution state, evidence,
+relationships, and safe user actions when the owner needs a global view or must take over manually.
+
+## Product boundary
+
+- The user's primary conversation stays in an external Agent host. Web does not recreate Slack, an IDE,
+  or an Agent chat workspace.
+- Backup means infrequent, not incomplete. Critical lifecycle, approval, recovery, and configuration
+  actions remain available without an external Agent.
+- Web emphasizes relationships and evidence that are hard to understand from a short Agent summary:
+  project attention, Issue and Epic progress, Workflow state, diffs, AgentSession transcripts, and system
+  health.
+- New domain actions cannot exist only in Web. Web submits the same server-owned intent available to other
+  clients and never creates a second interpretation of Workflow state.
 
 ## What belongs where
 
@@ -54,6 +67,7 @@ Web 按 Feature-Sliced Design 组织为 `app`、`pages`、`widgets`、`features`
 
 ## Preference
 
-Dense, scannable screens. No landing pages.
+Dense, scannable screens. No landing pages or chat-first composition.
 
-First screens: issue board → workflow detail → approval queue → runner status.
+First screens: attention-first production overview → Issue execution detail → approval and recovery →
+execution evidence → runner status.

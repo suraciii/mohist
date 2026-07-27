@@ -3,9 +3,14 @@
 ## Boundary
 
 ```
-User / Web / CLI
+User in Slack / IDE / chat
        │
        v
+External Agent ── Mohist Skill ── mo CLI ──┐
+                                            │
+User ── direct CLI fallback ────────────────┤
+User ── Web UI (backup operation + view) ───┤
+                                            v
 Control Plane        owns state, makes decisions
        │
        v
@@ -19,8 +24,9 @@ User Project
 
 | Concern | Belongs in | Not in |
 |---|---|---|
+| user conversation and interaction context | external Agent host | Mohist Web / Server |
 | user commands | CLI | Server |
-| observe & act | Web UI + API | Runner |
+| fallback observe & act | Web UI + API | Runner |
 | state authority | Server | Runner |
 | decide workflow | Server | Runner |
 | register/presence/capacity | Server | Web / CLI |
@@ -29,7 +35,7 @@ User Project
 | git side effects | Runner | Server |
 | OpenSpec side effects | Runner | Server |
 | Mohist daemon self-management process execution (inspect, update, install, restart, and determine the status of Mohist and its managed services) | Server | Runner for user-project workspace, git, shell, and agent execution |
-| explore/chat | external agent skill | Mohist runtime |
+| explore, status conversation, and delegation | external Agent + Skill | Mohist runtime / Web UI |
 | skill install | CLI | Server |
 | product design | docs/ | design/ |
 | domain model | code | design/ |
@@ -171,11 +177,16 @@ runtime 绑定——这些不走协调者。
 - Artifact: persist (audit trail).
 - Authority grains: no `[Reentrant]`.
 
-## Explore is external
+## Interaction is external
 
-Mohist does not own AI chat. Explore belongs to external agent skills (mohist-explore, etc.).
+Mohist does not own AI chat or the user's primary interaction context. Exploration, status questions,
+delegation, and follow-up conversation stay in an external Agent host such as Slack or an IDE. The
+external Agent uses Mohist Skills and the `mo` CLI to translate that conversation into domain queries
+and commands, then presents Mohist's results back in the original context.
 
-External skills read projects, call `mo` CLI, write files. Never touch Mohist DB.
+External skills read projects, call `mo` CLI, and may write ordinary files. They never touch the Mohist
+database. Mohist owns durable execution state and evidence; the external conversation does not become an
+AgentSession merely because it caused Mohist work.
 Runner may adapt OpenCode or another runtime for Workflow TaskRun and AgentJob work.
 Agent/Session ownership invariants: [`agent-execution.md`](agent-execution.md).
 

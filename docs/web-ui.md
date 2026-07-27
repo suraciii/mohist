@@ -1,15 +1,23 @@
 # Web UI 指南
 
-Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`。
+Web UI 是 Mohist 的备用操作和可视化平面，不是用户日常协作的工作站点。用户通常在
+Slack、IDE 或其他场所通过外部 Agent 使用 Mohist；需要查看全局与复杂状态、核对执行
+证据、调整配置，或在外部 Agent 不可用时人工接管，才进入 Web UI。
+
+备用不等于功能残缺。启动、审批、拒绝、恢复、停止和配置等关键操作必须可以在 Web UI
+完成；同一操作的结果仍由 Mohist 裁决，Web UI 不建立另一套状态或规则。
+
+打开 `http://localhost:3456`。进入任一页面时，应当能回答：发生了什么、为什么、是否需要
+人工处理，以及当前可以安全执行什么操作。
 
 ## 页面一览
 
 | 页面 | 用途 |
 |---|---|
-| **看板（Home）** | 默认页。所有 issue 按状态分列 |
-| **Issue 详情** | 单个 issue 的全部信息和操作 |
+| **看板（Home）** | 默认页。查看全局推进情况和需要处理的 Issue |
+| **Issue 详情** | 查看单个 Issue 的执行状态、证据和人工操作 |
 | **Issue 改动文件** | 看一个 issue 改了哪些文件、diff |
-| **AgentSession** | Workflow 或 Mohist Agent 执行时的对话记录与操作 |
+| **AgentSession** | 理解执行会话的归属、状态、结果、诊断证据和恢复操作 |
 | **Epics** | Epic 列表和详情 |
 | **Activity** | 实时活动流 |
 | **Logs** | 系统日志 |
@@ -61,7 +69,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 
 ## Issue 详情页
 
-进入 issue 的主要操作界面。分两栏（桌面）/ 单栏（移动）。
+查看和人工操作单个 Issue 的页面。分两栏（桌面）/ 单栏（移动）。
 
 ### 顶部信息
 
@@ -117,7 +125,16 @@ URL: `/issues/<number>/files`
 
 从 Issue 的 Workflow Session 列表或 Mohist Agent 的 Session 列表进入。
 
-这里展示 Workflow 或 Mohist Agent 执行时的对话记录。可以：
+这里展示 Workflow 或 Mohist Agent 的执行会话。它是证据与诊断视图，不是用户和外部
+Agent 日常对话的工作场所。
+
+页面必须先解释这段会话，再展示原始消息。首屏应当回答：
+
+- 为什么创建，以及它服务于哪个 Issue、Workflow task 或 Mohist Agent 工作
+- 当前是执行中、空闲还是状态未知，最近一次执行产生了什么结果
+- 是否需要人工处理，以及当前有哪些安全操作
+
+在此基础上，可以：
 
 - 按顺序查看消息和工具调用
 - 看模型、用量、压缩记录和当前活动状态

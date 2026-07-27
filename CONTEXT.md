@@ -1,7 +1,17 @@
 # Mohist 统一语言
 
-本词汇表定义 Mohist 各上下文共享的 Agent 执行语言。生命周期、事件与模块边界的
+本词汇表定义 Mohist 各上下文共享的产品与 Agent 执行语言。生命周期、事件与模块边界的
 规范见 [`design/agent-execution.md`](design/agent-execution.md)。
+
+## 产品界面
+
+**外部 Agent**：用户在 Mohist 之外直接交互，并代表用户读取或操作 Mohist 的 Agent。
+它不是 Mohist 资源，也不由 Mohist 调度或运行。
+
+避免用法：用“Mohist Agent”或“Inline Agent”指代外部 Agent。
+
+**Web UI**：Mohist 的备用操作和可视化平面。它用于观察、人工操作和接管，不是用户
+日常协作的工作站点，也不是主要交互入口。
 
 ## Agent 执行
 
