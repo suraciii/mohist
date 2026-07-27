@@ -1,0 +1,47 @@
+{
+  "project": "mohist-local",
+  "description": "Retire obsolete AgentSession terminal event aliases and expose terminal activity consistently as session.activity.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Canonicalize Server Session terminal activity feeds",
+      "spec": "specs/agent-session-terminal-feed-vocabulary/spec.md#project-feed-uses-the-persisted-terminal-activity-type",
+      "description": "Remove retired Session runtime and transcript vocabulary from the Server, retaining session.activity as the only terminal fact. Update ProjectEventFeedAssembler and IssueEventFeedAssembler to project eligible terminal activity as session.activity while preserving delivery idempotency, routed-failure selection, ordering, and context.",
+      "acceptanceCriteria": [
+        "Production code under packages/server/src contains no session.closed, session.followup_completed, or session.followup_failed runtime or transcript event type.",
+        "A retired runtime event produces no accepted or persisted transcript fact, while a terminal session.activity fact retains its status and established delivery-idempotency behavior.",
+        "Project event feed terminal Session entries and eligible routed AgentJob failure entries in the Issue feed have type session.activity and retain their existing source, identity context, status, failure details, filtering, and ordering semantics.",
+        "Historical transcript rows are neither migrated nor modified.",
+        "Server coverage for Session ingestion/idempotency and AgentOps project and issue feeds is updated, and npm test passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server Session vocabulary and AgentOps project/issue feeds expose session.activity as the sole terminal event contract.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Rename closed-oriented feed helpers and envelope identity labels to activity terminology; keep the existing transcript-part query and routed AgentJob correlation predicates."
+    },
+    {
+      "id": "T-002",
+      "title": "Align Web Session event vocabulary and terminal presentation",
+      "spec": "specs/agent-session-runtime-event-vocabulary/spec.md#web-session-event-contract-uses-current-vocabulary",
+      "description": "Consume the Server's canonical session.activity terminal event in Web transcript and activity views. Remove retired names from the canonical subscription set, typed event map, labels, helper predicates, and special branches while preserving terminal status, failure attention, and navigation targets.",
+      "acceptanceCriteria": [
+        "Production code under packages/web/src contains no session.closed, session.followup_completed, or session.followup_failed event branches, subscriptions, labels, or typed payload entries.",
+        "The canonical transcript subscription and live-event contract retain session.activity and exclude all three retired names.",
+        "An activity-feed session.activity event with completed status renders as completed, while failed, timeout, and cancelled statuses retain failure attention, available failure detail, and the existing Session navigation target.",
+        "Web tests covering canonical event types and Session activity presentation are updated, npm run typecheck -w packages/web, npm run test:run -w packages/web, and npm run check:fsd -w packages/web pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web clients subscribe to and render the canonical session.activity terminal event without retired Session aliases.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Depend on T-001 because the Web activity feed must consume the Server's changed project and issue feed event type."
+    }
+  ]
+}
