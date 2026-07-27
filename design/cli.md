@@ -40,6 +40,11 @@ CLI 导航以用户意图为主，同时尊重领域所有权。顶层命令不�
 | `server` | Mohist Server | 当前连接的控制平面应用及其状态、健康和应用日志 |
 | `service` | Managed Service | 本机受管的 Server 或 Runner 进程；不是领域上下文 |
 | `event` | Event delivery operations | 实时信封流与 dead-letter 恢复；不是业务领域资源 |
+| `label` | Label definition | Project 范围的标签词汇定义，供 Issue / Epic 引用 |
+| `routing` | Routing rule | Project 范围的有序事件路由规则及其干跑评估 |
+| `notification` | Notification channel | 本机外发通知渠道配置；不是业务领域资源 |
+| `otel` | OpenTelemetry traces | 本机追踪存储与查询；可观测性工具，不是业务领域资源 |
+| `skill` | Mohist Skill | 打包的 Skill 资产，安装到本机 agent 目录；不是业务领域资源 |
 
 Runtime adapter、Runtime Session 和 model catalog 不形成顶层 area。Runtime 是 Agent 配置、
 Session binding 或 Action 选择中的维度；模型目录通过 `agent model list --runtime` 提供配置

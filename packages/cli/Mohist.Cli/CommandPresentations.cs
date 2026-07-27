@@ -7,11 +7,11 @@ internal static class CommandPresentations
     public static void AttachTo(RootCommand root)
     {
         AttachRoot(root);
-        AttachToArea(root, "project", CommandCapability.Operations,
+        AttachToArea(root, "project", CommandCapability.Work,
             summary: "Manage Projects and their state",
             boundary: "Each Project owns one or more Repositories and one active Workflow Profile; project-scoped commands resolve --project <name-or-id> before any directory-based fallback.",
             seeAlso: "mo workflow for Workflow Profile selection.");
-        AttachToArea(root, "repo", CommandCapability.Operations,
+        AttachToArea(root, "repo", CommandCapability.Work,
             summary: "Manage Repositories inside the active Project",
             boundary: "A Repository always belongs to exactly one Project; it does not address cross-project concerns.",
             seeAlso: "mo project for the owning Project; mo run for execution that targets a Repository.");
@@ -39,10 +39,10 @@ internal static class CommandPresentations
             summary: "Locate and read Agent/Workflow Sessions",
             boundary: "Sessions are not owned by any other resource; read them by stable Session ID or by their origin (--issue, --agent).",
             seeAlso: "mo agent launch to start a new session; mo activity to trace it.");
-        AttachToArea(root, "activity", CommandCapability.Operations,
+        AttachToArea(root, "activity", CommandCapability.Automation,
             summary: "Inspect Activity across the active Project",
             boundary: "Activity is the read-only timeline that links Issues, Runs, Sessions, and Events; it never owns state.");
-        AttachToArea(root, "routing", CommandCapability.Operations,
+        AttachToArea(root, "routing", CommandCapability.Automation,
             summary: "Manage routing rules and event targets",
             boundary: "Routing rules bind an event pattern to an Agent and a response prompt; they always live inside one Project.");
         AttachToArea(root, "runner", CommandCapability.Operations,
@@ -257,10 +257,8 @@ internal static class CommandPresentations
                 CommandPresentationCatalog.Attach(Find(group, "view"), new CommandPresentation(
                     CommandCapability.Automation, "Read a WorkflowRun by its Run ID",
                     JsonFields: RunCommands.RunViewDescriptor.Fields));
-                CommandPresentationCatalog.Attach(Find(group, "logs"), new CommandPresentation(
-                    CommandCapability.Automation, "Tail WorkflowRun-scoped logs"));
-                CommandPresentationCatalog.Attach(Find(group, "events"), new CommandPresentation(
-                    CommandCapability.Automation, "Tail WorkflowRun-scoped events"));
+                CommandPresentationCatalog.Attach(Find(group, "watch"), new CommandPresentation(
+                    CommandCapability.Automation, "Follow a WorkflowRun until it reaches a terminal state"));
                 CommandPresentationCatalog.Attach(Find(group, "feedback"), new CommandPresentation(
                     CommandCapability.Automation, "Inspect or submit WorkflowRun feedback"));
                 CommandPresentationCatalog.Attach(Find(group, "variable"), new CommandPresentation(
@@ -384,8 +382,6 @@ internal static class CommandPresentations
                     CommandCapability.Operations, "List Repositories inside the active Project"));
                 CommandPresentationCatalog.Attach(Find(group, "edit"), new CommandPresentation(
                     CommandCapability.Operations, "Edit a Repository"));
-                CommandPresentationCatalog.Attach(Find(group, "add"), new CommandPresentation(
-                    CommandCapability.Operations, "Add a Repository to the active Project"));
                 CommandPresentationCatalog.Attach(Find(group, "set-default"), new CommandPresentation(
                     CommandCapability.Operations, "Set a Repository as the Project default"));
                 CommandPresentationCatalog.Attach(Find(group, "delete"), new CommandPresentation(
@@ -408,14 +404,30 @@ internal static class CommandPresentations
                 CommandPresentationCatalog.Attach(Find(group, "edit"), new CommandPresentation(
                     CommandCapability.Work, "Edit an Epic",
                     JsonFields: EpicCommands.EpicDescriptor.Fields));
-                foreach (var action in new[] { "add", "remove", "start", "pause", "resume", "done", "close", "reopen" })
-                {
-                    CommandPresentationCatalog.Attach(Find(group, action), new CommandPresentation(
-                        CommandCapability.Work, $"{action} an Epic",
-                        JsonFields: EpicCommands.EpicDescriptor.Fields));
-                }
-                CommandPresentationCatalog.Attach(Find(group, "delete"), new CommandPresentation(
-                    CommandCapability.Work, "Delete an Epic"));
+                CommandPresentationCatalog.Attach(Find(group, "add"), new CommandPresentation(
+                    CommandCapability.Work, "Add an Issue to an Epic",
+                    JsonFields: EpicCommands.EpicDescriptor.Fields));
+                CommandPresentationCatalog.Attach(Find(group, "remove"), new CommandPresentation(
+                    CommandCapability.Work, "Remove an Issue from an Epic",
+                    JsonFields: EpicCommands.EpicDescriptor.Fields));
+                CommandPresentationCatalog.Attach(Find(group, "start"), new CommandPresentation(
+                    CommandCapability.Work, "Start autonomous progression on an Epic",
+                    JsonFields: EpicCommands.EpicDescriptor.Fields));
+                CommandPresentationCatalog.Attach(Find(group, "pause"), new CommandPresentation(
+                    CommandCapability.Work, "Pause autonomous progression on an Epic",
+                    JsonFields: EpicCommands.EpicDescriptor.Fields));
+                CommandPresentationCatalog.Attach(Find(group, "resume"), new CommandPresentation(
+                    CommandCapability.Work, "Resume autonomous progression on an Epic",
+                    JsonFields: EpicCommands.EpicDescriptor.Fields));
+                CommandPresentationCatalog.Attach(Find(group, "done"), new CommandPresentation(
+                    CommandCapability.Work, "Mark an Epic as done",
+                    JsonFields: EpicCommands.EpicDescriptor.Fields));
+                CommandPresentationCatalog.Attach(Find(group, "close"), new CommandPresentation(
+                    CommandCapability.Work, "Close an Epic",
+                    JsonFields: EpicCommands.EpicDescriptor.Fields));
+                CommandPresentationCatalog.Attach(Find(group, "reopen"), new CommandPresentation(
+                    CommandCapability.Work, "Reopen a closed Epic",
+                    JsonFields: EpicCommands.EpicDescriptor.Fields));
             }
         }
 
@@ -426,10 +438,6 @@ internal static class CommandPresentations
             {
                 CommandPresentationCatalog.Attach(Find(group, "list"), new CommandPresentation(
                     CommandCapability.Work, "List label definitions available in the active Project"));
-                CommandPresentationCatalog.Attach(Find(group, "add"), new CommandPresentation(
-                    CommandCapability.Work, "Add a label definition to the catalog"));
-                CommandPresentationCatalog.Attach(Find(group, "update"), new CommandPresentation(
-                    CommandCapability.Work, "Update a label definition in the catalog (partial update)"));
                 CommandPresentationCatalog.Attach(Find(group, "delete"), new CommandPresentation(
                     CommandCapability.Work, "Delete a label definition from the catalog"));
             }
@@ -440,16 +448,10 @@ internal static class CommandPresentations
             public static readonly RoutingLeaves Instance = new();
             public void Attach(Command group)
             {
-                CommandPresentationCatalog.Attach(Find(group, "list"), new CommandPresentation(
-                    CommandCapability.Operations, "List routing rules in the active Project"));
-                CommandPresentationCatalog.Attach(Find(group, "view"), new CommandPresentation(
-                    CommandCapability.Operations, "Read a routing rule"));
-                CommandPresentationCatalog.Attach(Find(group, "edit"), new CommandPresentation(
-                    CommandCapability.Operations, "Edit a routing rule"));
-                CommandPresentationCatalog.Attach(Find(group, "create"), new CommandPresentation(
-                    CommandCapability.Operations, "Create a routing rule"));
-                CommandPresentationCatalog.Attach(Find(group, "delete"), new CommandPresentation(
-                    CommandCapability.Operations, "Delete a routing rule"));
+                CommandPresentationCatalog.Attach(Find(group, "rule"), new CommandPresentation(
+                    CommandCapability.Automation, "Manage the project's ordered routing rules"));
+                CommandPresentationCatalog.Attach(Find(group, "test"), new CommandPresentation(
+                    CommandCapability.Automation, "Dry-run recent project events through the routing table"));
             }
         }
 
@@ -481,8 +483,6 @@ internal static class CommandPresentations
                     CommandCapability.Operations, "List registered Runners"));
                 CommandPresentationCatalog.Attach(Find(group, "view"), new CommandPresentation(
                     CommandCapability.Operations, "Read a Runner by id"));
-                CommandPresentationCatalog.Attach(Find(group, "logs"), new CommandPresentation(
-                    CommandCapability.Operations, "Tail Runner logs"));
             }
         }
 
@@ -507,8 +507,12 @@ internal static class CommandPresentations
             public static readonly ServiceLeaves Instance = new();
             public void Attach(Command group)
             {
-                CommandPresentationCatalog.Attach(Find(group, "install"), new CommandPresentation(
-                    CommandCapability.Operations, "Install Mohist as an OS service"));
+                CommandPresentationCatalog.Attach(Find(group, "start"), new CommandPresentation(
+                    CommandCapability.Operations, "Start the local managed service for the given target"));
+                CommandPresentationCatalog.Attach(Find(group, "stop"), new CommandPresentation(
+                    CommandCapability.Operations, "Stop the local managed service for the given target"));
+                CommandPresentationCatalog.Attach(Find(group, "restart"), new CommandPresentation(
+                    CommandCapability.Operations, "Restart the local managed service for the given target"));
                 CommandPresentationCatalog.Attach(Find(group, "uninstall"), new CommandPresentation(
                     CommandCapability.Operations, "Remove the Mohist OS service"));
                 CommandPresentationCatalog.Attach(Find(group, "status"), new CommandPresentation(
@@ -547,8 +551,10 @@ internal static class CommandPresentations
             public static readonly OtelLeaves Instance = new();
             public void Attach(Command group)
             {
-                CommandPresentationCatalog.Attach(Find(group, "list"), new CommandPresentation(
-                    CommandCapability.Operations, "Query local OpenTelemetry traces"));
+                CommandPresentationCatalog.Attach(Find(group, "query"), new CommandPresentation(
+                    CommandCapability.Operations, "Run a SQL query against otel.db directly (does not require the server)"));
+                CommandPresentationCatalog.Attach(Find(group, "status"), new CommandPresentation(
+                    CommandCapability.Operations, "Show OTel collector status and database statistics (requires server)"));
             }
         }
 

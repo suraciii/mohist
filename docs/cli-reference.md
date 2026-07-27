@@ -97,7 +97,7 @@ task-command     = mo <task> [target] [flags]
 |---|---|
 | `project` | `list`、`view`、`create`、`use`、`delete`；`workflow set-default`；`prompt get/set/clear/preview`；`variable list/get/set/unset` |
 | `repo` | `list`、`create`、`edit`、`set-default`、`delete` |
-| `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`rebase`、`diff`；`comment create`；`commits`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset`；`watch list/add/remove` |
+| `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`、`commits`、`logs`、`events`；`comment create`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset`；`watch list/add/remove` |
 | `epic` | `list`、`view`、`create`、`edit`、`add`、`remove`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
 | `label` | `list`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
@@ -342,21 +342,21 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 当前命令面仍有以下主要差距：
 
-- `workflow` 当前主要表示 WorkflowRun；Workflow Profile 位于更深的 Project 子命令。目标是 `workflow` 管 Profile、`run` 管执行。
-- Run 控制目前同时出现在 workflow 和 issue 下。目标只保留 `run` 的规范入口，Issue 号作为 `--issue` 选择器。
-- 资源读取和修改混用 `show`、`get`、`update` 等词。目标统一为 `view`、`edit`。
-- 项目作用域、输出模式和默认输出尚未统一。目标只保留 `--project` 与字段选择式 `--json`。
-- 当前根帮助、叶子帮助和 Mohist Skill 含有重复信息及部分内部实现描述。目标按本文的渐进披露边界重写。
-- 当前部分未知 area 或 action 会回退到根帮助并以 `0` 退出；目标是返回 `2`，只展示最近
-  一级的相关 usage。
-- 当前 `opencode` 和根级 `config` 是实现或配置容器导向的入口；目标把模型目录放到 Agent
-  配置辅助命令，并删除没有明确资源所有者的泛化 config 命令。
-- 其它用户指南在迁移期间仍可能展示当前可运行的旧路径；完成命令迁移后再一次性更新示例。
+- `project prompt get/set/clear/preview` 已在命令地图登记，命令树尚未实装。
+- `agent restore` 已在命令地图登记，命令树尚未实装（`archive` 已有）。
+- `issue workflow status/timeline` 是 Run 状态在 `run` 之外的第二条读取路径，且子区边界文案
+  与实际动作名实不符；由 issue #498 推进退役，能力并入 `run`。
 
 ### 已闭合
 
 - `runner` / `server` / `service` 三层职责：`runner` 只表示 Server 已注册的远程执行资源（`list`/`view`/`status`），`server` 只表示当前连接的 Mohist Server 应用（`status`/`health`/`info`/`logs`，其中 `logs` 是应用日志）；本机受管进程统一为 `mo service <verb> server|runner`。`project status` 已迁移到 `server status`；`system logs` 已合并到 `server logs`，`system` 命令组整体退役。
 - Agent launch 同时暴露 Job 与 Session 的稳定身份：`mo agent launch <agent>` 直接挂在 `agent` 下（不再经过 `agent session launch`），打印 `jobId` 与 `sessionId`；HTTP 201 同样同时返回 `jobId`、`sessionId` 与各自读取链接，`jobId` 被 `agent job view` 原样接受（无 id 翻译）。
-- AgentSession 对话统一到顶层 `mo session`：`mo session` 直接挂在根下，`show` / `transcript` / `followup` / `compact` / `reset` / `cancel` 都以稳定 Session ID 寻址，不论该 Session 来自 Agent launch 还是 Workflow run；`list` 通过 `--agent <agent>` / `--issue <number>` / `--run <run-id>` 之一筛选，不创建 `mo issue session` 与 `mo agent session` 两套重复能力。`mo issue sessions <number>` 与 `mo agent session …` 已退役，运行返回 command-not-found。
+- AgentSession 对话统一到顶层 `mo session`：`mo session` 直接挂在根下，`view` / `transcript` / `followup` / `compact` / `reset` / `cancel` 都以稳定 Session ID 寻址，不论该 Session 来自 Agent launch 还是 Workflow run；`list` 通过 `--agent <agent>` / `--issue <number>` / `--run <run-id>` 之一筛选，不创建 `mo issue session` 与 `mo agent session` 两套重复能力。`mo issue sessions <number>` 与 `mo agent session …` 已退役，运行返回 command-not-found。
+- `workflow` / `run` 分工：`workflow` 管理 Project 范围的 Workflow Profile，`run` 管理 WorkflowRun 的执行与控制；两组帮助互相链接，Run 控制动词只保留 `run` 入口，Issue 号作为 `--issue` 选择器。
+- 资源读取与修改动词统一为 `view` / `edit`；`show` / `get` / `update` 已退役，旧词解析失败并以 `2` 退出。
+- 根级 `opencode` 与泛化 `config` 入口已移除；模型目录通过 `agent model list --runtime` 提供。
+- 未知 area 或 action 返回用法错误 `2`，只展示最近一级的相关 usage，不回退根帮助并成功退出。
+- Project 作用域与输出模式统一：Project-scoped 命令共享 `--project <name-or-id>`，资源结果共享字段选择式 `--json`。
+- 根帮助分组与命令地图一致：Work / Automation / Operations / Tools 四组归属同本文登记。
 
 对应源码：`packages/cli/`。

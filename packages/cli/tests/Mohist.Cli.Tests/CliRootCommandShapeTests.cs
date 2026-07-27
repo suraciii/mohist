@@ -93,10 +93,10 @@ public class CliRootCommandShapeTests
         foreach (var name in survivingResourceGroups)
             Assert.Contains(name, stdout, StringComparison.Ordinal);
         Assert.Contains("repo", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("repository", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("opencode", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("config", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("skills", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  repository ", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  opencode ", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  config ", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  skills ", stdout, StringComparison.Ordinal);
     }
 
     [Fact]

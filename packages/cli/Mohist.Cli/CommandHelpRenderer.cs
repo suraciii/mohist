@@ -30,8 +30,7 @@ internal static class CommandHelpRenderer
             writer.WriteLine($"    {capability}");
             foreach (var (cmd, presentation) in entries)
             {
-                var summary = cmd.Name == "skill" ? "Manage coder agent tooling" : presentation!.Summary;
-                writer.WriteLine($"  {cmd.Name,-14} {summary}");
+                writer.WriteLine($"  {cmd.Name,-14} {presentation!.Summary}");
             }
             writer.WriteLine();
         }
