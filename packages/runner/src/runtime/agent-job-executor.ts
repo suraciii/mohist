@@ -61,6 +61,7 @@ export class AgentJobExecutor {
     private readonly connection: ServerConnection,
     private readonly runtimes: AgentJobRuntimeAccessors,
     private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
+    private readonly defaultWorkDir: string = process.cwd(),
   ) {}
 
   async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -85,10 +86,11 @@ export class AgentJobExecutor {
       return failureResult("invalid-input", `AgentJob ${model.message}`)
     }
 
-    const workDir = resolveWorkDir(work)
-    if (!workDir) {
-      return failureResult("invalid-input", "AgentJob requires 'workspace.path' in dispatch variables")
+    const workspacePath = readWorkspacePath(work)
+    if (workspacePath.kind === "invalid") {
+      return failureResult("invalid-input", "AgentJob requires 'workspace.path' to be a non-empty string when 'workspace' is provided in dispatch variables")
     }
+    const workDir = workspacePath.kind === "resolved" ? workspacePath.path : this.defaultWorkDir
 
     let binding: BindingResolution
     try {
@@ -297,11 +299,19 @@ async function resolveBinding(
   }
 }
 
-function resolveWorkDir(work: DispatchWorkItem): string | null {
+type WorkspacePathResolution =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | { kind: "resolved"; path: string }
+
+function readWorkspacePath(work: DispatchWorkItem): WorkspacePathResolution {
   const ws = work.variables?.["workspace"]
-  if (!isObject(ws)) return null
+  if (ws === undefined) return { kind: "absent" }
+  if (!isObject(ws)) return { kind: "invalid" }
   const path = ws["path"]
-  return typeof path === "string" && path.length > 0 ? path : null
+  return typeof path === "string" && path.trim().length > 0
+    ? { kind: "resolved", path }
+    : { kind: "invalid" }
 }
 
 function readPrompt(payload: JsonObject | null): string | null {

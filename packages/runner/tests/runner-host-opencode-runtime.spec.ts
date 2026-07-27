@@ -125,7 +125,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   setExecutorGitRunnerForTest(nonGitRunner)
   clearOpenCodeRuntimeFactoryForTest()
-  setOpencodeModelDiscoveryForTest(async () => ({ models: ["openai/gpt-5.5"], variants: {} }))
+  setOpencodeModelDiscoveryForTest(async () => ({ models: ["openai/gpt-5.5"], variants: {}, complete: true }))
   blockingAction.mockReset()
   connect.mockReset().mockResolvedValue(undefined)
   heartbeat.mockReset().mockResolvedValue(undefined)
@@ -194,6 +194,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     setOpencodeModelDiscoveryForTest(async () => ({
       models: ["openai/gpt-5", "anthropic/claude-sonnet-4"],
       variants: { "openai/gpt-5": ["low", "high"] },
+      complete: true,
     }))
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
@@ -219,6 +220,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     setOpencodeModelDiscoveryForTest(async () => ({
       models: ["openai/gpt-5"],
       variants: { "openai/gpt-5": ["low", "high"] },
+      complete: true,
     }))
     const piCatalog = {
       models: [
@@ -267,6 +269,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     setOpencodeModelDiscoveryForTest(async () => ({
       models: ["openai/gpt-5"],
       variants: { "openai/gpt-5": ["low"] },
+      complete: true,
     }))
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })

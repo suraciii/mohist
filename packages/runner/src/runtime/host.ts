@@ -24,8 +24,10 @@ import {
 } from "./opencode/index.js"
 import {
   getOpencodeModelDiscovery,
+  mergeOpencodeModelCatalogs,
   opencodeModelSetsEqual,
   type DiscoveredOpencodeModels,
+  type OpencodeModelCatalog,
 } from "./opencode-models.js"
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiCatalog, type PiRuntime } from "./pi/index.js"
 import { SessionCommandJournal } from "./session-command-journal.js"
@@ -314,8 +316,11 @@ export class RunnerHost {
       models: this.coderModels,
       variants: this.coderModelVariants,
     }
-    if (opencodeModelSetsEqual(previous, discovered)) return
-    this.replaceCoderModels(discovered)
+    const next = discovered.complete
+      ? discovered
+      : mergeOpencodeModelCatalogs(previous, discovered)
+    if (opencodeModelSetsEqual(previous, next)) return
+    this.replaceCoderModels(next)
     await this.sendImmediateHeartbeat()
   }
 
@@ -324,11 +329,11 @@ export class RunnerHost {
       return await getOpencodeModelDiscovery()(signal)
     } catch (error) {
       console.error("failed to discover opencode models", error)
-      return { models: [], variants: {} }
+      return { models: [], variants: {}, complete: false }
     }
   }
 
-  private replaceCoderModels(discovered: DiscoveredOpencodeModels): void {
+  private replaceCoderModels(discovered: OpencodeModelCatalog): void {
     this.coderModels = [...discovered.models]
     this.coderModelVariants = Object.fromEntries(
       Object.entries(discovered.variants).map(([model, variants]) => [model, [...variants]]),

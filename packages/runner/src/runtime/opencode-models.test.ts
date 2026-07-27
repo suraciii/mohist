@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   createOpencodeModelsCommandAdapter,
   discoverOpencodeModels,
+  mergeOpencodeModelCatalogs,
   opencodeModelSetsEqual,
   parseOpencodeModelsVerbose,
-  type DiscoveredOpencodeModels,
-  type SyncModelsProcessExecutor,
+  type ModelsProcessExecutor,
+  type OpencodeModelCatalog,
 } from "./opencode-models.js"
 
 afterEach(() => {
@@ -127,11 +128,11 @@ describe("parseOpencodeModelsVerbose", () => {
 })
 
 describe("discoverOpencodeModels", () => {
-  it("passes the complete command contract through the synchronous executor", async () => {
+  it("passes the complete command contract through the buffered process executor", async () => {
     vi.stubEnv("MOHIST_AGENT_MODELS_COMMAND", "custom-models-opencode")
     vi.stubEnv("MOHIST_AGENT_COMMAND", "general-opencode")
     const payload = largeCatalogPayload()
-    const executor = vi.fn<SyncModelsProcessExecutor>(() => ({ status: 0, stdout: payload }))
+    const executor = vi.fn<ModelsProcessExecutor>(async () => ({ status: 0, stdout: payload }))
     const adapter = createOpencodeModelsCommandAdapter(executor)
     const signal = new AbortController().signal
 
@@ -140,7 +141,7 @@ describe("discoverOpencodeModels", () => {
     expect(executor).toHaveBeenCalledOnce()
     expect(executor).toHaveBeenCalledWith("custom-models-opencode", ["models", "--verbose"], {
       signal,
-      timeout: 10_000,
+      timeout: 3_000,
       encoding: "utf8",
       maxBuffer: 16 * 1024 * 1024,
     })
@@ -148,6 +149,7 @@ describe("discoverOpencodeModels", () => {
     expect(result).toEqual({
       models: ["openrouter/vendor/family/trailing-model"],
       variants: { "openrouter/vendor/family/trailing-model": ["high", "max"] },
+      complete: true,
     })
   })
 
@@ -158,7 +160,7 @@ describe("discoverOpencodeModels", () => {
   ])("selects command precedence from %s and %s", async (modelsCommand, agentCommand, expected) => {
     vi.stubEnv("MOHIST_AGENT_MODELS_COMMAND", modelsCommand)
     vi.stubEnv("MOHIST_AGENT_COMMAND", agentCommand)
-    const executor = vi.fn<SyncModelsProcessExecutor>(() => ({ status: 0, stdout: "openai/gpt-5\n" }))
+    const executor = vi.fn<ModelsProcessExecutor>(() => ({ status: 0, stdout: "openai/gpt-5\n" }))
 
     await discoverOpencodeModels(
       new AbortController().signal,
@@ -175,16 +177,18 @@ describe("discoverOpencodeModels", () => {
       "openai/gpt-5\n" + JSON.stringify({ variants: { low: {} } }),
       "anthropic/claude-sonnet-4\n" + JSON.stringify({ variants: { max: {} } }),
     ]
-    const executor = vi.fn<SyncModelsProcessExecutor>(() => ({ status: 0, stdout: outputs.shift() ?? "" }))
+    const executor = vi.fn<ModelsProcessExecutor>(() => ({ status: 0, stdout: outputs.shift() ?? "" }))
     const adapter = createOpencodeModelsCommandAdapter(executor)
 
     await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
       models: ["openai/gpt-5"],
       variants: { "openai/gpt-5": ["low"] },
+      complete: true,
     })
     await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
       models: ["anthropic/claude-sonnet-4"],
       variants: { "anthropic/claude-sonnet-4": ["max"] },
+      complete: true,
     })
     expect(executor).toHaveBeenCalledTimes(2)
   })
@@ -195,12 +199,12 @@ describe("discoverOpencodeModels", () => {
     ["non-zero exit", { status: 2, stdout: "openai/gpt-5\n" }],
   ])("logs and normalizes %s", async (_name, processResult) => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    const executor: SyncModelsProcessExecutor = () => processResult
+    const executor: ModelsProcessExecutor = () => processResult
     try {
       await expect(discoverOpencodeModels(
         new AbortController().signal,
         createOpencodeModelsCommandAdapter(executor),
-      )).resolves.toEqual({ models: [], variants: {} })
+      )).resolves.toEqual({ models: [], variants: {}, complete: false })
       expect(errorSpy).toHaveBeenCalledOnce()
       expect(errorSpy).toHaveBeenCalledWith("failed to discover opencode models", expect.any(Error))
     } finally {
@@ -208,14 +212,37 @@ describe("discoverOpencodeModels", () => {
     }
   })
 
-  it("logs and normalizes successful output with no valid header", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    const executor: SyncModelsProcessExecutor = () => ({ status: 0, stdout: "warning: no providers\n" })
+  it("keeps valid model output when the CLI times out after writing it", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const executor: ModelsProcessExecutor = () => ({
+      error: Object.assign(new Error("timed out"), { code: "ETIMEDOUT" }),
+      status: null,
+      stdout: "kimi-for-coding/kimi-for-coding-highspeed\n",
+    })
+
     try {
       await expect(discoverOpencodeModels(
         new AbortController().signal,
         createOpencodeModelsCommandAdapter(executor),
-      )).resolves.toEqual({ models: [], variants: {} })
+      )).resolves.toEqual({
+        models: ["kimi-for-coding/kimi-for-coding-highspeed"],
+        variants: {},
+        complete: false,
+      })
+      expect(warnSpy).toHaveBeenCalledWith("opencode model discovery timed out; using an incomplete catalog")
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it("logs and normalizes successful output with no valid header", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const executor: ModelsProcessExecutor = () => ({ status: 0, stdout: "warning: no providers\n" })
+    try {
+      await expect(discoverOpencodeModels(
+        new AbortController().signal,
+        createOpencodeModelsCommandAdapter(executor),
+      )).resolves.toEqual({ models: [], variants: {}, complete: false })
       expect(errorSpy).toHaveBeenCalledWith("failed to discover opencode models", expect.any(Error))
     } finally {
       errorSpy.mockRestore()
@@ -228,16 +255,18 @@ describe("discoverOpencodeModels", () => {
       { error: new Error("ENOENT"), status: null, stdout: "" },
       { status: 0, stdout: "openai/gpt-5\n" + JSON.stringify({ variants: { high: {} } }) },
     ]
-    const executor: SyncModelsProcessExecutor = () => processResults.shift()!
+    const executor: ModelsProcessExecutor = () => processResults.shift()!
     const adapter = createOpencodeModelsCommandAdapter(executor)
     try {
       await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
         models: [],
         variants: {},
+        complete: false,
       })
       await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
         models: ["openai/gpt-5"],
         variants: { "openai/gpt-5": ["high"] },
+        complete: true,
       })
       expect(errorSpy).toHaveBeenCalledOnce()
     } finally {
@@ -247,7 +276,7 @@ describe("discoverOpencodeModels", () => {
 })
 
 describe("opencodeModelSetsEqual", () => {
-  const base: DiscoveredOpencodeModels = {
+  const base: OpencodeModelCatalog = {
     models: ["openai/gpt-5", "anthropic/claude-sonnet-4"],
     variants: { "openai/gpt-5": ["low", "high"], "anthropic/claude-sonnet-4": ["max"] },
   }
@@ -268,6 +297,33 @@ describe("opencodeModelSetsEqual", () => {
     ["removed variant value", { ...base, variants: { ...base.variants, "openai/gpt-5": ["low"] } }],
   ])("detects an %s", (_name, changed) => {
     expect(opencodeModelSetsEqual(base, changed)).toBe(false)
+  })
+})
+
+describe("mergeOpencodeModelCatalogs", () => {
+  it("adds discoveries without removing models or variants from the current catalog", () => {
+    const current: OpencodeModelCatalog = {
+      models: ["openai/gpt-5", "anthropic/claude-sonnet-4"],
+      variants: {
+        "openai/gpt-5": ["low", "high"],
+        "anthropic/claude-sonnet-4": ["max"],
+      },
+    }
+
+    expect(mergeOpencodeModelCatalogs(current, {
+      models: ["openai/gpt-5", "google/gemini-3"],
+      variants: {
+        "openai/gpt-5": ["high", "max"],
+        "google/gemini-3": ["pro"],
+      },
+    })).toEqual({
+      models: ["openai/gpt-5", "anthropic/claude-sonnet-4", "google/gemini-3"],
+      variants: {
+        "openai/gpt-5": ["low", "high", "max"],
+        "anthropic/claude-sonnet-4": ["max"],
+        "google/gemini-3": ["pro"],
+      },
+    })
   })
 })
 

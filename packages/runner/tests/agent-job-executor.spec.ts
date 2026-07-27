@@ -546,16 +546,42 @@ describe("AgentJobExecutor parses the dispatch payload", () => {
     expect(runtime.runTurnCalls).toHaveLength(0)
   })
 
-  it("requires a workspace.path variable", async () => {
+  it.each([
+    ["null workspace", null],
+    ["non-object workspace", "invalid"],
+    ["missing path", {}],
+    ["empty path", { path: "" }],
+    ["whitespace path", { path: "   " }],
+    ["non-string path", { path: 42 }],
+  ])("rejects %s instead of using the runner default workdir", async (_name, workspace) => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
+    const executor = new AgentJobExecutor(
+      connection.connection,
+      makeAccessors(runtime.runtime),
+      null,
+      "/virtual/runner",
+    )
 
-    const work = buildAgentJobWork({ variables: {} })
+    const work = buildAgentJobWork({ variables: { workspace } })
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("failed")
     expect(result.message).toMatch(/workspace\.path/)
     expect(runtime.runTurnCalls).toHaveLength(0)
+  })
+
+  it("uses the runner default workdir when a direct AgentJob has no workspace", async () => {
+    const runtime = makeFakeRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
+
+    const result = await executor.execute(
+      buildAgentJobWork({ variables: {} }),
+      new AbortController().signal,
+    )
+
+    expect(result.status).toBe("completed")
+    expect(runtime.runTurnCalls[0]?.target.workDir).toBe(process.cwd())
   })
 
   it("does not flag `runtime` as an unknown dispatch option key", async () => {
