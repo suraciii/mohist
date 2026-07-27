@@ -290,7 +290,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("core/script", verify.Uses);
         Assert.Equal("${{ vars.ci.verify }}", ReadStringWith(verify, "run"));
         Assert.Equal(300000, verify.With!["timeout"]!.Value.GetInt32());
-        Assert.Equal(600000, defBuild.Tasks.Single(t => t.Id == "verify").With!["timeout"]!.Value.GetInt32());
+        Assert.Equal(300000, defBuild.Tasks.Single(t => t.Id == "verify").With!["timeout"]!.Value.GetInt32());
         Assert.NotNull(verify.Recovery);
         Assert.True(verify.Recovery!.Budget >= 2);
         var handler = Assert.Single(verify.Recovery.Handlers);
