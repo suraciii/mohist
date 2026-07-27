@@ -11,6 +11,7 @@ import {
   isSessionActivityEvent,
   isToolEvent,
   mapToolState,
+  mapTerminalStatus,
   narrowPayload,
   normalizeRaw,
   normalizeToolName,
@@ -257,6 +258,12 @@ export function buildChatView(events: SessionEvent[]): SessionChatView {
       const activity = getStringProp(payload, 'activity') ?? ''
       if (current && activity === 'idle') {
         current = { ...current, completedAt: event.createdAt }
+        const status = mapTerminalStatus(getStringProp(payload, 'status'))
+        if (status === 'failed' || status === 'cancelled') {
+          const terminalStatus = getStringProp(payload, 'status') ?? status
+          const reason = getStringProp(payload, 'failureReason') ?? `Session ${terminalStatus}`
+          current = pushErrorPart(current, reason, status, event.createdAt, counter)
+        }
       }
       continue
     }

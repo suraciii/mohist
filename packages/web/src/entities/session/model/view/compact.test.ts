@@ -49,8 +49,8 @@ describe('buildCompactView', () => {
       }),
       makeEvent({
         sequence: 5,
-        type: 'session.liveness',
-        payload: { status: 'failed', failureReason: 'out of memory' },
+        type: 'session.activity',
+        payload: { activity: 'idle', status: 'failed', failureReason: 'out of memory' },
         createdAt: '2024-02-01T00:00:05.000Z',
       }),
     ])
@@ -70,5 +70,22 @@ describe('buildCompactView', () => {
       firstPromptKind: 'task',
       preview: `${'x'.repeat(200)}\u2026`,
     })
+  })
+
+  it.each([
+    ['completed', 'completed', undefined],
+    ['failed', 'failed', 'out of memory'],
+    ['timeout', 'failed', 'runner timeout'],
+    ['cancelled', 'cancelled', 'cancelled by user'],
+  ] as const)('uses terminal session.activity status %s', (status, terminalStatus, failureReason) => {
+    const view = buildCompactView([
+      makeEvent({
+        type: 'session.activity',
+        payload: { activity: 'idle', status, failureReason },
+      }),
+    ])
+
+    expect(view.terminalStatus).toBe(terminalStatus)
+    expect(view.failureReason).toBe(failureReason)
   })
 })

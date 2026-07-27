@@ -72,6 +72,7 @@ export function mapToolState(status: string | undefined): 'pending' | 'running' 
 
 export function mapTerminalStatus(status: string | undefined): 'completed' | 'failed' | 'cancelled' | 'running' {
   if (status === 'completed' || status === 'failed' || status === 'cancelled') return status
+  if (status === 'timeout') return 'failed'
   return 'running'
 }
 

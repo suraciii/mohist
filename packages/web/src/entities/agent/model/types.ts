@@ -72,7 +72,14 @@ export type AgentDetailEventMap = {
   coder_thought_chunk: { issueNumber: number; projectId: string; executionId?: string; runtimeSessionId: string; runtime?: string; text: string; sessionId?: string; model?: string }
   coder_tool_call: { issueNumber: number; projectId: string; executionId?: string; runtimeSessionId: string; runtime?: string; toolName: string; state?: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; status?: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; rawOutputMetadata?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: Record<string, unknown>; normalizedName?: string; displayTitle?: string; displaySubtitle?: string; category?: string; sessionId?: string; model?: string }
   'session.input': SessionRuntimeBase & { text: string; kind?: string; sentAt?: string }
-  'session.activity': SessionRuntimeBase & { activity: 'idle' | 'active' | 'unknown'; observedAt?: string }
+  'session.activity': SessionRuntimeBase & {
+    activity: 'idle' | 'active' | 'unknown'
+    observedAt?: string
+    operationId?: string
+    status?: 'completed' | 'failed' | 'timeout' | 'cancelled' | string
+    failureReason?: string | null
+    failureCategory?: string | null
+  }
   'message.delta': SessionRuntimeBase & { text: string; model?: string }
   'reasoning.delta': SessionRuntimeBase & { text: string; model?: string }
   'tool_call.started': SessionRuntimeBase & { toolName: string; state: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; rawOutputMetadata?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: Record<string, unknown>; normalizedName?: string; displayTitle?: string; displaySubtitle?: string; category?: string; model?: string }

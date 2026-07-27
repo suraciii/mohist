@@ -8,6 +8,7 @@ import {
   isLivenessEvent,
   isSessionActivityEvent,
   isToolEvent,
+  mapTerminalStatus,
   narrowPayload,
   readToolString,
 } from './helpers'
@@ -69,8 +70,12 @@ export function buildCompactView(events: SessionEvent[]): SessionCompactView {
 
     if (isSessionActivityEvent(event.type)) {
       const activity = getStringProp(payload, 'activity')
-      if (activity === 'idle' && terminalStatus === 'running') {
-        terminalStatus = 'completed'
+      if (activity === 'idle') {
+        const status = mapTerminalStatus(getStringProp(payload, 'status'))
+        terminalStatus = status === 'running' ? 'completed' : status
+        if (terminalStatus === 'failed' || terminalStatus === 'cancelled') {
+          failureReason = getStringProp(payload, 'failureReason') ?? failureReason
+        }
       }
       continue
     }
