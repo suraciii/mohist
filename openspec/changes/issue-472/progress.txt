@@ -21,3 +21,4 @@
 ## Review fix
 
 - When `Mohist:Otel:Enabled=false`, omit `OtelDiagnosticsSampler` from the hosted-service registration so no diagnostics sampling or maintenance loop starts. Added host composition coverage for the disabled registration surface.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore --filter "FullyQualifiedName~MohistHostPlanCompositionSpecs"` passed all 1,522 Server unit tests (the Microsoft Testing Platform ignored the VSTest filter). Final `npm test` passed: 175 workflow-definition, 1,432 CLI, 1,522 Server unit, 33 Server architecture, and 3,247 Server spec tests; 389 Web files (5,133 passed, 1 skipped); and 120 Runner files (1,423 passed).
