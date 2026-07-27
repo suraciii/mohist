@@ -164,12 +164,9 @@ public sealed class AgentJobGrainPersistenceSpecs
             await registry.UnregisterAsync(runnerId);
     }
 
-    private static Task WaitForRunningAsync(IAgentJobGrain job) =>
-        TestWait.ForAsync(
-            () => job.GetStatusAsync(),
-            status => status == AgentJobStatus.Running,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            "status == Running",
-            () => job.CheckTimeoutsAsync());
+    private async Task WaitForRunningAsync(IAgentJobGrain job)
+    {
+        await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
+        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+    }
 }

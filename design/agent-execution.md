@@ -235,6 +235,12 @@ Follow-up 命令只需要三种结果：
 把 transcript 分组。`unknown` 后只能使用同一 operation 核对结果；创建新 operation
 重新发送可能产生重复副作用。
 
+Compact 与 Reset 这类 recovery 命令在调用方省略显式幂等键时，由 grain 每次生成唯一键
+（与 `operationId` 同格式），不再退化为固定值；显式提供幂等键时同键重放、异键 join
+同一 in-progress reservation 的语义不变；省略键的重试因此不再跨操作幂等——已完成
+reservation 不会被后续缺省调用误命中，缺省调用落入 `BeginSessionCommandAsync` 开启新
+操作。需要重试幂等的调用方必须显式提供键。
+
 Cancel 只针对当前 binding 上唯一可能执行中的操作，不需要额外的执行身份。Runtime 无法确认
 已经停止时，Session 进入 `unknown`；停止请求本身不能伪造 idle。
 

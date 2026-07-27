@@ -1,0 +1,27 @@
+{
+  "project": "mohist-local",
+  "description": "AgentSession recovery 幂等键缺省兜底由固定常量 \"legacy\" 改为 grain 每次生成唯一值，消除不同 recovery 操作共享一键导致的误重放，并保留显式键的全部幂等命中语义。",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Recovery 缺省幂等键每次生成唯一值",
+      "spec": "specs/agent-session-recovery-idempotency/spec.md",
+      "description": "在 AgentSessionGrain.RecoveryIdempotencyKey 中，当 value 为空白时返回 Guid.NewGuid().ToString(\"N\") 而非常量 \"legacy\"；删除 LegacyRecoveryIdempotencyKey 常量。匹配/(join) 逻辑保持不变。在 design/agent-execution.md 的 operationId 幂等键段补记决策：缺省由 grain 生成唯一值、显式键语义不变、省略键重试不再跨操作幂等。补 recovery spec/unit 回归覆盖缺省唯一键与不误重放路径。",
+      "acceptanceCriteria": [
+        "AgentSessionGrain 中不再存在 LegacyRecoveryIdempotencyKey 常量，RecoveryIdempotencyKey 对空白输入返回每次不同的值（非固定常量、非 \"legacy\"）。",
+        "两次省略显式键的同类 recovery 操作产生的 reservation 幂等键不同，且第二次不再重放第一次的 outcome（新 operationId、记录新的 recovery effect/事件）。",
+        "省略显式键调用 GetCompletedRecoveryAsync 在存在已完成同类 reservation 时返回 null，并落入 BeginSessionCommandAsync 开启新操作。",
+        "显式键语义零回归：同键重放同一 reservation/结果；异显式键 join 同一 in-progress 操作；显式传入 \"legacy\" 视为普通调用方键，不被归一或与省略键等价。",
+        "design/agent-execution.md 记录缺省生成唯一值的决策。",
+        "server 全量测试绿（npm test）。"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server 中 AgentSessionGrain.cs 改动 + design/agent-execution.md 决策段落 + recovery spec/unit 测试增补，且 npm test 通过。",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "改动局限单一子系统，无 DB schema/事件/API 形状变化、无迁移、无 runner 行为变化。参考 design.md D1–D4。"
+    }
+  ]
+}

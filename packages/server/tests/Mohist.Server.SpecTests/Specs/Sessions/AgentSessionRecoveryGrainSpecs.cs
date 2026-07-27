@@ -217,7 +217,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     public async Task Compact_PostCommitFailure_ReactivationReturnsPersistedCompletionWithoutAnotherCompaction()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-post-commit");
-        var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "post-commit-key");
         _fixture.StateStore.CommitThenThrowNextSave(sessionId);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => grain.CompleteCompactAsync(
@@ -227,7 +227,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         await management.DeactivateOnIdle();
         var reactivated = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
 
-        var completed = await reactivated.GetCompletedRecoveryAsync(SessionCommandKind.Compact);
+        var completed = await reactivated.GetCompletedRecoveryAsync(SessionCommandKind.Compact, "post-commit-key");
         Assert.NotNull(completed);
         Assert.Equal(sessionId, completed!.Id);
         Assert.True(completed.WasCompacted);
@@ -270,6 +270,83 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
 
         Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset, "reset-1"));
         Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset, "reset-2"));
+    }
+
+    [Fact]
+    public async Task DefaultKey_GeneratesUniqueIdempotencyKeyForEachOmittedCall()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-default-key");
+        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var firstKey = (await _fixture.StateStore.LoadAsync(sessionId))!
+            .Status.PendingReset!.IdempotencyKey;
+
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, Summary: "first"));
+        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var secondKey = (await _fixture.StateStore.LoadAsync(sessionId))!
+            .Status.PendingReset!.IdempotencyKey;
+
+        Assert.NotNull(firstKey);
+        Assert.NotNull(secondKey);
+        Assert.NotEqual("legacy", firstKey);
+        Assert.NotEqual("legacy", secondKey);
+        Assert.NotEqual(firstKey, secondKey);
+    }
+
+    [Fact]
+    public async Task DefaultKey_AfterCompletedRecovery_StartsNewOperationInsteadOfReplaying()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-default-no-replay");
+        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, Summary: "first"));
+
+        Assert.Null(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact));
+
+        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        Assert.NotEqual(first.OperationId, second.OperationId);
+    }
+
+    [Fact]
+    public async Task DefaultKey_ProducesItsOwnRecoveryEffectForEachOmittedCall()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-default-reset-effect");
+        var eventCountBefore = _fixture.StateStore.Events.Count;
+        var first = await grain.BeginResetAsync();
+        await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
+            first.OperationId!,
+            "runtime-default-reset-effect-replacement-1",
+            "opencode"));
+
+        var second = await grain.BeginResetAsync();
+        await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
+            second.OperationId!,
+            "runtime-default-reset-effect-replacement-2",
+            "opencode"));
+
+        var recoveryEvents = _fixture.StateStore.Events.Skip(eventCountBefore).ToArray();
+        Assert.NotEqual(first.OperationId, second.OperationId);
+        Assert.Equal(2, recoveryEvents.Count(e => e.Value is AgentSessionRuntimeBound));
+    }
+
+    [Fact]
+    public async Task ExplicitLegacyKey_IsTreatedAsOrdinaryCallerSuppliedKey()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-explicit-legacy");
+        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "legacy");
+        var firstKey = (await _fixture.StateStore.LoadAsync(sessionId))!
+            .Status.PendingReset!.IdempotencyKey;
+        Assert.Equal("legacy", firstKey);
+
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, Summary: "first"));
+
+        Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact, "legacy"));
+        Assert.Null(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact));
+
+        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var secondKey = (await _fixture.StateStore.LoadAsync(sessionId))!
+            .Status.PendingReset!.IdempotencyKey;
+        Assert.NotEqual("legacy", secondKey);
+        Assert.NotEqual(firstKey, secondKey);
+        Assert.NotEqual(first.OperationId, second.OperationId);
     }
 
     [Fact]

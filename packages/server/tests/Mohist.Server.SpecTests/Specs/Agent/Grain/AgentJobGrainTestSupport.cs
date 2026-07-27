@@ -36,8 +36,14 @@ public abstract class AgentJobGrainTestSupport
         string description)
         => await TestWait.ForAsync(probe, done, timeout, step, description);
 
-    protected static async Task WaitForStatusAsync(IAgentJobGrain job, AgentJobStatus expected, TimeSpan timeout)
+    protected async Task WaitForStatusAsync(IAgentJobGrain job, AgentJobStatus expected, TimeSpan timeout)
     {
+        if (expected == AgentJobStatus.Running)
+        {
+            await WaitForRunningAsync(job);
+            return;
+        }
+
         var convergenceTimeout = timeout < TimeSpan.FromSeconds(30)
             ? TimeSpan.FromSeconds(30)
             : timeout;
@@ -49,6 +55,12 @@ public abstract class AgentJobGrainTestSupport
             TimeSpan.FromMilliseconds(25),
             $"status == {expected}",
             () => job.CheckTimeoutsAsync());
+    }
+
+    protected async Task WaitForRunningAsync(IAgentJobGrain job)
+    {
+        await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
+        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }
 
     protected static async Task<T> WaitForAsync<T>(
