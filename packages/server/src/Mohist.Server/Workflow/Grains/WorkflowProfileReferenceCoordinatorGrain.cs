@@ -68,12 +68,6 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         }
     }
 
-    public Task DeactivateForTestAsync()
-    {
-        DeactivateOnIdle();
-        return Task.CompletedTask;
-    }
-
     public async Task<WorkflowProfileReferenceResult> SetProjectDefaultAsync(
         WorkflowProfileCommandPayload.SetProjectDefault payload,
         string commandId,

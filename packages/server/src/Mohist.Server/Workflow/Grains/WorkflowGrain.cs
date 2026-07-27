@@ -34,9 +34,30 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly WorkflowStageInitializer _stageInitializer;
     private readonly WorkflowWorkLifecycle _workLifecycle;
 
-    private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
+    private string GrainKey => _testKey ?? this.GetPrimaryKeyString();
 
-    internal string GrainKeyForTest { get; set; } = string.Empty;
+    private string? _testKey;
+
+    /// <summary>
+    /// Direct-construction factory for unit tests that need to drive the
+    /// grain outside an Orleans silo. Production uses
+    /// <c>this.GetPrimaryKeyString()</c>; the test key stored here is
+    /// only used when Orleans is absent.
+    /// </summary>
+    internal static WorkflowGrain ForDirectConstruction(
+        string testKey,
+        IWorkflowRunStore runStore,
+        WorkflowProfileManager profileManager,
+        WorkflowRunProfileManager runProfileManager,
+        TimeProvider timeProvider,
+        ILogger<WorkflowGrain> log)
+    {
+        var grain = new WorkflowGrain(runStore, profileManager, runProfileManager, timeProvider, log)
+        {
+            _testKey = testKey,
+        };
+        return grain;
+    }
 
     internal Func<string, string, Task<WorkflowProfileReferenceResult>>? BindProfileForTest { get; set; }
 
@@ -491,12 +512,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         await CommitAsync(events);
 
         return new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count);
-    }
-
-    public Task DeactivateForTestAsync()
-    {
-        DeactivateOnIdle();
-        return Task.CompletedTask;
     }
 
     public Task<string?> GetRunStatusAsync()

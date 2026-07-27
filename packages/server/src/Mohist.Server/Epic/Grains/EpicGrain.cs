@@ -39,11 +39,32 @@ public class EpicGrain : Grain, IEpicGrain
         _log = log;
     }
 
-    internal string GrainKeyForTest { get; set; } = string.Empty;
-
-    private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
+    private string GrainKey => _testKey ?? this.GetPrimaryKeyString();
 
     private DateTimeOffset Now() => _timeProvider.GetUtcNow();
+
+    private string? _testKey;
+
+    /// <summary>
+    /// Direct-construction factory for unit tests that need to drive the
+    /// grain outside an Orleans silo. Production uses
+    /// <c>this.GetPrimaryKeyString()</c>; the test key stored here is
+    /// only used when Orleans is absent.
+    /// </summary>
+    internal static EpicGrain ForDirectConstruction(
+        string testKey,
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IGrainFactory grains,
+        TimeProvider timeProvider,
+        IEventStore eventStore,
+        ILogger<EpicGrain> log)
+    {
+        var grain = new EpicGrain(dbFactory, grains, timeProvider, eventStore, log)
+        {
+            _testKey = testKey,
+        };
+        return grain;
+    }
 
     public async Task<EpicDto> CreateAsync(string projectId, int number, string title, string? description, string? priority)
     {

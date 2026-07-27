@@ -474,6 +474,105 @@ public class ArchitectureRules
         Assert.DoesNotContain("RecordRepositoryCommandReceiptAsync", names);
     }
 
+    // issue-500 T-001: grain interfaces MUST NOT expose a test-only
+    // deactivation operation. The shared cluster-lifecycle control
+    // (IManagementGrain.ForceActivationCollection) is the only
+    // rehydration path specs can use.
+    [Fact]
+    public void ProductionGrainInterfaces_DoNotExposeDeactivateForTestAsync()
+    {
+        var grainInterfaceTypes = new[]
+        {
+            typeof(Mohist.Server.Issue.Grains.IIssueGrain),
+            typeof(Mohist.Server.Issue.Grains.Coordinator.IIssueRepositoryCoordinatorGrain),
+            typeof(Mohist.Server.Sessions.Grains.IAgentSessionGrain),
+            typeof(Mohist.Server.Workflow.Grains.IWorkflowGrain),
+            typeof(Mohist.Server.Runner.Grains.IRunnerGrain),
+            typeof(Mohist.Server.Workflow.Grains.IWorkflowProfileReferenceCoordinatorGrain),
+        };
+
+        var offenders = grainInterfaceTypes
+            .SelectMany(iface => iface.GetMethods())
+            .Where(method => method.Name == "DeactivateForTestAsync")
+            .Select(method => method.DeclaringType!.FullName + "." + method.Name)
+            .ToList();
+
+        Assert.True(
+            offenders.Count == 0,
+            "Production grain interfaces MUST NOT expose DeactivateForTestAsync. " +
+            "Rehydration is the cluster's job (IManagementGrain.ForceActivationCollection). " +
+            "Offenders: " + string.Join(", ", offenders));
+    }
+
+    // issue-500 T-001: the Agent, Epic, Issue, and Workflow grain
+    // implementations MUST derive identity from their authoritative
+    // Orleans grain key alone. The legacy `GrainKeyForTest` property /
+    // field fallback must never reappear.
+    [Fact]
+    public void ProductionGrains_DoNotExposeGrainKeyForTest()
+    {
+        var grainImplementationTypes = new[]
+        {
+            typeof(Mohist.Server.Agent.Grains.AgentGrain),
+            typeof(Mohist.Server.Epic.Grains.EpicGrain),
+            typeof(Mohist.Server.Issue.Grains.IssueGrain),
+            typeof(Mohist.Server.Workflow.Grains.WorkflowGrain),
+        };
+
+        var offenders = grainImplementationTypes
+            .SelectMany(type => type.GetMembers(
+                System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.Static
+                | System.Reflection.BindingFlags.DeclaredOnly))
+            .Where(member => member.Name == "GrainKeyForTest")
+            .Select(member => member.DeclaringType!.FullName + "." + member.Name)
+            .ToList();
+
+        Assert.True(
+            offenders.Count == 0,
+            "Production grain implementations MUST NOT expose a GrainKeyForTest member. " +
+            "Identity is the grain's authoritative Orleans key. " +
+            "Offenders: " + string.Join(", ", offenders));
+    }
+
+    // issue-500 T-001: production grain implementations MUST NOT
+    // implement a DeactivateForTest method. Rehydration is the
+    // cluster's job; production grains expose only production verbs.
+    [Fact]
+    public void ProductionGrainImplementations_DoNotImplementDeactivateForTest()
+    {
+        var grainImplementationTypes = new[]
+        {
+            typeof(Mohist.Server.Agent.Grains.AgentGrain),
+            typeof(Mohist.Server.Epic.Grains.EpicGrain),
+            typeof(Mohist.Server.Issue.Grains.IssueGrain),
+            typeof(Mohist.Server.Issue.Grains.Coordinator.IssueRepositoryCoordinatorGrain),
+            typeof(Mohist.Server.Sessions.Grains.AgentSessionGrain),
+            typeof(Mohist.Server.Workflow.Grains.WorkflowGrain),
+            typeof(Mohist.Server.Workflow.Grains.WorkflowProfileReferenceCoordinatorGrain),
+            typeof(Mohist.Server.Runner.Grains.RunnerGrain),
+        };
+
+        var offenders = grainImplementationTypes
+            .SelectMany(type => type.GetMethods(
+                System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.Static
+                | System.Reflection.BindingFlags.DeclaredOnly))
+            .Where(method => method.Name == "DeactivateForTestAsync")
+            .Select(method => method.DeclaringType!.FullName + "." + method.Name)
+            .ToList();
+
+        Assert.True(
+            offenders.Count == 0,
+            "Production grain implementations MUST NOT implement DeactivateForTestAsync. " +
+            "Rehydration is the cluster's job. " +
+            "Offenders: " + string.Join(", ", offenders));
+    }
+
     [Fact]
     public void Api_ShouldNotDependOnOrleans()
     {

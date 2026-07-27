@@ -179,7 +179,8 @@ public class IssueWorkflowReadPathSpecs
         string projectId,
         int issueNumber)
     {
-        return new IssueGrain(
+        return IssueGrain.ForDirectConstruction(
+            GrainKey.Issue(new IssueKey(projectId, issueNumber)),
             stateStore,
             services.GetRequiredService<IssueWorkflowProfileRegistry>(),
             services.GetRequiredService<WorkflowQuerier>(),
@@ -195,10 +196,7 @@ public class IssueWorkflowReadPathSpecs
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<TimeProvider>(),
-            services.GetRequiredService<ILogger<IssueGrain>>())
-        {
-            GrainKeyForTest = GrainKey.Issue(new IssueKey(projectId, issueNumber)),
-        };
+            services.GetRequiredService<ILogger<IssueGrain>>());
     }
 
     private static async Task SeedIssueAsync(

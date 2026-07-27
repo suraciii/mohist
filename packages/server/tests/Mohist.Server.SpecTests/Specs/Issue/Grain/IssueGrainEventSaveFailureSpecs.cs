@@ -168,7 +168,8 @@ public class IssueGrainEventSaveFailureSpecs
         IIssueStore stateStore,
         string grainKey)
     {
-        return new IssueGrain(
+        return IssueGrain.ForDirectConstruction(
+            grainKey,
             stateStore,
             services.GetRequiredService<IssueWorkflowProfileRegistry>(),
             services.GetRequiredService<WorkflowQuerier>(),
@@ -184,10 +185,7 @@ public class IssueGrainEventSaveFailureSpecs
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<TimeProvider>(),
-            services.GetRequiredService<ILogger<IssueGrain>>())
-        {
-            GrainKeyForTest = grainKey,
-        };
+            services.GetRequiredService<ILogger<IssueGrain>>());
     }
 
     private static async Task SeedIssueAsync(

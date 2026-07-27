@@ -143,22 +143,14 @@ public abstract class WorkflowGrainSpecs
 
     protected static int TestIssueNumber(string workflowId) => 1;
 
-    protected async Task DeactivateWorkflowAsync(string workflowId)
-    {
-        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await workflow.DeactivateForTestAsync();
-
-        var management = Grains.GetGrain<IManagementGrain>(0);
-        await management.ForceActivationCollection(TimeSpan.Zero);
-
-        await TestWait.ForAsync(
-            async () => await management.GetDetailedGrainStatistics(),
-            activations => !activations.Any(stat => stat.GrainType.Contains(nameof(WorkflowGrain), StringComparison.Ordinal)
-                && stat.GrainId.ToString()!.Contains(workflowId, StringComparison.Ordinal)),
+    protected Task DeactivateWorkflowAsync(string workflowId) =>
+        GrainTestSupport.ForceActivationCollectionForGrainAsync(
+            Grains,
+            nameof(WorkflowGrain),
+            workflowId,
             TimeSpan.FromSeconds(3),
             TimeSpan.FromMilliseconds(50),
             $"Workflow grain '{workflowId}' to deactivate");
-    }
 
     protected async Task ClearBacklogAsync()
     {

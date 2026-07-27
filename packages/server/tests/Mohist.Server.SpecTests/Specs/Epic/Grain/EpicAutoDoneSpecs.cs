@@ -392,15 +392,13 @@ public class EpicAutoDoneSpecs
     }
 
     private static EpicGrain CreateGrain(TestDbContextFactory factory, string grainKey) =>
-        new(
+        EpicGrain.ForDirectConstruction(
+            grainKey,
             factory,
             null!,
             new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
             new NoopEventStore(),
-            NullLogger<EpicGrain>.Instance)
-        {
-            GrainKeyForTest = grainKey,
-        };
+            NullLogger<EpicGrain>.Instance);
 
     private static async Task SeedEpicAsync(
         TestDatabase database,

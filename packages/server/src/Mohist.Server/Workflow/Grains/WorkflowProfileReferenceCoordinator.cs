@@ -47,8 +47,6 @@ public interface IWorkflowProfileReferenceCoordinatorGrain : IGrainWithStringKey
         WorkflowProfileCommandPayload.DeleteProfile payload,
         string commandId,
         long? expectedRevision);
-
-    Task DeactivateForTestAsync();
 }
 
 public enum WorkflowProfileReferenceResultCode

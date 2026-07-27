@@ -1,18 +1,23 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Events.Grains;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Otel;
 using Mohist.Server.Project.Services;
@@ -30,6 +35,7 @@ using Mohist.Server.SpecTests.Specs.Issue.Profile;
 using Orleans.Configuration;
 using Orleans.Hosting;
 using Orleans.TestingHost;
+using WorkflowQuerier = Mohist.Server.Workflow.Services.WorkflowQuerier;
 
 namespace Mohist.Server.SpecTests.Support;
 
@@ -226,7 +232,16 @@ public static class GrainTestConfig
             options.ConfigureWarnings(w => w.Ignore(
                 RelationalEventId.PendingModelChangesWarning));
         });
+        siloBuilder.Services.AddScoped<IIssueStore, IssueStore>();
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+        siloBuilder.Services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
+        siloBuilder.Services.AddScoped<WorkflowQuerier>();
+        siloBuilder.Services.AddScoped<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
+        siloBuilder.Services.AddScoped<IssueRepositoryResolver>();
+        siloBuilder.Services.AddScoped<AttachmentService>();
+        siloBuilder.Services.AddSingleton<IActionCatalogSource, NullActionCatalogSource>();
+        siloBuilder.Services.AddScoped<ProjectWorkflowProfileManager>();
+        siloBuilder.Services.AddScoped<IssueWorkflowProfileManager>();
         siloBuilder.Services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();

@@ -253,12 +253,13 @@ public abstract class EpicAutoDoneHandlerTestSupport
         public IEpicGrain GetEpicGrain(string grainKey)
         {
             Calls.Add(new RecordedGrainCall(grainKey));
-            return new EpicGrain(
+            return EpicGrain.ForDirectConstruction(
+                grainKey,
                 _dbFactory,
                 this,
                 new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
                 new NoopEventStore(),
-                NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
+                NullLogger<EpicGrain>.Instance);
         }
 
         private IIssueGrain GetIssueGrain(string issueId) => new TestIssueGrain(this, issueId);
@@ -343,7 +344,6 @@ public abstract class EpicAutoDoneHandlerTestSupport
         public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
         public Task StartCompositeAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
-        public Task DeactivateForTestAsync() => throw new NotSupportedException();
         public Task<bool> AssignEpicAsync(int epicNumber) => Task.FromResult(true);
         public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => Task.FromResult(true);
         public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber)

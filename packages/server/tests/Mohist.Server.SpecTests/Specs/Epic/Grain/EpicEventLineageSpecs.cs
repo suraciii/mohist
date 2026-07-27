@@ -120,10 +120,9 @@ public class EpicEventLineageSpecs
             await SeedEpicAsync(database);
             await SeedIssueAsync(database);
             var grains = new RecordingGrainFactory();
-            var grain = new EpicGrain(database.Factory, grains, new FakeTimeProvider(FixedTime), eventStore, NullLogger<EpicGrain>.Instance)
-            {
-                GrainKeyForTest = $"{ProjectId}:{EpicNumber}",
-            };
+            var grain = EpicGrain.ForDirectConstruction(
+                $"{ProjectId}:{EpicNumber}",
+                database.Factory, grains, new FakeTimeProvider(FixedTime), eventStore, NullLogger<EpicGrain>.Instance);
 
             await grain.LinkIssueAsync(1, ProjectId);
             await grain.UnlinkIssueAsync(1, ProjectId);
@@ -152,10 +151,9 @@ public class EpicEventLineageSpecs
         {
             await SeedEpicAsync(database);
             await SeedIssueAsync(database);
-            var grain = new EpicGrain(database.Factory, new ThrowingAffiliationGrainFactory(), new FakeTimeProvider(FixedTime), eventStore, NullLogger<EpicGrain>.Instance)
-            {
-                GrainKeyForTest = $"{ProjectId}:{EpicNumber}",
-            };
+            var grain = EpicGrain.ForDirectConstruction(
+                $"{ProjectId}:{EpicNumber}",
+                database.Factory, new ThrowingAffiliationGrainFactory(), new FakeTimeProvider(FixedTime), eventStore, NullLogger<EpicGrain>.Instance);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() => grain.LinkIssueAsync(1, ProjectId));
 

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
@@ -20,6 +21,14 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public string ConnectionString => _keeper.ConnectionString;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public ControllableDispatchPollObserver DispatchPollObserver { get; } = new();
+    public IServiceProvider Services => Cluster.GetSiloServiceProvider(null);
+    public Mohist.Server.Infrastructure.Data.Db.MohistDbContext CreateDbContext()
+    {
+        var options = new DbContextOptionsBuilder<Mohist.Server.Infrastructure.Data.Db.MohistDbContext>()
+            .UseSqlite(ConnectionString)
+            .Options;
+        return new Mohist.Server.Infrastructure.Data.Db.MohistDbContext(options);
+    }
 
     private readonly RecordingEventStore _sharedEventStore = new();
     private readonly InMemoryEventBus _sharedEventBus;

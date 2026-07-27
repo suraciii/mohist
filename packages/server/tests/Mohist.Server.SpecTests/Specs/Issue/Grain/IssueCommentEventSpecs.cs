@@ -224,7 +224,8 @@ public class IssueCommentEventSpecs
 
     private static IssueGrain CreateGrain(IServiceProvider services, string projectId, int issueNumber)
     {
-        return new IssueGrain(
+        return IssueGrain.ForDirectConstruction(
+            GrainKey.Issue(new IssueKey(projectId, issueNumber)),
             services.GetRequiredService<IIssueStore>(),
             services.GetRequiredService<IssueWorkflowProfileRegistry>(),
             services.GetRequiredService<WorkflowQuerier>(),
@@ -240,9 +241,6 @@ public class IssueCommentEventSpecs
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<TimeProvider>(),
-            services.GetRequiredService<ILogger<IssueGrain>>())
-        {
-            GrainKeyForTest = GrainKey.Issue(new IssueKey(projectId, issueNumber)),
-        };
+            services.GetRequiredService<ILogger<IssueGrain>>());
     }
 }

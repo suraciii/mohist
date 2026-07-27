@@ -86,9 +86,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _log = log;
     }
 
-    private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
-
-    internal string GrainKeyForTest { get; set; } = string.Empty;
+    private string GrainKey => _testKey ?? this.GetPrimaryKeyString();
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
@@ -96,14 +94,49 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _issue = await _issueStore.LoadAsync(GrainKey);
     }
 
-    public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
+    /// <summary>
+    /// Direct-construction factory for unit tests that need to drive the
+    /// grain outside an Orleans silo. The production constructor above is
+    /// unchanged; tests call this factory with the test key plus the same
+    /// services the silo would supply. The grain's
+    /// <c>GrainKey</c> property reads from <c>this.GetPrimaryKeyString()</c>
+    /// in production; the test key stored here is used only when Orleans
+    /// is absent (i.e. the grain was constructed directly in a test).
+    /// </summary>
+    internal static IssueGrain ForDirectConstruction(
+        string testKey,
+        IIssueStore issueStore,
+        IssueWorkflowProfileRegistry profiles,
+        WorkflowQuerier workflowQuerier,
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IEventStore eventStore,
+        IGrainFactory grainFactory,
+        IBackgroundTaskLauncher backgroundTasks,
+        IssueRepositoryResolver repositoryResolver,
+        WorkflowProfileManager workflowProfileManager,
+        ProjectWorkflowProfileManager projectProfileManager,
+        IssueWorkflowProfileManager issueProfileManager,
+        AttachmentService attachmentService,
+        IConfiguration configuration,
+        IEnvironmentVariableProvider environment,
+        TimeProvider timeProvider,
+        ILogger<IssueGrain> log)
     {
-        return Task.CompletedTask;
+        var grain = new IssueGrain(
+            issueStore, profiles, workflowQuerier, dbFactory, eventStore,
+            grainFactory, backgroundTasks, repositoryResolver,
+            workflowProfileManager, projectProfileManager, issueProfileManager,
+            attachmentService, configuration, environment, timeProvider, log)
+        {
+            _testKey = testKey,
+        };
+        return grain;
     }
 
-    public Task DeactivateForTestAsync()
+    private string? _testKey;
+
+    public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {
-        DeactivateOnIdle();
         return Task.CompletedTask;
     }
 

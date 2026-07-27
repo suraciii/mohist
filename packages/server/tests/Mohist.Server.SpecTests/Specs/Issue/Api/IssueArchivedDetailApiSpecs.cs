@@ -467,7 +467,7 @@ public class IssueArchivedDetailApiSpecs
         // Deactivate the workflow grain so it re-reads the updated
         // state on the next request — otherwise the status endpoint
         // would serve the in-memory snapshot from StartWorkAsync.
-        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).DeactivateForTestAsync();
+        await GrainTestSupport.ForceActivationCollectionAsync(_grains);
     }
 
     private async Task SeedArtifactAsync(string wrId, string path, string body)

@@ -147,7 +147,7 @@ public class IssueWorkflowLifecycleSpecs
     {
         var (projectId, _, issueNumber, _, oldWrId) = await SeedIssueInProgressAsync();
         await _grains.GetGrain<IWorkflowGrain>(oldWrId).StopAsync("test-stop");
-        await _grains.GetGrain<IWorkflowGrain>(oldWrId).DeactivateForTestAsync();
+        await GrainTestSupport.ForceActivationCollectionAsync(_grains);
         await PoisonWorkflowFailureReasonAsync(oldWrId, "RemovedReason");
 
         await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issueNumber}/rerun");
@@ -228,8 +228,7 @@ public class IssueWorkflowLifecycleSpecs
     public async Task EventDispatcher_RedeliversIssueWorkStartedAndCreatesMissingWorkflowRun()
     {
         var (projectId, _, issueNumber, _, workflowRunId) = await SeedIssueInProgressAsync();
-        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).DeactivateForTestAsync();
-        await _grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+        await GrainTestSupport.ForceActivationCollectionAsync(_grains);
         await DeleteWorkflowRunAsync(workflowRunId);
         await MarkIssueWorkStartedUndeliveredAsync(projectId, issueNumber);
 

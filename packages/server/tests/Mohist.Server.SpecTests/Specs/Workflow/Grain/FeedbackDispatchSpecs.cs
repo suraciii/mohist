@@ -295,8 +295,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         // Force the workflow grain to deactivate so the next dispatch
         // rehydrates the workflow run from the JSON-serialized state.
         // This exercises the CausedByFeedbackId round-trip path.
-        var grain = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
-        await grain.DeactivateForTestAsync();
+        await GrainTestSupport.ForceActivationCollectionAsync(Grains);
 
         // Re-register the runner so the next poll picks up the
         // rehydrated apply-feedback task.

@@ -1348,12 +1348,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await AppendEventsAsync([new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, payload)], session.Status.AgentRuntimeSessionId, true);
     }
 
-    public Task DeactivateForTestAsync()
-    {
-        DeactivateOnIdle();
-        return Task.CompletedTask;
-    }
-
     public async Task FlushForTestAsync()
     {
         if (await FlushAsync(CancellationToken.None))

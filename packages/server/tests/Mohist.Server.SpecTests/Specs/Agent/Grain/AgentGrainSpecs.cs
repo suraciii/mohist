@@ -234,14 +234,11 @@ public class AgentGrainSpecs
 
     private static AgentGrain CreateGrain(TestDbContextFactory factory, FakeTimeProvider timeProvider, string projectId, string agentId)
     {
-        var grain = new AgentGrain(
+        return AgentGrain.ForDirectConstruction(
+            GrainKey.Agent(projectId, agentId),
             new AgentStore(factory),
             new AgentQuerier(factory),
-            timeProvider)
-        {
-            GrainKeyForTest = GrainKey.Agent(projectId, agentId),
-        };
-        return grain;
+            timeProvider);
     }
 
     private static AgentCreateData NewCreate(string projectId, string name) => new(

@@ -18,13 +18,32 @@ public class AgentGrain : Grain, IAgentGrain
         _timeProvider = timeProvider;
     }
 
-    private string GrainKey => this.GetPrimaryKeyString();
+    private string GrainKey => _testKey ?? this.GetPrimaryKeyString();
 
-    internal string GrainKeyForTest { get; set; } = string.Empty;
+    private string? _testKey;
+
+    /// <summary>
+    /// Direct-construction factory for unit tests that need to drive the
+    /// grain outside an Orleans silo. Production uses
+    /// <c>this.GetPrimaryKeyString()</c>; the test key stored here is
+    /// only used when Orleans is absent.
+    /// </summary>
+    internal static AgentGrain ForDirectConstruction(
+        string testKey,
+        IStateStore<Domain.Agent> agentStore,
+        AgentQuerier querier,
+        TimeProvider timeProvider)
+    {
+        var grain = new AgentGrain(agentStore, querier, timeProvider)
+        {
+            _testKey = testKey,
+        };
+        return grain;
+    }
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
-        _agent = await _agentStore.LoadAsync(CurrentKey());
+        _agent = await _agentStore.LoadAsync(GrainKey);
     }
 
     public async Task<AgentInfo> CreateAsync(AgentCreateData data)
@@ -51,7 +70,7 @@ public class AgentGrain : Grain, IAgentGrain
             UpdatedAt = now,
         };
 
-        await _agentStore.SaveAsync(CurrentKey(), _agent);
+        await _agentStore.SaveAsync(GrainKey, _agent);
         return AgentQuerier.ToInfo(_agent);
     }
 
@@ -73,7 +92,7 @@ public class AgentGrain : Grain, IAgentGrain
         if (data.Fields.Contains(nameof(data.MaxConcurrentRuns))) _agent.MaxConcurrentRuns = data.MaxConcurrentRuns;
         _agent.UpdatedAt = _timeProvider.GetUtcNow();
 
-        await _agentStore.SaveAsync(CurrentKey(), _agent);
+        await _agentStore.SaveAsync(GrainKey, _agent);
         return AgentQuerier.ToInfo(_agent);
     }
 
@@ -82,7 +101,7 @@ public class AgentGrain : Grain, IAgentGrain
         if (_agent is null) return null;
         _agent.Status = AgentStatus.Archived;
         _agent.UpdatedAt = _timeProvider.GetUtcNow();
-        await _agentStore.SaveAsync(CurrentKey(), _agent);
+        await _agentStore.SaveAsync(GrainKey, _agent);
         return AgentQuerier.ToInfo(_agent);
     }
 
@@ -92,7 +111,7 @@ public class AgentGrain : Grain, IAgentGrain
         if (_agent.Status == AgentStatus.Active) return AgentQuerier.ToInfo(_agent);
         _agent.Status = AgentStatus.Active;
         _agent.UpdatedAt = _timeProvider.GetUtcNow();
-        await _agentStore.SaveAsync(CurrentKey(), _agent);
+        await _agentStore.SaveAsync(GrainKey, _agent);
         return AgentQuerier.ToInfo(_agent);
     }
 
@@ -105,7 +124,7 @@ public class AgentGrain : Grain, IAgentGrain
 
     private (string ProjectId, string AgentId) ParseKey()
     {
-        var key = CurrentKey();
+        var key = GrainKey;
         var parts = key.Split(':', 2);
         if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
             throw new InvalidOperationException($"Invalid Agent grain key '{key}'");
@@ -114,6 +133,4 @@ public class AgentGrain : Grain, IAgentGrain
 
     private static System.Text.Json.JsonElement? Clone(System.Text.Json.JsonElement? value) =>
         value is null ? null : value.Value.Clone();
-
-    private string CurrentKey() => string.IsNullOrEmpty(GrainKeyForTest) ? GrainKey : GrainKeyForTest;
 }

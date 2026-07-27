@@ -88,7 +88,6 @@ internal sealed class RecordingIssueGrain : IIssueGrain
     public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
         public Task StartCompositeAsync() => throw new NotSupportedException();
     public Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
-    public Task DeactivateForTestAsync() => throw new NotSupportedException();
 
     public Task<bool> AssignEpicAsync(int epicNumber)
     {
@@ -161,7 +160,6 @@ internal sealed class ThrowingIssueGrain : IIssueGrain
     public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
         public Task StartCompositeAsync() => throw new NotSupportedException();
     public Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
-    public Task DeactivateForTestAsync() => throw new NotSupportedException();
     public Task<bool> AssignEpicAsync(int epicNumber) =>
         Task.FromException<bool>(new InvalidOperationException("simulated Issue command failure"));
     public Task<bool> RemoveEpicAsync(int expectedEpicNumber) =>
@@ -207,15 +205,13 @@ internal static class EpicEventPublishTestSupport
         string grainKey,
         IEventStore eventStore,
         FakeTimeProvider timeProvider,
-        IGrainFactory? grains = null) => new(
+        IGrainFactory? grains = null) => EpicGrain.ForDirectConstruction(
+            grainKey,
             factory,
             grains ?? new StubGrainFactory(),
             timeProvider,
             eventStore,
-            NullLogger<EpicGrain>.Instance)
-        {
-            GrainKeyForTest = grainKey,
-        };
+            NullLogger<EpicGrain>.Instance);
 
     public static async Task SeedEpicAsync(
         TestDatabase database,
