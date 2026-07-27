@@ -49,7 +49,7 @@ describe('buildCompactView', () => {
       }),
       makeEvent({
         sequence: 5,
-        type: 'session_closed',
+        type: 'session.liveness',
         payload: { status: 'failed', failureReason: 'out of memory' },
         createdAt: '2024-02-01T00:00:05.000Z',
       }),

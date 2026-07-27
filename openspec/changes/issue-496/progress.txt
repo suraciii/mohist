@@ -10,3 +10,11 @@
 - Removed retired runtime/transcript constants and changed Project/Issue terminal envelope types and stable identity labels to `session.activity` / `activity` terminology without changing query predicates, context projection, filtering, or ordering.
 - Historical transcript fixtures keep literal retired type values rather than a production constant; no migration or storage mutation was added.
 - Baseline focused unit tests passed. The first broad spec baseline ran 3255 tests with one unrelated failure after parallel build contention was corrected. Final `npm test` passed all .NET, Web, and Runner suites.
+
+## T-002
+
+- `TRANSCRIPT_EVENT_TYPES` no longer carries `session.closed`, `session.followup_completed`, or `session.followup_failed`; the three names are also excluded from the typed `AgentDetailEventMap`. The canonical-event-types test now asserts both the current transcript catalogue and an explicit exclusion of the three retired names.
+- `isSessionClosedEvent` predicate is gone; the transcript chat/compact views now close a turn and set terminal status from `session.activity` with `activity: 'idle'`. Failure detail still arrives through `session.liveness` with `status: 'failed'`; `coder_session_status_changed` / `coder_recovery_status` continue to carry recovery surfaces.
+- The activity-feed event classifier (`agentSessionEventInfo` + `AGENT_SESSION_EVENT_TYPES`) now treats `session.activity` as the canonical AgentSession event, keeping the existing `status`-based attention routing for completed/failed/timeout/cancelled outcomes and the Session navigation target.
+- Test fixtures that named the retired events for terminal signalling were migrated to the equivalent current event (`session.activity` for terminal completion, `session.liveness` for failure). `events-hub-subscription.spec.tsx` and `live-task-cloud-event.spec.tsx` now assert subscription/routing against `session.activity` and explicitly exclude the retired names.
+- `npm run typecheck -w packages/web`, `npm run test:run -w packages/web` (5134 tests passed, 1 skipped), and `npm run check:fsd -w packages/web` all pass.

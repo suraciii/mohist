@@ -8,7 +8,7 @@ import {
   isAssistantTextEvent,
   isInputEvent,
   isLivenessEvent,
-  isSessionClosedEvent,
+  isSessionActivityEvent,
   isToolEvent,
   mapToolState,
   narrowPayload,
@@ -253,14 +253,10 @@ export function buildChatView(events: SessionEvent[]): SessionChatView {
       continue
     }
 
-    if (isSessionClosedEvent(event.type)) {
-      const status = getStringProp(payload, 'status') ?? 'completed'
-      if (current) {
+    if (isSessionActivityEvent(event.type)) {
+      const activity = getStringProp(payload, 'activity') ?? ''
+      if (current && activity === 'idle') {
         current = { ...current, completedAt: event.createdAt }
-        if (status === 'failed' || status === 'cancelled') {
-          const reason = getStringProp(payload, 'failureReason') ?? `Session ${status}`
-          current = pushErrorPart(current, reason, status === 'failed' ? 'failed' : 'cancelled', event.createdAt, counter)
-        }
       }
       continue
     }

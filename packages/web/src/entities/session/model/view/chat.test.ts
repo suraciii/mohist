@@ -63,8 +63,8 @@ describe('buildChatView', () => {
       }),
       makeEvent({
         sequence: 6,
-        type: 'session_closed',
-        payload: { status: 'completed' },
+        type: 'session.activity',
+        payload: { activity: 'idle' },
         createdAt: '2024-01-01T10:00:06.000Z',
       }),
     ])

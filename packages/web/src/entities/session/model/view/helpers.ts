@@ -91,8 +91,8 @@ export function isToolEvent(type: string): boolean {
   return type === 'tool_call' || type === 'tool_call.started' || type === 'tool_call.updated' || type === 'tool_call.completed'
 }
 
-export function isSessionClosedEvent(type: string): boolean {
-  return type === 'session.closed' || type === 'session_closed'
+export function isSessionActivityEvent(type: string): boolean {
+  return type === 'session.activity'
 }
 
 export function isLivenessEvent(type: string): boolean {

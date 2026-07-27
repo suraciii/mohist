@@ -83,7 +83,7 @@ describe('activity event targets', () => {
       sourceAggregateKind: 'agent-session',
       sourceAggregateId: 'workflow-session-42',
       source: '/mohist/agent-sessions/workflow-session-42',
-      type: 'session.closed',
+      type: 'session.activity',
       subject: null,
       data: { status: 'failed', failureReason: 'runner timeout' },
       issueNumber: 42,

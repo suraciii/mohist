@@ -88,9 +88,6 @@ export type AgentDetailEventMap = {
   coder_session_failed: { issueNumber: number; projectId: string; sessionId: string; reason?: string }
   coder_session_cancelled: { issueNumber: number; projectId: string; sessionId: string; reason?: string }
   coder_session_status_changed: SessionRuntimeBase & { issueNumber: number; projectId: string; status: string; lastDataAt?: string | null; probeSentAt?: string | null; probeDeadlineAt?: string | null; failureReason?: string | null }
-  'session.closed': SessionRuntimeBase & { status: 'completed' | 'failed' | 'cancelled' | string; failureReason?: string | null; failureCategory?: string | null; exitCode?: number | null }
-  'session.followup_completed': SessionRuntimeBase & { status: 'completed'; operationId: string; completedAt?: string }
-  'session.followup_failed': SessionRuntimeBase & { status: 'failed'; operationId: string; completedAt?: string; failureReason?: string | null }
   'usage.updated': SessionRuntimeBase & {
     inputTokens?: number
     outputTokens?: number
