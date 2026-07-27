@@ -218,6 +218,12 @@ export function IssueDetailPage({
     approvalStage: decision?.approvalStage ?? null,
     getStopConsequenceCopy,
   })
+  const approvalArtifactSummaries = useMemo(() => {
+    if (!workflowTimeline || !decision?.approvalStage) return undefined
+    return workflowTimeline.stages
+      .find((stage) => stage.stage === decision.approvalStage)
+      ?.tasks.flatMap((task) => task.artifactSummaries ?? []) ?? []
+  }, [decision?.approvalStage, workflowTimeline])
 
   if (isError) {
     const isNotFound = error instanceof ApiError && error.status === 404
@@ -292,12 +298,6 @@ export function IssueDetailPage({
     ?? 'No action required right now.'
 
   const isApproval = decision?.summary === 'approval-required'
-  const approvalArtifactSummaries = useMemo(() => {
-    if (!workflowTimeline || !decision?.approvalStage) return undefined
-    return workflowTimeline.stages
-      .find((stage) => stage.stage === decision.approvalStage)
-      ?.tasks.flatMap((task) => task.artifactSummaries ?? []) ?? []
-  }, [decision?.approvalStage, workflowTimeline])
   const showDecisionSurface = !isNarrowViewport
     && (decision !== null || issueOnlyContext !== null)
   const showMobileActionBar = isNarrowViewport && !isApproval
