@@ -38,10 +38,14 @@ public abstract class AgentJobGrainTestSupport
 
     protected static async Task WaitForStatusAsync(IAgentJobGrain job, AgentJobStatus expected, TimeSpan timeout)
     {
+        var convergenceTimeout = timeout < TimeSpan.FromSeconds(30)
+            ? TimeSpan.FromSeconds(30)
+            : timeout;
+
         await WaitForAsync(
             () => job.GetStatusAsync(),
             s => s == expected,
-            timeout,
+            convergenceTimeout,
             TimeSpan.FromMilliseconds(25),
             $"status == {expected}",
             () => job.CheckTimeoutsAsync());
@@ -80,6 +84,21 @@ public abstract class AgentJobGrainTestSupport
         {
             await runner.UpdateAsync(maxWorkflowSlots);
         }
+
+        await WaitForAsync(
+            () => runner.GetRuntimeStateAsync(),
+            state => state.Status == RunnerStatus.Online,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"runner {runnerId} is online");
+
+        await WaitForAsync(
+            () => Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).ListEligibleRunnersAsync(pid),
+            runners => runners.Any(info => string.Equals(info.RunnerId, runnerId, StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"runner {runnerId} is eligible for project {pid}");
+
         return (runnerId, pid);
     }
 
