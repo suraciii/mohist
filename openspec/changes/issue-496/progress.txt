@@ -1,0 +1,12 @@
+## Codebase Patterns
+
+- `TranscriptAccumulator.EventTypes` is the canonical allow-list for AgentSession runtime ingress and transcript persistence.
+- Terminal AgentJob delivery is persisted as `TranscriptPartTypes.SessionActivity`; its `operationId`/delivery id is the transcript correlation key, so duplicate runtime delivery remains one part while `RawEventCount` records both observations.
+- Project and Issue AgentOps feeds query persisted `session.activity` parts directly. The Issue feed additionally requires routed AgentJob lineage and a canonical `agent-job:{id}:terminal` delivery id.
+
+## T-001
+
+- Unsupported runtime entries are partitioned out before Session loading, binding checks, activity/domain application, envelope creation, persistence scheduling, event-info output, and realtime publication. Mixed batches retain supported entry order.
+- Removed retired runtime/transcript constants and changed Project/Issue terminal envelope types and stable identity labels to `session.activity` / `activity` terminology without changing query predicates, context projection, filtering, or ordering.
+- Historical transcript fixtures keep literal retired type values rather than a production constant; no migration or storage mutation was added.
+- Baseline focused unit tests passed. The first broad spec baseline ran 3255 tests with one unrelated failure after parallel build contention was corrected. Final `npm test` passed all .NET, Web, and Runner suites.

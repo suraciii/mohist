@@ -430,7 +430,7 @@ public class GenericAgentSessionSummarySpecs
                 {
                     TurnId = turn.Id,
                     Sequence = 100,
-                    Type = TranscriptPartTypes.SessionClosed,
+                    Type = "session.closed",
                     CorrelationKey = "session.closed",
                     PayloadJson = JsonSerializer.Serialize(new
                     {
@@ -479,7 +479,7 @@ public class GenericAgentSessionSummarySpecs
             {
                 TurnId = turn1.Id,
                 Sequence = 50,
-                Type = TranscriptPartTypes.SessionClosed,
+                Type = "session.closed",
                 CorrelationKey = "agent-job:old:terminal",
                 PayloadJson = JsonSerializer.Serialize(new
                 {
@@ -493,7 +493,7 @@ public class GenericAgentSessionSummarySpecs
             {
                 TurnId = turn2.Id,
                 Sequence = 1,
-                Type = TranscriptPartTypes.SessionClosed,
+                Type = "session.closed",
                 CorrelationKey = "agent-job:newest:terminal",
                 PayloadJson = JsonSerializer.Serialize(new
                 {
@@ -533,7 +533,7 @@ public class GenericAgentSessionSummarySpecs
             {
                 TurnId = turn.Id,
                 Sequence = 5,
-                Type = TranscriptPartTypes.SessionClosed,
+                Type = "session.closed",
                 CorrelationKey = "agent-job:earlier:terminal",
                 PayloadJson = JsonSerializer.Serialize(new
                 {
@@ -547,7 +547,7 @@ public class GenericAgentSessionSummarySpecs
             {
                 TurnId = turn.Id,
                 Sequence = 20,
-                Type = TranscriptPartTypes.SessionClosed,
+                Type = "session.closed",
                 CorrelationKey = "agent-job:latest:terminal",
                 PayloadJson = JsonSerializer.Serialize(new
                 {
@@ -602,7 +602,7 @@ public class GenericAgentSessionSummarySpecs
             {
                 TurnId = turn.Id,
                 Sequence = 30,
-                Type = TranscriptPartTypes.SessionClosed,
+                Type = "session.closed",
                 CorrelationKey = "closed-latest-by-sequence",
                 PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = "sequence-last-failure" }, JSON.Options),
                 LastSeenAt = CreatedAt.AddMinutes(30),
@@ -611,7 +611,7 @@ public class GenericAgentSessionSummarySpecs
             {
                 TurnId = turn.Id,
                 Sequence = 15,
-                Type = TranscriptPartTypes.SessionClosed,
+                Type = "session.closed",
                 CorrelationKey = "closed-inserted-last",
                 PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = "inserted-last-failure" }, JSON.Options),
                 LastSeenAt = CreatedAt.AddMinutes(15),

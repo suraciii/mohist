@@ -837,6 +837,22 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         if (runtimeEvents.Count == 0) return [];
 
+        var supportedEvents = runtimeEvents
+            .Where(runtimeEvent => TranscriptAccumulator.EventTypes.Contains(runtimeEvent.Type))
+            .ToList();
+        foreach (var group in runtimeEvents
+            .Where(runtimeEvent => !TranscriptAccumulator.EventTypes.Contains(runtimeEvent.Type))
+            .GroupBy(runtimeEvent => runtimeEvent.Type, StringComparer.Ordinal))
+        {
+            _log.LogWarning(
+                "AgentSessionGrain discarded unsupported transcript events for {SessionId}; type {EventType}, count {DiscardedEventCount}",
+                SessionId,
+                group.Key,
+                group.Count());
+        }
+        if (supportedEvents.Count == 0) return [];
+        runtimeEvents = supportedEvents;
+
         var session = await GetRequiredAsync();
         if (requireCurrentRuntimeBinding
             && (string.IsNullOrWhiteSpace(runtimeSessionId)
@@ -946,17 +962,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _lastHealthPercent = previousUsagePercent;
 
         var allEntries = entries.Concat(supplementaryEntries).ToList();
-
-        foreach (var group in allEntries
-            .Where(entry => !TranscriptAccumulator.EventTypes.Contains(entry.Type))
-            .GroupBy(entry => entry.Type, StringComparer.Ordinal))
-        {
-            _log.LogWarning(
-                "AgentSessionGrain discarded unsupported transcript events for {SessionId}; type {EventType}, count {DiscardedEventCount}",
-                SessionId,
-                group.Key,
-                group.Count());
-        }
 
         var normalizedParts = _transcript.Accept(session, allEntries, now);
         session.PersistedActivitySummary = AgentSessionActivitySummaryReducer.Reduce(

@@ -25,7 +25,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
         var saveCount = _fixture.StateStore.SaveCount;
 
         var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-            new List<AgentSessionRuntimeEventInput> { Event("message.delta"), Event("session.closed") },
+            new List<AgentSessionRuntimeEventInput> { Event("message.delta"), Event("session.liveness") },
             "runtime-stale"));
 
         Assert.Empty(result);
@@ -47,7 +47,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
         var saveCount = _fixture.StateStore.SaveCount;
 
         var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-            new List<AgentSessionRuntimeEventInput> { Event("message.delta"), Event("message.delta"), Event("session.closed") },
+            new List<AgentSessionRuntimeEventInput> { Event("message.delta"), Event("message.delta"), Event("session.liveness") },
             ""));
 
         Assert.Empty(result);
@@ -61,25 +61,54 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
     }
 
     [Fact]
-    public async Task MixedBatch_LogsUnsupportedTypeOnceAndOnlyProcessesSupportedEvents()
+    public async Task RetiredEvents_AreDiscardedBeforeSessionEffects()
+    {
+        var grain = await OpenBoundGrainAsync("runtime-current");
+        var before = await grain.GetAsync();
+        var saveCount = _fixture.StateStore.SaveCount;
+
+        var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                Event("session.closed"),
+                Event("session.followup_completed"),
+                Event("session.followup_failed"),
+            },
+            "runtime-current"));
+        await grain.FlushForTestAsync();
+
+        Assert.Empty(result);
+        Assert.Equal(saveCount, _fixture.StateStore.SaveCount);
+        Assert.Equal(before, await grain.GetAsync());
+        Assert.Equal(3, DiscardWarnings().Count);
+        Assert.Empty(_fixture.TranscriptStore.Flushes);
+        Assert.Empty(_fixture.TranscriptPublisher.Published);
+    }
+
+    [Fact]
+    public async Task MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents()
     {
         var grain = await OpenBoundGrainAsync("runtime-current");
 
         var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-            new List<AgentSessionRuntimeEventInput> { Event("message.delta"), Event("unsupported.event"), Event("unsupported.event"), Event("message.delta") },
+            new List<AgentSessionRuntimeEventInput>
+            {
+                Event("message.delta"),
+                Event("session.closed"),
+                Event("session.followup_completed"),
+                Event("session.followup_failed"),
+                new(RuntimeEventTypes.SessionActivity, "{\"activity\":\"idle\",\"status\":\"failed\",\"operationId\":\"delivery-1\"}"),
+            },
             "runtime-current"));
         await grain.FlushForTestAsync();
 
-        Assert.Equal(4, result.Count);
-        var warning = Assert.Single(DiscardWarnings());
-        Assert.Equal("unsupported.event", warning.State["EventType"]);
-        Assert.Equal(2, warning.State["DiscardedEventCount"]);
-        Assert.Equal(2, _fixture.TranscriptPublisher.Published.Count);
-        Assert.All(_fixture.TranscriptPublisher.Published, entry => Assert.Equal("message.delta", entry.Type));
-        Assert.Single(_fixture.TranscriptStore.Flushes);
-        Assert.DoesNotContain(
-            _fixture.TranscriptStore.Flushes[0].Parts,
-            part => part.Type == "unsupported.event");
+        Assert.Equal(["message.delta", "session.activity"], result.Select(entry => entry.Type));
+        Assert.Equal(3, DiscardWarnings().Count);
+        Assert.Equal(["message.delta", "session.activity"], _fixture.TranscriptPublisher.Published.Select(entry => entry.Type));
+        var flush = Assert.Single(_fixture.TranscriptStore.Flushes);
+        var activity = Assert.Single(flush.Parts, part => part.Type == TranscriptPartTypes.SessionActivity);
+        Assert.Contains("\"status\":\"failed\"", activity.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(flush.Parts, part => part.Type is "session.closed" or "session.followup_completed" or "session.followup_failed");
     }
 
     [Fact]
