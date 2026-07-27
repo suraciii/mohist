@@ -187,7 +187,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.LabelTriggerRuleId)
                 .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.TriggerRuleId), stored: false);
 
-            // issue-467 T-001: stored projection of status.activity, lowered
+            // issue-467 T-001: virtual projection of status.activity, lowered
             // to match the existing Status column convention. Powers the
             // history-bounded direct-session candidate selection in
             // AgentSessionQuery.ListStatusCandidatesAsync; the matching
@@ -196,8 +196,7 @@ public class MohistDbContext : DbContext
             // index-only path.
             entity.Property(e => e.Activity)
                 .HasComputedColumnSql(
-                    "LOWER(COALESCE(json_extract(\"State\", '$.status.activity'), json_extract(\"State\", '$.status.Activity')))",
-                    stored: true);
+                    "LOWER(COALESCE(json_extract(\"State\", '$.status.activity'), json_extract(\"State\", '$.status.Activity')))");
 
             entity.HasIndex(e => new { e.LabelProjectId, e.CreatedAt }).HasDatabaseName("IX_AgentSessions_LabelProjectId_CreatedAt");
             entity.HasIndex(e => e.LabelSourceId).HasDatabaseName("IX_AgentSessions_LabelSourceId");

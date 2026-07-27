@@ -1366,7 +1366,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("Activity")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("LOWER(COALESCE(json_extract(\"State\", '$.status.activity'), json_extract(\"State\", '$.status.Activity')))", true);
+                        .HasComputedColumnSql("LOWER(COALESCE(json_extract(\"State\", '$.status.activity'), json_extract(\"State\", '$.status.Activity')))");
 
                     b.Property<DateTime?>("LastDataAt")
                         .HasColumnType("TEXT");

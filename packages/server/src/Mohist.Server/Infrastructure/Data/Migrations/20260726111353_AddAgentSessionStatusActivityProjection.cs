@@ -14,7 +14,7 @@ public partial class AddAgentSessionStatusActivityProjection : Migration
                 LOWER(COALESCE(
                     json_extract("State", '$.status.activity'),
                     json_extract("State", '$.status.Activity')))
-            ) STORED;
+            ) VIRTUAL;
             """);
 
         migrationBuilder.Sql("""
