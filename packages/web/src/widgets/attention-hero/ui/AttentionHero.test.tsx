@@ -271,12 +271,11 @@ describe('AttentionHero - per-item actions', () => {
 
     const approveBtn = await screen.findByTestId('attention-item-approve')
     expect(approveBtn).toHaveAttribute('data-action', 'approve')
-    expect(approveBtn).toBeDisabled()
-    fireEvent.change(screen.getByTestId('attention-approval-operator'), { target: { value: '  Ada  ' } })
+    expect(approveBtn).not.toBeDisabled()
     fireEvent.click(approveBtn)
 
     await waitFor(() => {
-      expect(_approveHandler).toHaveBeenCalledWith(12, { author: 'Ada' }, 'proj-1')
+      expect(_approveHandler).toHaveBeenCalledWith(12, {}, 'proj-1')
     })
   })
 
@@ -339,7 +338,6 @@ describe('AttentionHero - per-item actions', () => {
     renderHeroWithClient(queryClient)
 
     const approveBtn = await screen.findByTestId('attention-item-approve')
-    fireEvent.change(screen.getByTestId('attention-approval-operator'), { target: { value: 'Ada' } })
     fireEvent.click(approveBtn)
 
     await waitFor(() => {
@@ -883,7 +881,6 @@ describe('AttentionHero - approval-wait metric', () => {
     renderHeroWithClient(queryClient)
 
     const approveBtn = await screen.findByTestId('attention-item-approve')
-    fireEvent.change(screen.getByTestId('attention-approval-operator'), { target: { value: 'Ada' } })
     fireEvent.click(approveBtn)
 
     await waitFor(() => {

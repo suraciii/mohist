@@ -285,9 +285,9 @@ public record AddPrerequisiteRequest(int PrerequisiteNumber);
 
 public record AddCommentRequest(string Author, string Body, string[]? AttachmentIds = null);
 
-public record ApproveRequest(string Author);
+public record ApproveRequest(string? Author = null);
 
-public record RejectWithAuthorRequest(string Author, string Message);
+public record RejectWithAuthorRequest(string Message, string? Author = null);
 
 public sealed record AttachmentUploadResponse(
     string Id,

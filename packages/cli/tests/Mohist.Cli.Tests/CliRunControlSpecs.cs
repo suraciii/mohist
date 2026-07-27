@@ -205,29 +205,37 @@ public class CliRunControlSpecs
     }
 
     [Fact]
-    public async Task Approve_MissingAuthor_FailsLocallyWithExitOneAndNoHttp()
+    public async Task Approve_MissingAuthor_PostsWithoutAttribution()
     {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+            req.Method == HttpMethod.Post
+                ? RecordingHttpHandler.Json(new { success = true, data = new { } })
+                : null!);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["run", "approve", WrId], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("--author", error.ToString());
+        Assert.Equal(0, exitCode);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!) as JsonObject;
+        Assert.NotNull(body);
+        Assert.Null(body!["author"]);
     }
 
     [Fact]
-    public async Task Approve_BlankAuthor_FailsLocallyWithExitOneAndNoHttp()
+    public async Task Approve_BlankAuthor_PostsWithoutAttribution()
     {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+            req.Method == HttpMethod.Post
+                ? RecordingHttpHandler.Json(new { success = true, data = new { } })
+                : null!);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["run", "approve", WrId, "--author", "   "], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("--author", error.ToString());
+        Assert.Equal(0, exitCode);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!) as JsonObject;
+        Assert.NotNull(body);
+        Assert.Null(body!["author"]);
     }
 
     [Fact]
@@ -471,16 +479,21 @@ public class CliRunControlSpecs
     }
 
     [Fact]
-    public async Task Reject_MissingAuthor_FailsLocallyWithExitOneAndNoHttp()
+    public async Task Reject_MissingAuthor_PostsMessageWithoutAttribution()
     {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+            req.Method == HttpMethod.Post
+                ? RecordingHttpHandler.Json(new { success = true, data = new { } })
+                : null!);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["run", "reject", WrId, "--message", "needs more detail"], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("--author", error.ToString());
+        Assert.Equal(0, exitCode);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!) as JsonObject;
+        Assert.NotNull(body);
+        Assert.Equal("needs more detail", body!["message"]?.GetValue<string>());
+        Assert.Null(body["author"]);
     }
 
     [Fact]

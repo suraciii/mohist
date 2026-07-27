@@ -149,23 +149,11 @@ describe('runControllerAction', () => {
     expect(sendBackMutation.mutate).not.toHaveBeenCalled()
   })
 
-  it('invokes approve mutation on approve action', () => {
+  it('invokes approve mutation without an operator', () => {
     const approveMutation = mutation()
     const ctx = makeCtx({ mutations: mutations({ approveMutation }) })
-    runControllerAction(ctx, makeAction('approve'), { approvalOperator: '  Ada  ' })
-    expect(approveMutation.mutate).toHaveBeenCalledWith('Ada')
-  })
-
-  it('does not dispatch an approval decision without a valid operator', () => {
-    const approveMutation = mutation()
-    const sendBackMutation = mutation()
-    const ctx = makeCtx({ mutations: mutations({ approveMutation, sendBackMutation }), approvalStage: 'check' })
-
     runControllerAction(ctx, makeAction('approve'))
-    runControllerAction(ctx, makeAction('send-back'), { sendBackBody: 'Tighten the tests', approvalOperator: ' ' })
-
-    expect(approveMutation.mutate).not.toHaveBeenCalled()
-    expect(sendBackMutation.mutate).not.toHaveBeenCalled()
+    expect(approveMutation.mutate).toHaveBeenCalledWith()
   })
 
   it('routes recoverable stop through forceStop and irreversible through stop', () => {
@@ -184,10 +172,10 @@ describe('runControllerAction', () => {
 
   it('refuses send-back without a body or approvalStage', () => {
     const sendBackMutation = mutation()
-    runControllerAction(makeCtx({ mutations: mutations({ sendBackMutation }), approvalStage: null }), makeAction('send-back'), { sendBackBody: 'feedback', approvalOperator: 'Ada' })
+    runControllerAction(makeCtx({ mutations: mutations({ sendBackMutation }), approvalStage: null }), makeAction('send-back'), { sendBackBody: 'feedback' })
     expect(sendBackMutation.mutate).not.toHaveBeenCalled()
 
-    runControllerAction(makeCtx({ mutations: mutations({ sendBackMutation }), approvalStage: 'check' }), makeAction('send-back'), { sendBackBody: '', approvalOperator: 'Ada' })
+    runControllerAction(makeCtx({ mutations: mutations({ sendBackMutation }), approvalStage: 'check' }), makeAction('send-back'), { sendBackBody: '' })
     expect(sendBackMutation.mutate).not.toHaveBeenCalled()
   })
 
@@ -197,10 +185,10 @@ describe('runControllerAction', () => {
     runControllerAction(
       makeCtx({ mutations: mutations({ sendBackMutation }), approvalStage: 'check', setStopConfirmOpen }),
       makeAction('send-back'),
-      { sendBackBody: 'Tighten the tests', approvalOperator: '  Ada  ' },
+      { sendBackBody: 'Tighten the tests' },
     )
     expect(sendBackMutation.mutate).toHaveBeenCalledWith(
-      { stage: 'check', body: 'Tighten the tests', author: 'Ada' },
+      { stage: 'check', body: 'Tighten the tests' },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
   })

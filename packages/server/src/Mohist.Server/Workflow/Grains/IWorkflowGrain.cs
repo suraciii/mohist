@@ -15,8 +15,8 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task PauseAsync(string? reason = null);
     Task StopAsync(string? reason = null);
 
-    Task ApproveAsync(string decidedBy);
-    Task<string> RequestChangesAsync(string body, string decidedBy);
+    Task ApproveAsync(string? decidedBy = null);
+    Task<string> RequestChangesAsync(string body, string? decidedBy = null);
     Task RetryAsync();
     Task RerunAsync();
     Task<WorkflowControlResult> RerunFromStageAsync(string stageId);

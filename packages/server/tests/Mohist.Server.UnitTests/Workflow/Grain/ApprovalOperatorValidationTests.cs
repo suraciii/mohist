@@ -3,13 +3,6 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Grain;
 
-/// <summary>
-/// issue-491 T-002: validation parity with the comment author model. Approval
-/// <c>--author</c> is a declared name, not an authenticated identity: required,
-/// trimmed of surrounding whitespace, capped at 100 characters. Mirrors
-/// <see cref="Mohist.Server.Issue.Grains.IssueGrain.AddCommentAsync(string, string, string[]?)"/>
-/// so the comment and the approval author share one validation contract.
-/// </summary>
 public class ApprovalOperatorValidationTests
 {
     [Fact]
@@ -31,10 +24,9 @@ public class ApprovalOperatorValidationTests
     [InlineData("   ")]
     [InlineData("\t")]
     [InlineData("\n")]
-    public void Normalize_RejectsBlankOrWhitespace(string? raw)
+    public void Normalize_TreatsBlankOrWhitespaceAsMissing(string? raw)
     {
-        var ex = Assert.Throws<ArgumentException>(() => ApprovalOperatorValidation.Normalize(raw));
-        Assert.Contains("required", ex.Message);
+        Assert.Null(ApprovalOperatorValidation.Normalize(raw));
     }
 
     [Fact]
@@ -44,5 +36,4 @@ public class ApprovalOperatorValidationTests
         var ex = Assert.Throws<ArgumentException>(() => ApprovalOperatorValidation.Normalize(overlong));
         Assert.Contains("100 characters", ex.Message);
     }
-
 }

@@ -126,7 +126,7 @@ AgentSession 只负责会话与审计。
 
 Workflow 不区分这些来源。谁来发起审批，是 Mohist Agent、CLI、Web UI 或外部自动化的职责；审批结果仍然只有 approve / reject。
 
-每次 approve / reject 都必须声明审批者名称，以便历史能够回答“这道门是谁放的”。这个名称只是记录在审批历史里的声明，不是登录身份或权限认证。Web UI 会在提交决议前要求填写审批者；CLI 使用 `--author`。Mohist 不会用 `web`、`owner` 等默认值代替真实声明。
+approve / reject 可以附带审批者名称，供历史记录回答“这道门是谁放的”。这个名称只是可选署名，不是登录身份、权限认证或作出决策的前提。人通过 Web UI 操作时无需填写；CLI 可用 `--author` 署名。Agent 和自动化应主动署名，以便与人的操作区分。未署名时 Mohist 保持为空，不用 `web`、`owner` 等合成值代替。
 
 ## Skill（外部 Agent 能力）
 

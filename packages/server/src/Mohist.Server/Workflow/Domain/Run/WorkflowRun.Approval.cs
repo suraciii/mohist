@@ -101,7 +101,7 @@ public static partial class WorkflowRunExtensions
 
     extension(WorkflowRun run)
     {
-        public IReadOnlyList<WorkflowEvent> Approve(DateTimeOffset now, string decidedBy)
+        public IReadOnlyList<WorkflowEvent> Approve(DateTimeOffset now, string? decidedBy = null)
         {
             var current = run.CurrentStage();
             if (!current.IsAwaitingApproval)
@@ -122,7 +122,7 @@ public static partial class WorkflowRunExtensions
             return events;
         }
 
-        public IReadOnlyList<WorkflowEvent> Reject(string? reason, DateTimeOffset now, string decidedBy)
+        public IReadOnlyList<WorkflowEvent> Reject(string? reason, DateTimeOffset now, string? decidedBy = null)
         {
             var current = run.CurrentStage();
             if (!current.IsAwaitingApproval)
@@ -148,7 +148,7 @@ public static partial class WorkflowRunExtensions
             string body,
             string feedbackId,
             DateTimeOffset now,
-            string decidedBy,
+            string? decidedBy = null,
             IReadOnlyList<TaskDefinition>? feedbackTasks = null)
         {
             if (string.IsNullOrWhiteSpace(body))
@@ -167,6 +167,7 @@ public static partial class WorkflowRunExtensions
                 DecidedBy = decidedBy,
                 RespondedAt = now.ToString("O"),
             };
+            current.Status = StageRunStatus.Running;
 
             var feedback = new ApprovalFeedback(
                 Id: feedbackId,

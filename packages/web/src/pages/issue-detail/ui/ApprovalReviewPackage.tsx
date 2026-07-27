@@ -2,15 +2,12 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { Link } from 'react-router-dom'
 import { MoreHorizontalIcon } from 'lucide-react'
 import {
-  isApprovalOperatorValid,
-  normalizeApprovalOperator,
   useIssueWorkflowArtifactContent,
   useIssueWorkflowArtifacts,
   type IssueDiffResponse,
   type WorkflowArtifact,
   type WorkflowArtifactSummary,
 } from '../../../entities/issue'
-import { ApprovalOperatorField } from '../../../features/approve-issue'
 import { ArtifactTextContent } from '../../../widgets/issue-workflow'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
@@ -316,26 +313,9 @@ export function ApprovalReviewPackage({
 }: ApprovalReviewPackageProps) {
   const [sendBackOpen, setSendBackOpen] = useState(false)
   const [draft, setDraft] = useState<SendBackDraft>({ category: null, body: '' })
-  const [approvalOperator, setApprovalOperator] = useState('')
-  const normalizedApprovalOperator = normalizeApprovalOperator(approvalOperator)
-  const approvalOperatorValid = isApprovalOperatorValid(approvalOperator)
-  const decisionActions = actions.map((action) => {
-    if (approvalOperatorValid || !action.enabled || (action.kind !== 'approve' && action.kind !== 'send-back')) return action
-    return { ...action, enabled: false, reason: 'Enter an approval operator before deciding.' }
-  })
-  const approvalController: IssueDecisionActionController = {
-    ...controller,
-    runAction: (action, options) => {
-      if (action.kind === 'approve' || action.kind === 'send-back') {
-        controller.runAction(action, { ...options, approvalOperator: normalizedApprovalOperator })
-        return
-      }
-      controller.runAction(action, options)
-    },
-  }
-  const approve = decisionActions.find((action) => action.kind === 'approve') ?? null
-  const sendBack = decisionActions.find((action) => action.kind === 'send-back') ?? null
-  const secondary = decisionActions.filter((action) => action.kind !== 'approve' && action.kind !== 'send-back')
+  const approve = actions.find((action) => action.kind === 'approve') ?? null
+  const sendBack = actions.find((action) => action.kind === 'send-back') ?? null
+  const secondary = actions.filter((action) => action.kind !== 'approve' && action.kind !== 'send-back')
   const approveReason = controller.pendingKind !== null
     ? 'Another request is in progress. Wait for it to finish before trying again.'
     : approve?.reason
@@ -345,12 +325,12 @@ export function ApprovalReviewPackage({
   const handleSendBackOpen = () => setSendBackOpen(true)
   const handleSendBackSubmit = () => {
     if (!sendBack || !sendBack.enabled || controller.pendingKind !== null || !draft.category || !draft.body.trim()) return
-    approvalController.runAction(sendBack, { sendBackBody: serializeSendBackFeedback(draft) })
+    controller.runAction(sendBack, { sendBackBody: serializeSendBackFeedback(draft) })
   }
 
   useApprovalKeyboardShortcuts({
-    actions: decisionActions,
-    controller: approvalController,
+    actions,
+    controller,
     isNarrowViewport,
     onSendBackOpen: handleSendBackOpen,
   })
@@ -383,17 +363,7 @@ export function ApprovalReviewPackage({
     </div>
   )
 
-  const hasApprovalDecision = actions.some((action) => action.kind === 'approve' || action.kind === 'send-back')
-  const operatorField = hasApprovalDecision ? (
-    <ApprovalOperatorField
-      id={`approval-operator-${issueNumber}`}
-      value={approvalOperator}
-      onChange={setApprovalOperator}
-      disabled={controller.pendingKind !== null}
-      className="mt-4 max-w-sm"
-    />
-  ) : null
-  const actionsForSurface = isNarrowViewport ? [] : decisionActions
+  const actionsForSurface = isNarrowViewport ? [] : actions
 
   return (
     <section
@@ -407,7 +377,6 @@ export function ApprovalReviewPackage({
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             <span>Next action</span><span className="normal-case font-normal text-card-foreground">{nextAction}</span>
           </div>
-          {operatorField}
           {evidence}
         </div>
       ) : (
@@ -416,8 +385,8 @@ export function ApprovalReviewPackage({
           summary="approval-required"
           rationale={rationale}
           nextAction={nextAction}
-          controller={approvalController}
-          evidence={<>{operatorField}{evidence}</>}
+          controller={controller}
+          evidence={evidence}
           sendBackOpen={sendBackOpen}
           onSendBackOpen={handleSendBackOpen}
           sendBackForm={sendBackForm}
@@ -431,13 +400,13 @@ export function ApprovalReviewPackage({
       {isNarrowViewport && (
         <div data-testid="approval-mobile-action-bar" className="fixed inset-x-0 bottom-0 z-50 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
           <div className="mx-auto grid w-full max-w-md grid-cols-[1fr_1fr_auto] gap-2 rounded-xl border border-border bg-popover/95 p-2 shadow-lg backdrop-blur">
-            <Button type="button" data-testid="approval-mobile-approve" aria-describedby={approveReason ? 'approval-mobile-approve-reason' : undefined} disabled={!approve?.enabled || controller.pendingKind !== null} onClick={() => approve && approvalController.runAction(approve)} className="min-h-11">
+            <Button type="button" data-testid="approval-mobile-approve" aria-describedby={approveReason ? 'approval-mobile-approve-reason' : undefined} disabled={!approve?.enabled || controller.pendingKind !== null} onClick={() => approve && controller.runAction(approve)} className="min-h-11">
               {controller.pendingKind === 'approve' ? 'Approving...' : 'Approve'}
             </Button>
             <Button type="button" variant="destructive" data-testid="approval-mobile-send-back" aria-describedby={sendBackReason ? 'approval-mobile-send-back-reason' : undefined} disabled={!sendBack?.enabled || controller.pendingKind !== null} onClick={handleSendBackOpen} className="min-h-11">
               Send back
             </Button>
-            <SecondaryActions actions={secondary} controller={approvalController} />
+            <SecondaryActions actions={secondary} controller={controller} />
           </div>
           {approveReason && <p id="approval-mobile-approve-reason" className="sr-only">{approveReason}</p>}
           {sendBackReason && <p id="approval-mobile-send-back-reason" className="sr-only">{sendBackReason}</p>}
