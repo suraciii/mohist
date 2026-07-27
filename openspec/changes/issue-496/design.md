@@ -21,11 +21,11 @@ The Session domain owns accepted runtime facts and activity state. AgentOps is a
 
 ### 1. Remove retired names at their vocabulary authorities
 
-Remove the three retired constants from `TranscriptEventTypes.cs`, any obsolete transcript mapping branches, and the corresponding Web canonical subscription entries, live-event payload types, view helpers, labels, and special branches. `TranscriptAccumulator.EventTypes` and its mapping remain the Server authority for persistable current runtime events; unknown retired names therefore cannot create transcript parts.
+Remove the three retired constants from `TranscriptEventTypes.cs`, any obsolete transcript mapping branches, and the corresponding Web canonical subscription entries, live-event payload types, view helpers, labels, and special branches. `TranscriptAccumulator.EventTypes` remains the Server authority for accepted runtime events as well as transcript persistence: `AgentSessionGrain.AppendEventsAsync` will first partition the input by that set, log discarded types, and return immediately when no supported entries remain. Every subsequent binding check, input guard, activity recording, domain application, runtime-envelope construction, persistence timer, realtime fan-out, and event-info result will operate only on the supported subset.
 
-This keeps the accepted language finite and prevents a second, partially supported terminal contract. Tests may name retired values only to prove rejection; production code will not retain them.
+This makes discard-at-ingress the explicit behavior for retired and other unsupported entries. A mixed batch retains its supported entries in order while discarding only unsupported entries, avoiding a new error/retry protocol for event names that have no current producer. Tests may name retired values only to prove rejection; production code will not retain them.
 
-Alternative considered: retain deprecated aliases that normalize to `session.activity`. Rejected because the names have no producer, create ambiguous semantics for follow-up outcomes, and contradict the no-new-and-old-vocabulary constraint.
+Alternative considered: reject an entire batch with an API error when any unsupported type is present. Rejected because it would convert a removable stale observation into a retryable runtime failure and suppress valid current entries in mixed batches. Retaining deprecated aliases that normalize to `session.activity` was also rejected because the names have no producer, create ambiguous semantics for follow-up outcomes, and contradict the no-new-and-old-vocabulary constraint.
 
 ### 2. Project terminal facts are synthesized as `session.activity`
 
@@ -47,7 +47,7 @@ Alternative considered: keep the closed predicate solely for persisted historica
 
 ### 5. Cover contracts at their owning boundaries
 
-Server Session tests will assert retired runtime events produce no accepted transcript part and current terminal activity retains idempotent behavior. AgentOps tests will assert project and issue feeds return `session.activity` with the existing context and failure filtering. Web tests will assert canonical subscriptions exclude retired types and activity entries render terminal `session.activity` statuses and targets.
+Server Session tests will assert retired runtime events are discarded before activity/state changes, runtime-envelope or event-info output, persistence scheduling, and realtime publication; mixed batches still process current entries; and current terminal activity retains idempotent behavior. AgentOps tests will assert project and issue feeds return `session.activity` with the existing context and failure filtering. Web tests will assert canonical subscriptions exclude retired types and activity entries render terminal `session.activity` statuses and targets.
 
 Alternative considered: only search the tree for retired strings. Rejected because a textual absence check cannot prove that the surviving current activity facts remain persisted, surfaced, and rendered correctly.
 

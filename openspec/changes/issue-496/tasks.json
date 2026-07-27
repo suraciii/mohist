@@ -6,10 +6,11 @@
       "id": "T-001",
       "title": "Canonicalize Server Session terminal activity feeds",
       "spec": "specs/agent-session-terminal-feed-vocabulary/spec.md#project-feed-uses-the-persisted-terminal-activity-type",
-      "description": "Remove retired Session runtime and transcript vocabulary from the Server, retaining session.activity as the only terminal fact. Update ProjectEventFeedAssembler and IssueEventFeedAssembler to project eligible terminal activity as session.activity while preserving delivery idempotency, routed-failure selection, ordering, and context.",
+      "description": "Discard unsupported runtime-event entries at the AgentSession ingress before they can change activity, create runtime envelopes, return event info, or schedule persistence, retaining session.activity as the only terminal fact. Remove retired Session runtime and transcript vocabulary, then update ProjectEventFeedAssembler and IssueEventFeedAssembler to project eligible terminal activity as session.activity while preserving delivery idempotency, routed-failure selection, ordering, and context.",
       "acceptanceCriteria": [
         "Production code under packages/server/src contains no session.closed, session.followup_completed, or session.followup_failed runtime or transcript event type.",
-        "A retired runtime event produces no accepted or persisted transcript fact, while a terminal session.activity fact retains its status and established delivery-idempotency behavior.",
+        "A retired runtime event is discarded before Session activity/domain application, runtime-envelope creation, event-info output, persistence scheduling, or realtime publication, and produces no persisted transcript fact.",
+        "A mixed runtime batch discards retired entries while preserving established processing for its supported entries; a terminal session.activity fact retains its status and delivery-idempotency behavior.",
         "Project event feed terminal Session entries and eligible routed AgentJob failure entries in the Issue feed have type session.activity and retain their existing source, identity context, status, failure details, filtering, and ordering semantics.",
         "Historical transcript rows are neither migrated nor modified.",
         "Server coverage for Session ingestion/idempotency and AgentOps project and issue feeds is updated, and npm test passes."
@@ -20,7 +21,7 @@
       "output": "Server Session vocabulary and AgentOps project/issue feeds expose session.activity as the sole terminal event contract.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Rename closed-oriented feed helpers and envelope identity labels to activity terminology; keep the existing transcript-part query and routed AgentJob correlation predicates."
+      "notes": "Filter AppendEventsAsync input against TranscriptAccumulator.EventTypes before any stateful processing, then rename closed-oriented feed helpers and envelope identity labels to activity terminology. Keep the existing transcript-part query and routed AgentJob correlation predicates."
     },
     {
       "id": "T-002",

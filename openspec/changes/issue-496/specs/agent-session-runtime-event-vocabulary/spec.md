@@ -1,9 +1,13 @@
 ### Requirement: Current Session runtime-event vocabulary
-The Server SHALL accept and map only the current AgentSession runtime-event vocabulary. `session.closed`, `session.followup_completed`, and `session.followup_failed` MUST NOT be accepted as runtime facts, mapped to transcript parts, or exposed as current transcript event types.
+The Server SHALL discard unsupported AgentSession runtime-event entries at ingress before activity recording, domain application, runtime-envelope creation, persistence scheduling, realtime publication, or event-info output. `session.closed`, `session.followup_completed`, and `session.followup_failed` MUST NOT be accepted as runtime facts, mapped to transcript parts, or exposed as current transcript event types.
 
 #### Scenario: Retired runtime event is submitted
 - **WHEN** a runtime event batch contains `session.closed`, `session.followup_completed`, or `session.followup_failed`
-- **THEN** the retired event MUST NOT produce an accepted runtime fact or persisted transcript part
+- **THEN** the retired event MUST NOT produce a state change, activity refresh, runtime envelope, event-info result, realtime publication, or persisted transcript part
+
+#### Scenario: Retired event accompanies a current event
+- **WHEN** a runtime event batch contains a retired event and a current supported event
+- **THEN** the Server SHALL discard only the retired event and process the supported event through its established runtime-event behavior
 
 #### Scenario: Current terminal activity is submitted
 - **WHEN** a runtime reports a terminal `session.activity` fact with its terminal status
