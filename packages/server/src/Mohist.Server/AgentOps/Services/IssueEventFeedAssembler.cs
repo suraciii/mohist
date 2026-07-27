@@ -156,9 +156,9 @@ public sealed class IssueEventFeedAssembler : IScopedService
             [EventCatalog.Lineage.Issue] = session.LabelAgentLaunchIssueNumber!,
         };
         var envelope = new CloudEvent(
-            id: $"{sessionId}:closed:{deliveryId}",
+            id: $"{sessionId}:activity:{deliveryId}",
             source: new Uri(AgentSessionEventPersistence.AgentSessionSource(sessionId), UriKind.Relative),
-            type: "session.closed",
+            type: "session.activity",
             time: new DateTimeOffset(DateTime.SpecifyKind(part.LastSeenAt, DateTimeKind.Utc)),
             data: data,
             dataContentType: "application/json",

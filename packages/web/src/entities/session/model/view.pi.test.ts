@@ -13,7 +13,7 @@ const PI_STREAM: SessionEvent[] = [
   makeEvent(4, 'tool_call.completed', { toolCallId: 'pi-tool-1', toolName: 'read', status: 'completed', rawOutput: 'version: 1.0.0' }, '2024-02-01T10:00:04.000Z'),
   makeEvent(5, 'provider.retry', { phase: 'provider', attempt: 2, maxAttempts: 5, delayMs: 1000, message: 'temporary upstream response' }, '2024-02-01T10:00:05.000Z'),
   makeEvent(6, 'compaction_event', { strategy: 'automatic', contextWindowUsedBefore: 30000, contextWindowUsedAfter: 8000, contextWindowSize: 32000, summary: 'Earlier context compacted' }, '2024-02-01T10:00:06.000Z'),
-  makeEvent(7, 'session.closed', { status: 'completed' }, '2024-02-01T10:00:07.000Z'),
+  makeEvent(7, 'session.activity', { activity: 'idle' }, '2024-02-01T10:00:07.000Z'),
 ]
 
 describe('Pi facts through runtime-neutral Session views', () => {

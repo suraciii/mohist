@@ -21,11 +21,10 @@ describe('canonical event types', () => {
   })
 
   it('includes the transcript event types', () => {
-    // Issue 484: the transcript event catalogue now also carries the
-    // activity-model transport events (`session.activity`,
-    // `session.context_reset`, `turn.failed`). The legacy
-    // `session.closed` / `session.followup_*` names are retained on the
-    // wire for now (frontend no longer patches status off them).
+    // Issue 484: the transcript event catalogue carries the activity-model
+    // transport events (`session.activity`, `session.context_reset`,
+    // `turn.failed`). The retired `session.closed` / `session.followup_*`
+    // names are no longer part of the canonical Web subscription contract.
     expect(TRANSCRIPT_EVENT_TYPES).toEqual([
       'session.input',
       'message.delta',
@@ -37,9 +36,6 @@ describe('canonical event types', () => {
       'session.activity',
       'session.context_reset',
       'turn.failed',
-      'session.closed',
-      'session.followup_completed',
-      'session.followup_failed',
       'usage.updated',
       'model.resolved',
       'compaction',
@@ -49,6 +45,14 @@ describe('canonical event types', () => {
     ])
     for (const name of TRANSCRIPT_EVENT_TYPES) {
       expect(EVENT_TYPES).toContain(name)
+    }
+  })
+
+  it('excludes the retired session.closed and session.followup_* event names', () => {
+    const retired = ['session.closed', 'session.followup_completed', 'session.followup_failed']
+    for (const name of retired) {
+      expect(TRANSCRIPT_EVENT_TYPES).not.toContain(name)
+      expect(EVENT_TYPES).not.toContain(name)
     }
   })
 

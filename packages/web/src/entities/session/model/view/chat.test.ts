@@ -63,8 +63,8 @@ describe('buildChatView', () => {
       }),
       makeEvent({
         sequence: 6,
-        type: 'session_closed',
-        payload: { status: 'completed' },
+        type: 'session.activity',
+        payload: { activity: 'idle' },
         createdAt: '2024-01-01T10:00:06.000Z',
       }),
     ])
@@ -83,5 +83,30 @@ describe('buildChatView', () => {
       completedAt: '2024-01-01T10:00:05.000Z',
     })
     expect(view.turns[0].completedAt).toBe('2024-01-01T10:00:06.000Z')
+  })
+
+  it.each([
+    ['failed', 'out of memory', 'failed'],
+    ['timeout', 'runner timeout', 'failed'],
+    ['cancelled', 'cancelled by user', 'cancelled'],
+  ] as const)('adds a %s terminal activity failure to the current turn', (status, failureReason, kind) => {
+    const view = buildChatView([
+      makeEvent({
+        sequence: 0,
+        type: 'input',
+        payload: { text: 'Fix the login bug', kind: 'initial' },
+      }),
+      makeEvent({
+        sequence: 1,
+        type: 'session.activity',
+        payload: { activity: 'idle', status, failureReason },
+      }),
+    ])
+
+    expect(view.turns[0].parts).toContainEqual(expect.objectContaining({
+      partType: 'error',
+      kind,
+      message: failureReason,
+    }))
   })
 })

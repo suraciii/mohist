@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
@@ -290,15 +292,30 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
 
         var closed = Assert.Single(parts, p => p.Type == TranscriptPartTypes.SessionActivity);
         var payload = JSON.DeserializeElement(closed.PayloadJson);
-        // Issue 484: terminal delivery writes a session.activity
-        // (activity=idle) part. The delivery id is recorded as
-        // `operationId`; the preflight reason is still observable as
-        // `failureReason`. The failureCategory stays the AgentJob's
-        // own verdict and is no longer mirrored onto the transcript.
         Assert.Equal(
             AgentJobSessionDeliveryIds.TerminalDeliveryId(plan.JobKey),
             payload.GetProperty("operationId").GetString());
+        Assert.Equal(
+            AgentJobSessionDeliveryIds.TerminalDeliveryId(plan.JobKey),
+            payload.GetProperty("deliveryId").GetString());
         Assert.Equal(AgentJobFailureReasons.WorkspaceUnavailable, payload.GetProperty("failureReason").GetString());
+        Assert.Equal(AgentJobFailureReasons.WorkspaceUnavailable, payload.GetProperty("failureCategory").GetString());
+
+        Assert.NotNull(plan.IssueNumber);
+        using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
+        var assembler = new IssueEventFeedAssembler(
+            _fixture.EventStore,
+            null!,
+            scope.ServiceProvider.GetRequiredService<IDbContextFactory<Mohist.Server.Infrastructure.Data.Db.MohistDbContext>>());
+        var events = await assembler.ListAsync(projectId, plan.IssueNumber.Value, workflowRunId: null, limit: 200);
+
+        var activity = Assert.Single(events, entry => entry.Envelope.Type == "session.activity");
+        Assert.Equal(plan.SessionId, activity.Envelope.Subject);
+        Assert.Equal("failed", activity.Envelope.Data!.Value.GetProperty("status").GetString());
+        Assert.Equal(AgentJobFailureReasons.WorkspaceUnavailable,
+            activity.Envelope.Data!.Value.GetProperty("failureReason").GetString());
+        Assert.Equal(_fixture.TimeProvider.GetUtcNow().ToString("o"),
+            activity.Envelope.Data!.Value.GetProperty("recordedAt").GetString());
     }
 
     private async Task<int> CountTurnsAsync(string sessionId)

@@ -127,7 +127,11 @@ public abstract class ProjectEventsApiTestSupport
         await db.SaveChangesAsync();
     }
 
-    protected async Task AppendSessionClosedFactAsync(string sessionId, DateTimeOffset time)
+    protected async Task AppendSessionActivityFactAsync(
+        string sessionId,
+        DateTimeOffset time,
+        string status = "failed",
+        string? failureReason = "runner timeout")
     {
         await using var db = await _fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
@@ -148,7 +152,13 @@ public abstract class ProjectEventsApiTestSupport
             Sequence = 1,
             Type = TranscriptPartTypes.SessionActivity,
             CorrelationKey = $"session.activity_{Guid.NewGuid():N}",
-            PayloadJson = """{"activity":"idle","status":"failed","failureReason":"runner timeout","exitCode":1}""",
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                activity = "idle",
+                status,
+                failureReason,
+                exitCode = status == "completed" ? 0 : 1,
+            }, Mohist.Server.Infrastructure.JSON.Options),
             FirstSeenAt = time.UtcDateTime,
             LastSeenAt = time.UtcDateTime,
         });

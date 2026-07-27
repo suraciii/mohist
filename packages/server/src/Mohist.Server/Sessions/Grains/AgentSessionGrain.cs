@@ -814,19 +814,28 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public async Task<AppendTerminalCloseResult> AppendTerminalCloseAsync(AppendTerminalCloseCommand command)
     {
+        var sourcePayload = AgentSessionJsonHelper.ParsePayloadOrEmpty(command.PayloadJson);
         var payload = JSON.Serialize(new Dictionary<string, object?>
         {
             ["activity"] = "idle",
             ["observedAt"] = command.RecordedAt.ToString("o"),
+            ["recordedAt"] = command.RecordedAt.ToString("o"),
             ["operationId"] = command.DeliveryId,
+            ["deliveryId"] = command.DeliveryId,
             ["status"] = command.Status,
+            ["exitCode"] = command.ExitCode,
             ["failureReason"] = command.FailureReason,
             ["failureCategory"] = command.FailureCategory,
+            ["agentJobId"] = AgentSessionJsonHelper.GetStringProp(sourcePayload, "agentJobId"),
         });
-        await AppendEventsAsync(
+        var entries = await AppendEventsAsync(
             [new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, payload)],
             command.RuntimeSessionId,
             requireCurrentRuntimeBinding: !string.IsNullOrWhiteSpace(command.RuntimeSessionId));
+        if (entries.Count == 0)
+            return new AppendTerminalCloseResult(SessionId, command.DeliveryId, true);
+        if (!await FlushAsync(CancellationToken.None))
+            throw new InvalidOperationException($"Agent session {SessionId} could not persist terminal delivery {command.DeliveryId}");
         return new AppendTerminalCloseResult(SessionId, command.DeliveryId, false);
     }
 
@@ -836,6 +845,22 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         bool requireCurrentRuntimeBinding)
     {
         if (runtimeEvents.Count == 0) return [];
+
+        var supportedEvents = runtimeEvents
+            .Where(runtimeEvent => TranscriptAccumulator.EventTypes.Contains(runtimeEvent.Type))
+            .ToList();
+        foreach (var group in runtimeEvents
+            .Where(runtimeEvent => !TranscriptAccumulator.EventTypes.Contains(runtimeEvent.Type))
+            .GroupBy(runtimeEvent => runtimeEvent.Type, StringComparer.Ordinal))
+        {
+            _log.LogWarning(
+                "AgentSessionGrain discarded unsupported transcript events for {SessionId}; type {EventType}, count {DiscardedEventCount}",
+                SessionId,
+                group.Key,
+                group.Count());
+        }
+        if (supportedEvents.Count == 0) return [];
+        runtimeEvents = supportedEvents;
 
         var session = await GetRequiredAsync();
         if (requireCurrentRuntimeBinding
@@ -946,17 +971,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _lastHealthPercent = previousUsagePercent;
 
         var allEntries = entries.Concat(supplementaryEntries).ToList();
-
-        foreach (var group in allEntries
-            .Where(entry => !TranscriptAccumulator.EventTypes.Contains(entry.Type))
-            .GroupBy(entry => entry.Type, StringComparer.Ordinal))
-        {
-            _log.LogWarning(
-                "AgentSessionGrain discarded unsupported transcript events for {SessionId}; type {EventType}, count {DiscardedEventCount}",
-                SessionId,
-                group.Key,
-                group.Count());
-        }
 
         var normalizedParts = _transcript.Accept(session, allEntries, now);
         session.PersistedActivitySummary = AgentSessionActivitySummaryReducer.Reduce(

@@ -82,7 +82,7 @@ public class WorkflowRecoveryCollection : ICollectionFixture<WorkflowGrainFixtur
 [CollectionDefinition("RunnerGrain")]
 public class RunnerGrainCollection : ICollectionFixture<WorkflowGrainFixture>;
 
-[CollectionDefinition("AgentJobGrain")]
+[CollectionDefinition("AgentJobGrain", DisableParallelization = true)]
 public class AgentJobGrainCollection : ICollectionFixture<AgentJobGrainFixture>;
 
 [CollectionDefinition("Backlog")]
