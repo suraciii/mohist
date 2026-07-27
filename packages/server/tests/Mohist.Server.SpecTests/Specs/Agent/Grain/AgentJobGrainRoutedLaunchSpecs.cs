@@ -292,11 +292,6 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
 
         var closed = Assert.Single(parts, p => p.Type == TranscriptPartTypes.SessionActivity);
         var payload = JSON.DeserializeElement(closed.PayloadJson);
-        // Issue 484: terminal delivery writes a session.activity
-        // (activity=idle) part. The delivery id is recorded as
-        // `operationId`; the preflight reason is still observable as
-        // `failureReason`. The failureCategory stays the AgentJob's
-        // own verdict and is no longer mirrored onto the transcript.
         Assert.Equal(
             AgentJobSessionDeliveryIds.TerminalDeliveryId(plan.JobKey),
             payload.GetProperty("operationId").GetString());

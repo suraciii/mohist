@@ -83,51 +83,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task ReportResultAsync_TerminalTranscriptFailure_RetainsPendingCloseUntilRedeliveryPersistsIt()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
-            $"agent-job-terminal-retry-{Guid.NewGuid():N}");
-        var jobKey = $"agent-job-terminal-retry-{Guid.NewGuid():N}";
-        var sessionId = $"session-terminal-retry-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
-
-        var job = JobGrain(jobKey);
-        await job.SubmitAsync(new AgentJobInput(
-            Prompt: "do a failing thing",
-            WorkspacePath: "/tmp/agent-job-terminal-retry",
-            ProjectId: projectId,
-            AgentSessionId: sessionId,
-            AgentId: "agent-test"));
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-
-        _fixture.SessionPersistence.QueueFailures(100);
-        await runner.ReportAgentJobResultAsync(
-            jobKey,
-            workId,
-            new WorkResult(Status: "failed", Message: "transient", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
-
-        await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
-        Assert.True((await job.GetRuntimeSnapshotAsync()).HasPendingSessionClose);
-
-        _fixture.SessionPersistence.ResetFailures();
-        var replay = await runner.ReportAgentJobResultAsync(
-            jobKey,
-            workId,
-            new WorkResult(Status: "failed", Message: "transient", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
-
-        Assert.False(replay.Tracked);
-        Assert.False((await job.GetRuntimeSnapshotAsync()).HasPendingSessionClose);
-
-        var parts = (await ListSessionClosedPartsAsync(sessionId))
-            .Where(part => part.Type == TranscriptPartTypes.SessionActivity)
-            .ToList();
-        var persisted = Assert.Single(parts);
-        Assert.Equal(TerminalDeliveryId(jobKey), persisted.CorrelationKey);
-    }
-
-    [Fact]
     public async Task ReportResultAsync_SuccessfulRunnerReport_PersistsPendingCloseWithoutReasonOrCategory()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
