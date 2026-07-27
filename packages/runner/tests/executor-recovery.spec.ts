@@ -182,3 +182,45 @@ describe("recovery action error protocol", () => {
     expect(result?.message).toContain("failure.error fields [code, message]")
   })
 })
+
+describe("recovery budget clamp", () => {
+  const recovery = {
+    budget: 2,
+    handlers: [{ when: "error.code=conflict", tasks: [], retrySelf: true }],
+  }
+  const failedResult = {
+    status: "failed",
+    error: { code: "conflict", message: "conflict" },
+  } as const
+
+  function dispatchWithRemaining(remaining: number | null): DispatchWorkItem {
+    return {
+      ...work(recovery),
+      recoveryRemaining: remaining,
+    }
+  }
+
+  it("clamps a negative continuation allowance to zero and skips automatic recovery", () => {
+    const result = tryRecovery(dispatchWithRemaining(-3), failedResult)
+
+    expect(result).toBeNull()
+  })
+
+  it("clamps an above-budget continuation allowance to the declared budget", () => {
+    const result = tryRecovery(dispatchWithRemaining(99), failedResult)
+
+    expect(result).toMatchObject({
+      status: "completed",
+      addTasks: [{ id: "integrate:rebase", recoveryRemaining: 1 }],
+    })
+  })
+
+  it("leaves an in-range continuation allowance untouched", () => {
+    const result = tryRecovery(dispatchWithRemaining(1), failedResult)
+
+    expect(result).toMatchObject({
+      status: "completed",
+      addTasks: [{ id: "integrate:rebase", recoveryRemaining: 0 }],
+    })
+  })
+})

@@ -34,7 +34,7 @@ public static partial class WorkflowRunExtensions
             var failure = failureOverride ?? run.EffectiveFailure();
             if (run.Status != WorkflowRunStatus.Failed || failure is null) return null;
 
-            if (failure.Reason is FailureReason.TaskFailed)
+            if (failure.Reason is FailureReason.TaskFailed or FailureReason.ContextExhaustion)
             {
                 var taskId = failure.TaskId;
                 if (taskId is null && failure.Stage is not null)
@@ -80,45 +80,24 @@ public static partial class WorkflowRunExtensions
             if (current.Failure is null)
                 throw new InvalidOperationException($"Stage {current.Id} is not failed");
 
-            switch (current.Failure.Reason)
+            var target = run.RetryTarget();
+            if (target is null)
+                throw new InvalidOperationException($"Stage {current.Id} failure has no retry target; use rerun to restart the stage");
+
+            switch (target.Reason)
             {
                 case FailureReason.TaskFailed:
-                {
-                    var taskId = current.Failure.TaskId
-                        ?? current.Tasks.LastOrDefault(t => t.Status == TaskRunStatus.Failed)?.Id;
-                    if (taskId is null)
-                        throw new InvalidOperationException($"Stage {current.Id} task failure has no task ID; use rerun to restart the stage");
-
-                    current.RetryFailedTask(taskId);
+                    current.RetryFailedTask(target.Target);
                     run.Failure = null;
                     ApplyWaitingForDispatchStatus(run, now);
                     return [new WorkflowRunResumed()];
-                }
                 case FailureReason.CheckFailed:
-                    current.RetryFailedCheck(current.Failure.CheckName);
+                    current.RetryFailedCheck(target.Target);
                     run.Failure = null;
                     ApplyWaitingForDispatchStatus(run, now);
                     return [new WorkflowRunResumed()];
-                // ContextExhaustion is a legacy failure reason: it was only ever
-                // produced by the removed session-health gate, but persisted runs
-                // still carry it. Retry re-runs the failing task
-                // rather than refusing — capacity is OpenCode's responsibility now.
-                case FailureReason.ContextExhaustion:
-                {
-                    var taskId = current.Failure.TaskId
-                        ?? current.Tasks.LastOrDefault(t => t.Status == TaskRunStatus.Failed)?.Id;
-                    if (taskId is null)
-                        throw new InvalidOperationException($"Stage {current.Id} failure has no task ID; use rerun to restart the stage");
-
-                    current.RetryFailedTask(taskId);
-                    run.Failure = null;
-                    ApplyWaitingForDispatchStatus(run, now);
-                    return [new WorkflowRunResumed()];
-                }
-                case FailureReason.ApprovalRejected:
-                    throw new InvalidOperationException($"Stage {current.Id} failure is approval rejection; use rerun to restart the stage");
                 default:
-                    throw new InvalidOperationException($"Unknown failure reason: {current.Failure.Reason}");
+                    throw new InvalidOperationException($"Stage {current.Id} failure cannot be retried; use rerun to restart the stage");
             }
         }
 

@@ -1,0 +1,20 @@
+## Codebase Patterns
+
+- `WorkflowRun.RetryTarget` is the shared domain resolver used by the status mapper; it returns a normalized `TaskFailed` target for both ordinary task failures and persisted legacy `ContextExhaustion` failures.
+- Task target resolution falls back to the last failed task in the failure's recorded stage when the persisted failure has no task id.
+- `Retry` retains the failed-run and failed-stage guards, then executes only the target returned by `RetryTarget`; rerun and rerun-from-stage remain separate controls.
+- The Server test projects use Microsoft Testing Platform, so `dotnet test --filter` is ignored in this workspace. Build with `-p:SkipWebBuild=true`, then invoke the test DLL directly with xUnit v3 `-class` for focused runs.
+- A successful task report that carries a follow-up set still leaves the reporting task in `TaskRunStatus.Completed` (not `Failed`); the new follow-up is `Pending` and the runner's next poll dispatches it. Assertions on out-of-range-recovery scenarios must target `Pending`, not `Failed`.
+
+## T-001
+
+- Added unit coverage for legacy ContextExhaustion status/action mapping and task retry, check retry, and no-target rejection without mutation.
+- Existing `WorkflowRetrySpecs` passed all 25 tests, covering ordinary task/check retry, rerun, rerun-from-stage support, and recovery retry behavior.
+
+## T-002
+
+- Server `TaskRun.ValidateContinuation` now narrows to the recovery-declaration requirement only; the negative and above-declared-budget range rejection is removed. Structural checks (recovery follow-up with missing numeric state, non-recovery follow-up with continuation state) remain in `RuntimeTaskFollowUps.Project`.
+- `WorkflowRecoveryRoundTests.ContinuationStateIsBoundToItsDeclaration` keeps the declaration-shape assertion but no longer asserts that `MakeContinuationTask` throws above-budget; a new parameterized test covers negative, zero, and above-budget persistence.
+- `WorkflowRetrySpecs` flips two existing "outside-declared-budget fails terminally" tests to verify dispatch preserves the value, and adds a non-recovery follow-up test for the structural-mismatch scenario.
+- Runner `tryRecovery` already clamps `recoveryRemaining` via `clampRemaining(value, budget) = Math.min(budget, Math.max(0, Math.floor(value)))`; new tests in `executor-recovery.spec.ts` cover the negative (returns null → no automatic recovery) and above-budget (clamps to budget) outcomes alongside the in-range baseline.
+- Bumped `spec-file-size-baseline.json` allowance for `WorkflowRetrySpecs.cs` from 25955 to 27090 bytes to absorb the new recovery-budget coverage.

@@ -1,0 +1,44 @@
+{
+  "project": "mohist-local",
+  "description": "Align Workflow retry targeting and recovery-continuation authority so status, control, and runner behavior share one rule each.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Unify failed-work retry targeting",
+      "spec": "specs/workflow-task-recovery/spec.md#retry-availability-and-execution-use-one-failure-target",
+      "description": "Refactor WorkflowRun retry-target resolution so retry execution and available-actions mapping consume the same task-or-check target. Include legacy ContextExhaustion task failures while retaining existing retry, rerun, and rerun-from-stage behavior.",
+      "acceptanceCriteria": [
+        "A single WorkflowRun retry-target resolver identifies retryable task and check work for both control execution and status presentation.",
+        "A persisted ContextExhaustion failure with an identifiable failed task exposes retry and creates a new attempt of that task.",
+        "Check retry continues to rerun the identified check, and failures without a target expose no retry and leave the run unchanged when retry is attempted.",
+        "Focused Server unit and spec coverage verifies ordinary task, check, legacy ContextExhaustion, no-target, retry, rerun, and rerun-from-stage behavior; the relevant Server test projects pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowRun retry-target resolver and status/control integration with regression coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not add a second status-only retryability branch or change the existing workflow control API."
+    },
+    {
+      "id": "T-002",
+      "title": "Make runner the recovery-budget authority",
+      "spec": "specs/workflow-task-recovery/spec.md#recovery-continuation-allowance-is-runner-owned-execution-state",
+      "description": "Narrow Server recovery follow-up validation to declaration and continuation-state shape, allowing numeric values outside the declared budget to persist and dispatch unchanged. Retain the existing Runner clamp as the only declared-budget interpretation.",
+      "acceptanceCriteria": [
+        "Server accepts and preserves negative and above-budget numeric recoveryRemaining values on otherwise valid recovery follow-ups.",
+        "Server still rejects a recovery follow-up without explicit numeric continuation state and a non-recovery follow-up that supplies continuation state.",
+        "Runner recovery evaluation clamps a negative allowance to zero and an above-budget allowance to the declared budget before automatic recovery selection.",
+        "Focused Server workflow recovery and Runner recovery tests cover accepted out-of-range transport, malformed shape rejection, and both clamp outcomes; the relevant Server and Runner test suites pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Structural Server follow-up validation and verified Runner-owned recovery allowance bounds.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "No persistence migration, protocol change, or change to recovery handler, retrySelf, or manual-retry semantics."
+    }
+  ]
+}

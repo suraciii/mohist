@@ -178,9 +178,6 @@ public static class TaskRunExtensions
         {
             if (input.Recovery is null)
                 throw new InvalidOperationException("A continuation task requires a recovery declaration");
-            if (recoveryRemaining < 0 || recoveryRemaining > Math.Max(0, input.Recovery.Budget))
-                throw new InvalidOperationException(
-                    $"Recovery remaining value {recoveryRemaining} is outside the declared budget {input.Recovery.Budget}");
         }
 
         private static TaskRun MakeTask(
