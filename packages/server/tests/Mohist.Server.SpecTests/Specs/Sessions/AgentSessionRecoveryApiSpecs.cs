@@ -254,6 +254,70 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     [Theory]
     [InlineData("compact")]
     [InlineData("reset")]
+    public async Task RecoveryEndpoint_OmittedIdempotencyKey_DoesNotReplayCompletedOperation(string operation)
+    {
+        var (project, issue, _, _) = await CreateAndStartSessionAsync(
+            $"{operation}-omitted-key",
+            sessionName: "build",
+            attachIdle: true);
+        var requests = new List<SessionCommandRequest>();
+        RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+        {
+            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
+            requests.Add(request);
+            return request.Command == SessionCommandKind.Compact
+                ? new SessionCommandResult(Ok: true)
+                : new SessionCommandResult(Ok: true, RuntimeSessionId: $"{request.RuntimeSessionId}-replacement");
+        });
+
+        using var first = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/{operation}",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+
+        using var second = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/{operation}",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+
+        Assert.Equal(2, requests.Count);
+        Assert.NotEqual(requests[0].OperationId, requests[1].OperationId);
+    }
+
+    [Fact]
+    public async Task CompactEndpoint_ExplicitLegacyIdempotencyKey_DoesNotMergeWithOmittedKey()
+    {
+        var (project, issue, _, _) = await CreateAndStartSessionAsync(
+            "compact-explicit-legacy",
+            sessionName: "build",
+            attachIdle: true);
+        var requests = new List<SessionCommandRequest>();
+        RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+        {
+            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
+            requests.Add(request);
+            return new SessionCommandResult(Ok: true);
+        });
+
+        using var legacyRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/compact");
+        legacyRequest.Headers.Add("Idempotency-Key", "legacy");
+        using var legacyResponse = await _client.SendAsync(legacyRequest);
+        Assert.Equal(HttpStatusCode.OK, legacyResponse.StatusCode);
+
+        using var omitted = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/compact",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, omitted.StatusCode);
+
+        Assert.Equal(2, requests.Count);
+        Assert.NotEqual(requests[0].OperationId, requests[1].OperationId);
+    }
+
+    [Theory]
+    [InlineData("compact")]
+    [InlineData("reset")]
     public async Task RecoveryEndpoint_TimedOutRunnerResponse_RetriesThePersistedOperation(string operation)
     {
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(

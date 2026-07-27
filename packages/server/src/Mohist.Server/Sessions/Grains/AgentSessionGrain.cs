@@ -509,10 +509,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         outcome.Operation,
         outcome.WasCompacted);
 
-    private const string LegacyRecoveryIdempotencyKey = "legacy";
-
     private static string RecoveryIdempotencyKey(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? LegacyRecoveryIdempotencyKey : value;
+        string.IsNullOrWhiteSpace(value) ? Guid.NewGuid().ToString("N") : value;
 
     private static bool MatchesRecoveryIdempotencyKey(AgentSessionResetReservation reservation, string key) =>
         string.Equals(reservation.IdempotencyKey, key, StringComparison.Ordinal)

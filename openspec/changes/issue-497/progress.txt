@@ -1,0 +1,69 @@
+# issue-497 progress
+
+## Codebase Patterns
+
+- `AgentSessionGrain.RecoveryIdempotencyKey` is the only place that materializes the
+  idempotency key on a reservation; `BeginSessionCommandAsync` and
+  `GetCompletedRecoveryAsync` go through it. API-layer
+  `AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(HttpContext)` only forwards the
+  header-or-null and is unrelated to the grain-internal helper.
+- The reservation record carries `IdempotencyKey` and `AdditionalIdempotencyKeys`.
+  `MatchesRecoveryIdempotencyKey` is the join/match predicate and is used by both
+  `BeginSessionCommandAsync` and `GetCompletedRecoveryAsync`.
+- `design/agent-execution.md` has a single `operationId` paragraph in the Follow-up
+  section (≈ line 234). No dedicated "recovery idempotency key" section exists —
+  the decision paragraph lives next to the existing operationId note.
+- `AgentSessionRecoveryGrainSpecs` covers the grain-internal surface; the FakeAgentSessionStore
+  re-clones on save, so tests can read `PendingReset.IdempotencyKey` from
+  `_fixture.StateStore.LoadAsync(sessionId)`. AttachPhysicalSessionAsync also emits
+  one `AgentSessionRuntimeBound` event, so use `eventCountBefore` to count
+  recovery-only events.
+- The ArchTests `CSharpTestFiles_MustStayWithinSizeRatchet` baseline is the
+  only spec-file-size constraint — any spec file > 24 KB needs a baseline entry
+  in `spec-file-size-baseline.json`.
+
+## Implementation notes
+
+- D1 fix: `RecoveryIdempotencyKey` now returns `Guid.NewGuid().ToString("N")` on
+  blank input; `LegacyRecoveryIdempotencyKey` constant is gone. Format matches
+  `OperationId`.
+- D3 falls out automatically: a fresh GUID can't match any stored key, so
+  `GetCompletedRecoveryAsync(null)` returns null after a completed reservation,
+  and the caller falls through to `BeginSessionCommandAsync` for a new op.
+- D4 design-doc paragraph added at the existing `operationId` idempotency note
+  (line 234) in `design/agent-execution.md`. Chose this location because the
+  Follow-up section already discusses command idempotency; recovery inherits the
+  same vocabulary.
+- One existing test (`Compact_PostCommitFailure_ReactivationReturnsPersistedCompletionWithoutAnotherCompaction`)
+  relied on the old default-key replay. Switched it to pass an explicit key
+  `"post-commit-key"` — its actual intent (reactivation returns persisted
+  completion) is preserved without depending on the now-broken default-key
+  match. This is a clean change because the spec already guarantees explicit-key
+  replay semantics.
+
+## Spec test additions
+
+- `DefaultKey_GeneratesUniqueIdempotencyKeyForEachOmittedCall`: inspects
+  `PendingReset.IdempotencyKey` after each call to assert two distinct, non-`"legacy"`
+  GUID-style keys.
+- `DefaultKey_AfterCompletedRecovery_StartsNewOperationInsteadOfReplaying`:
+  exercises the `GetCompletedRecoveryAsync` → null → new-op path.
+- `DefaultKey_ProducesItsOwnRecoveryEffectForEachOmittedCall`: counts delta
+  events via `eventCountBefore` to isolate the two reset `RuntimeBound` events
+  from the initial attach `RuntimeBound` event.
+- `ExplicitLegacyKey_IsTreatedAsOrdinaryCallerSuppliedKey`: full round-trip —
+  caller `"legacy"` key stays as the reservation key, omitted-key follow-up
+  does NOT replay it.
+- API-level: `RecoveryEndpoint_OmittedIdempotencyKey_DoesNotReplayCompletedOperation`
+  (theory: compact + reset) and `CompactEndpoint_ExplicitLegacyIdempotencyKey_DoesNotMergeWithOmittedKey`.
+
+## Gotchas
+
+- The Microsoft.Testing.Platform `--filter` flag ignores the filter in this
+  repo's setup — it runs the whole suite regardless. Use it as a coarse
+  classifier, not a runtime filter.
+- Spec file size grew past 24 KB in both recovery spec files; baseline entries
+  added alphabetically with the existing pattern.
+- One observed flake: `AgentJobTerminalDeliverySpecs.ReportResultAsync_RunnerCategoryPrecedence_ErrorCodeUsedWhenOutputCategoryMissing`
+  timed out on one run; it passed on re-run and on master. Treat as pre-existing
+  flake, not a regression from this issue.
