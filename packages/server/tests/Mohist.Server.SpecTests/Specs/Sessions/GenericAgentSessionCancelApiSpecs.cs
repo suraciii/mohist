@@ -194,22 +194,14 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         }
     }
 
-    // Cancel_AlreadyTerminalSession_ShortCircuitsWithoutCallingRunner and
-    // Cancel_AlreadyTerminalSession_MirrorsEachTerminalStateVerbatim were
-    // removed: under the activity model (issue-484) a session never enters a
-    // terminal state, so a manual session.closed injection is a no-op and the
-    // cancel terminal short-circuit no longer exists. The runner-reported
-    // terminal mirroring behaviour is still covered by
-    // Cancel_RunnerRepliesWithTerminalState_MirrorsThatTerminalState.
-
     [Fact]
-    public async Task Cancel_AfterReset_IgnoresTerminalStateFromPredecessorRuntime()
+    public async Task Cancel_AfterReset_IgnoresTerminalActivityFromPredecessorRuntime()
     {
         var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-reset-terminal");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
-            new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionClosed, """{"status":"completed"}"""),
+            new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, """{"activity":"idle","status":"completed","operationId":"terminal-delivery"}"""),
         }, sessionId));
         await grain.FlushForTestAsync();
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));

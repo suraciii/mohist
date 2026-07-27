@@ -33,7 +33,7 @@ public class ProjectEventFeedAssembler : IScopedService
         buckets.Add(await LoadWorkflowEventsAsync(db, projectId, limit, filter, ct));
         buckets.Add(await LoadAgentSessionEventsAsync(db, projectId, limit, filter, ct));
         buckets.Add(await LoadSessionOpenedEventsAsync(db, projectId, limit, filter, ct));
-        buckets.Add(await LoadSessionClosedEventsAsync(db, projectId, limit, filter, ct));
+        buckets.Add(await LoadSessionActivityEventsAsync(db, projectId, limit, filter, ct));
 
         var events = buckets
             .SelectMany(bucket => bucket)
@@ -165,14 +165,14 @@ public class ProjectEventFeedAssembler : IScopedService
         return sessions.Select(session => ProjectEventEnvelope.SessionOpened(ProjectEventSessionContext.From(session))).ToList();
     }
 
-    private static async Task<IReadOnlyList<ProjectEventEnvelope>> LoadSessionClosedEventsAsync(
+    private static async Task<IReadOnlyList<ProjectEventEnvelope>> LoadSessionActivityEventsAsync(
         MohistDbContext db,
         string projectId,
         int limit,
         ProjectEventFilter? filter,
         CancellationToken ct)
     {
-        if (filter is not null && !filter.MayMatchSessionClosed()) return [];
+        if (filter is not null && !filter.MayMatchSessionActivity()) return [];
 
         var rows = await (
             from part in db.AgentSessionTranscriptParts.AsNoTracking()
@@ -190,7 +190,7 @@ public class ProjectEventFeedAssembler : IScopedService
             .ToListAsync(ct);
 
         return rows
-            .Select(row => ProjectEventEnvelope.SessionClosed(ProjectEventSessionContext.From(row.Session), row.Part))
+            .Select(row => ProjectEventEnvelope.SessionActivity(ProjectEventSessionContext.From(row.Session), row.Part))
             .ToList();
     }
 
@@ -247,8 +247,8 @@ public sealed record ProjectEventEnvelope(
     internal static ProjectEventEnvelope SessionOpened(ProjectEventSessionContext session) =>
         SessionLifecycle(session, 0, "coder_session_started", ToData(new { status = "opened" }), ToOffset(session.CreatedAt), $"{session.SessionId}:opened");
 
-    internal static ProjectEventEnvelope SessionClosed(ProjectEventSessionContext session, AgentSessionTranscriptPartRow part) =>
-        SessionLifecycle(session, part.Id, "session.closed", ToData(part.PayloadJson), ToOffset(part.LastSeenAt), $"{session.SessionId}:closed:{part.Id}");
+    internal static ProjectEventEnvelope SessionActivity(ProjectEventSessionContext session, AgentSessionTranscriptPartRow part) =>
+        SessionLifecycle(session, part.Id, "session.activity", ToData(part.PayloadJson), ToOffset(part.LastSeenAt), $"{session.SessionId}:activity:{part.Id}");
 
     private static ProjectEventEnvelope SessionLifecycle(
         ProjectEventSessionContext session,
@@ -421,7 +421,7 @@ public sealed class ProjectEventFilter
         "coder_session_status_changed", "com.mohist.agent-session.runtime-bound",
         "com.mohist.agent-session.usage-recorded", "com.mohist.agent-session.model-changed",
         "com.mohist.agent-session.context-compacted", "com.mohist.agent-session.context-health-updated",
-        "com.mohist.agent-session.context-exhausted", "session.closed", "session.liveness",
+        "com.mohist.agent-session.context-exhausted", "session.activity", "session.liveness",
     ];
 
     private readonly HashSet<string> _types;
@@ -471,7 +471,7 @@ public sealed class ProjectEventFilter
         return candidates;
     }
 
-    public bool MayMatchSessionClosed() =>
+    public bool MayMatchSessionActivity() =>
         RequiresAgentSessionStatusFailure
         || (!AttentionOnly && (_types.Count == 0 || _types.Contains("agent-session")));
 

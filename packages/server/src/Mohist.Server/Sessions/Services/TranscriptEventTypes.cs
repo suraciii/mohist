@@ -2,9 +2,6 @@ namespace Mohist.Server.Sessions.Services;
 
 internal static class RuntimeEventTypes
 {
-    public const string SessionClosed = "session.closed";
-    public const string SessionFollowupFailed = "session.followup_failed";
-    public const string SessionFollowupCompleted = "session.followup_completed";
     public const string SessionInput = "session.input";
     public const string SessionLiveness = "session.liveness";
     public const string SessionActivity = "session.activity";
@@ -25,7 +22,6 @@ internal static class RuntimeEventTypes
 
 internal static class TranscriptPartTypes
 {
-    public const string SessionClosed = "session.closed";
     public const string Input = "input";
     public const string Text = "text";
     public const string Reasoning = "reasoning";

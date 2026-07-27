@@ -385,7 +385,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             .Select(turn => turn.Id)
             .ToListAsync();
         Assert.Empty(await db.AgentSessionTranscriptParts
-            .Where(part => turnIds.Contains(part.TurnId) && part.Type == TranscriptPartTypes.SessionClosed)
+            .Where(part => turnIds.Contains(part.TurnId) && part.Type == TranscriptPartTypes.SessionActivity)
             .ToListAsync());
     }
 

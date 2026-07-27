@@ -269,21 +269,9 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         Assert.Equal(sessionId, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
     }
 
-    // GenericFollowupEndpoint_TerminalSession_ReturnsConflict was removed:
-    // under the activity model (issue-484) a session never enters a
-    // terminal state, the session.closed runtime event is a no-op, and the
-    // session_inactive followup short-circuit no longer exists. The followup
-    // endpoint now joins the active/idle turn while the runner is reachable.
-
     [Fact]
-    public async Task GenericFollowupEndpoint_ActivityMarksActiveThenClosedStaysFollowable()
+    public async Task GenericFollowupEndpoint_TerminalActivityStaysFollowable()
     {
-        // Under the activity model (issue-484) session.closed is a no-op
-        // and a session never becomes terminal. After an activity record
-        // marks the session active, the followup endpoint joins the active
-        // turn; a subsequent session.closed observation does not flip the
-        // session to a non-followable state, so a second followup still
-        // succeeds while the runner is reachable.
         var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-lifecycle");
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -308,8 +296,8 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
             {
                 new AgentSessionRuntimeEventInput(
-                    Type: RuntimeEventTypes.SessionClosed,
-                    PayloadJson: "{\"status\":\"completed\"}"),
+                    Type: RuntimeEventTypes.SessionActivity,
+                    PayloadJson: "{\"activity\":\"idle\",\"status\":\"completed\",\"operationId\":\"terminal-delivery\"}"),
             }, sessionId));
             await grain.FlushForTestAsync();
 

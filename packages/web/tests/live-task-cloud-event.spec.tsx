@@ -229,7 +229,7 @@ describe('LiveTaskProvider transcript routing', () => {
     ['reasoning.delta', { text: 'thinking' }],
     ['tool_call.started', { toolName: 'Read', state: 'started', toolCallId: 'tool-1' }],
     ['session.input', { text: 'prompt', kind: 'task' }],
-    ['session.closed', { status: 'completed' }],
+    ['session.activity', { activity: 'idle' }],
   ] as const)('forwards %s transcript events to %s subscribers', async (eventName, partialPayload) => {
     const queryClient = new QueryClient()
     const received: unknown[] = []

@@ -121,6 +121,28 @@ public class TranscriptAccumulatorSpecs
     }
 
     [Fact]
+    public void Accept_TerminalSessionActivity_UsesDeliveryIdForCorrelation()
+    {
+        var session = CreateSession();
+        var accumulator = new TranscriptAccumulator();
+        var now = new DateTime(2026, 6, 14, 12, 0, 0, DateTimeKind.Utc);
+        const string deliveryId = "agent-job:job-1:terminal";
+
+        var accepted = accumulator.Accept(session, [
+            new RuntimeEventEnvelope
+            {
+                Type = RuntimeEventTypes.SessionActivity,
+                PayloadJson = $$"""{"activity":"idle","deliveryId":"{{deliveryId}}","status":"failed"}""",
+                CreatedAt = now,
+            },
+        ], now);
+
+        var part = Assert.Single(accepted);
+        Assert.Equal(deliveryId, part.CorrelationKey);
+        Assert.Equal(deliveryId, part.CorrelationId);
+    }
+
+    [Fact]
     public void Accept_ContinuousTextDeltas_AcrossCalls_CombineIntoSinglePart()
     {
         var session = CreateSession();

@@ -67,11 +67,11 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         Assert.Equal(
             "AgentJob requires 'workspace.path' in dispatch variables",
             closed.GetProperty("failureReason").GetString());
-        // Issue 484: the activity part records the delivery id as `operationId`
-        // (the field that survives the new payload shape) and carries no
-        // terminal `failureCategory`/`agentJobId` — those remain the job's
-        // own verdict, observable through the AgentJob snapshot below.
         Assert.Equal(TerminalDeliveryId(jobKey), closed.GetProperty("operationId").GetString());
+        Assert.Equal(TerminalDeliveryId(jobKey), closed.GetProperty("deliveryId").GetString());
+        Assert.Equal("invalid-input", closed.GetProperty("failureCategory").GetString());
+        Assert.Equal(jobKey, closed.GetProperty("agentJobId").GetString());
+        Assert.Equal(_fixture.TimeProvider.GetUtcNow().ToString("o"), closed.GetProperty("recordedAt").GetString());
 
         await GetSingleSessionClosedPartAsync(sessionId);
 

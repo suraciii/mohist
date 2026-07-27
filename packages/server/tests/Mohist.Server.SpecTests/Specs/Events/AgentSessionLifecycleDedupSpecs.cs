@@ -117,7 +117,7 @@ public class AgentSessionLifecycleDedupSpecs
     }
 
     [Fact]
-    public async Task AppendRuntimeEventsAsync_SessionClosedDoesNotPersistTerminalDomainEvents()
+    public async Task AppendRuntimeEventsAsync_TerminalActivityIsDeliveryIdempotentWithoutDomainEvent()
     {
         var session = await CreateStartedSessionAsync("dedup-completed");
 
@@ -137,8 +137,20 @@ public class AgentSessionLifecycleDedupSpecs
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
-        // Only the RuntimeBound event from the attach may be present.
-        Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
+        Assert.All(stored, s => Assert.NotEqual("session.activity", s.Envelope.Type));
+
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
+            .CreateDbContextAsync();
+        var parts = await (
+            from part in db.AgentSessionTranscriptParts
+            join turn in db.AgentSessionTranscriptTurns on part.TurnId equals turn.Id
+            where turn.SessionId == session.Id && part.Type == TranscriptPartTypes.SessionActivity
+            select part)
+            .ToListAsync();
+        var activity = Assert.Single(parts);
+        Assert.Equal(2, activity.RawEventCount);
+        Assert.Equal("completed", activity.PayloadStatus);
     }
 
     [Fact]
@@ -154,7 +166,7 @@ public class AgentSessionLifecycleDedupSpecs
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
-        Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
+        Assert.All(stored, s => Assert.NotEqual("session.activity", s.Envelope.Type));
     }
 
     [Fact]
@@ -170,7 +182,7 @@ public class AgentSessionLifecycleDedupSpecs
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
-        Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
+        Assert.All(stored, s => Assert.NotEqual("session.activity", s.Envelope.Type));
     }
 
     [Fact]
@@ -257,16 +269,12 @@ public class AgentSessionLifecycleDedupSpecs
     }
 
     [Fact]
-    public async Task AppendRuntimeEventsAsync_SessionClosedPublishesOnlyTranscriptChannel()
+    public async Task AppendRuntimeEventsAsync_TerminalActivityPublishesOnlyTranscriptChannel()
     {
         var session = await CreateStartedSessionAsync("dedup-terminal-publishes");
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
-        // Under the activity model the terminal-close observation is carried by
-        // the `session.activity` runtime event (the legacy `session.closed`
-        // event is a no-op). It must still be forwarded on the transcript
-        // channel and must not be persisted as a domain event.
         await AppendEventsAsync(session, new
         {
             runtimeSessionId = session.Id,
@@ -363,8 +371,8 @@ public class AgentSessionLifecycleDedupSpecs
             runtimeEvents = new[]
             {
                 failureReason is null
-                    ? (object)new { type = "session.closed", payload = new { status, exitCode } }
-                    : new { type = "session.closed", payload = new { status, exitCode, failureReason } }
+                    ? (object)new { type = "session.activity", payload = new { activity = "idle", status, exitCode, operationId = "terminal-delivery" } }
+                    : new { type = "session.activity", payload = new { activity = "idle", status, exitCode, failureReason, operationId = "terminal-delivery" } }
             }
         });
 

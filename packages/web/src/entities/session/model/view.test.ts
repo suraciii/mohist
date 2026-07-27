@@ -105,8 +105,8 @@ const STREAM: SessionEvent[] = [
   }),
   makeEvent({
     sequence: 11,
-    type: 'session_closed',
-    payload: { status: 'completed' },
+    type: 'session.activity',
+    payload: { activity: 'idle' },
     createdAt: '2024-01-01T10:00:11.000Z',
   }),
 ]
@@ -340,7 +340,7 @@ describe('viewSessionEvents compact projection', () => {
     expect(view.toolCount).toBe(2)
   })
 
-  it('records terminal status and failure reason from session_closed', () => {
+  it('records terminal status and failure reason from session.activity=idle', () => {
     const view = viewSessionEvents(STREAM, 'compact') as SessionCompactView
     expect(view.terminalStatus).toBe('completed')
     expect(view.failureReason).toBeUndefined()
@@ -359,7 +359,7 @@ describe('viewSessionEvents compact projection', () => {
     expect(view.lastActivityAt).toBe('2024-01-01T10:00:11.000Z')
   })
 
-  it('reports failure reason when session_closed fails', () => {
+  it('reports failure reason when session.liveness reports failure', () => {
     const failedStream: SessionEvent[] = [
       makeEvent({
         sequence: 0,
@@ -369,7 +369,7 @@ describe('viewSessionEvents compact projection', () => {
       }),
       makeEvent({
         sequence: 1,
-        type: 'session_closed',
+        type: 'session.liveness',
         payload: { status: 'failed', failureReason: 'out of memory' },
         createdAt: '2024-02-01T00:00:01.000Z',
       }),

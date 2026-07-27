@@ -119,12 +119,12 @@ public sealed class TranscriptPartLoaderSpecs
         var result = await TranscriptPartLoader.LoadAsync(
             db,
             new[] { "sess_a" },
-            partType: TranscriptPartTypes.SessionClosed);
+            partType: "session.closed");
 
         Assert.Single(result.SessionByTurnId);
         Assert.Single(result.Turns);
         Assert.Equal(2, result.Parts.Count);
-        Assert.All(result.Parts, p => Assert.Equal(TranscriptPartTypes.SessionClosed, p.Type));
+        Assert.All(result.Parts, p => Assert.Equal("session.closed", p.Type));
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public sealed class TranscriptPartLoaderSpecs
         var result = await TranscriptPartLoader.LoadAsync(
             db,
             new[] { "sess_a" },
-            partType: TranscriptPartTypes.SessionClosed);
+            partType: "session.closed");
 
         Assert.Single(result.SessionByTurnId);
         Assert.Single(result.Turns);

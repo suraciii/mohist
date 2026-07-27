@@ -179,7 +179,7 @@ public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
         var project = await CreateProjectAsync("session-lifecycle");
         var sessionId = $"agent_session_{Guid.NewGuid():N}";
         await SeedAgentSessionAsync(project.Id, sessionId);
-        await AppendSessionClosedFactAsync(sessionId, FixedTime.AddMinutes(1));
+        await AppendSessionActivityFactAsync(sessionId, FixedTime.AddMinutes(1));
 
         var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
             $"/api/projects/{project.Id}/events");
@@ -191,13 +191,35 @@ public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
         Assert.Equal("wf-1", opened.WorkflowRunId);
         Assert.Equal("runner-1", opened.RunnerId);
 
-        var closed = Assert.Single(response, entry => entry.Type == "session.closed");
-        Assert.Equal("failed", closed.Data.GetProperty("status").GetString());
-        Assert.Equal("runner timeout", closed.Data.GetProperty("failureReason").GetString());
-        Assert.Equal("workflow", closed.SessionSourceKind);
-        Assert.Equal(1, closed.IssueNumber);
-        Assert.Equal(7, closed.EpicNumber);
-        Assert.Equal("runner-1", closed.RunnerId);
+        var activity = Assert.Single(response, entry => entry.Type == "session.activity");
+        Assert.Equal("failed", activity.Data.GetProperty("status").GetString());
+        Assert.Equal("runner timeout", activity.Data.GetProperty("failureReason").GetString());
+        Assert.Equal("workflow", activity.SessionSourceKind);
+        Assert.Equal(1, activity.IssueNumber);
+        Assert.Equal(7, activity.EpicNumber);
+        Assert.Equal("runner-1", activity.RunnerId);
+    }
+
+    [Fact]
+    public async Task GetProjectEvents_ProjectsCompletedSessionActivity()
+    {
+        var project = await CreateProjectAsync("session-completed-activity");
+        var sessionId = $"agent_session_{Guid.NewGuid():N}";
+        await SeedAgentSessionAsync(project.Id, sessionId);
+        await AppendSessionActivityFactAsync(
+            sessionId,
+            FixedTime.AddMinutes(1),
+            status: "completed",
+            failureReason: null);
+
+        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events");
+
+        var activity = Assert.Single(response, entry => entry.Type == "session.activity");
+        Assert.Equal("completed", activity.Data.GetProperty("status").GetString());
+        Assert.Equal("agent-session", activity.SourceAggregateKind);
+        Assert.Equal(sessionId, activity.SourceAggregateId);
+        Assert.Equal(sessionId, activity.Subject);
     }
 
     [Fact]

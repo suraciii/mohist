@@ -57,7 +57,7 @@ public sealed class IssueEventFeedAssemblerTests
             Id = 9,
             CorrelationKey = "agent-job:job-1:terminal",
             CorrelationId = "agent-job:job-1:terminal",
-            Type = "session.closed",
+            Type = "session.activity",
             PayloadStatus = "failed",
             PayloadJson = JsonSerializer.Serialize(new
             {
@@ -74,19 +74,26 @@ public sealed class IssueEventFeedAssemblerTests
 
         Assert.NotNull(result);
         Assert.Equal(9, result.Id);
-        Assert.Equal("session-1:closed:agent-job:job-1:terminal", result.Envelope.Id);
+        Assert.Equal("session-1:activity:agent-job:job-1:terminal", result.Envelope.Id);
         Assert.Equal("/mohist/agent-session/session-1", result.Envelope.Source.ToString());
+        Assert.Equal("session.activity", result.Envelope.Type);
         Assert.Equal("session-1", result.Envelope.Subject);
         Assert.Equal("1.0", result.Envelope.SpecVersion);
         Assert.Equal("application/json", result.Envelope.DataContentType);
         Assert.Equal("proj-1", result.Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
         Assert.Equal("42", result.Envelope.Extensions[EventCatalog.Lineage.Issue]);
         Assert.Equal("workspace unavailable", result.Envelope.Data!.Value.GetProperty("failureReason").GetString());
+        Assert.Equal("workspace-unavailable", result.Envelope.Data!.Value.GetProperty("failureCategory").GetString());
+        Assert.Equal(17, result.Envelope.Data!.Value.GetProperty("exitCode").GetInt32());
+        Assert.Equal("failed", result.Envelope.Data!.Value.GetProperty("status").GetString());
+        Assert.Equal("agent-1", result.Envelope.Data!.Value.GetProperty("agentId").GetString());
+        Assert.Equal("Reviewer", result.Envelope.Data!.Value.GetProperty("agentName").GetString());
         Assert.Equal("evt-1", result.Envelope.Data!.Value.GetProperty("triggerEventId").GetString());
+        Assert.Equal("rule-1", result.Envelope.Data!.Value.GetProperty("triggerRuleId").GetString());
     }
 
     [Fact]
-    public void ProjectRoutedFailureExcludesRuntimeAndFollowupCloses()
+    public void ProjectRoutedFailureExcludesRuntimeAndFollowupDeliveries()
     {
         var session = new AgentSessionRow
         {
@@ -98,7 +105,7 @@ public sealed class IssueEventFeedAssemblerTests
         };
         var part = new AgentSessionTranscriptPartRow
         {
-            Type = "session.closed",
+            Type = "session.activity",
             CorrelationKey = "runtime-close",
             PayloadStatus = "failed",
             PayloadJson = "{\"deliveryId\":\"runtime-close\",\"status\":\"failed\"}",
@@ -108,7 +115,7 @@ public sealed class IssueEventFeedAssemblerTests
     }
 
     [Fact]
-    public void ProjectRoutedFailureExcludesAgentJobPrefixedNonTerminalClose()
+    public void ProjectRoutedFailureExcludesAgentJobPrefixedNonTerminalDelivery()
     {
         var session = new AgentSessionRow
         {
@@ -121,7 +128,7 @@ public sealed class IssueEventFeedAssemblerTests
         var deliveryId = "agent-job:job-1:not-terminal";
         var part = new AgentSessionTranscriptPartRow
         {
-            Type = "session.closed",
+            Type = "session.activity",
             CorrelationKey = deliveryId,
             CorrelationId = deliveryId,
             PayloadStatus = "failed",

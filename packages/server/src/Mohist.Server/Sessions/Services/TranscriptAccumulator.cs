@@ -80,11 +80,14 @@ internal sealed class TranscriptAccumulator
                 CaptureRecoveryRuntime(row);
 
             var type = ToTranscriptPartType(row.Type);
+            var correlationId = type == TranscriptPartTypes.SessionActivity
+                ? SessionActivityCorrelationId(row.PayloadJson)
+                : AgentSessionJsonHelper.ExtractCorrelationId(row.PayloadJson);
             var part = CreatePartDelta(
                 row,
                 type,
                 CorrelationKey(type, row.PayloadJson),
-                AgentSessionJsonHelper.ExtractCorrelationId(row.PayloadJson),
+                correlationId,
                 textDelta: null,
                 payloadJson: row.PayloadJson,
                 rawEventCount: 1,
@@ -276,8 +279,18 @@ internal sealed class TranscriptAccumulator
     {
         TranscriptPartTypes.Tool => AgentSessionJsonHelper.ExtractCorrelationId(json) ?? TranscriptPartTypes.Tool,
         TranscriptPartTypes.Text or TranscriptPartTypes.Reasoning => AgentSessionJsonHelper.ExtractCorrelationId(json) ?? type,
+        TranscriptPartTypes.SessionActivity => SessionActivityCorrelationId(json) ?? TranscriptPartTypes.SessionActivity,
         _ => type,
     };
+
+    private static string? SessionActivityCorrelationId(string json)
+    {
+        var payload = AgentSessionJsonHelper.ParsePayload(json);
+        return payload is { } value
+            ? AgentSessionJsonHelper.GetStringProp(value, "deliveryId")
+                ?? AgentSessionJsonHelper.GetStringProp(value, "operationId")
+            : null;
+    }
 }
 
 internal sealed record RuntimeEventEnvelope

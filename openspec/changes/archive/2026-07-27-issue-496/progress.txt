@@ -1,0 +1,50 @@
+## Codebase Patterns
+
+- `TranscriptAccumulator.EventTypes` is the canonical allow-list for AgentSession runtime ingress and transcript persistence.
+- Terminal AgentJob delivery is persisted as `TranscriptPartTypes.SessionActivity`; its `operationId`/delivery id is the transcript correlation key, so duplicate runtime delivery remains one part while `RawEventCount` records both observations.
+- Project and Issue AgentOps feeds query persisted `session.activity` parts directly. The Issue feed additionally requires routed AgentJob lineage and a canonical `agent-job:{id}:terminal` delivery id.
+
+## T-001
+
+- Unsupported runtime entries are partitioned out before Session loading, binding checks, activity/domain application, envelope creation, persistence scheduling, event-info output, and realtime publication. Mixed batches retain supported entry order.
+- Removed retired runtime/transcript constants and changed Project/Issue terminal envelope types and stable identity labels to `session.activity` / `activity` terminology without changing query predicates, context projection, filtering, or ordering.
+- Historical transcript fixtures keep literal retired type values rather than a production constant; no migration or storage mutation was added.
+- Baseline focused unit tests passed. The first broad spec baseline ran 3255 tests with one unrelated failure after parallel build contention was corrected. Final `npm test` passed all .NET, Web, and Runner suites.
+
+## T-002
+
+- `TRANSCRIPT_EVENT_TYPES` no longer carries `session.closed`, `session.followup_completed`, or `session.followup_failed`; the three names are also excluded from the typed `AgentDetailEventMap`. The canonical-event-types test now asserts both the current transcript catalogue and an explicit exclusion of the three retired names.
+- `isSessionClosedEvent` predicate is gone; the transcript chat/compact views now close a turn and set terminal status from `session.activity` with `activity: 'idle'`. Failure detail still arrives through `session.liveness` with `status: 'failed'`; `coder_session_status_changed` / `coder_recovery_status` continue to carry recovery surfaces.
+- The activity-feed event classifier (`agentSessionEventInfo` + `AGENT_SESSION_EVENT_TYPES`) now treats `session.activity` as the canonical AgentSession event, keeping the existing `status`-based attention routing for completed/failed/timeout/cancelled outcomes and the Session navigation target.
+- Test fixtures that named the retired events for terminal signalling were migrated to the equivalent current event (`session.activity` for terminal completion, `session.liveness` for failure). `events-hub-subscription.spec.tsx` and `live-task-cloud-event.spec.tsx` now assert subscription/routing against `session.activity` and explicitly exclude the retired names.
+- `npm run typecheck -w packages/web`, `npm run test:run -w packages/web` (5134 tests passed, 1 skipped), and `npm run check:fsd -w packages/web` all pass.
+
+## Fix-CI (verify.1 hard timeout)
+
+- verify.1 was aborted after exactly 300090 ms (`Action 'core/script' threw before returning a result: The operation was aborted`). The captured runner signal matches `core/script`'s `timeoutSignal` firing at the 300000 ms (`timeout: 300000`) bound declared by `mohist-local.workflow.yaml`'s verify task — a runner-level abort, not a test failure.
+- The configured `vars.ci.verify` script runs `npm ci` + `dotnet test` + web typecheck/test + runner typecheck/test sequentially. The bound set by `e355abd5a` ("bound CI verification to five minutes") is too tight for that script in a fresh runner workspace: `npm ci` alone can consume ~3 minutes, leaving no room for the test stages which need ~2+ minutes.
+- Fix: restore the mohist-local verify `timeout: 600000` (the value before `e355abd5a`). The github-pr profile keeps `300000` because this issue is bound to `mohist/local`; restoring the github-pr value would be unrelated to this change. The corresponding test assertion in `MohistPrIssueWorkflowProfileSpecs.GithubPrWorkflowDefinition_BuildStage_PreservesLoadTasksAndVerify` is updated to match (`defBuild` is `mohist/local`'s verify task).
+- Verification locally: targeted test `Mohist.Server.SpecTests.Specs.Issue.Profile.MohistGithubPrIssueWorkflowProfileSpecs.GithubPrWorkflowDefinition_BuildStage_PreservesLoadTasksAndVerify` passes (1/1). Full `dotnet test Mohist.sln -p:SkipWebBuild=true` passes (175 + 1527 + 1432 + 33 + 3257 = 6424/6424). The full `vars.ci.verify` body with `node_modules` already populated runs end-to-end in 2m12s (dotnet 62s + web typecheck/test ~12s + runner typecheck/test ~55s), well inside the 600000 ms budget; even with a cold `npm ci` (~3 min) the worst-case total stays under 5 minutes 12 seconds.
+
+## Fix-CI (verify.2 — pre-existing SpecTests dispatch race)
+
+- After the timeout fix landed, verify.2 ran inside the 600000 ms budget (93 s wall-clock) and reached the .NET SpecTests phase but exited non-zero with `script-failed`. The runner's surfaced stderr was just the cached `npm warn deprecated node-domexception@1.0.0` line from `npm ci`; the actual failure is one of the 3257 SpecTests failing under full-suite load.
+- The failing test is `Mohist.Server.SpecTests.Specs.Agent.Grain.AgentJobGrainSpecs.SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch`: `Timed out waiting for: status == Running. Last value: Pending` after `TestWait.ForAsync` exhausted its `ceil(timeout / step)` attempt budget. This is the same race documented as pre-existing in `openspec/changes/archive/2026-07-26-issue-479/progress.txt` ("Pre-existing flaky test (re-confirmed): the first full-suite run hit the documented `SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch` race; the immediate rerun passed") and `openspec/changes/archive/2026-07-23-issue-477/progress.txt` ("Adding a real `CancellationTokenSource(timeout)` would enforce the caller-supplied budget without weakening any assertion, but it widens the test-support contract and is out of scope for this issue").
+- Reproduction: `dotnet test Mohist.Server.SpecTests` alone was run three times. Run 1 PASS (3257/3257), Run 2 FAIL (3256/3257 with the same test), Run 3 PASS (3257/3257). The flake reproduces in roughly one third of full-suite runs. The targeted test in isolation passes every time (3/3, ~3 s each) — confirming the failure is full-suite contention, not the test itself or anything touched by issue-496's AgentSession event vocabulary work.
+- My code delta in `AgentJobGrainSpecs.cs` is a one-line type rename (`TranscriptPartTypes.SessionClosed` → `TranscriptPartTypes.SessionActivity`) inside a dedup spec; the failing dispatch race does not touch transcript-part enumeration, so the rename cannot have introduced it. The runner stack trace points at `AgentJobGrainTestSupport.WaitForStatusAsync` calling `TestWait.ForAsync`, which sits on the same out-of-scope fix path called out in issue-477.
+- Per the repair policy ("Do not make unrelated changes", "If the cause is external or cannot be resolved in this workspace, leave the evidence intact and finish unfinished"), no production code, helper, or assertion is changed here. The remaining `recover:fix-ci` retry budget will rerun verify against the current HEAD; per the documented pattern, the next immediate rerun usually clears the race.
+
+## Review fixes
+
+- Terminal `session.activity` now retains status, failure reason, failure category, exit code, AgentJob identity, and canonical delivery id. The transcript accumulator uses that delivery id for both correlation fields, so a routed AgentJob terminal failure satisfies the Issue feed's existing canonical-delivery selection.
+- `AgentJobGrainRoutedLaunchSpecs` now covers the real preflight-failure path through Session persistence and `IssueEventFeedAssembler`, asserting the resulting Issue feed event is `session.activity` with the originating Session and failure context.
+- Web transcript projections read terminal status from `session.activity`: completed remains routine, while failed, timeout, and cancelled entries retain failure attention and detail. The typed live-event contract includes the terminal fields.
+- Restored `mohist/local` verify timeout and its profile definition assertion to 300000 ms, preserving the repository five-minute CI-job budget.
+- Verification: Web typecheck, 5141 Web tests (one skipped), FSD boundary check, Runner typecheck, and 1427 Runner tests pass. Full Server SpecTests run the new routed-feed coverage successfully but repeatedly hit the pre-existing `AgentJobGrainSpecs.SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch` dispatch race (3257/3258); no issue-496 test failed in the final run.
+
+## Review fixes (terminal durability)
+
+- `AppendTerminalCloseAsync` now synchronously flushes the terminal `session.activity` before acknowledging an AgentJob delivery. A failed transcript write throws to the AgentJob, so its durable `PendingSessionClose` stays available for reminder, activation, or report-replay retry. Superseded-runtime closes remain acknowledged without a write.
+- Terminal activity payloads now retain `recordedAt` from the AgentJob's authoritative terminal timestamp. Routed Issue-feed coverage asserts that timestamp is exposed alongside the existing failure context.
+- Added `AgentJobTerminalTranscriptPersistenceSpecs` to verify a failed terminal transcript write preserves the pending close, and a report replay persists exactly one canonical terminal activity before clearing the obligation. The oversized terminal-delivery test was split to keep all C# spec files within the 24KB ratchet.
+- Verification: `dotnet test packages/server/tests/Mohist.Server.ArchTests` passes 33/33. `npm test` passes definition (175), CLI (1432), unit (1527), and architecture (33) suites; SpecTests run the new coverage but again hit the documented pre-existing `AgentJobGrainSpecs.SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch` dispatch race (3258/3259).

@@ -117,13 +117,13 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
     }
 
     [Fact]
-    public async Task Followup_AfterReset_IgnoresTerminalStateFromPredecessorRuntime()
+    public async Task Followup_AfterReset_IgnoresTerminalActivityFromPredecessorRuntime()
     {
         var (project, sessionId, firstRuntimeSessionId) = await CreateIdleGenericSessionAsync("followup-reset-terminal");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
-            new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionClosed, """{"status":"completed"}"""),
+            new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, """{"activity":"idle","status":"completed","operationId":"terminal-delivery"}"""),
         }, firstRuntimeSessionId));
         await grain.FlushForTestAsync();
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));

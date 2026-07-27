@@ -96,7 +96,7 @@ const AGENT_SESSION_EVENT_TYPES: Record<string, EventTypeInfo> = {
   'com.mohist.agent-session.context-compacted': { label: 'context compacted', attention: 'routine' },
   'com.mohist.agent-session.context-health-updated': { label: 'context health updated', attention: 'routine' },
   'com.mohist.agent-session.context-exhausted': { label: 'context exhausted', attention: 'failure' },
-  'session.closed': { label: 'closed', attention: 'routine' },
+  'session.activity': { label: 'activity recorded', attention: 'routine' },
   'session.liveness': { label: 'liveness changed', attention: 'routine' },
 }
 
@@ -335,7 +335,7 @@ function agentSessionEventInfo(event: ProjectEventDto): EventTypeInfo | null {
   if (event.type === 'coder_session_status_changed' && status) {
     return { label: status, attention: 'routine' }
   }
-  if (event.type === 'session.closed' && status) {
+  if (event.type === 'session.activity' && status) {
     return { label: status, attention: 'routine' }
   }
   return base
