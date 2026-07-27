@@ -97,7 +97,22 @@ public sealed class WorkflowRecoveryRoundTests
         Assert.Equal(1, continuation.RecoveryRemaining);
         Assert.Equal(2, continuation.Recovery!.Budget);
         Assert.Throws<InvalidOperationException>(() =>
-            TaskRun.MakeContinuationTask(run.CurrentStage().Tasks, definition, run.CurrentStage().Attempt, 3));
+            TaskRun.MakeContinuationTask(run.CurrentStage().Tasks, new TaskDefinition("orphan", "Orphan", "test/orphan"), run.CurrentStage().Attempt, 1));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(3)]
+    public void ContinuationStateOutsideDeclaredBudgetIsPreserved(int recoveryRemaining)
+    {
+        var run = BuildRun();
+        var definition = Assert.Single(run.CurrentStage().Tasks).ToDefinition();
+
+        var continuation = TaskRun.MakeContinuationTask(run.CurrentStage().Tasks, definition, run.CurrentStage().Attempt, recoveryRemaining);
+
+        Assert.Equal(recoveryRemaining, continuation.RecoveryRemaining);
+        Assert.Equal(2, continuation.Recovery!.Budget);
     }
 
     [Fact]
