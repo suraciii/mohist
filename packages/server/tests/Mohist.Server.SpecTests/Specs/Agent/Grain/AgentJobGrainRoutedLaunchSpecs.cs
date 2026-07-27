@@ -319,6 +319,8 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         Assert.Equal("failed", activity.Envelope.Data!.Value.GetProperty("status").GetString());
         Assert.Equal(AgentJobFailureReasons.WorkspaceUnavailable,
             activity.Envelope.Data!.Value.GetProperty("failureReason").GetString());
+        Assert.Equal(_fixture.TimeProvider.GetUtcNow().ToString("o"),
+            activity.Envelope.Data!.Value.GetProperty("recordedAt").GetString());
     }
 
     private async Task<int> CountTurnsAsync(string sessionId)

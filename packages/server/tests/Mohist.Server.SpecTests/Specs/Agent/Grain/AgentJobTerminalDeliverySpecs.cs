@@ -67,11 +67,11 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         Assert.Equal(
             "AgentJob requires 'workspace.path' in dispatch variables",
             closed.GetProperty("failureReason").GetString());
-        // Issue 484: the activity part records the delivery id as `operationId`
-        // (the field that survives the new payload shape) and carries no
-        // terminal `failureCategory`/`agentJobId` — those remain the job's
-        // own verdict, observable through the AgentJob snapshot below.
         Assert.Equal(TerminalDeliveryId(jobKey), closed.GetProperty("operationId").GetString());
+        Assert.Equal(TerminalDeliveryId(jobKey), closed.GetProperty("deliveryId").GetString());
+        Assert.Equal("invalid-input", closed.GetProperty("failureCategory").GetString());
+        Assert.Equal(jobKey, closed.GetProperty("agentJobId").GetString());
+        Assert.Equal(_fixture.TimeProvider.GetUtcNow().ToString("o"), closed.GetProperty("recordedAt").GetString());
 
         await GetSingleSessionClosedPartAsync(sessionId);
 
@@ -80,6 +80,51 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var runtimeSnapshot = await job.GetRuntimeSnapshotAsync();
         Assert.False(runtimeSnapshot.HasPendingSessionClose,
             "Successful delivery clears the pending payload before the call returns");
+    }
+
+    [Fact]
+    public async Task ReportResultAsync_TerminalTranscriptFailure_RetainsPendingCloseUntilRedeliveryPersistsIt()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-terminal-retry-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-terminal-retry-{Guid.NewGuid():N}";
+        var sessionId = $"session-terminal-retry-{Guid.NewGuid():N}";
+        await OpenSessionAsync(sessionId, projectId);
+
+        var job = JobGrain(jobKey);
+        await job.SubmitAsync(new AgentJobInput(
+            Prompt: "do a failing thing",
+            WorkspacePath: "/tmp/agent-job-terminal-retry",
+            ProjectId: projectId,
+            AgentSessionId: sessionId,
+            AgentId: "agent-test"));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        _fixture.SessionPersistence.QueueFailures(100);
+        await runner.ReportAgentJobResultAsync(
+            jobKey,
+            workId,
+            new WorkResult(Status: "failed", Message: "transient", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
+
+        await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
+        Assert.True((await job.GetRuntimeSnapshotAsync()).HasPendingSessionClose);
+
+        _fixture.SessionPersistence.ResetFailures();
+        var replay = await runner.ReportAgentJobResultAsync(
+            jobKey,
+            workId,
+            new WorkResult(Status: "failed", Message: "transient", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
+
+        Assert.False(replay.Tracked);
+        Assert.False((await job.GetRuntimeSnapshotAsync()).HasPendingSessionClose);
+
+        var parts = (await ListSessionClosedPartsAsync(sessionId))
+            .Where(part => part.Type == TranscriptPartTypes.SessionActivity)
+            .ToList();
+        var persisted = Assert.Single(parts);
+        Assert.Equal(TerminalDeliveryId(jobKey), persisted.CorrelationKey);
     }
 
     [Fact]

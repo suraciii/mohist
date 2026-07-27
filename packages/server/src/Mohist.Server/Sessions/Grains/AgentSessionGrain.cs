@@ -819,6 +819,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             ["activity"] = "idle",
             ["observedAt"] = command.RecordedAt.ToString("o"),
+            ["recordedAt"] = command.RecordedAt.ToString("o"),
             ["operationId"] = command.DeliveryId,
             ["deliveryId"] = command.DeliveryId,
             ["status"] = command.Status,
@@ -827,10 +828,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             ["failureCategory"] = command.FailureCategory,
             ["agentJobId"] = AgentSessionJsonHelper.GetStringProp(sourcePayload, "agentJobId"),
         });
-        await AppendEventsAsync(
+        var entries = await AppendEventsAsync(
             [new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, payload)],
             command.RuntimeSessionId,
             requireCurrentRuntimeBinding: !string.IsNullOrWhiteSpace(command.RuntimeSessionId));
+        if (entries.Count == 0)
+            return new AppendTerminalCloseResult(SessionId, command.DeliveryId, true);
+        if (!await FlushAsync(CancellationToken.None))
+            throw new InvalidOperationException($"Agent session {SessionId} could not persist terminal delivery {command.DeliveryId}");
         return new AppendTerminalCloseResult(SessionId, command.DeliveryId, false);
     }
 
