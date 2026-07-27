@@ -90,8 +90,11 @@
 - `InboxProjectionHandlerSpecs.cs` grew past its previous 42 035-byte allowance (now 42 071) — bumped to 42 071.
 - `EventDispatcherSpecs.cs` shrank slightly (41 204 → 41 201) — entry updated to match.
 
-## Verification (T-002)
-- `Mohist.Server.ArchTests` — 37/37 pass (36 prior + 1 new guard).
+## Verification diagnosis
+
+- Worktree was clean before verification; no implementation or test changes were present at HEAD.
+- `npm run verify` completed the build, web/runner builds, workflow definition tests, CLI tests (1432), unit tests (1531), and architecture tests (37), then exceeded the 20-minute command timeout while SpecTests was still running; no assertion failure was emitted.
+- A standalone SpecTests invocation likewise exceeded 30 minutes without producing a test result. Process inspection showed the timed-out verification process remained alive, while other workspaces already had long-running SpecTests processes. The failure was therefore verification-process timeout/resource contention, not a reproducible code defect. The processes started by this verification were terminated; no Git-visible verification side effects remained.
 
 ## T-003 Plan
 
