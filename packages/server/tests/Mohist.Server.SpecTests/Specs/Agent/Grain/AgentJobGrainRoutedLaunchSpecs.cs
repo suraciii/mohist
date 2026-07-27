@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
@@ -298,7 +300,22 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         Assert.Equal(
             AgentJobSessionDeliveryIds.TerminalDeliveryId(plan.JobKey),
             payload.GetProperty("operationId").GetString());
+        Assert.Equal(
+            AgentJobSessionDeliveryIds.TerminalDeliveryId(plan.JobKey),
+            payload.GetProperty("deliveryId").GetString());
         Assert.Equal(AgentJobFailureReasons.WorkspaceUnavailable, payload.GetProperty("failureReason").GetString());
+        Assert.Equal(AgentJobFailureReasons.WorkspaceUnavailable, payload.GetProperty("failureCategory").GetString());
+
+        Assert.NotNull(plan.IssueNumber);
+        using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
+        var assembler = scope.ServiceProvider.GetRequiredService<IssueEventFeedAssembler>();
+        var events = await assembler.ListAsync(projectId, plan.IssueNumber.Value, workflowRunId: null, limit: 200);
+
+        var activity = Assert.Single(events, entry => entry.Envelope.Type == "session.activity");
+        Assert.Equal(plan.SessionId, activity.Envelope.Subject);
+        Assert.Equal("failed", activity.Envelope.Data!.Value.GetProperty("status").GetString());
+        Assert.Equal(AgentJobFailureReasons.WorkspaceUnavailable,
+            activity.Envelope.Data!.Value.GetProperty("failureReason").GetString());
     }
 
     private async Task<int> CountTurnsAsync(string sessionId)

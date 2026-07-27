@@ -814,14 +814,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public async Task<AppendTerminalCloseResult> AppendTerminalCloseAsync(AppendTerminalCloseCommand command)
     {
+        var sourcePayload = AgentSessionJsonHelper.ParsePayloadOrEmpty(command.PayloadJson);
         var payload = JSON.Serialize(new Dictionary<string, object?>
         {
             ["activity"] = "idle",
             ["observedAt"] = command.RecordedAt.ToString("o"),
             ["operationId"] = command.DeliveryId,
+            ["deliveryId"] = command.DeliveryId,
             ["status"] = command.Status,
+            ["exitCode"] = command.ExitCode,
             ["failureReason"] = command.FailureReason,
             ["failureCategory"] = command.FailureCategory,
+            ["agentJobId"] = AgentSessionJsonHelper.GetStringProp(sourcePayload, "agentJobId"),
         });
         await AppendEventsAsync(
             [new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, payload)],
