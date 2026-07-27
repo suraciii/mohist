@@ -42,19 +42,19 @@ Keep only genuinely optional dependencies nullable, such as rule-expression cach
 
 Alternative considered: retain nullable parameters and validate them only in production DI. That preserves unreachable fallback branches and lets direct tests assert behavior no shipped composition can exhibit, so it is rejected.
 
-### 3. Test-only persistence probes decorate storage adapters
+### 3. Test-only persistence probes observe complete timer cycles
 
-Add a SpecTests support probe that decorates `IAgentSessionStore` and `IAgentSessionTranscriptStore` in test host registrations. Each decorator delegates to the existing store, then records the completed or failed write with the session identity and a monotonic operation sequence. The probe exposes checkpoints and awaitable completion for a session, so a test subscribes at a known checkpoint, triggers the command, and awaits the required state/event and/or transcript write boundary without polling the database.
+Add an internal persistence-cycle reporter at the `PersistCallback` boundary. Each timer invocation creates one session-scoped cycle identifier before calling `FlushAsync`, then reports exactly one terminal outcome after `FlushAsync` returns or throws: `succeeded` only when the complete deferred flush succeeds, `transcript-failed` when state/events committed but transcript remains pending, or `state-failed` when the state/event transaction fails and the activation is quarantined. Immediate `FlushPendingTranscriptAsync` and immediate transcript-evidence writes do not create a cycle report.
 
-The helper replaces `FlushForTestAsync` calls with the narrowest observation required by the assertion. It uses `TaskCompletionSource` with asynchronous continuations and recorded outcomes, so a write that completed before the wait is still observable and a failed write is reported rather than mistaken for a successful flush. Fixtures using fake stores receive the same decorators; database-backed specs register them around the existing scoped stores.
+The production composition supplies a no-op reporter. SpecTests replaces it with a checkpointed probe that records cycle identifiers and terminal outcomes using `TaskCompletionSource` with asynchronous continuations. A test captures a session checkpoint before causing deferred data, then awaits the next reported cycle for that session. Recorded outcomes make a cycle observable even when it completes before the wait starts, and allow tests to distinguish a full durable flush from either failure mode without inspecting arbitrary storage calls.
 
-The production service graph does not register the probe or decorators. `AgentSessionGrain`, its public interface, timer, and `FlushAsync` stay free of test-specific dependencies; removing `FlushForTestAsync` therefore adds no production persistence operation, timer, or blocking work.
+The helper replaces `FlushForTestAsync` calls with this correlated cycle observation. The reporter is an internal grain implementation collaborator, not an `IAgentSessionGrain` operation; it does not write data, schedule work, block timer execution, or alter `FlushAsync` ordering, clearing, retry, or quarantine decisions. The no-op production reporter therefore adds no persistence operation or timer work when no test is observing.
 
-Alternative considered: add a production `IAgentSessionPersistenceObserver` or another grain method. A no-op observer still expands the grain's production constructor and every flush path for test synchronization; another grain method repeats the current test-only control. Both are rejected. Polling the database or using wall-clock delays is also rejected because it is nondeterministic and violates the server test policy.
+Alternative considered: decorate `IAgentSessionStore` and `IAgentSessionTranscriptStore`. The same transcript store is invoked by the synchronous input fence, immediate evidence persistence, and timer-driven persistence, so a decorator can observe only individual writes and cannot correlate them to one deferred `FlushAsync` outcome. This is rejected. Another public grain method repeats the current test-only control; polling storage or using wall-clock delays is nondeterministic and violates the server test policy.
 
 ### 4. Preserve the existing persistence failure split
 
-The probe observes writes but does not decide retry, clear pending data, or alter ordering. `FlushAsync` remains the sole owner of state/event clearing, transcript commit, timer disposal, and activation quarantine. Tests cover successful writes, state/event failure quarantine, and transcript-only retry through the new observation rather than by forcing a flush.
+The reporter observes the terminal result but does not decide retry, clear pending data, or alter ordering. `FlushAsync` remains the sole owner of state/event clearing, transcript commit, timer disposal, and activation quarantine. Tests cover successful writes, state/event failure quarantine, and transcript-only retry through the correlated cycle observation rather than by forcing a flush.
 
 Alternative considered: move retry or aggregation into the probe. That would make test infrastructure a second authority for AgentSession persistence and could diverge from production behavior, so it is rejected.
 
@@ -68,15 +68,15 @@ Alternative considered: make the compiler fixes first and address test failures 
 
 - [ForceActivationCollection deactivates all eligible test-cluster activations, not one grain] -> Serialize only tests sharing the management operation and give the shared helper a clear name; existing suites already use this mechanism.
 - [Required constructor changes expose incomplete direct test composition] -> Treat compilation failures as the migration inventory and provide explicit fakes at every affected test boundary.
-- [Storage writes can complete before a test begins waiting] -> Use checkpointed, recorded probe outcomes rather than one-shot notifications.
-- [A state write and transcript write have different success/failure outcomes] -> Let tests await the boundary they assert and retain dedicated coverage for state quarantine and transcript-only retry.
-- [Test decorators can drift from actual persistence behavior] -> Decorators only delegate and record post-call outcomes; they must not transform data, schedule writes, or implement retry.
+- [A deferred cycle can complete before a test begins waiting] -> Use checkpointed, recorded cycle outcomes rather than one-shot notifications.
+- [A state write and transcript write have different success/failure outcomes] -> Report the final `FlushAsync` result, with distinct state-failed and transcript-failed outcomes, and retain dedicated coverage for both paths.
+- [An immediate transcript write could be mistaken for deferred persistence] -> Create reports only in `PersistCallback`, never in storage adapters or immediate transcript paths.
 - [Architecture guards could ban valid optional dependencies] -> Scope the rule to the audited required services and retain explicit allowlisted cache and diagnostic sink cases.
 
 ## Migration Plan
 
-1. Add the shared grain-collection helper and checkpointed persistence probe/decorators to SpecTests support, then prove their success and failure behavior with focused tests.
-2. Convert all `FlushForTestAsync` callers to the probe or existing deterministic scheduler control; remove the grain method only after no callers remain.
+1. Add the shared grain-collection helper, internal no-op persistence-cycle reporter, and checkpointed SpecTests reporter/probe, then prove its cycle correlation and terminal outcomes with focused tests.
+2. Convert all `FlushForTestAsync` callers to await the correlated deferred-persistence cycle or existing deterministic scheduler control; remove the grain method only after no callers remain.
 3. Convert activation tests to the management helper and direct key-dependent tests to real cluster activation; remove deactivation methods and key overrides.
 4. Make audited dependencies required, register the intended event-push implementation explicitly in each composition root, and remove unreachable branches.
 5. Add or update architecture guards, then run server build, unit tests, spec tests, and architecture tests.
@@ -85,4 +85,4 @@ No persisted data or external contract migration is required. Rollback is a norm
 
 ## Open Questions
 
-None. The concrete probe API can be named to match existing SpecTests support conventions, provided it remains test-only, checkpointed, and decorator-based.
+None. The concrete probe API can be named to match existing SpecTests support conventions, provided it remains test-only, checkpointed, and reports only complete deferred-persistence cycles.

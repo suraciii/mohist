@@ -42,22 +42,23 @@
     },
     {
       "id": "T-003",
-      "title": "Observe deferred AgentSession persistence in test hosts",
+      "title": "Observe complete deferred AgentSession persistence cycles",
       "spec": "specs/agent-session-persistence-observation/spec.md#persistence-completion-is-observable-per-operation",
-      "description": "Add checkpointed SpecTests persistence probes by decorating AgentSession state and transcript stores in fake and database-backed test hosts. Migrate every FlushForTestAsync caller to await the relevant recorded persistence outcome or the existing deterministic scheduler boundary, then remove the flush command from the AgentSession grain contract and implementation without changing FlushAsync production semantics.",
+      "description": "Add an internal persistence-cycle reporter at AgentSessionGrain.PersistCallback that assigns a session-scoped cycle identifier and records the terminal FlushAsync outcome only after the complete deferred flush returns or throws. The production host uses a no-op reporter while SpecTests uses a checkpointed probe; migrate every FlushForTestAsync caller to await that correlated cycle or the existing deterministic scheduler boundary, then remove the flush command without changing FlushAsync production semantics.",
       "acceptanceCriteria": [
-        "The test-only probe records successful and failed state, event, and transcript writes by session and monotonic checkpoint, allowing waits to observe a write that completed before the wait began.",
-        "All former FlushForTestAsync callers await a precise persistence outcome or deterministically drive the existing scheduler; no migrated test uses polling, Task.Delay, wall-clock waits, or a forced grain flush.",
-        "IAgentSessionGrain and AgentSessionGrain expose no test-only flush command, while the production service graph contains no persistence probe or decorator registration.",
+        "Each PersistCallback invocation reports one session-scoped cycle outcome after FlushAsync finishes: succeeded only after the full deferred flush is durable, transcript-failed after state/events commit but transcript persistence fails, or state-failed when the state/event save fails and quarantines the activation.",
+        "The probe records cycle outcomes after a per-session checkpoint, allowing a wait to observe a completed cycle while excluding synchronous input-fence and immediate evidence writes that use the same transcript store.",
+        "All former FlushForTestAsync callers await a correlated deferred-cycle outcome or deterministically drive the existing scheduler; no migrated test uses polling, Task.Delay, wall-clock waits, or a forced grain flush.",
+        "IAgentSessionGrain and AgentSessionGrain expose no test-only flush command; production registers a no-op internal reporter that performs no persistence operation, scheduling, or blocking work.",
         "Focused AgentSession persistence tests prove successful ordering, state/event-save quarantine, transcript-only retry, failed observation, and unobserved production-equivalent timer behavior; relevant server unit, spec, and architecture suites pass."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "MIGRATE",
-      "output": "Checkpointed test-host AgentSession persistence observation and flush-free persistence specifications.",
+      "output": "Correlated deferred-persistence cycle observation and flush-free AgentSession persistence specifications.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "T-001 first removes AgentSession's separate deactivation control from the shared grain contract. The probe must delegate only and never own clearing, retry, ordering, or timer decisions."
+      "notes": "T-001 first removes AgentSession's separate deactivation control from the shared grain contract. The reporter observes only final PersistCallback outcomes; it must never own clearing, retry, ordering, quarantine, or timer decisions."
     }
   ]
 }
