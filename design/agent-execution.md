@@ -62,6 +62,10 @@ snapshot 后，其 executor 接收由 Agent 拥有的 execution request。Workfl
 adapter 与 AgentJob executor 可以调用同一个 Runtime 深模块。复用点是 Runtime 实现，
 不是 Action。
 
+manual 启动的 AgentJob 可以完全省略 workspace；Runner 此时使用自己的默认工作目录。
+dispatch 一旦提供 workspace，`workspace.path` 就必须是非空字符串；畸形 workspace 是
+无效输入，不能回退到默认目录。
+
 ## 工作生命周期与会话
 
 TaskRun 与 AgentJob 拥有以下决策：

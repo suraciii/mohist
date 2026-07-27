@@ -97,7 +97,7 @@ vi.mock("../src/actions/registry.js", async (importOriginal) => {
 beforeEach(() => {
   vi.useFakeTimers()
   installReadyRuntimeFactory()
-  setOpencodeModelDiscoveryForTest(async () => ({ models: ["openai/gpt-5.5"], variants: {} }))
+  setOpencodeModelDiscoveryForTest(async () => ({ models: ["openai/gpt-5.5"], variants: {}, complete: true }))
   capturedOnReconnected = null
   capturedFollowupTargetResolver = null
   uploadTaskLog.mockResolvedValue({ accepted: 0, truncated: false })

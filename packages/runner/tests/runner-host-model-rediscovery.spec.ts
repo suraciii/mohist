@@ -21,6 +21,7 @@ const baseline: DiscoveredOpencodeModels = {
     "openai/gpt-5.5": ["low", "high"],
     "anthropic/claude-sonnet-4": ["max"],
   },
+  complete: true,
 }
 
 const mocks = vi.hoisted(() => ({
@@ -236,16 +237,18 @@ describe("RunnerHost model discovery", () => {
       .mockResolvedValueOnce({ models: [...baseline.models].reverse(), variants: {
         "anthropic/claude-sonnet-4": ["max"],
         "openai/gpt-5.5": ["high", "low"],
-      } })
-      .mockResolvedValueOnce({ models: [], variants: {} })
+      }, complete: true })
+      .mockResolvedValueOnce({ models: [], variants: {}, complete: true })
       .mockRejectedValueOnce(failure)
       .mockResolvedValueOnce({
         models: ["openai/gpt-5.5", "openai/gpt-6"],
         variants: { "openai/gpt-5.5": ["low", "high"], "openai/gpt-6": ["max"] },
+        complete: true,
       })
       .mockResolvedValueOnce({
         models: ["openai/gpt-5.5", "openai/gpt-6"],
         variants: { "openai/gpt-5.5": ["low", "high"], "openai/gpt-6": ["medium", "max"] },
+        complete: true,
       })
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const { controller, run } = await startHost({ modelRediscoveryIntervalMs: REDISCOVERY_INTERVAL_MS })
@@ -280,11 +283,38 @@ describe("RunnerHost model discovery", () => {
     await stopHost(controller, run)
   })
 
+  it("merges an incomplete rediscovery without removing known models or variants", async () => {
+    discovery
+      .mockResolvedValueOnce(baseline)
+      .mockResolvedValueOnce({
+        models: ["openai/gpt-5.5", "google/gemini-3"],
+        variants: {
+          "openai/gpt-5.5": ["high", "max"],
+          "google/gemini-3": ["pro"],
+        },
+        complete: false,
+      })
+    const { controller, run } = await startHost({ modelRediscoveryIntervalMs: REDISCOVERY_INTERVAL_MS })
+
+    await vi.advanceTimersByTimeAsync(REDISCOVERY_INTERVAL_MS)
+
+    expect(mocks.heartbeat).toHaveBeenCalledTimes(1)
+    expect(mocks.heartbeat.mock.calls[0]?.[0]).toMatchObject({
+      coderModels: ["openai/gpt-5.5", "anthropic/claude-sonnet-4", "google/gemini-3"],
+      coderModelVariants: {
+        "openai/gpt-5.5": ["low", "high", "max"],
+        "anthropic/claude-sonnet-4": ["max"],
+        "google/gemini-3": ["pro"],
+      },
+    })
+    await stopHost(controller, run)
+  })
+
   it("contains immediate-heartbeat failure and rediscovers on the next interval", async () => {
     discovery
       .mockResolvedValueOnce(baseline)
-      .mockResolvedValueOnce({ models: ["openai/gpt-6"], variants: { "openai/gpt-6": ["high"] } })
-      .mockResolvedValueOnce({ models: ["openai/gpt-7"], variants: { "openai/gpt-7": ["max"] } })
+      .mockResolvedValueOnce({ models: ["openai/gpt-6"], variants: { "openai/gpt-6": ["high"] }, complete: true })
+      .mockResolvedValueOnce({ models: ["openai/gpt-7"], variants: { "openai/gpt-7": ["max"] }, complete: true })
     const heartbeatFailure = new Error("heartbeat unavailable")
     mocks.heartbeat.mockRejectedValueOnce(heartbeatFailure).mockResolvedValue(undefined)
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)

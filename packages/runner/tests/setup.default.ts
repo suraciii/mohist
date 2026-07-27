@@ -11,7 +11,7 @@ const denyExternalProcess: ExternalProcessPolicy = {
 }
 
 setExternalProcessPolicyForTest(denyExternalProcess)
-setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {} }))
+setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {}, complete: true }))
 setPiRuntimeFactoryForTest(() => ({
   start: async () => ({ ok: true, value: { ready: true, diagnostic: null, catalog: { models: [] } }, diagnostics: [] }),
   ready: () => true,
@@ -23,7 +23,7 @@ setPiRuntimeFactoryForTest(() => ({
 } as never))
 beforeEach(() => {
   setExternalProcessPolicyForTest(denyExternalProcess)
-  setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {} }))
+  setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {}, complete: true }))
   setPiRuntimeFactoryForTest(() => ({
     start: async () => ({ ok: true, value: { ready: true, diagnostic: null, catalog: { models: [] } }, diagnostics: [] }),
     ready: () => true,
@@ -36,6 +36,6 @@ beforeEach(() => {
 })
 afterEach(() => {
   setExternalProcessPolicyForTest(denyExternalProcess)
-  setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {} }))
+  setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {}, complete: true }))
   setPiRuntimeFactoryForTest(null)
 })

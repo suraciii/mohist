@@ -139,7 +139,9 @@ OpenCode Server 退出后，Runner 停止领取新工作，并重建 Server、Cl
 Mohist 固定 SDK package 版本，OpenCode CLI 由安装者提供。Mohist 不安装、升级或强制
 CLI 精确匹配 SDK 版本；Server / SDK 不兼容必须形成可操作的 readiness error，CLI
 模型发现不兼容只记录诊断并保留 best-effort 语义。原生 workspace 配置和 plugins
-正常加载，不使用 `--pure`，也不清理 `.opencode` lockfile。
+正常加载，不使用 `--pure`，也不清理 `.opencode` lockfile。若 plugin 持有的资源导致
+CLI 在截止时间前未退出，但 stdout 已包含可解析的非空目录，该结果只能标记为不完整
+快照并记录诊断，不能伪装成一次正常完成的发现。
 
 ## Session 绑定
 
@@ -382,13 +384,19 @@ directory 时还必须与当前 workDir 一致。相同 request ID 在同一次�
 
 模型目录属于 `RunnerHost`，不属于 `OpenCodeRuntime`。Host 在首次注册前 best-effort 执行
 `opencode models --verbose`，由 `runtime/opencode-models.ts` 一次解析模型与 provider 定义的
-variant key，并直接保存到 host 的 `coderModels` / `coderModelVariants` 字段。发现失败或结果
-为空时，首次注册上报空字段，但健康 Runtime 仍继续领取工作。
+variant key，并直接保存到 host 的 `coderModels` / `coderModelVariants` 字段。正常退出产生
+完整快照；超时后留下的可解析非空 stdout 产生不完整快照。发现失败或结果为空时，首次注册
+上报空字段；不完整非空快照可以作为首次注册的 best-effort 目录。两种情况都不影响健康
+Runtime 继续领取工作。
+
+命令边界使用不经过 shell 的异步缓冲执行，并在进程关闭后才解析一次 stdout；这同时保留
+退出前写入的尾部数据并避免阻塞 Runner event loop。单次发现的 deadline 是 3 秒。
 
 首次注册与启动 convergence 完成后，Host 注册独立的周期发现 timer；默认周期 30 分钟、
 最小 60 秒，首次触发从 timer 注册时刻起算。周期发现不检查 Runtime readiness。空结果或
-失败保留最后一次非空快照；非空结果按集合比较模型与每个模型的 variants，只有内容变化时
-替换两个字段并尝试一次即时 heartbeat。run loop 终止时由 Host 清理 timer。
+失败保留最后一次非空快照；完整非空结果替换旧快照。不完整非空结果只能把新模型和 variant
+并入旧快照，不能据此删除旧成员。合并后的模型与 variant 集合确实变化时才替换两个字段并
+尝试一次即时 heartbeat。run loop 终止时由 Host 清理 timer。
 
 目录只用于 Server 与 Web 的配置辅助，不是执行合法性的最终权威。省略 model 时使用当前
 OpenCode 选择或默认值；选定 model / variant 是否有效仍由 OpenCode 在执行时校验。
