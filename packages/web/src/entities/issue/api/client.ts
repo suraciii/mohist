@@ -98,11 +98,23 @@ export function retryIssue(number: number, projectId?: string | null) {
   return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/retry`), { method: 'POST' })
 }
 
-export function approveIssue(number: number, projectId?: string | null) {
-  return request<{ issue: Issue; context: string | null; message: string }>(projectApiPath(projectId, `/issues/${number}/approve`), { method: 'POST' })
+export interface ApproveIssueInput {
+  author: string
 }
 
-export function rejectIssue(number: number, data: { message?: string }, projectId?: string | null) {
+export function approveIssue(number: number, data: ApproveIssueInput, projectId?: string | null) {
+  return request<{ issue: Issue; context: string | null; message: string }>(projectApiPath(projectId, `/issues/${number}/approve`), {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export interface RejectIssueInput {
+  author: string
+  message: string
+}
+
+export function rejectIssue(number: number, data: RejectIssueInput, projectId?: string | null) {
   return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/reject`), {
     method: 'POST',
     body: JSON.stringify(data),
@@ -112,13 +124,14 @@ export function rejectIssue(number: number, data: { message?: string }, projectI
 export interface CreateFeedbackRequest {
   stage: string
   body: string
+  author: string
 }
 
 export function requestChangesIssue(number: number, data: CreateFeedbackRequest, projectId?: string | null) {
-  return request<{ success?: boolean; data: ApprovalFeedback }>(projectApiPath(projectId, `/issues/${number}/feedback`), {
+  return request<ApprovalFeedback>(projectApiPath(projectId, `/issues/${number}/feedback`), {
     method: 'POST',
     body: JSON.stringify(data),
-  }).then((response) => response.data)
+  })
 }
 
 export function listIssueFeedback(number: number, params: { stage?: string } = {}, projectId?: string | null) {

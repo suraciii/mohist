@@ -135,8 +135,8 @@ describe('useIssueDetailMutations', () => {
   it('approve / send-back: call approval APIs and invalidate runtime plus approval wait queries', () => {
     arrange({ issueNumber: 7, projectId: 'proj-x' })
 
-    const approve = findMutationByApiCall(apiMocks.approveIssue)
-    expect(apiMocks.approveIssue).toHaveBeenCalledWith(7, 'proj-x')
+    const approve = findMutationByApiCallWithArg(apiMocks.approveIssue, 'Ada')
+    expect(apiMocks.approveIssue).toHaveBeenCalledWith(7, { author: 'Ada' }, 'proj-x')
 
     invalidateQueriesMock.mockClear()
     approve.onSuccess?.()
@@ -149,10 +149,11 @@ describe('useIssueDetailMutations', () => {
     const sendBack = findMutationByApiCallWithArg(apiMocks.requestChangesIssue, {
       stage: 'check',
       body: 'Please update the implementation.',
+      author: 'Ada',
     })
     expect(apiMocks.requestChangesIssue).toHaveBeenCalledWith(
       7,
-      { stage: 'check', body: 'Please update the implementation.' },
+      { stage: 'check', body: 'Please update the implementation.', author: 'Ada' },
       'proj-x',
     )
 

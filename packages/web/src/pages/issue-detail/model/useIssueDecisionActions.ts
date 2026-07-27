@@ -1,7 +1,13 @@
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { isApprovalOperatorValid, normalizeApprovalOperator } from '../../../entities/issue'
 import type { IssueDetailMutations } from './useIssueDetailMutations'
 import type { IssueDecisionAction, IssueDecisionActionKind } from './issueDecisionActions'
+
+export interface IssueDecisionActionOptions {
+  approvalOperator?: string
+  sendBackBody?: string
+}
 
 export interface IssueDecisionActionController {
   pendingKind: IssueDecisionActionKind | null
@@ -11,7 +17,7 @@ export interface IssueDecisionActionController {
   stopConfirmBody: string
   openStopConfirm(): void
   closeStopConfirm(): void
-  runAction(action: IssueDecisionAction, options?: { sendBackBody?: string }): void
+  runAction(action: IssueDecisionAction, options?: IssueDecisionActionOptions): void
   sendBackBodyValid(body: string, approvalStage?: string | null): boolean
 }
 
@@ -106,18 +112,22 @@ function collectError(
 export function runControllerAction(
   ctx: IssueDecisionControllerContext,
   action: IssueDecisionAction,
-  options?: { sendBackBody?: string },
+  options?: IssueDecisionActionOptions,
 ): void {
   if (!action.enabled || pickPendingKind(ctx.mutations)) return
 
   switch (action.kind) {
-    case 'approve':
-      ctx.mutations.approveMutation.mutate()
+    case 'approve': {
+      const author = normalizeApprovalOperator(options?.approvalOperator ?? '')
+      if (!isApprovalOperatorValid(author)) return
+      ctx.mutations.approveMutation.mutate(author)
       return
+    }
     case 'send-back': {
       const body = (options?.sendBackBody ?? '').trim()
-      if (!body || !ctx.approvalStage) return
-      ctx.mutations.sendBackMutation.mutate({ stage: ctx.approvalStage, body }, {
+      const author = normalizeApprovalOperator(options?.approvalOperator ?? '')
+      if (!body || !ctx.approvalStage || !isApprovalOperatorValid(author)) return
+      ctx.mutations.sendBackMutation.mutate({ stage: ctx.approvalStage, body, author }, {
         onSuccess: () => ctx.setStopConfirmOpen(false),
       })
       return
@@ -184,7 +194,7 @@ export function useIssueDecisionActionController({
   const stopCopy = getStopConsequenceCopy(stopRecoverable)
   const stopConfirming = stopConfirmOpen && pendingKind !== 'stop'
 
-  const runAction = useCallback((action: IssueDecisionAction, options?: { sendBackBody?: string }) => {
+  const runAction = useCallback((action: IssueDecisionAction, options?: IssueDecisionActionOptions) => {
     runControllerAction({
       mutations,
       stopRecoverable,

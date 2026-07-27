@@ -149,22 +149,22 @@ mo issue start 42
 Plan / Check 完成后，issue 进入 `awaiting approval`。这表示 workflow 停在审批点，等待 approve / reject 决策：
 
 ```bash
-mo run approve --issue 42     # 通过，进下一阶段
-mo run reject --issue 42 --message "Missing error handling in proposal"  # 打回，Inline Agent 重做当前阶段
+mo run approve --issue 42 --author "Ada"     # 通过，进下一阶段
+mo run reject --issue 42 --author "Ada" --message "Missing error handling in proposal"  # 打回，Inline Agent 重做当前阶段
 ```
 
-`reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么（审批者可以是人也可以是自动化，见 [核心概念 · Approval](concepts.md#approval审批)）。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
+approve / reject 都必须用 `--author` 声明审批者；`reject` 还必须带理由，用 `--message`（或 `-m`）说明需要重做什么（审批者可以是人也可以是自动化，见 [核心概念 · Approval](concepts.md#approval审批)）。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
 
 ```bash
-mo issue comment create 42 --body "Reject because: missing error handling in proposal"
-mo run reject --issue 42 -m "See comment: missing error handling"
+mo issue comment create 42 --author "Ada" --body "Reject because: missing error handling in proposal"
+mo run reject --issue 42 --author "Ada" -m "See comment: missing error handling"
 ```
 
 ## Comment（评论）
 
 ```bash
 # 加评论
-mo issue comment create 42 --body "Looks good but check edge cases"
+mo issue comment create 42 --author "Ada" --body "Looks good but check edge cases"
 
 # 删除评论目前不提供 CLI 命令；使用 Web UI 或 API。
 ```

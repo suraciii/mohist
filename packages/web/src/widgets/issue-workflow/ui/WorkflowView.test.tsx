@@ -15,7 +15,7 @@ import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
 import { issueWorkflowKeys } from '../../../entities/issue/api/query-keys'
 
 let approveRequests: string[] = []
-let feedbackRequests: Array<{ issueNumber: number; stage: string; body: string }> = []
+let feedbackRequests: Array<{ issueNumber: number; stage: string; body: string; author: string }> = []
 let artifactRequests: string[] = []
 let timelineRequests: string[] = []
 let timelineData: WorkflowTimeline | null | undefined
@@ -53,12 +53,13 @@ const approveIssueFn: StepListDependencies['approveIssue'] = async (issueNumber)
 }
 
 const requestChangesHook: StepListDependencies['requestChangesHook'] = () =>
-  useMutation<ApprovalFeedback, Error, { issueNumber: number; data: { stage: string; body: string } }>({
+  useMutation<ApprovalFeedback, Error, { issueNumber: number; data: { stage: string; body: string; author: string } }>({
     mutationFn: async ({ issueNumber, data }) => {
       feedbackRequests.push({
         issueNumber,
         stage: data.stage,
         body: data.body,
+        author: data.author,
       })
       return {
         id: 'feedback-1',

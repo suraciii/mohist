@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { addComment, createIssue, getIssueEvents, getIssueWorkflowArtifactContent, getIssues, getLabels, getParentIssueCandidates, updateIssue } from './client'
+import { addComment, approveIssue, createIssue, getIssueEvents, getIssueWorkflowArtifactContent, getIssues, getLabels, getParentIssueCandidates, requestChangesIssue, updateIssue } from './client'
 
 useMswServer()
 
@@ -133,6 +133,31 @@ describe('addComment', () => {
 
     expect(requestBody).toEqual({ author: 'Ada Lovelace', body: 'Looks good', attachmentIds: ['att-1'] })
     expect(comment.author).toBe('Ada Lovelace')
+  })
+})
+
+describe('approval decisions', () => {
+  it('sends the declared operator for approve and send back', async () => {
+    const requestBodies: unknown[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/issues/:number/approve', async ({ request }) => {
+        requestBodies.push(await request.json())
+        return successResponse(null)
+      }),
+      http.post('*/api/projects/:projectId/issues/:number/feedback', async ({ request }) => {
+        requestBodies.push(await request.json())
+        return successResponse({ id: 'feedback-1' })
+      }),
+    )
+
+    await approveIssue(42, { author: 'Ada' }, 'proj-1')
+    const feedback = await requestChangesIssue(42, { stage: 'plan', body: 'Narrow the scope.', author: 'Ada' }, 'proj-1')
+
+    expect(requestBodies).toEqual([
+      { author: 'Ada' },
+      { stage: 'plan', body: 'Narrow the scope.', author: 'Ada' },
+    ])
+    expect(feedback).toEqual({ id: 'feedback-1' })
   })
 })
 

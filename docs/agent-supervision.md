@@ -88,6 +88,6 @@ workflow 终态失败（系统的自动恢复已耗尽）时，Agent 先读自�
 - 给每个 Agent 自己的 comment 标记（如 `[approver]`、`[fixer]`），否则各自数不清自己干预过几次；
 - 每个 Agent 的身份指令里都要写明：行动前读 issue 下**所有**监管 comment，不只读自己写的。审批反复打回、修复反复糊补丁的往返循环，拆开后任何一方只看自己的记录都看不见。
 
-## 实装差距
+## 实装状态
 
-`mo issue watch` 关注与静音、「Agent 响应失败」通知、审批决议的操作者记录均尚未实装，实施 issue 待创建。`mo agent install supervisor` 已实装；当前也可以手工达到近似效果：用 `mo agent create` 创建 Agent，再用 `mo routing rule create` 建立审批与失败两条规则，提示词写法见 [Agent 事件路由](event-routing.md) 的监管场景。路由表、Agent 启动、审批/失败事件和通知这些底座均已实装。
+`mo agent install supervisor`、`mo issue watch` 关注与静音、「Agent 响应失败」通知、审批决议的操作者记录，以及路由表、Agent 启动、审批/失败事件均已实装。需要手工组装专职 Agent 时，仍可用 `mo agent create` 创建 Agent，再用 `mo routing rule create` 建立规则；提示词写法见 [Agent 事件路由](event-routing.md) 的监管场景。

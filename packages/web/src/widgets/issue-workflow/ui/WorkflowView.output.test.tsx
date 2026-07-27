@@ -17,7 +17,7 @@ useMswServer(http.get('*/api/projects/:projectId/issues/:issueNumber/workflow/st
 
 const dependencies: StepListDependencies = {
   approveIssue: async (issueNumber) => ({ issue: issue(issueNumber), context: null, message: 'approved' }),
-  requestChangesHook: () => useMutation<ApprovalFeedback, Error, { issueNumber: number, data: { stage: string, body: string } }>({ mutationFn: async () => { throw new Error('not used') } }),
+  requestChangesHook: () => useMutation<ApprovalFeedback, Error, { issueNumber: number, data: { stage: string, body: string, author: string } }>({ mutationFn: async () => { throw new Error('not used') } }),
   artifactContentHook: (() => ({ data: undefined, isLoading: false, error: null })) as ArtifactContentHook,
   taskLogHook: (() => ({ data: { lines: [], nextCursor: null, truncated: false }, isLoading: false, isError: false })) as TaskLogDataHook,
   workflowSessionsHook: (() => ({ sessions: [], isLoading: false })) as WorkflowRunSessionsHook,

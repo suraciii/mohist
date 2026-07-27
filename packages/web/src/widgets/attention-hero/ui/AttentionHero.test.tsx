@@ -32,8 +32,8 @@ const dataHook: AttentionHeroDataHook = () => ({
   issuesResolved: _issues !== undefined,
 })
 
-const approveIssueFn: NonNullable<AttentionHeroProps['approveIssueFn']> = async (issueNumber, projectId) => {
-  _approveHandler(issueNumber, projectId)
+const approveIssueFn: NonNullable<AttentionHeroProps['approveIssueFn']> = async (issueNumber, data, projectId) => {
+  _approveHandler(issueNumber, data, projectId)
   return { issue: makeIssue({ number: issueNumber }), context: null, message: 'approved' }
 }
 
@@ -271,10 +271,12 @@ describe('AttentionHero - per-item actions', () => {
 
     const approveBtn = await screen.findByTestId('attention-item-approve')
     expect(approveBtn).toHaveAttribute('data-action', 'approve')
+    expect(approveBtn).toBeDisabled()
+    fireEvent.change(screen.getByTestId('attention-approval-operator'), { target: { value: '  Ada  ' } })
     fireEvent.click(approveBtn)
 
     await waitFor(() => {
-      expect(_approveHandler).toHaveBeenCalledWith(12, 'proj-1')
+      expect(_approveHandler).toHaveBeenCalledWith(12, { author: 'Ada' }, 'proj-1')
     })
   })
 
@@ -337,6 +339,7 @@ describe('AttentionHero - per-item actions', () => {
     renderHeroWithClient(queryClient)
 
     const approveBtn = await screen.findByTestId('attention-item-approve')
+    fireEvent.change(screen.getByTestId('attention-approval-operator'), { target: { value: 'Ada' } })
     fireEvent.click(approveBtn)
 
     await waitFor(() => {
@@ -880,6 +883,7 @@ describe('AttentionHero - approval-wait metric', () => {
     renderHeroWithClient(queryClient)
 
     const approveBtn = await screen.findByTestId('attention-item-approve')
+    fireEvent.change(screen.getByTestId('attention-approval-operator'), { target: { value: 'Ada' } })
     fireEvent.click(approveBtn)
 
     await waitFor(() => {
