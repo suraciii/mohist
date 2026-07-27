@@ -1,9 +1,9 @@
 # Review Findings
 
-## P1: Explicit opt-out still starts diagnostics work
+## P2: OTLP route enablement has no default or opt-out coverage
 
-`packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs:207` unconditionally registers `OtelDiagnosticsSampler`. Its `StartAsync` then unconditionally calls `SampleProcess()` at `packages/server/src/Mohist.Server/Otel/OtelDiagnosticsSampler.cs:116-121`, and its loop continues to sample process resources every 10 seconds at `packages/server/src/Mohist.Server/Otel/OtelDiagnosticsSampler.cs:143-151`. The `_enabled` guard only skips storage sampling and maintenance.
+The acceptance criteria require focused coverage of the OTLP route for both default enablement and explicit opt-out. The added tests exercise options binding, OpenTelemetry SDK registration, the host listener plan, runtime status, and sampler registration, but none maps `OtlpRoutes` using an absent `Mohist:Otel:Enabled` setting or an explicit `false`. Existing OTLP integration specs configure the feature explicitly on at `packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/OtlpRoutesWebApplicationFactory.cs:76-93`, so they cannot detect a regression in the newly changed default.
 
-Consequently, `Mohist:Otel:Enabled=false` still creates and runs the diagnostics hosted service, reads process resource data, and mutates `RuntimeObservability`. This violates the issue/spec requirement that the explicit opt-out must not start diagnostics or maintenance work. Make the disabled path avoid registering/starting the sampler (or make `StartAsync` entirely inert when disabled), while preserving the status route so it can report `off`. Add a composition or hosted-service test that verifies the disabled configuration performs no diagnostics sampling or maintenance callbacks.
+Add route-level coverage that starts the production mapping with no enablement setting and verifies `POST /otel/v1/traces` is mounted on the OTLP listener, plus an explicit-false case that verifies the route is absent while `/otel/api/status` remains available and reports `off`. This is needed to lock the `OtlpRoutes.MapOtlpRoutes` guard at `packages/server/src/Mohist.Server/Api/OtlpRoutes.cs:35-37` against the changed options default.
 
 <promise>FAIL</promise>
