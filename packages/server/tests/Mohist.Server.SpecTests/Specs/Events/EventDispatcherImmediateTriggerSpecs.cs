@@ -7,6 +7,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain.Run;
 using Orleans;
+using Orleans.Runtime;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
@@ -85,6 +86,8 @@ public class EventDispatcherImmediateTriggerSpecs
                 .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
                 .ListRunnerIdsAsync();
         }
+
+        Assert.True(signal.IsCompleted, "Event delivery did not settle after 200 cluster turns");
         await signal;
     }
 
@@ -153,8 +156,7 @@ public class EventDispatcherImmediateTriggerSpecs
         // exception is swallowed by the store's best-effort wrapper).
         // The event row remains DispatchedAt IS NULL — verifiable on
         // the in-memory event store as PendingCount == 1 — and the
-        // next reminder tick (advanced by 1 hour via the fixture's
-        // FakeTimeProvider) queries and dispatches it through the
+        // reminder callback queries and dispatches it through the
         // normal pull–fan-out cycle.
         var issueId = $"issue_lost_poke_{Guid.NewGuid():N}";
         var eventId = $"evt_lost_poke_{Guid.NewGuid():N}";
@@ -181,29 +183,14 @@ public class EventDispatcherImmediateTriggerSpecs
         lock (_fixture.SpecificInvocations)
             Assert.Equal(beforeSpecific, _fixture.SpecificInvocations.Count);
 
-        // Register the delivery signal before advancing the clock so the
-        // reminder tick's delivery resolves it deterministically.
-        var delivered = _fixture.WaitForSpecificBeyondAsync(beforeSpecific);
+        var reminderTime = EventTime.UtcDateTime.AddHours(1);
+        await _fixture.EventDispatcher.ReceiveReminder(
+            EventDispatcherGrain.ReminderName,
+            new TickStatus(EventTime.UtcDateTime, TimeSpan.FromHours(1), reminderTime));
 
-        // Advancing the fake clock past the reminder period lets the
-        // dispatcher fire its next tick — the same path a real silo
-        // takes. The query re-pulls the undelivered row and delivers
-        // it through the normal fan-out.
-        await AwaitReminderTickAsync();
-
-        await AdvanceClusterTurnUntilSettledAsync(delivered);
+        lock (_fixture.SpecificInvocations)
+            Assert.Equal(beforeSpecific + 1, _fixture.SpecificInvocations.Count);
         Assert.Equal(0, _fixture.EventStore.PendingCount);
-    }
-
-    private async Task AwaitReminderTickAsync()
-    {
-        // Advance the fake clock past the 1-hour reminder period, then cross
-        // a cluster turn so reminder bookkeeping and the dispatcher can run.
-        _fixture.TimeProvider.Advance(TimeSpan.FromHours(2));
-        // Drive a cluster turn to settle any pending reminder bookkeeping.
-        await _fixture.Grains
-            .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
-            .ListRunnerIdsAsync();
     }
 
     private static WorkflowRun BuildRun(string id, string eventId, string? issueId = null)
