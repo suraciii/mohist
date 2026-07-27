@@ -17,3 +17,7 @@
 - First reproduction of `npm test` failed once at `packages/web/src/app/App.test.tsx:268` (`findByTestId('insights-title')` timed out with empty DOM `<body><div/></body>`), 388/389 web files passed (5132 passed, 1 failed, 1 skipped).
 - Focused rerun of the same file in isolation passed 15/15; three full `vitest run` passes and the final `npm test` all pass with 389/389 web files (5133 passed, 1 skipped) plus 120/120 runner files (1423 passed) and 6408 .NET tests. `.NET` build clean, worktree stays clean.
 - Root cause: non-reproducible flake in the shared-worker `jsdom` project (vitest `isolate: false`, see `packages/web/vite.config.ts:41`). The flaky case is the lazy InsightsPage module never resolving before `asyncUtilTimeout` (10s) when the module cache and MSW handler reset races during a full-suite run. No code or test change is needed: targeted fixes would either weaken the assertion or fight the shared-worker design, and the failure does not recur across three clean full runs.
+
+## Review fix
+
+- When `Mohist:Otel:Enabled=false`, omit `OtelDiagnosticsSampler` from the hosted-service registration so no diagnostics sampling or maintenance loop starts. Added host composition coverage for the disabled registration surface.

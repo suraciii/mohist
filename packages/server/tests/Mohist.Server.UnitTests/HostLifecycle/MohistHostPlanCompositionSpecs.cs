@@ -99,6 +99,23 @@ public class MohistHostPlanCompositionSpecs
     }
 
     [Fact]
+    public void ApplyPlan_DisabledOtelDoesNotRegisterDiagnosticsSampler()
+    {
+        var builder = NewBuilder();
+        builder.Configuration["Mohist:Otel:Enabled"] = "false";
+        var plan = MohistHostPlan.Primary(
+            new RuntimeEpoch(Start),
+            enabled: false,
+            listenerIntent: null);
+
+        MohistHostFactory.ApplyPlan(plan, builder);
+
+        Assert.DoesNotContain(
+            builder.Services,
+            d => d.ImplementationType?.FullName?.Contains("OtelDiagnosticsSampler", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
     public void ApplyPlan_PreservesEnabledIntentAcrossPrimaryAndAlternate()
     {
         var epoch = new RuntimeEpoch(Start);
