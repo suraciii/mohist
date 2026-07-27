@@ -120,7 +120,7 @@ mo issue rebase <n>     # 尝试自动 rebase
 1. 进 worktree：`cd <repo>/.mohist/worktrees/issue-<n>/`
 2. 手动解决冲突
 3. `git add` + `git rebase --continue`
-4. 回到 Mohist：`mo run resume --issue <n>`
+4. 恢复 Workflow：`mo run resume --issue <n>`
 
 ### 5. Runner 不可用
 

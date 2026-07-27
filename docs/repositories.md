@@ -1,6 +1,8 @@
 # 仓库
 
-一个 Project 是一个产品的工作空间。产品的代码可能分布在多个代码库里——server 一个、web 一个。Project 通过声明**仓库（repository）**来引用这些代码库：仓库是 Project 声明的执行资源，每个 Issue 绑定其中一个目标仓库工作。
+一个 Project 是一个产品在 Mohist 中的范围与执行边界。产品的代码可能分布在多个代码库
+里——server 一个、web 一个。Project 通过声明**仓库（repository）**来引用这些代码库：
+仓库是 Project 声明的执行资源，每个 Issue 绑定其中一个目标仓库工作。
 
 ## 心智模型
 

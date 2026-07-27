@@ -1,8 +1,12 @@
 # Agent 与 AgentSession
 
-Mohist 使用 Agent 能力有两种方式：Workflow 可以直接内联调用，Project 也可以保存
-有稳定身份的 Mohist Agent。两者都会使用 AgentSession，但 Action、Agent、Job 和
+本文只讨论 Mohist 执行层内的 Agent 能力：Workflow 可以直接内联调用，Project 也可以
+保存有稳定身份的 Mohist Agent。两者都会使用 AgentSession，但 Action、Agent、Job 和
 Session 分属不同层次。
+
+用户在 Slack、IDE 或其他交互场所使用的外部 Agent 是 Mohist 的主要交互面。它通过
+Mohist Skill 和 `mo` 查询、委托或操作执行层，不是 Mohist 资源，也不会因为触发了工作
+就变成 AgentSession。三类 Agent 的产品边界见[核心概念](concepts.md)。
 
 ## 概念层次
 

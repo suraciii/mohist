@@ -6,10 +6,10 @@
 
 ## 板块 1：入门
 
-- [产品愿景](vision.md) —— Mohist 要去哪里，三条产品原则
-- [快速上手](getting-started.md) —— 从零启动，看一个 issue 走完全流程
+- [产品愿景](vision.md) —— Mohist 要去哪里、用户如何通过外部 Agent 使用它
+- [快速上手](getting-started.md) —— 从零启动，通过外部 Agent 或 `mo` 看一个 Issue 走完全流程
 - [核心概念](concepts.md) —— 理解 Mohist 的生产线模型
-- [Agent 与 AgentSession](agents.md) —— Inline Agent、Mohist Agent、AgentJob、AgentSession 的层次和关系
+- [Agent 与 AgentSession](agents.md) —— Mohist 执行层内的 Agent、工作与会话关系
 
 ## 板块 2：工作流
 
@@ -26,14 +26,14 @@
 
 ## 板块 4：观察与操作
 
-- [Web UI 指南](web-ui.md) —— 看板、详情页、活动流、设置
-- [CLI 参考](cli-reference.md) —— `mo` 的目标命令语言、命令地图与交互契约
+- [Web UI 指南](web-ui.md) —— 备用操作和可视化平面的看板、详情、证据与设置
+- [CLI 参考](cli-reference.md) —— 外部 Agent 与人共用的 `mo` 命令语言、命令地图与交互契约
 
 ## 板块 5：执行后端与扩展
 
 - [Action 契约](actions/README.md) —— Workflow Action 的输入、输出与行为；当前包括 `mohist/opencode` 与 `mohist/pi`
 - [Runner 指南](runner.md) —— 执行平面怎么跑、怎么调并发
-- [Skill 机制](skills.md) —— 用 OpenCode / Claude Code 探索需求，再交给 Mohist
+- [Skill 机制](skills.md) —— 外部 Agent 如何查询、委托和操作 Mohist
 - [Agent 事件路由](event-routing.md) —— 项目级路由表：一条表达式订阅任何实体的事件，按序触发 Mohist Agent 响应
 - [Agent 监管](agent-supervision.md) —— 一条命令安装监管 Agent：替你审批、替你修复失败，只有它停手时才轮到你
 

@@ -4,11 +4,15 @@
 
 ## 一句话版本
 
-> 你在 **Project** 里把产品目标拆成 **Issue**，由 **Workflow** 推进到 Done。多个相关 Issue 组成 **Epic**。Workflow 可通过 **Inline Agent** 直接执行 task；有稳定身份的 **Mohist Agent** 可以被启动，也可以由事件路由规则触发、响应系统事件。需求探索由外部 **Skill** 完成，产物是可进入 Workflow 的 Issue。
+> 你通常在已有工作场所与**外部 Agent**协作；外部 Agent 通过 **Skill** 操作 Mohist。
+> Mohist 在 **Project** 中把产品目标记录为 **Issue**，由 **Workflow** 推进到 Done。多个
+> 相关 Issue 组成 **Epic**；**Inline Agent**执行 task，**Mohist Agent**作为稳定代理人
+> 接受委托或响应事件。
 
 ## Project（项目）
 
-一个 Project 对应你手上的一个真实产品，是它的工作空间。
+一个 Project 对应一个真实产品，是 Mohist 内的产品范围与执行边界，不是用户的聊天或
+协作工作站点。
 
 - 每个 Project 声明一个或多个 git **仓库**作为执行资源（每个仓库有资源名 + base branch），其中一个是 default 仓库
 - Project 内的每个 issue 有一个**目标仓库**，不指定就落在 default 仓库
@@ -93,7 +97,11 @@ Epic 是为一个产品目标持续供料的单位。新建的 Epic 默认 `idle
 
 详见 [用 Epic 规划](epics.md) 了解完整生命周期。
 
-## Inline Agent 与 Mohist Agent
+## 外部 Agent、Inline Agent 与 Mohist Agent
+
+外部 Agent 在 Mohist 之外与用户交互，例如运行在 Slack、IDE 或其他支持 Agent 的工具中。
+它通过 Mohist Skill 和 `mo` 查询、委托或操作执行层，但不是 Mohist 资源，也不由 Mohist
+调度。
 
 Inline Agent 是 Workflow 直接通过 `mohist/opencode` 等 Action 调用 Agent 能力的
 方式，没有独立 Agent ID。Mohist Agent 则是 Project 内有稳定 ID、名称、Instructions
@@ -120,30 +128,36 @@ Workflow 不区分这些来源。谁来发起审批，是 Mohist Agent、CLI、W
 
 每次 approve / reject 都必须声明审批者名称，以便历史能够回答“这道门是谁放的”。这个名称只是记录在审批历史里的声明，不是登录身份或权限认证。Web UI 会在提交决议前要求填写审批者；CLI 使用 `--author`。Mohist 不会用 `web`、`owner` 等默认值代替真实声明。
 
-## Skill（外部 agent 能力）
+## Skill（外部 Agent 能力）
 
-Mohist 不内置对话式探索。需求挖掘、产品思考这类**需要实时互动**的工作，由外部 agent（OpenCode、Claude Code 等）通过 **Skill** 完成。
+Skill 让外部 Agent 理解 Mohist 的领域动作和操作边界。外部 Agent 使用 Skill 查询项目
+推进、创建和启动 Issue、作出审批、处理恢复，也可以完成需要实时互动的需求探索。
 
-Mohist 分发两个 Skill：
+Mohist 分发四个 Skill：
 
 | Skill | 作用 |
 |---|---|
 | `mohist` | 在外部 agent 里操作 Mohist（创建 issue、审批、查状态） |
 | `mohist-explore` | 从产品视角探索需求，产出可进入 workflow 的结构化 issue |
+| `mohist-create-issue` | 把已明确的需求创建为可独立交付的 Issue |
+| `mohist-create-epic` | 创建产品目标并组织、驱动相关 Issue |
 
-典型路径：在外部 agent 里用 `mohist-explore` 探索需求、产出结构化 issue body，再用 `mohist` 创建 issue，进入 Mohist workflow 执行到 Done。完整工作流见 [Skill 机制](skills.md)。
+典型路径：用户留在原来的交互场所，外部 Agent 按需加载这些 Skill，通过 `mo` 把意图交给
+Mohist，再把执行状态和结果带回原会话。完整工作流见 [Skill 机制](skills.md)。
 
 ## 它们怎么咬合
 
 ```
-[你的产品想法]
+[Slack / IDE / 其他交互场所]
      │
-     │  Explore skill（在 OpenCode 里）
+     │  外部 Agent + Mohist Skill
      ▼
-[Epic] ────┐
+[Project]
+     │
+     ├── [Epic] ────┐
      │     │ 多个 issue 组成 epic
      ▼     │
-[Issue] ◄──┘
+   [Issue] ◄────────┘
      │
      │  Workflow（默认 mohist/local）
      ▼
@@ -154,7 +168,10 @@ Mohist 分发两个 Skill：
 [产品向前进一步]
 ```
 
-记住一个心智模型：**你是 owner；Epic 负责目标和供料；Issue 是工件；Workflow 是生产线；Inline Agent 直接执行 task；Mohist Agent 是可复用的代理人；AgentSession 记录每段对话；审批点决定工件能不能继续流动。**
+记住一个心智模型：**你在外部 Agent 所在的场所工作；Mohist 是执行层；Project 是产品与
+执行边界；Epic 负责目标和供料；Issue 是工件；Workflow 是生产线；Inline Agent 直接执行
+task；Mohist Agent 是可复用的代理人；AgentSession 记录执行会话；Web UI 是备用操作和
+可视化平面。**
 
 ---
 

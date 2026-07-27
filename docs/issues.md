@@ -1,12 +1,11 @@
 # Issue 管理
 
-Issue 是你日常打交道的核心对象。这篇覆盖创建到关闭的所有**操作**。各 workflow 阶段内部做什么、产出什么，见 [工作流详解](the-workflow.md)；把多个 issue 组织成里程碑，见 [用 Epic 规划](epics.md)。
+Issue 是 Mohist 执行层的核心工作单元。这篇覆盖创建到关闭的所有**操作**。用户通常让
+外部 Agent 通过 Mohist Skill 和 `mo` 完成这些操作；也可以直接使用同一套 CLI，或在
+Web UI 这个备用平面中人工操作。各 Workflow 阶段内部做什么、产出什么，见
+[工作流详解](the-workflow.md)；把多个 Issue 组织成里程碑，见 [用 Epic 规划](epics.md)。
 
 ## 创建 Issue
-
-### Web UI
-
-看板右上角 **New Issue** 按钮。填 title、body、priority、labels。
 
 ### CLI
 
@@ -42,6 +41,10 @@ mo issue create "web: 订阅管理页" --parent 42 --repo web
 不指定 `--workflow-profile` 时，Issue 继承 Project 的默认 Profile。可以在启动前或后续
 更新 Issue 的选择；已经开始的 Workflow 继续使用启动时确定的 Profile，新选择从下一次
 运行开始生效。清除显式选择后，Issue 重新继承 Project 默认值。
+
+### Web UI（备用）
+
+看板右上角 **New Issue** 按钮。填 title、body、priority、labels。
 
 ### 目标仓库与子 issue
 
@@ -99,6 +102,8 @@ Inline Agent 不知道你要搜什么、搜哪些字段、要不要高亮、要�
 
 ## 查看 Issue
 
+在外部 Agent 中可以直接询问某个 Issue 的进度、阻塞和待处理事项。直接使用 CLI 时：
+
 ```bash
 # 当前 project 所有 issue
 mo issue list
@@ -116,7 +121,7 @@ mo issue list --all
 mo issue view 42
 ```
 
-Web UI 上点 issue card 进详情页，能看到：
+需要完整可视化或人工接管时，在 Web UI 点 Issue card 进入详情页，可以看到：
 
 - 当前 stage、health、审批状态
 - 完整 body 和 comments
