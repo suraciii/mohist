@@ -30,7 +30,7 @@ public static partial class WorkflowRoutes
         {
             if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
                 return failure;
-            string decidedBy;
+            string? decidedBy;
             try
             {
                 decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);
@@ -51,7 +51,7 @@ public static partial class WorkflowRoutes
         {
             if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
                 return failure;
-            string decidedBy;
+            string? decidedBy;
             try
             {
                 decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);

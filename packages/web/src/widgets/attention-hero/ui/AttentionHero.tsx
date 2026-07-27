@@ -1,19 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangleIcon, CheckCircle2Icon, GaugeIcon, ShieldOffIcon } from 'lucide-react'
 import {
   approveIssue,
   invalidateApprovalWait,
-  isApprovalOperatorValid,
   issueListKeys,
-  normalizeApprovalOperator,
   useApprovalWait,
   useIssues,
   type ApprovalWaitMetricsResponse,
   type Issue,
 } from '../../../entities/issue'
-import { ApprovalOperatorField } from '../../../features/approve-issue'
 import {
   deriveAttentionItems,
   isIssueAttentionItem,
@@ -104,7 +101,6 @@ export function AttentionHero({
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   const toProjectPath = useProjectPath()
-  const [approvalOperator, setApprovalOperator] = useState('')
 
   const data = dataHook()
   const issues = issuesOverride ?? data.issues
@@ -118,11 +114,8 @@ export function AttentionHero({
   )
 
   const hasAttention = items.length > 0
-  const hasApprovalItems = items.some(isApprovalItem)
-  const approvalOperatorValid = isApprovalOperatorValid(approvalOperator)
-
   const approveMutation = useMutation({
-    mutationFn: ({ issueNumber, author }: { issueNumber: number; author: string }) => approveIssueFn(issueNumber, { author }, projectId),
+    mutationFn: (issueNumber: number) => approveIssueFn(issueNumber, {}, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -165,28 +158,13 @@ export function AttentionHero({
         <span className={cn('text-xs font-medium', heroTreatment.text)}>({items.length})</span>
       </div>
       <ApprovalWaitSummary approvalWait={approvalWait} />
-      {hasApprovalItems && (
-        <ApprovalOperatorField
-          id="attention-approval-operator"
-          value={approvalOperator}
-          onChange={setApprovalOperator}
-          disabled={approveMutation.isPending}
-          className="mb-3 max-w-xs"
-          testId="attention-approval-operator"
-        />
-      )}
       <ul className="flex flex-col gap-2" data-testid="attention-items">
         {items.map((item) => (
           <AttentionItemRow
             key={attentionKey(item)}
             item={item}
             isPending={isPending}
-            approvalOperatorValid={approvalOperatorValid}
-            onApprove={(issueNumber) => {
-              const author = normalizeApprovalOperator(approvalOperator)
-              if (!isApprovalOperatorValid(author)) return
-              approveMutation.mutate({ issueNumber, author })
-            }}
+            onApprove={(issueNumber) => approveMutation.mutate(issueNumber)}
             toProjectPath={toProjectPath}
           />
         ))}
@@ -210,7 +188,6 @@ const defaultAgentStatus: AgentStatus = {
 interface AttentionItemRowProps {
   item: AttentionItem
   isPending: boolean
-  approvalOperatorValid: boolean
   onApprove: (issueNumber: number) => void
   toProjectPath: (path: string) => string
 }
@@ -218,7 +195,6 @@ interface AttentionItemRowProps {
 function AttentionItemRow({
   item,
   isPending,
-  approvalOperatorValid,
   onApprove,
   toProjectPath,
 }: AttentionItemRowProps) {
@@ -263,7 +239,7 @@ function AttentionItemRow({
             type="button"
             data-testid="attention-item-approve"
             data-action="approve"
-            disabled={isPending || !approvalOperatorValid}
+            disabled={isPending}
             onClick={() => onApprove(item.issueNumber)}
             className={cn(
               'inline-flex items-center gap-1 rounded-md bg-warning px-2 py-1 text-xs font-medium text-warning-foreground',

@@ -5,12 +5,6 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Domain;
 
-/// <summary>
-/// issue-491 T-002: declaration-model validation for the approval operator.
-/// Threading is mirrored across <see cref="WorkflowRunExtensions"/> so the
-/// spec scenario "the resulting approval decision SHALL carry that author as
-/// decidedBy" holds at every layer.
-/// </summary>
 public class ApprovalDecidedByTests
 {
     private const string Operator = "supervisor";
@@ -63,6 +57,23 @@ public class ApprovalDecidedByTests
             .OfType<StageApprovalResolved>()
             .Single();
         Assert.Equal(Operator, resolved.DecidedBy);
+    }
+
+    [Fact]
+    public void Approve_WithoutOperator_RecordsDecisionWithoutAttribution()
+    {
+        var run = BuildAwaitingApprovalRun();
+
+        var events = run.Approve(DateTimeOffset.UnixEpoch);
+
+        var current = run.CurrentStage();
+        Assert.Equal("approved", current.ApprovalStatus?.Result);
+        Assert.Null(current.ApprovalStatus?.DecidedBy);
+        Assert.Null(events
+            .Select(WorkflowEventSerializer.Unwrap)
+            .OfType<StageApprovalResolved>()
+            .Single()
+            .DecidedBy);
     }
 
     [Fact]
@@ -131,5 +142,22 @@ public class ApprovalDecidedByTests
         var unwrapped = events.Select(WorkflowEventSerializer.Unwrap).ToList();
         Assert.Single(unwrapped.OfType<FeedbackRequested>());
         Assert.Single(unwrapped.OfType<StageApprovalResolved>());
+    }
+
+    [Fact]
+    public void RequestChanges_WithoutOperator_RecordsResponseWithoutAttribution()
+    {
+        var run = BuildAwaitingApprovalRun();
+
+        var events = run.RequestChanges("needs more detail", "fb_1", DateTimeOffset.UnixEpoch);
+
+        var current = run.CurrentStage();
+        Assert.NotNull(current.ApprovalStatus?.RespondedAt);
+        Assert.Null(current.ApprovalStatus?.DecidedBy);
+        Assert.Null(events
+            .Select(WorkflowEventSerializer.Unwrap)
+            .OfType<StageApprovalResolved>()
+            .Single()
+            .DecidedBy);
     }
 }

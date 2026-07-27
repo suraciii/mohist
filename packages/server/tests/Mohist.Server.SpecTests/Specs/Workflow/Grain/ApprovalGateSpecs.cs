@@ -33,7 +33,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task AwaitingApproval_UserApproves_WorkflowContinuesToNextStage()
+    public async Task AwaitingApproval_UserApprovesWithoutOperator_WorkflowContinuesToNextStage()
     {
         var workflow = await StartWorkflowAsync(ApprovalStage());
 
@@ -43,10 +43,10 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        await workflow.ApproveAsync("  operator-1  ");
+        await workflow.ApproveAsync();
 
         var run = await LoadRunAsync();
-        Assert.Equal("operator-1", run.Stages.Single(stage => stage.Id == "plan").ApprovalStatus?.DecidedBy);
+        Assert.Null(run.Stages.Single(stage => stage.Id == "plan").ApprovalStatus?.DecidedBy);
 
         var (task2, r3) = await PollWorkAnyAsync();
         Assert.StartsWith("compile.", task2.WorkId);
@@ -96,7 +96,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
 
         // RequestChanges must NOT mark the workflow as failed; it
         // routes through the feedback loop.
-        await workflow.RequestChangesAsync("not good enough", "  operator-1  ");
+        await workflow.RequestChangesAsync("not good enough");
 
         var run = await LoadRunAsync();
         Assert.NotEqual(WorkflowRunStatus.Failed, run.Status);
@@ -104,7 +104,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         Assert.Equal(StageRunStatus.Running, current.Status);
         Assert.NotNull(current.ApprovalStatus);
         Assert.Null(current.ApprovalStatus!.Result);
-        Assert.Equal("operator-1", current.ApprovalStatus.DecidedBy);
+        Assert.Null(current.ApprovalStatus.DecidedBy);
         Assert.Single(run.Feedback);
         Assert.Equal("not good enough", run.Feedback[0].Body);
         Assert.Equal(ApprovalFeedbackStatus.Open, run.Feedback[0].Status);

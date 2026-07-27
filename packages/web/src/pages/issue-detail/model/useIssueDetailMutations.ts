@@ -34,8 +34,8 @@ export interface UseIssueDetailMutationsOptions {
 
 export interface IssueDetailMutations {
   startMutation: UseMutationResult<{ issue: unknown; message: string }, Error, void, unknown>
-  approveMutation: UseMutationResult<{ issue: unknown; context?: unknown; message: string }, Error, string, unknown>
-  sendBackMutation: UseMutationResult<unknown, Error, { stage: string; body: string; author: string }, unknown>
+  approveMutation: UseMutationResult<{ issue: unknown; context?: unknown; message: string }, Error, void, unknown>
+  sendBackMutation: UseMutationResult<unknown, Error, { stage: string; body: string }, unknown>
   markReadyMutation: UseMutationResult<unknown, Error, void, unknown>
   addPrerequisiteMutation: UseMutationResult<{ issue: unknown; message: string }, Error, number, unknown>
   removePrerequisiteMutation: UseMutationResult<{ issue: unknown; message: string }, Error, number, unknown>
@@ -161,12 +161,12 @@ export function createIssueDetailMutationOptions(
   }
 
   const approveMutation = {
-    mutationFn: (author: string) => approveIssue(issueNumber, { author }, projectId),
+    mutationFn: () => approveIssue(issueNumber, {}, projectId),
     onSuccess: invalidateApprovalQueries,
   }
 
   const sendBackMutation = {
-    mutationFn: ({ stage, body, author }: { stage: string; body: string; author: string }) => requestChangesIssue(issueNumber, { stage, body, author }, projectId),
+    mutationFn: ({ stage, body }: { stage: string; body: string }) => requestChangesIssue(issueNumber, { stage, body }, projectId),
     onSuccess: invalidateApprovalQueries,
   }
 

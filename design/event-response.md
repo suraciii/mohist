@@ -43,11 +43,11 @@ AgentSession）。响应的事实分三处，各有权威：
 agent 的每个决定必须与人的可区分，这是 owner 回看历史能接手的前提：
 
 - comment：`--author` 声明 agent 自己的名字（约定，已写入监管预设文本）。
-- 审批决议：增加声明式操作者 `decidedBy`，与 comment author 同模型（声明而非
-  认证）。`mo run approve` / `mo run reject` 增加 `--author`；审批决议事件与
-  读取模型携带该字段。历史里「这道门是谁放的」必须可回答。
-- Web UI 的每个审批入口在 approve / send back 前要求填写同一个声明式操作者；
-  空值时不提交决议，也不以 `web`、`owner` 或其它合成值代替。
+- 审批决议：可附带声明式操作者 `decidedBy`，与 comment author 一样是声明而非
+  认证。`mo run approve` / `mo run reject` 可用 `--author` 署名；审批决议事件与
+  读取模型在有署名时携带该字段。Agent 应主动署名，人操作时可以省略。
+- Web UI 的人工 approve / send back 不要求填写操作者。未署名决议保持
+  `decidedBy` 为空，不以 `web`、`owner` 或其它合成值代替。
 
 ### Not doing
 
@@ -59,6 +59,6 @@ agent 的每个决定必须与人的可区分，这是 owner 回看历史能接�
 
 ## Status
 
-`agent.job.failed` 事件与通知种类、审批 `decidedBy` 及各产品入口的操作者声明
+`agent.job.failed` 事件与通知种类、可选审批 `decidedBy` 及 Agent 的操作者声明
 均已实装。响应保证 1–3 描述的是启动管线与领域命令的既有行为，本文把它们
 固定为契约。

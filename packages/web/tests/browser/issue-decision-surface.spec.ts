@@ -456,9 +456,9 @@ test.describe('Issue decision surface browser layout', () => {
 
     await expect(page.getByTestId('approval-mobile-approve')).toBeVisible()
     await expect(page.getByTestId('approval-mobile-send-back')).toBeVisible()
-    await expect(page.getByTestId('approval-operator-input')).toBeVisible()
-    await expect(page.getByTestId('approval-mobile-approve')).toBeDisabled()
-    await expect(page.getByTestId('approval-mobile-send-back')).toBeDisabled()
+    await expect(page.getByTestId('approval-operator-input')).toHaveCount(0)
+    await expect(page.getByTestId('approval-mobile-approve')).toBeEnabled()
+    await expect(page.getByTestId('approval-mobile-send-back')).toBeEnabled()
     await expect(page.getByTestId('approval-review-evidence')).toBeVisible()
     await expect(page.getByTestId('mobile-action-sheet-launcher')).not.toBeVisible()
   })
@@ -494,7 +494,6 @@ test.describe('Issue decision surface browser layout', () => {
     })
     await page.goto(`/${project.name}/issues/${issue.number}`)
 
-    await page.getByTestId('approval-operator-input').fill('Ada')
     await page.getByTestId('decision-rationale').click()
     await expect(page.getByTestId('decision-action-approve-shortcut')).toHaveText('a')
     await expect(page.getByTestId('decision-action-send-back-shortcut')).toHaveText('m')
@@ -537,16 +536,14 @@ test.describe('Issue decision surface browser layout', () => {
     })
     await page.goto(`/${project.name}/issues/${issue.number}`)
 
-    await expect(page.getByTestId('decision-action-approve')).toBeDisabled()
-    await expect(page.getByTestId('decision-action-approve-shortcut')).toHaveCount(0)
-    await page.getByTestId('approval-operator-input').fill('Ada')
+    await expect(page.getByTestId('decision-action-approve')).toBeEnabled()
     await page.getByTestId('decision-rationale').click()
     await expect(page.getByTestId('decision-action-approve-shortcut')).toHaveText('a')
     const approveRequest = page.waitForRequest((request) => request.method() === 'POST'
       && request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/approve`))
     await page.keyboard.press('a')
     await expect.poll(() => approveRequests).toBe(1)
-    expect(JSON.parse((await approveRequest).postData() ?? '{}')).toEqual({ author: 'Ada' })
+    expect(JSON.parse((await approveRequest).postData() ?? '{}')).toEqual({})
   })
 
   test('phone plan approval renders recorded artifacts without overflow and submits send-back once', async ({ page }) => {
@@ -592,7 +589,6 @@ test.describe('Issue decision surface browser layout', () => {
       expect(controlBox.y + controlBox.height).toBeLessThanOrEqual(viewport!.height)
     }
 
-    await page.getByTestId('approval-operator-input').fill('Ada')
     await sendBack.click()
     const feedback = page.getByTestId('send-back-feedback-textarea')
     await expect(feedback).toBeFocused()
@@ -604,7 +600,6 @@ test.describe('Issue decision surface browser layout', () => {
     expect(JSON.parse((await feedbackRequest).postData() ?? '{}')).toEqual({
       stage: 'plan',
       body: 'Category: Scope\n\nKeep the plan focused.',
-      author: 'Ada',
     })
   })
 

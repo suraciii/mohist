@@ -20,7 +20,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Workflow.Api;
 
 [Collection("IntegrationWorkflow")]
-public class WorkflowRunControlApiSpecs
+public partial class WorkflowRunControlApiSpecs
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -94,23 +94,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Contains(plan.Tasks, t => t.DefinitionId == WorkflowRunExtensions.DefaultFeedbackTaskId);
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task Approve_WithBlankAuthor_Returns400AndDoesNotCallGrain(string author)
-    {
-        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
-        await ForceAwaitingApprovalAsync(wrId);
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/workflow-runs/{wrId}/approve",
-            new { author });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var run = await LoadRunAsync(wrId);
-        Assert.NotEqual(StageRunStatus.Completed, run!.Stages.Single(s => s.Id == "plan").Status);
-    }
-
     [Fact]
     public async Task Approve_WithOverlongAuthor_Returns400AndDoesNotCallGrain()
     {
@@ -139,23 +122,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var run = await LoadRunAsync(wrId);
         Assert.Equal("supervisor", run!.Stages.Single(s => s.Id == "plan").ApprovalStatus?.DecidedBy);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task Reject_WithBlankAuthor_Returns400AndDoesNotCallGrain(string author)
-    {
-        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
-        await ForceAwaitingApprovalAsync(wrId);
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/workflow-runs/{wrId}/reject",
-            new { author, message = "needs more detail" });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var run = await LoadRunAsync(wrId);
-        Assert.Null(run!.Feedback.FirstOrDefault());
     }
 
     [Fact]

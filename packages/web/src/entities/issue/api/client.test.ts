@@ -137,6 +137,29 @@ describe('addComment', () => {
 })
 
 describe('approval decisions', () => {
+  it('sends approval decisions without attribution when no operator is provided', async () => {
+    const requestBodies: unknown[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/issues/:number/approve', async ({ request }) => {
+        requestBodies.push(await request.json())
+        return successResponse(null)
+      }),
+      http.post('*/api/projects/:projectId/issues/:number/feedback', async ({ request }) => {
+        requestBodies.push(await request.json())
+        return successResponse({ id: 'feedback-1' })
+      }),
+    )
+
+    await approveIssue(42, {}, 'proj-1')
+    const feedback = await requestChangesIssue(42, { stage: 'plan', body: 'Narrow the scope.' }, 'proj-1')
+
+    expect(requestBodies).toEqual([
+      {},
+      { stage: 'plan', body: 'Narrow the scope.' },
+    ])
+    expect(feedback).toEqual({ id: 'feedback-1' })
+  })
+
   it('sends the declared operator for approve and send back', async () => {
     const requestBodies: unknown[] = []
     server.use(

@@ -99,7 +99,7 @@ export function retryIssue(number: number, projectId?: string | null) {
 }
 
 export interface ApproveIssueInput {
-  author: string
+  author?: string | null
 }
 
 export function approveIssue(number: number, data: ApproveIssueInput, projectId?: string | null) {
@@ -110,7 +110,7 @@ export function approveIssue(number: number, data: ApproveIssueInput, projectId?
 }
 
 export interface RejectIssueInput {
-  author: string
+  author?: string | null
   message: string
 }
 
@@ -124,7 +124,7 @@ export function rejectIssue(number: number, data: RejectIssueInput, projectId?: 
 export interface CreateFeedbackRequest {
   stage: string
   body: string
-  author: string
+  author?: string | null
 }
 
 export function requestChangesIssue(number: number, data: CreateFeedbackRequest, projectId?: string | null) {

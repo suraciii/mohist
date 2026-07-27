@@ -249,7 +249,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         await CommitAsync(events, reason);
     }
 
-    public async Task ApproveAsync(string decidedBy)
+    public async Task ApproveAsync(string? decidedBy = null)
     {
         EnsureRun();
         var normalizedOperator = ApprovalOperatorValidation.Normalize(decidedBy);
@@ -258,7 +258,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         await CommitAsync(events);
     }
 
-    public async Task<string> RequestChangesAsync(string body, string decidedBy)
+    public async Task<string> RequestChangesAsync(string body, string? decidedBy = null)
     {
         EnsureRun();
         var normalizedOperator = ApprovalOperatorValidation.Normalize(decidedBy);

@@ -42,3 +42,8 @@
 
 **Runtime Binding**：AgentSession 当前关联的 Runtime、物理 Session 与 Runner 等路由
 事实。Binding 可以整体替换，但不是 AgentSession 身份，也不是物理 Session 历史。
+
+## Workflow 决策
+
+**Approval**：对 Workflow 阶段产物作出的 approve 或 reject 决策。审批者署名是可选的
+归属信息，不是决策成立的前提；未署名表示这次决策没有记录操作者。

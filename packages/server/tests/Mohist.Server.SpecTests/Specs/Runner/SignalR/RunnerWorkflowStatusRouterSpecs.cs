@@ -170,8 +170,8 @@ public class RunnerWorkflowStatusRouterSpecs
         public Task ResumeAsync() => Task.CompletedTask;
         public Task PauseAsync(string? reason = null) => Task.CompletedTask;
         public Task StopAsync(string? reason = null) => Task.CompletedTask;
-        public Task ApproveAsync(string decidedBy) => Task.CompletedTask;
-        public Task<string> RequestChangesAsync(string body, string decidedBy) => Task.FromResult(string.Empty);
+        public Task ApproveAsync(string? decidedBy = null) => Task.CompletedTask;
+        public Task<string> RequestChangesAsync(string body, string? decidedBy = null) => Task.FromResult(string.Empty);
         public Task RetryAsync() => Task.CompletedTask;
         public Task RerunAsync() => Task.CompletedTask;
         public Task<WorkflowControlResult> RerunFromStageAsync(string stageId) =>

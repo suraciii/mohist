@@ -36,7 +36,7 @@ public static partial class IssueRoutes
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            string decidedBy;
+            string? decidedBy;
             try
             {
                 decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);
@@ -61,7 +61,7 @@ public static partial class IssueRoutes
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            string decidedBy;
+            string? decidedBy;
             try
             {
                 decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);

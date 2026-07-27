@@ -2,9 +2,8 @@ import { useState, useCallback, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
-import { issueDetailKeys, issueListKeys, IssueStatus, WorkflowStage, approveIssue, getFileContent, invalidateApprovalWait, isApprovalOperatorValid, normalizeApprovalOperator, useRequestChangesIssue } from '../../../entities/issue'
+import { issueDetailKeys, issueListKeys, IssueStatus, WorkflowStage, approveIssue, getFileContent, invalidateApprovalWait, useRequestChangesIssue } from '../../../entities/issue'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead } from '../../../entities/issue'
-import { ApprovalOperatorField } from '../../../features/approve-issue'
 import { useProject } from '../../../entities/project'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
@@ -50,14 +49,12 @@ export function InlineApprovalControls({
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
   const [reportModalOpen, setReportModalOpen] = useState(false)
-  const [approvalOperator, setApprovalOperator] = useState('')
-  const approvalOperatorValid = isApprovalOperatorValid(approvalOperator)
 
   const review: ReviewOutput = useMemo(() => parseReviewOutput(approvalOutput), [approvalOutput])
   const classified = useMemo(() => classifyResult(review.result), [review.result])
 
   const approveMutation = useMutation({
-    mutationFn: (author: string) => approveIssueFn(issueNumber, { author }, projectId),
+    mutationFn: () => approveIssueFn(issueNumber, {}, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -69,10 +66,8 @@ export function InlineApprovalControls({
   const requestChangesMutation = requestChangesHook()
 
   const handleApprove = useCallback(() => {
-    const author = normalizeApprovalOperator(approvalOperator)
-    if (!isApprovalOperatorValid(author)) return
-    approveMutation.mutate(author)
-  }, [approvalOperator, approveMutation])
+    approveMutation.mutate()
+  }, [approveMutation])
 
   const handleOpenRequestChanges = useCallback(() => {
     setFeedbackOpen(true)
@@ -85,12 +80,11 @@ export function InlineApprovalControls({
 
   const handleSubmitRequestChanges = useCallback(() => {
     const trimmed = feedbackText.trim()
-    const author = normalizeApprovalOperator(approvalOperator)
-    if (!trimmed || !isApprovalOperatorValid(author)) return
+    if (!trimmed) return
     requestChangesMutation.mutate(
       {
         issueNumber,
-        data: { stage, body: trimmed, author },
+        data: { stage, body: trimmed },
       },
       {
         onSuccess: () => {
@@ -99,7 +93,7 @@ export function InlineApprovalControls({
         },
       },
     )
-  }, [approvalOperator, feedbackText, requestChangesMutation, issueNumber, stage])
+  }, [feedbackText, requestChangesMutation, issueNumber, stage])
 
   const handleViewChanges = useCallback(() => {
     document.getElementById('changes-panel')?.scrollIntoView({ behavior: 'smooth' })
@@ -132,13 +126,6 @@ export function InlineApprovalControls({
             : `Review the ${stage} stage output and approve to continue, or request changes with feedback.`}
       </p>
 
-      <ApprovalOperatorField
-        id={`inline-approval-operator-${issueNumber}`}
-        value={approvalOperator}
-        onChange={setApprovalOperator}
-        disabled={approveMutation.isPending || requestChangesMutation.isPending}
-      />
-
       {hasApprovalOutput && (
         <ReviewSummary output={approvalOutput} />
       )}
@@ -166,7 +153,7 @@ export function InlineApprovalControls({
         <div className="flex gap-2">
           <Button
             onClick={handleApprove}
-            disabled={!approvalOperatorValid || approveMutation.isPending}
+            disabled={approveMutation.isPending}
             data-testid="approve-button"
             className={`flex-1 ${
               hasApprovalOutput && classified === 'PASS'
@@ -180,7 +167,7 @@ export function InlineApprovalControls({
             <Button
               variant="outline"
               onClick={handleOpenRequestChanges}
-              disabled={!approvalOperatorValid || requestChangesMutation.isPending}
+              disabled={requestChangesMutation.isPending}
               data-testid="request-changes-button"
               className="flex-1"
             >
@@ -220,7 +207,7 @@ export function InlineApprovalControls({
               </Button>
               <Button
                 onClick={handleSubmitRequestChanges}
-                disabled={!approvalOperatorValid || !feedbackText.trim() || requestChangesMutation.isPending}
+                disabled={!feedbackText.trim() || requestChangesMutation.isPending}
                 size="sm"
                 data-testid="submit-request-changes"
               >

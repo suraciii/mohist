@@ -181,7 +181,7 @@ internal static partial class RunCommands
         var (projectOpt, projectIdOpt) = ProjectOptions();
         var authorOpt = new Option<string?>("--author")
         {
-            Description = "Declared approval operator (1-100 characters)",
+            Description = "Optional approval operator (1-100 characters)",
         };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
@@ -207,14 +207,8 @@ internal static partial class RunCommands
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(RunControlDescriptor, selection);
 
-                string normalizedAuthor;
-                if (string.IsNullOrWhiteSpace(author))
-                {
-                    api.Error.WriteLine("--author is required and must not be blank.");
-                    return 1;
-                }
-                normalizedAuthor = author.Trim();
-                if (normalizedAuthor.Length > 100)
+                var normalizedAuthor = string.IsNullOrWhiteSpace(author) ? null : author.Trim();
+                if (normalizedAuthor?.Length > 100)
                 {
                     api.Error.WriteLine("--author must be 100 characters or fewer.");
                     return 1;
@@ -238,7 +232,7 @@ internal static partial class RunCommands
     }
 
     // ────────────────────────────────────────────────────────────────────
-    //  reject — requires --message and --author
+    //  reject — requires --message
     // ────────────────────────────────────────────────────────────────────
 
     private static Command BuildReject(MohistCliApi api)
@@ -255,7 +249,7 @@ internal static partial class RunCommands
         };
         var authorOpt = new Option<string?>("--author")
         {
-            Description = "Declared rejection operator (1-100 characters)",
+            Description = "Optional rejection operator (1-100 characters)",
         };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
@@ -290,15 +284,8 @@ internal static partial class RunCommands
                     return CliExitCode.For(CliExitOutcome.OperationFailure);
                 }
 
-                string normalizedAuthor;
-                if (string.IsNullOrWhiteSpace(author))
-                {
-                    await api.Error.WriteLineAsync(
-                        "--author is required and must not be blank.").ConfigureAwait(false);
-                    return CliExitCode.For(CliExitOutcome.OperationFailure);
-                }
-                normalizedAuthor = author.Trim();
-                if (normalizedAuthor.Length > 100)
+                var normalizedAuthor = string.IsNullOrWhiteSpace(author) ? null : author.Trim();
+                if (normalizedAuthor?.Length > 100)
                 {
                     await api.Error.WriteLineAsync(
                         "--author must be 100 characters or fewer.").ConfigureAwait(false);

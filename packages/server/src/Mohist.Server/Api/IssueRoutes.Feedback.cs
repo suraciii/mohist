@@ -29,7 +29,7 @@ public static partial class IssueRoutes
 
             try
             {
-                string decidedBy;
+                string? decidedBy;
                 try
                 {
                     decidedBy = ApprovalOperatorValidation.Normalize(req.Author);

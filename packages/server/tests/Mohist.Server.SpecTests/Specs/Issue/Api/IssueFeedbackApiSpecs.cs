@@ -45,13 +45,13 @@ public class IssueFeedbackApiSpecs
     }
 
     [Fact]
-    public async Task CreateFeedback_AtAwaitingApprovalStage_ResumesStageAndPersistsFeedback()
+    public async Task CreateFeedback_WithoutAuthor_ResumesStageAndPersistsFeedback()
     {
         var (project, issueNumber, issueKey, wrId) = await SeedAwaitingApprovalIssueAsync();
 
         var response = await _client.PostAsJsonAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
-            new { stage = "plan", body = "add a quick start section", author = "supervisor" });
+            new { stage = "plan", body = "add a quick start section" });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var envelope = await response.Content.ReadFromJsonAsync<FeedbackApiFeedbackEnvelopeDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -68,21 +68,13 @@ public class IssueFeedbackApiSpecs
         var run = await LoadWorkflowRunAsync(wrId);
         Assert.NotNull(run);
         Assert.Single(run!.Feedback);
-        // After RequestChanges/AddRuntimeTask, the legacy approval is
-        // replaced with a feedback task the runner can pick up. The
-        // seed does not bind a runner, so the new state machine lands
-        // the run on Pending (started, has dispatchable work, no
-        // assigned runner) — assignment pool will pick it up. The
-        // approval status is preserved (Result stays null while
-        // DecidedBy is stamped with the operator who requested
-        // changes) so the gate's history still attributes the
-        // request.
         Assert.Equal(WorkflowRunStatus.Pending, run.Status);
         var current = run.Stages.First(s => s.Id == "plan");
         Assert.Equal(StageRunStatus.Running, current.Status);
         Assert.NotNull(current.ApprovalStatus);
         Assert.Null(current.ApprovalStatus!.Result);
-        Assert.Equal("supervisor", current.ApprovalStatus.DecidedBy);
+        Assert.NotNull(current.ApprovalStatus.RespondedAt);
+        Assert.Null(current.ApprovalStatus.DecidedBy);
     }
 
     [Fact]

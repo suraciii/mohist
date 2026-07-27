@@ -1,11 +1,9 @@
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { isApprovalOperatorValid, normalizeApprovalOperator } from '../../../entities/issue'
 import type { IssueDetailMutations } from './useIssueDetailMutations'
 import type { IssueDecisionAction, IssueDecisionActionKind } from './issueDecisionActions'
 
 export interface IssueDecisionActionOptions {
-  approvalOperator?: string
   sendBackBody?: string
 }
 
@@ -118,16 +116,13 @@ export function runControllerAction(
 
   switch (action.kind) {
     case 'approve': {
-      const author = normalizeApprovalOperator(options?.approvalOperator ?? '')
-      if (!isApprovalOperatorValid(author)) return
-      ctx.mutations.approveMutation.mutate(author)
+      ctx.mutations.approveMutation.mutate()
       return
     }
     case 'send-back': {
       const body = (options?.sendBackBody ?? '').trim()
-      const author = normalizeApprovalOperator(options?.approvalOperator ?? '')
-      if (!body || !ctx.approvalStage || !isApprovalOperatorValid(author)) return
-      ctx.mutations.sendBackMutation.mutate({ stage: ctx.approvalStage, body, author }, {
+      if (!body || !ctx.approvalStage) return
+      ctx.mutations.sendBackMutation.mutate({ stage: ctx.approvalStage, body }, {
         onSuccess: () => ctx.setStopConfirmOpen(false),
       })
       return

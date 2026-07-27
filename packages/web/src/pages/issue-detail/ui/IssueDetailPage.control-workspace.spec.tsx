@@ -127,11 +127,9 @@ describe('IssueDecisionSurface — control workspace (active execution)', () => 
     const surface = await waitFor(() => screen.getByTestId('issue-decision-surface'))
     const approve = await within(surface).findByTestId('decision-action-approve')
     const sendBack = await within(surface).findByTestId('decision-action-send-back')
-    expect(approve).toBeDisabled()
-    expect(sendBack).toBeDisabled()
-    fireEvent.change(within(surface).getByTestId('approval-operator-input'), { target: { value: 'Ada' } })
     expect(approve).not.toBeDisabled()
     expect(sendBack).not.toBeDisabled()
+    expect(within(surface).queryByTestId('approval-operator-input')).not.toBeInTheDocument()
     expect(surface.dataset.summary).toBe('approval-required')
   })
 
@@ -156,7 +154,6 @@ describe('IssueDecisionSurface — control workspace (active execution)', () => 
 
     const surface = await waitFor(() => screen.getByTestId('issue-decision-surface'))
     const sendBack = await within(surface).findByTestId('decision-action-send-back')
-    fireEvent.change(within(surface).getByTestId('approval-operator-input'), { target: { value: 'Ada' } })
     fireEvent.click(sendBack)
 
     const form = await within(surface).findByTestId('send-back-feedback-form')

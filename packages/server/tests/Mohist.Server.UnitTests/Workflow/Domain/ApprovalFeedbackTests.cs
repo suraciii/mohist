@@ -203,10 +203,10 @@ public partial class ApprovalFeedbackTests
     }
 
     [Fact]
-    public void Approve_StillWorks_AfterRequestChanges()
+    public void Approve_StillWorks_AfterAnonymousRequestChanges()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("first revision", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("first revision", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
 
         // The apply-feedback runtime task added by RequestChanges needs to be
         // completed (Pending → Running → Completed) before the stage is ready
@@ -220,7 +220,7 @@ public partial class ApprovalFeedbackTests
 
         Assert.Equal(StageRunStatus.AwaitingApproval, current.Status);
 
-        run.Approve(DateTimeOffset.UnixEpoch, TestOperator);
+        run.Approve(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(StageRunStatus.Completed, current.Status);
         Assert.Null(run.Failure);
