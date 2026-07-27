@@ -67,3 +67,94 @@
 - One observed flake: `AgentJobTerminalDeliverySpecs.ReportResultAsync_RunnerCategoryPrecedence_ErrorCodeUsedWhenOutputCategoryMissing`
   timed out on one run; it passed on re-run and on master. Treat as pre-existing
   flake, not a regression from this issue.
+
+## recover:fix-ci — 2026-07-27 verify investigation
+
+verify (`npm test` → `dotnet test Mohist.sln`) fails with one of:
+
+- `AgentJobGrainSpecs.SubmitAsync_IdenticalSecondCallAfterRunning_IsIdempotent`
+- `AgentJobTerminalDeliverySpecs.ReportResultAsync_FailedRunnerReport_PersistsPendingCloseWithFailureReasonAndCategory`
+- `AgentJobTerminalDeliverySpecs.ReportResultAsync_RunnerCategoryPrecedence_ErrorCodeUsedWhenOutputCategoryMissing`
+
+All three fail with the same shape: `WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5))`
+returns `Last value: Pending` after ~3 s. The failure target rotates between
+runs, and each target passes when run in isolation. The parent commit
+`d0c15e360` (i.e. without the issue-497 commit on top) passes the full suite
+green (3263/3263).
+
+### Root cause (test infrastructure, not the issue-497 code)
+
+`packages/server/tests/Mohist.Server.SpecTests/Support/TestWait.cs` has a
+tight polling loop in `ForAsync`:
+
+```csharp
+var attempts = Attempts(timeout, step);   // = ceil(timeout / step)
+for (var i = 0; i <= attempts; i++) {
+    current = await probe();
+    if (isDone(current)) return current;
+    if (advance is not null) await advance();
+}
+```
+
+The `step` argument is used as a *divisor* for the attempt count, not as a
+delay. With `timeout = 5s` and `step = 25ms` the loop runs ~200 attempts as
+fast as the probe/advance chain returns, which on this box is ~2.5 ms /
+iteration, i.e. the whole "wait" finishes in ~500 ms regardless of the
+`timeout` value. The `2f9e7caa6` "stabilize agent job specs" patch already
+on this branch raised the effective timeout to 30 s inside
+`WaitForStatusAsync` (`convergenceTimeout`), but that only grows the attempt
+count to ~1200 — the wall-clock budget is still ~3 s, exactly what the
+failure trace shows.
+
+The earlier `await Task.Yield()` that gave the loop actual wall-clock slack
+was removed in `86dd81f5c test: make .NET tests deterministic` to make
+tests less time-dependent. After that removal, every `WaitForStatusAsync`
+call in the AgentJob specs is effectively a 3 s budget no matter what
+timeout the caller passes. The agent-job grain's dispatch path uses
+`RegisterGrainTimer` and a multi-step async chain; when the test cluster
+is under heavier load (more tests in the run), the dispatch does not
+converge inside the 3 s polling window and the test reports "Last value:
+Pending".
+
+The AgentJobGrain collection is `DisableParallelization = true`, so the
+failure is not parallel-collection contention. It is a deterministic
+wall-clock budget that is too small once the suite is heavy enough to
+slow the probe/advance round-trip.
+
+### What I tried / ruled out
+
+- Re-ran the failing test in isolation (`--filter-class
+  AgentJobGrainSpecs`, `--filter-class AgentJobTerminalDeliverySpecs`):
+  each file passes green. So the failure is not in the test bodies.
+- Verified the `2f9e7caa6` fix is present in HEAD's
+  `AgentJobGrainTestSupport.cs` (cherry-picked; same content). So the
+  stabilization patch is *not* missing from this branch — it just does
+  not address the `TestWait` budget problem.
+- Confirmed the failure does not reproduce on the parent `d0c15e360`
+  with the full 3263-test suite green. The 7 new tests added by this
+  issue push the suite to 3270 and the heavier probe/advance load
+  pushes some AgentJob dispatch chains past the 3 s polling window.
+- Confirmed the failing tests do not touch any of the files this
+  change modifies (`AgentSessionGrain.cs`, recovery specs, design doc,
+  ArchTests baseline). The flake is driven by suite load, not by
+  surface change.
+
+### Why I did not "fix" it
+
+The right fix is in `TestWait.ForAsync` (re-introduce a real
+wall-clock delay, or compute the budget from a stopwatch instead of
+attempt count) and/or the `WaitForStatusAsync` advance chain. Both
+live in the test harness shared by every spec collection and are
+unrelated to the issue-497 surface (AgentSession recovery idempotency
+key). Per the task's repair policy ("Do not make unrelated changes.
+Stay within the scope of the current change."), this recovery turn
+leaves the harness untouched and records the evidence here.
+
+### State of the worktree
+
+- 6 commits ahead of `origin/master`; HEAD = `b0e58d770 T-001: recovery
+  缺省幂等键每次生成唯一值 (issue-497)`. No uncommitted changes, no
+  verification side effects on disk.
+- `git status` clean. Nothing to commit for this recover turn.
+- The 3263-test suite on `d0c15e360` is green, confirming the issue-497
+  diff itself is not the regression.
