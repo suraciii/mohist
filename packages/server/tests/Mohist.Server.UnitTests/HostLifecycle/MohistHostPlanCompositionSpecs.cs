@@ -50,6 +50,33 @@ public class MohistHostPlanCompositionSpecs
     }
 
     [Fact]
+    public void CreatePrimaryPlan_MissingEnablementUsesProtectedLocalDefaults()
+    {
+        var builder = NewBuilder();
+        builder.Environment.EnvironmentName = MohistHostEnvironment.Testing;
+        var factory = new MohistHostFactory([], builder);
+
+        var plan = factory.CreatePrimaryPlan(new RuntimeEpoch(Start));
+
+        Assert.True(plan.Enabled);
+        Assert.Equal(new OtelListenerIntent("localhost", 4318), plan.ListenerIntent);
+    }
+
+    [Fact]
+    public void CreatePrimaryPlan_ExplicitFalseOmitsCollectorListener()
+    {
+        var builder = NewBuilder();
+        builder.Environment.EnvironmentName = MohistHostEnvironment.Testing;
+        builder.Configuration["Mohist:Otel:Enabled"] = "false";
+        var factory = new MohistHostFactory([], builder);
+
+        var plan = factory.CreatePrimaryPlan(new RuntimeEpoch(Start));
+
+        Assert.False(plan.Enabled);
+        Assert.Null(plan.ListenerIntent);
+    }
+
+    [Fact]
     public void ApplyPlan_RegistersExactlyOneDiagnosticsSamplerPerPlan()
     {
         var primaryPlan = MohistHostPlan.Primary(
@@ -68,6 +95,23 @@ public class MohistHostPlanCompositionSpecs
         MohistHostFactory.ApplyPlan(alternatePlan, alternateBuilder);
         Assert.Single(
             alternateBuilder.Services,
+            d => d.ImplementationType?.FullName?.Contains("OtelDiagnosticsSampler", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void ApplyPlan_DisabledOtelDoesNotRegisterDiagnosticsSampler()
+    {
+        var builder = NewBuilder();
+        builder.Configuration["Mohist:Otel:Enabled"] = "false";
+        var plan = MohistHostPlan.Primary(
+            new RuntimeEpoch(Start),
+            enabled: false,
+            listenerIntent: null);
+
+        MohistHostFactory.ApplyPlan(plan, builder);
+
+        Assert.DoesNotContain(
+            builder.Services,
             d => d.ImplementationType?.FullName?.Contains("OtelDiagnosticsSampler", StringComparison.Ordinal) == true);
     }
 
