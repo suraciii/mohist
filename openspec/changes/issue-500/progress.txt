@@ -92,3 +92,74 @@
 
 ## Verification (T-002)
 - `Mohist.Server.ArchTests` — 37/37 pass (36 prior + 1 new guard).
+
+## T-003 Plan
+
+### Producer contract
+- `internal interface IAgentSessionPersistenceCycleReporter { void Report(string sessionId, AgentSessionPersistenceCycleOutcome outcome); }` in `Mohist.Server.Sessions.Grains`. Outcome enum: `Succeeded | TranscriptFailed | StateFailed`.
+- `internal sealed class NullAgentSessionPersistenceCycleReporter { public static readonly Instance; void Report => no-op }` — production registration (`MohistServiceRegistration.TryAddSingleton<IAgentSessionPersistenceCycleReporter>(NullAgentSessionPersistenceCycleReporter.Instance)`). Performs no persistence, no scheduling, no allocation. The grain always loads it.
+- `internal sealed class AgentSessionPersistenceCycleProbe : IAgentSessionPersistenceCycleReporter` lives in the production assembly (visible via existing `InternalsVisibleTo("Mohist.Server.SpecTests")`). Single global instance per test silo; one TaskCompletionSource per session; Report drains either a pending waiter or queues the outcome so a waiter registered after the cycle completes still observes it. Public surface for tests: `Task<RecordedCycle> AwaitNextCycleAsync(sessionId, timeout)`, `void Reset()`.
+
+### Grain wiring
+- Add `IAgentSessionPersistenceCycleReporter persistenceCycleReporter` constructor parameter to `AgentSessionGrain`.
+- In `PersistCallback` (only), wrap `FlushAsync`:
+  - try { success = await FlushAsync(…) } catch (InvalidOperationException) { outcome = StateFailed; rethrow }
+  - outcome = success ? Succeeded : TranscriptFailed
+  - reporter.Report(SessionId, outcome) — *before* `DisposePersistTimer()`.
+- Reporter must never be invoked from `FlushPendingTranscriptAsync`, `FlushPendingTranscriptEvidenceAsync`, `OnDeactivateAsync`, or `PersistRecoveryAsync`; those are not deferred cycles. Move existing `DisposePersistTimer()` to fire only on `Succeeded` (current code disposes on `success`; both outcomes equivalent).
+- Remove `Task FlushForTestAsync();` from `IAgentSessionGrain` and `public async Task FlushForTestAsync()` from `AgentSessionGrain`.
+
+### SpecTests wiring
+- `AgentSessionGrainFixture` (`packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/AgentSessionGrainFixture.cs`) registers `siloBuilder.Services.AddSingleton<IAgentSessionPersistenceCycleReporter>(Probe)` and exposes `public AgentSessionPersistenceCycleProbe Probe { get; }` plus `Reset()` that clears the probe.
+- `MohistIntegrationFixture.ConfigureWebHost` overrides the production singleton with `services.RemoveAll<IAgentSessionPersistenceCycleReporter>(); services.AddSingleton<AgentSessionPersistenceCycleProbe>(); services.AddSingleton<IAgentSessionPersistenceCycleReporter>(p => p.GetRequiredService<AgentSessionPersistenceCycleProbe>())` and exposes `public AgentSessionPersistenceCycleProbe PersistenceCycleProbe { get; }` resolved from `_factory.Services`.
+- `GrainTestConfig` (the direct test cluster builder used by `IssueGrainEventSaveFailureSpecs`, `WorkflowGrainStateSaveFailureSpecs`, etc.) — those specs do not touch AgentSessionGrain.PersistCallback today, but if they ever did the test cluster must register the probe too. Audit first; only add if needed.
+
+### Helper replacement
+- Drop `AgentSessionPersistenceTestHelper.WaitForTranscriptPartsAsync(...)` (the four overloads that internally call `FlushForTestAsync`). Replace with:
+  - `public static Task<RecordedCycle> AwaitDeferredCycleAsync(this AgentSessionPersistenceCycleProbe probe, FakeTimeProvider timeProvider, string sessionId, TimeSpan? advance = null, TimeSpan? timeout = null)` — advances time (default 250 ms > 200 ms persist timer due-time), awaits the next cycle for `sessionId`, throws if outcome is not `Succeeded`.
+  - `public static async Task AwaitTranscriptPartsAsync(IDbContextFactory<MohistDbContext> dbFactory, string sessionId, int expectedCount, AgentSessionPersistenceCycleProbe probe, FakeTimeProvider timeProvider, TimeSpan? timeout = null)` — calls AwaitDeferredCycleAsync once, then reads the storage count once and asserts ≥ expectedCount. No polling loop, no Task.Delay, no wall-clock wait.
+- Keep `CountTranscriptPartsAsync` as a private helper.
+
+### Migration map (67 `FlushForTestAsync` call sites + 16 `WaitForTranscriptPartsAsync` call sites)
+- `AgentSessionGrainPersistenceSpecs.cs` (12 sites) — uses `Fixture.PersistenceCycleProbe` + `Fixture.TimeProvider`. The existing `DeactivateAsync` helper still relies on grain deactivation; the persistence cycle only fires when data was pending at deactivation, so the existing "deactivation flushes pending state" assertion needs the cycle observation after the deactivation. Rewriting per spec.
+- `AgentSessionGrainInputBoundarySpecs.cs` (2 sites) — fence flushes are synchronous inside `AppendRuntimeEventsAsync` (no cycle); the trailing `FlushForTestAsync` is the timer cycle that finalizes state. Replace with `await Fixture.PersistenceCycleProbe.AwaitNextCycleAsync(Fixture.TimeProvider, sessionId)`.
+- `AgentSessionEventDiscardObservabilitySpecs.cs` (1 site) — same pattern.
+- `AgentSessionRuntimeEventSpecs.cs` (1 direct + 6 helper) — `_fixture.PersistenceCycleProbe.AwaitDeferredCycleAsync(_fixture.TimeProvider, session.Id)` in place of `WaitForTranscriptPartsAsync`.
+- `AgentSessionContextEventPublishingSpecs.cs` (2 sites) — only need the cycle when checking post-save event rows; replace direct flush with `await Fixture.PersistenceCycleProbe.AwaitNextCycleAsync(Fixture.TimeProvider, sessionId)`.
+- `AgentSessionLifecycleDedupSpecs.cs` (10 sites) — same pattern using `_fixture.PersistenceCycleProbe`.
+- `AgentSessionRecoveryApiSpecs.cs` (3 sites) — same.
+- `AgentSessionRecoveryConflictApiSpecs.cs` (2 sites) — same.
+- `GenericAgentSessionFollowupApiSpecs.cs` (3 sites) — same.
+- `GenericAgentSessionCanonicalFollowupApiSpecs.cs` (1 site) — same.
+- `GenericAgentSessionCancelApiSpecs.cs` (1 site) — same.
+- `GenericAgentSessionCancelApiTestSupport.cs` (1 site) — same.
+- `GenericAgentSessionTranscriptAxisSpecs.cs` (4 sites + 4 helper) — same.
+- `AgentSessionLaunchRoutesSpecs.cs` (1 site) — same.
+- `AgentSessionLaunchValidationRoutesSpecs.cs` (2 helper) — same.
+- `AgentJobTerminalDeliverySpecs.cs` (10 sites) — same.
+- `AgentJobGrainSpecs.cs` (3 sites) — same.
+- `AgentJobGrainRoutedLaunchSpecs.cs` (3 sites) — same.
+- `RunnerAgentSessionReconciliationApiSpecs.cs` (1 site) — same.
+- `IssueSessionApiSpecs.cs` (1 site + 3 helper) — same.
+- `AgentActivityObservabilitySpecs.cs` (1 helper) — same.
+- `AgentSessionTranscriptProjectionSpecs.cs` (4 helper) — same.
+- `WorkflowSessionSpecs.cs` (2 helper) — same.
+- `WorkflowSessionTerminalConvergenceSpecs.cs` (1 helper) — same.
+
+### Architecture guards
+- Add to `Mohist.Server.ArchTests/ArchitectureRules.cs`:
+  - `ProductionGrainInterfaces_DoNotExposeFlushForTestAsync` — scans `IAgentSessionGrain` for any method named `FlushForTestAsync` (mirror of the existing T-001 `DeactivateForTestAsync` guard).
+  - `ProductionGrainImplementations_DoNotImplementFlushForTest` — scans `AgentSessionGrain` for any method named `FlushForTestAsync` (mirror of `ProductionGrainImplementations_DoNotImplementDeactivateForTest`).
+
+### Baseline expectations
+- `ArchitectureRules.cs` 41 546 → expect ~42 400; bump 42 000 entry if needed.
+- `AgentSessionPersistenceTestHelper.cs` shrinks (the four overloads collapse to one helper plus the small AwaitDeferredCycleAsync); stays under 24 KB.
+- No spec file should grow past 24 KB; the largest migrated one (`AgentSessionLifecycleDedupSpecs.cs` at ~12 KB currently) only grows by import line plus per-call replacement. Audit after migration; bump individual baselines if needed.
+
+### Verification gates
+- `Mohist.Server.ArchTests` (39/39 expected after two new guards).
+- `Mohist.Server.SpecTests` — all 3 257 tests still pass; the new fixture exposes the probe and the helper exposes `AwaitDeferredCycleAsync`.
+- `Mohist.Server.UnitTests` — unaffected.
+
+### Files NOT changed in T-003
+- The 8 stub-class implementations of `IIssueGrain` / `IAgentSessionGrain` — already cleared in T-001; no remaining `FlushForTestAsync` references in any stub. Verified by grep (`class.*: IAgentSessionGrain`).
