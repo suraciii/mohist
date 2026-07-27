@@ -30,14 +30,24 @@ const controller: IssueDecisionActionController = {
   sendBackBodyValid: () => true,
 }
 
-const artifactListHook = (_issue: number, params: { path?: string } = {}) => ({
-  data: [{ artifactId: params.path ?? 'artifact', workflowRunId: 'run-1', taskRunId: 'task-1', path: params.path ?? '', kind: 'file' as const, recordedAt: '2026-01-01T00:00:00Z' }],
+const artifactListHook = () => ({
+  data: [
+    { artifactId: 'proposal.md', workflowRunId: 'run-1', taskRunId: 'proposal.1', path: 'proposal.md', kind: 'file' as const, recordedAt: '2026-01-01T00:00:00Z' },
+    { artifactId: 'tasks.json', workflowRunId: 'run-1', taskRunId: 'tasks.1', path: 'tasks.json', kind: 'file' as const, recordedAt: '2026-01-01T00:00:00Z' },
+    { artifactId: 'review.md', workflowRunId: 'run-1', taskRunId: 'ai-review.1', path: 'review.md', kind: 'file' as const, recordedAt: '2026-01-01T00:00:00Z' },
+  ],
   isLoading: false,
   error: null,
 })
 
 const artifactContentHook = (_issue: number, artifactId: string | null) => ({
   data: { kind: 'text' as const, content: artifactId === 'tasks.json' ? '{"token":"' + 'x'.repeat(100) + '"}' : `# ${artifactId}`, contentType: artifactId === 'tasks.json' ? 'application/json' : 'text/markdown' },
+  isLoading: false,
+  error: null,
+})
+
+const prefixedArtifactListHook = () => ({
+  data: [{ artifactId: 'artifact-review', workflowRunId: 'run-1', taskRunId: 'ai-review.3', path: 'openspec/changes/issue-455/review.md', kind: 'file' as const, recordedAt: '2026-01-01T00:00:00Z' }],
   isLoading: false,
   error: null,
 })
@@ -118,6 +128,50 @@ describe('ApprovalReviewPackage', () => {
     expect(screen.getByTestId('approval-review-evidence')).toHaveAttribute('id', 'artifacts')
     expect(screen.getByText('No inline evidence is configured for this approval stage.')).toBeInTheDocument()
     expect(document.querySelectorAll('#artifacts')).toHaveLength(1)
+  })
+
+  it('renders approval evidence when the artifact path has a workflow directory prefix', () => {
+    render(
+      <MemoryRouter><ApprovalReviewPackage
+        issueNumber={455}
+        workflowRunId="run-1"
+        approvalStage="check"
+        actions={[]}
+        controller={controller}
+        rationale="Review the check."
+        nextAction="Approve or send back"
+        isNarrowViewport={false}
+        artifactListHook={prefixedArtifactListHook}
+        artifactContentHook={artifactContentHook}
+      /></MemoryRouter>,
+    )
+
+    expect(screen.getByText('artifact-review')).toBeInTheDocument()
+    expect(screen.queryByText('Artifact is missing from this workflow run.')).not.toBeInTheDocument()
+  })
+
+  it('uses current-stage artifact summaries and leaves approval available when evidence is absent', () => {
+    render(
+      <MemoryRouter><ApprovalReviewPackage
+        issueNumber={455}
+        workflowRunId="run-1"
+        approvalStage="check"
+        artifactSummaries={[]}
+        actions={[action('approve', 0)]}
+        controller={controller}
+        rationale="Review the check."
+        nextAction="Approve or send back"
+        isNarrowViewport={false}
+        artifactListHook={artifactListHook}
+        artifactContentHook={artifactContentHook}
+      /></MemoryRouter>,
+    )
+
+    expect(screen.getByText('Artifact is missing from this workflow run.')).toBeInTheDocument()
+    const approveButton = screen.getByTestId('decision-action-approve')
+    expect(approveButton).not.toBeDisabled()
+    fireEvent.click(approveButton)
+    expect(controller.runAction).toHaveBeenCalledWith(expect.objectContaining({ kind: 'approve' }))
   })
 
   it('keeps every secondary descriptor in ordered non-modal access', () => {

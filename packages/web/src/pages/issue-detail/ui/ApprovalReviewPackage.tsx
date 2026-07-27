@@ -6,7 +6,7 @@ import {
   useIssueWorkflowArtifacts,
   type IssueDiffResponse,
   type WorkflowArtifact,
-  type WorkflowArtifactDirectory,
+  type WorkflowArtifactSummary,
 } from '../../../entities/issue'
 import { ArtifactTextContent } from '../../../widgets/issue-workflow'
 import { Button } from '@/shared/ui/components/button'
@@ -117,10 +117,27 @@ export function SendBackFeedbackForm({
   )
 }
 
-type ArtifactValue = WorkflowArtifact | WorkflowArtifactDirectory
+type ArtifactValue = Pick<WorkflowArtifact, 'artifactId' | 'path' | 'kind' | 'recordedAt'> & Partial<Pick<WorkflowArtifact, 'workflowRunId' | 'taskRunId' | 'contentType' | 'size' | 'displayName'>>
 
 function artifactError(error: unknown): string {
   return error instanceof Error ? error.message : 'Failed to load artifact content.'
+}
+
+function artifactFileName(path: string): string {
+  return path.replaceAll('\\', '/').split('/').pop() ?? path
+}
+
+function findApprovalArtifact(
+  artifacts: ReadonlyArray<ArtifactValue> | undefined,
+  path: string,
+  workflowRunId: string | null,
+): ArtifactValue | null {
+  const currentRunArtifacts = artifacts?.filter((item) => !workflowRunId || !item.workflowRunId || item.workflowRunId === workflowRunId) ?? []
+  return currentRunArtifacts.find((item) => item.path === path)
+    ?? currentRunArtifacts
+      .filter((item) => artifactFileName(item.path) === path)
+      .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0]
+    ?? null
 }
 
 function ArtifactEvidence({
@@ -148,17 +165,19 @@ function ArtifactSlot({
   issueNumber,
   path,
   workflowRunId,
+  artifactSummaries,
   artifactsHook = useIssueWorkflowArtifacts,
   contentHook,
 }: {
   issueNumber: number
   path: string
   workflowRunId: string | null
+  artifactSummaries?: ReadonlyArray<WorkflowArtifactSummary>
   artifactsHook?: ArtifactListHook
   contentHook?: ArtifactContentHook
 }) {
-  const query = artifactsHook(issueNumber, { path }, !!workflowRunId, workflowRunId)
-  const artifact = query.data?.find((item) => item.path === path) ?? null
+  const query = artifactsHook(issueNumber, {}, !!workflowRunId && artifactSummaries === undefined, workflowRunId)
+  const artifact = findApprovalArtifact(artifactSummaries ?? query.data, path, workflowRunId)
 
   return (
     <section data-testid={`approval-artifact-${path}`} className="min-w-0 space-y-2">
@@ -269,6 +288,7 @@ export interface ApprovalReviewPackageProps {
   diffData?: IssueDiffResponse
   diffIsLoading?: boolean
   diffError?: unknown
+  artifactSummaries?: ReadonlyArray<WorkflowArtifactSummary>
   artifactListHook?: ArtifactListHook
   artifactContentHook?: ArtifactContentHook
 }
@@ -285,6 +305,7 @@ export function ApprovalReviewPackage({
   diffData,
   diffIsLoading = false,
   diffError,
+  artifactSummaries,
   artifactListHook,
   artifactContentHook,
 }: ApprovalReviewPackageProps) {
@@ -325,12 +346,12 @@ export function ApprovalReviewPackage({
 
   const evidence: ReactNode = approvalStage === 'plan' ? (
     <div id="artifacts" data-testid="approval-review-evidence" className="mt-4 min-w-0 scroll-mt-20 space-y-5">
-      <ArtifactSlot issueNumber={issueNumber} path="proposal.md" workflowRunId={workflowRunId} artifactsHook={artifactListHook} contentHook={artifactContentHook} />
-      <ArtifactSlot issueNumber={issueNumber} path="tasks.json" workflowRunId={workflowRunId} artifactsHook={artifactListHook} contentHook={artifactContentHook} />
+      <ArtifactSlot issueNumber={issueNumber} path="proposal.md" workflowRunId={workflowRunId} artifactSummaries={artifactSummaries} artifactsHook={artifactListHook} contentHook={artifactContentHook} />
+      <ArtifactSlot issueNumber={issueNumber} path="tasks.json" workflowRunId={workflowRunId} artifactSummaries={artifactSummaries} artifactsHook={artifactListHook} contentHook={artifactContentHook} />
     </div>
   ) : approvalStage === 'check' ? (
     <div id="artifacts" data-testid="approval-review-evidence" className="mt-4 min-w-0 scroll-mt-20 space-y-5">
-      <ArtifactSlot issueNumber={issueNumber} path="review.md" workflowRunId={workflowRunId} artifactsHook={artifactListHook} contentHook={artifactContentHook} />
+      <ArtifactSlot issueNumber={issueNumber} path="review.md" workflowRunId={workflowRunId} artifactSummaries={artifactSummaries} artifactsHook={artifactListHook} contentHook={artifactContentHook} />
       <DiffSummary data={diffData} isLoading={diffIsLoading} error={diffError} />
     </div>
   ) : (
