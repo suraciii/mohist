@@ -43,13 +43,13 @@ export async function resolveIssueFields(context: IssueFieldLookupContext): Prom
 
   const result = await commandRunner(
     "mo",
-    ["issue", "show", String(issueNumber), "--project", projectId, "--json", "title,body"],
+    ["issue", "view", String(issueNumber), "--project", projectId, "--json", "title,body"],
     context.workDir,
     context.signal,
   )
   if (result.exitCode !== 0) {
     const detail = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n")
-    throw new Error(`mo issue show ${issueNumber} failed while resolving issue fields${detail ? `: ${detail}` : ""}`)
+    throw new Error(`mo issue view ${issueNumber} failed while resolving issue fields${detail ? `: ${detail}` : ""}`)
   }
 
   return parseIssueFields(result.stdout) ?? { title: "", body: "" }

@@ -188,7 +188,7 @@ describe("mohist/create-github-pr action", () => {
       "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft",
     ])
     expect(moCalls).toEqual([
-      "mo issue show 248 --project proj_1 --json title,body",
+      "mo issue view 248 --project proj_1 --json title,body",
     ])
     expect(output).toMatchObject({
       kind: "create-github-pr",
