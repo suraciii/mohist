@@ -308,7 +308,10 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
 
         Assert.NotNull(plan.IssueNumber);
         using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
-        var assembler = scope.ServiceProvider.GetRequiredService<IssueEventFeedAssembler>();
+        var assembler = new IssueEventFeedAssembler(
+            _fixture.EventStore,
+            null!,
+            scope.ServiceProvider.GetRequiredService<IDbContextFactory<Mohist.Server.Infrastructure.Data.Db.MohistDbContext>>());
         var events = await assembler.ListAsync(projectId, plan.IssueNumber.Value, workflowRunId: null, limit: 200);
 
         var activity = Assert.Single(events, entry => entry.Envelope.Type == "session.activity");
