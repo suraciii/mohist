@@ -43,7 +43,7 @@ export async function resolveIssueFields(context: IssueFieldLookupContext): Prom
 
   const result = await commandRunner(
     "mo",
-    ["issue", "show", String(issueNumber), "--project-id", projectId, "--output", "json"],
+    ["issue", "show", String(issueNumber), "--project", projectId, "--json", "title,body"],
     context.workDir,
     context.signal,
   )

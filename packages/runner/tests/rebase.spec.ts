@@ -289,7 +289,7 @@ describe("mohist/rebase", () => {
     }))
 
     expect(result.error).toBeUndefined()
-    expect(moCalls).toEqual(["mo issue show 217 --project-id proj_1 --output json"])
+    expect(moCalls).toEqual(["mo issue show 217 --project proj_1 --json title,body"])
     expect(calls).toContain("commit -m Use issue title for squash")
   })
 
@@ -326,7 +326,7 @@ describe("mohist/rebase", () => {
     expect(calls).not.toContain("fetch origin master")
     expect(calls).not.toContain("rebase origin/master")
     expect(calls).not.toContain("commit -m Use issue title for squash")
-    expect(moCalls).toEqual(["mo issue show 217 --project-id proj_1 --output json"])
+    expect(moCalls).toEqual(["mo issue show 217 --project proj_1 --json title,body"])
   })
 
   it("SquashOption_UnsupportedMessageFrom_ReturnsStructuredFailure", async () => {
