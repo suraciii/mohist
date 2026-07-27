@@ -10,3 +10,10 @@
 - Updated defaults, host-plan binding, Compose exposure, product/self-hosting docs, and the observability current-gap statement. Added absent-setting and explicit opt-out host-plan coverage plus absent-setting SDK registration coverage.
 - Added a runtime status assertion that a default-enabled `OtelOptions` snapshot is never `off`.
 - Serial focused unit/spec runs pass. The first full `npm test` had one non-reproducible Server spec failure after 3,246 passes; a complete serial spec rerun and the next full `npm test` both passed. Final full run passed all .NET, web, and runner tests/checks.
+
+## Fix-ci re-verification
+
+- Worktree started clean; HEAD is `0190ceaeb T-001 enable protected observability by default`.
+- First reproduction of `npm test` failed once at `packages/web/src/app/App.test.tsx:268` (`findByTestId('insights-title')` timed out with empty DOM `<body><div/></body>`), 388/389 web files passed (5132 passed, 1 failed, 1 skipped).
+- Focused rerun of the same file in isolation passed 15/15; three full `vitest run` passes and the final `npm test` all pass with 389/389 web files (5133 passed, 1 skipped) plus 120/120 runner files (1423 passed) and 6408 .NET tests. `.NET` build clean, worktree stays clean.
+- Root cause: non-reproducible flake in the shared-worker `jsdom` project (vitest `isolate: false`, see `packages/web/vite.config.ts:41`). The flaky case is the lazy InsightsPage module never resolving before `asyncUtilTimeout` (10s) when the module cache and MSW handler reset races during a full-suite run. No code or test change is needed: targeted fixes would either weaken the assertion or fight the shared-worker design, and the failure does not recur across three clean full runs.
