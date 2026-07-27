@@ -33,7 +33,7 @@ export async function scriptAction(inputs: JsonObject, host: ActionHost): Promis
     const signal = timeoutMs ? timeoutSignal(host.signal, timeoutMs) : host.signal
     const result = await runCommand(shell, [file], host.workDir, signal, undefined, logLineOptions(host, "action:script"))
     if (result.exitCode !== 0) {
-      return fail(result.status === "timeout" ? "timeout" : "script-failed", `Script failed: ${firstLine(run)}${result.stderr.trim() ? `: ${trim(result.stderr)}` : ""}`, { exitCode: result.exitCode })
+      return fail(result.status === "timeout" ? "timeout" : "script-failed", scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr), { exitCode: result.exitCode })
     }
     const output: JsonObject = { kind: "script", run, shell, exitCode: result.exitCode, stdout: trim(result.stdout), stderr: trim(result.stderr) }
     return succeed(output, { exitCode: result.exitCode })
@@ -76,6 +76,27 @@ function isPromiseVerdict(value: string) {
 
 function firstLine(value: string) {
   return value.replace(/\r\n/g, "\n").trim().split("\n")[0]
+}
+
+const MAX_FAILURE_STREAM_CHARS = 10_000
+
+export function scriptFailureMessage(run: string, exitCode: number, stdout: string, stderr: string) {
+  const streams = [
+    failureStream("stdout", stdout),
+    failureStream("stderr", stderr),
+  ].filter((stream): stream is string => stream !== null)
+  return [`Script failed with exit code ${exitCode}: ${firstLine(run)}`, ...streams].join("\n")
+}
+
+function failureStream(name: string, value: string) {
+  const content = value.trim()
+  return content ? `${name}:\n${tail(content, MAX_FAILURE_STREAM_CHARS)}` : null
+}
+
+function tail(value: string, limit: number) {
+  if (value.length <= limit) return value
+  const marker = "[truncated]\n"
+  return marker + value.slice(-(limit - marker.length))
 }
 
 function trim(value: string) {
