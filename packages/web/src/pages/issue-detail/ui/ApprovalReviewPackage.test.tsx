@@ -52,6 +52,10 @@ const prefixedArtifactListHook = () => ({
   error: null,
 })
 
+function enterApprovalOperator(value = 'Ada') {
+  fireEvent.change(screen.getByTestId('approval-operator-input'), { target: { value } })
+}
+
 describe('ApprovalReviewPackage', () => {
   beforeEach(() => vi.clearAllMocks())
 
@@ -85,12 +89,17 @@ describe('ApprovalReviewPackage', () => {
     expect(screen.queryByTestId('mobile-action-sheet-launcher')).not.toBeInTheDocument()
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
 
+    expect(screen.getByTestId('approval-mobile-send-back')).toBeDisabled()
+    enterApprovalOperator()
     fireEvent.click(screen.getByTestId('approval-mobile-send-back'))
     expect(screen.getByTestId('send-back-feedback-textarea')).toHaveFocus()
     fireEvent.click(screen.getByRole('radio', { name: 'Scope' }))
     fireEvent.change(screen.getByTestId('send-back-feedback-textarea'), { target: { value: 'Please narrow it.' } })
     fireEvent.click(screen.getByTestId('send-back-feedback-submit'))
-    expect(controller.runAction).toHaveBeenCalledWith(expect.objectContaining({ kind: 'send-back' }), { sendBackBody: 'Category: Scope\n\nPlease narrow it.' })
+    expect(controller.runAction).toHaveBeenCalledWith(expect.objectContaining({ kind: 'send-back' }), {
+      approvalOperator: 'Ada',
+      sendBackBody: 'Category: Scope\n\nPlease narrow it.',
+    })
   })
 
   it('keeps the artifacts destination mounted while approval evidence is loading or unavailable', () => {
@@ -169,9 +178,11 @@ describe('ApprovalReviewPackage', () => {
 
     expect(screen.getByText('Artifact is missing from this workflow run.')).toBeInTheDocument()
     const approveButton = screen.getByTestId('decision-action-approve')
+    expect(approveButton).toBeDisabled()
+    enterApprovalOperator('  Ada  ')
     expect(approveButton).not.toBeDisabled()
     fireEvent.click(approveButton)
-    expect(controller.runAction).toHaveBeenCalledWith(expect.objectContaining({ kind: 'approve' }))
+    expect(controller.runAction).toHaveBeenCalledWith(expect.objectContaining({ kind: 'approve' }), { approvalOperator: 'Ada' })
   })
 
   it('keeps every secondary descriptor in ordered non-modal access', () => {
@@ -213,6 +224,8 @@ describe('ApprovalReviewPackage', () => {
       /></MemoryRouter>,
     )
 
+    expect(screen.queryByTestId('decision-action-approve-shortcut')).not.toBeInTheDocument()
+    enterApprovalOperator()
     expect(screen.getByTestId('decision-action-approve-shortcut')).toHaveTextContent('a')
     expect(screen.getByTestId('decision-action-send-back-shortcut')).toHaveTextContent('m')
 
@@ -253,6 +266,7 @@ describe('ApprovalReviewPackage', () => {
         artifactContentHook={artifactContentHook}
       /></MemoryRouter>,
     )
+    enterApprovalOperator()
     fireEvent.click(screen.getByTestId('approval-mobile-send-back'))
     fireEvent.click(screen.getByRole('radio', { name: 'Direction' }))
     const textarea = screen.getByTestId('send-back-feedback-textarea')

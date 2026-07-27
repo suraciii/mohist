@@ -46,6 +46,8 @@ agent 的每个决定必须与人的可区分，这是 owner 回看历史能接�
 - 审批决议：增加声明式操作者 `decidedBy`，与 comment author 同模型（声明而非
   认证）。`mo run approve` / `mo run reject` 增加 `--author`；审批决议事件与
   读取模型携带该字段。历史里「这道门是谁放的」必须可回答。
+- Web UI 的每个审批入口在 approve / send back 前要求填写同一个声明式操作者；
+  空值时不提交决议，也不以 `web`、`owner` 或其它合成值代替。
 
 ### Not doing
 
@@ -57,6 +59,6 @@ agent 的每个决定必须与人的可区分，这是 owner 回看历史能接�
 
 ## Status
 
-全部未实装：`agent.job.failed` 事件与通知种类、审批 `decidedBy` 均为新增；
-响应保证 1–3 描述的是现有启动管线与领域命令的既有行为，本文把它们固定为
-契约。实施 issue 待创建。
+`agent.job.failed` 事件与通知种类、审批 `decidedBy` 及各产品入口的操作者声明
+均已实装。响应保证 1–3 描述的是启动管线与领域命令的既有行为，本文把它们
+固定为契约。

@@ -129,11 +129,11 @@ Plan 完成后，issue 会停在 **awaiting approval** 状态，表示 workflow 
 - `tasks.json` — 接下来 Build 阶段会执行的步骤
 - `self-review.md` — Inline Agent 自己的 review
 
-读一遍，觉得合理就点 **Approve**。觉得有问题就 **Reject**（Inline Agent 会重新 plan）。这一步处理的是 workflow 的审批点；动作可以来自 Web UI、CLI、Mohist Agent 或其它自动化。
+读一遍，在 **Approval operator** 填写要记录到审批历史的名字；觉得合理就点 **Approve**，觉得有问题就 **Reject**（Inline Agent 会重新 plan）。这一步处理的是 workflow 的审批点；动作可以来自 Web UI、CLI、Mohist Agent 或其它自动化。
 
 ```bash
-mo run approve --issue 1                         # 批准
-mo run reject --issue 1 --message "需要修改的内容"  # 打回
+mo run approve --issue 1 --author "Ada"                         # 批准
+mo run reject --issue 1 --author "Ada" --message "需要修改的内容"  # 打回
 ```
 
 ## 10. 观察 Build / Check / Integrate
