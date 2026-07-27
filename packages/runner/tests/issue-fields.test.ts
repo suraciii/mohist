@@ -6,7 +6,7 @@ afterEach(() => {
 })
 
 describe("issue field source parsing", () => {
-  it("reads title and body from mo issue show envelope output", () => {
+  it("reads title and body from mo issue view envelope output", () => {
     const json = JSON.stringify({
       success: true,
       data: {
@@ -26,7 +26,7 @@ describe("issue field source parsing", () => {
     expect(parseIssueField(json, "issue.body")).toBe("Direct body")
   })
 
-  it("uses the current mo issue show command surface", async () => {
+  it("uses the current mo issue view command surface", async () => {
     let command: string[] = []
     setIssueFieldCommandRunnerForTest(async (cmd, args) => {
       command = [cmd, ...args]
@@ -46,7 +46,7 @@ describe("issue field source parsing", () => {
     expect(command).toEqual([
       "mo",
       "issue",
-      "show",
+      "view",
       "248",
       "--project",
       "proj_1",

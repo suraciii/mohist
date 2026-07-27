@@ -289,7 +289,7 @@ describe("mohist/rebase", () => {
     }))
 
     expect(result.error).toBeUndefined()
-    expect(moCalls).toEqual(["mo issue show 217 --project proj_1 --json title,body"])
+    expect(moCalls).toEqual(["mo issue view 217 --project proj_1 --json title,body"])
     expect(calls).toContain("commit -m Use issue title for squash")
   })
 
@@ -318,7 +318,7 @@ describe("mohist/rebase", () => {
     }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "invalid-input" })
-    expect(result.error?.message).toContain("mo issue show 217 failed")
+    expect(result.error?.message).toContain("mo issue view 217 failed")
     expect(calls).toEqual([
       "rev-parse --git-path rebase-merge",
       "rev-parse --git-path rebase-apply",
@@ -326,7 +326,7 @@ describe("mohist/rebase", () => {
     expect(calls).not.toContain("fetch origin master")
     expect(calls).not.toContain("rebase origin/master")
     expect(calls).not.toContain("commit -m Use issue title for squash")
-    expect(moCalls).toEqual(["mo issue show 217 --project proj_1 --json title,body"])
+    expect(moCalls).toEqual(["mo issue view 217 --project proj_1 --json title,body"])
   })
 
   it("SquashOption_UnsupportedMessageFrom_ReturnsStructuredFailure", async () => {
