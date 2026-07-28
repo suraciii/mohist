@@ -75,12 +75,14 @@ internal static class EpicCommands
     {
         var cmd = new Command("create", "Create a new epic");
         var titleArg = new Argument<string>("title") { Description = "Epic title" };
-        var descriptionOpt = new Option<string?>("--description") { Description = "Epic description" };
+        var descriptionOpt = new Option<string?>("--description") { Description = "Epic description (mutually exclusive with --description-file)" };
+        var descriptionFileOpt = new Option<string?>("--description-file") { Description = "Read epic description from a UTF-8 file path, or - for stdin (mutually exclusive with --description)" };
         var priorityOpt = new Option<string?>("--priority", "-p") { Description = "Epic priority (p0|p1|p2|p3)" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(titleArg);
         cmd.Options.Add(descriptionOpt);
+        cmd.Options.Add(descriptionFileOpt);
         cmd.Options.Add(priorityOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(jsonOpt);
@@ -88,6 +90,7 @@ internal static class EpicCommands
         {
             var title = ctx.GetValue(titleArg);
             var description = ctx.GetValue(descriptionOpt);
+            var descriptionFile = ctx.GetValue(descriptionFileOpt);
             var priority = ctx.GetValue(priorityOpt);
             var project = ctx.GetValue(projectOpt);
             var selection = Selection(ctx, jsonOpt);
@@ -102,6 +105,19 @@ internal static class EpicCommands
                 }
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
+                if (description is not null || !string.IsNullOrWhiteSpace(descriptionFile))
+                {
+                    var resolvedDescription = await BodyInputResolver.ResolveAsync(
+                        description,
+                        descriptionFile,
+                        new BodyInputResolver.SourceFlags("--description", "--description-file", "epic description"),
+                        api.FileSystem,
+                        api.StandardInput,
+                        TextWriter.Null);
+                    if (resolvedDescription is BodyInputResolver.Result.Failure failure)
+                        return CommandHelpHook.RenderUsageFailure(ctx, api.Error, failure.Message);
+                    description = ((BodyInputResolver.Result.Success)resolvedDescription).Body;
+                }
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
@@ -154,13 +170,15 @@ internal static class EpicCommands
         var cmd = new Command("edit", "Update an epic");
         var numberArg = NumberArg();
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
-        var descriptionOpt = new Option<string?>("--description") { Description = "New description" };
+        var descriptionOpt = new Option<string?>("--description") { Description = "New description (mutually exclusive with --description-file)" };
+        var descriptionFileOpt = new Option<string?>("--description-file") { Description = "Read new epic description from a UTF-8 file path, or - for stdin (mutually exclusive with --description)" };
         var priorityOpt = new Option<string?>("--priority", "-p") { Description = "New priority (p0|p1|p2|p3)" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(titleOpt);
         cmd.Options.Add(descriptionOpt);
+        cmd.Options.Add(descriptionFileOpt);
         cmd.Options.Add(priorityOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(jsonOpt);
@@ -169,6 +187,7 @@ internal static class EpicCommands
             var number = ctx.GetValue(numberArg);
             var title = ctx.GetValue(titleOpt);
             var description = ctx.GetValue(descriptionOpt);
+            var descriptionFile = ctx.GetValue(descriptionFileOpt);
             var priority = ctx.GetValue(priorityOpt);
             var project = ctx.GetValue(projectOpt);
             var selection = Selection(ctx, jsonOpt);
@@ -178,6 +197,19 @@ internal static class EpicCommands
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
+                if (description is not null || !string.IsNullOrWhiteSpace(descriptionFile))
+                {
+                    var resolvedDescription = await BodyInputResolver.ResolveAsync(
+                        description,
+                        descriptionFile,
+                        new BodyInputResolver.SourceFlags("--description", "--description-file", "epic description"),
+                        api.FileSystem,
+                        api.StandardInput,
+                        TextWriter.Null);
+                    if (resolvedDescription is BodyInputResolver.Result.Failure failure)
+                        return CommandHelpHook.RenderUsageFailure(ctx, api.Error, failure.Message);
+                    description = ((BodyInputResolver.Result.Success)resolvedDescription).Body;
+                }
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
