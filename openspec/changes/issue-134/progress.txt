@@ -76,3 +76,4 @@ T-004: Web and documentation surfaces.
 - Generic follow-ups resolve Skills before claiming an operation or recording `session.input`; Pi follow-ups now apply captured model and variant before prompt or steer submission.
 - Empty resolved Skills are omitted from OpenCode runtime requests.
 - Verification after the review fixes: `npm test` and `npm run build` both pass. Runner coverage now verifies dispatch-only Agent definition precedence for Pi workflow work and Pi follow-up model/variant application.
+- Strict launch binding now treats non-string `prompt` values as malformed input rather than throwing from `JsonElement.GetString`; the Agent launch validation specs verify a 400 response without a created Session or AgentJob.

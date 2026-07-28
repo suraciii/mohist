@@ -217,7 +217,9 @@ public sealed record AgentSessionLaunchBody(
 
         var prompt = raw.TryGetProperty("prompt", out var promptElement)
                      && promptElement.ValueKind != JsonValueKind.Null
-            ? promptElement.GetString()
+            ? promptElement.ValueKind == JsonValueKind.String
+                ? promptElement.GetString()
+                : throw new JsonException("prompt must be a string")
             : null;
 
         AgentSessionLaunchContextRef? ctx = null;
