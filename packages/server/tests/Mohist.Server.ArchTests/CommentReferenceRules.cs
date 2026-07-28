@@ -128,7 +128,7 @@ public sealed class CommentReferenceRules
     }
 
     [Fact]
-    public void Ratchet_PassesWhenCurrentCountShrinksBelowBaseline()
+    public void Ratchet_FailsWhenCurrentCountShrinksBelowBaselineWithoutBaselineUpdate()
     {
         var baseline = new Dictionary<string, int>(StringComparer.Ordinal)
         {
@@ -141,7 +141,9 @@ public sealed class CommentReferenceRules
 
         var violations = Ratchet(baseline, currentCounts);
 
-        Assert.Empty(violations);
+        var message = Assert.Single(violations);
+        Assert.Contains("shrunk from baseline 4 to 2", message, StringComparison.Ordinal);
+        Assert.Contains("must be updated", message, StringComparison.Ordinal);
     }
 
     internal static IReadOnlyList<string> Ratchet(
@@ -180,6 +182,14 @@ public sealed class CommentReferenceRules
             {
                 violations.Add(
                     $"{path} has 0 comment-reference offender(s) and must be removed from the baseline");
+                continue;
+            }
+
+            if (currentCount < baselineCount)
+            {
+                violations.Add(
+                    $"{path} shrunk from baseline {baselineCount} to {currentCount} comment-reference offender(s) "
+                    + "and the baseline count must be updated");
             }
         }
 

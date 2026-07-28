@@ -320,3 +320,15 @@ Tests:
 
 ArchTests:
 - `packages/server/tests/Mohist.Server.ArchTests/spec-file-size-baseline.json` — `EventDispatcherSpecs.cs` entry raised from 41204 to 43029 bytes to accommodate the legitimate rewrite
+
+## Review fix — comment-reference baseline partial shrink
+
+### Decision
+- A `path -> count` baseline is only a ratchet when every count stays exact. `CommentReferenceRules.Ratchet` now rejects a nonzero current count below its baseline and requires the baseline count to be updated in the same change. A zero count remains a separate case that requires removing the baseline entry entirely.
+
+### Test strategy
+- `Ratchet_FailsWhenCurrentCountShrinksBelowBaselineWithoutBaselineUpdate` verifies that a baseline count of 4 and a current count of 2 fails with an actionable stale-baseline message. Equal counts still pass; growth, missing entries, missing files, and zero-count stale entries retain their existing coverage.
+
+### Verification
+- `dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj` — 50/50 passed.
+- `dotnet build Mohist.sln` — passed with 0 warnings and 0 errors.
