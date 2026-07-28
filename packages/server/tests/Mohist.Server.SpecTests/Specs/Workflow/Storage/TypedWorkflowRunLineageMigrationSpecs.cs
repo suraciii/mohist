@@ -102,6 +102,8 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
     [InlineData("+5", 5)]
     [InlineData("042", 42)]
     [InlineData(" 42 ", 42)]
+    [InlineData("\t42\t", 42)]
+    [InlineData("\r\n42\r\n", 42)]
     public async Task Up_MigratesLegacyIssueNumberAcceptedByPreviousReader(string issueNumber, int expectedIssueNumber)
     {
         await using var database = TestSqliteDatabase.CreateEmpty();
@@ -141,5 +143,5 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
     }
 
     private static string LegacyAnnotationState(string issueNumber) =>
-        "{\"id\":\"wr_malformed\",\"metadata\":{\"createdAt\":\"2026-01-01T00:00:00Z\",\"annotations\":{\"projectId\":\"proj_1\",\"issueNumber\":\"" + issueNumber + "\"}},\"status\":\"Running\",\"stages\":[]}";
+        "{\"id\":\"wr_malformed\",\"metadata\":{\"createdAt\":\"2026-01-01T00:00:00Z\",\"annotations\":{\"projectId\":\"proj_1\",\"issueNumber\":" + JsonSerializer.Serialize(issueNumber) + "}},\"status\":\"Running\",\"stages\":[]}";
 }
