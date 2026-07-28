@@ -1,0 +1,215 @@
+{
+  "project": "mohist-local",
+  "description": "Deliver the Owner-only Slack DM vertical for a Mohist Agent: install a stateless mohist-slack adapter, create/configure/claim a Connection, dispatch one DM task through the Agent API, and receive the result in the same conversation — with provider inbox/outbox reliability, encrypted credentials, and the four independent Connection facts (Setup/Desired/health/Readiness) never collapsed.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Encrypted credential secret store",
+      "spec": "specs/slack-connection-setup/spec.md#Credentials are entered and stored only through protected channels",
+      "description": "Introduce the repo's first encryption primitive: an `ISecretStore` abstraction backed by `AesGcmSecretStore` (`System.Security.Cryptography.AesGCM`) with a master key file at `MOHIST_SECRET_KEY_PATH` / `~/.mohist/slack-master.key` (32 random bytes, `0600`, non-symlink, auto-generated, mirroring `OperatorCredential`'s file discipline). Ciphertext blobs (nonce + tag + ciphertext) persist in a new `ConnectionSecrets` table keyed by `(ConnectionId, Kind ∈ {appToken, botToken})` via an EF migration. This is the seam later features (Runner creds, webhook secrets) reuse.",
+      "acceptanceCriteria": [
+        "ISecretStore exposes Store/Load/Delete; AesGcmSecretStore round-trips plaintext and fails cleanly on a wrong/missing master key.",
+        "The master key file is auto-created with 0600 (non-Windows), symlinks are rejected, and a world-readable file is refused on load.",
+        "Stored tokens never appear in logs, transcripts, or config reads (redaction mirrors ConfigRoutes.cs:99-104 for any *token field).",
+        "The ConnectionSecrets EF migration applies cleanly on top of the current schema.",
+        "Server tests cover round-trip, wrong-key failure, file-permission/symlink rejection, and delete using in-memory SQLite with fakes only; npm test passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ISecretStore + AesGcmSecretStore + master key file discipline + ConnectionSecrets table and EF migration.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D2. This task delivers only the encrypted secret-store seam (no Connection consumer yet); T-003 and T-007 consume it. Closes the spec's '由 Server 加密保存' gap (slack-agent-connection.md:134) that the existing plaintext OperatorCredential does not satisfy."
+    },
+    {
+      "id": "T-002",
+      "title": "AgentConnection aggregate and lifecycle",
+      "spec": "specs/agent-connection/spec.md#A Connection binds one Agent, one workspace, and one Bot identity immutably",
+      "description": "Add the AgentConnection aggregate in the Agent domain: a column-per-field `AgentConnection` domain + `AgentConnectionRow` + scoped `AgentConnectionStore` + `AgentQuerier` (mirroring RoutingRule/WatchEntry, not a grain). Binding (`AgentId, WorkspaceTeamId, AppId, BotUserId`) is immutable after create; the four independent facts (`SetupProgress, DesiredState, ConnectionHealth, AgentReadiness`) are real queryable columns; `OwnerSlackUserId` is set by claim. DbContext config adds a unique index on `(ProjectId, AgentId, WorkspaceTeamId)` where `DeletedAt IS NULL` (at most one non-deleted Connection per Agent+workspace). Deliver create/list/view/edit/delete; deletion cascades provider records but preserves the Agent and accepted work.",
+      "acceptanceCriteria": [
+        "create binds one active Agent + one workspace + one Bot identity immutably; an archived Agent is rejected and no Connection is created.",
+        "A second non-deleted Connection for the same (Project, Agent, workspace) is refused without overwriting the existing one; distinct workspaces allow coexistence.",
+        "The Connection stores no Instructions/Runtime/Model/Skills/concurrency — only binding, access policy, lifecycle, and the four facts.",
+        "SetupProgress, DesiredState, ConnectionHealth, and AgentReadiness persist and read as four independent facts; none collapses into a single Connected value (a healthy Connection with a not-ready Agent reads as such).",
+        "delete removes provider integration records (credentials/inbox/mapping/outbox) but preserves the Agent, its Jobs, Sessions, and accepted inputs; the Agent remains launchable from Web/CLI unchanged.",
+        "Server spec tests cover binding/immutability/uniqueness/four-fact-independence/deletion using migrated in-memory SQLite + fakes; npm test passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentConnection domain + AgentConnectionRow + AgentConnectionStore + AgentQuerier + DbContext mapping + unique index + create/list/view/edit/delete + EF migration.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D1. Follows the RoutingRule/WatchEntry column-per-field pattern (MohistDbContext.cs:399-440), not the Agent JSON-blob pattern, because binding and the four facts must be individually indexed/queryable and (Agent,workspace) uniqueness needs real columns. Credentials/inbox/outbox are separate Server-infrastructure aggregates keyed by ConnectionId (T-001, T-004)."
+    },
+    {
+      "id": "T-003",
+      "title": "Slack API client and Setup identity verification",
+      "spec": "specs/slack-connection-setup/spec.md#Identity is verified before owner claim becomes available",
+      "description": "Add `ISlackApiClient` as a typed HttpClient (auth.test, bots.info, users.info, conversations.info, users.list) registered via `AddHttpClient<ISlackApiClient, SlackApiClient>()` with a recording fake (mirroring IHermesWebhookClient). Implement Setup identity verification: load the Bot token via ISecretStore, call auth.test/bots.info/conversations.info, verify workspace/App/Bot consistency and required scopes, and drive the SetupProgress state machine — CreateAppCredentials → WaitingForSlackService when the adapter is offline → FixSlackSetup on token invalid / App-Bot mismatch / missing scope → ClaimOwner on success. Completed steps are preserved across adapter offline, token invalid, or Agent-not-ready.",
+      "acceptanceCriteria": [
+        "ISlackApiClient is registered as a typed HttpClient with a recording fake usable by tests.",
+        "Verification advances SetupProgress to ClaimOwner only when workspace/App/Bot are consistent and required scopes are present; any inconsistency yields FixSlackSetup with a confirmed, actionable reason.",
+        "When mohist-slack is offline, the Connection stays in WaitingForSlackService and retains saved credentials and prior confirmed steps.",
+        "Verification loads the Bot token via ISecretStore and never logs it; SetupProgress advances independently of Agent Readiness.",
+        "A Connection whose identity cannot be verified does not present the claim action and never invites a user to wait for an unreceivable DM.",
+        "Server tests use a fake ISlackApiClient and injectable TimeProvider with no real network; npm test passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ISlackApiClient + SlackApiClient + recording fake; Setup identity verification driving the SetupProgress state machine.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Implements design D3 (Server-side read/verify half). The Server is the identity authority; the adapter (T-009) only owns event/message transport and never makes identity/access decisions."
+    },
+    {
+      "id": "T-004",
+      "title": "Provider inbox and outbound outbox",
+      "spec": "specs/slack-provider-reliability/spec.md#The provider inbox deduplicates by stable Slack message identity and is bounded",
+      "description": "Add Server-infrastructure provider reliability (keyed by ConnectionId, outside Agent/Session domains): `SlackProviderInboxStore` + `SlackProviderInboxRow` with a unique index on `(ConnectionId, SlackMessageIdentity)` for dedup-on-insert (InboxStore precedent) and bounded per-connection capacity (refuse on overflow, never evict accepted); and `SlackOutboxStore` + `SlackOutboxRow` with Kind {ReplaceableProgress, TerminalResult, ExplicitFailure, UserAction} and State {Pending, Claimed, Delivered, DeliveryUncertain, DeadLettered}, where replaceable progress is merged to the latest before claim and terminal/failure/user-action rows are never silently dropped. Add a cluster-singleton `slack-outbox-dispatcher` Orleans reminder (EventDispatcherGrain precedent) with backoff retry + dead-letter (IDeadLetterStore) + Delivery uncertain surfacing. Overflow flips ConnectionHealth to Degraded(Backpressured) and stops ingress. Survive adapter/Server restart; never override AgentJob/AgentTurn result authority.",
+      "acceptanceCriteria": [
+        "Duplicate Slack message identity resolves to one inbox entry and produces no second SessionInput; capacity overflow refuses new ingress without dropping any accepted event.",
+        "Replaceable progress entries are merged to the latest; terminal results, explicit failures, and user-action messages are never silently dropped.",
+        "Outbox overflow moves ConnectionHealth to Degraded(Backpressured), stops accepting new Slack input, and lets already-accepted execution continue under Mohist authority.",
+        "Unconfirmed delivery is reported as Delivery uncertain and is not blindly reduplicated; manual resend warns of possible duplication.",
+        "After adapter or Server restart, accepted inbox events remain accepted and unsent outbox entries remain pending (no loss or duplication from the restart).",
+        "Slack delivery success or failure never changes an AgentJob or AgentTurn result; the Server remains the sole result authority.",
+        "Server tests use fake storage and injectable TimeProvider for backoff/retry, no real network; npm test passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SlackProviderInboxStore/Row + SlackOutboxStore/Row + slack-outbox-dispatcher reminder + dead-letter integration + Backpressured/Delivery-uncertain surfacing + EF migration.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Implements design D6. Reuses the InboxStore dedup-on-insert idiom and the EventDispatcherGrain + IDeadLetterStore delivery idiom so the repo keeps one reliability pattern. Inbox (protects Server) and outbox (protects Slack / Backpressured) are split because ingress and egress have different capacity, ordering, and failure semantics."
+    },
+    {
+      "id": "T-005",
+      "title": "Owner claim flow",
+      "spec": "specs/slack-connection-setup/spec.md#Owner claim uses a short-lived single-use code validated against workspace membership",
+      "description": "Implement owner claim: `claim-owner` generates a short-lived (default 10 min, injectable TimeProvider) single-use code and stores only its hash + expiry + UsedAt; regeneration supersedes and immediately invalidates any prior code. On an inbound DM claim envelope, look up the unused+unexpired code, call users.info via ISlackApiClient, and accept the claim only if the sender is a current regular (non-guest, non-bot, non-deactivated) member of the bound workspace and of no other workspace; on success set OwnerSlackUserId, advance SetupProgress to Complete, and mark the code used. After claim, DM access is owner-only: a non-owner DM is rejected and creates no Agent resources.",
+      "acceptanceCriteria": [
+        "The claim code is stored hashed (not plaintext); an expired, used, or superseded code is rejected.",
+        "Regenerating a code immediately invalidates the prior code.",
+        "Only a current regular workspace member can claim; guests, bots, deactivated members, and members of other workspaces are rejected and establish no Owner.",
+        "A successful claim establishes exactly one Owner and advances SetupProgress to Complete.",
+        "After claim, a non-owner DM is rejected with an explicit denial and creates no AgentJob, AgentSession, SessionInput, AgentTurn, or inbox entry.",
+        "Server tests use a fake ISlackApiClient and injectable TimeProvider for code expiry; npm test passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Hashed single-use claim code generation/validation + users.info membership check + Owner establishment + owner-only DM gating.",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Implements design D7. The code is a single-use ownership bearer, not a credential. Membership is validated Server-side via users.info (D3), never by display name/message text and never delegated to the adapter."
+    },
+    {
+      "id": "T-006",
+      "title": "Connection dispatch through the Agent API",
+      "spec": "specs/slack-dm-dispatch/spec.md#A DM task dispatches one launch through the Agent API",
+      "description": "Add `IAgentLauncher.LaunchConnectionAsync(agent, prompt, ConnectionLaunchOrigin)` mirroring LaunchMentionAsync; derive the idempotency key as `KeyFor(projectId, \"slack:{teamId}:{conversationId}:{messageTs}\")`; stamp `source-kind=agent-connection` plus connection-id/slack-user-id/slack-conversation-id audit labels on the Session; carry a ConnectionOrigin field through the existing coordinator envelope (no new coordinator grain). Add the three adapter HTTP routes authenticated by the operator token: POST .../ingress (durable inbox write before ack), POST .../dispatch (owner-only gating → LaunchConnectionAsync → Bot replies accepted/queued/rejected), POST .../deliveries/claim + /ack (outbox drain). Redelivery resolves to the same SessionInput; the final result returns to the same DM conversation via the outbox. This issue dispatches one task per DM with no continuation semantics.",
+      "acceptanceCriteria": [
+        "One owner DM task creates exactly one AgentJob, one AgentSession, one first SessionInput, and one first AgentTurn via LaunchConnectionAsync; the idempotency key is derived from (team, conversation, messageTs).",
+        "Slack redelivery of the same message — including after adapter or Server restart — resolves to the same SessionInput and creates no second job, input, or turn.",
+        "A bare mention without a task creates no work and the Bot asks the Owner to supply a task; the Bot replies accepted, queued, or an explicit rejection with an actionable reason.",
+        "The terminal result is delivered to the same DM conversation; an unconfirmable result is surfaced honestly rather than fabricated.",
+        "A second DM task dispatches an independent launch; this issue makes no continuation, queue-merge, or current-Session commitment.",
+        "Adapter routes are authenticated by the operator token and resolve the Connection before any dispatch.",
+        "Server tests use fake dispatch, fake storage, and injectable TimeProvider with no real network; npm test passes."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "LaunchConnectionAsync + source-kind=agent-connection labels + coordinator ConnectionOrigin + ingress/dispatch/deliveries HTTP routes.",
+      "dependsOn": ["T-002", "T-003", "T-004", "T-005"],
+      "passes": false,
+      "notes": "Implements design D4 + D5. Reuses AgentLaunchCoordinatorGrain unchanged — the connection-scoped key inherits #512's redelivery/restart idempotency. Precedent for an origin-encoded launch method is LaunchMentionAsync (IAgentLauncher.cs:119). source-kind=agent-connection distinguishes Slack sessions for audit and for the later DM-conversation feature."
+    },
+    {
+      "id": "T-007",
+      "title": "CLI connection command group",
+      "spec": "specs/slack-connection-setup/spec.md#A CLI connection subgroup manages the Connection lifecycle",
+      "description": "Add the `mo agent connection` subgroup: create/configure/claim-owner/view/list/edit/delete (rotate-credentials/transfer-owner/enable/disable are deliberately absent). `create` outputs the Connection id, Slack identity preview, and prefilled Create-in-Slack reference without requiring the adapter online. `configure` reads credentials via hidden terminal input or `--credentials-file` (UTF-8 JSON {appToken,botToken}, validated 0600 + non-symlink), and refuses command-line token arguments. `claim-owner` generates and prints the one-time code once. Commands target the T-002/T-003/T-005 server endpoints.",
+      "acceptanceCriteria": [
+        "create, configure, claim-owner, view, list, edit, delete are present; rotate-credentials, transfer-owner, enable, and disable are absent.",
+        "`create` succeeds without the adapter online and outputs the Connection identity and prefilled Slack reference.",
+        "`configure` reads hidden input or a protected credentials file, refuses command-line token args, and refuses a symlink or world-readable file; credentials are never echoed or logged.",
+        "`claim-owner` prints the one-time code once; regenerating invalidates the prior code.",
+        "CLI tests cover each command and the credential-input validation paths; npm test passes."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "mo agent connection subgroup (create/configure/claim-owner/view/list/edit/delete) with protected credential input.",
+      "dependsOn": ["T-002", "T-003", "T-005"],
+      "passes": false,
+      "notes": "Implements design D8 (CLI command half). Web and CLI configure the same Connection record — there is no second local config. Credential-file discipline mirrors OperatorCredential (0600 + non-symlink)."
+    },
+    {
+      "id": "T-008",
+      "title": "Minimal Agent Readiness derivation",
+      "spec": "specs/agent-connection/spec.md#Readiness gaps produce honest dispatch decisions",
+      "description": "Add a minimal Server-side config-derived Agent Readiness on the Connection read surface: NeedsSetup if AgentConfig is null or lacks model+runtime; Ready if both are present; Unknown as the default. Integrate into dispatch decisions (T-006): NeedsSetup rejects a new dispatch with an actionable reason while the Connection stays healthy; Unknown accepts and awaits Runner verification; Ready accepts. Show Readiness independently of ConnectionHealth on the four-facts surface.",
+      "acceptanceCriteria": [
+        "Readiness is derived from AgentConfig as NeedsSetup/Ready/Unknown, with Unknown as the default for any un-probed Agent.",
+        "A NeedsSetup Agent rejects a new DM dispatch with an actionable reason while the Connection remains healthy; an Unknown Agent accepts and awaits Runner verification; a Ready Agent accepts.",
+        "Readiness is shown independently of ConnectionHealth (no single Connected collapse; a healthy Connection with a not-ready Agent reads as such).",
+        "Server tests cover all three dispatch decisions and the independent display; npm test passes.",
+        "The docs/agents.md Readiness gap note is updated to describe this minimal derivation and flag the full probe as a follow-up."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Config-derived Agent Readiness (NeedsSetup/Ready/Unknown) on the Connection surface + dispatch-decision integration.",
+      "dependsOn": ["T-002", "T-006"],
+      "passes": false,
+      "notes": "Implements design D9. Deliberately minimal — a real Runner/runtime Readiness probe is a follow-up (Open Questions). Unknown-as-default avoids falsely claiming any configured Agent is Ready; the authoritative AgentJob/Turn result still governs the actual outcome regardless of the Readiness label."
+    },
+    {
+      "id": "T-009",
+      "title": "mohist-slack adapter package",
+      "spec": "specs/mohist-slack-adapter/spec.md#The adapter is a stateless protocol translator",
+      "description": "Add `packages/mohist-slack/` as a new npm workspace package (append to root workspaces) using `@slack/socket-mode` + `@slack/web-api`. Implement: Socket Mode connect, normalize events to envelopes with a stable provider identity, POST ingress/dispatch to the T-006 routes, drain the outbox via deliveries/claim+ack, render and post replies via chat.postMessage, report delivery results, lease tokens from the Server at startup/reconnect (in-memory only), apply an in-flight concurrency cap, and hold no durable state. Authenticate to the Server with the operator token. Include an end-to-end fake round-trip against the T-006 routes.",
+      "acceptanceCriteria": [
+        "The package is added to root workspaces and builds a dist/cli.js; root build/test include it.",
+        "The adapter connects Socket Mode, normalizes events to envelopes, forwards them to /ingress and /dispatch, drains the outbox via claim/ack, and posts replies via chat.postMessage.",
+        "The adapter holds tokens in memory only and persists no inbox/mapping/pending/Agent-config state; reconnect re-leases tokens and resumes pulling unconverged items from the Server.",
+        "The adapter bounds its in-flight concurrency and does not own a persistent queue or apply product-level backpressure (the Server decides Backpressured).",
+        "The adapter reaches execution only through the Connection boundary and does not call mo, the database, grains, Runner, or Runtime protocols directly.",
+        "One adapter carries multiple Connections, each with independent App/Bot credentials.",
+        "mohist-slack tests use a fake Slack (event ingress/ack/redelivery/member directory) and a fake Server transport with no real Slack/network; npm run typecheck -w packages/mohist-slack, npm test -w packages/mohist-slack, and npm test pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/mohist-slack workspace package: Socket Mode client + envelope normalization + ingress/dispatch/delivery-drain + reply posting + token lease + concurrency cap.",
+      "dependsOn": ["T-004", "T-006"],
+      "passes": false,
+      "notes": "Implements design D8 (adapter half) and honors architecture.md:49 (Slack protocol in mohist-slack) + :233-234 (stateless; anything that must survive restart lives in Server). Using the official @slack SDKs avoids hand-rolling the Socket Mode WebSocket protocol (design D8 alternative rejected)."
+    },
+    {
+      "id": "T-010",
+      "title": "CLI Slack service management",
+      "spec": "specs/slack-connection-setup/spec.md#mohist-slack is a CLI-managed service",
+      "description": "Add Slack as a first-class CLI service target: ServiceTarget.Slack, IServiceInstaller.InstallSlackAsync + six lifecycle methods + IsSlackInstalledAsync, a `mohist-slack.service` systemd unit in SystemdServiceInstaller (ExecStart = node packages/mohist-slack/dist/cli.js, Restart=on-failure, env SERVER_URL + operator token) mirroring the runner unit, and the WindowsScheduledTaskInstaller equivalent. Deliver mo install slack, mo service status|start|stop|restart|logs slack, and mo update slack.",
+      "acceptanceCriteria": [
+        "ServiceTarget.Slack is present; mo install slack installs the mohist-slack.service unit.",
+        "mo service status slack reports whether mohist-slack is installed and running; start/stop/restart/logs/uninstall operate on the slack unit.",
+        "The unit ExecStart points at the T-009 package dist/cli.js and carries the SERVER_URL + operator-token environment.",
+        "CLI tests cover install and the lifecycle verbs using a fake installer; npm test passes.",
+        "The docs/self-host.md gap notes for mo install slack / mo service status slack / mo update slack are updated to reflect the now-implemented surface."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ServiceTarget.Slack + IServiceInstaller slack methods + systemd/scheduled-task units + mo install/status/update slack verbs.",
+      "dependsOn": ["T-009"],
+      "passes": false,
+      "notes": "Implements design D8 (CLI service half). Mirrors the runner unit (SystemdServiceInstaller.cs:53-69): Linux = systemctl --user, Windows = schtasks. The unit can only start once T-009's dist/cli.js exists."
+    }
+  ]
+}
