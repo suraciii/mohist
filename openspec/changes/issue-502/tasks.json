@@ -1,0 +1,85 @@
+{
+  "project": "mohist-local",
+  "description": "Align event-dispatcher behavior and documentation by giving every durable event producer the same best-effort wake-up path, retaining retry state across transient settlement failures, and exposing blocked FIFO sources through a low-cardinality metric.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Wake the dispatcher after Epic and AgentJob event persistence",
+      "spec": "specs/event-dispatcher/spec.md#Every-durable-event-producer-triggers-an-immediate-dispatch-attempt",
+      "description": "Extend EpicGrain and AgentJobGrain to reuse EventDispatcherPoke after their event append is durable. Inject the existing background task launcher where needed, preserve each producer's current failure behavior, and keep handler execution outside the producer write path.",
+      "acceptanceCriteria": [
+        "Epic commands that persist one or more event rows request a fire-and-forget dispatcher cycle only after SaveChangesAsync succeeds; commands with no pending events do not issue a poke.",
+        "AgentJob requests the same poke only after its failure-event append succeeds; an append failure retains its recovery obligation and does not poke.",
+        "A failed poke is swallowed and logged by the shared helper, leaving the producer command result and durable event unchanged; reminder-driven recovery remains valid.",
+        "EventDispatcherImmediateTriggerSpecs (or its focused successor) proves Epic and AgentJob delivery occurs before the fixture's long reminder period, and retains a lost-poke reminder-recovery scenario without wall-clock waiting.",
+        "npm run build and npm test pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "EpicGrain and AgentJobGrain post-append poke wiring with focused server dispatcher specs.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Reuse EventDispatcherPoke.PokeAfterCommit; do not add an event-store callback or invoke DispatchNowAsync inline."
+    },
+    {
+      "id": "T-002",
+      "title": "Preserve dispatcher retry state until delivery settlement persists",
+      "spec": "specs/event-dispatcher/spec.md#Delivery-settlement-preserves-in-process-retry-progress-until-durable",
+      "description": "Change EventDispatcherService so completed and dead-lettered handler state remains in its process-local map when MarkDispatchedAsync or SettleAsync fails. A later cycle retries only the settlement write, while process restart intentionally resets the volatile retry budget.",
+      "acceptanceCriteria": [
+        "EventDispatcherService removes an event's in-memory handler state only after MarkDispatchedAsync or IDeadLetterStore.SettleAsync succeeds.",
+        "After a dead-letter settlement failure, the source remains undispatched; after the store recovers, the next dispatch settles it without reinvoking already completed handlers or resetting a dead-lettered handler's attempt count.",
+        "Per-handler exponential backoff, independent handler budgets, FIFO source blocking, and restart-reset volatile state retain their current semantics.",
+        "DispatcherGrainSpecs (or its focused successor) deterministically covers settlement failure then recovery using fakes and injected time, with no real network, database, or wall-clock dependency.",
+        "npm run build and npm test pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "EventDispatcherService settlement-state retention with regression coverage for transient dead-letter settlement failure.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not persist retry state or alter DLQ redelivery behavior; this task only removes the premature in-process state discard."
+    },
+    {
+      "id": "T-003",
+      "title": "Expose current blocked event-source count",
+      "spec": "specs/event-dispatcher/spec.md#Blocked-source-count-is-observable",
+      "description": "Publish the latest completed dispatch cycle's blocked source count from EventDispatcherService as the attribute-free observable gauge mohist.server.event_dispatcher.blocked_sources. Register the instrument in RuntimeMetricCatalog and keep meter ownership scoped to the singleton dispatcher service.",
+      "acceptanceCriteria": [
+        "RuntimeMetricCatalog declares mohist.server.event_dispatcher.blocked_sources as an ObservableGauge with unit 1 and no attribute keys.",
+        "A completed cycle with a pending handler retry publishes a positive blocked-source count and does not dispatch later rows from that source; a subsequent unblocked cycle publishes zero.",
+        "The gauge publishes no source identifier or other high-cardinality tags.",
+        "RuntimeMetricCatalogTests and a MeterListener-based dispatcher test assert the catalog contract, gauge values, and absence of metric tags without real time or external dependencies.",
+        "npm run build and npm test pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Blocked-source observable gauge, runtime metric catalog entry, and deterministic telemetry/dispatcher tests.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Build on the retained dispatch-cycle state from T-002 so the gauge reports the finalized cycle outcome."
+    },
+    {
+      "id": "T-004",
+      "title": "Align the event bus design contract with deployed behavior",
+      "spec": "specs/event-dispatcher/spec.md#Event-bus-documentation-states-the-deployed-delivery-contract",
+      "description": "Update design/eventbus.md after the implementation tasks land so its converged contract describes handwritten option-configured backoff, post-commit best-effort pokes, reminder-backed correctness, process-local retry reset, FIFO blocking, and the blocked-source gauge. Remove statements that name Polly or prohibit producer wake-ups.",
+      "acceptanceCriteria": [
+        "design/eventbus.md names EventDispatcherOptions as the source of handwritten exponential backoff parameters and does not mention Polly.",
+        "The document states that all durable producers can perform best-effort post-commit pokes, that the reminder remains the correctness path, and that retry state resets after a dispatcher restart.",
+        "The document explains FIFO source blocking and identifies mohist.server.event_dispatcher.blocked_sources as the operator visibility signal without promising retry persistence or new DLQ APIs.",
+        "The document's stated behavior matches the completed T-001 through T-003 implementation and their focused tests; npm run build and npm test pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated design/eventbus.md describing the verified event-dispatcher contract.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Keep the document converged only after wording and implementation agree; do not introduce future dispatcher architecture."
+    }
+  ]
+}
