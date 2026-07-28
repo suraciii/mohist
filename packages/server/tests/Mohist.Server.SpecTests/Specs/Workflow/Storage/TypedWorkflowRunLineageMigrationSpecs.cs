@@ -70,8 +70,6 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
     [InlineData("42junk", "numeric suffix")]
     [InlineData("1e2", "scientific notation")]
     [InlineData("1.5", "decimal")]
-    [InlineData("042", "leading zeros")]
-    [InlineData("+5", "explicit sign")]
     public async Task Up_PreservesMalformedLegacyIssueNumberInsteadOfFabricatingIdentity(string issueNumber, string label)
     {
         await using var database = TestSqliteDatabase.CreateEmpty();
@@ -97,6 +95,36 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
             Assert.True(annotations.TryGetProperty("projectId", out _), $"{label}: legacy projectId annotation must be preserved");
             Assert.False(metadata.TryGetProperty("issueNumber", out _), $"{label}: no typed issueNumber must be fabricated");
             Assert.False(metadata.TryGetProperty("projectId", out _), $"{label}: no typed projectId must be fabricated");
+        }
+    }
+
+    [Theory]
+    [InlineData("+5", 5)]
+    [InlineData("042", 42)]
+    [InlineData(" 42 ", 42)]
+    public async Task Up_MigratesLegacyIssueNumberAcceptedByPreviousReader(string issueNumber, int expectedIssueNumber)
+    {
+        await using var database = TestSqliteDatabase.CreateEmpty();
+        MigratedSqliteTemplate.CopyTo(database.Keeper, BeforeMigration);
+
+        await using (var db = database.CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "EpicNumber", "ETag")
+                VALUES ('wr_legacy_integer', {LegacyAnnotationState(issueNumber)}, NULL, 1);
+                """);
+            await db.Database.GetService<IMigrator>().MigrateAsync(Migration);
+        }
+
+        await using (var db = database.CreateContext())
+        {
+            var row = await db.WorkflowRuns.SingleAsync(x => x.WorkflowRunId == "wr_legacy_integer");
+            using var json = JsonDocument.Parse(row.State);
+            var metadata = json.RootElement.GetProperty("metadata");
+            var annotations = metadata.GetProperty("annotations");
+            Assert.Equal(expectedIssueNumber, metadata.GetProperty("issueNumber").GetInt32());
+            Assert.False(annotations.TryGetProperty("projectId", out _));
+            Assert.False(annotations.TryGetProperty("issueNumber", out _));
         }
     }
 

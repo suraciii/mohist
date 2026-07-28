@@ -97,16 +97,40 @@ public partial class TypedWorkflowRunLineage : Migration
                 json_extract("State", '$.metadata.annotations.IssueNumber'),
                 json_extract("State", '$.Metadata.Annotations.issueNumber'),
                 json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) > 0
-          AND COALESCE(
-                json_extract("State", '$.metadata.annotations.issueNumber'),
-                json_extract("State", '$.metadata.annotations.IssueNumber'),
-                json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                json_extract("State", '$.Metadata.Annotations.IssueNumber')) =
-              CAST(CAST(COALESCE(
-                json_extract("State", '$.metadata.annotations.issueNumber'),
-                json_extract("State", '$.metadata.annotations.IssueNumber'),
-                json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) AS TEXT);
+          AND length(CASE
+                WHEN substr(trim(COALESCE(
+                    json_extract("State", '$.metadata.annotations.issueNumber'),
+                    json_extract("State", '$.metadata.annotations.IssueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.IssueNumber'))), 1, 1) = '+'
+                    THEN substr(trim(COALESCE(
+                        json_extract("State", '$.metadata.annotations.issueNumber'),
+                        json_extract("State", '$.metadata.annotations.IssueNumber'),
+                        json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                        json_extract("State", '$.Metadata.Annotations.IssueNumber'))), 2)
+                ELSE trim(COALESCE(
+                    json_extract("State", '$.metadata.annotations.issueNumber'),
+                    json_extract("State", '$.metadata.annotations.IssueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.IssueNumber')))
+              END) > 0
+          AND (CASE
+                WHEN substr(trim(COALESCE(
+                    json_extract("State", '$.metadata.annotations.issueNumber'),
+                    json_extract("State", '$.metadata.annotations.IssueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.IssueNumber'))), 1, 1) = '+'
+                    THEN substr(trim(COALESCE(
+                        json_extract("State", '$.metadata.annotations.issueNumber'),
+                        json_extract("State", '$.metadata.annotations.IssueNumber'),
+                        json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                        json_extract("State", '$.Metadata.Annotations.IssueNumber'))), 2)
+                ELSE trim(COALESCE(
+                    json_extract("State", '$.metadata.annotations.issueNumber'),
+                    json_extract("State", '$.metadata.annotations.IssueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.IssueNumber')))
+              END) NOT GLOB '*[^0-9]*';
 
         UPDATE "WorkflowRuns"
         SET "State" = json_set(
@@ -132,12 +156,28 @@ public partial class TypedWorkflowRunLineage : Migration
           AND CAST(COALESCE(
                 json_extract("State", '$.Metadata.Annotations.issueNumber'),
                 json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) > 0
-          AND COALESCE(
-                json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                json_extract("State", '$.Metadata.Annotations.IssueNumber')) =
-              CAST(CAST(COALESCE(
-                json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) AS TEXT);
+          AND length(CASE
+                WHEN substr(trim(COALESCE(
+                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.IssueNumber'))), 1, 1) = '+'
+                    THEN substr(trim(COALESCE(
+                        json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                        json_extract("State", '$.Metadata.Annotations.IssueNumber'))), 2)
+                ELSE trim(COALESCE(
+                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.IssueNumber')))
+              END) > 0
+          AND (CASE
+                WHEN substr(trim(COALESCE(
+                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.IssueNumber'))), 1, 1) = '+'
+                    THEN substr(trim(COALESCE(
+                        json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                        json_extract("State", '$.Metadata.Annotations.IssueNumber'))), 2)
+                ELSE trim(COALESCE(
+                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                    json_extract("State", '$.Metadata.Annotations.IssueNumber')))
+              END) NOT GLOB '*[^0-9]*';
         """;
 
     private const string TypedToLegacyJson = """
