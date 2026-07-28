@@ -66,9 +66,10 @@
       "id": "T-004",
       "title": "Align the event bus design contract with deployed behavior",
       "spec": "specs/event-dispatcher/spec.md#Event-bus-documentation-states-the-deployed-delivery-contract",
-      "description": "Update design/eventbus.md after the implementation tasks land so its converged contract describes handwritten option-configured backoff, post-commit best-effort pokes, reminder-backed correctness, process-local retry reset, FIFO blocking, and the blocked-source gauge. Remove statements that name Polly or prohibit producer wake-ups.",
+      "description": "Update design/eventbus.md after the implementation tasks land so its converged contract describes handwritten option-configured backoff, post-commit best-effort pokes, reminder-backed correctness, process-local retry reset, FIFO blocking, the blocked-source gauge, and the five durable origins queried by the dispatcher. Remove statements that name Polly, prohibit producer wake-ups, or exclude a durable origin from the event inventory.",
       "acceptanceCriteria": [
         "design/eventbus.md names EventDispatcherOptions as the source of handwritten exponential backoff parameters and does not mention Polly.",
+        "The event inventory lists WorkflowRun, Issue, Epic, AgentSession, and AgentJob as the five durable origins queried by the dispatcher; its table and prose do not exclude or omit any of them.",
         "The document states that all durable producers can perform best-effort post-commit pokes, that the reminder remains the correctness path, and that retry state resets after a dispatcher restart.",
         "The document explains FIFO source blocking and identifies mohist.server.event_dispatcher.blocked_sources as the operator visibility signal without promising retry persistence or new DLQ APIs.",
         "The document's stated behavior matches the completed T-001 through T-003 implementation and their focused tests; npm run build and npm test pass."

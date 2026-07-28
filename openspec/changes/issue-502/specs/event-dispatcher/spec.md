@@ -64,9 +64,10 @@ The dispatcher SHALL expose the count of sources blocked in the most recent disp
 
 ### Requirement: Event bus documentation states the deployed delivery contract
 
-The event bus design document SHALL describe handwritten, option-configured exponential backoff; best-effort producer wake-ups with reminder-backed correctness; process-local retry state that resets after restart; FIFO source blocking; and the blocked-source metric. It SHALL not describe Polly as the retry mechanism or claim that producers never wake the dispatcher.
+The event bus design document SHALL describe handwritten, option-configured exponential backoff; best-effort producer wake-ups with reminder-backed correctness; process-local retry state that resets after restart; FIFO source blocking; and the blocked-source metric. Its event inventory SHALL identify WorkflowRun, Issue, Epic, AgentSession, and AgentJob as the durable origins queried by the dispatcher. It SHALL not describe Polly as the retry mechanism, claim that producers never wake the dispatcher, or exclude any of those origins from the bus.
 
 #### Scenario: Operator consults the event bus design document
 - **WHEN** an operator reads the event bus design document to diagnose a delayed event
 - **THEN** the document SHALL identify retry backoff, restart-reset retry state, and FIFO source blocking as deployed behavior
 - **AND** it SHALL identify the blocked-source metric as the visibility signal for stalled sources
+- **AND** its event inventory SHALL match the five durable origins queried for delivery

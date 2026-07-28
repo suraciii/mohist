@@ -45,7 +45,7 @@ Alternative: tag a metric with every blocked source. Rejected because source ide
 
 ### Correct the design document alongside code
 
-`design/eventbus.md` will describe the handwritten `EventDispatcherOptions`-controlled backoff, best-effort producer pokes, reminder-backed recovery, process-local restart-reset retry state, FIFO blocking, and the new gauge. It will remove the incorrect Polly and "producers never wake" statements while retaining the existing convergence status once code and tests match.
+`design/eventbus.md` will describe the handwritten `EventDispatcherOptions`-controlled backoff, best-effort producer pokes, reminder-backed recovery, process-local restart-reset retry state, FIFO blocking, and the new gauge. Its event inventory will identify WorkflowRun, Issue, Epic, AgentSession, and AgentJob as the durable origins queried by the dispatcher. It will remove the incorrect Polly and "producers never wake" statements, and the incorrect exclusion or omission of those origins, while retaining the existing convergence status once code and tests match.
 
 Alternative: leave the document as a future-state description. Rejected because it is marked converged and is relied upon as the current architecture contract.
 
