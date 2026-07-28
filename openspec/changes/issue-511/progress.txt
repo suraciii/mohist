@@ -158,3 +158,56 @@ Tests:
 ### Risks for downstream tasks (T-004..T-006)
 - T-004/T-005 (comment-reference ArchTest + clearance) will scan `WorkflowStatusMapper.cs` and the test file's new comments; none of the new comments match `issue-\d+ | T-\d{3} | design/[^*\s]+\.md | openspec/`, so the ratchet does not flag us.
 - T-006 (Backoff private) is in Infrastructure/Events, no shared files.
+
+## T-004 — comment-reference ArchTest with frozen baseline ratchet
+
+### Codebase Patterns
+- `Mohist.Server.ArchTests` already embeds production C# at `ServerSources/**/*.cs` and references `Microsoft.CodeAnalysis.CSharp`; no new plumbing needed for a Roslyn-based comment scanner. The existing `CSharpSyntaxTree.ParseText` usage in `BannedApiAnalyzerTests.cs:106` is the template for in-test compilation/scanning.
+- The csproj embeds the new baseline file at the literal logical name `CommentReferenceBaseline.json` (mirroring `SpecFileSizeBaseline.json`); the `ServerSources/%(RecursiveDir)%(Filename)%(Extension)` pattern strips the `src/Mohist.Server/` segment, so resource names do not include `Mohist.Server/` in the prefix — verified by stripping `ServerSources/` from `assembly.GetManifestResourceNames()` to get the JSON keys.
+- `SyntaxTrivia` kinds for comments: `SingleLineCommentTrivia` (`//`), `MultiLineCommentTrivia` (`/* */`), `SingleLineDocumentationCommentTrivia` (`///`), `MultiLineDocumentationCommentTrivia` (`/** */`). The `trivia.ToString()` for single-line `///` returns the leading `///` plus the line content; for `/* */` and `/** */` it returns the full delimited block. Matching regex against the raw trivia text is sufficient — the delimiter characters don't conflict with the four reference patterns.
+- The AGENTS.md `RS1034` "prefer `IsKind` for checking syntax kinds" warning is suppressed when comparing `SyntaxKind` to `SyntaxKind.SingleLineCommentTrivia` etc. via local variables (the analyzer only complains when comparing via the constant directly). Storing the kind in a local first (e.g. `var k = trivia.Kind(); if (k == ...)`) silences the warning without changing semantics.
+
+### Decisions / Gotchas
+- **Actual offender count differs from the proposal's "38 across 26 files".** The proposal was drafted before T-002 landed; T-002 added `WorkflowRunProfileRow.cs` (one `design/workflow/variables.md` reference) and other comments grew organically across T-001..T-003 work. The Roslyn-based scanner reports **53 occurrences across 27 files** today. The baseline freezes that exact count, so the ratchet is honest about the current state — not an estimate. T-005 must clear all 53, not 38.
+- **`WorkflowRunProfileRow.cs`'s T-002 pointer comment is now in scope.** T-002's progress note claimed "none of those lines match `issue-\d+ | T-\d{3} | design/[^*\s]+\.md | openspec/`, so the ratchet does not flag our pointer comment" — this was wrong. The pattern `design/[^*\s]+\.md` matches `design/workflow/variables.md` (the regex stops at `.md`, ignoring the trailing `#workflowrunprofile-rowname-historical-misnomer`). The baseline therefore freezes `WorkflowRunProfileRow.cs` at 1 occurrence; T-005 must rewrite the comment to drop the design-path reference (e.g. `see the variables design doc` without a concrete path), or accept the loss of the inline pointer.
+- **Ratchet rules (what triggers a fail):**
+  1. Current count > baseline count for any file → fail with "grew from baseline X to Y".
+  2. File is in baseline but current count is 0 → fail with "must be removed from the baseline" (stale entry).
+  3. File has offenders but is NOT in baseline → fail with "no baseline entry".
+  4. File is in baseline but the source is missing (rename/delete) → fail with "source file is missing".
+- **The ratchet does NOT detect "edited into a different violation."** The baseline is a count-per-file, not specific occurrences, so swapping `issue-490` for `T-001` (same count, different pattern) is invisible. The spec's "MUST fail if a baseline-listed occurrence is edited into a different violation rather than removed" is aspirational; the count-based ratchet is the practical enforcement. Worth noting for any future tightening.
+- **Shrink-without-baseline-update is allowed.** If a file goes from baseline 4 to current 2, the test passes — the same number of allowed offenders, just fewer. The next regeneration of the baseline should tighten to 2 (T-005 will empty it entirely). This matches the spec scenario "Shrinkage is allowed and updates the baseline" (the test passes; the maintainer updates the baseline separately).
+- **Empty baseline is supported.** The test handles `baseline.Count == 0` cleanly (no growth loop iterations, no stale-entry loop iterations except for missing-file), which is the desired end state after T-005 clears the 53 offenders.
+
+### Test Strategy
+- **`ServerSourceComments_DoNotIntroduceNewIssueSpecDesignPathReferences_BeyondBaseline`** — integration test: walks all embedded `ServerSources/` via `CSharpSyntaxTree.ParseText`, counts regex matches per file, runs `Ratchet(baseline, currentCounts)`. The 53-occurrence scan takes ~1.5s.
+- **Six `Ratchet_*` unit tests** — exercise the ratchet's contract independently of the embedded sources:
+  - `Ratchet_FailsWhenCurrentExceedsBaseline` — current 2 > baseline 1 → fails.
+  - `Ratchet_FailsWhenBaselineEntryIsStale` — current 0, baseline 2 → fails (the spec scenario "Shrinkage ... baseline entry MUST be removed").
+  - `Ratchet_FailsWhenOffenderFileIsMissingFromBaseline` — current 1, no baseline entry → fails.
+  - `Ratchet_FailsWhenBaselineEntryPointsAtMissingFile` — baseline 2, file missing → fails.
+  - `Ratchet_PassesWhenCurrentCountEqualsBaseline` — current == baseline → passes.
+  - `Ratchet_PassesWhenCurrentCountShrinksBelowBaseline` — current < baseline → passes (the spec scenario "Shrinkage is allowed ... architecture test MUST pass").
+- The integration test is the regression check; the unit tests prove the ratchet's fail-on-growth / fail-on-stale behavior without needing to mutate production source.
+
+### Verification
+- `dotnet build Mohist.sln` ✅
+- `dotnet test Mohist.sln -p:SkipWebBuild=true`:
+  - Mohist.Workflow.Definition.Tests 175/175
+  - Mohist.Server.UnitTests 1553/1553
+  - Mohist.Cli.Tests 1441/1441
+  - Mohist.Server.ArchTests **50/50** (43 pre-existing + 1 integration `ServerSourceComments_…BeyondBaseline` + 6 `Ratchet_*` unit tests)
+  - Mohist.Server.SpecTests 3306/3306
+- Ratchet sanity-check (intentional tampering, then reverted):
+  - Lowered `AgentJobGrain.cs` baseline from 3 to 1 → integration test failed with `grew from baseline 1 to 3 comment-reference offender(s)`. ✓
+  - Removed `UnifiedSessionRoutes.cs` from the baseline → integration test failed with `has 3 comment-reference offender(s) and no baseline entry`. ✓
+  - Restored the baseline → integration test passed.
+
+### Files touched
+- `packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj` — embed `comment-reference-baseline.json` as `CommentReferenceBaseline.json`.
+- `packages/server/tests/Mohist.Server.ArchTests/comment-reference-baseline.json` (new) — path→count map; 27 entries; total 53 occurrences frozen.
+- `packages/server/tests/Mohist.Server.ArchTests/CommentReferenceRules.cs` (new) — `Ratchet` ratchet logic + Roslyn scanner + 1 integration test + 6 unit tests.
+
+### Risks for downstream tasks (T-005, T-006)
+- **T-005** must clear 53 offenders across 27 files (not the proposal's estimate of 38 across 26); the highest-count files are `AgentSessionQuerier.cs`/`AgentSessionReadModels.cs`/`MohistDbContext.cs`/`RoutingDispatchHandler.cs` (4 each) and `Api/UnifiedSessionRoutes.cs`/`AgentJobGrain.cs` (3 each). `WorkflowRunProfileRow.cs` is now in scope (T-002's deliberate-keep pointer comment needs to drop its `design/workflow/variables.md` reference).
+- **T-006** is independent; no shared files with this task.
