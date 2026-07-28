@@ -95,6 +95,9 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
         var grain = await OpenBoundGrainAsync("runtime-current");
         var sessionId = grain.GetPrimaryKeyString();
         var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
+        var activityFlush = _fixture.TranscriptStore.WaitForAsync(
+            flush => flush.Turn.SessionId == sessionId
+                && flush.Parts.Any(part => part.Type == TranscriptPartTypes.SessionActivity));
 
         var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
@@ -111,9 +114,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
         Assert.Equal(["message.delta", "session.activity"], result.Select(entry => entry.Type));
         Assert.Equal(3, DiscardWarnings(sessionId).Count);
         Assert.Equal(["message.delta", "session.activity"], PublishedFor(sessionId).Select(entry => entry.Type));
-        var flush = Assert.Single(
-            FlushesFor(sessionId),
-            flush => flush.Parts.Any(part => part.Type == TranscriptPartTypes.SessionActivity));
+        var flush = await activityFlush;
         var activity = Assert.Single(flush.Parts, part => part.Type == TranscriptPartTypes.SessionActivity);
         Assert.Contains("\"status\":\"failed\"", activity.PayloadJson, StringComparison.Ordinal);
         Assert.DoesNotContain(flush.Parts, part => part.Type is "session.closed" or "session.followup_completed" or "session.followup_failed");

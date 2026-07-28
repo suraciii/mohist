@@ -55,3 +55,8 @@
 - Kept trace and metrics exporters on named signal-specific options so the trace endpoint cannot override the metrics endpoint.
 - Extended the registration specs to assert the hosted `MeterProvider` and the named metrics exporter configuration for the dispatcher meter, including its `/v1/metrics` endpoint, without a real collector.
 - Verification passed: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore -p:SkipWebBuild=true` (1541 tests) and `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true` (3279 tests). `npm run build` passed. `npm test` reached the server specs but failed in the unrelated, intermittent `AgentSessionEventDiscardObservabilitySpecs.MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents` assertion.
+
+## Review Fix: Transcript Flush Synchronization
+
+- Added a predicate-based completion signal to `FakeAgentSessionTranscriptStore` and registered the `session.activity` wait before submitting the mixed event batch. The spec now waits for its own flush instead of relying on a persistence checkpoint that can complete before transcript persistence.
+- Scoped the no-transcript assertions in the same shared fixture to the session under test, so delayed flushes from unrelated session activations do not invalidate their behavior checks.
