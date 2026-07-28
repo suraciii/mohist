@@ -593,6 +593,7 @@ internal static class AgentCommands
         var repositoryRefOpt = new Option<string?>("--repo") { Description = "Optional context reference: record the repository on the session metadata" };
         var workspacePathOpt = new Option<string?>("--workspace-path") { Description = "Optional context reference: record the workspace path on the session metadata" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
+        var idempotencyKeyOpt = new Option<string?>("--idempotency-key") { Description = "Reuse this key to safely retry a launch after response loss" };
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionLaunch)));
 
         cmd.Arguments.Add(agentRefArg);
@@ -602,6 +603,7 @@ internal static class AgentCommands
         cmd.Options.Add(epicRefOpt);
         cmd.Options.Add(repositoryRefOpt);
         cmd.Options.Add(workspacePathOpt);
+        cmd.Options.Add(idempotencyKeyOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
@@ -613,6 +615,7 @@ internal static class AgentCommands
             var epicRef = ctx.GetValue(epicRefOpt);
             var repositoryRef = ctx.GetValue(repositoryRefOpt);
             var workspacePath = ctx.GetValue(workspacePathOpt);
+            var suppliedIdempotencyKey = ctx.GetValue(idempotencyKeyOpt);
             var project = ctx.GetValue(projectOpt);
             var output = ctx.GetValue(outputOpt);
             return LaunchAsync();
@@ -634,6 +637,11 @@ internal static class AgentCommands
                 if (resolveExit != 0) return resolveExit;
 
                 var promptText = ((BodyInputResolver.Result.Success)resolvedPrompt).Body;
+                var idempotencyKey = string.IsNullOrWhiteSpace(suppliedIdempotencyKey)
+                    ? Guid.NewGuid().ToString("N")
+                    : suppliedIdempotencyKey;
+                if (string.IsNullOrWhiteSpace(suppliedIdempotencyKey))
+                    api.Output.WriteLine($"Idempotency-Key: {idempotencyKey}");
 
                 var contextRefs = BuildLaunchContext(issueRef, epicRef, repositoryRef, workspacePath);
                 object body = contextRefs is null
@@ -644,7 +652,9 @@ internal static class AgentCommands
                     body,
                     mode,
                     nameof(MohistCliApi.TableShape.AgentSessionLaunch),
-                    rawJson: true);
+                    rawJson: true,
+                    headers: new Dictionary<string, string> { ["Idempotency-Key"] = idempotencyKey! },
+                    retries: 1);
             }
         });
         return cmd;

@@ -16,8 +16,9 @@ import {
 
 const state = {
   agentsData: [] as AgentInfo[],
-  launchCalls: [] as Array<{ agentRef: string; body: unknown }>,
+  launchCalls: [] as Array<{ agentRef: string; body: unknown; idempotencyKey?: string }>,
   launchError: null as { error: string; code?: string } | null,
+  launchFailuresRemaining: -1,
 }
 
 const components: AgentSessionComposerPageComponents = {
@@ -36,11 +37,11 @@ const dataHook: AgentSessionComposerDataHook = () => {
   const launchMutation = useMutation<
     AgentSessionLaunchResponse,
     Error,
-    { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null }
+    { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null; idempotencyKey?: string }
   >({
-    mutationFn: async ({ agentRef, prompt, context }) => {
-      state.launchCalls.push({ agentRef, body: { prompt, context } })
-      if (state.launchError) {
+    mutationFn: async ({ agentRef, prompt, context, idempotencyKey }) => {
+      state.launchCalls.push({ agentRef, body: { prompt, context }, idempotencyKey })
+      if (state.launchError && (state.launchFailuresRemaining < 0 || state.launchFailuresRemaining-- > 0)) {
         throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
       }
       return {
@@ -117,6 +118,7 @@ describe('AgentSessionComposerPage', () => {
     state.agentsData = []
     state.launchCalls.length = 0
     state.launchError = null
+    state.launchFailuresRemaining = -1
   })
 
   afterEach(() => {
@@ -253,6 +255,22 @@ describe('AgentSessionComposerPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agent-sessions/sess-123')
     })
+  })
+
+  it('retains one idempotency key when the first response is lost and the launch is retried', async () => {
+    state.agentsData = [makeAgent('agent-1')]
+    state.launchError = { error: 'response lost' }
+    state.launchFailuresRemaining = 1
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Retry me' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+    await waitFor(() => expect(state.launchCalls).toHaveLength(1))
+    fireEvent.click(screen.getByTestId('launch-button'))
+    await waitFor(() => expect(state.launchCalls).toHaveLength(2))
+
+    expect(state.launchCalls[0].idempotencyKey).toBeTruthy()
+    expect(state.launchCalls[1].idempotencyKey).toBe(state.launchCalls[0].idempotencyKey)
   })
 
   /* ── Context-ref chip remove ──────────────────────────── */

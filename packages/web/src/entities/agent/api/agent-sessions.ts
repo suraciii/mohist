@@ -74,6 +74,40 @@ export interface AgentSessionLaunchInput {
   context?: AgentSessionLaunchContext | null
 }
 
+export interface AgentLaunchObservationDto {
+  jobId: string
+  jobStatus: string
+  jobMessage?: string | null
+  jobOutput?: string | null
+  jobFailureReason?: string | null
+  jobExitCode?: number | null
+  sessionId: string
+  sessionActivity: AgentSessionActivity
+  sessionRuntime?: string | null
+  transcriptUrl: string
+  inputId?: string | null
+  inputAcceptance: string
+  turnId?: string | null
+  turnStatus: string
+  turnResult?: {
+    message?: string | null
+    output?: string | null
+    failureReason?: string | null
+    failureCategory?: string | null
+    exitCode?: number | null
+  } | null
+  observationUrl: string
+}
+
+export type AgentLaunchObservationMeaning = 'observe' | 'result' | 'reconcile'
+
+export function getAgentLaunchObservationMeaning(observation: Pick<AgentLaunchObservationDto, 'turnStatus'>): AgentLaunchObservationMeaning {
+  const status = observation.turnStatus.toLowerCase()
+  if (status === 'unknown') return 'reconcile'
+  if (status === 'completed' || status === 'failed') return 'result'
+  return 'observe'
+}
+
 export interface GenericFollowupInput {
   text: string
 }
@@ -105,14 +139,30 @@ export function getGenericSessionTranscript(projectId: string, sessionId: string
   )
 }
 
-export function launchAgentSession(projectId: string, agentRef: string, input: AgentSessionLaunchInput) {
+export function launchAgentSession(projectId: string, agentRef: string, input: AgentSessionLaunchInput, idempotencyKey?: string) {
   return request<AgentSessionLaunchResponse>(
     projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/sessions`),
     {
       method: 'POST',
       body: JSON.stringify(input),
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     },
   )
+}
+
+export function getAgentLaunchObservation(projectId: string, jobId: string) {
+  return request<AgentLaunchObservationDto>(
+    projectApiPath(projectId, `/agent-jobs/${encodeURIComponent(jobId)}/launch-observation`),
+  )
+}
+
+export function launchObservationQueryOptions(projectId: string | null | undefined, jobId: string | null | undefined) {
+  return {
+    queryKey: ['agent-launch-observation', projectId, jobId],
+    queryFn: () => getAgentLaunchObservation(projectId!, jobId!),
+    enabled: !!projectId && !!jobId,
+    refetchInterval: 5000,
+  }
 }
 
 export function postGenericFollowup(projectId: string, sessionId: string, input: GenericFollowupInput) {
@@ -185,8 +235,8 @@ const CANCEL_TERMINAL_STATES = new Set(['completed', 'failed', 'stopped', 'cance
 
 export function launchAgentSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
   return {
-    mutationFn: ({ agentRef, prompt, context }: { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null }) =>
-      launchAgentSession(projectId!, agentRef, { prompt, context }),
+    mutationFn: ({ agentRef, prompt, context, idempotencyKey }: { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null; idempotencyKey?: string }) =>
+      launchAgentSession(projectId!, agentRef, { prompt, context }, idempotencyKey),
     onSuccess: (_data: AgentSessionLaunchResponse, variables: { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })

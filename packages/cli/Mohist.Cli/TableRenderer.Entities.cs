@@ -128,9 +128,14 @@ internal sealed partial class TableRenderer
 
         _out.WriteLine($"job id:     {StringOf(data, "jobId")}");
         _out.WriteLine($"session id: {StringOf(data, "sessionId")}");
+        _out.WriteLine($"input id:   {StringOf(data, "inputId")}");
+        _out.WriteLine($"turn id:    {StringOf(data, "turnId")}");
         _out.WriteLine($"agent id:   {StringOf(data, "agentId")}");
         _out.WriteLine($"agent name: {StringOf(data, "agentName")}");
         _out.WriteLine($"status:     {StringOf(data, "status")}");
+        _out.WriteLine($"transcript: {StringOf(data, "transcriptUrl")}");
+        _out.WriteLine($"job:        {StringOf(data, "jobUrl")}");
+        _out.WriteLine($"observation: {StringOf(data, "observationUrl")}");
     }
 
     private void RenderAgentSessionFollowup(JsonNode? data)
