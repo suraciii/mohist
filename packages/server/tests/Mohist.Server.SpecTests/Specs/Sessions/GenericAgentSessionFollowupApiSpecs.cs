@@ -374,12 +374,11 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     }
 
     [Fact]
-    public async Task ResolveGenericFollowupTargetAsync_NoRunnerOpened_ReturnsInactiveTargetWithEmptyRunner()
+    public async Task ResolveGenericFollowupTargetAsync_NoRunnerOpened_ReturnsActiveQueuedTargetWithEmptyRunner()
     {
         // The launch minted the session, but the runner never opened it
-        // (no RunnerId bound). The resolver still finds the session (so
-        // the endpoint returns 409 inactive, not 404 not-found), with
-        // RunnerId empty and IsActive=false.
+        // (no RunnerId bound). The accepted initial turn keeps Session
+        // activity active while the work is queued.
         var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-resolve-no-runner");
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -390,7 +389,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         Assert.NotNull(target);
         Assert.Equal(string.Empty, target!.RunnerId);
         Assert.Equal(sessionId, target.SessionId);
-        Assert.False(target.IsActive);
+        Assert.True(target.IsActive);
     }
 
     [Fact]

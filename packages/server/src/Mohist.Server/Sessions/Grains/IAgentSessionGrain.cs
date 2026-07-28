@@ -42,6 +42,38 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task EnsureRuntimeSessionPresentAsync();
     Task RunnerDisconnectedAsync();
 
+    /// <summary>
+    /// Idempotently record the initial input and turn for a launch
+    /// (issue-512 T-001). The session is opened from the supplied
+    /// metadata when absent; the first <see cref="AgentSessionInputRecord"/>
+    /// is recorded as accepted and the first <see cref="AgentTurnRecord"/>
+    /// as queued, both linked to the AgentJob id. Re-issuing with the
+    /// same ids is a no-op; mismatched content or pre-existing immutable
+    /// source metadata raises a conflict. Returns the persisted
+    /// session, input, and turn ids so the caller can correlate Job
+    /// dispatch with the durable session artifacts.
+    /// </summary>
+    Task<EnsureInitialLaunchResult> EnsureInitialLaunchAsync(EnsureInitialLaunchCommand command);
+
+    /// <summary>
+    /// Mark the initial turn for the given job id as executing.
+    /// No-op when the turn is missing or already past queued state.
+    /// </summary>
+    Task MarkInitialTurnExecutingAsync(string jobId);
+
+    /// <summary>
+    /// Mark the initial turn for the given job id as terminal.
+    /// </summary>
+    Task MarkInitialTurnTerminalAsync(string jobId, AgentTurnStatus status, AgentTurnResult? result);
+
+    /// <summary>
+    /// Read the initial input and turn records for the session. Returns
+    /// <c>null</c> when the session has not yet been launched. The
+    /// composite observation read (issue-512 T-002) projects this
+    /// shape into the canonical Job+Session+Input+Turn snapshot.
+    /// </summary>
+    Task<AgentInitialLaunchSnapshot?> GetInitialLaunchAsync();
+
 }
 
 [GenerateSerializer]
@@ -201,3 +233,37 @@ public sealed record AgentSessionRuntimeEventInfo(
     [property: Id(4)] string Type,
     [property: Id(5)] string PayloadJson,
     [property: Id(6)] string CreatedAt);
+
+/// <summary>
+/// Command issued by the coordinator to durably record the initial
+/// input and turn on a freshly opened AgentSession. The grain owns
+/// no business aggregate for Input or Turn — both are addressable
+/// children of the Session aggregate — but the Session must persist
+/// the initial children before the AgentJob dispatches so the
+/// launch identity is durable at acceptance time. The supplied
+/// metadata is used to open the Session if it has not yet been
+/// opened by an earlier launch step.
+/// </summary>
+[GenerateSerializer]
+public sealed record EnsureInitialLaunchCommand(
+    [property: Id(0)] string InputId,
+    [property: Id(1)] string TurnId,
+    [property: Id(2)] string Prompt,
+    [property: Id(3)] string Source,
+    [property: Id(4)] string JobId,
+    [property: Id(5)] AgentSessionMetadata? Metadata = null,
+    [property: Id(6)] string? Runtime = null,
+    [property: Id(7)] string? WorkDir = null);
+
+[GenerateSerializer]
+public sealed record EnsureInitialLaunchResult(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] string InputId,
+    [property: Id(2)] string TurnId,
+    [property: Id(3)] bool AlreadyPersisted);
+
+[GenerateSerializer]
+public sealed record AgentInitialLaunchSnapshot(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] AgentSessionInputRecord? Input,
+    [property: Id(2)] AgentTurnRecord? Turn);

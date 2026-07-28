@@ -239,6 +239,7 @@ public static class AgentJobController
         AgentJobStatus.Failed => "failed",
         AgentJobStatus.Running => "running",
         AgentJobStatus.Pending => "pending",
+        AgentJobStatus.Unknown => "unknown",
         _ => "unknown",
     };
 }

@@ -14,6 +14,7 @@ import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
 import { useMediaQuery } from '@/shared/lib/use-media-query'
+import { getAgentLaunchObservationMeaning } from '../../../entities/agent'
 import type { StatusKind, EmptyStateKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
 
@@ -182,6 +183,7 @@ export function SessionDetailShell({
     issueNumber,
     cancel,
     emptyStateKind,
+    launchObservation,
   } = data
 
   // ── All hooks must be before any early return ──
@@ -230,6 +232,14 @@ export function SessionDetailShell({
       </div>
     </div>
   ) : null
+
+  const observationGuidance = launchObservation
+    ? getAgentLaunchObservationMeaning(launchObservation) === 'reconcile'
+      ? 'Launch outcome is unresolved. Re-read this observation or retry with the original Idempotency-Key.'
+      : getAgentLaunchObservationMeaning(launchObservation) === 'result'
+        ? 'Initial launch is terminal. Read the result and transcript; this Session remains available.'
+        : 'Initial launch is accepted and still progressing. Continue observing the Job and transcript.'
+    : null
 
   // Errors evidence (region between usage summary and transcript)
   const errorsEvidence = (
@@ -424,6 +434,11 @@ export function SessionDetailShell({
           />
           <SessionUsageSummary usage={meta.usage} />
           {errorsEvidence}
+          {observationGuidance && (
+            <div className="border-b border-border px-4 py-2 text-xs text-muted-foreground" data-testid="launch-observation-guidance">
+              {observationGuidance}
+            </div>
+          )}
           {recoveryBarContent && (
             <div
               data-testid="session-recovery-bar"

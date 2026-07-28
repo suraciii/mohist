@@ -6,6 +6,7 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Agent.Grains;
 
 namespace Mohist.Server.Sessions.Grains;
 
@@ -1537,4 +1538,132 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             "unknown" => AgentSessionActivity.Unknown,
             _ => AgentSessionActivity.Idle,
         };
+
+    public async Task<EnsureInitialLaunchResult> EnsureInitialLaunchAsync(EnsureInitialLaunchCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (string.IsNullOrWhiteSpace(command.InputId))
+            throw new ArgumentException("Input id is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.TurnId))
+            throw new ArgumentException("Turn id is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.Prompt))
+            throw new ArgumentException("Prompt is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.JobId))
+            throw new ArgumentException("Job id is required.", nameof(command));
+
+        bool alreadyPersisted = false;
+        if (_session is null)
+        {
+            RejectIfReloadRequired();
+            _session = CreateSession(new OpenAgentSessionCommand(
+                RunnerId: string.Empty,
+                AgentRuntime: command.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                WorkDir: command.WorkDir,
+                Metadata: command.Metadata));
+        }
+        else
+        {
+            CheckInputsAndTurns(command, out alreadyPersisted);
+        }
+
+        if (!alreadyPersisted)
+        {
+            _ = _session.EnsureInitialLaunch(
+                inputId: command.InputId,
+                turnId: command.TurnId,
+                prompt: command.Prompt,
+                source: command.Source,
+                jobId: command.JobId,
+                now: Now());
+        }
+
+        await _stateStore.SaveAsync(SessionId, _session);
+        _connections.RegisterSession(_session.Runtime.RunnerId, SessionId);
+
+        return new EnsureInitialLaunchResult(
+            SessionId: SessionId,
+            InputId: command.InputId,
+            TurnId: command.TurnId,
+            AlreadyPersisted: alreadyPersisted);
+    }
+
+    private void CheckInputsAndTurns(EnsureInitialLaunchCommand command, out bool alreadyPersisted)
+    {
+        alreadyPersisted = false;
+        var inputs = _session!.Status.Inputs ?? [];
+        var turns = _session.Status.Turns ?? [];
+        var inputMatch = inputs.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, command.InputId, StringComparison.Ordinal));
+        var turnMatch = turns.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, command.TurnId, StringComparison.Ordinal));
+
+        if (inputMatch is null && turnMatch is null)
+            return;
+
+        alreadyPersisted = true;
+        if (inputMatch is not null)
+        {
+            if (!string.Equals(inputMatch.Text, command.Prompt, StringComparison.Ordinal)
+                || !string.Equals(inputMatch.Source, command.Source, StringComparison.Ordinal)
+                || !string.Equals(inputMatch.JobId, command.JobId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"AgentSession {SessionId} already has input '{command.InputId}' with different content/source/job.");
+            }
+        }
+
+        if (turnMatch is not null)
+        {
+            if (!string.Equals(turnMatch.JobId, command.JobId, StringComparison.Ordinal)
+                || !turnMatch.InputIds.Contains(command.InputId, StringComparer.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"AgentSession {SessionId} already has turn '{command.TurnId}' with different job/input linkage.");
+            }
+        }
+    }
+
+    public async Task MarkInitialTurnExecutingAsync(string jobId)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+            return;
+        var session = await GetRequiredAsync();
+        var events = session.MarkInitialTurnExecuting(jobId, Now());
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
+    public async Task MarkInitialTurnTerminalAsync(string jobId, AgentTurnStatus status, AgentTurnResult? result)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+            return;
+        var session = await GetRequiredAsync();
+        var events = session.MarkInitialTurnTerminal(jobId, status, result, Now());
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
+    public async Task<AgentInitialLaunchSnapshot?> GetInitialLaunchAsync()
+    {
+        var session = await GetRequiredAsync();
+        var inputs = session.Status.Inputs ?? [];
+        var turns = session.Status.Turns ?? [];
+        if (inputs.Count == 0 && turns.Count == 0)
+            return null;
+        var turn = turns.Count > 0 ? turns[0] : null;
+        return new AgentInitialLaunchSnapshot(
+            SessionId: SessionId,
+            Input: inputs.Count > 0 ? inputs[0] : null,
+            Turn: turn is null ? null : turn with { InputIds = turn.InputIds.ToArray() });
+    }
 }

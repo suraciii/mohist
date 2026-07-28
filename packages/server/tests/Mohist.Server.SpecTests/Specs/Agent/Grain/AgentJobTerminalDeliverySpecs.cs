@@ -285,7 +285,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task ReportTimeout_PersistsCloseWithReportTimeoutCategory()
+    public async Task ReportTimeout_PreservesUnknownWithoutSessionClose()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-job-timeout-{Guid.NewGuid():N}");
@@ -305,13 +305,15 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
         await job.CheckTimeoutsAsync();
 
-        await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
+        await WaitForStatusAsync(job, AgentJobStatus.Unknown, TimeSpan.FromSeconds(5));
 
-        var closed = await GetSingleClosedAsync(sessionId);
-        // Issue 484: the report-timeout category is the AgentJob's own
-        // verdict and is no longer mirrored onto the session.activity
-        // part; the job's Failed status is still observable here.
-        Assert.Equal("failed", closed.GetProperty("status").GetString());
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
+        Assert.StartsWith(AgentJobFailureReasons.ReportTimeout, terminal.FailureReason, StringComparison.Ordinal);
+        var activityParts = (await ListSessionClosedPartsAsync(sessionId))
+            .Where(part => part.Type == TranscriptPartTypes.SessionActivity)
+            .ToList();
+        Assert.Empty(activityParts);
     }
 
     [Fact]

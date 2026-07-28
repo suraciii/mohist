@@ -261,7 +261,24 @@ public sealed record AgentSessionStatusSnapshot(
     IReadOnlyList<AgentSessionFollowupLease>? PendingFollowups = null,
     IReadOnlyList<AgentSessionTranscriptEvidence>? PendingTranscriptEvidence = null,
     DateTime? CurrentTurnEndedAt = null,
-    AgentSessionActivity Activity = AgentSessionActivity.Idle)
+    AgentSessionActivity Activity = AgentSessionActivity.Idle,
+    /// <summary>
+    /// Ordered child inputs created against this session. The first
+    /// entry is the launch-time input recorded by the
+    /// <see cref="Mohist.Server.Agent.Grains.AgentLaunchCoordinatorGrain"/>
+    /// before the AgentJob dispatch. Subsequent entries are follow-up
+    /// inputs (out of scope for the manual launch surface).
+    /// </summary>
+    IReadOnlyList<AgentSessionInputRecord>? Inputs = null,
+    /// <summary>
+    /// Ordered child turns created against this session. The first
+    /// entry is the launch-time turn associated with the AgentJob
+    /// grain. <see cref="AgentTurnRecord.JobId"/> links the turn to
+    /// the AgentJob that owns its first-execution result; the
+    /// AgentSession remains the authority for input acceptance and
+    /// turn status, not for the AgentJob's terminal result.
+    /// </summary>
+    IReadOnlyList<AgentTurnRecord>? Turns = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: []);
@@ -326,3 +343,61 @@ public sealed record AgentSessionTranscriptEvidence(
     string PayloadJson,
     DateTime CreatedAt,
     string PromptKind);
+
+/// <summary>
+/// One child input recorded on the AgentSession. Inputs are addressed
+/// through their Session and surfaced via the composite observation
+/// surface (issue-512 T-002) — they are not independent top-level
+/// resources. The launch-time input is created by the
+/// <see cref="Mohist.Server.Agent.Grains.AgentLaunchCoordinatorGrain"/>
+/// before the AgentJob dispatches so the durable launch identity
+/// exists at acceptance time. Acceptance is the Server-side verdict
+/// that the prompt is recorded; the runtime's eventual delivery
+/// result is recorded as a separate turn status update, not as
+/// reverting the input acceptance.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentSessionInputRecord(
+    [property: Id(0)] string Id,
+    [property: Id(1)] long Sequence,
+    [property: Id(2)] string Text,
+    [property: Id(3)] string Source,
+    [property: Id(4)] AgentSessionInputAcceptance Acceptance,
+    [property: Id(5)] DateTime RecordedAt,
+    [property: Id(6)] string? JobId = null);
+
+public enum AgentSessionInputAcceptance
+{
+    Accepted,
+    Pending,
+    Rejected,
+}
+
+[GenerateSerializer]
+public sealed record AgentTurnRecord(
+    [property: Id(0)] string Id,
+    [property: Id(1)] long Sequence,
+    [property: Id(2)] IReadOnlyList<string> InputIds,
+    [property: Id(3)] AgentTurnStatus Status,
+    [property: Id(4)] string? JobId = null,
+    [property: Id(5)] AgentTurnResult? Result = null,
+    [property: Id(6)] DateTime? RecordedAt = null,
+    [property: Id(7)] DateTime? UpdatedAt = null);
+
+public enum AgentTurnStatus
+{
+    Queued,
+    Executing,
+    Completed,
+    Failed,
+    Unknown,
+    Cancelled,
+}
+
+[GenerateSerializer]
+public sealed record AgentTurnResult(
+    [property: Id(0)] string? Message = null,
+    [property: Id(1)] string? Output = null,
+    [property: Id(2)] string? FailureReason = null,
+    [property: Id(3)] string? FailureCategory = null,
+    [property: Id(4)] int? ExitCode = null);

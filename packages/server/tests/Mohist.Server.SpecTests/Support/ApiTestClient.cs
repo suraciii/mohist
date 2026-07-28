@@ -30,6 +30,46 @@ public static class ApiTestClient
         return await ReadDataAsync<T>(response);
     }
 
+    /// <summary>
+    /// Issue-512 T-001: POST a manual AgentSession launch with an
+    /// Idempotency-Key header. The route now requires the header
+    /// (the coordinator owns the durable launch identity). Tests
+    /// that want to omit the header (e.g. to assert the 400
+    /// missing-header gate) call <see cref="LaunchAgentSessionWithoutIdempotencyKeyAsync"/>.
+    /// </summary>
+    public static Task<HttpResponseMessage> LaunchAgentSessionAsync(
+        this HttpClient client,
+        string projectId,
+        string agentId,
+        object body,
+        string? idempotencyKey = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/projects/{projectId}/agents/{agentId}/sessions")
+        {
+            Content = JsonContent.Create(body, options: JsonOptions),
+        };
+        request.Headers.Add("Idempotency-Key", idempotencyKey ?? Guid.NewGuid().ToString("N"));
+        return client.SendAsync(request);
+    }
+
+    /// <summary>
+    /// Issue-512 T-001: POST a manual AgentSession launch WITHOUT
+    /// an Idempotency-Key header. Used to assert the 400
+    /// missing-header rejection gate.
+    /// </summary>
+    public static Task<HttpResponseMessage> LaunchAgentSessionWithoutIdempotencyKeyAsync(
+        this HttpClient client,
+        string projectId,
+        string agentId,
+        object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/projects/{projectId}/agents/{agentId}/sessions")
+        {
+            Content = JsonContent.Create(body, options: JsonOptions),
+        };
+        return client.SendAsync(request);
+    }
+
     public static async Task<T> PostMultipartDataAsync<T>(this HttpClient client, string path, HttpContent body)
     {
         using var response = await client.PostAsync(path, body);

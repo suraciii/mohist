@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Issue.Services;
@@ -79,6 +80,48 @@ public static class AgentSessionLaunchRoutes
             }
 
             var prompt = body.Prompt;
+            var idempotencyKey = ReadIdempotencyKey(context.Request);
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+            {
+                return ApiResults.BadRequest(
+                    "Idempotency-Key is required for manual agent launches",
+                    "idempotency_key_required",
+                    new { fields = new[] { "Idempotency-Key" } });
+            }
+
+            var project = context.GetResolvedProject();
+            var launchRequest = new AgentLaunchCoordinatorRequest(
+                Prompt: prompt?.Trim() ?? string.Empty,
+                AgentRef: agentRef,
+                Runtime: null,
+                WorkspacePath: body.Context?.WorkspacePath,
+                IssueNumber: body.Context?.IssueNumber,
+                EpicNumber: body.Context?.EpicNumber,
+                Repository: body.Context?.Repository,
+                Title: null);
+
+            try
+            {
+                var resumed = await launcher.ResumeIdempotentAsync(
+                    project.Id,
+                    idempotencyKey,
+                    launchRequest,
+                    ct);
+                if (resumed is not null)
+                    return AcceptedLaunch(project.Id, resumed);
+            }
+            catch (LaunchIdempotencyConflictException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "launch_idempotency_conflict",
+                    new { idempotencyKey = ex.IdempotencyKey });
+            }
+            catch (LaunchSetupPendingException ex)
+            {
+                return LaunchSetupPending(ex);
+            }
+
             if (string.IsNullOrWhiteSpace(prompt))
             {
                 return ApiResults.BadRequest(
@@ -87,7 +130,6 @@ public static class AgentSessionLaunchRoutes
                     new { fields = new[] { "prompt" } });
             }
 
-            var project = context.GetResolvedProject();
             var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
             if (agent is null)
             {
@@ -113,34 +155,61 @@ public static class AgentSessionLaunchRoutes
             AgentLaunchResult result;
             try
             {
-                result = await launcher.LaunchAsync(
+                result = await launcher.LaunchIdempotentAsync(
                     agent,
-                    prompt,
+                    prompt!,
                     launchContext,
-                    triggerLabels: null,
+                    idempotencyKey,
+                    launchRequest,
                     ct: ct);
             }
             catch (ArgumentException ex)
             {
                 return ApiResults.BadRequest(ex.Message, "validation_failed");
             }
+            catch (LaunchIdempotencyConflictException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "launch_idempotency_conflict",
+                    new { idempotencyKey = ex.IdempotencyKey });
+            }
+            catch (LaunchSetupPendingException ex)
+            {
+                return LaunchSetupPending(ex);
+            }
 
-            return Results.Json(
+            return AcceptedLaunch(project.Id, result);
+        });
+
+        return app;
+    }
+
+    private static IResult AcceptedLaunch(string projectId, AgentLaunchResult result)
+    {
+        return Results.Json(
                 new ApiResponse<AgentSessionLaunchResponse>(
                     true,
                     new AgentSessionLaunchResponse(
                         JobId: result.JobKey,
                         SessionId: result.SessionId,
+                        InputId: result.InputId,
+                        TurnId: result.TurnId,
                         AgentId: result.AgentId,
                         AgentName: result.AgentName,
-                        Status: "inactive",
-                        TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-sessions/{Uri.EscapeDataString(result.SessionId)}/transcript",
-                        JobUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}")),
+                        Status: "queued",
+                        TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-sessions/{Uri.EscapeDataString(result.SessionId)}/transcript",
+                        JobUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}",
+                        ObservationUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}/launch-observation")),
                 statusCode: 201);
-        });
-
-        return app;
     }
+
+    private static IResult LaunchSetupPending(LaunchSetupPendingException exception) =>
+        ApiResults.Fail(
+            exception.Message,
+            StatusCodes.Status503ServiceUnavailable,
+            "launch_setup_pending",
+            new { idempotencyKey = exception.IdempotencyKey });
 
     private static async Task<IResult?> ValidateContextAsync(
         AgentSessionLaunchContextRef? context,
@@ -166,6 +235,15 @@ public static class AgentSessionLaunchRoutes
         }
 
         return null;
+    }
+    private static string? ReadIdempotencyKey(HttpRequest request)
+    {
+        if (!request.Headers.TryGetValue("Idempotency-Key", out var values))
+            return null;
+        if (values.Count == 0)
+            return null;
+        var value = values[0];
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 }
 
@@ -279,8 +357,11 @@ public sealed record AgentSessionLaunchContextRef(
 public sealed record AgentSessionLaunchResponse(
     string JobId,
     string SessionId,
+    string InputId,
+    string TurnId,
     string AgentId,
     string AgentName,
     string Status,
     string TranscriptUrl,
-    string JobUrl);
+    string JobUrl,
+    string ObservationUrl);

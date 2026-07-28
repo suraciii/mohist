@@ -769,6 +769,68 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
+    public async Task AgentLaunch_ForwardsExplicitIdempotencyKeyAndPrintsAllReferences()
+    {
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = new
+            {
+                jobId = "job-1",
+                sessionId = "session-1",
+                inputId = "input-1",
+                turnId = "turn-1",
+                agentId = "agent-1",
+                agentName = "reviewer",
+                status = "queued",
+                transcriptUrl = "/transcript",
+                jobUrl = "/job",
+                observationUrl = "/observation",
+            },
+        })));
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "launch", "reviewer", "--prompt", "Inspect", "--idempotency-key", "retry-1"],
+            output: output,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(handler.Requests);
+        Assert.Equal("retry-1", handler.Requests[0].Headers["Idempotency-Key"].Single());
+        var text = output.ToString();
+        Assert.Contains("job-1", text);
+        Assert.Contains("session-1", text);
+        Assert.Contains("input-1", text);
+        Assert.Contains("turn-1", text);
+        Assert.Contains("/observation", text);
+    }
+
+    [Fact]
+    public async Task AgentLaunch_GeneratedKeyIsPrintedBeforeRequest()
+    {
+        var output = new StringWriter();
+        var observedOutput = string.Empty;
+        var handler = new RecordingHttpHandler((_, _) =>
+        {
+            observedOutput = output.ToString();
+            return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } }));
+        });
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "launch", "reviewer", "--prompt", "Inspect"],
+            output: output,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Idempotency-Key:", observedOutput, StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+        Assert.NotEmpty(handler.Requests[0].Headers["Idempotency-Key"].Single());
+    }
+
+    [Fact]
     public async Task AgentUpdate_MissingInstructionsFileFailsWithScopedUsageBeforeHttp()
     {
         var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));

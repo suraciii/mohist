@@ -34,9 +34,7 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
 
         try
         {
-            using var launch = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new { prompt = "roundtrip the job id" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "roundtrip the job id" });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var data = launchPayload.GetProperty("data");
@@ -79,9 +77,7 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         {
             var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-            using var launch = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new { prompt = "exactly one of each" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "exactly one of each" });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;

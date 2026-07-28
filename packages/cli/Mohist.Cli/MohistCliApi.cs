@@ -897,12 +897,13 @@ internal sealed class MohistCliApi
         string mode,
         string? tableShape = null,
         bool rawJson = false,
-        IReadOnlyDictionary<string, string>? headers = null)
+        IReadOnlyDictionary<string, string>? headers = null,
+        int retries = 0)
     {
         var localExit = HandleLocalJsonSelection(mode, tableShape);
         if (localExit is not null)
             return localExit.Value;
-        using var response = await SendAsync(HttpMethod.Post, path, body, headers: headers);
+        using var response = await SendAsync(HttpMethod.Post, path, body, headers: headers, retries: retries);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape, rawJson: rawJson);
     }
 
@@ -1387,24 +1388,31 @@ internal sealed class MohistCliApi
         string path,
         object? body,
         bool printServerUnavailable = true,
-        IReadOnlyDictionary<string, string>? headers = null)
+        IReadOnlyDictionary<string, string>? headers = null,
+        int retries = 0)
     {
-        try
+        for (var attempt = 0; ; attempt++)
         {
-            using var request = new HttpRequestMessage(method, path);
-            if (body is not null)
-                request.Content = JsonContent.Create(body, options: JsonOptions);
-            if (headers is not null)
+            try
             {
-                foreach (var (name, value) in headers)
-                    request.Headers.TryAddWithoutValidation(name, value);
+                using var request = new HttpRequestMessage(method, path);
+                if (body is not null)
+                    request.Content = JsonContent.Create(body, options: JsonOptions);
+                if (headers is not null)
+                {
+                    foreach (var (name, value) in headers)
+                        request.Headers.TryAddWithoutValidation(name, value);
+                }
+                return await _http.SendAsync(request);
             }
-            return await _http.SendAsync(request);
-        }
-        catch (HttpRequestException) when (printServerUnavailable)
-        {
-            _err.WriteLine(ServerUnavailableMessage);
-            return null;
+            catch (HttpRequestException) when (attempt < retries)
+            {
+            }
+            catch (HttpRequestException) when (printServerUnavailable)
+            {
+                _err.WriteLine(ServerUnavailableMessage);
+                return null;
+            }
         }
     }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ComponentProps, type ComponentType } from 'react'
+import { useCallback, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon } from 'lucide-react'
 import { useAgents, useLaunchAgentSession } from '../../../entities/agent'
@@ -213,6 +213,7 @@ export function AgentSessionComposerPage({
 
   const [prompt, setPrompt] = useState('')
   const [promptTouched, setPromptTouched] = useState(false)
+  const launchKeyRef = useRef<string | null>(null)
 
   const selectedAgent = useMemo(
     () => agents?.find((a) => a.id === selectedAgentRef) ?? null,
@@ -245,10 +246,17 @@ export function AgentSessionComposerPage({
     const hasContext = Object.keys(context).length > 0
 
     launchMutation.mutate(
-      { agentRef: selectedAgentRef, prompt: prompt.trim(), context: hasContext ? context : null },
+      {
+        agentRef: selectedAgentRef,
+        prompt: prompt.trim(),
+        context: hasContext ? context : null,
+        idempotencyKey: launchKeyRef.current ??= crypto.randomUUID(),
+      },
       {
         onSuccess: (data) => {
-          navigate(toProjectPath(`/agent-sessions/${encodeURIComponent(data.sessionId)}`))
+          launchKeyRef.current = null
+          const jobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
+          navigate(toProjectPath(`/agent-sessions/${encodeURIComponent(data.sessionId)}${jobQuery}`))
         },
       },
     )
@@ -280,7 +288,7 @@ export function AgentSessionComposerPage({
               No available runner for the selected agent type. Please ensure a runner is connected and try again.
             </span>
           </div>
-        )}
+          )}
 
         {isExternalAgentUnavailable && (
           <div

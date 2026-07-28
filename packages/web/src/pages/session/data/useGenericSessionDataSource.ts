@@ -1,8 +1,9 @@
 import { useCallback, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollowup, useCancelGenericSession } from '../../../entities/agent'
+import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollowup, useCancelGenericSession, launchObservationQueryOptions } from '../../../entities/agent'
+import type { AgentLaunchObservationDto } from '../../../entities/agent'
 import { canFollowupSession, deriveSessionStatusKind } from '../../../entities/coder-session'
 import type { SessionTurn, SessionMetadata } from '../../../entities/coder-session'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
@@ -46,11 +47,13 @@ export function useGenericSessionDataSource(
   const queryClient = useQueryClient()
   const sessionId = rawSessionId ? decodeURIComponent(rawSessionId) : ''
   const [searchParams] = useSearchParams()
+  const jobId = searchParams.get('jobId')
 
   useDocumentTitle(`Session — Mohist`)
 
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useSummary(sessionId)
   const { data: transcriptResponse } = useTranscriptResponse(sessionId)
+  const { data: launchObservation } = useQuery<AgentLaunchObservationDto>(launchObservationQueryOptions(projectId, jobId))
   const genericFollowup = useFollowup()
   const cancelGeneric = useCancel()
 
@@ -164,6 +167,7 @@ export function useGenericSessionDataSource(
     runtimeSessionId: summary?.runtimeSessionId ?? sessionId,
     meta,
     transcriptResponse: transcriptResponse ?? null,
+    launchObservation: launchObservation ?? null,
     initialTurns,
     statusKind,
     isRunning,

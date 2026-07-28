@@ -181,11 +181,20 @@ export class AgentJobExecutor {
     }
 
     const eventSink = createAgentSessionEventSink(this.connection, work, signal, binding.agentSessionId)
+    // Issue-512 T-001: when the coordinator durably recorded the
+    // initial input on the AgentSession before dispatch, the runner
+    // must NOT re-publish a `session.input` runtime event. The
+    // durable input identity is owned by the Session aggregate; the
+    // dispatch only carries the correlation ids so the runner knows
+    // the initial input is already accepted.
+    const skipInitialInput = Boolean(work.initialInputId && work.initialTurnId)
     const observer: RuntimeTurnObserver | undefined = binding.agentSessionId
       ? {
         onSessionReady: async (session) => {
           await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
-          await eventSink.publishSessionInput(composed, session.runtimeSessionId)
+          if (!skipInitialInput) {
+            await eventSink.publishSessionInput(composed, session.runtimeSessionId)
+          }
         },
         onEvent: (event) => {
           eventSink.observeEvent(event)
@@ -259,7 +268,9 @@ export class AgentJobExecutor {
       runtimeSessionId = created.value.runtimeSessionId
     }
     await eventSink.attachSession(runtimeSessionId, workDir, modelInput)
-    await eventSink.publishSessionInput(composed, runtimeSessionId)
+    if (!work.initialInputId || !work.initialTurnId) {
+      await eventSink.publishSessionInput(composed, runtimeSessionId)
+    }
 
     const request: PiTurnRequest = {
       target: { runtime: "pi", runtimeSessionId, workDir },

@@ -95,7 +95,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task RunnerLoss_SynthesizesAgentJobFailure_AndUpdatesLedgerRow()
+    public async Task RunnerLoss_PreservesUnknownAndUpdatesLedgerRow()
     {
         await ClearBacklogAsync();
         var runnerId = $"agent-job-loss-runner-{Guid.NewGuid():N}";
@@ -123,13 +123,13 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
 
         var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
         var terminal = await job.GetTerminalResultAsync();
-        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
-        Assert.Equal("runner-lost", terminal.Message);
+        Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
+        Assert.Null(terminal.Message);
         Assert.Equal("runner-lost", terminal.FailureReason);
     }
 
     [Fact]
-    public async Task RunnerLoss_ContextlessAgentJob_ReactivationRetriesFailureEvent()
+    public async Task RunnerLoss_ContextlessAgentJob_PreservesUnknownWithoutFailureEvent()
     {
         await ClearBacklogAsync();
         var runnerId = $"agent-job-raw-loss-runner-{Guid.NewGuid():N}";
@@ -161,12 +161,10 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
             await Grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
 
             var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
-            await job.GetStatusAsync();
-
-            var failure = Assert.Single(_fixture.EventStore.Appended,
+            Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
+            Assert.DoesNotContain(_fixture.EventStore.Appended,
                 evt => evt.Envelope.Type == EventCatalog.ReverseDns.AgentJobFailed
                     && evt.Envelope.Subject == jobKey);
-            Assert.Equal("agent-test", failure.Envelope.Extensions[EventCatalog.Lineage.AgentId]);
         }
         finally
         {

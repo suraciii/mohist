@@ -53,6 +53,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IAgentJobStore _jobStore;
     private readonly IEventStore _eventStore;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly IGrainFactory _grains;
     private IDisposable? _dispatchTimer;
     private IDisposable? _jobTimeoutTimer;
 
@@ -64,7 +65,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         IEventStore eventStore,
         IAgentJobDispatchObserver dispatchObserver,
         IAgentJobStore jobStore,
-        IBackgroundTaskLauncher backgroundTasks)
+        IBackgroundTaskLauncher backgroundTasks,
+        IGrainFactory grains)
     {
         _log = log;
         _options = options.Value;
@@ -74,6 +76,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _dispatchObserver = dispatchObserver;
         _jobStore = jobStore;
         _backgroundTasks = backgroundTasks;
+        _grains = grains;
         // The backoff schedule is captured at activation time from the current
         // snapshot of AgentJobOptions. Hot-reload of the configuration section
         // is not applied to an already-active grain; it takes effect on the
@@ -133,6 +136,15 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
+        // Issue-512 T-002: Unknown is intentionally non-dispatchable.
+        // A freshly reactivated Unknown job must NOT auto-replay;
+        // reconciliation waits for an authoritative running or
+        // terminal report from the original Runner.
+        if (State.Status == AgentJobStatus.Unknown)
+        {
+            return;
+        }
+
         await TryDispatchAsync();
     }
 
@@ -149,6 +161,26 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private AgentJobState State => _state.State;
     private bool IsTerminal => State.Status is AgentJobStatus.Completed or AgentJobStatus.Failed;
 
+    /// <summary>
+    /// Job is in a state where no further dispatch attempts are
+    /// allowed. Unknown is intentionally non-dispatchable: a Runner
+    /// disconnect or inconclusive delivery never fabricates a new
+    /// dispatch; reconciliation uses the original work identity.
+    /// </summary>
+    private bool IsDispatchable => State.Status is AgentJobStatus.Pending;
+
+    /// <summary>
+    /// Job still has a recoverable first-execution obligation. Both
+    /// <see cref="AgentJobStatus.Pending"/> and <see cref="AgentJobStatus.Running"/>
+    /// qualify, and <see cref="AgentJobStatus.Unknown"/> is also
+    /// reachable for reconciliation — a Runner reconnect or
+    /// authoritative terminal report must update the original Job
+    /// rather than minting a replacement.
+    /// </summary>
+    private bool IsReconcilable => State.Status is AgentJobStatus.Pending
+        or AgentJobStatus.Running
+        or AgentJobStatus.Unknown;
+
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(State.Status);
 
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult(State.WorkId);
@@ -163,7 +195,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.RunnerAccepted,
             State.PendingSessionClose is not null,
             State.Input?.ProjectId ?? State.RoutedPlan?.ProjectId,
-            ExecutionDefinitionFrom(State.Input)));
+            ExecutionDefinitionFrom(State.Input),
+            AgentSessionId: State.Input?.AgentSessionId ?? State.RoutedPlan?.SessionId,
+            InitialInputId: State.Input?.InitialInputId,
+            InitialTurnId: State.Input?.InitialTurnId));
 
     /// <summary>
     /// Returns the job's terminal result. Before the job has reached a terminal
@@ -197,6 +232,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         State.RunningSince = _timeProvider.GetUtcNow();
         await SaveAsync();
         ArmJobTimeout();
+        await MarkInitialTurnExecutingAsync();
     }
 
     private void AssignRunnerInternal(string runnerId, string workId)
@@ -307,6 +343,24 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             result.ExitCode);
 
         return new AgentJobReportResult(true);
+    }
+
+    public async Task ReconcileRunningAsync(string runnerId, string workId)
+    {
+        if (IsTerminal
+            || !string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
+            || !string.Equals(State.WorkId, workId, StringComparison.Ordinal))
+            return;
+
+        if (State.Status == AgentJobStatus.Unknown)
+        {
+            State.Status = AgentJobStatus.Running;
+            State.FailureReason = null;
+            State.RunningSince ??= _timeProvider.GetUtcNow();
+            await SaveAsync();
+            ArmJobTimeout();
+            await MarkInitialTurnExecutingAsync();
+        }
     }
 
     public Task FailAsync(string reason, string? agentId = null)
@@ -598,6 +652,214 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await TryDispatchAsync();
     }
 
+    /// <summary>
+    /// Manual-launch preparation (issue-512 T-001). Persists the
+    /// canonical <see cref="PrepareManualLaunchCommand"/> as the
+    /// grain's durable plan, then builds the matching
+    /// <see cref="AgentJobInput"/> snapshot. The grain refuses to
+    /// dispatch until <see cref="SubmitPreparedLaunchAsync"/> is called
+    /// — the coordinator uses the gap between prepare and submit to
+    /// first persist the AgentSession's initial Input and Turn.
+    /// Re-issuing with the same plan is a no-op; re-issuing with a
+    /// different plan is rejected.
+    /// </summary>
+    public async Task<AgentJobInput> PrepareManualLaunchAsync(PrepareManualLaunchCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (string.IsNullOrWhiteSpace(command.Prompt))
+            throw new ArgumentException("Prompt is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.AgentId))
+            throw new ArgumentException("AgentId is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.SessionId))
+            throw new ArgumentException("SessionId is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.InputId))
+            throw new ArgumentException("InputId is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.TurnId))
+            throw new ArgumentException("TurnId is required.", nameof(command));
+
+        if (State.RoutedPlan is not null)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' cannot accept a manual launch plan; routed launch already prepared.");
+
+        if (State.ManualPlan is not null)
+        {
+            if (PlansEquivalent(State.ManualPlan, command))
+            {
+                return BuildManualInput(State.ManualPlan);
+            }
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' already prepared a different manual launch plan.");
+        }
+
+        if (IsTerminal)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' cannot accept a manual launch plan; already terminal.");
+
+        if (State.Input is not null)
+        {
+            // Manual launch must come before submission; we refuse to
+            // overwrite an already-submitted input.
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' already has input; manual launch preparation must be the first write.");
+        }
+
+        State.ManualPlan = command;
+        var input = BuildManualInput(command);
+        State.AgentConfigJson = SerializeAgentConfig(command.AgentConfig);
+        State.Input = input with { AgentConfig = null };
+        State.SubmittedAt = _timeProvider.GetUtcNow();
+        State.NextDispatchDelay = TimeSpan.Zero;
+        State.DispatchAttempts = 0;
+        await SaveAsync();
+        await EnsureRecoveryReminderAsync();
+        return input;
+    }
+
+    /// <summary>
+    /// Submit the manual launch to dispatch. The prepare step
+    /// already persisted the input; the submission bumps the
+    /// dispatch attempts and triggers the regular dispatch loop.
+    /// </summary>
+    public async Task SubmitPreparedLaunchAsync()
+    {
+        if (State.RoutedPlan is not null)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' cannot submit a manual launch; routed launch path owns this job.");
+        if (State.ManualPlan is null)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' has no manual launch plan to submit.");
+        if (State.Input is null)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' manual launch plan has no input to submit.");
+        if (IsTerminal)
+            return;
+        if (!State.LaunchReady)
+        {
+            State.LaunchReady = true;
+            await SaveAsync();
+        }
+        await TryDispatchAsync();
+    }
+
+    public Task MarkUnknownAsync(string reason)
+    {
+        if (IsTerminal)
+            return Task.CompletedTask;
+        if (State.Status == AgentJobStatus.Unknown
+            && string.Equals(State.FailureReason ?? string.Empty, reason ?? string.Empty, StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+        return EnterUnknownStateAsync(reason ?? AgentJobFailureReasons.RunnerUnavailable);
+    }
+
+    /// <summary>
+    /// Move a non-terminal Job into <see cref="AgentJobStatus.Unknown"/>
+    /// without dispatching a new prompt or emitting a terminal
+    /// session-close. Preserves the durable Job / work / input / turn
+    /// identities so a Runner reconnect or authoritative terminal
+    /// report resolves the original Job. Also propagates the same
+    /// verdict to the linked initial <see cref="Mohist.Server.Sessions.Domain.AgentTurnRecord"/>
+    /// so the Session's view of the first turn stays consistent with
+    /// the Job's verdict.
+    /// </summary>
+    internal async Task EnterUnknownStateAsync(string reason)
+    {
+        if (IsTerminal)
+            return;
+
+        var previousStatus = State.Status;
+        State.Status = AgentJobStatus.Unknown;
+        State.FailureReason = reason;
+        State.RunningSince = null;
+        // Clear any terminal result so subsequent GetTerminalResult
+        // reads do not fabricate a previously-set Completed/Failed
+        // verdict. A later authoritative terminal transition repopulates
+        // TerminalResult through the normal EnterTerminalStateAsync path.
+        State.TerminalResult = null;
+        State.TerminalAt = null;
+
+        DisposeDispatchTimer();
+        DisposeJobTimeoutTimer();
+
+        // Re-register the recovery reminder so OnActivate / the
+        // reminder tick keeps the durable identities coherent and the
+        // Session-side initial-turn verdict mirrors the Job-side one.
+        // No terminal session-close / failure-event obligations are
+        // staged — Unknown is non-terminal and not a Session close.
+        await EnsureRecoveryReminderAsync();
+        await SaveAsync();
+
+        await PropagateUnknownToInitialTurnAsync(reason);
+
+        _log.LogInformation(
+            "AgentJob {Id} unknown: previous={Previous}, reason={Reason}",
+            Key, previousStatus, reason);
+    }
+
+    private async Task PropagateUnknownToInitialTurnAsync(string reason)
+    {
+        var sessionId = State.Input?.AgentSessionId;
+        if (string.IsNullOrWhiteSpace(sessionId)
+            || string.IsNullOrWhiteSpace(State.Input?.InitialTurnId))
+            return;
+
+        try
+        {
+            var sessionGrain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+            await sessionGrain.MarkInitialTurnTerminalAsync(
+                Key,
+                AgentTurnStatus.Unknown,
+                new AgentTurnResult(
+                    Message: reason,
+                    Output: null,
+                    FailureReason: reason,
+                    FailureCategory: "unknown",
+                    ExitCode: null));
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} could not propagate unknown verdict to initial turn on session {SessionId}; reminder will retry",
+                Key, sessionId);
+        }
+    }
+
+    private static AgentJobInput BuildManualInput(PrepareManualLaunchCommand command) =>
+        new(
+            Prompt: command.Prompt,
+            Model: command.Model,
+            WorkspacePath: command.WorkspacePath,
+            ProjectId: command.ProjectId,
+            Runtime: command.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+            AgentId: command.AgentId,
+            AgentInstructions: string.IsNullOrWhiteSpace(command.AgentInstructions) ? null : command.AgentInstructions,
+            AgentConfig: command.AgentConfig,
+            AgentSessionId: command.SessionId,
+            Variant: command.Variant,
+            IssueNumber: command.IssueNumber,
+            EpicNumber: command.EpicNumber,
+            WorkflowRunId: command.WorkflowRunId,
+            InitialInputId: command.InputId,
+            InitialTurnId: command.TurnId);
+
+    private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
+        string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
+        && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
+        && string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)
+        && string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
+        && string.Equals(left.Runtime ?? string.Empty, right.Runtime ?? string.Empty, StringComparison.Ordinal)
+        && string.Equals(left.AgentId, right.AgentId, StringComparison.Ordinal)
+        && string.Equals(left.AgentInstructions ?? string.Empty, right.AgentInstructions ?? string.Empty, StringComparison.Ordinal)
+        && string.Equals(left.SessionId, right.SessionId, StringComparison.Ordinal)
+        && string.Equals(left.InputId, right.InputId, StringComparison.Ordinal)
+        && string.Equals(left.TurnId, right.TurnId, StringComparison.Ordinal)
+        && string.Equals(left.Variant ?? string.Empty, right.Variant ?? string.Empty, StringComparison.Ordinal)
+        && left.IssueNumber == right.IssueNumber
+        && left.EpicNumber == right.EpicNumber
+        && string.Equals(left.WorkflowRunId ?? string.Empty, right.WorkflowRunId ?? string.Empty, StringComparison.Ordinal)
+        && JsonEquals(left.AgentConfig, right.AgentConfig);
+
     private static System.Text.Json.JsonElement? DeserializeAgentConfig(string? json) =>
         string.IsNullOrWhiteSpace(json)
             ? null
@@ -880,7 +1142,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             AgentJobId: Key,
             ProjectId: string.IsNullOrWhiteSpace(input.ProjectId) ? null : input.ProjectId,
             AgentSessionId: string.IsNullOrWhiteSpace(input.AgentSessionId) ? null : input.AgentSessionId,
-            AgentId: input.AgentId);
+            AgentId: input.AgentId,
+            InitialInputId: string.IsNullOrWhiteSpace(input.InitialInputId) ? null : input.InitialInputId,
+            InitialTurnId: string.IsNullOrWhiteSpace(input.InitialTurnId) ? null : input.InitialTurnId);
     }
 
     private async Task ScheduleNextDispatchAsync()
@@ -941,19 +1205,17 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (IsTerminal || State.RunnerId is null)
             return;
 
+        // Issue-512 T-002: a report timeout is inconclusive
+        // delivery, not authoritative failure. The job transitions to
+        // Unknown so the durable identities (job/work/input/turn) are
+        // preserved for reconciliation; an authoritative terminal
+        // report from the original Runner later resolves the original
+        // Job and Turn. A retryable new launch MUST NOT be issued.
         _log.LogWarning(
-            "AgentJob {Id} report timeout after {Timeout}; transitioning to failed",
+            "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown",
             Key, _options.JobTimeout);
-        await EnterTerminalStateAsync(
-            AgentJobStatus.Failed,
-            null,
-            AgentJobFailureReasons.ReportTimeout,
-            AgentJobFailureReasons.ReportTimeout,
-            AgentJobFailureReasons.ReportTimeout,
-            $"report timeout after {_options.JobTimeout}",
-            null,
-            null,
-            null);
+        await EnterUnknownStateAsync(
+            $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}");
     }
 
     private bool DispatchRetryBoundExceeded()
@@ -1059,8 +1321,36 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.PendingSessionClose?.DeliveryId ?? "-");
 
         await DeliverTerminalToSessionAsync(pending);
+        await MarkInitialTurnTerminalAsync(terminalStatus, message, output, failureReason, failureCategory, terminalExitCode ?? exitCode);
         if (State.PendingFailureEvent is not null)
             await EmitFailureEventAsync(State.PendingFailureEvent);
+    }
+
+    private async Task MarkInitialTurnExecutingAsync()
+    {
+        var sessionId = State.Input?.AgentSessionId;
+        if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(State.Input?.InitialTurnId))
+            return;
+
+        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkInitialTurnExecutingAsync(Key);
+    }
+
+    private async Task MarkInitialTurnTerminalAsync(
+        AgentJobStatus status,
+        string? message,
+        string? output,
+        string? failureReason,
+        string? failureCategory,
+        int? exitCode)
+    {
+        var sessionId = State.Input?.AgentSessionId;
+        if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(State.Input?.InitialTurnId))
+            return;
+
+        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkInitialTurnTerminalAsync(
+            Key,
+            status == AgentJobStatus.Completed ? AgentTurnStatus.Completed : AgentTurnStatus.Failed,
+            new AgentTurnResult(message, output, failureReason, failureCategory, exitCode));
     }
 
     private async Task EmitFailureEventAsync(PendingFailureEvent obligation)
@@ -1260,6 +1550,19 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (State.RoutedPlan is not null && !State.RunnerAccepted)
         {
             await AdvancePreparedLaunchAsync();
+            return;
+        }
+
+        // Issue-512 T-002: Unknown is a reconcilable, non-terminal
+        // state. The reminder must stay registered so a later
+        // authoritative running or terminal report from the original
+        // Runner can update the same Job, and so a Runner reconnect
+        // path can re-deliver the Unknown verdict to the linked
+        // AgentSession if the first propagation failed.
+        if (State.Status == AgentJobStatus.Unknown)
+        {
+            await PropagateUnknownToInitialTurnAsync(State.FailureReason
+                ?? AgentJobFailureReasons.RunnerUnavailable);
             return;
         }
 

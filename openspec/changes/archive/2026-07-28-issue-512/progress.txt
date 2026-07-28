@@ -1,0 +1,146 @@
+## Codebase Patterns
+
+- AgentLaunch routes live in `packages/server/src/Mohist.Server/Api/AgentSessionLaunchRoutes.cs`. They delegate to `IAgentLauncher.LaunchAsync` (in `AgentLauncher.cs`).
+- `IAgentSessionGrain` is `IGrainWithStringKey`; commands take a record with `[GenerateSerializer]` and `[property: Id(N)]`.
+- `AgentJobGrain` already uses IPersistentState + Reminders for `agent-job-recovery`. The recovery reminder is the durable wake-up mechanism.
+- `AgentSessionGrain` participates via `OpenAsync` (idempotent on existing session) and reports work via `AppendTerminalCloseAsync`. The routed-launch flow uses `IAgentJobGrain.EnsurePreparedAsync` + `AdvancePreparedLaunchAsync` for a similar preprocess+advance pattern (session open from canonical plan).
+- The routed-launch coordinator already implements the "open Session from canonical plan only, never from caller's newly resolved values" property — the manual launch should mirror that pattern.
+- Session persistence uses `IAgentSessionStore` + `IAgentSessionTranscriptStore`; `AgentSession` is the domain aggregate with `Status` snapshot.
+- `AgentJobInput` carries launch-time snapshot (Prompt, Model, Variant, Runtime, AgentId, AgentInstructions, AgentConfig, AgentSessionId, IssueNumber, EpicNumber, WorkflowRunId). To add Input/Turn IDs.
+- `WorkDispatch` carries AgentJobId, AgentSessionId, ProjectId. To add InputId, TurnId, IdempotencyKey.
+- Runner's `AgentJobExecutor` creates `session.input` event on `onSessionReady` via `eventSink.publishSessionInput`. T-001 requires skipping this when IDs are pre-seeded.
+- The fake clock + in-memory DB + fake dispatch observer exists; tests should use them.
+- `MohistIntegrationFixture` and `AgentJobGrainFixture` provide the test infrastructure.
+- `WithTriggerLabels` is invoked through `metadata.Merge(new AgentSessionMetadata(triggerLabels, null))` — the AgentSession source label is immutable (mohist.io/agent-id) once set.
+
+## Plan
+
+### Code Touchpoints
+
+1. **`AgentSession` domain** — add `SessionInput` and `AgentTurn` ordered child records to `AgentSessionStatusSnapshot` (or a child list). Add `EnsureInitialLaunch` transition method that opens the session if absent, records the initial Input/Turn, and returns the stored children.
+2. **`IAgentSessionGrain`** — add `EnsureInitialLaunchAsync(EnsureInitialLaunchCommand)` returning `InitialLaunchArtifacts` (sessionId, inputId, turnId, input content stored). Repeat with same IDs is a no-op; mismatched IDs or source metadata conflict.
+3. **`IAgentJobGrain`** — add `PrepareManualLaunchAsync(PrepareManualLaunchCommand)` returning `AgentJobInput` snapshot (so re-prepare uses the same input). Also need `SubmitPreparedLaunchAsync()` to convert Pending → dispatchable without re-submit. (We can add it as a thin method that triggers TryDispatchAsync once Input is set.)
+4. **`AgentLaunchCoordinatorGrain`** — keyed by `(ProjectId, IdempotencyKey)`. Holds `LaunchPlan` (canonical request fingerprint, generated JobKey/SessionId/InputId/TurnId, snapshot Agent fields, current single-participant command fence). Steps:
+   - Look up existing plan. If exists and fingerprint matches → return persistent result.
+   - If fingerprint differs → throw `LaunchIdempotencyConflictException` (caught by route → 409).
+   - Persist plan with generated IDs.
+   - Per command, set `Pending { commandId, kind, payload, expectedRevision }` then await participant; clear fence on success/AlreadyApplied.
+   - Steps: ResolveAndSnapshot → PrepareManualLaunch → EnsureInitialLaunch → SubmitPreparedLaunch.
+   - Reminder + OnActivate recovery.
+5. **`IAgentLauncher.LaunchAsync`** — accept idempotency key; delegate to coordinator (or a new `LaunchIdempotentAsync`). Keep the existing `LaunchAsync` signature for non-idempotent paths.
+6. **`AgentSessionLaunchRoutes`** — read `Idempotency-Key` header; 400 if missing/empty; route through coordinator.
+7. **`AgentJobInput`** — add `InitialInputId` and `InitialTurnId` fields. WorkDispatch carries them.
+8. **`WorkDispatch`** — add `InitialInputId`, `InitialTurnId`, `IdempotencyKey` fields.
+9. **Runner** — `AgentJobExecutor` skips `publishSessionInput` when `InitialInputId`/`InitialTurnId` are supplied on the dispatch. Instead, when the runtime session is ready, the executor sends a "session.input.acknowledged" (or simply nothing) since the input is already durably recorded server-side.
+10. **Tests** — Server: plan-conflict, retry, replay after archive/rename, replay after context mutation, coordinator crash recovery (every fence), initial Input/Turn persistence on restart, queue delay, exactly-one dispatch with fake observer. Runner: identity propagation, no duplicate session.input.
+
+## Decisions
+
+- Coordinator key derivation: `($"agent-launch-coord/{projectId}/{stableIdempotencyKey}")` — opaque, project-scoped.
+- Generated IDs: `Input-Id = Guid.NewGuid().ToString("N")`, `Turn-Id = Guid.NewGuid().ToString("N")`, `JobKey = "agent-job-launch-{guid}"`, `SessionId = "agent-session-{guid}"` (since manual launch has no stable derived id).
+- Coordinator state is `[GenerateSerializer]`-only (no relational storage) — Orleans persistent state only.
+- Single-participant command fence: `Pending { CommandId, Kind, Payload, ExpectedRevision }`; cleared on applied/already-applied.
+- Fingerprint: SHA-256 over canonical JSON of {prompt, agentRef, context, runtime, idempotencyKey}.
+- Route returns 409 with code `launch_idempotency_conflict` when the plan fingerprint differs.
+- The SessionInput/AgentTurn children are stored on the AgentSession aggregate (not top-level). The composite observation (T-002) reads them through the session.
+- The `AgentJobInput` lost the `AgentConfig` (`State.Input = input with { AgentConfig = null }`) — we keep that pattern.
+- The launch response gains `inputId`, `turnId`, `observationUrl` (T-002 will route that; for T-001 we add the IDs and an observation URL even though the handler isn't required).
+
+## Status
+
+Interrupted ~T+90 min. Coordinated manual-launch boundary is wired
+through Server + Runner; durable idempotency path compiles and
+existing tests are migrated. New behaviour-coverage specs and
+replay/conflict tests for T-001 still pending.
+
+### What's in the build
+
+- `AgentLaunchCoordinatorGrain` + `IAgentLaunchCoordinatorGrain`
+  + `AgentLaunchCoordinatorTypes` keyed by reversible
+  `agent-launch-coord/{projectId}/{idempotencyKey}` codec; durable
+  plan + one-at-a-time command fence; reminder-driven recovery;
+  conflict (`launch_idempotency_conflict` 409) when replay differs.
+- `AgentJobGrain.PrepareManualLaunchAsync` +
+  `SubmitPreparedLaunchAsync` mirroring the routed-launch
+  prepare/advance pattern; `ManualPlan` field added to
+  `AgentJobState`; new `AgentJobInput.InitialInputId/InitialTurnId`
+  carried into `WorkDispatch`.
+- `AgentSessionGrain.EnsureInitialLaunchAsync` +
+  `MarkInitialTurnExecutingAsync` +
+  `MarkInitialTurnTerminalAsync` +
+  `GetInitialLaunchAsync`; new `AgentSessionInputRecord`,
+  `AgentSessionInputAcceptance`, `AgentTurnRecord`,
+  `AgentTurnStatus`, `AgentTurnResult` aggregate children. Existing
+  source-label immutability preserved; `AgentSessionStatusSnapshot`
+  extended with `Inputs` and `Turns`.
+- `AgentLauncher.LaunchIdempotentAsync` (manual path) leaves the
+  routed launch path untouched.
+- `AgentSessionLaunchRoutes` requires `Idempotency-Key`; 400 with
+  `idempotency_key_required` on missing; 409 with
+  `launch_idempotency_conflict` on conflicting replay; preserves
+  the existing invalid-prompt / unknown-agent / archived-agent
+  gates.
+- Runner `AgentJobExecutor` skips `publishSessionInput` when
+  `work.initialInputId && work.initialTurnId` are both present
+  (issue-512 T-001).
+- Test wiring: `ApiTestClient.LaunchAgentSessionAsync` /
+  `LaunchAgentSessionWithoutIdempotencyKeyAsync` extensions; all
+  existing launch callers migrated.
+
+### What's NOT yet in the build (will resume after interruption)
+
+- Behaviour-coverage specs (new file): header-required validation,
+  duplicate/concurrent retry, conflict on changed prompt, replay
+  after Agent archive/rename + context mutation, every coordinator
+  recovery fence, initial Input/Turn persistence, queue delay,
+  exactly-one dispatch with fake `IAgentJobDispatchObserver`.
+- Runner identity-propagation spec using fake Runtime + fake
+  `ServerConnection` asserting no duplicate `session.input`.
+- Full test runs (dotnet test + npm test -w packages/runner).
+
+## T-002 Implementation Notes
+
+- The existing T-001 worktree already contained the launch observation assembler, route, expanded 201 response, and Unknown enum scaffolding; this task completed the state convergence paths and the observation spec compilation.
+- Runner loss now calls the AgentJob owner through `IAgentJobWorkCoordinator.MarkUnknownAsync` instead of synthesizing a failed report. The Runner module stays isolated from Agent types through the coordinator boundary.
+- Reconnect polling calls `ReconcileRunningAsync` only with the persisted original runner/work identity. This changes Unknown back to Running and marks the linked initial turn executing; terminal reports continue to use the same identity and update the original turn.
+- AgentJob terminal transitions now propagate the authoritative completed/failed result to the linked initial AgentTurn. Unknown remains nonterminal and does not create a Session close or a replacement dispatch.
+- `AgentLaunchObservationRoutesSpecs` covers queued, terminal, Unknown, repeated reads, cross-project rejection, terminal reconciliation, session usability, and stable launch references. Direct integration execution started the host but exceeded the available command timeout without producing test results; build and architecture checks passed.
+- A coordinator fence bug was found during the long-running spec: successful Prepare/Ensure participant calls left the same Pending command in state and recursively re-entered the same step. The fence is now cleared and persisted after each successful participant acknowledgement before advancing.
+- Final verification: Server solution build, Runner typecheck, Runner tests (1438), Server UnitTests (1533), and Server ArchTests (35) pass. Server SpecTests remain blocked by a long-running SpecTests process in another workspace; this workspace's focused launch-observation run reproduced the host-start hang and was stopped by timeout.
+
+## T-003 Implementation Notes
+
+- Web launch now creates one UUID before the first mutation, keeps it in the composer until a successful response, sends it only as `Idempotency-Key`, and reuses it when the mutation is invoked again after an error. Navigation uses the returned Session ID and carries the returned Job ID as a query reference for observation.
+- Web exposes `AgentLaunchObservationDto`, reads the project-scoped observation endpoint, and maps turn status directly to observe/result/reconcile guidance. Session activity remains independently authoritative, so a terminal Job does not close the Session.
+- CLI `mo agent launch` accepts `--idempotency-key`; omitted keys are printed before dispatch and the transport retries once with the same header. Human/table output includes Job, Session, Input, Turn, transcript, Job, and observation references; docs describe original-key recovery.
+- T-003 verification passed: Web typecheck, full Web tests (5153 passed, 1 skipped), FSD boundary check, and CLI tests (1435). `npm test` passed Workflow Definition (175), CLI (1435), Unit (1533), and Arch (35) suites but did not exit within five minutes while running existing Server SpecTests.
+
+## Verification Repair
+
+- The Server SpecTests hang was caused by `AgentLaunchCoordinatorGrain` clearing its pending command after Prepare/Ensure without persisting the next stage, so `AdvanceAsync` restarted Prepare recursively and the launch request never returned.
+- After stage progression was fixed, the observation route exposed a second defect: Orleans could not copy `AgentTurnRecord.InputIds` when its `IReadOnlyList<string>` held the collection-expression `ReadOnlySingleElementList<string>` runtime type. `GetInitialLaunchAsync` now materializes that child list as an array at the grain boundary.
+- Focused Server verification now passes: observation 9/9, validation 17/17, and launch identity 2/2. Runner typecheck passes and Runner tests pass 1438/1438.
+- A subsequent full `npm test` reached all 3283 Server SpecTests but found six stale assertions: four expected timeout/runner-loss `Failed` or failure events instead of the specified `Unknown`, one expected a queued initial Session turn to be inactive, and one contextless runner-loss test expected a retryable failure event. Those tests now verify the issue-512 Unknown/recovery contract; the OpenTelemetry `localhost:4318` connection-refused messages are exporter diagnostics and were not failed test cases.
+- Final full verification passes: Workflow Definition 175, CLI 1435, Unit 1533, Arch 35, Server SpecTests 3283, Web 5153 passed/1 skipped, and Runner 1438; FSD and test-boundary checks also pass.
+
+## Review Fixes
+
+- Manual launch now asks the idempotency coordinator to resume a matching raw request before resolving the current Agent, context, or runtime override. The raw path Agent reference is fingerprinted, so a renamed or archived Agent can still replay the accepted launch while a different supplied reference conflicts.
+- Unknown initial turns now leave Session activity `unknown`; reconciliation to the original running work restores the turn to `executing` and Session activity to `active`.
+- Added Server specs for replay after Agent rename/archive, conflicting supplied Agent references, and Unknown-to-running composite observation convergence.
+- Direct `dotnet test` Server SpecTests run executed 3287 tests and exposed one unrelated existing flaky failure in `AgentSessionEventDiscardObservabilitySpecs.MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents`; the previous full suite had passed before these fixes.
+- Final verification passed: `npm test` completed with 3288 Server SpecTests, 1533 Server UnitTests, 35 architecture tests, 1435 CLI tests, 5153 Web tests (1 skipped), and 1438 Runner tests. Runner typecheck, Web typecheck, and the Web FSD boundary check also passed.
+- Coordinator launch and replay now reject unfinished setup with `launch_setup_pending` rather than returning `201`; reminder recovery remains responsible for completing the existing fenced plan. A grain-level failure-injection spec covers the non-acceptance behavior for both calls.
+- Final verification after the acceptance-boundary fix passed: `npm test` completed with 3289 Server SpecTests, 1533 Server UnitTests, 35 architecture tests, 1435 CLI tests, 5153 Web tests (1 skipped), and 1438 Runner tests. Runner/Web typechecks and the Web FSD check also passed.
+
+## Review Fix 2 (participant-fence coverage)
+
+- The grain-level `Coordinator_DoesNotReturnLaunchResultUntilSetupCompletes` spec only fed malformed `AgentConfigJson` to the coordinator grain directly, so it never exercised a real participant failure after a durable fence, never went through the HTTP route, and could not detect a route catch/mapping regression. It was replaced by route-level failure injection at each coordinator fence.
+- Added an `IAgentLaunchParticipantProbe` seam (no-op default registered in `MohistServiceRegistration` alongside the existing `IAgentJobDispatchObserver` singleton). The coordinator invokes it after each participant write and before advancing the durable fence. The test fixture substitutes a probe that throws the next N acknowledgements at an armed gate, so the durable `Pending` fence stays on the current step and the route returns `503 launch_setup_pending` until recovery.
+- `Launch_ParticipantFailureAtFence_Returns503AndRecoversWithSameKey` (Theory over all three fences) asserts `503` + `launch_setup_pending` (never `201`), same-key recovery to `201`, an idempotent resume returning the same four IDs, and a recovered Session with exactly one accepted Input and one queued Turn. `Launch_RecoveryAfterSessionFenceFailure_RecordsSingleInputAndTurn` fails the Session fence twice and asserts no Input/Turn duplication across retries.
+- Verification: focused `AgentSessionLaunchIdempotencySpecs` 8/8 pass; all launch/session/job spec classes 449/449 pass. `npm test` reports Workflow Definition 175, Server Unit 1533, CLI 1435, Arch 35, and Server SpecTests 3291/3292 pass; the single SpecTests failure is the pre-existing `AgentSessionEventDiscardObservabilitySpecs.MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents` flake (separate `AgentSessionGrainFixture`, passes in isolation, fails intermittently under full-suite load only). Runner and Web typechecks pass.
+- Participant probes now fire after the participant command succeeds but before the coordinator advances its fence, so recovery exercises lost acknowledgement after durable Job/Session writes. Prepare retries retain the original pending command ID; focused idempotency specs assert it remains stable across recovery.
+- Final verification passed: `npm test` completed with Workflow Definition 175, Server Unit 1533, Server Architecture 35, Server SpecTests 3292, CLI 1435, Web 5153 (1 skipped), and Runner 1438 tests.
+- Submit-fence recovery now registers a fake Runner and asserts the post-submit acknowledgement-loss retry emits exactly one `AssignmentPrepared` event for the returned Job.
+- Final verification after the Submit-fence dispatch assertion passed: `npm test` completed with Workflow Definition 175, Server Unit 1533, Server Architecture 35, Server SpecTests 3292, CLI 1435, Web 5153 (1 skipped), and Runner 1438 tests.
+- Rebase CI repair: replay lookup now runs before prompt validation, so a reused Idempotency-Key with a changed whitespace prompt reports `launch_idempotency_conflict` rather than treating the replay as a fresh invalid request. Full Server SpecTests passed 3302/3302 after the repair.

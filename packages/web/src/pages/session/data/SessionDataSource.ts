@@ -1,4 +1,5 @@
 import type { AgentSessionTranscriptResponse, SessionMetadata, SessionStatusKind, SessionTurn } from '../../../entities/coder-session'
+import type { AgentLaunchObservationDto } from '../../../entities/agent'
 import type { DisplayTurn } from '../../../widgets/session-transcript'
 
 export type StatusKind = SessionStatusKind | 'live' | 'finalizing' | 'probing' | 'completed' | 'failed' | 'stale'
@@ -23,6 +24,7 @@ export interface SessionDataSourceResult {
   historicalRuntimeId?: string | null
   meta: SessionMetadata | null
   transcriptResponse: AgentSessionTranscriptResponse | null
+  launchObservation?: AgentLaunchObservationDto | null
   initialTurns: SessionTurn[]
 
   statusKind: StatusKind

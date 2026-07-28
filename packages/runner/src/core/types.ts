@@ -119,6 +119,21 @@ export type WorkDispatchResponse = {
   recovery?: string | null
   recoveryRemaining?: number | null
   agentDefinition?: AgentExecutionDefinition | null
+  /**
+   * Launch-time `SessionInput` id the coordinator durably recorded
+   * on the AgentSession before the AgentJob dispatched. The runner
+   * uses this to skip emitting a duplicate `session.input` record
+   * for an AgentJob launch (issue-512 T-001). Mirrors
+   * `WorkDispatch.InitialInputId` on the server.
+   */
+  initialInputId?: string | null
+  /**
+   * Launch-time `AgentTurn` id the coordinator durably recorded on
+   * the AgentSession. The runner propagates the id so the Session's
+   * turn status can be reconciled with the Job's lifecycle. Mirrors
+   * `WorkDispatch.InitialTurnId` on the server.
+   */
+  initialTurnId?: string | null
 }
 
 /**
@@ -195,6 +210,21 @@ export interface DispatchWorkItem {
   recovery?: JsonObject | null
   recoveryRemaining?: number | null
   agentDefinition?: AgentExecutionDefinition | null
+  /**
+   * Launch-time `SessionInput` id the coordinator durably recorded
+   * on the AgentSession before the AgentJob dispatched. When set,
+   * the runner skips emitting a duplicate `session.input` record
+   * for an AgentJob launch (issue-512 T-001). Mirrors
+   * `WorkDispatch.InitialInputId` on the server.
+   */
+  initialInputId?: string | null
+  /**
+   * Launch-time `AgentTurn` id the coordinator durably recorded on
+   * the AgentSession. The runner propagates the id so the Session's
+   * turn status can be reconciled with the Job's lifecycle. Mirrors
+   * `WorkDispatch.InitialTurnId` on the server.
+   */
+  initialTurnId?: string | null
 }
 
 export interface AddTaskInput {

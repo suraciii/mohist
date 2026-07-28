@@ -466,9 +466,27 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         return Task.FromResult(new AgentLaunchResult(
             SessionId: $"mention-session-{sequence}",
             JobKey: $"mention-job-{sequence}",
+            InputId: string.Empty,
+            TurnId: string.Empty,
             AgentId: agent.Id,
             AgentName: agent.Name));
     }
+
+    public Task<AgentLaunchResult> LaunchIdempotentAsync(
+        AgentInfo agent,
+        string prompt,
+        AgentLaunchContext context,
+        string idempotencyKey,
+        AgentLaunchCoordinatorRequest request,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("RecordingAgentLauncher does not exercise the manual launch path.");
+
+    public Task<AgentLaunchResult?> ResumeIdempotentAsync(
+        string projectId,
+        string idempotencyKey,
+        AgentLaunchCoordinatorRequest request,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("RecordingAgentLauncher does not exercise the manual launch path.");
 }
 
 public sealed record RecordedMentionLaunch(

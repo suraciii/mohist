@@ -207,7 +207,8 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 解释为对话关闭或用户目标已经交付。
 
 - `mo agent launch <agent>` 创建 AgentJob、AgentSession、首条 SessionInput 与首个 AgentTurn，
-  并返回四个稳定 ID。
+  并返回四个稳定 ID、transcript URL 和 composite observation URL。命令接受
+  `--idempotency-key`；省略时会在请求前打印生成的 key，响应丢失后必须用该 key 重试。
 - `mo agent create/edit` 使用类型化的 `--runtime`、`--model`、`--variant`、`--skills` 和
   `--max-concurrent-runs` 配置 Agent；头像使用 `--avatar-file`，Instructions 使用互斥的
   `--instructions` 或 `--instructions-file`。CLI 不要求调用方拼 Agent config JSON，

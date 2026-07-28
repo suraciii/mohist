@@ -21,4 +21,12 @@ public sealed class AgentJobState
     [Id(15)] public bool LaunchReady { get; set; }
     [Id(16)] public DateTimeOffset? TerminalAt { get; set; }
     [Id(17)] public PendingFailureEvent? PendingFailureEvent { get; set; }
+    /// <summary>
+    /// Durable record of the manual-launch preparation command the
+    /// coordinator used to materialise this job. Populated by
+    /// <see cref="IAgentJobGrain.PrepareManualLaunchAsync"/>; the
+    /// canonical <see cref="Input"/> is built from this snapshot so
+    /// reminder-driven recovery can re-derive the same args verbatim.
+    /// </summary>
+    [Id(18)] public PrepareManualLaunchCommand? ManualPlan { get; set; }
 }

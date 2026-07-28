@@ -144,12 +144,16 @@ Runtime 判断规则。
 mo agent create --name explorer --description "Explore product needs" --instructions "Clarify the request, identify missing decisions, and produce actionable issues." --runtime opencode --skills mohist,mohist-explore --max-concurrent-runs 1
 mo agent view explorer
 mo agent launch explorer --prompt "探索一个可以从 Slack 调用 Mohist Agent 的产品方案"
+# 响应丢失后使用启动前打印的 key 重试，不要生成新的启动
+mo agent launch explorer --prompt "探索一个可以从 Slack 调用 Mohist Agent 的产品方案" --idempotency-key <key>
 ```
 
 `agent view` 显示 Readiness、Availability 与配置缺口；Needs setup 时按提示
 补齐再启动。`agent launch` 返回 AgentJob ID、AgentSession ID、首个 Input ID 与 Turn ID。
-首次启动的工作结果用 `mo agent job view` 读取，连续对话用 `mo session followup` 提交新的
-SessionInput，完整记录用 `mo session transcript`。CLI 与 Web 调用的是同一组产品能力。
+首次启动的工作结果和 composite observation 用返回的 observation URL 读取；连续对话用
+`mo session followup` 提交新的 SessionInput，完整记录用 `mo session transcript`。pending、queued
+和 executing 状态继续观察，terminal 状态读取结果或 transcript，Unknown 必须用原 key 重读或重试。
+CLI 与 Web 调用的是同一组产品能力。
 
 ## 启动入口
 

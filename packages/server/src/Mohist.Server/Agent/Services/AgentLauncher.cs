@@ -113,8 +113,95 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         return new AgentLaunchResult(
             SessionId: sessionId,
             JobKey: jobKey,
+            InputId: string.Empty,
+            TurnId: string.Empty,
             AgentId: agent.Id,
             AgentName: agent.Name);
+    }
+
+    public async Task<AgentLaunchResult> LaunchIdempotentAsync(
+        AgentInfo agent,
+        string prompt,
+        AgentLaunchContext context,
+        string idempotencyKey,
+        AgentLaunchCoordinatorRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(context);
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            throw new ArgumentException(
+                "Idempotency-Key is required for the manual launch path.",
+                nameof(idempotencyKey));
+        }
+
+        var trimmedPrompt = prompt.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedPrompt))
+        {
+            throw new ArgumentException(
+                "Prompt must not be empty or whitespace.",
+                nameof(prompt));
+        }
+
+        var resolvedRuntime = ResolveRuntime(agent.AgentConfig);
+        var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
+        var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
+            ? agent.AgentConfig.Value.GetRawText()
+            : null;
+
+        var coordinator = _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
+            AgentLaunchCoordinatorCodec.KeyFor(context.ProjectId, idempotencyKey));
+        var outcome = await coordinator.LaunchAsync(new AgentLaunchCoordinatorCommandEnvelope(
+            ProjectId: context.ProjectId,
+            IdempotencyKey: idempotencyKey,
+            AgentId: agent.Id,
+            AgentName: agent.Name,
+            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentConfigJson: agentConfigJson,
+            Model: resolvedModel,
+            Variant: resolvedVariant,
+            Runtime: resolvedRuntime,
+            Prompt: trimmedPrompt,
+            WorkspacePath: context.WorkspacePath,
+            IssueNumber: context.IssueNumber,
+            EpicNumber: context.EpicNumber,
+            Repository: context.Repository,
+            Title: context.Title,
+            Request: request));
+
+        return new AgentLaunchResult(
+            SessionId: outcome.SessionId,
+            JobKey: outcome.JobKey,
+            InputId: outcome.InputId,
+            TurnId: outcome.TurnId,
+            AgentId: outcome.AgentId,
+            AgentName: outcome.AgentName);
+    }
+
+    public async Task<AgentLaunchResult?> ResumeIdempotentAsync(
+        string projectId,
+        string idempotencyKey,
+        AgentLaunchCoordinatorRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(idempotencyKey);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var coordinator = _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
+            AgentLaunchCoordinatorCodec.KeyFor(projectId, idempotencyKey));
+        var outcome = await coordinator.ResumeAsync(request);
+        return outcome is null
+            ? null
+            : new AgentLaunchResult(
+                SessionId: outcome.SessionId,
+                JobKey: outcome.JobKey,
+                InputId: outcome.InputId,
+                TurnId: outcome.TurnId,
+                AgentId: outcome.AgentId,
+                AgentName: outcome.AgentName);
     }
 
     private (string SessionId, string JobKey) ResolveSessionAndJobKeys(
@@ -297,6 +384,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         return new AgentLaunchResult(
             SessionId: sessionId,
             JobKey: jobKey,
+            InputId: string.Empty,
+            TurnId: string.Empty,
             AgentId: agent.Id,
             AgentName: agent.Name);
     }
