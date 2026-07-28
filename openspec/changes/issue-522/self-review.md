@@ -1,33 +1,29 @@
-# Self Review: Issue 522 Plan
+# Self Review: Issue 522 Plan (round 2)
 
 ## Findings
 
-### 1. [Blocking] Follow-up Turn lifecycle drivers are unspecified — stop cannot apply to a follow-up Turn
+### 1. [Blocking] D8's activity-driven terminal clobbers the launch Turn's authoritative terminal result
 
-D1 introduces durable `AgentTurnRecord`s for follow-up idle-start Turns (recorded as `Queued`), and D2 generalizes the transition *methods* to be Turn-id-keyed. But neither the design nor T-001 specifies **what drives those Turns from `Queued → Executing → terminal` for the non-launch case**, and today nothing does.
+Round-1 finding 1 was addressed by adding D8, which drives non-launch Turn status from runtime facts. D8's `Queued → Executing` promotion is safe for the launch Turn (issue-512 removed its Runner `session.input`, so it never fires). But D8's **terminal** transition is not safe for the launch Turn, contrary to D8's claim that "the launch Turn is unaffected."
 
-Evidence in current code:
-- `MarkInitialTurnExecuting` / `MarkInitialTurnTerminal` are called **only** from `AgentJobGrain` (`AgentJobGrain.cs:235,362,810,1324,1335,1350`). The AgentJob is the sole driver of the launch Turn's Executing/terminal transitions.
-- Runtime events do not touch Turn status: `ApplyRuntimeEventToDomain` (`AgentSessionGrain.cs:1498-1532`) maps `session.input`/`session.activity` to `SetActivity` only — it never marks a Turn Executing or terminal.
+`AppendTerminalCloseAsync` — the AgentJob's terminal delivery for the launch Turn — builds a `session.activity` payload with `status: completed|failed` and ingests it through the **same** `AppendEventsAsync` → `ApplyRuntimeEventToDomain` path used by Runner runtime events (`AgentSessionGrain.cs:819-836`). Under D8 that terminal `session.activity` would mark the current Turn terminal.
 
-Consequence for the plan: cancel/stop eligibility is Turn-status-based (design D4/D5: "Stop applies only to an Executing Turn"; spec `agent-turn-stop`: "SHALL apply only to a Turn that is executing"). After D1, a follow-up Turn is recorded `Queued` and **nothing ever marks it `Executing`**, so:
-- Stop can never apply to a follow-up Turn — its premise (an Executing follow-up Turn) is never produced by its dependency T-001. T-003's central acceptance criterion ("stop request for an Executing Turn") is therefore unreachable for the follow-up case, which is exactly the case the issue cares about ("正在执行的工作").
-- Normal completion of a follow-up Turn would also leave the Turn non-terminal (activity converges, Turn status does not).
+Ordering makes it a regression. `AgentJobGrain.EnterTerminalStateAsync` awaits `DeliverTerminalToSessionAsync` (→ `AppendTerminalCloseAsync`) at `AgentJobGrain.cs:1323` **before** `MarkInitialTurnTerminalAsync` at `:1324`. So under D8 the thin activity-driven terminal lands first; the authoritative `MarkInitialTurnTerminal` — carrying the Turn's `message`/`output`/`failureCategory`/`exitCode` — then no-ops (terminal guard, `Transitions.cs:492`). The launch Turn's rich terminal result is lost.
 
-Recommended fix (for the fix task, not applied here): add a decision — or extend D1/D2 — that specifies the event-driven lifecycle for non-launch Turns: which runtime event / runner report marks a follow-up Turn `Queued → Executing`, which marks it terminal (`completed`/`failed`) on normal completion, and how the stop path marks it terminal (`unknown`/terminal) on stop. Move that wiring into T-001's scope and acceptance criteria, and have T-003 drive the follow-up Turn to terminal on stop. The alternative is to explicitly descope to launch-Turn-only cancel/stop and drop D1, but that does not satisfy the issue's intent for follow-up Turns.
+Recommended fix (for the fix task): guard D8's activity-driven terminal so it does not apply to a launch Turn (a Turn whose `JobId` is set), or skip `session.activity` facts that carry the AppendTerminalClose markers (`agentJobId`/`deliveryId`). The launch Turn's terminal must remain solely AgentJob-driven. D8's "launch Turn is unaffected" must be reworded to cover the terminal path, and T-001's "launch-Turn isolation" criterion must explicitly test the terminal-close path, not only the `session.input` promotion.
 
-### 2. [Precision] D5 enumerates a `Stopped` Turn status that does not exist
+### 2. [Resolved] Prior round-1 findings verified fixed
 
-Design D5's stale-guard lists terminal Turn statuses as `Completed|Failed|Cancelled|Stopped|Unknown`. The actual `AgentTurnStatus` enum is `Queued, Executing, Completed, Failed, Unknown, Cancelled` (`AgentSession.cs:387-395`) — there is no `Stopped` value. "stopped" is a stop-reply *label* (D6), not a Turn status; a stopped Turn's status is driven through the existing Completed/Failed/Unknown mapping.
+- Round-1 finding 1 (follow-up Turn lifecycle unspecified): resolved by D8 + T-001 lifecycle criteria + T-002/T-003 notes — modulo the blocking edge in finding 1 above.
+- Round-1 finding 2 (D5 listed a non-existent `Stopped` Turn status): resolved; D5 now enumerates `Completed|Failed|Cancelled|Unknown` and clarifies `stopped` is a reply label only.
+- Round-1 finding 3 (command-surface docs): resolved; T-004 now requires updating `design/cli.md` and `docs/cli-reference.md`.
 
-Recommended fix: correct the D5 enumeration to the real terminal statuses (`Completed|Failed|Cancelled|Unknown`) and keep `stopped`/`stop-requested` as reply labels only, so an implementer does not add a bogus `Stopped` enum value.
+### 3. [Observation, non-blocking] Follow-up cancel is best-effort by design
 
-### 3. [Minor] Command-surface docs are not updated
-
-`design/cli.md:77` and `docs/cli-reference.md` list the session command surface as `transcript/followup/compact/reset/cancel`. D6 adds `session stop` and changes `cancel`'s semantics (BREAKING), but neither the design migration plan nor T-004 requires updating these docs. Per the AGENTS.md spec-first rule (landing a command updates `design/` and `docs/`), T-004 should carry a doc-update acceptance criterion for `design/cli.md` and `docs/cli-reference.md`.
+D8 documents that follow-up cancel cannot un-deliver a synchronously delivered input (launch-Turn cancel stays deterministic). A related consequence is not spelled out: after a follow-up-Turn cancel the Server marks activity `idle`, so a new follow-up may be accepted and dispatched while the runtime still has the cancelled input — the runtime serializes inputs so there is no true concurrency, but the Server/runtime views diverge briefly. This is within the accepted follow-up-cancel tradeoff and does not block build; noting it so the implementer is aware.
 
 ## Verdict
 
-Finding 1 is a build-blocking coherence gap: the substrate task (T-001) does not deliver the Executing/terminal lifecycle that the stop task (T-003) and the issue's follow-up-Turn scenarios depend on. The plan is not ready to build until that lifecycle is specified and tasked.
+Finding 1 is a build-blocking correctness regression introduced by the D8 fix: it would silently drop the launch Turn's authoritative terminal result. The plan is not ready to build until D8's terminal path is guarded against launch Turns.
 
 <promise>FAIL</promise>
