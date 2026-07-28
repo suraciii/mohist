@@ -97,6 +97,21 @@ public class IssueApiSpecs
     }
 
     [Fact]
+    public async Task UpdateIssue_RiskOnly_PersistsAndReturnsRisk()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"risk-update-{Guid.NewGuid():N}");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Risk update", projectId = project.Id });
+
+        var updated = await _client.PatchDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}",
+            new { risk = "high" });
+
+        Assert.Equal("high", updated.Risk);
+    }
+
+    [Fact]
     public async Task CreateEpic_OnProjectRoute_UsesRouteProjectContext()
     {
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-header-{Guid.NewGuid():N}");
@@ -156,7 +171,7 @@ public class IssueApiSpecs
         Assert.NotNull(detail.Blocker);
         Assert.Equal("waiting-for", detail.Blocker!.Kind);
         Assert.Equal(prereq.Number, detail.Blocker.Issue!.Number);
-        Assert.Contains(detail.Prerequisites, p => p.Number == prereq.Number && !p.Completed);
+        Assert.Contains(detail.Prereq, p => p.Number == prereq.Number && !p.Completed);
     }
 
     [Fact]
@@ -238,10 +253,10 @@ public class IssueApiSpecs
         var issueDetail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
         Assert.Contains(detail.LinkedIssues, i => i.Number == issue.Number);
-        Assert.Equal(epic.Number, issueDetail.PrimaryEpic?.Number);
+        Assert.Equal(epic.Number, issueDetail.Epic?.Number);
     }
 
-    private sealed record IssueDto(int Number, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, bool IsDraft, bool CanStart, BlockerDto? Blocker, PrimaryEpicDto? PrimaryEpic, string WorkflowProfileId);
+    private sealed record IssueDto(int Number, CommentDto[] Comments, PrerequisiteDto[] Prereq, bool IsDraft, bool CanStart, BlockerDto? Blocker, IssueEpicDto? Epic, string WorkflowProfileId, string? Risk = null);
     private sealed record WorkflowProfileDto(string Id, string Name, string Description);
     private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description);
     private sealed record ProjectDto(string Id);
@@ -249,7 +264,7 @@ public class IssueApiSpecs
     private sealed record PrerequisiteDto(int Number, bool Completed);
     private sealed record BlockerDto(string Kind, BlockerIssueDto? Issue);
     private sealed record BlockerIssueDto(int Number, string Title);
-    private sealed record PrimaryEpicDto(int Number, string Title);
+    private sealed record IssueEpicDto(int Number, string Title);
     private sealed record ProjectStatusDto(int Issues, Dictionary<string, int> IssuesByStatus);
     private sealed record SystemInfoDto(
         RunningInfoDto Running,

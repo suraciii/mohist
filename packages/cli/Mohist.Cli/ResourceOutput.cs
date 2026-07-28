@@ -15,10 +15,13 @@ internal sealed record ResourceDescriptor(
 
 internal static class ResourceOutputCatalog
 {
+    private static readonly IReadOnlyList<string> AgentFields =
+        ["id", "name", "description", "instructions", "agentConfig", "skills", "maxConcurrentRuns", "createdAt", "updatedAt"];
+
     public static ResourceDescriptor For(string? tableShape)
     {
         if (!Enum.TryParse<MohistCliApi.TableShape>(tableShape, ignoreCase: false, out var shape))
-            return new(ResourceCardinality.Single, ["id", "name", "description", "status", "createdAt", "updatedAt"]);
+            throw new ArgumentException($"Unknown resource output shape '{tableShape}'.", nameof(tableShape));
 
         var cardinality = shape switch
         {
@@ -40,7 +43,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.IssueTemplateList or
             MohistCliApi.TableShape.RoutingRuleList or
             MohistCliApi.TableShape.DeadLetterList or
-            MohistCliApi.TableShape.OpencodeModels or
+            MohistCliApi.TableShape.Models or
             MohistCliApi.TableShape.RunList or
             MohistCliApi.TableShape.ActivityList or
             MohistCliApi.TableShape.AgentJobList or
@@ -51,16 +54,20 @@ internal static class ResourceOutputCatalog
         IReadOnlyList<string> fields = shape switch
         {
             MohistCliApi.TableShape.ProjectList => ["id", "name", "repository", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.ProjectShow => ["id", "name", "repository", "workflowProfile", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.IssueList => ["number", "title", "status", "stage", "priority", "labels"],
-            MohistCliApi.TableShape.IssueShow => ["number", "title", "status", "stage", "priority", "labels", "body", "repository", "repositoryName", "workflowRunId"],
+            MohistCliApi.TableShape.Project => ["id", "name", "repository", "workflowProfile", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.WorkflowStatus => ["issueNumber", "title", "status", "workflow"],
+            MohistCliApi.TableShape.EpicList => ["projectId", "number", "title", "description", "priority", "status", "createdAt", "updatedAt", "progress", "pauseReason"],
+            MohistCliApi.TableShape.EpicShow => ["projectId", "number", "title", "description", "priority", "status", "createdAt", "updatedAt", "linkedIssues", "progress", "nextIssueNumber", "nextIssueReason", "pauseReason"],
+            MohistCliApi.TableShape.EpicLink or MohistCliApi.TableShape.EpicUnlink => ["number", "title", "status", "priority"],
+            MohistCliApi.TableShape.IssueList => ["number", "title", "status", "stage", "priority", "risk", "labels", "prereq", "epic", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.Issue => ["number", "title", "status", "stage", "priority", "risk", "labels", "body", "repository", "repositoryName", "prereq", "epic", "workflowRunId", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.RepoList => ["name", "gitUrl", "baseBranch", "isDefault", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.FeedbackList or MohistCliApi.TableShape.FeedbackShow =>
                 ["id", "issueNumber", "workflowRunId", "stage", "status", "body", "createdAt", "resolution", "updatedAt"],
             MohistCliApi.TableShape.CommentShow => ["id", "issueNumber", "author", "body", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.LabelList => ["key", "description", "supportedValues"],
-            MohistCliApi.TableShape.AgentList => ["id", "name", "description", "status", "archived", "createdAt", "updatedAt"],
-            MohistCliApi.TableShape.AgentShow => ["id", "name", "description", "instructions", "agentConfig", "skills", "maxConcurrentRuns", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.AgentList or
+            MohistCliApi.TableShape.AgentShow => AgentFields,
             MohistCliApi.TableShape.Sessions => ["id", "sessionName", "status", "createdAt", "model"],
             MohistCliApi.TableShape.SessionMetadata => ["id", "sessionName", "status", "model", "stage", "createdAt", "usage", "metadata"],
             MohistCliApi.TableShape.SessionTranscriptSummary => ["turns", "partCount", "firstActivityAt", "lastActivityAt"],
@@ -88,10 +95,13 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.ProjectTemplateList => ["projectId", "templateId", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.ProjectTemplateShow => ["projectId", "templateId", "definition", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.ProjectWorkflowProfile => ["defaultTemplateId", "variables", "prompts"],
+            MohistCliApi.TableShape.WorkflowProfilePrompt => ["key", "displayName", "description", "tags", "stage", "body", "source"],
+            MohistCliApi.TableShape.WorkflowProfilePreview => ["rendered"],
             MohistCliApi.TableShape.WorkflowRunDetail => ["status", "issueRef"],
             MohistCliApi.TableShape.WorkflowApproval => ["workflowRunId", "approved"],
             MohistCliApi.TableShape.RunList => ["id", "status", "stage", "currentStage", "issueNumber"],
             MohistCliApi.TableShape.WorkflowRunEvents => ["id", "type", "source", "subject", "time", "data"],
+            MohistCliApi.TableShape.WorkflowRunVariables => ["key", "value"],
             MohistCliApi.TableShape.WorkflowVariables => ["vars", "stages"],
             MohistCliApi.TableShape.WorkflowProfile =>
                 ["issueNumber", "projectId", "sourceTemplateId", "hasCustomTemplate", "yaml", "workflowRunId", "profileId", "updateMode", "templateSource", "variables", "updatedAt"],
@@ -100,13 +110,14 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.DeadLetterList or MohistCliApi.TableShape.DeadLetterRedelivery => ["id", "eventId", "handler", "attempts", "status", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.ActivityList => ["id", "provenance", "scope", "kind", "time", "title", "description", "eventType", "issueNumber", "workflowRunId", "sessionId", "runnerId", "status"],
             MohistCliApi.TableShape.IssueWatchList => ["number", "watching", "muted"],
-            MohistCliApi.TableShape.OpencodeModels => ["id"],
+            MohistCliApi.TableShape.IssueArchiveCompleted => ["message", "archived", "skipped"],
+            MohistCliApi.TableShape.Models => ["id"],
             MohistCliApi.TableShape.RunnerList =>
                 ["id", "kind", "hostname", "scope", "status", "registeredAt", "lastHeartbeatAt", "connectionState", "capabilities", "coderModels", "coderModelCount", "capacity", "activeWork", "activeWorks"],
             MohistCliApi.TableShape.RunnerShow =>
                 ["id", "kind", "hostname", "scope", "status", "registeredAt", "lastHeartbeatAt", "connectionState", "capabilities", "coderModels", "coderModelCount", "capacity", "buildGitHash", "activeWorks"],
             MohistCliApi.TableShape.SystemInfo => ["running", "source", "install", "update", "services", "paths", "degraded", "cliVersion"],
-            _ => ["id", "number", "name", "title", "description", "status", "state", "stage", "priority", "labels", "createdAt", "updatedAt"],
+            _ => throw new ArgumentOutOfRangeException(nameof(tableShape), shape, "Resource output shape has no field catalog."),
         };
 
         return new(cardinality, fields);

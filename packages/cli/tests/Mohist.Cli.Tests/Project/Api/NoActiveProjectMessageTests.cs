@@ -18,7 +18,7 @@ public class NoActiveProjectMessageTests
     }
 
     [Fact]
-    public void NoActiveProjectMessage_DoesNotMentionProjectId()
+    public void NoActiveProjectMessage_DoesNotMentionProjectReference()
     {
         Assert.DoesNotContain("--project-id", MohistCliCommands.NoActiveProjectMessage);
     }
@@ -31,7 +31,7 @@ public class NoActiveProjectMessageTests
     }
 
     [Fact]
-    public async Task ResolveProjectIdAsync_NoOptionsAndNoActiveProject_EmitsHelperMessage()
+    public async Task ResolveProjectReference_NoOptionsAndNoActiveProject_EmitsHelperMessage()
     {
         var files = new FakeFileSystem();
         var http = new RecordingHttpHandler();
@@ -39,7 +39,7 @@ public class NoActiveProjectMessageTests
         var error = new StringWriter();
         var api = CreateApi(http, output, error, files);
 
-        var resolved = await api.ResolveProjectIdAsync(null, null);
+        var resolved = await api.ResolveProjectIdAsync(null);
 
         Assert.Null(resolved);
         var err = error.ToString().TrimEnd('\r', '\n');
@@ -48,7 +48,7 @@ public class NoActiveProjectMessageTests
     }
 
     [Fact]
-    public async Task ResolveProjectIdAsync_BlankOptionsAndNoActiveProject_EmitsHelperMessage()
+    public async Task ResolveProjectReference_BlankOptionsAndNoActiveProject_EmitsHelperMessage()
     {
         var files = new FakeFileSystem();
         var http = new RecordingHttpHandler();
@@ -56,7 +56,7 @@ public class NoActiveProjectMessageTests
         var error = new StringWriter();
         var api = CreateApi(http, output, error, files);
 
-        var resolved = await api.ResolveProjectIdAsync("", " ");
+        var resolved = await api.ResolveProjectIdAsync("");
 
         Assert.Null(resolved);
         var err = error.ToString().TrimEnd('\r', '\n');
@@ -65,7 +65,7 @@ public class NoActiveProjectMessageTests
     }
 
     [Fact]
-    public async Task ResolveProjectIdAsync_BlankActiveProject_EmitsHelperMessage()
+    public async Task ResolveProjectReference_BlankActiveProject_EmitsHelperMessage()
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
@@ -79,7 +79,7 @@ public class NoActiveProjectMessageTests
         var error = new StringWriter();
         var api = CreateApi(http, output, error, files);
 
-        var resolved = await api.ResolveProjectIdAsync(null, null);
+        var resolved = await api.ResolveProjectIdAsync(null);
 
         Assert.Null(resolved);
         var err = error.ToString().TrimEnd('\r', '\n');
@@ -88,7 +88,7 @@ public class NoActiveProjectMessageTests
     }
 
     [Fact]
-    public async Task ResolveProjectIdAsync_CorruptStateFile_EmitsHelperMessage()
+    public async Task ResolveProjectReference_CorruptStateFile_EmitsHelperMessage()
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
@@ -102,7 +102,7 @@ public class NoActiveProjectMessageTests
         var error = new StringWriter();
         var api = CreateApi(http, output, error, files);
 
-        var resolved = await api.ResolveProjectIdAsync(null, null);
+        var resolved = await api.ResolveProjectIdAsync(null);
 
         Assert.Null(resolved);
         var err = error.ToString().TrimEnd('\r', '\n');
@@ -111,7 +111,7 @@ public class NoActiveProjectMessageTests
     }
 
     [Fact]
-    public async Task IssueShow_NoProjectAndNoActiveProject_DiagnosticMatchesHelper()
+    public async Task IssueView_NoProjectAndNoActiveProject_DiagnosticMatchesHelper()
     {
         var files = new FakeFileSystem();
         var http = new RecordingHttpHandler();

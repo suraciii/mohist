@@ -28,7 +28,7 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public void ProjectShow_Help_ListsOutputOption()
+    public void ProjectView_Help_ListsOutputOption()
     {
         var help = RenderHelp(["project", "view", "--help"]);
 
@@ -36,7 +36,7 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public void ProjectShow_Help_DescribesJsonFieldSelection()
+    public void ProjectView_Help_DescribesJsonFieldSelection()
     {
         var help = RenderHelp(["project", "view", "--help"]);
 
@@ -236,7 +236,7 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public async Task ProjectShow_OutputTable_RendersProjectShowTable()
+    public async Task ProjectView_OutputTable_RendersProjectViewTable()
     {
         const string json = """
             {
@@ -278,7 +278,7 @@ public class ProjectCliOutputModeTests
     }
 
     [Fact]
-    public async Task ProjectShow_LegacyOutputOption_FailsBeforeHttpCall()
+    public async Task ProjectView_LegacyOutputOption_FailsBeforeHttpCall()
     {
         var http = new RecordingHttpHandler();
         var output = new StringWriter();

@@ -16,7 +16,7 @@ public static class RoutingTestRoutes
 
         group.MapGet("/test", async (
             HttpContext context,
-            int? last,
+            int? limit,
             RoutingRuleStore rules,
             ProjectRecentEventReader events,
             RoutingTableEvaluator evaluator,
@@ -28,15 +28,15 @@ public static class RoutingTestRoutes
             if (activeRules.Count == 0)
                 return ApiResults.Ok(new RoutingTestResponse(
                     project.Id,
-                    last is null ? DefaultLast : NormalizeLimit(last.Value),
+                    limit is null ? DefaultLast : NormalizeLimit(limit.Value),
                     "No active routing rules are configured for this project.",
                     []));
 
-            var replayed = await events.ListAsync(project.Id, last ?? DefaultLast, ct);
+            var replayed = await events.ListAsync(project.Id, limit ?? DefaultLast, ct);
             if (replayed.Count == 0)
                 return ApiResults.Ok(new RoutingTestResponse(
                     project.Id,
-                    last is null ? DefaultLast : NormalizeLimit(last.Value),
+                    limit is null ? DefaultLast : NormalizeLimit(limit.Value),
                     "No replayable events are available for this project.",
                     []));
 
@@ -48,7 +48,7 @@ public static class RoutingTestRoutes
                 evt.Time,
                 evaluator.Evaluate(evt.Input, activeRules, probe).Select(ToTrace).ToArray())).ToArray();
 
-            return ApiResults.Ok(new RoutingTestResponse(project.Id, NormalizeLimit(last ?? DefaultLast), null, traces));
+            return ApiResults.Ok(new RoutingTestResponse(project.Id, NormalizeLimit(limit ?? DefaultLast), null, traces));
         });
 
         return app;

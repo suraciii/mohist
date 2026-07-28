@@ -151,7 +151,7 @@ public class CliIssueUpdatePatchBodySpecs
         Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
         Assert.Contains("--body, --body-file", error.ToString());
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -217,6 +217,20 @@ public class CliIssueUpdatePatchBodySpecs
         Assert.False(body.AsObject().ContainsKey("labels"));
         Assert.False(body.AsObject().ContainsKey("title"));
         Assert.False(body.AsObject().ContainsKey("body"));
+    }
+
+    [Fact]
+    public async Task IssueUpdate_RiskOnly_PatchBodyContainsRisk()
+    {
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "edit", "1", "--risk", "high"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var body = JsonNode.Parse(handler.Requests.Single(r => r.Method == HttpMethod.Patch).Body!)!.AsObject();
+        Assert.Equal("high", body["risk"]!.GetValue<string>());
+        Assert.Single(body);
     }
 
     [Fact]

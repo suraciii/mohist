@@ -9,6 +9,8 @@ namespace Mohist.Cli;
 
 internal static class AgentCommands
 {
+    internal static readonly ResourceDescriptor AgentDescriptor =
+        ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentShow));
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -45,10 +47,9 @@ internal static class AgentCommands
     {
         var command = new Command("install", "Install a built-in agent preset.");
         var preset = new Argument<string>("preset") { Description = "Built-in preset name." };
-        var (project, projectId) = MohistCliCommands.ProjectRefOption();
+        var project = MohistCliCommands.ProjectRefOption();
         command.Arguments.Add(preset);
         command.Options.Add(project);
-        command.Options.Add(projectId);
         command.SetAction(ctx => InstallAsync(ctx));
 
         async Task<int> InstallAsync(ParseResult ctx)
@@ -61,7 +62,7 @@ internal static class AgentCommands
                 return 1;
             }
 
-            var resolution = await api.ResolveProject(ctx.GetValue(project), ctx.GetValue(projectId));
+            var resolution = await api.ResolveProject(ctx.GetValue(project));
             if (resolution.Exit != 0)
                 return resolution.Exit;
 
@@ -250,10 +251,11 @@ internal static class AgentCommands
         var instructionsOpt = new Option<string?>("--instructions") { Description = "Agent instructions as literal text" };
         var instructionsFileOpt = new Option<string?>("--instructions-file") { Description = "Read Agent instructions from a UTF-8 file path, or - for stdin" };
         var descriptionOpt = new Option<string?>("--description") { Description = "Agent description" };
-        var agentConfigOpt = new Option<string?>("--agent-config") { Description = "Agent config JSON or @file" };
+        var agentConfigOpt = new Option<string?>("--agent-config") { Description = "Agent config as inline JSON" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
         var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Maximum concurrent runs" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(AgentDescriptor);
+        var projectOpt = MohistCliCommands.ProjectRefOption();
 
         cmd.Options.Add(nameOpt);
         cmd.Options.Add(instructionsOpt);
@@ -262,58 +264,64 @@ internal static class AgentCommands
         cmd.Options.Add(agentConfigOpt);
         cmd.Options.Add(skillsOpt);
         cmd.Options.Add(maxConcurrentRunsOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.SetAction(ctx =>
-        {
-            var name = ctx.GetValue(nameOpt);
-            var instructions = ctx.GetValue(instructionsOpt);
-            var instructionsFile = ctx.GetValue(instructionsFileOpt);
-            var description = ctx.GetValue(descriptionOpt);
-            var agentConfig = ctx.GetValue(agentConfigOpt);
-            var skills = ctx.GetValue(skillsOpt);
-            var maxConcurrentRuns = ctx.GetValue(maxConcurrentRunsOpt);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            return CreateAsync();
-
-            async Task<int> CreateAsync()
-            {
-                if (string.IsNullOrWhiteSpace(name))
                 {
-                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--name is required");
-                }
+                    var name = ctx.GetValue(nameOpt);
+                    var instructions = ctx.GetValue(instructionsOpt);
+                    var instructionsFile = ctx.GetValue(instructionsFileOpt);
+                    var description = ctx.GetValue(descriptionOpt);
+                    var agentConfig = ctx.GetValue(agentConfigOpt);
+                    var skills = ctx.GetValue(skillsOpt);
+                    var maxConcurrentRuns = ctx.GetValue(maxConcurrentRunsOpt);
+                    var selection = JsonSelection.Parse(AgentDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
+                    var project = ctx.GetValue(projectOpt);
+                    return CreateAsync();
 
-                var instructionsResult = await BodyInputResolver.ResolveAsync(
-                    instructions,
-                    instructionsFile,
-                    new BodyInputResolver.SourceFlags("--instructions", "--instructions-file", "Agent instructions"),
-                    api.FileSystem,
-                    api.StandardInput,
-                    TextWriter.Null);
-                if (instructionsResult is BodyInputResolver.Result.Failure instructionsFailure)
-                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, instructionsFailure.Message);
+                    async Task<int> CreateAsync()
+                    {
+                        if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                            return api.WriteJsonSelectionResult(AgentDescriptor, selection);
+                        if (string.IsNullOrWhiteSpace(name))
+                        {
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--name is required");
+                        }
 
-                var config = await ResolveJsonAsync(agentConfig, api, TextWriter.Null);
-                if (config is ResolveJsonResult.Invalid configFailure)
-                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, configFailure.Message);
+                        var instructionsResult = await BodyInputResolver.ResolveAsync(
+                            instructions,
+                            instructionsFile,
+                            new BodyInputResolver.SourceFlags("--instructions", "--instructions-file", "Agent instructions"),
+                            api.FileSystem,
+                            api.StandardInput,
+                            TextWriter.Null);
+                        if (instructionsResult is BodyInputResolver.Result.Failure instructionsFailure)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, instructionsFailure.Message);
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
+                        var config = await ResolveJsonAsync(agentConfig, api, TextWriter.Null);
+                        if (config is ResolveJsonResult.Invalid configFailure)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, configFailure.Message);
 
-                var resolvedInstructions = ((BodyInputResolver.Result.Success)instructionsResult).Body;
+                        var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
+                        if (resolveExit != 0) return resolveExit;
 
-                return await PrintAgentIdAsync(api, ProjectAgentsPath(resolvedProjectId, "/agents"), new
-                {
-                    name,
-                    description,
-                    instructions = resolvedInstructions,
-                    agentConfig = ((ResolveJsonResult.Valid)config).Value,
-                    skills = ParseSkills(skills),
-                    maxConcurrentRuns,
+                        var resolvedInstructions = ((BodyInputResolver.Result.Success)instructionsResult).Body;
+
+                        var path = ProjectAgentsPath(resolvedProjectId, "/agents");
+                        var body = new
+                        {
+                            name,
+                            description,
+                            instructions = resolvedInstructions,
+                            agentConfig = ((ResolveJsonResult.Valid)config).Value,
+                            skills = ParseSkills(skills),
+                            maxConcurrentRuns,
+                        };
+                        return selection.Kind == JsonSelectionKind.Selected
+                            ? await api.PrintMutationResourceAsync(HttpMethod.Post, path, body, AgentDescriptor, selection, data => api.RenderTableAsync(data, MohistCliApi.TableShape.AgentShow))
+                            : await PrintAgentIdAsync(api, path, body);
+                    }
                 });
-            }
-        });
         AddInstructionsInputValidation(cmd, instructionsOpt, instructionsFileOpt);
         return cmd;
     }
@@ -323,31 +331,31 @@ internal static class AgentCommands
         var cmd = new Command("list", "List agents");
         var allOpt = new Option<bool>("--all") { Description = "Include archived agents" };
         var statusOpt = new Option<string?>("--status") { Description = "Filter by status" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentList)));
 
         cmd.Options.Add(allOpt);
         cmd.Options.Add(statusOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var all = ctx.GetValue(allOpt);
             var status = ctx.GetValue(statusOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ListAsync();
 
             async Task<int> ListAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (mode, exit) = api.ResolveOutputMode(output);
+                if (exit != 0) return exit;
+                var localJsonExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.AgentList));
+                if (localJsonExit is not null) return localJsonExit.Value;
+
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = api.ResolveOutputMode(output);
-
-                if (exit != 0) return exit;
 
                 var query = AgentQuery(all ? true : null, status);
                 return await api.PrintWithOutputAsync(
@@ -363,29 +371,29 @@ internal static class AgentCommands
     {
         var cmd = new Command("view", "Show agent details");
         var nameOrIdArg = NameOrIdArg();
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentShow)));
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(AgentDescriptor);
 
         cmd.Arguments.Add(nameOrIdArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var nameOrId = ctx.GetValue(nameOrIdArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ShowAsync();
 
             async Task<int> ShowAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (mode, exit) = api.ResolveOutputMode(output);
+                if (exit != 0) return exit;
+                var localJsonExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.AgentShow));
+                if (localJsonExit is not null) return localJsonExit.Value;
+
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = api.ResolveOutputMode(output);
-
-                if (exit != 0) return exit;
 
                 var agent = await ResolveAgentAsync(api, resolvedProjectId, nameOrId!);
                 if (agent is null)
@@ -407,14 +415,15 @@ internal static class AgentCommands
         var descriptionOpt = new Option<string?>("--description") { Description = "New agent description" };
         var instructionsOpt = new Option<string?>("--instructions") { Description = "New Agent instructions as literal text" };
         var instructionsFileOpt = new Option<string?>("--instructions-file") { Description = "Read new Agent instructions from a UTF-8 file path, or - for stdin" };
-        var agentConfigOpt = new Option<string?>("--agent-config") { Description = "New agent config JSON or @file" };
+        var agentConfigOpt = new Option<string?>("--agent-config") { Description = "New agent config as inline JSON" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
         var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Maximum concurrent runs" };
         var clearDescriptionOpt = new Option<bool>("--clear-description") { Description = "Clear the agent description" };
         var clearAgentConfigOpt = new Option<bool>("--clear-agent-config") { Description = "Clear the agent config" };
         var clearSkillsOpt = new Option<bool>("--clear-skills") { Description = "Clear the agent skills" };
         var clearMaxConcurrentRunsOpt = new Option<bool>("--clear-max-concurrent-runs") { Description = "Clear the maximum concurrent runs" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(AgentDescriptor);
+        var projectOpt = MohistCliCommands.ProjectRefOption();
 
         cmd.Arguments.Add(nameOrIdArg);
         cmd.Options.Add(nameOpt);
@@ -428,75 +437,80 @@ internal static class AgentCommands
         cmd.Options.Add(clearAgentConfigOpt);
         cmd.Options.Add(clearSkillsOpt);
         cmd.Options.Add(clearMaxConcurrentRunsOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.SetAction(ctx =>
-        {
-            var nameOrId = ctx.GetValue(nameOrIdArg);
-            var name = ctx.GetValue(nameOpt);
-            var description = ctx.GetValue(descriptionOpt);
-            var instructions = ctx.GetValue(instructionsOpt);
-            var instructionsFile = ctx.GetValue(instructionsFileOpt);
-            var agentConfig = ctx.GetValue(agentConfigOpt);
-            var skills = ctx.GetValue(skillsOpt);
-            var maxConcurrentRuns = ctx.GetValue(maxConcurrentRunsOpt);
-            var clearDescription = ctx.GetValue(clearDescriptionOpt);
-            var clearAgentConfig = ctx.GetValue(clearAgentConfigOpt);
-            var clearSkills = ctx.GetValue(clearSkillsOpt);
-            var clearMaxConcurrentRuns = ctx.GetValue(clearMaxConcurrentRunsOpt);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            return UpdateAsync();
-
-            async Task<int> UpdateAsync()
-            {
-                var clearSetConflict = ValidateClearSetPair("--description", description is not null, "--clear-description", clearDescription)
-                    ?? ValidateClearSetPair("--agent-config", agentConfig is not null, "--clear-agent-config", clearAgentConfig)
-                    ?? ValidateClearSetPair("--skills", skills is not null, "--clear-skills", clearSkills)
-                    ?? ValidateClearSetPair("--max-concurrent-runs", maxConcurrentRuns is not null, "--clear-max-concurrent-runs", clearMaxConcurrentRuns);
-                if (clearSetConflict is not null)
-                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, clearSetConflict);
-
-                BodyInputResolver.Result? instructionsResult = null;
-                if (instructions is not null || instructionsFile is not null)
                 {
-                    instructionsResult = await BodyInputResolver.ResolveAsync(
-                        instructions,
-                        instructionsFile,
-                        new BodyInputResolver.SourceFlags("--instructions", "--instructions-file", "Agent instructions"),
-                        api.FileSystem,
-                        api.StandardInput,
-                        TextWriter.Null);
-                    if (instructionsResult is BodyInputResolver.Result.Failure instructionsFailure)
-                        return CommandHelpHook.RenderUsageFailure(ctx, api.Error, instructionsFailure.Message);
-                }
+                    var nameOrId = ctx.GetValue(nameOrIdArg);
+                    var name = ctx.GetValue(nameOpt);
+                    var description = ctx.GetValue(descriptionOpt);
+                    var instructions = ctx.GetValue(instructionsOpt);
+                    var instructionsFile = ctx.GetValue(instructionsFileOpt);
+                    var agentConfig = ctx.GetValue(agentConfigOpt);
+                    var skills = ctx.GetValue(skillsOpt);
+                    var maxConcurrentRuns = ctx.GetValue(maxConcurrentRunsOpt);
+                    var clearDescription = ctx.GetValue(clearDescriptionOpt);
+                    var clearAgentConfig = ctx.GetValue(clearAgentConfigOpt);
+                    var clearSkills = ctx.GetValue(clearSkillsOpt);
+                    var clearMaxConcurrentRuns = ctx.GetValue(clearMaxConcurrentRunsOpt);
+                    var selection = JsonSelection.Parse(AgentDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
+                    var project = ctx.GetValue(projectOpt);
+                    return UpdateAsync();
 
-                var config = await ResolveJsonAsync(agentConfig, api, TextWriter.Null);
-                if (config is ResolveJsonResult.Invalid configFailure)
-                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, configFailure.Message);
+                    async Task<int> UpdateAsync()
+                    {
+                        if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                            return api.WriteJsonSelectionResult(AgentDescriptor, selection);
+                        var clearSetConflict = ValidateClearSetPair("--description", description is not null, "--clear-description", clearDescription)
+                            ?? ValidateClearSetPair("--agent-config", agentConfig is not null, "--clear-agent-config", clearAgentConfig)
+                            ?? ValidateClearSetPair("--skills", skills is not null, "--clear-skills", clearSkills)
+                            ?? ValidateClearSetPair("--max-concurrent-runs", maxConcurrentRuns is not null, "--clear-max-concurrent-runs", clearMaxConcurrentRuns);
+                        if (clearSetConflict is not null)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, clearSetConflict);
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
+                        BodyInputResolver.Result? instructionsResult = null;
+                        if (instructions is not null || instructionsFile is not null)
+                        {
+                            instructionsResult = await BodyInputResolver.ResolveAsync(
+                                instructions,
+                                instructionsFile,
+                                new BodyInputResolver.SourceFlags("--instructions", "--instructions-file", "Agent instructions"),
+                                api.FileSystem,
+                                api.StandardInput,
+                                TextWriter.Null);
+                            if (instructionsResult is BodyInputResolver.Result.Failure instructionsFailure)
+                                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, instructionsFailure.Message);
+                        }
 
-                var agent = await ResolveAgentAsync(api, resolvedProjectId, nameOrId!);
-                if (agent is null)
-                    return 1;
+                        var config = await ResolveJsonAsync(agentConfig, api, TextWriter.Null);
+                        if (config is ResolveJsonResult.Invalid configFailure)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, configFailure.Message);
 
-                var resolvedInstructions = instructionsResult is BodyInputResolver.Result.Success instructionsSuccess
-                    ? instructionsSuccess.Body
-                    : null;
+                        var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
+                        if (resolveExit != 0) return resolveExit;
 
-                var body = new JsonObject();
-                AddIfProvided(body, "name", name);
-                AddIfProvided(body, "description", clearDescription ? null : description, clearDescription || description is not null);
-                AddIfProvided(body, "instructions", resolvedInstructions);
-                AddIfProvided(body, "agentConfig", clearAgentConfig ? null : ((ResolveJsonResult.Valid)config).Value, clearAgentConfig || agentConfig is not null);
-                AddIfProvided(body, "skills", clearSkills ? null : JsonSerializer.SerializeToNode(ParseSkills(skills), JsonOptions), clearSkills || skills is not null);
-                AddIfProvided(body, "maxConcurrentRuns", clearMaxConcurrentRuns ? null : maxConcurrentRuns, clearMaxConcurrentRuns || maxConcurrentRuns is not null);
+                        var agent = await ResolveAgentAsync(api, resolvedProjectId, nameOrId!);
+                        if (agent is null)
+                            return 1;
 
-                return await api.PrintPatchAsync(ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}"), body);
-            }
-        });
+                        var resolvedInstructions = instructionsResult is BodyInputResolver.Result.Success instructionsSuccess
+                            ? instructionsSuccess.Body
+                            : null;
+
+                        var body = new JsonObject();
+                        AddIfProvided(body, "name", name);
+                        AddIfProvided(body, "description", clearDescription ? null : description, clearDescription || description is not null);
+                        AddIfProvided(body, "instructions", resolvedInstructions);
+                        AddIfProvided(body, "agentConfig", clearAgentConfig ? null : ((ResolveJsonResult.Valid)config).Value, clearAgentConfig || agentConfig is not null);
+                        AddIfProvided(body, "skills", clearSkills ? null : JsonSerializer.SerializeToNode(ParseSkills(skills), JsonOptions), clearSkills || skills is not null);
+                        AddIfProvided(body, "maxConcurrentRuns", clearMaxConcurrentRuns ? null : maxConcurrentRuns, clearMaxConcurrentRuns || maxConcurrentRuns is not null);
+
+                        var path = ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}");
+                        return selection.Kind == JsonSelectionKind.Selected
+                            ? await api.PrintMutationResourceAsync(HttpMethod.Patch, path, body, AgentDescriptor, selection, data => api.RenderTableAsync(data, MohistCliApi.TableShape.AgentShow))
+                            : await api.PrintPatchAsync(path, body);
+                    }
+                });
         AddInstructionsInputValidation(cmd, instructionsOpt, instructionsFileOpt);
         return cmd;
     }
@@ -527,21 +541,24 @@ internal static class AgentCommands
     {
         var cmd = new Command("archive", "Archive an agent");
         var nameOrIdArg = NameOrIdArg();
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(AgentDescriptor);
 
         cmd.Arguments.Add(nameOrIdArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var nameOrId = ctx.GetValue(nameOrIdArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
+            var selection = JsonSelection.Parse(AgentDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             return ArchiveAsync();
 
             async Task<int> ArchiveAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                    return api.WriteJsonSelectionResult(AgentDescriptor, selection);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
 
@@ -549,7 +566,11 @@ internal static class AgentCommands
                 if (agent is null)
                     return 1;
 
-                var archived = await DeleteAgentAsync(api, ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}"));
+                var archivePath = ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}");
+                if (selection.Kind == JsonSelectionKind.Selected)
+                    return await api.PrintMutationResourceAsync(HttpMethod.Delete, archivePath, null, AgentDescriptor, selection, data => api.RenderTableAsync(data, MohistCliApi.TableShape.AgentShow));
+
+                var archived = await DeleteAgentAsync(api, archivePath);
                 if (archived is null)
                     return 1;
                 api.Output.WriteLine($"Agent {archived.Name} ({archived.Id}) archived");
@@ -569,9 +590,9 @@ internal static class AgentCommands
         var promptFileOpt = new Option<string?>("--prompt-file") { Description = "Read prompt from a UTF-8 file path, or - for stdin (mutually exclusive with --prompt)" };
         var issueRefOpt = new Option<int?>("--issue") { Description = "Optional context reference: record the issue number on the session metadata" };
         var epicRefOpt = new Option<string?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
-        var repositoryRefOpt = new Option<string?>("--repository") { Description = "Optional context reference: record the repository on the session metadata" };
+        var repositoryRefOpt = new Option<string?>("--repo") { Description = "Optional context reference: record the repository on the session metadata" };
         var workspacePathOpt = new Option<string?>("--workspace-path") { Description = "Optional context reference: record the workspace path on the session metadata" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionLaunch)));
 
         cmd.Arguments.Add(agentRefArg);
@@ -582,7 +603,6 @@ internal static class AgentCommands
         cmd.Options.Add(repositoryRefOpt);
         cmd.Options.Add(workspacePathOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
@@ -594,7 +614,6 @@ internal static class AgentCommands
             var repositoryRef = ctx.GetValue(repositoryRefOpt);
             var workspacePath = ctx.GetValue(workspacePathOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return LaunchAsync();
 
@@ -611,7 +630,7 @@ internal static class AgentCommands
 
                 if (exit != 0) return exit;
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 var promptText = ((BodyInputResolver.Result.Success)resolvedPrompt).Body;
@@ -672,24 +691,9 @@ internal static class AgentCommands
             return new ResolveJsonResult.Valid(null);
 
         error ??= api.Error;
-        var text = value;
-        if (value.StartsWith('@'))
-        {
-            try
-            {
-                text = await api.FileSystem.ReadAllTextAsync(value[1..]);
-            }
-            catch (Exception ex)
-            {
-                var message = $"could not read agent config file: {value[1..]} ({ex.Message})";
-                error.WriteLine(message);
-                return new ResolveJsonResult.Invalid(message);
-            }
-        }
-
         try
         {
-            return new ResolveJsonResult.Valid(JsonNode.Parse(text));
+            return new ResolveJsonResult.Valid(JsonNode.Parse(value));
         }
         catch (JsonException ex)
         {
@@ -732,20 +736,18 @@ internal static class AgentCommands
             "List AgentJobs for a given Agent profile. Resolves the agent ref client-side, then GETs .../agents/{agentId}/jobs.");
         var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
         var statusOpt = new Option<string?>("--status") { Description = "Filter by job status (pending, running, completed, failed)" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentJobList)));
 
         cmd.Arguments.Add(agentRefArg);
         cmd.Options.Add(statusOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var agentRef = ctx.GetValue(agentRefArg);
             var status = ctx.GetValue(statusOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ListAsync();
 
@@ -754,7 +756,7 @@ internal static class AgentCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 var agent = await ResolveAgentAsync(api, resolvedProjectId, agentRef!);
@@ -779,18 +781,16 @@ internal static class AgentCommands
             "view",
             "Show an AgentJob's current status and terminal result. GETs .../agent-jobs/{jobId}.");
         var jobIdArg = new Argument<string>("job-id") { Description = "Agent job id returned by launch" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentJobView)));
 
         cmd.Arguments.Add(jobIdArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var jobId = ctx.GetValue(jobIdArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ViewAsync();
 
@@ -799,7 +799,7 @@ internal static class AgentCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 return await api.PrintWithOutputAsync(

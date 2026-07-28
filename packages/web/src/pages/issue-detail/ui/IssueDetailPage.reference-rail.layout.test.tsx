@@ -110,7 +110,7 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
         nonBlockingItemIds: [],
         blockedReason: 'A blocking check failed.',
       },
-      prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+      prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
       recovery: DEFAULT_RECOVERY,
     }))
 
@@ -155,7 +155,7 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
         nonBlockingItemIds: [],
         blockedReason: 'A blocking check failed.',
       },
-      prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+      prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
       recovery: DEFAULT_RECOVERY,
     }))
 
@@ -222,7 +222,7 @@ describe('IssueDetailPage reference-rail — document-order audit (narrow)', () 
         nonBlockingItemIds: [],
         blockedReason: 'A blocking check failed.',
       },
-      prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+      prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
       recovery: DEFAULT_RECOVERY,
     }))
 

@@ -701,7 +701,7 @@ public class CliAgentCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("Agent instructions is required", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo agent create [flags]", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -720,7 +720,7 @@ public class CliAgentCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("could not read body file: missing.md", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo agent create [flags]", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -741,7 +741,7 @@ public class CliAgentCommandSpecs
 
         Assert.Equal(2, missingExit);
         Assert.Contains("--name is required", missingError.ToString());
-        Assert.Contains("Usage:", missingError.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", missingError.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo agent create [flags]", missingError.ToString(), StringComparison.Ordinal);
         Assert.Empty(missingHandler.Requests);
         Assert.NotEqual(0, conflictExit);
@@ -763,7 +763,7 @@ public class CliAgentCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("prompt is required", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo agent launch <agent> [flags]", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -782,7 +782,7 @@ public class CliAgentCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("could not read body file: missing.md", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo agent edit <name-or-id> [flags]", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -801,7 +801,7 @@ public class CliAgentCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("--agent-config must be valid JSON", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo agent edit <name-or-id> [flags]", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -932,7 +932,7 @@ public class CliAgentCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains($"{setFlag} cannot be used with {clearFlag}", error.ToString());
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo agent edit <name-or-id> [flags]", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }

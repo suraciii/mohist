@@ -152,7 +152,7 @@ export function IssueDetailPage({
       convergence: issue.convergence ?? undefined,
       drift: issue.drift ?? undefined,
       workflowStageProgress: issue.workflowStageProgress ?? undefined,
-      prerequisites: issue.prerequisites ?? [],
+      prerequisites: issue.prereq ?? [],
       isDraft: issue.isDraft,
       canStart: issue.canStart,
       blocker: issue.blocker,
@@ -417,12 +417,12 @@ export function IssueDetailPage({
                   })}
                 </div>
               )}
-              {issue.primaryEpic && (
+              {issue.epic && (
                 <button
                   type="button"
                   onClick={() => {
-                    if (issue.primaryEpic?.number != null) {
-                      navigate(toProjectPath(`/epics/${issue.primaryEpic.number}`))
+                    if (issue.epic?.number != null) {
+                      navigate(toProjectPath(`/epics/${issue.epic.number}`))
                     }
                   }}
                   className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -433,12 +433,12 @@ export function IssueDetailPage({
                     className="font-mono font-medium text-foreground/80"
                     data-testid="primary-epic-number"
                   >
-                    {issue.primaryEpic.number != null
-                      ? `#${issue.primaryEpic.number}`
+                    {issue.epic.number != null
+                      ? `#${issue.epic.number}`
                       : 'Epic'}
                   </span>
                   <span className="font-medium text-foreground/90">
-                    {issue.primaryEpic.title}
+                    {issue.epic.title}
                   </span>
                 </button>
               )}
@@ -641,21 +641,21 @@ export function IssueDetailPage({
                 summary={issue.model ?? 'default model'}
               >
                 <IssueConfigurationCard
-                  issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, canStart: issue.canStart, blocker: issue.blocker, isBacklog: !!isBacklog }}
+                  issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prereq, canStart: issue.canStart, blocker: issue.blocker, isBacklog: !!isBacklog }}
                   projectId={issueProjectId}
                   mutations={{ addPrerequisiteMutation: mutations.addPrerequisiteMutation, removePrerequisiteMutation: mutations.removePrerequisiteMutation }}
                   unframed
                 />
               </CollapsibleRailCard>
 
-              {issue.prerequisites && issue.prerequisites.length > 0 && (
+              {issue.prereq && issue.prereq.length > 0 && (
                 <CollapsibleRailCard
                   testId="reference-rail-prerequisites"
                   title="Start Prerequisites"
                   forceCollapsed={isNarrowViewport}
-                  summary={`${issue.prerequisites.length} item${issue.prerequisites.length === 1 ? '' : 's'}`}
+                  summary={`${issue.prereq.length} item${issue.prereq.length === 1 ? '' : 's'}`}
                 >
-                  <IssuePrerequisitesCard prerequisites={issue.prerequisites} unframed />
+                  <IssuePrerequisitesCard prerequisites={issue.prereq} unframed />
                 </CollapsibleRailCard>
               )}
 

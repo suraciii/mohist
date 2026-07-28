@@ -105,7 +105,11 @@ public sealed record EpicDetailDto(
     string UpdatedAt,
     IReadOnlyList<LinkedIssueDto> LinkedIssues,
     EpicProgressDto Progress,
-    string? PauseReason = null);
+    string? PauseReason = null)
+{
+    public int? NextIssueNumber => Progress.NextIssue?.Number;
+    public string? NextIssueReason => Progress.NextIssueReason;
+};
 
 /// <summary>
 /// Per-issue result emitted by <c>IEpicGrain.LinkIssuesAsync</c> /

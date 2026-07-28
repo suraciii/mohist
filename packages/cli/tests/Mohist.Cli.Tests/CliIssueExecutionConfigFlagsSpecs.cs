@@ -112,7 +112,7 @@ public class CliIssueExecutionConfigFlagsSpecs
         fs.AddFile("/tmp/models.json", "{\"plan\":\"anthropic/claude-sonnet\",\"check\":\"openai/gpt-5\"}");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "create", "My issue", "--body", "Hello", "--stage-models", "@/tmp/models.json"],
+            http, ["issue", "create", "My issue", "--body", "Hello", "--stage-models-file", "/tmp/models.json"],
             output, error, fs, executor);
 
         Assert.True(exitCode == 0, $"exit={exitCode} stderr={error} stdout={output}");
@@ -131,7 +131,7 @@ public class CliIssueExecutionConfigFlagsSpecs
         fs.AddFile("/tmp/variants.json", "{\"plan\":\"max\",\"check\":\"high\"}");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "create", "My issue", "--body", "Hello", "--stage-model-variants", "@/tmp/variants.json"],
+            http, ["issue", "create", "My issue", "--body", "Hello", "--stage-model-variants-file", "/tmp/variants.json"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -156,7 +156,7 @@ public class CliIssueExecutionConfigFlagsSpecs
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Post);
         Assert.Contains("--stage-models", error.ToString());
         Assert.Contains("invalid JSON", error.ToString());
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -165,14 +165,14 @@ public class CliIssueExecutionConfigFlagsSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "create", "My issue", "--body", "Hello", "--stage-models", "@/tmp/does-not-exist.json"],
+            http, ["issue", "create", "My issue", "--body", "Hello", "--stage-models-file", "/tmp/does-not-exist.json"],
             output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Post);
         var stderr = error.ToString();
         Assert.Contains("--stage-models", stderr);
-        Assert.Contains("Usage:", stderr, StringComparison.Ordinal);
+        Assert.Contains("USAGE", stderr, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -219,7 +219,7 @@ public class CliIssueExecutionConfigFlagsSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "edit", "1", "--stage-model-variants", "@/tmp/variants.json"],
+            ["issue", "edit", "1", "--stage-model-variants-file", "/tmp/variants.json"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -273,7 +273,7 @@ public class CliIssueExecutionConfigFlagsSpecs
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
         Assert.Contains("--stage-models", error.ToString());
         Assert.Contains("invalid JSON", error.ToString());
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -17,7 +17,7 @@ public sealed class CliExecutionContractTests
 
         Assert.Equal(2, exit);
         Assert.Contains("does-not-exist", error.ToString());
-        Assert.Contains("Usage:", error.ToString());
+        Assert.Contains("USAGE", error.ToString());
         Assert.Empty(output.ToString());
         Assert.Empty(handler.Requests);
     }

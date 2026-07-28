@@ -15,21 +15,19 @@ internal static partial class IssueCommands
     private static Command BuildTemplateList(MohistCliApi api)
     {
         var cmd = new Command("list", "List available issue templates for the active project");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.IssueTemplateList)));
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ListAsync();
 
             async Task<int> ListAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
@@ -46,17 +44,15 @@ internal static partial class IssueCommands
     {
         var cmd = new Command("view", "View a single issue template by name");
         var nameArg = new Argument<string>("name") { Description = "Template name or id (e.g. feature)" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.IssueTemplateShow)));
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var name = ctx.GetValue(nameArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return GetAsync();
 
@@ -67,7 +63,7 @@ internal static partial class IssueCommands
                     api.Error.WriteLine("Template name is required");
                     return 1;
                 }
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;

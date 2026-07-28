@@ -39,14 +39,14 @@ Epic priority rates the **milestone's** importance, not any single issue's. Use
 
 ```bash
 mo epic create "<title>" --description "<markdown>" --priority p2
-# -d / --description: the milestone markdown (see epic-templates.md)
-# -p / --priority: p0|p1|p2|p3
+# --description: the milestone markdown (see epic-templates.md)
+# --priority: p0|p1|p2|p3
 # --project <id>: target project (else active project)
 ```
 
-Note: `mo epic create` currently takes the description inline via `-d` only; there
+Note: `mo epic create` currently takes the description inline via `--description` only; there
 is no `--description-file` yet. For long descriptions, write the markdown to a
-file first, then pass its contents to `-d` via your shell, or use the API. (A
+file first, then pass its contents to `--description` via your shell, or use the API. (A
 `--description-file` flag to match `mo issue create --body-file` is tracked as a
 follow-up.)
 

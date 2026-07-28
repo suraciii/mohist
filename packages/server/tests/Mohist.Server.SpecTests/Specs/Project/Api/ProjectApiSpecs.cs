@@ -659,7 +659,7 @@ public class ProjectApiSpecs
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(json.GetProperty("success").GetBoolean());
         Assert.Contains("default", json.GetProperty("error").GetString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("mo repo set-default", json.GetProperty("error").GetString() ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("mo project repo set-default", json.GetProperty("error").GetString() ?? string.Empty);
 
         var repos = await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{created.Id}/repositories");
         Assert.Single(repos);
@@ -693,7 +693,7 @@ public class ProjectApiSpecs
             new NoopCommandExecutor());
 
         Assert.NotEqual(0, exitCode);
-        Assert.Contains("mo repo set-default <other-name>", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo project repo set-default <other-name>", error.ToString());
         Assert.Single(await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{created.Id}/repositories"));
     }
 

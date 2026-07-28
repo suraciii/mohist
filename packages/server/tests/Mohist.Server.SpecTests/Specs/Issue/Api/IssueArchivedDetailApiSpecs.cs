@@ -79,7 +79,7 @@ public class IssueArchivedDetailApiSpecs
         Assert.Equal(issueNumber, detail.Number);
         Assert.NotNull(detail.Title);
         Assert.NotNull(detail.Feedback);
-        Assert.NotNull(detail.Prerequisites);
+        Assert.NotNull(detail.Prereq);
         Assert.NotNull(detail.Comments);
         Assert.NotNull(detail.Attachments);
     }
@@ -528,7 +528,7 @@ public class IssueArchivedDetailApiSpecs
         string? WorkflowStatus,
         string? ArchivedAt,
         FeedbackWireDto[] Feedback,
-        PrereqWireDto[] Prerequisites,
+        PrereqWireDto[] Prereq,
         CommentWireDto[] Comments,
         AttachmentWireDto[] Attachments);
 

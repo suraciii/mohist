@@ -20,19 +20,17 @@ internal static partial class IssueCommands
         {
             Description = "Prerequisite issue number",
         };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Arguments.Add(prereqNumberArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var prereqNumber = ctx.GetValue(prereqNumberArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             return AddAsync();
 
@@ -40,7 +38,7 @@ internal static partial class IssueCommands
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(IssueDescriptor, selection);
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/prerequisites");
                 return await api.PrintMutationResourceAsync(
@@ -49,7 +47,7 @@ internal static partial class IssueCommands
                     new { prerequisiteNumber = prereqNumber },
                     IssueDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.Issue));
             }
         });
         return cmd;
@@ -63,19 +61,17 @@ internal static partial class IssueCommands
         {
             Description = "Prerequisite issue number",
         };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Arguments.Add(prereqNumberArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var prereqNumber = ctx.GetValue(prereqNumberArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             return RemoveAsync();
 
@@ -83,7 +79,7 @@ internal static partial class IssueCommands
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(IssueDescriptor, selection);
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
@@ -94,7 +90,7 @@ internal static partial class IssueCommands
                     null,
                     IssueDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.Issue));
             }
         });
         return cmd;

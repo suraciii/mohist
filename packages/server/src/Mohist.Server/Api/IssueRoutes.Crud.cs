@@ -35,13 +35,14 @@ public static partial class IssueRoutes
             bool? all,
             string? repository,
             int? parent,
+            int? epic,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
             if (TryValidateLabelFilters(label, out var labelError) is false)
                 return ApiResults.BadRequest(labelError!, "invalid_label");
 
-            var list = await issuesQuery.ListWithLabelFiltersAsync(project.Id, project, stage, label, priority, archived, all, repository, parent);
+            var list = await issuesQuery.ListWithLabelFiltersAsync(project.Id, project, stage, label, priority, archived, all, repository, parent, epic);
             return ApiResults.Ok(list);
         });
 
@@ -210,6 +211,18 @@ public static partial class IssueRoutes
             if (TryValidateModelMetadataRawTypes(req.Raw, out var rawTypeError) is false)
                 return ApiResults.BadRequest(rawTypeError!, "invalid_model_metadata");
 
+            if (req.Contains(nameof(UpdateIssueRequest.Risk)))
+            {
+                try
+                {
+                    _ = IssueDomain.IssueRisk.From(req.Risk);
+                }
+                catch (ArgumentException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message, "invalid_risk");
+                }
+            }
+
             if (TryValidateAgentConfigForbiddenKeys(req.Raw, "agentConfig", out var agentConfigError) is false)
                 return ApiResults.BadRequest(agentConfigError!, "invalid_agent_config");
 
@@ -268,6 +281,7 @@ public static partial class IssueRoutes
                             Body: req.Body,
                             Labels: req.Labels,
                             Priority: req.Priority,
+                            Risk: req.Risk,
                             IsDraft: req.IsDraft,
                             AttachmentIds: req.AttachmentIds,
                             WorkflowProfileId: workflowProfileIdForUpdate,
@@ -353,6 +367,7 @@ public static partial class IssueRoutes
                             Body: req.Body,
                             Labels: req.Labels,
                             Priority: req.Priority,
+                            Risk: req.Risk,
                             IsDraft: req.IsDraft,
                             AttachmentIds: req.AttachmentIds,
                             WorkflowProfileId: workflowProfileIdForUpdate,
@@ -398,6 +413,7 @@ public static partial class IssueRoutes
                     Body: req.Body,
                     Labels: req.Labels,
                     Priority: req.Priority,
+                    Risk: req.Risk,
                     IsDraft: req.IsDraft,
                     AttachmentIds: req.AttachmentIds,
                     PresentFields: req.Fields,

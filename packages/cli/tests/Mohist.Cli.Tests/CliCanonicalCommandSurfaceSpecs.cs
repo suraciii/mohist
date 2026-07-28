@@ -161,7 +161,7 @@ public class CliCanonicalCommandSurfaceSpecs
     }
 
     [Fact]
-    public async Task IssueShow_IsRejectedAsUsageFailure()
+    public async Task IssueView_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = SetupEnv();
 
@@ -260,7 +260,7 @@ public class CliCanonicalCommandSurfaceSpecs
     }
 
     [Fact]
-    public async Task ProjectShow_IsRejectedAsUsageFailure()
+    public async Task ProjectView_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = SetupEnv();
 
@@ -492,7 +492,7 @@ public class CliCanonicalCommandSurfaceSpecs
     // ---------- Project selector and JSON field discovery ----------
 
     [Fact]
-    public async Task ProjectIdFlag_IsRejectedAsUsageFailure()
+    public async Task ProjectReferenceFlag_IsRejectedAsUsageFailure()
     {
         var (handler, http, output, error, fs, executor) = SetupEnv();
 
@@ -501,7 +501,7 @@ public class CliCanonicalCommandSurfaceSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo issue list", error.ToString(), StringComparison.Ordinal);
     }
 

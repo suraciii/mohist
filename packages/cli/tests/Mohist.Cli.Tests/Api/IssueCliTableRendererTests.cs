@@ -69,7 +69,7 @@ public class IssueCliTableRendererTests
     }
 
     [Fact]
-    public async Task RenderTable_ProjectShow_IsMultiLineSummary()
+    public async Task RenderTable_ProjectView_IsMultiLineSummary()
     {
         var data = JsonNode.Parse("""
             {
@@ -89,7 +89,7 @@ public class IssueCliTableRendererTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        await api.RenderTableAsync(data, MohistCliApi.TableShape.ProjectShow);
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.Project);
 
         var text = output.ToString();
         Assert.Contains("id:", text);
@@ -138,7 +138,7 @@ public class IssueCliTableRendererTests
     }
 
     [Fact]
-    public async Task RenderTable_IssueShow_IsMultiLineSummaryWithCondensedBody()
+    public async Task RenderTable_IssueView_IsMultiLineSummaryWithCondensedBody()
     {
         var longBody = new string('B', 200);
         var data = JsonNode.Parse($$"""
@@ -162,7 +162,7 @@ public class IssueCliTableRendererTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        await api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow);
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.Issue);
 
         var text = output.ToString();
         Assert.Contains("number:", text);
@@ -179,7 +179,7 @@ public class IssueCliTableRendererTests
     }
 
     [Fact]
-    public async Task RenderTable_IssueShow_RendersParentReferenceAndChildProgress()
+    public async Task RenderTable_IssueView_RendersParentReferenceAndChildProgress()
     {
         var data = JsonNode.Parse("""
             {
@@ -210,7 +210,7 @@ public class IssueCliTableRendererTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        await api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow);
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.Issue);
 
         var text = output.ToString();
         Assert.Contains("parent:   is a parent (4 child issues)", text);
@@ -218,7 +218,7 @@ public class IssueCliTableRendererTests
     }
 
     [Fact]
-    public async Task RenderTable_IssueShow_RendersParentIssueReferenceForChild()
+    public async Task RenderTable_IssueView_RendersParentIssueReferenceForChild()
     {
         var data = JsonNode.Parse("""
             {
@@ -242,7 +242,7 @@ public class IssueCliTableRendererTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        await api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow);
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.Issue);
 
         var text = output.ToString();
         Assert.Contains("parent:   #200 Composite parent", text);

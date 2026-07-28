@@ -20,19 +20,17 @@ internal static partial class IssueCommands
         var cmd = new Command("add", "Add a watching declaration for an Agent on an issue (idempotent)");
         var numberArg = NumberArg();
         var agentOpt = new Option<string?>("--agent") { Description = "Agent name or id" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(agentOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var agent = ctx.GetValue(agentOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             return AddAsync();
 
@@ -45,7 +43,7 @@ internal static partial class IssueCommands
                     api.Error.WriteLine("--agent is required");
                     return 1;
                 }
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 var resolvedAgent = await AgentCommands.ResolveAgentAsync(api, resolvedProjectId, agent!);
@@ -61,7 +59,7 @@ internal static partial class IssueCommands
                     new { agentId = resolvedAgent.Id },
                     IssueDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.Issue));
             }
         });
         return cmd;
@@ -72,19 +70,17 @@ internal static partial class IssueCommands
         var cmd = new Command("remove", "Remove a watching declaration; mutes the Agent on this issue if no other declaration covers it");
         var numberArg = NumberArg();
         var agentOpt = new Option<string?>("--agent") { Description = "Agent name or id" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(agentOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var agent = ctx.GetValue(agentOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             return RemoveAsync();
 
@@ -97,7 +93,7 @@ internal static partial class IssueCommands
                     api.Error.WriteLine("--agent is required");
                     return 1;
                 }
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 var resolvedAgent = await AgentCommands.ResolveAgentAsync(api, resolvedProjectId, agent!);
@@ -113,7 +109,7 @@ internal static partial class IssueCommands
                     new { agentId = resolvedAgent.Id },
                     IssueDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.Issue));
             }
         });
         return cmd;
@@ -125,17 +121,15 @@ internal static partial class IssueCommands
             "list",
             "List the issue's watching and muted Agents as two distinct groups");
         var numberArg = NumberArg();
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.IssueWatchList)));
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ListAsync();
 
@@ -144,7 +138,7 @@ internal static partial class IssueCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 var path = ProjectIssuesPath(
