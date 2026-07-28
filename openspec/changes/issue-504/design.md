@@ -33,7 +33,7 @@ This retains old serialized state compatibility and represents optional generic-
 
 Refactor `WorkflowRunLineage` to construct and compare typed context, update only the Epic field during a validated Issue-context refresh, derive `EpicAffiliationOf` directly from the field, and build CloudEvent extensions from typed values. Remove annotation-based lineage construction and parsing, including `RequiredAnnotation` and the silent parse-return path in `RestoreStoredEpicNumber`.
 
-`WorkflowGrain` reads typed Project and Issue values for ownership checks and startup profile resolution. The existing row-level `EpicNumber` remains the persisted refresh source: after deserialization, it overwrites the metadata Epic field when present, then normal saving keeps both representations aligned.
+`WorkflowGrain` reads typed Project and Issue values for ownership checks and startup profile resolution. `TaskLogService.ResolvePublishScopeAsync` reads the typed Project ID when it maps a workflow task log to its project-scoped notification audience. The existing row-level `EpicNumber` remains the persisted refresh source: after deserialization, it overwrites the metadata Epic field when present, then normal saving keeps both representations aligned.
 
 Keeping conversion logic at each caller was rejected because it would distribute field/annotation precedence and validation rules across grain, store, and event code. Removing the row-level Epic snapshot was rejected because existing indexed joins and durable membership refresh use it.
 
@@ -53,7 +53,7 @@ Rolling deployment was rejected because old binaries require lineage annotations
 
 ### Verify behavior at domain, storage, and schema boundaries
 
-Add focused tests for typed metadata serialization, Issue-backed creation, ownership rejection, Epic refresh including terminal-run behavior, user annotation preservation, and unchanged CloudEvent extensions. Add migration specs that begin with annotation-backed rows, run EF migrations, and assert transformed JSON, computed Project/Issue values, current `EpicNumber` precedence, and preserved indexes. Update `design/conventions.md` with a temporary implementation-gap note before code changes and remove it when the migration and model ship.
+Add focused tests for typed metadata serialization, Issue-backed creation, ownership rejection, Epic refresh including terminal-run behavior, user annotation preservation, unchanged CloudEvent extensions, and workflow task-log project routing. Add migration specs that begin with annotation-backed rows, run EF migrations, and assert transformed JSON, computed Project/Issue values, current `EpicNumber` precedence, and preserved indexes. Update `design/conventions.md` with a temporary implementation-gap note before code changes and remove it when the migration and model ship.
 
 ## Risks / Trade-offs
 
