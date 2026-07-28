@@ -25,17 +25,20 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
     private readonly IPersistentState<AgentLaunchCoordinatorState> _state;
     private readonly IGrainFactory _grains;
     private readonly TimeProvider _timeProvider;
+    private readonly IAgentLaunchParticipantProbe _participantProbe;
     private readonly ILogger<AgentLaunchCoordinatorGrain> _log;
 
     public AgentLaunchCoordinatorGrain(
         [PersistentState("agent-launch-coordinator")] IPersistentState<AgentLaunchCoordinatorState> state,
         IGrainFactory grains,
         TimeProvider timeProvider,
+        IAgentLaunchParticipantProbe participantProbe,
         ILogger<AgentLaunchCoordinatorGrain> log)
     {
         _state = state;
         _grains = grains;
         _timeProvider = timeProvider;
+        _participantProbe = participantProbe;
         _log = log;
     }
 
@@ -214,7 +217,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
 
     private async Task BeginPrepareAsync(AgentLaunchCoordinatorPlan plan)
     {
-        var commandId = Guid.NewGuid().ToString("N");
+        var commandId = plan.Pending?.CommandId ?? Guid.NewGuid().ToString("N");
         _state.State.Plan = plan with
         {
             Pending = new AgentLaunchCoordinatorPending(
@@ -242,6 +245,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             IssueNumber: plan.IssueNumber,
             EpicNumber: plan.EpicNumber,
             WorkflowRunId: null));
+        await _participantProbe.OnPrepareJobAsync(plan.JobKey, commandId);
 
         _state.State.Plan = plan with
         {
@@ -315,6 +319,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             Metadata: metadata,
             Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
             WorkDir: plan.WorkspacePath));
+        await _participantProbe.OnEnsureInitialLaunchAsync(plan.SessionId, commandId);
 
         _state.State.Plan = plan with
         {
@@ -343,6 +348,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
 
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(plan.JobKey);
         await jobGrain.SubmitPreparedLaunchAsync();
+        await _participantProbe.OnSubmitJobAsync(plan.JobKey, commandId);
 
         _state.State.Plan = plan with
         {
