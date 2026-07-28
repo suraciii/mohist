@@ -1,0 +1,12 @@
+## Codebase Patterns
+
+- AgentJobGrain persists lifecycle state through Orleans IPersistentState and mirrors a relational read model; terminal transitions are centralized in EnterTerminalStateAsync.
+- Agent keys use `projectId:agentId` via GrainKey.Agent.
+- Agent definitions are read through AgentQuerier, which returns MaxConcurrentRuns live from the Agent store.
+- Full npm test currently reaches all .NET projects successfully, but workspace JavaScript checks fail because node_modules tooling (`tsx`, `tsc`) is not installed.
+
+## T-001
+
+- Added AgentConcurrencyGrain with persisted active permit tokens and FIFO waiters, live MaxConcurrentRuns reads, release grants, reminder activation/reconciliation hooks, and AgentJob notification API.
+- AgentJobGrain acquires before runner assignment, releases on assignment failure and terminal transition, and no longer fails pending jobs after DispatchRetryBound.
+- Focused spec execution could not complete within the test runner timeout; build succeeds with `dotnet build Mohist.sln -p:SkipWebBuild=true`.

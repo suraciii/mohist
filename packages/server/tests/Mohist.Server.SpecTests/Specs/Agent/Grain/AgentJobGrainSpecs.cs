@@ -221,21 +221,19 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task SubmitAsync_BoundExceeded_TransitionsToFailedWithRunnerUnavailable()
+    public async Task SubmitAsync_BoundExceeded_StaysPendingWithoutRunnerUnavailableFailure()
     {
         await ClearGlobalRunnerRegistryAsync();
 
-        var jobKey = $"agent-job-bound-{Guid.NewGuid():N}";
-        var job = JobGrain(jobKey);
-
+        var job = JobGrain($"agent-job-bound-{Guid.NewGuid():N}");
         await job.SubmitAsync(MakeInput("no runner ever", $"agent-job-missing-project-bound-{Guid.NewGuid():N}", "/tmp/agent-job-bound"));
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
         await job.CheckTimeoutsAsync();
 
         var terminal = await job.GetTerminalResultAsync();
-        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
-        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
+        Assert.Equal(AgentJobStatus.Pending, terminal.Status);
+        Assert.NotEqual(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
     }
 
     [Fact]
