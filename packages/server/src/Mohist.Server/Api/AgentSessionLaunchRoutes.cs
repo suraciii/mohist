@@ -148,11 +148,14 @@ public static class AgentSessionLaunchRoutes
                     new AgentSessionLaunchResponse(
                         JobId: result.JobKey,
                         SessionId: result.SessionId,
+                        InputId: result.InputId,
+                        TurnId: result.TurnId,
                         AgentId: result.AgentId,
                         AgentName: result.AgentName,
-                        Status: "inactive",
+                        Status: "queued",
                         TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-sessions/{Uri.EscapeDataString(result.SessionId)}/transcript",
-                        JobUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}")),
+                        JobUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}",
+                        ObservationUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}/launch-observation")),
                 statusCode: 201);
         });
 
@@ -305,8 +308,11 @@ public sealed record AgentSessionLaunchContextRef(
 public sealed record AgentSessionLaunchResponse(
     string JobId,
     string SessionId,
+    string InputId,
+    string TurnId,
     string AgentId,
     string AgentName,
     string Status,
     string TranscriptUrl,
-    string JobUrl);
+    string JobUrl,
+    string ObservationUrl);

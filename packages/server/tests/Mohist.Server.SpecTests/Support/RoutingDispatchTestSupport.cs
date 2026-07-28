@@ -466,6 +466,8 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         return Task.FromResult(new AgentLaunchResult(
             SessionId: $"mention-session-{sequence}",
             JobKey: $"mention-job-{sequence}",
+            InputId: string.Empty,
+            TurnId: string.Empty,
             AgentId: agent.Id,
             AgentName: agent.Name));
     }

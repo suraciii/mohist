@@ -27,4 +27,10 @@ public sealed class AgentJobWorkCoordinator : IAgentJobWorkCoordinator, ISinglet
 
     public Task FailAsync(string agentJobId, string reason, string? agentId = null) =>
         _grains.GetGrain<IAgentJobGrain>(agentJobId).FailAsync(reason, agentId);
+
+    public Task ReconcileRunningAsync(string agentJobId, string runnerId, string workId) =>
+        _grains.GetGrain<IAgentJobGrain>(agentJobId).ReconcileRunningAsync(runnerId, workId);
+
+    public Task MarkUnknownAsync(string agentJobId, string reason) =>
+        _grains.GetGrain<IAgentJobGrain>(agentJobId).MarkUnknownAsync(reason);
 }

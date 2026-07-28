@@ -370,6 +370,7 @@ internal sealed class ReadAgentJobGrain : IAgentJobGrain
         Task.FromResult(new AgentJobRuntimeSnapshot(_status, null, null, null, 0, false, false, _projectId, _executionDefinition));
     public Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan) => Task.FromResult(plan);
     public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
+    public Task MarkUnknownAsync(string reason) => Task.CompletedTask;
     public Task<AgentJobInput> PrepareManualLaunchAsync(PrepareManualLaunchCommand command) => Task.FromResult(new AgentJobInput(Prompt: command.Prompt, AgentId: command.AgentId, AgentSessionId: command.SessionId, InitialInputId: command.InputId, InitialTurnId: command.TurnId));
     public Task SubmitPreparedLaunchAsync() => Task.CompletedTask;
     public Task FailAsync(string reason, string? agentId = null) => Task.CompletedTask;

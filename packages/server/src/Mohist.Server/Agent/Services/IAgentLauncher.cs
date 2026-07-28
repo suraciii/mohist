@@ -136,6 +136,8 @@ public interface IAgentLauncher
 public sealed record AgentLaunchResult(
     string SessionId,
     string JobKey,
+    string InputId,
+    string TurnId,
     string AgentId,
     string AgentName);
 

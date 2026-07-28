@@ -60,7 +60,8 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// record on every subsequent call. The grain does not dispatch
     /// until <see cref="SubmitPreparedLaunchAsync"/> is called.
     /// </summary>
-    Task<AgentJobInput> PrepareManualLaunchAsync(PrepareManualLaunchCommand command);
+    Task<AgentJobInput> PrepareManualLaunchAsync(PrepareManualLaunchCommand command) =>
+        Task.FromResult(new AgentJobInput(command.Prompt, AgentId: command.AgentId, AgentSessionId: command.SessionId, InitialInputId: command.InputId, InitialTurnId: command.TurnId));
 
     /// <summary>
     /// Submit a previously-prepared manual launch to dispatch. The
@@ -69,7 +70,24 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// refuses to submit when the launch record is missing or
     /// belongs to a different plan.
     /// </summary>
-    Task SubmitPreparedLaunchAsync();
+    Task SubmitPreparedLaunchAsync() => Task.CompletedTask;
+
+    /// <summary>
+    /// Move a non-terminal AgentJob to <see cref="AgentJobStatus.Unknown"/>
+    /// (issue-512 T-002). Used when a Runner disconnect, a status
+    /// timeout, or any inconclusive delivery leaves the original
+    /// first execution unverifiable. The grain preserves the durable
+    /// Job/work/input/turn identities; an authoritative running or
+    /// terminal report later resolves the original Job rather than
+    /// minting a replacement. Idempotent: re-issuing with the same
+    /// reason is a no-op while the Job remains Unknown; a terminal
+    /// Job or a Job already moving to Unknown with a different
+    /// reason is left untouched so the existing transition path is
+    /// never overwritten.
+    /// </summary>
+    Task MarkUnknownAsync(string reason) => Task.CompletedTask;
+
+    Task ReconcileRunningAsync(string runnerId, string workId) => Task.CompletedTask;
 }
 
 [GenerateSerializer]
@@ -105,7 +123,27 @@ public sealed record AgentJobRuntimeSnapshot(
     [property: Id(5)] bool RunnerAccepted = false,
     [property: Id(6)] bool HasPendingSessionClose = false,
     [property: Id(7)] string? ProjectId = null,
-    [property: Id(8)] AgentExecutionDefinition? ExecutionDefinition = null);
+    [property: Id(8)] AgentExecutionDefinition? ExecutionDefinition = null,
+    /// <summary>
+    /// Linked AgentSession id captured at launch time (issue-512
+    /// T-002). Surface so the composite observation assembler can
+    /// resolve the Session without re-reading the AgentJob input
+    /// snapshot. Null for legacy jobs that pre-date the manual
+    /// coordinator path.
+    /// </summary>
+    [property: Id(9)] string? AgentSessionId = null,
+    /// <summary>
+    /// Launch-time <c>SessionInput</c> id the coordinator durably
+    /// recorded on the AgentSession. Surface so the observation
+    /// assembler can correlate the durable identities without
+    /// round-tripping through the AgentSession.
+    /// </summary>
+    [property: Id(10)] string? InitialInputId = null,
+    /// <summary>
+    /// Launch-time <c>AgentTurn</c> id the coordinator durably
+    /// recorded on the AgentSession.
+    /// </summary>
+    [property: Id(11)] string? InitialTurnId = null);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending
@@ -172,7 +210,17 @@ public enum AgentJobStatus
     Pending,
     Running,
     Completed,
-    Failed
+    Failed,
+    /// <summary>
+    /// Nonterminal, non-dispatchable state (issue-512 T-002). The
+    /// AgentJob grain could not confirm whether the original work
+    /// accepted or completed the prompt; the durable identities (job,
+    /// work, input, turn) are preserved for reconciliation but the
+    /// job MUST NOT auto-replay or synthesise a failed/completed
+    /// verdict. Resolves only on authoritative running or terminal
+    /// Runner evidence.
+    /// </summary>
+    Unknown,
 }
 
 /// <summary>

@@ -203,8 +203,6 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     public Task EnsureSubmittedAsync(AgentJobInput input) => Task.CompletedTask;
     public Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan) => Task.FromResult(plan);
     public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
-    public Task<AgentJobInput> PrepareManualLaunchAsync(PrepareManualLaunchCommand command) => Task.FromResult(new AgentJobInput(Prompt: command.Prompt, AgentId: command.AgentId, AgentSessionId: command.SessionId));
-    public Task SubmitPreparedLaunchAsync() => Task.CompletedTask;
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(_result);
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_result.Status, null, null, _result.FailureReason));
@@ -233,8 +231,6 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
     public Task EnsureSubmittedAsync(AgentJobInput input) => SubmitAsync(input);
     public Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan) => Task.FromResult(plan);
     public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
-    public Task<AgentJobInput> PrepareManualLaunchAsync(PrepareManualLaunchCommand command) => Task.FromResult(new AgentJobInput(Prompt: command.Prompt, AgentId: command.AgentId, AgentSessionId: command.SessionId, InitialInputId: command.InputId, InitialTurnId: command.TurnId));
-    public Task SubmitPreparedLaunchAsync() => Task.CompletedTask;
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(new AgentJobTerminalResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, _failureReason, null, null, _failureReason, null));
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, null, null, _failureReason));

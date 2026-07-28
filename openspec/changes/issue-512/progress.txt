@@ -97,3 +97,13 @@ replay/conflict tests for T-001 still pending.
 - Runner identity-propagation spec using fake Runtime + fake
   `ServerConnection` asserting no duplicate `session.input`.
 - Full test runs (dotnet test + npm test -w packages/runner).
+
+## T-002 Implementation Notes
+
+- The existing T-001 worktree already contained the launch observation assembler, route, expanded 201 response, and Unknown enum scaffolding; this task completed the state convergence paths and the observation spec compilation.
+- Runner loss now calls the AgentJob owner through `IAgentJobWorkCoordinator.MarkUnknownAsync` instead of synthesizing a failed report. The Runner module stays isolated from Agent types through the coordinator boundary.
+- Reconnect polling calls `ReconcileRunningAsync` only with the persisted original runner/work identity. This changes Unknown back to Running and marks the linked initial turn executing; terminal reports continue to use the same identity and update the original turn.
+- AgentJob terminal transitions now propagate the authoritative completed/failed result to the linked initial AgentTurn. Unknown remains nonterminal and does not create a Session close or a replacement dispatch.
+- `AgentLaunchObservationRoutesSpecs` covers queued, terminal, Unknown, repeated reads, cross-project rejection, terminal reconciliation, session usability, and stable launch references. Direct integration execution started the host but exceeded the available command timeout without producing test results; build and architecture checks passed.
+- A coordinator fence bug was found during the long-running spec: successful Prepare/Ensure participant calls left the same Pending command in state and recursively re-entered the same step. The fence is now cleared and persisted after each successful participant acknowledgement before advancing.
+- Final verification: Server solution build, Runner typecheck, Runner tests (1438), Server UnitTests (1533), and Server ArchTests (35) pass. Server SpecTests remain blocked by a long-running SpecTests process in another workspace; this workspace's focused launch-observation run reproduced the host-start hang and was stopped by timeout.

@@ -5,6 +5,8 @@ public interface IAgentJobWorkCoordinator
     Task<bool> IsWorkRunnableAsync(string agentJobId, string runnerId, string workId);
     Task<AgentJobWorkReportResult> ReportAsync(string agentJobId, string runnerId, string workId, WorkResult result);
     Task FailAsync(string agentJobId, string reason, string? agentId = null);
+    Task ReconcileRunningAsync(string agentJobId, string runnerId, string workId);
+    Task MarkUnknownAsync(string agentJobId, string reason);
 }
 
 public sealed record AgentJobWorkReportResult(bool Accepted, string? Reason = null);

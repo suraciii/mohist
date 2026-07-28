@@ -432,6 +432,14 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                     continue;
                 }
 
+                if (live.DispatchSnapshot?.OwnerKind == WorkDispatchOwnerKinds.AgentJob)
+                {
+                    await _agentJobs.ReconcileRunningAsync(
+                        snapshot.AgentJobId,
+                        RunnerId,
+                        snapshot.WorkId);
+                }
+
                 if (live.Status == RunnerWorkStatus.Pending)
                 {
                     live.Status = RunnerWorkStatus.Running;
@@ -692,7 +700,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task CloseoutLostAsync()
     {
-        var synthesizedFailure = new WorkResult("failed", "runner-lost");
         var workerId = RunnerId;
 
         foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(workerId))
@@ -721,12 +728,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 if (FindWork(entry.WorkId, entry.OwnerKind, entry.OwnerId) is null)
                     continue;
                 await _closeoutObserver.AgentJobCloseoutStartingAsync(RunnerId, entry.OwnerId, entry.WorkId);
-                var reportResult = await _agentJobs.ReportAsync(entry.OwnerId, RunnerId, entry.WorkId, synthesizedFailure);
-                if (!reportResult.Accepted)
-                    await _agentJobs.FailAsync(
-                        entry.OwnerId,
-                        synthesizedFailure.Message ?? "failed",
-                        entry.DispatchSnapshot?.AgentId);
+                await _agentJobs.MarkUnknownAsync(entry.OwnerId, "runner-lost");
 
                 TryRemoveWork(entry.WorkId, entry.OwnerKind, entry.OwnerId);
                 await PersistAsync();

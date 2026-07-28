@@ -113,6 +113,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         return new AgentLaunchResult(
             SessionId: sessionId,
             JobKey: jobKey,
+            InputId: string.Empty,
+            TurnId: string.Empty,
             AgentId: agent.Id,
             AgentName: agent.Name);
     }
@@ -181,6 +183,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         return new AgentLaunchResult(
             SessionId: outcome.SessionId,
             JobKey: outcome.JobKey,
+            InputId: outcome.InputId,
+            TurnId: outcome.TurnId,
             AgentId: outcome.AgentId,
             AgentName: outcome.AgentName);
     }
@@ -365,6 +369,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         return new AgentLaunchResult(
             SessionId: sessionId,
             JobKey: jobKey,
+            InputId: string.Empty,
+            TurnId: string.Empty,
             AgentId: agent.Id,
             AgentName: agent.Name);
     }

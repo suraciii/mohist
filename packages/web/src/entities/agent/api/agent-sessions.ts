@@ -50,11 +50,16 @@ export interface GenericAgentSessionSummaryDto {
 }
 
 export interface AgentSessionLaunchResponse {
+  jobId?: string | null
   sessionId: string
+  inputId?: string | null
+  turnId?: string | null
   agentId: string
   agentName: string
   status: string
   transcriptUrl: string
+  jobUrl?: string | null
+  observationUrl?: string | null
 }
 
 export interface AgentSessionLaunchContext {
