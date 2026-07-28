@@ -72,9 +72,31 @@ The `AgentSessionFollowupResult` changes from `(SessionId, "sent")` to the three
 
 The session summary DTO is extended to surface the `Inputs` and `Turns` lists (acceptance + turn status), so Web and CLI can render "accepted, pending" vs "executing". Today only the launch input/turn is observable via `GetInitialLaunchAsync`/`AgentLaunchObservationAssembler`; follow-up subrecords must be readable too.
 
+The `Inputs`/`Turns` observation is a **status/identity view only**; the flat transcript (`session.input` events written by the runner) remains the single source for the conversation text. Clients SHALL render follow-up message text from the transcript and status (acceptance, turn status) from the observation — they SHALL NOT render the input text from the `Inputs` list — so a follow-up is never displayed twice. This mirrors how the launch path already separates launch-status observation from transcript text.
+
+### D8. Lease lifecycle reconciled with synchronous acceptance and multi-turn queueing
+
+The current follow-up lease assumes at-most-one in-flight follow-up: `BeginFollowupAsync` throws `FollowupOperationInProgressException` if any lease is non-accepted, and recovery-idle guards treat any pending follow-up as "active". Both conflict with synchronous acceptance (D4) and multi-turn queueing (D3), where several follow-up turns may be queued or executing at once and a follow-up submitted during execution MUST be accepted and queued (AC3).
+
+Reconciliation:
+- **Acceptance collapses Begin+Confirm into one synchronous step.** The accept transition persists the `SessionInput`, assigns/creates the `AgentTurn`, and records an already-`Accepted` lease carrying `InputId`/`TurnId`/`operationId` in a single commit. There is no non-accepted lease window, so the Begin→Confirm→Abandon round-trip is retired for the accept path.
+- **The concurrent-followup rejection is removed.** A follow-up is accepted regardless of whether a turn is executing; the turn-assignment rule (D3) decides whether it joins a queued turn or starts a new one. The grain enforces a bounded queued-input/turn capacity instead of a single-flight lease (see capacity note below) — exceeding it returns `rejected`, not an in-progress conflict.
+- **The lease becomes per-turn, many at once.** Each in-flight follow-up turn has its own accepted lease used only for `operationId`→turn correlation and clearing on idle `session.activity`. Multiple leases may coexist (one per non-terminal follow-up turn).
+- **Recovery-idle guard checks for non-terminal follow-up turns.** Compact/Reset still require the session to have no in-flight work; the guard is expressed as "no queued or executing follow-up turn" rather than "any pending lease". A terminal follow-up turn does not block recovery.
+
+- Capacity bound: the accept transition enforces a bounded count of queued (non-terminal) follow-up inputs/turns — a runtime config constant (not a product-model value, per `agent-execution.md`). Exceeding it returns `rejected` (`capacity_exceeded`), never discarding an accepted input.
+
+### D9. Idempotent retry re-attempts delivery only while the turn is still queued
+
+A retry with the same idempotency key resolves to the same `SessionInput` (no duplicate, per the input spec). Its delivery behavior depends on the turn state:
+- If the turn is still `queued` (the original dispatch did not succeed, e.g. runner was offline) → the retry re-attempts runner delivery, moving the turn toward `executing`.
+- If the turn is already `executing` or terminal → the retry is pure-identity: it returns the original `inputId`/`turnId` and does NOT re-dispatch (no duplicate runtime work).
+
+This makes retry the client-driven delivery path for a stuck-queued input, without introducing server-side auto-redelivery (which remains a Non-Goal).
+
 ## Risks / Trade-offs
 
-- [Queued input may not auto-redeliver if the runner is offline at acceptance] -> The input is durable and observable as `queued`; auto-redelivery on runner reconnect is a follow-on reliability feature, not a regression (today an offline runner loses the input entirely). The next accepted follow-up drains queued turns on the same dispatch.
+- [Queued input is not auto-redelivered if the runner is offline at acceptance] -> The input is durable and observable as `queued`. There is no server-side auto-redelivery (Non-Goal); instead, a client retry with the same idempotency key re-attempts delivery when the turn is still `queued` (see D9). This is not a regression — today an offline runner loses the input entirely.
 - [Multi-input-per-turn dispatch combination adds server-side text joining] -> If combination proves complex, fall back to one-input-per-turn; the hard requirement (no merge during execution) is preserved either way, and the model still allows future multi-input turns.
 - [`accepted` on offline runner could surprise callers expecting "sent"] -> The result model is explicitly three-valued and documented; clients read turn status to see queued vs executing, so "accepted but queued" is visible, not silent.
 - [operationId correlation assumes the runner keeps emitting operationId-correlated events] -> No runner change is required; the correlation is already in place and tested. A runtime that emits no terminal event leaves the turn non-terminal, surfaced honestly (not silently completed).
@@ -89,5 +111,5 @@ The session summary DTO is extended to surface the `Inputs` and `Turns` lists (a
 ## Open Questions
 
 - Exact representation of a multi-input turn's dispatch payload (single combined prompt vs ordered list) — resolve during implementation against the runner's single-prompt `ReceiveFollowup` contract.
-- Redelivery trigger for inputs accepted while the runner is offline (reconnect drain vs next-follow-up drain) — decide in implementation; either keeps the input durable.
+- Concrete value of the queued-input/turn capacity bound — pick a runtime config constant during implementation; the behavior (reject, not drop) is fixed by D8.
 - Whether the observation DTO surfaces the full `Inputs`/`Turns` history or a bounded recent window — decide based on payload size once follow-up subrecords are populated.

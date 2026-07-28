@@ -44,6 +44,18 @@ A follow-up submitted with a call identity (idempotency key) SHALL resolve to th
 - **WHEN** the same follow-up text is submitted twice with two different idempotency keys
 - **THEN** each submission SHALL create its own distinct `SessionInput` with its own Id
 
+#### Scenario: Retry re-attempts delivery only while the turn is still queued
+
+- **WHEN** a follow-up with idempotency key `K` was accepted but its turn is still `queued` (the original delivery did not succeed), and the client retries with the same key `K`
+- **THEN** the Server SHALL return the same `SessionInput` Id (no duplicate)
+- **AND** SHALL re-attempt delivery so the turn can progress toward `executing`
+
+#### Scenario: Retry against an executing or terminal turn is identity-only
+
+- **WHEN** a follow-up with idempotency key `K` is retried after its turn has already reached `executing` or a terminal status
+- **THEN** the Server SHALL return the original `SessionInput` Id and `AgentTurn` Id
+- **AND** SHALL NOT re-dispatch or create duplicate runtime work
+
 ### Requirement: Follow-up does not create an AgentJob
 
 A follow-up SHALL NOT create a new `AgentJob`. The launch `AgentJob` SHALL continue to own only the first execution; follow-up `SessionInput` and `AgentTurn` records SHALL carry no `JobId`. The AgentSession SHALL remain usable after the launch turn terminates.

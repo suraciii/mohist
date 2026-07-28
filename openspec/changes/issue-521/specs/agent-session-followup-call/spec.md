@@ -53,7 +53,7 @@ A follow-up request SHALL accept a client-provided idempotency key that identifi
 
 ### Requirement: Shared status interpretation across Web and CLI
 
-Web and CLI SHALL present follow-up status using the same model: the accepted/rejected/unknown sync outcome, input acceptance, and turn status (`queued` / `executing` / terminal). A user SHALL see the same interpretation of a given follow-up from either client.
+Web and CLI SHALL present follow-up status using the same model: the accepted/rejected/unknown sync outcome, input acceptance, and turn status (`queued` / `executing` / terminal). A user SHALL see the same interpretation of a given follow-up from either client. The `Inputs`/`Turns` observation is a status/identity view; clients SHALL render follow-up message text from the transcript and status from the observation, so a follow-up is never displayed twice.
 
 #### Scenario: Web and CLI render the same status for the same follow-up
 

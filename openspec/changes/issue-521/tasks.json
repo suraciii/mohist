@@ -6,16 +6,19 @@
       "id": "T-001",
       "title": "Server grain: follow-up input & turn lifecycle",
       "spec": "specs/agent-session-followup-input/spec.md#follow-up-acceptance-creates-a-stable-sessioninput",
-      "description": "The AgentSession grain's follow-up accept transition persists an AgentSessionInputRecord (stable Id, sequence, text, source, Acceptance=Accepted, no JobId, stored idempotency key) and assigns it to an AgentTurnRecord per the turn-assignment rule (idle/queued-turn joins; executing-turn starts a new queued turn). Retrying with the same idempotency key resolves to the same input with no duplicate. Runtime events progress follow-up turn status: a session.input event correlated by operationId marks the linked turn Executing; a session.activity idle event marks it terminal. The AgentSessionFollowupLease gains InputId/TurnId so operationId resolves to the turn. Omitted idempotency keys are minted unique per call (recovery convention).",
+      "description": "The AgentSession grain's follow-up accept transition persists an AgentSessionInputRecord (stable Id, sequence, text, source, Acceptance=Accepted, no JobId, stored idempotency key) and assigns it to an AgentTurnRecord per the turn-assignment rule (idle/queued-turn joins; executing-turn starts a new queued turn). Acceptance is one synchronous step that also records an already-Accepted lease (carrying InputId/TurnId/operationId); the Begin/Confirm two-step and the concurrent-followup rejection (FollowupOperationInProgressException) are retired so a follow-up submitted during an executing turn is accepted and queued, not rejected. The lease is per-turn (many may coexist). Retrying with the same idempotency key resolves to the same input with no duplicate, and re-attempts delivery only while the turn is still queued. Runtime events progress follow-up turn status: a session.input event correlated by operationId marks the linked turn Executing; a session.activity idle event marks it terminal. A bounded queued-input/turn capacity is enforced at acceptance (reject, not drop).",
       "acceptanceCriteria": [
-        "Accepting a follow-up persists an AgentSessionInputRecord with a stable Id, next sequence, submitted text, source, Acceptance=Accepted, and no JobId, before the accept transition returns.",
+        "Accepting a follow-up persists an AgentSessionInputRecord with a stable Id, next sequence, submitted text, source, Acceptance=Accepted, and no JobId, in one synchronous step that also records an Accepted lease — before the accept transition returns.",
+        "A follow-up submitted while another follow-up turn is queued or executing is accepted and queued (joined or new turn), not rejected as a conflicting in-progress operation; the FollowupOperationInProgressException path is removed.",
+        "Multiple non-terminal follow-up turns (and their per-turn leases) may coexist; Compact/Reset are blocked only while a non-terminal follow-up turn exists, not by any single pending lease.",
         "Retrying a follow-up with the same idempotency key returns the same Input Id and creates no second SessionInput; a different key creates a distinct input.",
+        "A retry with the same key re-attempts delivery when the turn is still queued, and is identity-only (no re-dispatch) once the turn is executing or terminal.",
         "An omitted idempotency key is minted unique per call, so omission is not retry-idempotent.",
         "A follow-up accepted while idle or while a turn is queued joins that turn's InputIds in order; a follow-up accepted while a turn is executing creates a new queued turn and does not interrupt or merge into the executing turn.",
         "A session.input runtime event carrying a follow-up operationId marks the linked AgentTurn Executing; a session.activity idle event carrying that operationId marks it terminal (completed/failed/unknown).",
         "An accepted SessionInput and its AgentTurn survive a grain state reload with the same Ids, sequence, and status.",
-        "When the session input queue is at capacity, new follow-ups are rejected and previously accepted inputs remain unchanged.",
-        "Server domain/grain unit and spec tests pass with fakes (no real runtime/network/wall-clock), covering acceptance, idempotent retry, turn assignment, status progression, and restart durability."
+        "When the queued-input/turn count is at the configured capacity bound, new follow-ups are rejected (capacity_exceeded) and previously accepted inputs remain unchanged.",
+        "Server domain/grain unit and spec tests pass with fakes (no real runtime/network/wall-clock), covering acceptance, concurrent-acceptance-during-execution, idempotent retry and re-dispatch, turn assignment, status progression, capacity rejection, and restart durability."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -23,7 +26,7 @@
       "output": "AgentSession grain follow-up accept transition and runtime-event turn-progression hooks with passing server tests",
       "dependsOn": [],
       "passes": false,
-      "notes": "Mirrors the launch path's EnsureInitialLaunch/MarkInitialTurnExecuting/MarkInitialTurnTerminal for follow-up inputs. No runner change is needed for correlation — the runner continues emitting operationId-correlated session.input/session.activity events; the lease carries InputId/TurnId for server-side resolution."
+      "notes": "Mirrors the launch path's EnsureInitialLaunch/MarkInitialTurnExecuting/MarkInitialTurnTerminal for follow-up inputs. Per design D8 the Begin/Confirm two-step and FollowupOperationInProgressException are retired; acceptance is one synchronous step with a per-turn Accepted lease. Per D9 a same-key retry re-dispatches only while the turn is queued. No runner change is needed for correlation — the runner continues emitting operationId-correlated session.input/session.activity events; the lease carries InputId/TurnId for server-side resolution."
     },
     {
       "id": "T-002",
@@ -36,7 +39,7 @@
         "POST followup returns unknown when the server cannot confirm persistence (grain timeout/lost response), directing the caller to reconcile with the same call identity.",
         "Both the canonical /agent-sessions/{id}/followup route and the issue-scoped alias return the same result shape.",
         "The Idempotency-Key header is read and forwarded to the grain; a retry with the same key returns the original inputId/turnId.",
-        "The session summary/observation DTO exposes follow-up inputs (with acceptance) and turns (with status), sufficient to distinguish accepted-pending (queued) from executing.",
+        "The session summary/observation DTO exposes follow-up inputs (with acceptance) and turns (with status), sufficient to distinguish accepted-pending (queued) from executing; the observation is status/identity only and does not duplicate transcript message text.",
         "Server API tests pass (fake grain/runner), covering the three outcomes, idempotency-key forwarding, decoupled acceptance, and the observation DTO."
       ],
       "priority": 2,
@@ -51,10 +54,11 @@
       "id": "T-003",
       "title": "Web: follow-up idempotency key and accepted-pending vs executing status",
       "spec": "specs/agent-session-followup-call/spec.md#client-idempotency-key-transport",
-      "description": "The Web follow-up flow generates and sends an Idempotency-Key header per submission and reuses it on retry. The composer and session view render follow-up status using the shared model: accepted/rejected/unknown outcome, input acceptance, and turn status (queued vs executing), distinguishing accepted-pending from executing.",
+      "description": "The Web follow-up flow generates and sends an Idempotency-Key header per submission and reuses it on retry. The composer and session view render follow-up status using the shared model: accepted/rejected/unknown outcome, input acceptance, and turn status (queued vs executing), distinguishing accepted-pending from executing. Message text is rendered from the transcript and status from the observation, with no double-rendering of a follow-up.",
       "acceptanceCriteria": [
         "useFollowupMutation / postFollowup send an Idempotency-Key header generated per submission and reuse the same key on a retry after a lost response.",
         "The follow-up composer and session view render accepted-pending (queued turn) distinctly from executing, derived from the observation DTO input acceptance and turn status.",
+        "A follow-up's message text is rendered once (from the transcript), with status rendered from the observation — not duplicated across both views.",
         "Web typecheck (npm run typecheck -w packages/web) and tests (npm run test:run -w packages/web) pass."
       ],
       "priority": 3,
@@ -69,10 +73,11 @@
       "id": "T-004",
       "title": "CLI: follow-up idempotency key and status output",
       "spec": "specs/agent-session-followup-call/spec.md#shared-status-interpretation-across-web-and-cli",
-      "description": "The mo session followup command sends an Idempotency-Key (generated per invocation, reusable on retry) and surfaces the three-valued outcome with inputId, turnId, and the accepted-pending vs executing status, using the same interpretation as Web.",
+      "description": "The mo session followup command sends an Idempotency-Key (generated per invocation, reusable on retry) and surfaces the three-valued outcome with inputId, turnId, and the accepted-pending vs executing status, using the same interpretation as Web. Message text is read from the transcript and status from the observation, with no double-display.",
       "acceptanceCriteria": [
         "mo session followup sends an Idempotency-Key header and reuses it on retry.",
         "The command output surfaces the accepted/rejected/unknown outcome and the inputId/turnId, and distinguishes accepted-pending from executing using the same status model as Web.",
+        "A follow-up's text and status are each shown once, not duplicated across transcript and observation views.",
         "CLI tests (packages/cli) pass, covering idempotency-key sending, the new result fields, and the issue-scoped/canonical routes."
       ],
       "priority": 3,

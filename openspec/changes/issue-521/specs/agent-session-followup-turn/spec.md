@@ -40,6 +40,12 @@ Inputs submitted while a turn is executing SHALL be accepted and queued; they SH
 - **AND** the new input SHALL be queued (joined to the current turn when supported, otherwise held for the next turn)
 - **AND** the input SHALL NOT be dropped or merged into the executing input
 
+#### Scenario: Follow-up is never rejected merely because a turn is in flight
+
+- **WHEN** a follow-up is submitted while another follow-up turn is queued or executing
+- **THEN** Mohist SHALL accept the follow-up (subject only to capacity) rather than reject it as a conflicting in-progress operation
+- **AND** the input SHALL be queued per the turn-assignment rule
+
 #### Scenario: Queued input starts a new turn when the current turn ends
 
 - **WHEN** a turn reaches a terminal state and one or more inputs were queued during its execution that the Runtime did not consume
