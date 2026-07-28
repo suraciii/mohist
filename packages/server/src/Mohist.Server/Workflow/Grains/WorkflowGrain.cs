@@ -247,12 +247,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     private async Task EnsureCreatedRunAsync(WorkflowIssueContext context)
     {
-        var metadata = new WorkflowRunMetadata(
-            Name: null,
-            CreatedAt: Now(),
-            ProjectId: context.ProjectId,
-            IssueNumber: context.IssueNumber,
-            EpicNumber: context.EpicNumber);
+        var metadata = WorkflowRunLineage.ForIssue(
+            context.ProjectId,
+            context.IssueNumber,
+            context.EpicNumber,
+            new WorkflowRunMetadata(null, Now()));
         var structure = await _profileManager.LoadStartupStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
         if (!string.IsNullOrWhiteSpace(structure.Id))

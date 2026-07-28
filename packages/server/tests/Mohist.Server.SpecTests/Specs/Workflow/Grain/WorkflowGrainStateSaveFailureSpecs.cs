@@ -58,6 +58,32 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStarted);
     }
 
+    [Theory]
+    [InlineData("", 1)]
+    [InlineData("proj-invalid-initial-context", 0)]
+    [InlineData("proj-invalid-initial-context", -1)]
+    public async Task EnsureStarted_RejectsInvalidInitialIssueContext(string projectId, int issueNumber)
+    {
+        var workflowRunId = $"wr-invalid-initial-context-{issueNumber}-{(string.IsNullOrWhiteSpace(projectId) ? "blank" : "project")}";
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var grain = CreateGrain(scope.ServiceProvider, store, workflowRunId);
+        await grain.OnActivateAsync(CancellationToken.None);
+
+        if (issueNumber <= 0)
+        {
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+                grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, issueNumber, null)));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, issueNumber, null)));
+        }
+
+        Assert.Null(await store.LoadAsync(workflowRunId));
+    }
+
     [Fact]
     public async Task RefreshIssueContext_SaveFailureQuarantinesActivationAndRedeliveryConverges()
     {
