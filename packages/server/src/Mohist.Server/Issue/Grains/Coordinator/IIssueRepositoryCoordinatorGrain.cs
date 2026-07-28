@@ -43,6 +43,13 @@ public interface IIssueRepositoryCoordinatorGrain : IGrainWithStringKey
     Task<IssueRepositoryBindingResult> RemoveRepositoryAsync(RepositoryCommandPayload.Remove payload, string commandId, long? expectedRevision);
 
     Task<IssueRepositoryBindingResult> UpdateRepositoryAsync(RepositoryCommandPayload.Update payload, string commandId, long? expectedRevision);
+
+    /// <summary>
+    /// test-only hook that lets a test force the
+    /// coordinator activation to deactivate. Used to prove that
+    /// the persisted fence survives activation loss and replays on
+    /// the next activation.
+    /// </summary>
 }
 
 public enum IssueRepositoryBindingResultCode

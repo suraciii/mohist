@@ -80,7 +80,7 @@ public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4, _fixture.Grains, _fixture.Persistence);
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);

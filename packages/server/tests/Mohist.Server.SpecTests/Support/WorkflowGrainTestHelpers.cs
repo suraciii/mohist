@@ -127,7 +127,7 @@ public static class WorkflowGrainTestHelpers
                 new PromptTemplateEngine(),
                 CreateEmptyConfigService(),
                 new WorkflowRunProfileManager(factory),
-                new FakeWorkflowProfileProvider()),
+                new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance)),
             new WorkflowArtifactQuerier(factory));
     }
 
@@ -219,23 +219,24 @@ public static class WorkflowGrainTestHelpers
             .Options;
 
         await using var db = new MohistDbContext(options);
-        var templateId = workflowId;
-        var templateJson = SerializeProfile(definition, templateId);
-
-        var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
-        if (existingTemplate is null)
+        var profileId = workflowId;
+        var definitionSource = WorkflowYamlSerializer.ToYaml(definition);
+        var existingProfile = await db.WorkflowProfileRecords.FindAsync(projectId, profileId);
+        if (existingProfile is null)
         {
-            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            db.WorkflowProfileRecords.Add(new WorkflowProfileRecordRow
             {
                 ProjectId = projectId,
-                TemplateId = templateId,
-                Template = templateJson,
+                ProfileId = profileId,
+                Name = profileId,
+                DefinitionSource = definitionSource,
+                SourceProvenance = nameof(WorkflowProfileSourceProvenance.Verbatim),
             });
         }
         else
         {
-            existingTemplate.Template = templateJson;
-            existingTemplate.UpdatedAt = TestTime.UtcNow;
+            existingProfile.DefinitionSource = definitionSource;
+            existingProfile.UpdatedAt = TestTime.UtcNow;
         }
 
         var projectProfile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
@@ -244,12 +245,14 @@ public static class WorkflowGrainTestHelpers
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
-                DefaultTemplateId = templateId,
+                DefaultWorkflowProfileId = profileId,
+                DefaultWorkflowProfileIdKey = profileId,
             });
         }
         else
         {
-            projectProfile.DefaultTemplateId = templateId;
+            projectProfile.DefaultWorkflowProfileId = profileId;
+            projectProfile.DefaultWorkflowProfileIdKey = profileId;
             projectProfile.UpdatedAt = TestTime.UtcNow;
         }
 

@@ -727,17 +727,25 @@ public partial class WorkflowRunControlApiSpecs
         await db.SaveChangesAsync();
     }
 
-    private Task DeactivateWorkflowAsync(string workflowRunId) =>
-        GrainTestSupport.ForceActivationCollectionForGrainAsync(
-            _grains,
-            nameof(WorkflowGrain),
-            workflowRunId,
+    private async Task DeactivateWorkflowAsync(string workflowRunId)
+    {
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).Deactivate();
+        var management = _grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+        await TestWait.ForAsync(
+            async () => await management.GetDetailedGrainStatistics(),
+            activations => !activations.Any(stat =>
+                stat.GrainType.Contains(nameof(WorkflowGrain), StringComparison.Ordinal)
+                && stat.GrainId.ToString()!.Contains(workflowRunId, StringComparison.Ordinal)),
             TimeSpan.FromSeconds(3),
             TimeSpan.FromMilliseconds(50),
-            $"Workflow grain '{workflowRunId}' to deactivate");
+            $"Workflow grain '{workflowRunId}' to deactivate",
+            () => management.ForceActivationCollection(TimeSpan.Zero));
+    }
 
     private async Task ForceAwaitingApprovalAsync(string wrId)
     {
+        var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
         await DeactivateWorkflowAsync(wrId);
 
         var options = new DbContextOptionsBuilder<MohistDbContext>()
@@ -776,5 +784,6 @@ public partial class WorkflowRunControlApiSpecs
         }
         row.State = JsonSerializer.Serialize(state, JSON.Options);
         await db.SaveChangesAsync();
+        await wfGrain.Deactivate();
     }
 }

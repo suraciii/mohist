@@ -47,6 +47,7 @@ public interface IWorkflowProfileReferenceCoordinatorGrain : IGrainWithStringKey
         WorkflowProfileCommandPayload.DeleteProfile payload,
         string commandId,
         long? expectedRevision);
+
 }
 
 public enum WorkflowProfileReferenceResultCode

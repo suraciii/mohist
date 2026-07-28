@@ -48,6 +48,47 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<IssueGrain> _log;
 
+    internal IssueGrain(
+        Orleans.Runtime.IGrainContext context,
+        Orleans.Runtime.IGrainRuntime runtime,
+        IIssueStore issueStore,
+        IssueWorkflowProfileRegistry profiles,
+        WorkflowQuerier workflowQuerier,
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IEventStore eventStore,
+        IGrainFactory grainFactory,
+        IBackgroundTaskLauncher backgroundTasks,
+        IssueRepositoryResolver repositoryResolver,
+        WorkflowProfileManager workflowProfileManager,
+        ProjectWorkflowProfileManager projectProfileManager,
+        IssueWorkflowProfileManager issueProfileManager,
+        AttachmentService attachmentService,
+        IConfiguration configuration,
+        IEnvironmentVariableProvider environment,
+        TimeProvider timeProvider,
+        ILogger<IssueGrain> log,
+        IWorkflowProfileProvider profileProvider)
+        : base(context, runtime)
+    {
+        _issueStore = issueStore;
+        _profiles = profiles;
+        _profileProvider = profileProvider;
+        _workflowQuerier = workflowQuerier;
+        _dbFactory = dbFactory;
+        _eventStore = eventStore;
+        _grainFactory = grainFactory;
+        _backgroundTasks = backgroundTasks;
+        _repositoryResolver = repositoryResolver;
+        _workflowProfileManager = workflowProfileManager;
+        _projectProfileManager = projectProfileManager;
+        _issueProfileManager = issueProfileManager;
+        _attachmentService = attachmentService;
+        _configuration = configuration;
+        _environment = environment;
+        _timeProvider = timeProvider;
+        _log = log;
+    }
+
     public IssueGrain(
         IIssueStore issueStore,
         IssueWorkflowProfileRegistry profiles,
@@ -86,56 +127,13 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _log = log;
     }
 
-    private string GrainKey => _testKey ?? this.GetPrimaryKeyString();
+    private string GrainKey => this.GetPrimaryKeyString();
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         _issueReloadRequired = false;
         _issue = await _issueStore.LoadAsync(GrainKey);
     }
-
-    /// <summary>
-    /// Direct-construction factory for unit tests that need to drive the
-    /// grain outside an Orleans silo. The production constructor above is
-    /// unchanged; tests call this factory with the test key plus the same
-    /// services the silo would supply. The grain's
-    /// <c>GrainKey</c> property reads from <c>this.GetPrimaryKeyString()</c>
-    /// in production; the test key stored here is used only when Orleans
-    /// is absent (i.e. the grain was constructed directly in a test).
-    /// </summary>
-    internal static IssueGrain ForDirectConstruction(
-        string testKey,
-        IIssueStore issueStore,
-        IssueWorkflowProfileRegistry profiles,
-        WorkflowQuerier workflowQuerier,
-        IDbContextFactory<MohistDbContext> dbFactory,
-        IEventStore eventStore,
-        IGrainFactory grainFactory,
-        IBackgroundTaskLauncher backgroundTasks,
-        IssueRepositoryResolver repositoryResolver,
-        WorkflowProfileManager workflowProfileManager,
-        ProjectWorkflowProfileManager projectProfileManager,
-        IssueWorkflowProfileManager issueProfileManager,
-        AttachmentService attachmentService,
-        IConfiguration configuration,
-        IEnvironmentVariableProvider environment,
-        TimeProvider timeProvider,
-        ILogger<IssueGrain> log,
-        IWorkflowProfileProvider profileProvider)
-    {
-        var grain = new IssueGrain(
-            issueStore, profiles, workflowQuerier, dbFactory, eventStore,
-            grainFactory, backgroundTasks, repositoryResolver,
-            workflowProfileManager, projectProfileManager, issueProfileManager,
-            attachmentService, configuration, environment, timeProvider, log,
-            profileProvider)
-        {
-            _testKey = testKey,
-        };
-        return grain;
-    }
-
-    private string? _testKey;
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {

@@ -48,7 +48,7 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
     public AgentSessionGrainPersistSuccessSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task FlushForTestAsync_SavesBoundRuntimeEventsAndTranscript()
+    public async Task Persistence_SavesBoundRuntimeEventsAndTranscript()
     {
         var grain = await OpenBoundGrainAsync();
 
@@ -59,7 +59,7 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
             }, "runtime-1"));
 
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(Fixture.Persistence);
 
         Assert.Equal(3, Fixture.StateStore.SaveCount);
         Assert.Single(Fixture.TranscriptStore.Flushes);
@@ -72,7 +72,7 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\" again\"}")
             }, "runtime-1"));
 
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(Fixture.Persistence);
 
         Assert.Equal(4, Fixture.StateStore.SaveCount);
         Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
@@ -96,7 +96,7 @@ public class AgentSessionGrainPersistSummarySpecs : AgentSessionGrainPersistence
     }
 
     [Fact]
-    public async Task FlushForTestAsync_PersistsSummary()
+    public async Task Persistence_PersistsSummary()
     {
         var grain = await OpenBoundGrainAsync();
 
@@ -109,7 +109,7 @@ public class AgentSessionGrainPersistSummarySpecs : AgentSessionGrainPersistence
                 new AgentSessionRuntimeEventInput("session.activity", "{\"failureCategory\":\"tool_failure\",\"failureReason\":\"failed\"}")
             },
             "runtime-1"));
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(Fixture.Persistence);
 
         var saved = Fixture.StateStore.State;
         Assert.NotNull(saved);
@@ -140,7 +140,7 @@ public class AgentSessionGrainPersistSummarySpecs : AgentSessionGrainPersistence
                 new AgentSessionRuntimeEventInput("session.activity", "{\"activity\":\"idle\",\"failureCategory\":\"failure-a\",\"failureReason\":\"reason-a\"}")
             },
             "runtime-1"));
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(Fixture.Persistence);
 
         var now = Fixture.TimeProvider.GetUtcNow().UtcDateTime;
         await using (var db = Fixture.CreateDbContext())
@@ -228,7 +228,7 @@ public class AgentSessionGrainPersistSummarySpecs : AgentSessionGrainPersistence
                 new AgentSessionRuntimeEventInput("model.resolved", "{\"resolvedModel\":\"current\"}")
             },
             "runtime-1"));
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(Fixture.Persistence);
 
         var before = Fixture.StateStore.State;
         Assert.NotNull(before);
@@ -252,7 +252,7 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
     public AgentSessionGrainPersistStateFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task FlushForTestAsync_StateSaveFailure_PropagatesAndQuarantinesActivation()
+    public async Task Persistence_StateSaveFailure_ReportsFailureAndQuarantinesActivation()
     {
         // A failed event-aware save must propagate and quarantine the
         // activation: the store's transaction rolled back, but the live
@@ -275,8 +275,8 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
             grain.GetPrimaryKeyString(),
             new InvalidOperationException("state store down"));
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => grain.FlushForTestAsync());
-        Assert.Contains("state store down", ex.Message);
+        var result = await grain.WaitForPersistenceAsync(Fixture.Persistence);
+        Assert.Equal(AgentSessionPersistenceOutcome.StateFailed, result.Outcome);
         // The faulted save did not increment the count (ThrowIfPending fires
         // before SaveCount++), and the dirty state was not salvaged by the
         // failing flush.
@@ -294,7 +294,7 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
     public AgentSessionGrainPersistTranscriptFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task FlushForTestAsync_TranscriptSaveFailure_RetriesOnlyTranscriptWithoutDuplicateEvents()
+    public async Task Persistence_TranscriptSaveFailure_RetriesOnlyTranscriptWithoutDuplicateEvents()
     {
         // State/event and transcript retry states are split: a transcript
         // save failure happens AFTER the state/event transaction commits, so
@@ -313,13 +313,15 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
             }, "runtime-1"));
 
-        await grain.FlushForTestAsync();
+        var first = await grain.WaitForPersistenceAsync(Fixture.Persistence);
+        Assert.Equal(AgentSessionPersistenceOutcome.TranscriptFailed, first.Outcome);
 
         // State/event committed on the first flush; no second state save.
         Assert.Equal(3, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
 
-        await grain.FlushForTestAsync();
+        var second = await grain.WaitForPersistenceAsync(Fixture.Persistence);
+        Assert.Equal(AgentSessionPersistenceOutcome.Succeeded, second.Outcome);
 
         // SaveCount must stay at 2: the retry is transcript-only.
         Assert.Equal(3, Fixture.StateStore.SaveCount);
@@ -408,7 +410,10 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
             new InvalidOperationException("second transcript failure"));
         await DeactivateAsync(grain);
 
-        await grain.FlushForTestAsync();
+        var deactivationFlush = await grain.WaitForPersistenceAsync(Fixture.Persistence);
+        Assert.Equal(AgentSessionPersistenceOutcome.TranscriptFailed, deactivationFlush.Outcome);
+        var recoveryFlush = await grain.WaitForPersistenceAsync(Fixture.Persistence);
+        Assert.Equal(AgentSessionPersistenceOutcome.Succeeded, recoveryFlush.Outcome);
 
         Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
         Assert.All(Fixture.TranscriptStore.Flushes, flush => Assert.Single(flush.Parts));

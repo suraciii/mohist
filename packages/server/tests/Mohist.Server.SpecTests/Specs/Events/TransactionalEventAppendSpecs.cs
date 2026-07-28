@@ -44,6 +44,9 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
 
+    private WorkflowRunStore CreateStore(IEventStore? eventStore = null) =>
+        new(_dbFactory, eventStore ?? _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, TestServices.BackgroundTasks);
+
     public async ValueTask InitializeAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -70,7 +73,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_CommitsStateAndEventRowsTogether()
     {
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = BuildRun("wr_txn_ok", includeAnnotations: true);
 
         await store.SaveAsync(run, [
@@ -99,7 +102,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // out of SaveAsync, and neither the state row nor any event row
         // may be persisted — there is no bare catch to swallow the
         // failure.
-        var store = new WorkflowRunStore(_dbFactory, new WorkflowTransactionalThrowingEventStore(), _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore(new WorkflowTransactionalThrowingEventStore());
         var run = BuildRun("wr_txn_fail", includeAnnotations: true);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -122,7 +125,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // and assert the event rows are still there. No post-commit
         // publish loop remains in the store; the only durable artefact
         // is the committed row.
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = BuildRun("wr_txn_crash", includeAnnotations: true);
 
         await store.SaveAsync(run, [new WorkflowRunCompleted()]);
@@ -151,7 +154,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // A consumer can read issue lineage directly from extensions without
         // doing a reverse database lookup, and Expression subscription can
         // match on the unified `issue` key (D3 / T-002).
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = BuildRun("wr_txn_identity", includeAnnotations: true);
 
         await store.SaveAsync(run, [
@@ -176,7 +179,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_EpicAffiliatedRun_StampsEpicOnRunStageTaskAndCheckEvents()
     {
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = BuildRun("wr_txn_epic", includeAnnotations: true, epicNumber: 1);
 
         WorkflowEvent[] events = [
@@ -209,7 +212,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // conditional on the annotations being present. Project identity
         // and the always-stamped workflowrunid remain on the envelope
         // so routing on the run itself still works.
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = new WorkflowRun
         {
             Id = "wr_txn_unbound",
@@ -247,7 +250,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // requested, tasks, and checks all carry the stage name onto
         // the envelope, alongside the workflow.* lineage (workflowrunid
         // + the conditionally-present projectid/issue).
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = BuildRun("wr_txn_stage", includeAnnotations: true);
 
         WorkflowEvent[] events = [
@@ -302,7 +305,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // D2: WorkflowArtifactRecorded carries no Stage member; even though
         // its bus type is workflow.*, it MUST NOT receive a `stage` stamp.
         // The base workflow.* lineage (projectid + workflowrunid) is kept.
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = BuildRun("wr_txn_artifact", includeAnnotations: true);
 
         await store.SaveAsync(run, [
@@ -327,7 +330,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // workflowrunid stamp because the run itself IS the producer,
         // but conditional affiliations (projectid/issue/stage)
         // are absent rather than empty strings.
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = new WorkflowRun
         {
             Id = "wr_txn_no_meta",
@@ -347,7 +350,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     public async Task SaveAsync_StampedEnvelopes_CarryWorkflowProducerContext()
     {
         // Drives every workflow event family through the production path.
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = BuildRun("wr_txn_conformance", includeAnnotations: true);
 
         WorkflowEvent[] events = [
@@ -377,7 +380,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_AllWorkflowEventVariants_SatisfyWorkflowProducerFamily()
     {
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = BuildRun("wr_txn_all_variants", includeAnnotations: true, epicNumber: 7);
         WorkflowEvent[] events =
         [
@@ -451,7 +454,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // The SaveAsync(run, events) overload is the transactional
         // entry point; when no events are supplied it should still
         // commit the state row cleanly with no spurious event rows.
-        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        var store = CreateStore();
         var run = BuildRun("wr_txn_state_only", includeAnnotations: true);
 
         await store.SaveAsync(run, []);

@@ -139,7 +139,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
                 RuntimeEventTypes.SessionActivity,
                 "{\"activity\":\"active\"}"),
         }, currentSession.Id));
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
 
@@ -239,7 +239,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
                 RuntimeEventTypes.SessionActivity,
                 "{\"activity\":\"active\"}"),
         }, session.Id));
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         using var response = await _client.PostAsync(
             $"/api/projects/{project.Id}/agent-sessions/{session.Id}/{operation}",

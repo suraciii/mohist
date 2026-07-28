@@ -426,7 +426,7 @@ public class IssueCompositeAdvancementGrainSpecs
             GrainKey.Issue(new IssueKey(projectId, parent.Number)));
 
         await parentGrain.StartCompositeAsync();
-        await GrainTestSupport.ForceActivationCollectionAsync(Grains);
+        await parentGrain.Deactivate();
 
         // Fresh activation loads the parent from the store (status
         // already InProgress) and runs recompute. The fan-out engages

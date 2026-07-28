@@ -193,12 +193,20 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
             .FirstOrDefaultAsync(CancellationToken.None);
     }
 
-    private Task DeactivateRunnerAsync(string runnerId) =>
-        GrainTestSupport.ForceActivationCollectionForGrainAsync(
-            Grains,
-            nameof(RunnerGrain),
-            runnerId,
+    private async Task DeactivateRunnerAsync(string runnerId)
+    {
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await TestLifecycle.Deactivate(runner);
+
+        var management = Grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+
+        await TestWait.ForAsync(
+            async () => await management.GetDetailedGrainStatistics(),
+            activations => !activations.Any(stat => stat.GrainType.Contains(nameof(RunnerGrain), StringComparison.Ordinal)
+                && stat.GrainId.ToString()!.Contains(runnerId, StringComparison.Ordinal)),
             TimeSpan.FromSeconds(3),
             TimeSpan.FromMilliseconds(50),
             $"Runner grain '{runnerId}' to deactivate");
+    }
 }

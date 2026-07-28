@@ -2,7 +2,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.SystemInfo;
-using Mohist.Server.UnitTests.Support;
 using Xunit;
 using EnvironmentAbstractions.TestHelpers;
 
@@ -235,7 +234,7 @@ public class SystemUpdateRecoveryTests
             new AvailableManagedAssetCatalog(),
             NullLogger<SystemUpdateService>.Instance,
             time,
-            NoopBackgroundTaskLauncher.Instance);
+            new Mohist.Server.Infrastructure.BackgroundTaskLauncher());
     }
 
     private static SystemUpdateJobState BuildJob(

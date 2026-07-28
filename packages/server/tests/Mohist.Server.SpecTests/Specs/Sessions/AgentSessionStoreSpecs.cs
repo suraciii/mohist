@@ -21,7 +21,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
     public AgentSessionStoreSpecs()
     {
         _database = TestSqliteDatabase.CreateMigrated();
-        _store = new AgentSessionStore(new TestDbContextFactory(_database.Options), new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<AgentSessionStore>.Instance, NoopBackgroundTaskLauncher.Instance);
+        _store = new AgentSessionStore(new TestDbContextFactory(_database.Options), new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<AgentSessionStore>.Instance, new Mohist.Server.Infrastructure.BackgroundTaskLauncher());
         _transcriptStore = new AgentSessionTranscriptStore(new TestDbContextFactory(_database.Options));
     }
 

@@ -319,7 +319,7 @@ public class IssueRepositoryCoordinatorSpecs
         // receipt) survives. A fresh call must observe the
         // participant's persisted receipt and return AlreadyApplied
         // without re-mutating state.
-        await GrainTestSupport.ForceActivationCollectionAsync(_grains);
+        await TestLifecycle.Deactivate(coordinator);
 
         var replayed = await coordinator.CreateIssueAsync(
             BuildCreatePayload(projectId, number, "web"),

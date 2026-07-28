@@ -100,7 +100,7 @@ internal static class SystemUpdateTestFactory
             managedAssets ?? new InMemoryManagedAssetCatalog(),
             NullLogger<SystemUpdateService>.Instance,
             time,
-            NoopBackgroundTaskLauncher.Instance);
+            new Mohist.Server.Infrastructure.BackgroundTaskLauncher());
         return (service, time);
     }
 

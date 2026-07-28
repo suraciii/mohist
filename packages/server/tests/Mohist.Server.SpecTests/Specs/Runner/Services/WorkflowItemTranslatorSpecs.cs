@@ -43,7 +43,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         _profileManager = new WorkflowProfileManager(
             factory, promptLoader, new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(), runProfileManager,
-            new FakeWorkflowProfileProvider());
+            new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
         _bindService = new WorkflowArtifactBindService(
             factory, BindNullLogger, new FakeTimeProvider(TestTime.UtcNow));
         _agentResolver = new FakeAgentExecutionSnapshotResolver();

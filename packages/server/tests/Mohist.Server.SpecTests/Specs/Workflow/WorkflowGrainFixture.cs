@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
@@ -20,15 +19,8 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public RecordingEventStore EventStore => _sharedEventStore;
     public string ConnectionString => _keeper.ConnectionString;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    public AgentSessionPersistenceTestProbe Persistence { get; }
     public ControllableDispatchPollObserver DispatchPollObserver { get; } = new();
-    public IServiceProvider Services => Cluster.GetSiloServiceProvider(null);
-    public Mohist.Server.Infrastructure.Data.Db.MohistDbContext CreateDbContext()
-    {
-        var options = new DbContextOptionsBuilder<Mohist.Server.Infrastructure.Data.Db.MohistDbContext>()
-            .UseSqlite(ConnectionString)
-            .Options;
-        return new Mohist.Server.Infrastructure.Data.Db.MohistDbContext(options);
-    }
 
     private readonly RecordingEventStore _sharedEventStore = new();
     private readonly InMemoryEventBus _sharedEventBus;
@@ -36,6 +28,8 @@ public class WorkflowGrainFixture : IAsyncLifetime
 
     public WorkflowGrainFixture()
     {
+        Persistence = new AgentSessionPersistenceTestProbe(
+            () => TimeProvider.Advance(TimeSpan.FromSeconds(1)));
         _sharedEventBus = new InMemoryEventBus(
             _sharedEventStore,
             TimeProvider,
@@ -55,7 +49,13 @@ public class WorkflowGrainFixture : IAsyncLifetime
         builder.Options.InitialSilosCount = 1;
         builder.ConfigureSilo((_, siloBuilder) =>
         {
-            GrainTestConfig.ConfigureSilo(siloBuilder, connectionString, _sharedEventBus, _sharedEventStore, TimeProvider);
+            GrainTestConfig.ConfigureSilo(
+                siloBuilder,
+                connectionString,
+                _sharedEventBus,
+                _sharedEventStore,
+                TimeProvider,
+                Persistence);
             siloBuilder.Services.AddSingleton<IDispatchPollObserver>(DispatchPollObserver);
         });
         Cluster = builder.Build();

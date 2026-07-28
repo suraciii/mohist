@@ -75,7 +75,6 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
                 Event("session.followup_failed"),
             },
             "runtime-current"));
-        await grain.FlushForTestAsync();
 
         Assert.Empty(result);
         Assert.Equal(saveCount, _fixture.StateStore.SaveCount);
@@ -100,7 +99,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
                 new(RuntimeEventTypes.SessionActivity, "{\"activity\":\"idle\",\"status\":\"failed\",\"operationId\":\"delivery-1\"}"),
             },
             "runtime-current"));
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         Assert.Equal(["message.delta", "session.activity"], result.Select(entry => entry.Type));
         Assert.Equal(3, DiscardWarnings().Count);

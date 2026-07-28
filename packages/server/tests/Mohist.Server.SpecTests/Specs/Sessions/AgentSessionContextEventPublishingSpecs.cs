@@ -160,7 +160,7 @@ public class AgentSessionContextEventPublishingSpecs
 
         // Force a flush so the post-state-save event rows are
         // committed before we read them.
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(sessionId);
@@ -186,7 +186,7 @@ public class AgentSessionContextEventPublishingSpecs
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":500,"contextWindowSize":1000}"""),
             }, RuntimeSessionId: "runtime-context"));
 
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(sessionId);

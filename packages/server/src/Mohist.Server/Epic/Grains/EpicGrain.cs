@@ -25,6 +25,23 @@ public class EpicGrain : Grain, IEpicGrain
     private readonly IEventStore _eventStore;
     private readonly ILogger<EpicGrain> _log;
 
+    internal EpicGrain(
+        Orleans.Runtime.IGrainContext context,
+        Orleans.Runtime.IGrainRuntime runtime,
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IGrainFactory grains,
+        TimeProvider timeProvider,
+        IEventStore eventStore,
+        ILogger<EpicGrain> log)
+        : base(context, runtime)
+    {
+        _dbFactory = dbFactory;
+        _grains = grains;
+        _timeProvider = timeProvider;
+        _eventStore = eventStore;
+        _log = log;
+    }
+
     public EpicGrain(
         IDbContextFactory<MohistDbContext> dbFactory,
         IGrainFactory grains,
@@ -39,32 +56,9 @@ public class EpicGrain : Grain, IEpicGrain
         _log = log;
     }
 
-    private string GrainKey => _testKey ?? this.GetPrimaryKeyString();
+    private string GrainKey => this.GetPrimaryKeyString();
 
     private DateTimeOffset Now() => _timeProvider.GetUtcNow();
-
-    private string? _testKey;
-
-    /// <summary>
-    /// Direct-construction factory for unit tests that need to drive the
-    /// grain outside an Orleans silo. Production uses
-    /// <c>this.GetPrimaryKeyString()</c>; the test key stored here is
-    /// only used when Orleans is absent.
-    /// </summary>
-    internal static EpicGrain ForDirectConstruction(
-        string testKey,
-        IDbContextFactory<MohistDbContext> dbFactory,
-        IGrainFactory grains,
-        TimeProvider timeProvider,
-        IEventStore eventStore,
-        ILogger<EpicGrain> log)
-    {
-        var grain = new EpicGrain(dbFactory, grains, timeProvider, eventStore, log)
-        {
-            _testKey = testKey,
-        };
-        return grain;
-    }
 
     public async Task<EpicDto> CreateAsync(string projectId, int number, string title, string? description, string? priority)
     {

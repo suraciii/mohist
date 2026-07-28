@@ -94,7 +94,7 @@ public class IssueSessionApiSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 5, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 5, _fixture.Grains, _fixture.Persistence);
 
         var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         using var doc = JsonDocument.Parse(raw);
@@ -176,11 +176,7 @@ public class IssueSessionApiSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 2, _fixture.Grains);
-
-        // Force the session grain to flush so the post-state-save event
-        // rows are committed before we read them.
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).FlushForTestAsync();
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 2, _fixture.Grains, _fixture.Persistence);
 
         var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(currentSession.Id);
@@ -260,7 +256,7 @@ public class IssueSessionApiSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 4, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 4, _fixture.Grains, _fixture.Persistence);
 
         var response = await _client.GetDataAsync<IssueSessionTranscriptResponseDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/transcript");
 

@@ -17,14 +17,20 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
     private RunnerDefinitionStore DefinitionStore =>
         _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<RunnerDefinitionStore>();
 
-    private Task DeactivateRunnerAsync(string runnerId) =>
-        GrainTestSupport.ForceActivationCollectionForGrainAsync(
-            Grains,
-            nameof(RunnerGrain),
-            runnerId,
+    private async Task DeactivateRunnerAsync(string runnerId)
+    {
+        await TestLifecycle.Deactivate(Grains.GetGrain<IRunnerGrain>(runnerId));
+        var management = Grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+
+        await TestWait.ForAsync(
+            async () => await management.GetDetailedGrainStatistics(),
+            activations => !activations.Any(stat => stat.GrainType.Contains(nameof(RunnerGrain), StringComparison.Ordinal)
+                && stat.GrainId.ToString()!.Contains(runnerId, StringComparison.Ordinal)),
             TimeSpan.FromSeconds(3),
             TimeSpan.FromMilliseconds(50),
             $"Runner grain '{runnerId}' to deactivate");
+    }
 
     [Fact]
     public async Task RegisterAsync_NewRunner_InitializesPersistedSlotsToOne()

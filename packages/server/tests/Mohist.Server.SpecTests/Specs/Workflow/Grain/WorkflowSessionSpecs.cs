@@ -81,7 +81,7 @@ public class WorkflowSessionSpecs
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
-        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 3, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 3, _fixture.Grains, _fixture.Persistence);
 
         var detail = await _client.GetDataAsync<WorkflowSessionDetailDto>($"/api/workflow-runs/{workflowRunId}/sessions/{sessionName}");
         var sessions = await _client.GetDataAsync<WorkflowSessionDto[]>($"/api/workflow-runs/{workflowRunId}/sessions");
@@ -178,7 +178,7 @@ public class WorkflowSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 3, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 3, _fixture.Grains, _fixture.Persistence);
 
         var metadata = await _client.GetDataAsync<IssueSessionMetadataTestDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}");
         Assert.Equal(sessionId, metadata.Id);

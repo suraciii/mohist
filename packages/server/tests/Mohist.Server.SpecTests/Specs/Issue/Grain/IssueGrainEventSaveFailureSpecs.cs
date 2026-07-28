@@ -168,8 +168,10 @@ public class IssueGrainEventSaveFailureSpecs
         IIssueStore stateStore,
         string grainKey)
     {
-        return IssueGrain.ForDirectConstruction(
-            grainKey,
+        var identity = GrainTestContext.Create(grainKey);
+        return new IssueGrain(
+            identity.Context,
+            identity.Runtime,
             stateStore,
             services.GetRequiredService<IssueWorkflowProfileRegistry>(),
             services.GetRequiredService<WorkflowQuerier>(),
@@ -186,7 +188,7 @@ public class IssueGrainEventSaveFailureSpecs
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<TimeProvider>(),
             services.GetRequiredService<ILogger<IssueGrain>>(),
-            new FakeWorkflowProfileProvider());
+            services.GetRequiredService<IWorkflowProfileProvider>());
     }
 
     private static async Task SeedIssueAsync(
@@ -234,7 +236,7 @@ public class IssueGrainEventSaveFailureSpecs
                 scopeFactory.GetRequiredService<IEventStore>(),
                 scopeFactory.GetRequiredService<IGrainFactory>(),
                 scopeFactory.GetRequiredService<ILoggerFactory>().CreateLogger<IssueStore>(),
-                NoopBackgroundTaskLauncher.Instance);
+                scopeFactory.GetRequiredService<IBackgroundTaskLauncher>());
             _eventsSaveFailures = failEventsSaveOnce ? 1 : 0;
         }
 

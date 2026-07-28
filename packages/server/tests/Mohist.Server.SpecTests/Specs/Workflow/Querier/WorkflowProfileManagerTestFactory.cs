@@ -26,7 +26,7 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
             new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
             new WorkflowRunProfileManager(dbContextFactory),
-            new FakeWorkflowProfileProvider());
+            new WorkflowProfileProvider(dbContextFactory, NullActionCatalogSource.Instance));
     }
 
     protected TestSqliteDatabase Database { get; }

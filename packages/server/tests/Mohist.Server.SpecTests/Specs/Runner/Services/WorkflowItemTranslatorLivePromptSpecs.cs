@@ -32,7 +32,7 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
             new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
             new WorkflowRunProfileManager(factory),
-            new FakeWorkflowProfileProvider());
+            new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
         var artifactService = new WorkflowArtifactBindService(
             factory,
             NullLogger<WorkflowArtifactBindService>.Instance,

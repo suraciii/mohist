@@ -95,8 +95,8 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs
                         $"{{\"activity\":\"{activity.ToString().ToLowerInvariant()}\"}}")
                 },
                 runtimeSessionId));
+            await grain.WaitForPersistenceAsync(_fixture.Persistence);
         }
-        await grain.FlushForTestAsync();
         return sessionId;
     }
 }

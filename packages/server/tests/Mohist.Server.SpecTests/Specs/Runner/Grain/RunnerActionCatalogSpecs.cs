@@ -77,7 +77,8 @@ public class RunnerActionCatalogSpecs : WorkflowGrainSpecs
             "test-host",
             null,
             ActionCatalog: catalog));
-        await GrainTestSupport.ForceActivationCollectionAsync(Grains);
+        await TestLifecycle.Deactivate(runner);
+        await Grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
 
         var reactivated = Grains.GetGrain<IRunnerGrain>(runnerId);
         var info = await reactivated.GetInfoAsync();

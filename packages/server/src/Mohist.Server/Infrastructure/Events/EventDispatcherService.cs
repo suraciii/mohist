@@ -33,7 +33,7 @@ public sealed class EventDispatcherService
         _time = time ?? throw new ArgumentNullException(nameof(time));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _log = log;
-        _pushQueue = pushQueue ?? throw new ArgumentNullException(nameof(pushQueue));
+        _pushQueue = pushQueue;
 
         if (_options.BatchSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(options), "BatchSize must be positive");

@@ -83,7 +83,7 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
                 RuntimeEventTypes.MessageDelta,
                 "{\"text\":\"preserved assistant text\"}"),
         }, runtimeSessionId));
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         return (project, sessionId);
     }

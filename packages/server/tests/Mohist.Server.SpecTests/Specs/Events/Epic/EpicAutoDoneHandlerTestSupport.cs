@@ -253,8 +253,10 @@ public abstract class EpicAutoDoneHandlerTestSupport
         public IEpicGrain GetEpicGrain(string grainKey)
         {
             Calls.Add(new RecordedGrainCall(grainKey));
-            return EpicGrain.ForDirectConstruction(
-                grainKey,
+            var identity = GrainTestContext.Create(grainKey);
+            return new EpicGrain(
+                identity.Context,
+                identity.Runtime,
                 _dbFactory,
                 this,
                 new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),

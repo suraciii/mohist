@@ -205,13 +205,18 @@ internal static class EpicEventPublishTestSupport
         string grainKey,
         IEventStore eventStore,
         FakeTimeProvider timeProvider,
-        IGrainFactory? grains = null) => EpicGrain.ForDirectConstruction(
-            grainKey,
+        IGrainFactory? grains = null)
+    {
+        var identity = GrainTestContext.Create(grainKey);
+        return new EpicGrain(
+            identity.Context,
+            identity.Runtime,
             factory,
             grains ?? new StubGrainFactory(),
             timeProvider,
             eventStore,
             NullLogger<EpicGrain>.Instance);
+    }
 
     public static async Task SeedEpicAsync(
         TestDatabase database,
