@@ -1,0 +1,28 @@
+{
+  "project": "mohist",
+  "description": "Move WorkflowRun Issue lineage from system annotations to typed metadata while preserving persisted history and external behavior.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Deliver typed WorkflowRun lineage persistence",
+      "spec": "specs/workflow-run-lineage/spec.md#typed-workflowrun-issue-context",
+      "description": "Move WorkflowRun Project, Issue, and optional Epic context into appended Orleans metadata fields, and switch creation, ownership validation, profile resolution, Epic refresh, and event extension construction to those fields. Deliver the matching SQLite migration that transforms legacy state, rebuilds computed Project/Issue projections without losing indexes or the profile-binding foreign key, preserves the current row Epic snapshot, and supports explicit downgrade.",
+      "acceptanceCriteria": [
+        "Issue-backed WorkflowRuns persist typed Project, Issue, and optional Epic metadata; generic runs retain their existing optional-context behavior; annotations contain no system lineage keys and preserve user-defined entries.",
+        "WorkflowGrain and WorkflowRunLineage perform no system-annotation parsing for ownership, profile selection, context comparison, Epic refresh, or event construction; mismatched context refreshes are rejected and terminal Runs remain unchanged.",
+        "Workflow CloudEvent extensions, WorkflowRun API values, and Project/Issue/Epic query results remain externally unchanged, including omission of absent Epic lineage and stage-bearing event rules.",
+        "The EF migration upgrades valid legacy annotation-backed WorkflowRun state, gives persisted WorkflowRuns.EpicNumber precedence over stale annotation Epic values, removes the system keys, and recreates all existing computed projections, indexes, and the profile-binding foreign key; its downgrade restores the prior state/projection representation.",
+        "Focused domain, grain, storage, and migration specs cover typed-context persistence, user annotation preservation, ownership, Epic refresh, event lineage, legacy-state migration, Epic precedence, and rebuilt schema projections.",
+        "design/conventions.md contains no completed-work implementation-gap note after the final representation is implemented.",
+        "npm test and npm run typecheck -w packages/web pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Typed WorkflowRun lineage implementation, EF migration and snapshot, updated conventions state, and passing Server/Web verification.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The model, JSON migration, and SQLite computed projections are one atomic feature slice. Do not deploy a partial implementation or a mixed-version Server fleet."
+    }
+  ]
+}
