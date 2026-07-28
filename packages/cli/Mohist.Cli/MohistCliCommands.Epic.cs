@@ -6,9 +6,8 @@ namespace Mohist.Cli;
 
 internal static class EpicCommands
 {
-    internal static readonly ResourceDescriptor EpicDescriptor = new(
-        ResourceCardinality.Single,
-        ["number", "title", "description", "status", "state", "priority", "createdAt", "updatedAt"]);
+    internal static readonly ResourceDescriptor EpicDescriptor =
+        ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.EpicShow));
 
     private static JsonSelection Selection(ParseResult ctx, Option<string?> json) =>
         JsonSelection.Parse(EpicDescriptor, ctx.GetResult(json) is not null, ctx.GetValue(json));
@@ -46,21 +45,19 @@ internal static class EpicCommands
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List epics");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.EpicList)));
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ListAsync();
 
             async Task<int> ListAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
                 var (mode, exit) = api.ResolveOutputMode(output);
@@ -78,15 +75,14 @@ internal static class EpicCommands
     {
         var cmd = new Command("create", "Create a new epic");
         var titleArg = new Argument<string>("title") { Description = "Epic title" };
-        var descriptionOpt = new Option<string?>("--description", "-d") { Description = "Epic description" };
+        var descriptionOpt = new Option<string?>("--description") { Description = "Epic description" };
         var priorityOpt = new Option<string?>("--priority", "-p") { Description = "Epic priority (p0|p1|p2|p3)" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(titleArg);
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(priorityOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
@@ -94,7 +90,6 @@ internal static class EpicCommands
             var description = ctx.GetValue(descriptionOpt);
             var priority = ctx.GetValue(priorityOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
             return CreateAsync();
 
@@ -107,7 +102,7 @@ internal static class EpicCommands
                 }
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintMutationResourceAsync(
@@ -126,23 +121,21 @@ internal static class EpicCommands
     {
         var cmd = new Command("view", "Show epic details");
         var numberArg = NumberArg();
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.EpicShow)));
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ShowAsync();
 
             async Task<int> ShowAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
                 var (mode, exit) = api.ResolveOutputMode(output);
@@ -161,16 +154,15 @@ internal static class EpicCommands
         var cmd = new Command("edit", "Update an epic");
         var numberArg = NumberArg();
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
-        var descriptionOpt = new Option<string?>("--description", "-d") { Description = "New description" };
+        var descriptionOpt = new Option<string?>("--description") { Description = "New description" };
         var priorityOpt = new Option<string?>("--priority", "-p") { Description = "New priority (p0|p1|p2|p3)" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(titleOpt);
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(priorityOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
@@ -179,7 +171,6 @@ internal static class EpicCommands
             var description = ctx.GetValue(descriptionOpt);
             var priority = ctx.GetValue(priorityOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
             return UpdateAsync();
 
@@ -187,7 +178,7 @@ internal static class EpicCommands
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
                 var body = new JsonObject();
@@ -214,19 +205,17 @@ internal static class EpicCommands
         var cmd = new Command("add", "Add an issue to an epic");
         var epicArg = new Argument<int>("epic") { Description = "Epic number" };
         var issueArg = new Argument<int>("issue") { Description = "Issue number" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(epicArg);
         cmd.Arguments.Add(issueArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var epic = ctx.GetValue(epicArg);
             var issue = ctx.GetValue(issueArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
             return AddAsync();
 
@@ -234,7 +223,7 @@ internal static class EpicCommands
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintMutationResourceAsync(
@@ -254,19 +243,17 @@ internal static class EpicCommands
         var cmd = new Command("remove", "Remove an issue from an epic");
         var epicArg = new Argument<int>("epic") { Description = "Epic number" };
         var issueArg = new Argument<int>("issue") { Description = "Issue number" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(epicArg);
         cmd.Arguments.Add(issueArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var epic = ctx.GetValue(epicArg);
             var issue = ctx.GetValue(issueArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
             return RemoveAsync();
 
@@ -274,7 +261,7 @@ internal static class EpicCommands
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintMutationResourceAsync(
@@ -293,17 +280,15 @@ internal static class EpicCommands
     {
         var cmd = new Command("done", "Mark an epic done");
         var numberArg = NumberArg();
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
             return DoneAsync();
 
@@ -311,7 +296,7 @@ internal static class EpicCommands
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintMutationResourceAsync(
@@ -345,17 +330,15 @@ internal static class EpicCommands
     {
         var cmd = new Command(name, description);
         var numberArg = NumberArg();
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
             return PostAsync();
 
@@ -363,7 +346,7 @@ internal static class EpicCommands
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintMutationResourceAsync(
@@ -382,17 +365,15 @@ internal static class EpicCommands
     {
         var cmd = new Command("close", "Close an epic");
         var numberArg = NumberArg();
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var selection = Selection(ctx, jsonOpt);
             return CloseAsync();
 
@@ -400,7 +381,7 @@ internal static class EpicCommands
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(EpicDescriptor, selection);
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintMutationResourceAsync(

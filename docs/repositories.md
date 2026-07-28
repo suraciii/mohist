@@ -19,7 +19,7 @@
 mo repo list
 mo repo create server --git-url /path/to/my-server --base-branch main
 mo repo create web    --git-url /path/to/my-web    --base-branch main
-mo repo set-default server
+mo project repo set-default server
 mo repo edit web --base-branch develop
 mo repo delete web
 ```

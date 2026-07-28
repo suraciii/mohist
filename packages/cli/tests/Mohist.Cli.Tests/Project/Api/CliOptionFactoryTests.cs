@@ -11,29 +11,19 @@ public class CliOptionFactoryTests
     [Fact]
     public void ProjectRefOption_ReturnsCanonicalProjectAndDoesNotAdvertiseLegacyOption()
     {
-        var (project, projectId) = MohistCliCommands.ProjectRefOption();
+        var project = MohistCliCommands.ProjectRefOption();
 
         Assert.Equal("--project", project.Name);
-        Assert.Equal("--project-id", projectId.Name);
-        Assert.True(projectId.Hidden);
     }
 
     [Fact]
     public void ProjectRefOption_DescribesProjectReference()
     {
-        var (project, projectId) = MohistCliCommands.ProjectRefOption();
+        var project = MohistCliCommands.ProjectRefOption();
 
         Assert.NotNull(project.Description);
         Assert.Contains("Project name or id", project.Description);
         Assert.DoesNotContain("--project", project.Description);
-    }
-
-    [Fact]
-    public void ProjectIdOption_IsNotAdvertisedByTheCanonicalFactory()
-    {
-        var projectId = MohistCliCommands.ProjectIdOption();
-
-        Assert.True(projectId.Hidden);
     }
 
     [Fact]

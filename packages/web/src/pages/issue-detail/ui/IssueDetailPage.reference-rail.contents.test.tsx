@@ -29,7 +29,7 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
         baseBranch: 'master',
         gitUrl: 'https://github.com/suraciii/mohist.git',
       },
-      prerequisites: [
+      prereq: [
         { number: 9, title: 'Prerequisite issue', completed: true },
       ],
     }))
@@ -286,7 +286,7 @@ describe('IssueDetailPage reference-rail — rail contents exclusivity (full set
         nonBlockingItemIds: [],
         blockedReason: 'A blocking check failed.',
       },
-      prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+      prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
       recovery: DEFAULT_RECOVERY,
     }))
 
@@ -327,7 +327,7 @@ describe('IssueDetailPage reference-rail — rail contents exclusivity (full set
         nonBlockingItemIds: [],
         blockedReason: 'A blocking check failed.',
       },
-      prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+      prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
       recovery: DEFAULT_RECOVERY,
     }))
 

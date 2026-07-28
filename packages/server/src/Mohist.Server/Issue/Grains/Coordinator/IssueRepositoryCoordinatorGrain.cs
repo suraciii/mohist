@@ -287,7 +287,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                 IssueRepositoryBindingResultCode.RepositoryDefault,
                 repository.Name,
                 expectedRevision ?? 0L,
-                $"Repository '{repository.Name}' is the default. Run 'mo repo set-default <other-name>' first.");
+                $"Repository '{repository.Name}' is the default. Run 'mo project repo set-default <other-name>' first.");
         }
 
         // Check committed Issue blockers before fencing so a rejection

@@ -362,7 +362,7 @@ public static class RepositoryPolicy
             {
                 new ValidationError(
                     "repository_default_deletion_conflict",
-                    $"Repository '{match.Name}' is the default. Run 'mo repo set-default <other-name>' first."),
+                    $"Repository '{match.Name}' is the default. Run 'mo project repo set-default <other-name>' first."),
             });
 
         return new(match, []);

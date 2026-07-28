@@ -929,6 +929,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var hasBody = present.Contains(nameof(command.Body));
         var hasLabels = present.Contains(nameof(command.Labels));
         var hasPriority = present.Contains(nameof(command.Priority));
+        var hasRisk = present.Contains(nameof(command.Risk));
         var hasIsDraft = present.Contains(nameof(command.IsDraft));
         var hasAttachments = present.Contains(nameof(command.AttachmentIds));
         var hasWorkflowProfile = present.Contains(nameof(command.WorkflowProfileId));
@@ -948,6 +949,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             throw new ArgumentException("Issue title is required", nameof(command.Title));
         if (hasPriority && command.Priority is not null)
             _ = IssuePriority.From(command.Priority);
+        if (hasRisk)
+            _ = IssueRisk.From(command.Risk);
         if (hasLabels && command.Labels is not null)
         {
             foreach (var (key, value) in command.Labels)
@@ -982,7 +985,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             hasTitle ? command.Title : null,
             hasBody ? command.Body : null,
             labelsForUpdate,
-            hasPriority ? command.Priority : null);
+            hasPriority ? command.Priority : null,
+            hasRisk ? command.Risk : null,
+            hasRisk);
 
         if (hasIsDraft && command.IsDraft.HasValue)
             _issue.SetDraft(command.IsDraft.Value);
@@ -1053,6 +1058,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var hasBody = present.Contains(nameof(UpdateIssueData.Body));
         var hasLabels = present.Contains(nameof(UpdateIssueData.Labels));
         var hasPriority = present.Contains(nameof(UpdateIssueData.Priority));
+        var hasRisk = present.Contains(nameof(UpdateIssueData.Risk));
         var hasIsDraft = present.Contains(nameof(UpdateIssueData.IsDraft));
         var hasAttachments = present.Contains(nameof(UpdateIssueData.AttachmentIds));
         var hasWorkflowProfile = present.Contains(nameof(UpdateIssueData.WorkflowProfileId));
@@ -1089,7 +1095,13 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             labelsForUpdate = data.Labels ?? new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
-        _issue!.Update(title, body, labelsForUpdate, priority);
+        _issue!.Update(
+            title,
+            body,
+            labelsForUpdate,
+            priority,
+            hasRisk ? data.Risk : null,
+            hasRisk);
 
         if (hasIsDraft && data.IsDraft.HasValue)
             _issue.SetDraft(data.IsDraft.Value);
@@ -1501,5 +1513,6 @@ public record UpdateIssueData(
     [property: Id(5)] string[]? AttachmentIds = null,
     [property: Id(6)] IReadOnlySet<string>? PresentFields = null,
     [property: Id(7)] string? WorkflowProfileId = null,
-    [property: Id(8)] int? ParentIssueNumber = null
+    [property: Id(8)] int? ParentIssueNumber = null,
+    [property: Id(9)] string? Risk = null
 );

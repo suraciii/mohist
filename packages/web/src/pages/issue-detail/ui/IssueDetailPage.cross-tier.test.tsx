@@ -378,7 +378,7 @@ describe('IssueDetailPage cross-tier verification: unique tier assignment', () =
         baseBranch: 'master',
         gitUrl: 'https://github.com/suraciii/mohist.git',
       },
-      prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: true }],
+      prereq: [{ number: 9, title: 'Prerequisite issue', completed: true }],
       drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
       health: 'blocked',
       convergence: {

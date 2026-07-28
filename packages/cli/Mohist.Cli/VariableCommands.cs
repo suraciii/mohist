@@ -4,23 +4,6 @@ using System.Text.Json.Nodes;
 
 namespace Mohist.Cli;
 
-// Shared `variable list | get | set | unset` command group registered under
-// `project`, `issue`, and `run`. The four leaves share one key-value language:
-//
-//   * dotted `<key>` (matches the `${{ vars.* }}` template path);
-//   * `--stage <stage>` to scope reads / writes to that scope's Stage Variables
-//     (absent = workflow-wide);
-//   * `set <key> <positional>` always stores the value as a JSON string;
-//   * `set <key> --value-json <json>` preserves the parsed JSON type;
-//   * `unset <key>` deletes the current scope's declaration so the key inherits
-//     from the parent scope (no `null` is persisted).
-//
-// Only `run variable list/get` accepts `--effective`, a read-only merge of the
-// Project → Issue → Run effective chain. Project and Issue never expose
-// effective reads; `--effective` on a write (any scope) is a local usage error.
-//
-// Single dispatch site: `BuildVariableGroup(api, scope)` returns the four-verb
-// `variable` sub-tree. Each scope plugs this into its command tree (D1).
 internal static class VariableCommands
 {
     private static readonly ResourceDescriptor VariableBundleDescriptor = new(
@@ -46,16 +29,12 @@ internal static class VariableCommands
         return group;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  list
-    // ────────────────────────────────────────────────────────────────────
-
     private static Command BuildList(MohistCliApi api, VariableScopeKind scope)
     {
         var cmd = new Command(
             "list",
             "List the scope's own Variables. With --stage, returns the scope's raw stage slice. Run-only --effective returns the merged Project → Issue → Run values.");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var stageOpt = StageOpt();
         var effectiveOpt = scope == VariableScopeKind.Run ? EffectiveOpt() : null;
         var jsonOpt = MohistCliCommands.JsonSelectionOption(VariableBundleDescriptor);
@@ -66,7 +45,6 @@ internal static class VariableCommands
 
         AddCommonArgs(cmd, scope, numberArg, runIdArg, issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(stageOpt);
         if (effectiveOpt is not null)
             cmd.Options.Add(effectiveOpt);
@@ -75,7 +53,6 @@ internal static class VariableCommands
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var stage = ctx.GetValue(stageOpt);
             var stageProvided = ctx.GetResult(stageOpt) is not null;
             var effective = effectiveOpt is null ? false : ctx.GetValue(effectiveOpt);
@@ -98,7 +75,7 @@ internal static class VariableCommands
                 if (scope == VariableScopeKind.Run && effective)
                 {
                     var effectiveAddress = await ResolveScopeAddressAsync(
-                        api, scope, project, projectId, number, runId, issue).ConfigureAwait(false);
+                        api, scope, project, number, runId, issue).ConfigureAwait(false);
                     if (effectiveAddress.Exit != 0)
                         return effectiveAddress.Exit;
 
@@ -116,7 +93,7 @@ internal static class VariableCommands
                     return api.WriteJsonSelectionResult(VariableBundleDescriptor, selection);
 
                 var address = await ResolveScopeAddressAsync(
-                    api, scope, project, projectId, number, runId, issue).ConfigureAwait(false);
+                    api, scope, project, number, runId, issue).ConfigureAwait(false);
                 if (address.Exit != 0)
                     return address.Exit;
 
@@ -130,17 +107,13 @@ internal static class VariableCommands
         return cmd;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  get
-    // ────────────────────────────────────────────────────────────────────
-
     private static Command BuildGet(MohistCliApi api, VariableScopeKind scope)
     {
         var cmd = new Command(
             "get",
             "Get one value at a dotted key path from the scope's own Variables. With --effective (run only), the value comes from the merged Project → Issue → Run chain.");
         var keyArg = KeyArg();
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var stageOpt = StageOpt();
         var effectiveOpt = scope == VariableScopeKind.Run ? EffectiveOpt() : null;
 
@@ -151,7 +124,6 @@ internal static class VariableCommands
         AddCommonArgs(cmd, scope, numberArg, runIdArg, issueOpt);
         cmd.Arguments.Add(keyArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(stageOpt);
         if (effectiveOpt is not null)
             cmd.Options.Add(effectiveOpt);
@@ -159,7 +131,6 @@ internal static class VariableCommands
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var stage = ctx.GetValue(stageOpt);
             var stageProvided = ctx.GetResult(stageOpt) is not null;
             var effective = effectiveOpt is null ? false : ctx.GetValue(effectiveOpt);
@@ -184,7 +155,7 @@ internal static class VariableCommands
                 }
 
                 var address = await ResolveScopeAddressAsync(
-                    api, scope, project, projectId, number, runId, issue).ConfigureAwait(false);
+                    api, scope, project, number, runId, issue).ConfigureAwait(false);
                 if (address.Exit != 0)
                     return address.Exit;
 
@@ -201,20 +172,15 @@ internal static class VariableCommands
         return cmd;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  set
-    // ────────────────────────────────────────────────────────────────────
-
     private static Command BuildSet(MohistCliApi api, VariableScopeKind scope)
     {
         var cmd = new Command(
             "set",
             "Set one value at a dotted key path. Positional value stores a JSON string; --value-json <json> stores the parsed type. The two inputs are mutually exclusive and exactly one is required.");
         var keyArg = KeyArg();
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var stageOpt = StageOpt();
         var valueJsonOpt = ValueJsonOpt();
-        var effectiveOpt = EffectiveOpt();
 
         var numberArg = scope == VariableScopeKind.Issue ? NumberArg() : null;
         var runIdArg = scope == VariableScopeKind.Run ? RunIdArg() : null;
@@ -232,13 +198,9 @@ internal static class VariableCommands
         cmd.Arguments.Add(positionalValue);
 
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(stageOpt);
         cmd.Options.Add(valueJsonOpt);
-        cmd.Options.Add(effectiveOpt);
 
-        // Mutual exclusion + exactly-one enforcement runs locally before the
-        // action body so HTTP is never called on malformed input.
         cmd.Validators.Add(result =>
         {
             var hasPositional = result.GetResult(positionalValue) is not null;
@@ -258,12 +220,10 @@ internal static class VariableCommands
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var stage = ctx.GetValue(stageOpt);
             var rawKey = ctx.GetValue(keyArg);
             var positionalString = ctx.GetValue(positionalValue);
             var valueJsonRaw = ctx.GetValue(valueJsonOpt);
-            var effective = ctx.GetValue(effectiveOpt);
             var number = numberArg is null ? null : ctx.GetValue(numberArg);
             var runId = runIdArg is null ? null : ctx.GetValue(runIdArg);
             var issue = issueOpt is null ? null : ctx.GetValue(issueOpt);
@@ -271,13 +231,6 @@ internal static class VariableCommands
 
             async Task<int> SetAsync()
             {
-                if (effective)
-                {
-                    await api.Error.WriteLineAsync(
-                        "--effective is read-only and cannot be combined with 'set'.").ConfigureAwait(false);
-                    return CliExitCode.For(CliExitOutcome.UsageFailure);
-                }
-
                 if (!VariableKeyPath.TryParse(rawKey, out var segments, out var keyError))
                 {
                     await api.Error.WriteLineAsync(keyError!).ConfigureAwait(false);
@@ -311,7 +264,7 @@ internal static class VariableCommands
                 }
 
                 var address = await ResolveScopeAddressAsync(
-                    api, scope, project, projectId, number, runId, issue).ConfigureAwait(false);
+                    api, scope, project, number, runId, issue).ConfigureAwait(false);
                 if (address.Exit != 0)
                     return address.Exit;
 
@@ -327,19 +280,14 @@ internal static class VariableCommands
         return cmd;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  unset
-    // ────────────────────────────────────────────────────────────────────
-
     private static Command BuildUnset(MohistCliApi api, VariableScopeKind scope)
     {
         var cmd = new Command(
             "unset",
             "Delete the current scope's declaration at a dotted key. The persisted document never stores a null; the key re-inherits from the parent scope.");
         var keyArg = KeyArg();
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var stageOpt = StageOpt();
-        var effectiveOpt = EffectiveOpt();
 
         var numberArg = scope == VariableScopeKind.Issue ? NumberArg() : null;
         var runIdArg = scope == VariableScopeKind.Run ? RunIdArg() : null;
@@ -348,17 +296,13 @@ internal static class VariableCommands
         AddCommonArgs(cmd, scope, numberArg, runIdArg, issueOpt);
         cmd.Arguments.Add(keyArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(stageOpt);
-        cmd.Options.Add(effectiveOpt);
 
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var stage = ctx.GetValue(stageOpt);
             var rawKey = ctx.GetValue(keyArg);
-            var effective = ctx.GetValue(effectiveOpt);
             var number = numberArg is null ? null : ctx.GetValue(numberArg);
             var runId = runIdArg is null ? null : ctx.GetValue(runIdArg);
             var issue = issueOpt is null ? null : ctx.GetValue(issueOpt);
@@ -366,13 +310,6 @@ internal static class VariableCommands
 
             async Task<int> UnsetAsync()
             {
-                if (effective)
-                {
-                    await api.Error.WriteLineAsync(
-                        "--effective is read-only and cannot be combined with 'unset'.").ConfigureAwait(false);
-                    return CliExitCode.For(CliExitOutcome.UsageFailure);
-                }
-
                 if (!VariableKeyPath.TryParse(rawKey, out var segments, out var keyError))
                 {
                     await api.Error.WriteLineAsync(keyError!).ConfigureAwait(false);
@@ -380,7 +317,7 @@ internal static class VariableCommands
                 }
 
                 var address = await ResolveScopeAddressAsync(
-                    api, scope, project, projectId, number, runId, issue).ConfigureAwait(false);
+                    api, scope, project, number, runId, issue).ConfigureAwait(false);
                 if (address.Exit != 0)
                     return address.Exit;
 
@@ -396,14 +333,6 @@ internal static class VariableCommands
         return cmd;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  Bundled-value extraction for scope-local `get`
-    // ────────────────────────────────────────────────────────────────────
-
-    // Fetch the scope's Variables bundle and print the value at the dotted key
-    // path. The CLI does the traversal (matching the server's
-    // `VariableBundle.GetByKeyPath` semantics) so a non-existent path prints
-    // an `absent` indicator rather than the raw envelope.
     private static async Task<int> PrintBundleValueAtKeyAsync(
         MohistCliApi api,
         string bundlePath,
@@ -489,10 +418,6 @@ internal static class VariableCommands
         return stageEntry?["vars"];
     }
 
-    // Mirrors the server's `VariableBundle.GetByKeyPath` traversal: descend
-    // into nested objects one segment at a time; any non-object step returns
-    // `null` (absent). The write side already rejected malformed keys; the
-    // read side reports absentees with a sentinel.
     private static JsonNode? TraverseKey(JsonNode? root, IReadOnlyList<string> segments)
     {
         if (root is null) return null;
@@ -508,25 +433,15 @@ internal static class VariableCommands
         return current;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  Address resolution
-    // ────────────────────────────────────────────────────────────────────
-
     private readonly record struct ResolvedAddress(int Exit, string? ProjectId, string? IssueNumber, string? RunId)
     {
         public static ResolvedAddress Failure(int exit) => new(exit, null, null, null);
     }
 
-    // Resolves the addressed scope's identifying ids and emits local usage
-    // errors for malformed invocations (run-id-or-issue on non-run scopes,
-    // both/neither target on the run scope). For Issue, the issue number is
-    // required from the argument; for Run, the resolver in `RunCommands`
-    // already enforces the dual-target rule.
     private static async Task<ResolvedAddress> ResolveScopeAddressAsync(
         MohistCliApi api,
         VariableScopeKind scope,
         string? project,
-        string? projectId,
         string? number,
         string? runId,
         string? issue)
@@ -540,7 +455,7 @@ internal static class VariableCommands
                         "'run id', --issue, and <number> are only valid on 'issue variable' or 'run variable'.").ConfigureAwait(false);
                     return ResolvedAddress.Failure(CliExitCode.For(CliExitOutcome.UsageFailure));
                 }
-                var (p, pExit) = await api.ResolveProject(MergeProject(project, projectId)).ConfigureAwait(false);
+                var (p, pExit) = await api.ResolveProject(project).ConfigureAwait(false);
                 return pExit != 0
                     ? ResolvedAddress.Failure(pExit)
                     : new ResolvedAddress(0, p, null, null);
@@ -557,13 +472,13 @@ internal static class VariableCommands
                         "<number> is required for 'issue variable'.").ConfigureAwait(false);
                     return ResolvedAddress.Failure(CliExitCode.For(CliExitOutcome.UsageFailure));
                 }
-                var (ip, ipExit) = await api.ResolveProject(MergeProject(project, projectId)).ConfigureAwait(false);
+                var (ip, ipExit) = await api.ResolveProject(project).ConfigureAwait(false);
                 return ipExit != 0
                     ? ResolvedAddress.Failure(ipExit)
                     : new ResolvedAddress(0, ip, number, null);
             case VariableScopeKind.Run:
                 var (resolvedRunId, resolveExit) = await RunCommands.ResolveRunTargetAsync(
-                    api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
+                    api, runId, issue, project).ConfigureAwait(false);
                 return resolveExit != 0
                     ? ResolvedAddress.Failure(resolveExit)
                     : new ResolvedAddress(0, null, null, resolvedRunId);
@@ -586,7 +501,6 @@ internal static class VariableCommands
     private static string BuildEffectiveListPath(string runId, string? stage) =>
         $"/api/workflow-runs/{MohistCliCommands.Escape(runId)}/variables/effective";
 
-    // Appends a `?stage=<stage>` query parameter when the caller asked for one.
     private static string StageQueryString(string path, string? stage) =>
         string.IsNullOrEmpty(stage) ? path : $"{path}?stage={MohistCliCommands.Escape(stage)}";
 
@@ -596,10 +510,6 @@ internal static class VariableCommands
         await api.Error.WriteLineAsync(
             $"--effective is only available for 'run variable list/get'; {scopeName} {verb} remains scope-local.").ConfigureAwait(false);
     }
-
-    // ────────────────────────────────────────────────────────────────────
-    //  Argument / option wiring
-    // ────────────────────────────────────────────────────────────────────
 
     private static Argument<string?> KeyArg() => new("key")
     {
@@ -652,8 +562,6 @@ internal static class VariableCommands
         }
     }
 
-    private static string? MergeProject(string? project, string? projectId) =>
-        !string.IsNullOrWhiteSpace(project) ? project : projectId;
 }
 
 internal enum VariableScopeKind

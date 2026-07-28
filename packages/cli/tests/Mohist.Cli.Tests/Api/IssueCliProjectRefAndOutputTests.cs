@@ -11,7 +11,7 @@ namespace Mohist.Cli.Tests.Api;
 public class IssueCliProjectRefAndOutputTests
 {
     [Fact]
-    public void IssueList_Help_ListsProjectProjectIdAndJsonOptions()
+    public void IssueList_Help_ListsProjectReferenceAndJsonOptions()
     {
         var help = RenderHelp(["issue", "list", "--help"]);
 
@@ -21,7 +21,7 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public void IssueShow_Help_ListsProjectProjectIdAndJsonOptions()
+    public void IssueView_Help_ListsProjectReferenceAndJsonOptions()
     {
         var help = RenderHelp(["issue", "view", "--help"]);
 
@@ -31,7 +31,7 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public void SessionList_Help_ListsProjectProjectIdAndOutputOptions()
+    public void SessionList_Help_ListsProjectReferenceAndOutputOptions()
     {
         // `mo issue sessions <num>` was retired by issue-479 T-005; the
         // list is now `mo session list --issue <num>`. The unified command
@@ -52,7 +52,7 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public void IssueShow_Help_OutputOptionDefaultsToJson()
+    public void IssueView_Help_OutputOptionDefaultsToJson()
     {
         var help = RenderHelp(["issue", "view", "--help"]);
 
@@ -60,7 +60,7 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public async Task IssueShow_ByProjectName_SendsGetOnResolvedPath()
+    public async Task IssueView_ByProjectName_SendsGetOnResolvedPath()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -86,7 +86,7 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public async Task IssueShow_ByProjectId_SendsGetOnResolvedPath()
+    public async Task IssueView_ByProjectReference_SendsGetOnResolvedPath()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -111,7 +111,7 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public async Task IssueShow_ProjectIdAlias_StillResolvesThroughSharedHelper()
+    public async Task IssueView_ProjectReference_ResolvesThroughSharedHelper()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -322,7 +322,7 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public async Task IssueShow_NoActiveProjectAndNoOption_PrintsGuidedDiagnostic()
+    public async Task IssueView_NoActiveProjectAndNoOption_PrintsGuidedDiagnostic()
     {
         var http = new RecordingHttpHandler();
         var output = new StringWriter();
@@ -345,7 +345,7 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public async Task IssueList_ConflictingProjectAndProjectId_FailsWithGuidedError()
+    public async Task IssueList_ConflictingProjectReferences_FailsWithGuidedError()
     {
         var http = new RecordingHttpHandler();
         var output = new StringWriter();
@@ -362,7 +362,7 @@ public class IssueCliProjectRefAndOutputTests
         Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
-        Assert.Contains("--project-id is not supported", err);
+        Assert.Contains("Unrecognized command or argument '--project-id'", err);
     }
 
     private static string RenderHelp(string[] args)

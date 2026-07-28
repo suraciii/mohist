@@ -26,13 +26,12 @@ internal static partial class RunCommands
         var command = new Command("list", "List approval feedback records");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
+        var projectOpt = ProjectOptions();
         var stageOpt = MohistCliCommands.StageOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(FeedbackListDescriptor);
         command.Arguments.Add(runIdArg);
         command.Options.Add(issueOpt);
         command.Options.Add(projectOpt);
-        command.Options.Add(projectIdOpt);
         command.Options.Add(stageOpt);
         command.Options.Add(jsonOpt);
         command.SetAction(ctx =>
@@ -52,7 +51,7 @@ internal static partial class RunCommands
                     api,
                     ctx.GetValue(runIdArg),
                     ctx.GetValue(issueOpt),
-                    MergeProject(ctx.GetValue(projectOpt), ctx.GetValue(projectIdOpt))).ConfigureAwait(false);
+                    ctx.GetValue(projectOpt)).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 
@@ -72,19 +71,23 @@ internal static partial class RunCommands
         var command = new Command("view", "Show one approval feedback record");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
-        var feedbackOpt = new Option<string?>("--feedback") { Description = "Feedback id" };
-        var latestOpt = new Option<bool>("--latest") { Description = "Show the most recent feedback record" };
+        var projectOpt = ProjectOptions();
+        var feedbackOpt = new Option<string?>("--feedback") { Description = "Feedback id (mutually exclusive with --latest)" };
+        var latestOpt = new Option<bool>("--latest") { Description = "Show the most recent feedback record (mutually exclusive with --feedback)" };
         var stageOpt = MohistCliCommands.StageOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(FeedbackViewDescriptor);
         command.Arguments.Add(runIdArg);
         command.Options.Add(issueOpt);
         command.Options.Add(projectOpt);
-        command.Options.Add(projectIdOpt);
         command.Options.Add(feedbackOpt);
         command.Options.Add(latestOpt);
         command.Options.Add(stageOpt);
         command.Options.Add(jsonOpt);
+        command.Validators.Add(result =>
+        {
+            if (result.GetResult(feedbackOpt) is not null && result.GetResult(latestOpt) is not null)
+                result.AddError("--feedback and --latest cannot be used together.");
+        });
         command.SetAction(ctx =>
         {
             var feedbackId = ctx.GetValue(feedbackOpt);
@@ -97,28 +100,20 @@ internal static partial class RunCommands
 
             async Task<int> ViewFeedbackAsync()
             {
-                if (string.IsNullOrWhiteSpace(feedbackId) && !latest)
-                {
-                    await api.Error.WriteLineAsync(
-                        "Either --feedback <id> or --latest is required").ConfigureAwait(false);
-                    return 1;
-                }
-
-                if (!string.IsNullOrWhiteSpace(feedbackId) && latest)
-                {
-                    await api.Error.WriteLineAsync(
-                        "--feedback and --latest cannot be used together").ConfigureAwait(false);
-                    return 1;
-                }
-
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(FeedbackViewDescriptor, selection);
+
+                if (string.IsNullOrWhiteSpace(feedbackId) && !latest)
+                {
+                    await api.Error.WriteLineAsync("--feedback <id> or --latest is required.").ConfigureAwait(false);
+                    return 1;
+                }
 
                 var (projectId, issueNumber, resolveExit) = await ResolveFeedbackIssueAsync(
                     api,
                     ctx.GetValue(runIdArg),
                     ctx.GetValue(issueOpt),
-                    MergeProject(ctx.GetValue(projectOpt), ctx.GetValue(projectIdOpt))).ConfigureAwait(false);
+                    ctx.GetValue(projectOpt)).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 

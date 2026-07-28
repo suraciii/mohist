@@ -49,7 +49,7 @@ public sealed class CliHelpSpecs
         var exitCode = await MohistCliCommands.RunAsync(http, ["help", "unknown"], output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
-        Assert.Contains("Usage: mo help <output|environment|exit-codes>", error.ToString());
+        Assert.Contains("USAGE\n    mo help <output|environment|exit-codes>", error.ToString());
         Assert.Empty(output.ToString());
         Assert.Empty(handler.Requests);
     }
@@ -255,8 +255,6 @@ public sealed class CliHelpSpecs
     [InlineData(new[] { "activity", "list", "--help" }, "provenance")]
     [InlineData(new[] { "event", "tail", "--help" }, "specversion")]
     [InlineData(new[] { "info", "--help" }, "platformNotice")]
-    [InlineData(new[] { "project", "variable", "list", "--help" }, "stages")]
-    [InlineData(new[] { "issue", "variable", "list", "--help" }, "stages")]
     [InlineData(new[] { "run", "variable", "list", "--help" }, "stages")]
     [InlineData(new[] { "epic", "close", "--help" }, "updatedAt")]
     public async Task DirectJsonSelectionHelp_ListsRuntimeJsonFields(string[] args, string expectedField)
@@ -302,6 +300,37 @@ public sealed class CliHelpSpecs
     }
 
     [Fact]
+    public async Task FilterHelp_DescribesMutuallyExclusiveOptions()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var issueExit = await MohistCliCommands.RunAsync(http, ["issue", "list", "--help"], output, error, fs, executor);
+        Assert.Equal(0, issueExit);
+        Assert.Contains("mutually exclusive", output.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        output.GetStringBuilder().Clear();
+        var feedbackExit = await MohistCliCommands.RunAsync(http, ["run", "feedback", "view", "--help"], output, error, fs, executor);
+        Assert.Equal(0, feedbackExit);
+        Assert.Contains("mutually exclusive", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task RoutingRuleEditHelpDescribesTargetAndOptions()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["routing", "rule", "edit", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("Rule id or name", text, StringComparison.Ordinal);
+        Assert.Contains("Replacement rule name", text, StringComparison.Ordinal);
+        Assert.Contains("Replacement event match expression", text, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task IssueEditHelp_SeparatesLongOptionNamesFromDescriptions()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
@@ -323,7 +352,7 @@ public sealed class CliHelpSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("missing", error.ToString());
-        Assert.Contains("Usage:", error.ToString());
+        Assert.Contains("USAGE", error.ToString());
         Assert.Contains("mo run", error.ToString());
         Assert.Empty(output.ToString());
         Assert.Empty(handler.Requests);

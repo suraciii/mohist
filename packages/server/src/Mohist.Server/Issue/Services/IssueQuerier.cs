@@ -254,8 +254,9 @@ public class IssueQuerier : IScopedService
         bool? archived = null,
         bool? all = null,
         string? repositoryName = null,
-        int? parentIssueNumber = null) =>
-        ListReadModelsWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all, repositoryName, parentIssueNumber);
+        int? parentIssueNumber = null,
+        int? epicNumber = null) =>
+        ListReadModelsWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all, repositoryName, parentIssueNumber, epicNumber);
 
     public async Task<List<IssueListItem>> ListWithLabelFiltersAsync(
         string projectId,
@@ -266,7 +267,8 @@ public class IssueQuerier : IScopedService
         bool? archived,
         bool? all,
         string? repositoryName = null,
-        int? parentIssueNumber = null)
+        int? parentIssueNumber = null,
+        int? epicNumber = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var list = await _loader.LoadListProjectedAsync(db, projectId, project);
@@ -276,6 +278,9 @@ public class IssueQuerier : IScopedService
             .OrderBy(i => i.Number)
             .ToList();
         await ApplyRelationshipProjectionsAsync(db, issues);
+
+        if (epicNumber is not null)
+            issues = issues.Where(i => i.Epic?.Number == epicNumber).ToList();
 
         if (parentIssueNumber is not null)
             issues = issues.Where(i => i.ParentIssueRef?.Number == parentIssueNumber).ToList();
@@ -292,8 +297,9 @@ public class IssueQuerier : IScopedService
         bool? archived = null,
         bool? all = null,
         string? repositoryName = null,
-        int? parentIssueNumber = null) =>
-        ListReadModelsWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all, repositoryName, parentIssueNumber);
+        int? parentIssueNumber = null,
+        int? epicNumber = null) =>
+        ListReadModelsWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all, repositoryName, parentIssueNumber, epicNumber);
 
     public async Task<List<IssueReadModel>> ListReadModelsWithLabelFiltersAsync(
         string projectId,
@@ -304,7 +310,8 @@ public class IssueQuerier : IScopedService
         bool? archived,
         bool? all,
         string? repositoryName = null,
-        int? parentIssueNumber = null)
+        int? parentIssueNumber = null,
+        int? epicNumber = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var list = await _loader.LoadProjectedAsync(db, projectId, project);
@@ -314,6 +321,8 @@ public class IssueQuerier : IScopedService
             .OrderBy(i => i.Number)
             .ToList();
         await EnrichAsync(db, issues);
+        if (epicNumber is not null)
+            issues = issues.Where(i => i.Epic?.Number == epicNumber).ToList();
         return parentIssueNumber is null
             ? issues
             : issues.Where(i => i.ParentIssueRef?.Number == parentIssueNumber).ToList();
@@ -486,7 +495,7 @@ public class IssueQuerier : IScopedService
                     .Cast<IssuePrerequisiteSummary>()
                     .ToArray()
                 : [];
-            issue.Prerequisites = summaries;
+            issue.Prereq = summaries;
             var summariesByNumber = summaries.ToDictionary(s => s.Number);
             var undelivered = new HashSet<int>(summaries.Where(s => !s.Completed).Select(s => s.Number));
             var hasChildren = issue.ChildIssuesSummary?.HasChildren == true;
@@ -520,7 +529,7 @@ public class IssueQuerier : IScopedService
                     // single non-terminal epic; an issue with only terminal
                     // memberships leaves PrimaryEpic null.
                     if (EpicProgress.IsTerminal(epic.Status)) continue;
-                    issue.PrimaryEpic = new IssuePrimaryEpic
+                    issue.Epic = new IssuePrimaryEpic
                     {
                         Number = epic.Number,
                         Title = epic.Title,
@@ -660,7 +669,7 @@ public class IssueQuerier : IScopedService
                     .Cast<IssuePrerequisiteSummary>()
                     .ToArray()
                 : [];
-            issue.Prerequisites = summaries;
+            issue.Prereq = summaries;
             var summariesByNumber = summaries.ToDictionary(s => s.Number);
             var undelivered = new HashSet<int>(summaries.Where(s => !s.Completed).Select(s => s.Number));
             var hasChildren = await db.Issues.AsNoTracking().AnyAsync(row =>
@@ -695,7 +704,7 @@ public class IssueQuerier : IScopedService
                     // single non-terminal epic; an issue with only terminal
                     // memberships leaves PrimaryEpic null.
                     if (EpicProgress.IsTerminal(epic.Status)) continue;
-                    issue.PrimaryEpic = new IssuePrimaryEpic
+                    issue.Epic = new IssuePrimaryEpic
                     {
                         Number = epic.Number,
                         Title = epic.Title,

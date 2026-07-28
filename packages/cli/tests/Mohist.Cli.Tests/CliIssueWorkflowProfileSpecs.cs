@@ -70,7 +70,7 @@ public class CliIssueWorkflowProfileSpecs
     }
 
     [Fact]
-    public async Task IssueShow_RendersEffectiveWorkflowProfile()
+    public async Task IssueView_RendersEffectiveWorkflowProfile()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
@@ -106,7 +106,7 @@ public class CliIssueWorkflowProfileSpecs
     }
 
     [Fact]
-    public async Task IssueShow_RendersInheritedDefaultWhenNoSelection()
+    public async Task IssueView_RendersInheritedDefaultWhenNoSelection()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
@@ -140,7 +140,7 @@ public class CliIssueWorkflowProfileSpecs
     }
 
     [Fact]
-    public async Task IssueShow_RoundTripsCreateThenShow()
+    public async Task IssueView_RoundTripsCreateThenView()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {

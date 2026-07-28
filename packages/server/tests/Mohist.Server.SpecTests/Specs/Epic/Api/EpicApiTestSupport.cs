@@ -53,8 +53,8 @@ public abstract class EpicApiTestSupport
     protected sealed record EpicDetailDto(int Number, string Title, string Description, string Status, LinkedIssueDto[] LinkedIssues);
     protected sealed record EpicDetailFullDto(int Number, string Status, string? PauseReason, LinkedIssueDto[] LinkedIssues);
     protected sealed record LinkedIssueDto(int Number);
-    protected sealed record IssueDto(int Number, PrimaryEpicDto? PrimaryEpic);
-    protected sealed record PrimaryEpicDto(int Number, string Title);
+    protected sealed record IssueDto(int Number, IssueEpicDto? Epic);
+    protected sealed record IssueEpicDto(int Number, string Title);
     protected sealed record NotFoundEnvelope(bool Success, string? Code = null, string? Error = null);
     protected sealed record ConflictEnvelope(bool Success, string? Code = null, string? Error = null, ConflictDetails? Details = null);
     protected sealed record ConflictDetails(string CurrentStatus, string? RequestedStatus = null);

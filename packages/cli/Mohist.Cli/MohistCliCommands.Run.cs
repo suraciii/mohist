@@ -163,7 +163,7 @@ internal static partial class RunCommands
         Description = "Target the workflow run bound to this issue number",
     };
 
-    private static (Option<string?> Project, Option<string?> ProjectId) ProjectOptions() =>
+    private static Option<string?> ProjectOptions() =>
         MohistCliCommands.ProjectRefOption();
 
     private static string WorkflowRunPath(string runId, string suffix) =>
@@ -178,7 +178,7 @@ internal static partial class RunCommands
         var cmd = new Command("approve", "Pass the approval gate for a workflow run");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
+        var projectOpt = ProjectOptions();
         var authorOpt = new Option<string?>("--author")
         {
             Description = "Optional approval operator (1-100 characters)",
@@ -187,7 +187,6 @@ internal static partial class RunCommands
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(authorOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
@@ -195,7 +194,6 @@ internal static partial class RunCommands
             var runId = ctx.GetValue(runIdArg);
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var author = ctx.GetValue(authorOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
@@ -215,7 +213,7 @@ internal static partial class RunCommands
                 }
 
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
-                    api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
+                    api, runId, issue, project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 
@@ -242,7 +240,7 @@ internal static partial class RunCommands
             "Reject the workflow run at its approval gate with a reason (use --message; required)");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
+        var projectOpt = ProjectOptions();
         var messageOpt = new Option<string?>("--message", "-m")
         {
             Description = "Reject reason / change request message (required, must not be empty)",
@@ -255,7 +253,6 @@ internal static partial class RunCommands
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(messageOpt);
         cmd.Options.Add(authorOpt);
         cmd.Options.Add(jsonOpt);
@@ -264,7 +261,6 @@ internal static partial class RunCommands
             var runId = ctx.GetValue(runIdArg);
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var message = ctx.GetValue(messageOpt);
             var author = ctx.GetValue(authorOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
@@ -293,7 +289,7 @@ internal static partial class RunCommands
                 }
 
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
-                    api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
+                    api, runId, issue, project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 
@@ -318,19 +314,17 @@ internal static partial class RunCommands
         var cmd = new Command("retry", "Retry the current failure point of a workflow run (restores the manual-retry budget; not for arbitrary stages — use 'rerun --from-stage')");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
+        var projectOpt = ProjectOptions();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var runId = ctx.GetValue(runIdArg);
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
             var selection = JsonSelection.Parse(RunControlDescriptor, jsonProvided, json);
@@ -342,7 +336,7 @@ internal static partial class RunCommands
                     return api.WriteJsonSelectionResult(RunControlDescriptor, selection);
 
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
-                    api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
+                    api, runId, issue, project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 
@@ -369,8 +363,8 @@ internal static partial class RunCommands
             "Rerun the entire workflow run (no flag) or from a specific stage (--from-stage). The 'rerun-from-stage' subcommand does not exist — use --from-stage.");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
-        var fromStageOpt = new Option<string?>("--from-stage", "-s")
+        var projectOpt = ProjectOptions();
+        var fromStageOpt = new Option<string?>("--from-stage")
         {
             Description = "Rerun from the specified stage (invalidates that stage and all later stages)",
         };
@@ -378,7 +372,6 @@ internal static partial class RunCommands
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(fromStageOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
@@ -386,7 +379,6 @@ internal static partial class RunCommands
             var runId = ctx.GetValue(runIdArg);
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var fromStage = ctx.GetValue(fromStageOpt);
             var fromStageProvided = ctx.GetResult(fromStageOpt) is not null;
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
@@ -407,7 +399,7 @@ internal static partial class RunCommands
                 }
 
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
-                    api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
+                    api, runId, issue, project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 
@@ -436,19 +428,17 @@ internal static partial class RunCommands
             "Pause a workflow run (resumable via 'mo run resume'; reversible — does not require --yes)");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
+        var projectOpt = ProjectOptions();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var runId = ctx.GetValue(runIdArg);
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
             var selection = JsonSelection.Parse(RunControlDescriptor, jsonProvided, json);
@@ -460,7 +450,7 @@ internal static partial class RunCommands
                     return api.WriteJsonSelectionResult(RunControlDescriptor, selection);
 
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
-                    api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
+                    api, runId, issue, project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 
@@ -485,19 +475,17 @@ internal static partial class RunCommands
         var cmd = new Command("resume", "Resume a paused workflow run");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
+        var projectOpt = ProjectOptions();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var runId = ctx.GetValue(runIdArg);
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
             var selection = JsonSelection.Parse(RunControlDescriptor, jsonProvided, json);
@@ -509,7 +497,7 @@ internal static partial class RunCommands
                     return api.WriteJsonSelectionResult(RunControlDescriptor, selection);
 
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
-                    api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
+                    api, runId, issue, project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 
@@ -536,7 +524,7 @@ internal static partial class RunCommands
             "Stop a workflow run permanently (terminal — cannot be resumed; use 'pause' for a resumable interruption). Requires --yes in non-interactive mode.");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
+        var projectOpt = ProjectOptions();
         var yesOpt = new Option<bool>("--yes", "-y")
         {
             Description = "Bypass confirmation (required in non-interactive mode for this irreversible action)",
@@ -545,7 +533,6 @@ internal static partial class RunCommands
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(yesOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
@@ -553,7 +540,6 @@ internal static partial class RunCommands
             var runId = ctx.GetValue(runIdArg);
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var yes = ctx.GetValue(yesOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
@@ -578,7 +564,7 @@ internal static partial class RunCommands
                 }
 
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
-                    api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
+                    api, runId, issue, project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 
@@ -609,10 +595,4 @@ internal static partial class RunCommands
         return cmd;
     }
 
-    // Pick whichever of --project / --project-id was supplied (issue #475
-    // contract: --project is the canonical option, --project-id is the
-    // hidden legacy alias). When both are supplied the resolver itself
-    // surfaces the mismatch error.
-    private static string? MergeProject(string? project, string? projectId) =>
-        !string.IsNullOrWhiteSpace(project) ? project : projectId;
 }

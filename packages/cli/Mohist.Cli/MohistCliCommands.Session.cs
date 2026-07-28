@@ -74,7 +74,7 @@ internal static class SessionCommands
         var issueOpt = new Option<int?>("--issue") { Description = "Filter by Issue number (workflow source)" };
         var runOpt = new Option<string?>("--run") { Description = "Filter by Workflow run id (workflow source)" };
         var limitOpt = new Option<int?>("--limit") { Description = "Maximum number of sessions to return" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionList)));
 
         cmd.Options.Add(agentOpt);
@@ -82,8 +82,15 @@ internal static class SessionCommands
         cmd.Options.Add(runOpt);
         cmd.Options.Add(limitOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
+        cmd.Validators.Add(result =>
+        {
+            var provided = (result.GetResult(agentOpt) is { Implicit: false } ? 1 : 0)
+                + (result.GetResult(issueOpt) is { Implicit: false } ? 1 : 0)
+                + (result.GetResult(runOpt) is { Implicit: false } ? 1 : 0);
+            if (provided > 1)
+                result.AddError("Only one of --agent, --issue, or --run may be set.");
+        });
         cmd.SetAction(ctx =>
         {
             var agent = ctx.GetValue(agentOpt);
@@ -91,12 +98,16 @@ internal static class SessionCommands
             var run = ctx.GetValue(runOpt);
             var limit = ctx.GetValue(limitOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ListAsync();
 
             async Task<int> ListAsync()
             {
+                var (mode, outputExit) = api.ResolveOutputMode(output);
+                if (outputExit != 0) return outputExit;
+                var localJsonExit = api.HandleLocalJsonSelection(mode, nameof(MohistCliApi.TableShape.SessionList));
+                if (localJsonExit is not null) return localJsonExit.Value;
+
                 var agentProvided = ctx.GetResult(agentOpt) is { Implicit: false };
                 var issueProvided = ctx.GetResult(issueOpt) is { Implicit: false };
                 var runProvided = ctx.GetResult(runOpt) is { Implicit: false };
@@ -116,10 +127,7 @@ internal static class SessionCommands
                         "Only one of --agent, --issue, or --run may be set.");
                 }
 
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
-
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 var queryParts = new List<string>();
@@ -148,18 +156,16 @@ internal static class SessionCommands
             "view",
             "Show the unified summary of an AgentSession by its stable Session ID. GETs the project-scoped .../sessions/{sessionId} route that resolves agent-launch and workflow sessions by the same id.");
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id returned by launch or the workflow session list" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionShow)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var sessionId = ctx.GetValue(sessionIdArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ShowAsync();
 
@@ -168,7 +174,7 @@ internal static class SessionCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 return await api.PrintWithOutputAsync(
@@ -186,18 +192,16 @@ internal static class SessionCommands
             "transcript",
             "Show the transcript of an AgentSession by its stable Session ID. GETs the project-scoped .../sessions/{sessionId}/transcript route that resolves agent-launch and workflow sessions by the same id.");
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id returned by launch or the workflow session list" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionTranscript)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var sessionId = ctx.GetValue(sessionIdArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return TranscriptAsync();
 
@@ -206,7 +210,7 @@ internal static class SessionCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 return await api.PrintWithOutputAsync(
@@ -226,14 +230,13 @@ internal static class SessionCommands
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
         var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file)" };
         var textFileOpt = new Option<string?>("--text-file") { Description = "Read followup text from a UTF-8 file path, or - for stdin (mutually exclusive with --text)" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionFollowup)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(textOpt);
         cmd.Options.Add(textFileOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
@@ -241,7 +244,6 @@ internal static class SessionCommands
             var text = ctx.GetValue(textOpt);
             var textFile = ctx.GetValue(textFileOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return FollowupAsync();
 
@@ -257,7 +259,7 @@ internal static class SessionCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 var textValue = ((BodyInputResolver.Result.Success)resolvedText).Body;
@@ -282,24 +284,22 @@ internal static class SessionCommands
     {
         var cmd = new Command(operation, description);
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionRecovery)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var sessionId = ctx.GetValue(sessionIdArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return RecoverAsync();
 
             async Task<int> RecoverAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
@@ -321,18 +321,16 @@ internal static class SessionCommands
             "cancel",
             "Request interruption of the current Runtime execution only. Sends POST /api/projects/:projectId/agent-sessions/:sessionId/cancel and prints the resulting session state honestly. Does not cancel or rewrite the owning AgentJob lifecycle; the job remains the sole terminal authority.");
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionCancel)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var sessionId = ctx.GetValue(sessionIdArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return CancelAsync();
 
@@ -341,7 +339,7 @@ internal static class SessionCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintPostWithOutputAsync(
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/cancel"),

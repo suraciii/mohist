@@ -11,7 +11,7 @@ namespace Mohist.Cli.Tests.Api;
 public class IssueCliRemainingProjectRefTests
 {
     [Fact]
-    public void IssueCreate_Help_ListsProjectAndProjectIdOptions()
+    public void IssueCreate_Help_ListsProjectReferenceOptions()
     {
         var help = RenderHelp(["issue", "create", "--help"]);
 
@@ -20,7 +20,7 @@ public class IssueCliRemainingProjectRefTests
     }
 
     [Fact]
-    public void IssueUpdate_Help_ListsProjectAndProjectIdOptions()
+    public void IssueUpdate_Help_ListsProjectReferenceOptions()
     {
         var help = RenderHelp(["issue", "edit", "--help"]);
 
@@ -40,7 +40,7 @@ public class IssueCliRemainingProjectRefTests
     [InlineData("events")]
     [InlineData("diff")]
     [InlineData("commits")]
-    public void IssueSubcommand_Help_ListsProjectAndProjectIdOptions(string subcommand)
+    public void IssueSubcommand_Help_ListsProjectReferenceOptions(string subcommand)
     {
         var help = RenderHelp(["issue", subcommand, "--help"]);
 
@@ -104,7 +104,7 @@ public class IssueCliRemainingProjectRefTests
     }
 
     [Fact]
-    public async Task IssueClose_ByProjectIdAlias_StillResolvesThroughSharedHelper()
+    public async Task IssueClose_ByProjectReferenceAlias_StillResolvesThroughSharedHelper()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "number": 83, "status": "closed" } }""");
@@ -197,7 +197,7 @@ public class IssueCliRemainingProjectRefTests
     }
 
     [Fact]
-    public async Task IssueClose_ConflictingProjectAndProjectId_FailsWithGuidedError()
+    public async Task IssueClose_ConflictingProjectReferences_FailsWithGuidedError()
     {
         var http = new RecordingHttpHandler();
         var output = new StringWriter();
@@ -214,7 +214,7 @@ public class IssueCliRemainingProjectRefTests
         Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
-        Assert.Contains("--project-id is not supported", err);
+        Assert.Contains("Unrecognized command or argument '--project-id'", err);
     }
 
     [Fact]

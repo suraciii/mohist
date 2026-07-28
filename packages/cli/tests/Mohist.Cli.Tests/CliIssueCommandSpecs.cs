@@ -119,7 +119,7 @@ public class CliIssueCommandSpecs
     }
 
     [Fact]
-    public async Task IssueShow_Table_RendersStoredRepositoryWithoutMetadata()
+    public async Task IssueView_Table_RendersStoredRepositoryWithoutMetadata()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -274,7 +274,7 @@ public class CliIssueCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -289,7 +289,7 @@ public class CliIssueCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("<number> is required", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -323,7 +323,7 @@ public class CliIssueCommandSpecs
     }
 
     [Fact]
-    public async Task ArchiveAllCompleted_ProjectIdOverride_UsesProjectIdArgument()
+    public async Task ArchiveAllCompleted_ProjectReferenceOverride_UsesProjectReferenceArgument()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -338,6 +338,26 @@ public class CliIssueCommandSpecs
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/proj_by_id/issues/archive-completed", handler.Requests.Single().RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task Rebase_PrintsQueueAcknowledgementWithoutResourceJsonMode()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { rebased = false, status = "queued", message = "Rebase task queued" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "rebase", "42", "--project", ActiveProjectId], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(HttpMethod.Post, handler.Requests.Single().Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/rebase", handler.Requests.Single().RequestUri?.PathAndQuery);
+        Assert.Contains("Rebase task queued", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
     }
 
     private static (HttpClient http, RecordingHttpHandler handler, StringWriter output, StringWriter error, FakeFileSystem fileSystem, FakeCommandExecutor executor) SetupEnv(

@@ -36,17 +36,15 @@ internal static class EventCommands
         var cmd = new Command(
             "tail",
             "Subscribe to realtime Event envelopes from subscription establishment; emit one NDJSON object per line. With --match, only matching events are emitted.");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var matchOpt = new Option<string?>("--match") { Description = "Match expression (CEL subset) forwarded to the server; the server is the single compile authority" };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(descriptor);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(matchOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(async ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var match = ctx.GetValue(matchOpt);
             var json = ctx.GetValue(jsonOpt);
             var selection = JsonSelection.Parse(descriptor, ctx.GetResult(jsonOpt) is not null, json);

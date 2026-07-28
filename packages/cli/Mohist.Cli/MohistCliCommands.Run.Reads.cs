@@ -67,15 +67,13 @@ internal static partial class RunCommands
         var cmd = new Command(
             "list",
             "List workflow runs visible in the current project scope. Derived from the project issues list (each issue with a bound run contributes one row).");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(RunListDescriptor);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var json = ctx.GetValue(jsonOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             return ListAsync();
@@ -86,7 +84,7 @@ internal static partial class RunCommands
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(RunListDescriptor, selection);
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId).ConfigureAwait(false);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 
@@ -162,7 +160,7 @@ internal static partial class RunCommands
             "Show full workflow run resource (status, stages, approval state, associated issue). Use --yaml to print the Workflow Definition; --yaml and --json are mutually exclusive.");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
+        var projectOpt = ProjectOptions();
         var yamlOpt = new Option<bool>("--yaml")
         {
             Description = "Print the Workflow Definition YAML source (mutually exclusive with --json)",
@@ -171,15 +169,18 @@ internal static partial class RunCommands
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(yamlOpt);
         cmd.Options.Add(jsonOpt);
+        cmd.Validators.Add(result =>
+        {
+            if (result.GetResult(yamlOpt) is not null && result.GetResult(jsonOpt) is not null)
+                result.AddError("--yaml and --json are mutually exclusive.");
+        });
         cmd.SetAction(ctx =>
         {
             var runId = ctx.GetValue(runIdArg);
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var yaml = ctx.GetValue(yamlOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
@@ -188,18 +189,11 @@ internal static partial class RunCommands
 
             async Task<int> ViewAsync()
             {
-                if (yaml && jsonProvided)
-                {
-                    await api.Error.WriteLineAsync(
-                        "--yaml and --json cannot be used together").ConfigureAwait(false);
-                    return CliExitCode.For(CliExitOutcome.UsageFailure);
-                }
-
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(RunViewDescriptor, selection);
 
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
-                    api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
+                    api, runId, issue, project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 
@@ -275,29 +269,27 @@ internal static partial class RunCommands
             "Follow a workflow run's progress. Prints a JSON status line whenever status or stage changes and exits 0 when the run reaches a terminal state (completed / stopped / cancelled) or 130 when interrupted.");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
-        var (projectOpt, projectIdOpt) = ProjectOptions();
-        var intervalOpt = new Option<int?>("--interval", "-i")
+        var projectOpt = ProjectOptions();
+        var intervalOpt = new Option<int?>("--interval")
         {
             Description = "Poll interval in milliseconds (default: 2000)",
         };
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(intervalOpt);
         cmd.SetAction(ctx =>
         {
             var runId = ctx.GetValue(runIdArg);
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var intervalMs = ctx.GetValue(intervalOpt);
             return WatchAsync();
 
             async Task<int> WatchAsync()
             {
                 var (resolvedRunId, resolveExit) = await ResolveRunTargetAsync(
-                    api, runId, issue, MergeProject(project, projectId)).ConfigureAwait(false);
+                    api, runId, issue, project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 

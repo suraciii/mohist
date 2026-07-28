@@ -184,7 +184,7 @@ internal static class OtelCommands
             Description = "SQL statement to execute (e.g. \"SELECT COUNT(*) FROM traces\")",
             Arity = ArgumentArity.ZeroOrOne,
         };
-        var dbOpt = new Option<string?>("--db", "-d")
+        var dbOpt = new Option<string?>("--db")
         {
             Description = "Path to the otel.db file (defaults to ~/.mohist/otel.db)",
         };

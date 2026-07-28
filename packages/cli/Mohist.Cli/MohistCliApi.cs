@@ -289,50 +289,6 @@ internal sealed class MohistCliApi
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
 
-    /// <summary>
-    /// Expands an <c>@file</c> reference into the file's UTF-8 contents.
-    /// Values that do not start with <c>@</c> are returned as-is (inline).
-    /// Read errors print to <see cref="Error"/> and return
-    /// <see cref="Result.Failure"/>; the caller exits non-zero.
-    /// </summary>
-    public abstract record ExpandAtFileResult
-    {
-        private ExpandAtFileResult() { }
-
-        public sealed record Success(string Value) : ExpandAtFileResult;
-
-        public sealed record Failure(string Message) : ExpandAtFileResult;
-    }
-
-    public async Task<ExpandAtFileResult> ExpandAtFileAsync(string? raw, string optionName)
-    {
-        if (string.IsNullOrEmpty(raw))
-            return new ExpandAtFileResult.Success(string.Empty);
-
-        if (!raw.StartsWith('@'))
-            return new ExpandAtFileResult.Success(raw);
-
-        var path = raw[1..];
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            await _err.WriteLineAsync(
-                $"{optionName}: '@' must be followed by a file path").ConfigureAwait(false);
-            return new ExpandAtFileResult.Failure($"{optionName}: missing file path after '@'");
-        }
-
-        try
-        {
-            var text = await _fileSystem.ReadAllTextAsync(path).ConfigureAwait(false);
-            return new ExpandAtFileResult.Success(text ?? string.Empty);
-        }
-        catch (Exception ex)
-        {
-            await _err.WriteLineAsync(
-                $"{optionName}: could not read file '{path}' ({ex.Message})").ConfigureAwait(false);
-            return new ExpandAtFileResult.Failure($"{optionName}: could not read file '{path}'");
-        }
-    }
-
     public async Task<int> PrintPatchAsync(string path, object body)
     {
         using var response = await SendAsync(HttpMethod.Patch, path, body);
@@ -624,7 +580,7 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintOpencodeModelsAsync(string projectId, string mode)
     {
-        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.OpencodeModels));
+        var localExit = HandleLocalJsonSelection(mode, nameof(TableShape.Models));
         if (localExit is not null)
             return localExit.Value;
         if (string.IsNullOrWhiteSpace(projectId))
@@ -664,7 +620,7 @@ internal sealed class MohistCliApi
                 if (item is JsonValue value && value.TryGetValue<string>(out var id))
                     resources.Add(new JsonObject { ["id"] = id });
             }
-            return await WriteSelectedDataAsync(resources, mode, nameof(TableShape.OpencodeModels));
+            return await WriteSelectedDataAsync(resources, mode, nameof(TableShape.Models));
         }
         foreach (var item in models)
         {
@@ -916,20 +872,6 @@ internal sealed class MohistCliApi
         };
     }
 
-    public async Task<(string ProjectId, int Exit)> ResolveProject(string? project, string? projectId)
-    {
-        if (!string.IsNullOrWhiteSpace(project) && !string.IsNullOrWhiteSpace(projectId)
-            && !string.Equals(project, projectId, StringComparison.Ordinal))
-        {
-            _err.WriteLine(
-                $"--project and --project-id resolve to different values ('{project}' vs '{projectId}'). " +
-                "Pass only one of the two options, or pass matching values.");
-            return ("", 1);
-        }
-
-        return await ResolveProject(project ?? projectId).ConfigureAwait(false);
-    }
-
     private string ReportProjectResolutionFailure(string message)
     {
         _err.WriteLine(message);
@@ -1005,6 +947,8 @@ internal sealed class MohistCliApi
         }
         if (mode.StartsWith("json:", StringComparison.Ordinal))
         {
+            if (string.IsNullOrWhiteSpace(tableShape))
+                return await PrintResponseAsync(response);
             var descriptor = ResourceOutputCatalog.For(tableShape);
             var selection = JsonSelection.Parse(descriptor, true, mode[5..]);
             if (selection.Kind == JsonSelectionKind.Invalid)
@@ -1027,6 +971,9 @@ internal sealed class MohistCliApi
     internal int? HandleLocalJsonSelection(string mode, string? tableShape)
     {
         if (mode == "table")
+            return null;
+
+        if (string.IsNullOrWhiteSpace(tableShape))
             return null;
 
         var descriptor = ResourceOutputCatalog.For(tableShape);
@@ -1068,9 +1015,9 @@ internal sealed class MohistCliApi
     public enum TableShape
     {
         ProjectList,
-        ProjectShow,
+        Project,
         IssueList,
-        IssueShow,
+        Issue,
         WorkflowStatus,
         Sessions,
         RepoList,
@@ -1089,7 +1036,7 @@ internal sealed class MohistCliApi
         WorkflowProfileList,
         RunnerList,
         RunnerShow,
-        OpencodeModels,
+        Models,
         SystemInfo,
         WorkflowProfile,
         WorkflowVariables,
@@ -1230,27 +1177,10 @@ internal sealed class MohistCliApi
         }
     }
 
-    public async Task<string?> ResolveProjectIdAsync(string? project, string? projectId)
+    public async Task<string?> ResolveProjectIdAsync(string? project)
     {
-        var hasProject = !string.IsNullOrWhiteSpace(project);
-        var hasProjectId = !string.IsNullOrWhiteSpace(projectId);
-
-        if (hasProject && hasProjectId)
-        {
-            if (string.Equals(project, projectId, StringComparison.Ordinal))
-                return project!;
-
-            _err.WriteLine(
-                $"--project and --project-id resolve to different values ('{project}' vs '{projectId}'). " +
-                "Pass only one of the two options, or pass matching values.");
-            return null;
-        }
-
-        if (hasProject)
+        if (!string.IsNullOrWhiteSpace(project))
             return project!;
-
-        if (hasProjectId)
-            return projectId!;
 
         if (!_fileSystem.Exists(ProjectStatePath))
         {
@@ -1276,9 +1206,6 @@ internal sealed class MohistCliApi
             return null;
         }
     }
-
-    public Task<string?> ResolveProjectIdAsync(string? projectId) =>
-        ResolveProjectIdAsync(null, projectId);
 
     internal Func<string>? ProjectStatePathOverride { get; set; }
 

@@ -87,7 +87,7 @@ internal static class RunnerCommands
     private static Command BuildList(MohistCliApi api, IEnvironmentVariableProvider environment)
     {
         var cmd = new Command("list", "List runners");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var scopeOpt = new Option<string>("--scope")
         {
             Description = "Filter runners by scope (all, global, project)",
@@ -95,20 +95,18 @@ internal static class RunnerCommands
         };
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RunnerList)));
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(scopeOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var scopeRaw = ctx.GetValue(scopeOpt) ?? "all";
             var output = ctx.GetValue(outputOpt);
             return ListAsync();
 
             async Task<int> ListAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
 
@@ -138,17 +136,15 @@ internal static class RunnerCommands
     {
         var cmd = new Command("view", "Show a single runner's full detail (read-only)");
         var runnerIdArg = new Argument<string>("runner-id") { Description = "Runner identifier" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RunnerShow)));
         cmd.Arguments.Add(runnerIdArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var runnerId = ctx.GetValue(runnerIdArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return ViewAsync();
 
@@ -159,7 +155,7 @@ internal static class RunnerCommands
                     api.Error.WriteLine("runner-id is required");
                     return 1;
                 }
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
                 var (mode, exit) = api.ResolveOutputMode(output);
@@ -178,21 +174,19 @@ internal static class RunnerCommands
     private static Command BuildStatus(MohistCliApi api)
     {
         var cmd = new Command("status", "Show online runner summary (id, heartbeat, idle/busy state)");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RunnerList)));
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return StatusAsync();
 
             async Task<int> StatusAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
 

@@ -116,7 +116,7 @@ public class IssueCliStartReadinessTests
         Assert.Contains("--ready", err);
         Assert.Contains("--draft", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Usage:", err, StringComparison.Ordinal);
+        Assert.Contains("USAGE", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -318,7 +318,7 @@ public class IssueCliStartReadinessTests
         Assert.Contains("--ready", err);
         Assert.Contains("--draft", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Usage:", err, StringComparison.Ordinal);
+        Assert.Contains("USAGE", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -427,7 +427,7 @@ public class IssueCliStartReadinessTests
     }
 
     [Fact]
-    public async Task IssueShow_Table_RendersDraftStateFromIsDraft()
+    public async Task IssueView_Table_RendersDraftStateFromIsDraft()
     {
         var data = JsonNode.Parse("""
             {
@@ -443,7 +443,7 @@ public class IssueCliStartReadinessTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        await api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow);
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.Issue);
 
         var text = output.ToString();
         Assert.Contains("state:", text);
@@ -451,7 +451,7 @@ public class IssueCliStartReadinessTests
     }
 
     [Fact]
-    public async Task IssueShow_Table_RendersWaitingReasonFromBlocker()
+    public async Task IssueView_Table_RendersWaitingReasonFromBlocker()
     {
         var data = JsonNode.Parse("""
             {
@@ -468,7 +468,7 @@ public class IssueCliStartReadinessTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        await api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow);
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.Issue);
 
         var text = output.ToString();
         Assert.Contains("Waiting for #200", text);

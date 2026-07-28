@@ -141,6 +141,7 @@ public record UpdateIssueRequest
     public string? Body { get; init; }
     public Dictionary<string, string>? Labels { get; init; }
     public string? Priority { get; init; }
+    public string? Risk { get; init; }
     public string? Model { get; init; }
     public string? ModelVariant { get; init; }
     public Dictionary<string, string>? StageModels { get; init; }
@@ -195,6 +196,7 @@ public record UpdateIssueRequest
         if (raw.TryGetProperty("body", out _)) fields.Add(nameof(Body));
         if (raw.TryGetProperty("labels", out _)) fields.Add(nameof(Labels));
         if (raw.TryGetProperty("priority", out _)) fields.Add(nameof(Priority));
+        if (raw.TryGetProperty("risk", out _)) fields.Add(nameof(Risk));
         if (raw.TryGetProperty("isDraft", out _)) fields.Add(nameof(IsDraft));
         if (raw.TryGetProperty("attachmentIds", out _)) fields.Add(nameof(AttachmentIds));
         if (raw.TryGetProperty("workflowProfileId", out _)) fields.Add(nameof(WorkflowProfileId));
@@ -207,6 +209,7 @@ public record UpdateIssueRequest
             Body = GetString(raw, "body"),
             Labels = GetStringMap(raw, "labels"),
             Priority = GetString(raw, "priority"),
+            Risk = GetString(raw, "risk"),
             Model = GetString(raw, "model"),
             ModelVariant = GetString(raw, "modelVariant"),
             StageModels = GetStringMap(raw, "stageModels"),

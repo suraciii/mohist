@@ -39,13 +39,13 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.ProjectList:
                 RenderProjectList(data);
                 break;
-            case MohistCliApi.TableShape.ProjectShow:
+            case MohistCliApi.TableShape.Project:
                 RenderProjectShow(data);
                 break;
             case MohistCliApi.TableShape.IssueList:
                 RenderIssueList(data);
                 break;
-            case MohistCliApi.TableShape.IssueShow:
+            case MohistCliApi.TableShape.Issue:
                 RenderIssueShow(data);
                 break;
             case MohistCliApi.TableShape.WorkflowStatus:

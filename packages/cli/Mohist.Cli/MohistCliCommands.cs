@@ -56,50 +56,41 @@ internal static class MohistCliCommands
     internal static Option<bool> FollowOption() =>
         new("--follow", "-f") { Description = "Follow log output" };
 
-    internal static Option<string?> ProjectIdOption()
-    {
-        var option = new Option<string?>("--project-id") { Description = "Legacy project option" };
-        option.Hidden = true;
-        return option;
-    }
-
-    internal static (Option<string?> Project, Option<string?> ProjectId) ProjectRefOption()
-    {
-        var project = new Option<string?>("--project") { Description = ProjectRefOptionDescription };
-        var projectId = ProjectIdOption();
-        projectId.Hidden = true;
-        return (project, projectId);
-    }
+    internal static Option<string?> ProjectRefOption() =>
+        new("--project") { Description = ProjectRefOptionDescription };
 
     internal static Option<string?> OutputOption(ResourceDescriptor descriptor, string defaultValue = "table")
     {
-        var option = CreateOutputOption(defaultValue);
+        var option = CreateJsonOption(defaultValue);
         CommandPresentationCatalog.AttachJsonFields(option, descriptor);
         return option;
     }
 
-    private static Option<string?> CreateOutputOption(string defaultValue)
+    private static Option<string?> CreateJsonOption(string? defaultValue = null)
     {
         var option = new Option<string?>("--json")
         {
             Description = "Return selected fields, or list available fields when no value is supplied",
-            DefaultValueFactory = _ => defaultValue,
             Arity = ArgumentArity.ZeroOrOne,
         };
+        if (defaultValue is not null)
+            option.DefaultValueFactory = _ => defaultValue;
         option.Validators.Add(result => OutputOptionState.Explicit = !result.Implicit);
         return option;
     }
 
     internal static Option<string?> JsonSelectionOption(ResourceDescriptor descriptor)
     {
-        var option = new Option<string?>("--json")
-        {
-            Description = "Return selected fields, or list available fields when no value is supplied",
-            Arity = ArgumentArity.ZeroOrOne,
-        };
+        var option = CreateJsonOption();
         CommandPresentationCatalog.AttachJsonFields(option, descriptor);
         return option;
     }
+
+    private static Option<string?> CreateJsonOption() => new("--json")
+    {
+        Description = "Return selected fields, or list available fields when no value is supplied",
+        Arity = ArgumentArity.ZeroOrOne,
+    };
 
     internal const string NoActiveProjectMessage =
         "Run 'mo project use <name-or-id>' or pass --project <name-or-id>";
@@ -135,17 +126,20 @@ internal static class MohistCliCommands
         new("--priority", "-p") { Description = "Filter by priority" };
 
     internal static Option<string?> StageOption() =>
-        new("--stage", "-s") { Description = "Filter by stage" };
+        new("--stage") { Description = "Filter by stage" };
+
+    internal static Option<string?> IssuePriorityOption() =>
+        new("--priority", "-p") { Description = "Issue priority (p0|p1|p2|p3)" };
 
     internal static (Option<bool> Ready, Option<bool> Draft) IsDraftFlags(string action)
     {
         var ready = new Option<bool>("--ready")
         {
-            Description = $"Mark the issue as ready (isDraft=false) when {action}ing",
+            Description = $"Mark the issue as ready (isDraft=false) when {action}",
         };
         var draft = new Option<bool>("--draft")
         {
-            Description = $"Mark the issue as a draft (isDraft=true) when {action}ing (default for new issues)",
+            Description = $"Mark the issue as a draft (isDraft=true) when {action} (default for new issues)",
         };
         return (ready, draft);
     }
@@ -165,8 +159,6 @@ internal static class MohistCliCommands
         if (draft) return DraftFlagState.Draft;
         return DraftFlagState.Unspecified;
     }
-
-    internal static string ProjectQuery(string? projectId) => Query(ProjectId: projectId);
 
     private static bool IsHelpToken(string arg)
     {
@@ -242,15 +234,6 @@ internal static class MohistCliCommands
         var config = new InvocationConfiguration { Output = output, Error = error };
         var parseConfig = new ParserConfiguration { ResponseFileTokenReplacer = null };
         var parseResult = CommandLineParser.Parse(root, args, parseConfig);
-        if (args.Any(arg => string.Equals(arg, "--project-id", StringComparison.Ordinal)
-            || arg.StartsWith("--project-id=", StringComparison.Ordinal)))
-        {
-            return CommandHelpHook.RenderUsageFailure(
-                parseResult,
-                error,
-                "--project-id is not supported; use --project <name-or-id>.");
-        }
-
         var helpRequested = args.Any(arg => IsHelpToken(arg));
         if (parseResult.Errors.Count > 0 && !helpRequested)
         {
@@ -323,6 +306,7 @@ internal static class MohistCliCommands
         string? Priority = null,
         string? Repository = null,
         int? Parent = null,
+        int? Epic = null,
         bool? Archived = null,
         bool? All = null)
     {
@@ -338,6 +322,7 @@ internal static class MohistCliCommands
         Add("priority", Priority);
         Add("repository", Repository);
         Add("parent", Parent?.ToString());
+        Add("epic", Epic?.ToString());
         Add("archived", Archived?.ToString().ToLowerInvariant());
         Add("all", All?.ToString().ToLowerInvariant());
         return parts.Count == 0 ? "" : "?" + string.Join("&", parts);

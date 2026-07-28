@@ -348,7 +348,7 @@ public class CliIssueWatchSpecs
     }
 
     [Fact]
-    public async Task IssueWatchAdd_AcceptsProjectIdFlag()
+    public async Task IssueWatchAdd_AcceptsProjectReferenceFlag()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
