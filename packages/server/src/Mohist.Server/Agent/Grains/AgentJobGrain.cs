@@ -598,6 +598,130 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await TryDispatchAsync();
     }
 
+    /// <summary>
+    /// Manual-launch preparation (issue-512 T-001). Persists the
+    /// canonical <see cref="PrepareManualLaunchCommand"/> as the
+    /// grain's durable plan, then builds the matching
+    /// <see cref="AgentJobInput"/> snapshot. The grain refuses to
+    /// dispatch until <see cref="SubmitPreparedLaunchAsync"/> is called
+    /// — the coordinator uses the gap between prepare and submit to
+    /// first persist the AgentSession's initial Input and Turn.
+    /// Re-issuing with the same plan is a no-op; re-issuing with a
+    /// different plan is rejected.
+    /// </summary>
+    public async Task<AgentJobInput> PrepareManualLaunchAsync(PrepareManualLaunchCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (string.IsNullOrWhiteSpace(command.Prompt))
+            throw new ArgumentException("Prompt is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.AgentId))
+            throw new ArgumentException("AgentId is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.SessionId))
+            throw new ArgumentException("SessionId is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.InputId))
+            throw new ArgumentException("InputId is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.TurnId))
+            throw new ArgumentException("TurnId is required.", nameof(command));
+
+        if (State.RoutedPlan is not null)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' cannot accept a manual launch plan; routed launch already prepared.");
+
+        if (State.ManualPlan is not null)
+        {
+            if (PlansEquivalent(State.ManualPlan, command))
+            {
+                return BuildManualInput(State.ManualPlan);
+            }
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' already prepared a different manual launch plan.");
+        }
+
+        if (IsTerminal)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' cannot accept a manual launch plan; already terminal.");
+
+        if (State.Input is not null)
+        {
+            // Manual launch must come before submission; we refuse to
+            // overwrite an already-submitted input.
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' already has input; manual launch preparation must be the first write.");
+        }
+
+        State.ManualPlan = command;
+        var input = BuildManualInput(command);
+        State.AgentConfigJson = SerializeAgentConfig(command.AgentConfig);
+        State.Input = input with { AgentConfig = null };
+        State.SubmittedAt = _timeProvider.GetUtcNow();
+        State.NextDispatchDelay = TimeSpan.Zero;
+        State.DispatchAttempts = 0;
+        await SaveAsync();
+        await EnsureRecoveryReminderAsync();
+        return input;
+    }
+
+    /// <summary>
+    /// Submit the manual launch to dispatch. The prepare step
+    /// already persisted the input; the submission bumps the
+    /// dispatch attempts and triggers the regular dispatch loop.
+    /// </summary>
+    public async Task SubmitPreparedLaunchAsync()
+    {
+        if (State.RoutedPlan is not null)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' cannot submit a manual launch; routed launch path owns this job.");
+        if (State.ManualPlan is null)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' has no manual launch plan to submit.");
+        if (State.Input is null)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' manual launch plan has no input to submit.");
+        if (IsTerminal)
+            return;
+        if (!State.LaunchReady)
+        {
+            State.LaunchReady = true;
+            await SaveAsync();
+        }
+        await TryDispatchAsync();
+    }
+
+    private static AgentJobInput BuildManualInput(PrepareManualLaunchCommand command) =>
+        new(
+            Prompt: command.Prompt,
+            Model: command.Model,
+            WorkspacePath: command.WorkspacePath,
+            ProjectId: command.ProjectId,
+            Runtime: command.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+            AgentId: command.AgentId,
+            AgentInstructions: string.IsNullOrWhiteSpace(command.AgentInstructions) ? null : command.AgentInstructions,
+            AgentConfig: command.AgentConfig,
+            AgentSessionId: command.SessionId,
+            Variant: command.Variant,
+            IssueNumber: command.IssueNumber,
+            EpicNumber: command.EpicNumber,
+            WorkflowRunId: command.WorkflowRunId,
+            InitialInputId: command.InputId,
+            InitialTurnId: command.TurnId);
+
+    private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
+        string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
+        && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
+        && string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)
+        && string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
+        && string.Equals(left.Runtime ?? string.Empty, right.Runtime ?? string.Empty, StringComparison.Ordinal)
+        && string.Equals(left.AgentId, right.AgentId, StringComparison.Ordinal)
+        && string.Equals(left.AgentInstructions ?? string.Empty, right.AgentInstructions ?? string.Empty, StringComparison.Ordinal)
+        && string.Equals(left.SessionId, right.SessionId, StringComparison.Ordinal)
+        && string.Equals(left.InputId, right.InputId, StringComparison.Ordinal)
+        && string.Equals(left.TurnId, right.TurnId, StringComparison.Ordinal)
+        && string.Equals(left.Variant ?? string.Empty, right.Variant ?? string.Empty, StringComparison.Ordinal)
+        && left.IssueNumber == right.IssueNumber
+        && left.EpicNumber == right.EpicNumber
+        && string.Equals(left.WorkflowRunId ?? string.Empty, right.WorkflowRunId ?? string.Empty, StringComparison.Ordinal)
+        && JsonEquals(left.AgentConfig, right.AgentConfig);
+
     private static System.Text.Json.JsonElement? DeserializeAgentConfig(string? json) =>
         string.IsNullOrWhiteSpace(json)
             ? null
@@ -880,7 +1004,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             AgentJobId: Key,
             ProjectId: string.IsNullOrWhiteSpace(input.ProjectId) ? null : input.ProjectId,
             AgentSessionId: string.IsNullOrWhiteSpace(input.AgentSessionId) ? null : input.AgentSessionId,
-            AgentId: input.AgentId);
+            AgentId: input.AgentId,
+            InitialInputId: string.IsNullOrWhiteSpace(input.InitialInputId) ? null : input.InitialInputId,
+            InitialTurnId: string.IsNullOrWhiteSpace(input.InitialTurnId) ? null : input.InitialTurnId);
     }
 
     private async Task ScheduleNextDispatchAsync()

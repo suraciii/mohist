@@ -1,0 +1,99 @@
+## Codebase Patterns
+
+- AgentLaunch routes live in `packages/server/src/Mohist.Server/Api/AgentSessionLaunchRoutes.cs`. They delegate to `IAgentLauncher.LaunchAsync` (in `AgentLauncher.cs`).
+- `IAgentSessionGrain` is `IGrainWithStringKey`; commands take a record with `[GenerateSerializer]` and `[property: Id(N)]`.
+- `AgentJobGrain` already uses IPersistentState + Reminders for `agent-job-recovery`. The recovery reminder is the durable wake-up mechanism.
+- `AgentSessionGrain` participates via `OpenAsync` (idempotent on existing session) and reports work via `AppendTerminalCloseAsync`. The routed-launch flow uses `IAgentJobGrain.EnsurePreparedAsync` + `AdvancePreparedLaunchAsync` for a similar preprocess+advance pattern (session open from canonical plan).
+- The routed-launch coordinator already implements the "open Session from canonical plan only, never from caller's newly resolved values" property — the manual launch should mirror that pattern.
+- Session persistence uses `IAgentSessionStore` + `IAgentSessionTranscriptStore`; `AgentSession` is the domain aggregate with `Status` snapshot.
+- `AgentJobInput` carries launch-time snapshot (Prompt, Model, Variant, Runtime, AgentId, AgentInstructions, AgentConfig, AgentSessionId, IssueNumber, EpicNumber, WorkflowRunId). To add Input/Turn IDs.
+- `WorkDispatch` carries AgentJobId, AgentSessionId, ProjectId. To add InputId, TurnId, IdempotencyKey.
+- Runner's `AgentJobExecutor` creates `session.input` event on `onSessionReady` via `eventSink.publishSessionInput`. T-001 requires skipping this when IDs are pre-seeded.
+- The fake clock + in-memory DB + fake dispatch observer exists; tests should use them.
+- `MohistIntegrationFixture` and `AgentJobGrainFixture` provide the test infrastructure.
+- `WithTriggerLabels` is invoked through `metadata.Merge(new AgentSessionMetadata(triggerLabels, null))` — the AgentSession source label is immutable (mohist.io/agent-id) once set.
+
+## Plan
+
+### Code Touchpoints
+
+1. **`AgentSession` domain** — add `SessionInput` and `AgentTurn` ordered child records to `AgentSessionStatusSnapshot` (or a child list). Add `EnsureInitialLaunch` transition method that opens the session if absent, records the initial Input/Turn, and returns the stored children.
+2. **`IAgentSessionGrain`** — add `EnsureInitialLaunchAsync(EnsureInitialLaunchCommand)` returning `InitialLaunchArtifacts` (sessionId, inputId, turnId, input content stored). Repeat with same IDs is a no-op; mismatched IDs or source metadata conflict.
+3. **`IAgentJobGrain`** — add `PrepareManualLaunchAsync(PrepareManualLaunchCommand)` returning `AgentJobInput` snapshot (so re-prepare uses the same input). Also need `SubmitPreparedLaunchAsync()` to convert Pending → dispatchable without re-submit. (We can add it as a thin method that triggers TryDispatchAsync once Input is set.)
+4. **`AgentLaunchCoordinatorGrain`** — keyed by `(ProjectId, IdempotencyKey)`. Holds `LaunchPlan` (canonical request fingerprint, generated JobKey/SessionId/InputId/TurnId, snapshot Agent fields, current single-participant command fence). Steps:
+   - Look up existing plan. If exists and fingerprint matches → return persistent result.
+   - If fingerprint differs → throw `LaunchIdempotencyConflictException` (caught by route → 409).
+   - Persist plan with generated IDs.
+   - Per command, set `Pending { commandId, kind, payload, expectedRevision }` then await participant; clear fence on success/AlreadyApplied.
+   - Steps: ResolveAndSnapshot → PrepareManualLaunch → EnsureInitialLaunch → SubmitPreparedLaunch.
+   - Reminder + OnActivate recovery.
+5. **`IAgentLauncher.LaunchAsync`** — accept idempotency key; delegate to coordinator (or a new `LaunchIdempotentAsync`). Keep the existing `LaunchAsync` signature for non-idempotent paths.
+6. **`AgentSessionLaunchRoutes`** — read `Idempotency-Key` header; 400 if missing/empty; route through coordinator.
+7. **`AgentJobInput`** — add `InitialInputId` and `InitialTurnId` fields. WorkDispatch carries them.
+8. **`WorkDispatch`** — add `InitialInputId`, `InitialTurnId`, `IdempotencyKey` fields.
+9. **Runner** — `AgentJobExecutor` skips `publishSessionInput` when `InitialInputId`/`InitialTurnId` are supplied on the dispatch. Instead, when the runtime session is ready, the executor sends a "session.input.acknowledged" (or simply nothing) since the input is already durably recorded server-side.
+10. **Tests** — Server: plan-conflict, retry, replay after archive/rename, replay after context mutation, coordinator crash recovery (every fence), initial Input/Turn persistence on restart, queue delay, exactly-one dispatch with fake observer. Runner: identity propagation, no duplicate session.input.
+
+## Decisions
+
+- Coordinator key derivation: `($"agent-launch-coord/{projectId}/{stableIdempotencyKey}")` — opaque, project-scoped.
+- Generated IDs: `Input-Id = Guid.NewGuid().ToString("N")`, `Turn-Id = Guid.NewGuid().ToString("N")`, `JobKey = "agent-job-launch-{guid}"`, `SessionId = "agent-session-{guid}"` (since manual launch has no stable derived id).
+- Coordinator state is `[GenerateSerializer]`-only (no relational storage) — Orleans persistent state only.
+- Single-participant command fence: `Pending { CommandId, Kind, Payload, ExpectedRevision }`; cleared on applied/already-applied.
+- Fingerprint: SHA-256 over canonical JSON of {prompt, agentRef, context, runtime, idempotencyKey}.
+- Route returns 409 with code `launch_idempotency_conflict` when the plan fingerprint differs.
+- The SessionInput/AgentTurn children are stored on the AgentSession aggregate (not top-level). The composite observation (T-002) reads them through the session.
+- The `AgentJobInput` lost the `AgentConfig` (`State.Input = input with { AgentConfig = null }`) — we keep that pattern.
+- The launch response gains `inputId`, `turnId`, `observationUrl` (T-002 will route that; for T-001 we add the IDs and an observation URL even though the handler isn't required).
+
+## Status
+
+Interrupted ~T+90 min. Coordinated manual-launch boundary is wired
+through Server + Runner; durable idempotency path compiles and
+existing tests are migrated. New behaviour-coverage specs and
+replay/conflict tests for T-001 still pending.
+
+### What's in the build
+
+- `AgentLaunchCoordinatorGrain` + `IAgentLaunchCoordinatorGrain`
+  + `AgentLaunchCoordinatorTypes` keyed by reversible
+  `agent-launch-coord/{projectId}/{idempotencyKey}` codec; durable
+  plan + one-at-a-time command fence; reminder-driven recovery;
+  conflict (`launch_idempotency_conflict` 409) when replay differs.
+- `AgentJobGrain.PrepareManualLaunchAsync` +
+  `SubmitPreparedLaunchAsync` mirroring the routed-launch
+  prepare/advance pattern; `ManualPlan` field added to
+  `AgentJobState`; new `AgentJobInput.InitialInputId/InitialTurnId`
+  carried into `WorkDispatch`.
+- `AgentSessionGrain.EnsureInitialLaunchAsync` +
+  `MarkInitialTurnExecutingAsync` +
+  `MarkInitialTurnTerminalAsync` +
+  `GetInitialLaunchAsync`; new `AgentSessionInputRecord`,
+  `AgentSessionInputAcceptance`, `AgentTurnRecord`,
+  `AgentTurnStatus`, `AgentTurnResult` aggregate children. Existing
+  source-label immutability preserved; `AgentSessionStatusSnapshot`
+  extended with `Inputs` and `Turns`.
+- `AgentLauncher.LaunchIdempotentAsync` (manual path) leaves the
+  routed launch path untouched.
+- `AgentSessionLaunchRoutes` requires `Idempotency-Key`; 400 with
+  `idempotency_key_required` on missing; 409 with
+  `launch_idempotency_conflict` on conflicting replay; preserves
+  the existing invalid-prompt / unknown-agent / archived-agent
+  gates.
+- Runner `AgentJobExecutor` skips `publishSessionInput` when
+  `work.initialInputId && work.initialTurnId` are both present
+  (issue-512 T-001).
+- Test wiring: `ApiTestClient.LaunchAgentSessionAsync` /
+  `LaunchAgentSessionWithoutIdempotencyKeyAsync` extensions; all
+  existing launch callers migrated.
+
+### What's NOT yet in the build (will resume after interruption)
+
+- Behaviour-coverage specs (new file): header-required validation,
+  duplicate/concurrent retry, conflict on changed prompt, replay
+  after Agent archive/rename + context mutation, every coordinator
+  recovery fence, initial Input/Turn persistence, queue delay,
+  exactly-one dispatch with fake `IAgentJobDispatchObserver`.
+- Runner identity-propagation spec using fake Runtime + fake
+  `ServerConnection` asserting no duplicate `session.input`.
+- Full test runs (dotnet test + npm test -w packages/runner).

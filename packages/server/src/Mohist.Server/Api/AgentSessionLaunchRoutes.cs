@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Issue.Services;
@@ -87,6 +88,15 @@ public static class AgentSessionLaunchRoutes
                     new { fields = new[] { "prompt" } });
             }
 
+            var idempotencyKey = ReadIdempotencyKey(context.Request);
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+            {
+                return ApiResults.BadRequest(
+                    "Idempotency-Key is required for manual agent launches",
+                    "idempotency_key_required",
+                    new { fields = new[] { "Idempotency-Key" } });
+            }
+
             var project = context.GetResolvedProject();
             var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
             if (agent is null)
@@ -113,16 +123,23 @@ public static class AgentSessionLaunchRoutes
             AgentLaunchResult result;
             try
             {
-                result = await launcher.LaunchAsync(
+                result = await launcher.LaunchIdempotentAsync(
                     agent,
                     prompt,
                     launchContext,
-                    triggerLabels: null,
+                    idempotencyKey,
                     ct: ct);
             }
             catch (ArgumentException ex)
             {
                 return ApiResults.BadRequest(ex.Message, "validation_failed");
+            }
+            catch (LaunchIdempotencyConflictException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "launch_idempotency_conflict",
+                    new { idempotencyKey = ex.IdempotencyKey });
             }
 
             return Results.Json(
@@ -166,6 +183,15 @@ public static class AgentSessionLaunchRoutes
         }
 
         return null;
+    }
+    private static string? ReadIdempotencyKey(HttpRequest request)
+    {
+        if (!request.Headers.TryGetValue("Idempotency-Key", out var values))
+            return null;
+        if (values.Count == 0)
+            return null;
+        var value = values[0];
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 }
 

@@ -345,6 +345,183 @@ public static partial class AgentSessionExtensions
         }
 
         /// <summary>
+        /// Initial-launch transition: opens the session if absent,
+        /// records the first <see cref="AgentSessionInputRecord"/> as
+        /// accepted, records the first <see cref="AgentTurnRecord"/> as
+        /// queued, and links both to the supplied AgentJob id. The
+        /// session activity is bumped to active so navigation surfaces
+        /// reflect the new work. The transition is idempotent for a
+        /// replay carrying the same ids; mismatched ids or
+        /// pre-existing immutable source metadata raise a conflict.
+        /// </summary>
+        public IReadOnlyList<AgentSessionEvent> EnsureInitialLaunch(
+            string inputId,
+            string turnId,
+            string prompt,
+            string source,
+            string jobId,
+            DateTime now)
+        {
+            if (string.IsNullOrWhiteSpace(inputId))
+                throw new ArgumentException("Input id is required.", nameof(inputId));
+            if (string.IsNullOrWhiteSpace(turnId))
+                throw new ArgumentException("Turn id is required.", nameof(turnId));
+            if (string.IsNullOrWhiteSpace(prompt))
+                throw new ArgumentException("Prompt is required.", nameof(prompt));
+            if (string.IsNullOrWhiteSpace(jobId))
+                throw new ArgumentException("Job id is required.", nameof(jobId));
+
+            var inputs = (session.Status.Inputs ?? []).ToList();
+            var inputIndex = inputs.FindIndex(candidate =>
+                string.Equals(candidate.Id, inputId, StringComparison.Ordinal));
+            if (inputIndex >= 0)
+            {
+                var existing = inputs[inputIndex];
+                if (!string.Equals(existing.Text, prompt, StringComparison.Ordinal)
+                    || !string.Equals(existing.Source, source, StringComparison.Ordinal)
+                    || !string.Equals(existing.JobId, jobId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"AgentSession {session.Id} already has input '{inputId}' with different content/source/job.");
+                }
+            }
+            else
+            {
+                inputs.Add(new AgentSessionInputRecord(
+                    Id: inputId,
+                    Sequence: inputs.Count + 1,
+                    Text: prompt,
+                    Source: source,
+                    Acceptance: AgentSessionInputAcceptance.Accepted,
+                    RecordedAt: now,
+                    JobId: jobId));
+            }
+
+            var turns = (session.Status.Turns ?? []).ToList();
+            var turnIndex = turns.FindIndex(candidate =>
+                string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
+            if (turnIndex >= 0)
+            {
+                var existing = turns[turnIndex];
+                if (!string.Equals(existing.JobId, jobId, StringComparison.Ordinal)
+                    || !existing.InputIds.Contains(inputId, StringComparer.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"AgentSession {session.Id} already has turn '{turnId}' with different job/input linkage.");
+                }
+            }
+            else
+            {
+                turns.Add(new AgentTurnRecord(
+                    Id: turnId,
+                    Sequence: turns.Count + 1,
+                    InputIds: [inputId],
+                    Status: AgentTurnStatus.Queued,
+                    JobId: jobId,
+                    RecordedAt: now,
+                    UpdatedAt: now));
+            }
+
+            session.Status = session.Status with
+            {
+                Inputs = inputs,
+                Turns = turns,
+                Activity = AgentSessionActivity.Active,
+                LastDataAt = now,
+                CurrentTurnEndedAt = null,
+            };
+
+            return [];
+        }
+
+        /// <summary>
+        /// Mark the initial turn for the given job id as
+        /// <see cref="AgentTurnStatus.Executing"/>. No-op if the turn
+        /// is already in a non-queued state. Used by the AgentJob
+        /// dispatch observer path so the Session's view of the
+        /// running turn stays consistent with Job-side progress.
+        /// </summary>
+        public IReadOnlyList<AgentSessionEvent> MarkInitialTurnExecuting(string jobId, DateTime now)
+        {
+            var turns = (session.Status.Turns ?? []).ToList();
+            var index = turns.FindIndex(candidate =>
+                string.Equals(candidate.JobId, jobId, StringComparison.Ordinal));
+            if (index < 0)
+                return [];
+            if (turns[index].Status is AgentTurnStatus.Executing
+                or AgentTurnStatus.Completed
+                or AgentTurnStatus.Failed
+                or AgentTurnStatus.Cancelled)
+            {
+                return [];
+            }
+            turns[index] = turns[index] with
+            {
+                Status = AgentTurnStatus.Executing,
+                UpdatedAt = now,
+            };
+            session.Status = session.Status with
+            {
+                Turns = turns,
+                LastDataAt = now,
+            };
+            return [];
+        }
+
+        /// <summary>
+        /// Apply a terminal result to the initial turn for the given
+        /// job id. The turn moves to Completed, Failed, or Unknown
+        /// based on the supplied status. The session remains usable
+        /// after a terminal first turn — AgentSession is the
+        /// conversation owner, not the work owner.
+        /// </summary>
+        public IReadOnlyList<AgentSessionEvent> MarkInitialTurnTerminal(
+            string jobId,
+            AgentTurnStatus status,
+            AgentTurnResult? result,
+            DateTime now)
+        {
+            var turns = (session.Status.Turns ?? []).ToList();
+            var index = turns.FindIndex(candidate =>
+                string.Equals(candidate.JobId, jobId, StringComparison.Ordinal));
+            if (index < 0)
+                return [];
+            if (turns[index].Status is AgentTurnStatus.Completed
+                or AgentTurnStatus.Failed
+                or AgentTurnStatus.Cancelled)
+            {
+                return [];
+            }
+            turns[index] = turns[index] with
+            {
+                Status = status,
+                Result = result,
+                UpdatedAt = now,
+            };
+            var inputIds = turns[index].InputIds;
+            var inputs = session.Status.Inputs ?? [];
+            var updatedInputs = inputs
+                .Select(candidate => candidate with { Acceptance = AgentSessionInputAcceptance.Accepted })
+                .ToList();
+            session.Status = session.Status with
+            {
+                Turns = turns,
+                Inputs = updatedInputs,
+                LastDataAt = now,
+                Activity = status == AgentTurnStatus.Queued
+                    ? session.Status.Activity
+                    : AgentSessionActivity.Idle,
+                CurrentTurnEndedAt = status is AgentTurnStatus.Completed
+                    or AgentTurnStatus.Failed
+                    or AgentTurnStatus.Cancelled
+                    or AgentTurnStatus.Unknown
+                    ? now
+                    : session.Status.CurrentTurnEndedAt,
+            };
+            return [];
+        }
+
+        /// <summary>
         /// Appends a thinned <see cref="ContextUsageHistoryEntry"/> to
         /// <paramref name="history"/>. Behaviour:
         /// <list type="bullet">

@@ -32,9 +32,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         try
         {
-            using var response = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
                 {
                     prompt = "Refactor the auth module",
                 });
@@ -83,9 +81,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         try
         {
-            using var launch = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new { prompt = "open product transcript" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "open product transcript" });
 
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
@@ -137,9 +133,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         try
         {
-            using var response = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
                 {
                     prompt = "look at the issue",
                     context = new
@@ -204,9 +198,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         try
         {
-            using var response = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new { prompt = "execute on pi via config" });
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "execute on pi via config" });
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -237,9 +229,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         try
         {
-            using var response = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new { prompt = "default runtime" });
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "default runtime" });
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -272,9 +262,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             new { vars = new { agent = new { runtime = "pi" } } });
         Assert.Equal(HttpStatusCode.BadRequest, patch.StatusCode);
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-            new
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
             {
                  prompt = "use the agent backend",
                 context = new { issueNumber },
@@ -302,9 +290,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             new { vars = new { agent = new { runtime = "pi" } } });
         Assert.Equal(HttpStatusCode.OK, projectPatch.StatusCode);
 
-        using var launch = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-            new
+        using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
             {
                 prompt = "keep the agent backend",
                 context = new { issueNumber },
@@ -342,9 +328,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         var projectId = await CreateProjectAsync("launch-runtime-invalid");
         var agent = await CreateAgentAsync(projectId, "runtime-invalid-agent");
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-            new
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
             {
                 prompt = "execute on unknown",
                 runtime = "mystery",
@@ -416,9 +400,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         try
         {
-            using var response = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new { prompt = "snapshot" });
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "snapshot" });
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();

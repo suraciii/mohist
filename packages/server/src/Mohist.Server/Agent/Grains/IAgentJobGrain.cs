@@ -50,7 +50,45 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// status and no longer recognises the runner/work pair).
     /// </summary>
     Task FailAsync(string reason, string? agentId = null);
+
+    /// <summary>
+    /// Idempotent manual-launch preparation entry point (issue-512
+    /// T-001). The coordinator passes the resolved launch snapshot
+    /// (prompt, agent id, runtime, agent session id, generated input
+    /// and turn ids) the first time it converges; the grain stores
+    /// the snapshot as <c>ManualPlan</c> and returns the canonical
+    /// record on every subsequent call. The grain does not dispatch
+    /// until <see cref="SubmitPreparedLaunchAsync"/> is called.
+    /// </summary>
+    Task<AgentJobInput> PrepareManualLaunchAsync(PrepareManualLaunchCommand command);
+
+    /// <summary>
+    /// Submit a previously-prepared manual launch to dispatch. The
+    /// grain is idempotent: a re-submit with the same input is a
+    /// no-op that bumps dispatch attempts if needed. The grain
+    /// refuses to submit when the launch record is missing or
+    /// belongs to a different plan.
+    /// </summary>
+    Task SubmitPreparedLaunchAsync();
 }
+
+[GenerateSerializer]
+public sealed record PrepareManualLaunchCommand(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] string InputId,
+    [property: Id(2)] string TurnId,
+    [property: Id(3)] string Prompt,
+    [property: Id(4)] string? Model = null,
+    [property: Id(5)] string? WorkspacePath = null,
+    [property: Id(6)] string? ProjectId = null,
+    [property: Id(7)] string? Runtime = null,
+    [property: Id(8)] string? AgentId = null,
+    [property: Id(9)] string? AgentInstructions = null,
+    [property: Id(10)] System.Text.Json.JsonElement? AgentConfig = null,
+    [property: Id(11)] string? Variant = null,
+    [property: Id(12)] int? IssueNumber = null,
+    [property: Id(13)] int? EpicNumber = null,
+    [property: Id(14)] string? WorkflowRunId = null);
 
 [GenerateSerializer]
 public sealed record AgentJobReportResult(
@@ -318,7 +356,24 @@ public sealed record AgentJobInput(
     /// empty (no Skill input reaches the selected Runtime). Append-only
     /// Orleans field id (next free after WorkflowRunId).
     /// </summary>
-    [property: Id(13)] IReadOnlyList<string>? Skills = null);
+    [property: Id(13)] IReadOnlyList<string>? Skills = null,
+    /// Stable id of the launch-time <c>SessionInput</c> the
+    /// coordinator durably recorded on the AgentSession before the
+    /// AgentJob dispatched. The runner uses this to correlate its
+    /// own reports with the durable input identity and to skip
+    /// emitting a duplicate <c>session.input</c> record for an
+    /// AgentJob launch (<see cref="Issue512"/> T-001). Append-only
+    /// Orleans field id (next free after WorkflowRunId).
+    /// </summary>
+    [property: Id(14)] string? InitialInputId = null,
+    /// <summary>
+    /// Stable id of the launch-time <c>AgentTurn</c> the coordinator
+    /// recorded on the AgentSession. The Runner correlates its
+    /// executing/terminal progress with this id so the Session's
+    /// turn status stays consistent with the Job's lifecycle.
+    /// Append-only Orleans field id (next free after InitialInputId).
+    /// </summary>
+    [property: Id(15)] string? InitialTurnId = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

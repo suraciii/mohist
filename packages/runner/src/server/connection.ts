@@ -466,6 +466,10 @@ function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem
     work.parentIssueContext = dispatch.parentIssueContext
   if (Object.prototype.hasOwnProperty.call(dispatch, "recoveryRemaining"))
     work.recoveryRemaining = dispatch.recoveryRemaining
+  if (Object.prototype.hasOwnProperty.call(dispatch, "initialInputId"))
+    work.initialInputId = dispatch.initialInputId ?? undefined
+  if (Object.prototype.hasOwnProperty.call(dispatch, "initialTurnId"))
+    work.initialTurnId = dispatch.initialTurnId ?? undefined
   return work
 }
 

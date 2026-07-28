@@ -60,6 +60,24 @@ public interface IAgentLauncher
         CancellationToken ct = default);
 
     /// <summary>
+    /// Idempotent manual launch (issue-512 T-001). The route forwards
+    /// the caller-supplied <paramref name="idempotencyKey"/> to the
+    /// <see cref="Grains.AgentLaunchCoordinatorGrain"/> keyed by
+    /// <c>(ProjectId, IdempotencyKey)</c>. The coordinator persists
+    /// the canonical launch plan, generates the Job/Session/Input/Turn
+    /// ids, and drives the four-step prepare-ensure-submit sequence.
+    /// Replays resolve to the same identities; conflicting replays
+    /// raise <see cref="Grains.LaunchIdempotencyConflictException"/>.
+    /// </summary>
+    Task<AgentLaunchResult> LaunchIdempotentAsync(
+        AgentInfo agent,
+        string prompt,
+        AgentLaunchContext context,
+        string idempotencyKey,
+        string? runtimeOverride = null,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Routed-launch path. Builds the
     /// canonical <see cref="RoutedAgentLaunchPlan"/> from the resolved
     /// Agent execution definition + routing execution context, calls

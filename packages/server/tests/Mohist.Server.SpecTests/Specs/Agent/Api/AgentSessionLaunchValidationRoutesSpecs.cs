@@ -31,9 +31,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var agent = await CreateAgentAsync(projectId, "invalid-epic-agent");
         var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-            new { prompt = "invalid context", context = new { epicNumber } });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "invalid context", context = new { epicNumber } });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
@@ -48,9 +46,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var agent = await CreateAgentAsync(projectId, "invalid-issue-agent");
         var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-            new { prompt = "invalid context", context = new { issueNumber } });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "invalid context", context = new { issueNumber } });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
@@ -63,9 +59,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var agent = await CreateAgentAsync(projectId, "opaque-epic-agent");
         var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-            new { prompt = "invalid context", context = new { epicNumber = "epic-7" } });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "invalid context", context = new { epicNumber = "epic-7" } });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
@@ -80,9 +74,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var otherEpicNumber = await CreateEpicAsync(otherProjectId, "Other project epic");
         var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-            new { prompt = "cross project context", context = new { epicNumber = otherEpicNumber } });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "cross project context", context = new { epicNumber = otherEpicNumber } });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
@@ -99,9 +91,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
 
         var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-            new { prompt });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -120,9 +110,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
 
         var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-            new { context = new { issueNumber = 1 } });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { context = new { issueNumber = 1 } });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
@@ -178,9 +166,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         {
             var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-            using var response = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new { prompt = "should not launch" });
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "should not launch" });
 
             Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -260,9 +246,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
 
         try
         {
-            using var launch = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new { prompt = "dispatch contract guard" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "dispatch contract guard" });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var mintedSessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -299,9 +283,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
 
         try
         {
-            using var launch = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new { prompt = "complete the generic session" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "complete the generic session" });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -362,9 +344,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
 
         try
         {
-            using var response = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new { prompt = "this will never finish" });
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "this will never finish" });
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
