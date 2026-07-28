@@ -75,7 +75,6 @@ public interface IAgentLauncher
         AgentLaunchContext context,
         string idempotencyKey,
         AgentLaunchCoordinatorRequest request,
-        string? runtimeOverride = null,
         CancellationToken ct = default);
 
     Task<AgentLaunchResult?> ResumeIdempotentAsync(

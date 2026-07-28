@@ -125,7 +125,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         AgentLaunchContext context,
         string idempotencyKey,
         AgentLaunchCoordinatorRequest request,
-        string? runtimeOverride = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
@@ -146,7 +145,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(prompt));
         }
 
-        var resolvedRuntime = ResolveRuntime(agent.AgentConfig, runtimeOverride);
+        var resolvedRuntime = ResolveRuntime(agent.AgentConfig);
         var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()
