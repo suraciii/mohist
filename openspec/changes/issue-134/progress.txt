@@ -36,3 +36,17 @@ T-001: Server-owned Agent execution-definition snapshot, strict launch binder, n
 - Agent-definition writes continue through `AgentConfigSchema.Validate`, while Issue model configuration uses `ValidateIssue` and rejects runtime. Historical Issue variables are not rewritten and are ignored by the named-Agent launch paths.
 - Direct launch binding is raw JSON presence-based and accepts only lowercase `prompt` and `context`; `runtime` and all other top-level fields return `unsupported_field` before Agent resolution.
 - `npm test` passed all Server, CLI, Web, and Runner tests (3274 Server SpecTests, 1525 Server UnitTests, 35 ArchTests, 5145 Web tests, 1438 Runner tests). `npm run build` passed after `npm ci`.
+
+T-002: Runner Skill resolution and runtime delivery.
+
+## Codebase Patterns
+
+- Runner runtime boundaries remain Mohist-owned: OpenCode and Pi receive resolved `{ name, instructions }` values through their turn options; provider SDK DTOs are unchanged.
+- AgentJob dispatch carries captured Skill names in `work.with.skills`; Workflow Agent transforms carry them in `with.options.skills`. Both paths resolve against the current task workspace.
+- Generic authenticated follow-up targets carry an optional immutable `definition`; workflow targets remain definition-free. The runner re-resolves its Skills and rebuilds the execution envelope for each follow-up submission.
+
+## Implementation Notes
+
+- `SkillResolver` roots are `<workDir>/.agents/skills`, `$HOME/.agents/skills`, then non-empty `MOHIST_SKILL_ROOTS` colon entries. Names must be one safe segment, file contents are strict UTF-8 and non-empty, and realpath containment prevents symlink escape.
+- `buildExecutionEnvelope` keeps legacy instruction-only prompts byte-compatible, while Skill-bearing turns use a JSON data block delimited by `[mohist-execution-definition]` markers.
+- Empty Skills do not touch the filesystem and are omitted from runtime options. Missing, unreadable, malformed, or unsafe Skills return `skill_not_found` before provider prompt submission.

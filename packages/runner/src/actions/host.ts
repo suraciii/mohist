@@ -8,6 +8,7 @@ import type { TaskLogger } from "../runtime/task-log.js"
 import type { ActionResult } from "../core/types.js"
 import type { IssueFields } from "./issue-fields.js"
 import type { PiRuntime } from "../runtime/pi/index.js"
+import type { SkillResolver } from "../runtime/skill-resolver.js"
 
 export const ALL_CAPABILITIES: ReadonlySet<ActionCapability> = new Set([
   "agent-turn",
@@ -28,7 +29,7 @@ export function capabilitySet(manifest: ActionManifest): ActionCapabilitySet {
 export interface AgentTurnRequest {
   prompt: string
   session?: string
-  options?: { model?: string; variant?: string }
+  options?: { model?: string; variant?: string; skills?: readonly string[]; instructions?: string | null }
   deadlineMs?: number
 }
 
@@ -49,6 +50,7 @@ export interface ActionHost {
   signal: AbortSignal
   log: TaskLogger | null
   piRuntime?: PiRuntime | null
+  skillResolver?: SkillResolver
   exec(command: string, args?: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }>
   agent?: AgentTurn
   issue?: IssueFieldsHost

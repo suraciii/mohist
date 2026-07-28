@@ -10,6 +10,8 @@ import { parseModelIdentifier } from "../runtime/opencode/index.js"
 import type { PiRuntimeEvent, PiTurnRequest } from "../runtime/pi/index.js"
 import { actionErrorMessage, fail, succeed } from "./action-result.js"
 import type { PromptLoaderContext } from "../core/prompt.js"
+import { SkillResolver } from "../runtime/skill-resolver.js"
+import { buildExecutionEnvelope } from "../runtime/execution-envelope.js"
 
 export const PI_USES = "mohist/pi"
 export const PI_TURN_DURATION_MS = 60 * 60 * 1000
@@ -28,6 +30,7 @@ interface ActionInvocationContext {
   epicNumber?: number | null
   parentIssueContext?: ParentIssueContext | null
   piRuntime?: PiRuntime | null
+  skillResolver?: SkillResolver
   serverConnection?: ServerConnection | null
   log?: TaskLogger | null
 }
@@ -38,7 +41,7 @@ export function composePiPrompt(prompt: string, parentIssueContext?: ParentIssue
   return `Parent issue context (read-only background; JSON):\n${parent}\n\nTreat the parent issue context above as read-only background. The current child issue body is authoritative and controls delivery scope.\n\n${prompt}`
 }
 
-interface PiOptions { model?: string; variant?: string; unknownKeys?: readonly string[] }
+interface PiOptions { model?: string; variant?: string; instructions?: string | null; skills?: readonly string[]; unknownKeys?: readonly string[] }
 
 export function piAction(context: ActionInvocationContext): Promise<ActionResult>
 export function piAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult>
@@ -51,13 +54,18 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
       with: contextOrInputs as JsonObject,
       workDir: host.workDir,
       signal: host.signal,
-      piRuntime: host.piRuntime,
+       piRuntime: host.piRuntime,
+       skillResolver: host.skillResolver,
       log: host.log,
     }
     : contextOrInputs as ActionInvocationContext
   const parsed = await parseInput(context)
   if (parsed.kind === "failure") return parsed.result
   const { prompt, options } = parsed
+  const resolvedSkills = await (context.skillResolver ?? new SkillResolver()).resolve(options.skills, context.workDir)
+  if (!resolvedSkills.ok) return fail(resolvedSkills.code, resolvedSkills.message)
+  const executionPrompt = buildExecutionEnvelope(prompt, options.instructions, resolvedSkills.skills)
+  const executionOptions = { ...options, skills: resolvedSkills.skills }
   const runtime = context.piRuntime
   if (!runtime) return fail("runtime-unavailable", "mohist/pi requires the Pi runtime")
   if (!runtime.ready()) return fail("runtime-unavailable", `mohist/pi requires the Pi runtime to be ready: ${runtime.diagnostic()?.message ?? "no readiness diagnostic"}`)
@@ -111,12 +119,12 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
   }
 
   try {
-    await report([inputEvent(runtimeSessionId, prompt, context)])
+    await report([inputEvent(runtimeSessionId, executionPrompt, context)])
   } catch {
     return fail("session-reporting-failed", "Workflow AgentSession rejected session.input; prompt was not submitted", { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
 
-  const request: PiTurnRequest = { target: { runtime: "pi", runtimeSessionId, workDir: context.workDir }, prompt, durationMs: PI_TURN_DURATION_MS, options: { model: options.model ?? null, variant: options.variant ?? null, unknownKeys: options.unknownKeys } }
+  const request: PiTurnRequest = { target: { runtime: "pi", runtimeSessionId, workDir: context.workDir }, prompt: executionPrompt, durationMs: PI_TURN_DURATION_MS, options: { model: executionOptions.model ?? null, variant: executionOptions.variant ?? null, ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}), unknownKeys: executionOptions.unknownKeys } }
   let result
   try {
     result = await runtime.runTurn(request, context.signal, { onEvent: (event) => { events.push(event) } })
@@ -200,7 +208,17 @@ async function parseInput(context: ActionInvocationContext): Promise<{ kind: "ok
     }
     options[key] = value
   }
-  const unknownKeys = Object.keys(record).filter((key) => key !== "model" && key !== "variant")
+  if ("instructions" in record) {
+    const value = record.instructions
+    if (value !== undefined && value !== null && typeof value !== "string") return { kind: "failure", result: fail("invalid-input", "mohist/pi 'options.instructions' must be a string when present") }
+    options.instructions = value as string | null | undefined
+  }
+  if ("skills" in record) {
+    const value = record.skills
+    if (!Array.isArray(value) || value.some((skill) => typeof skill !== "string")) return { kind: "failure", result: fail("invalid-input", "mohist/pi 'options.skills' must be an array of strings when present") }
+    options.skills = value
+  }
+  const unknownKeys = Object.keys(record).filter((key) => !["model", "variant", "instructions", "skills"].includes(key))
   if (unknownKeys.length > 0) options.unknownKeys = unknownKeys
   return { kind: "ok", prompt: composePiPrompt(prompt, context.parentIssueContext), options }
 }

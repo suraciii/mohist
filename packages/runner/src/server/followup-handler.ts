@@ -46,6 +46,8 @@ import type { PiTurnObserver } from "../runtime/pi/index.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from "../runtime/binding-recovery.js"
 import type { FollowupOperationJournalStore } from "../runtime/followup-operation-journal.js"
 import type { ServerConnection } from "./connection.js"
+import { SkillResolver } from "../runtime/skill-resolver.js"
+import { buildExecutionEnvelope } from "../runtime/execution-envelope.js"
 
 export interface FollowupHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
@@ -57,6 +59,7 @@ export interface FollowupHandlerDeps {
   followupOperationJournal?: FollowupOperationJournalStore | null
   randomId?: () => string
   bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
+  skillResolver?: SkillResolver
 }
 
 export interface FollowupDeliveryResult {
@@ -187,9 +190,18 @@ async function handleFollowup(
     return unavailable()
   }
 
+  const definition = sessionTarget.kind === "generic" ? target.definition : undefined
+  const skillNames = definition?.skills ?? []
+  const resolvedSkills = await (deps.skillResolver ?? new SkillResolver()).resolve(skillNames, selectedTarget.workDir)
+  if (!resolvedSkills.ok) return unavailable()
   const followupRequest = {
     target: { runtime: binding.runtime, runtimeSessionId: selectedTarget.runtimeSessionId, workDir: selectedTarget.workDir },
-    prompt: payload.text,
+    prompt: buildExecutionEnvelope(payload.text, definition?.instructions, resolvedSkills.skills),
+    ...(definition ? { options: {
+      model: definition.model ?? null,
+      variant: definition.variant ?? null,
+      ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}),
+    } } : {}),
   }
   const observer = buildFollowupObserver(outbox, sessionTarget, selectedTarget, payload.operationId)
   try {

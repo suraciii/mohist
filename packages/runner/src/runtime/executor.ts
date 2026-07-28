@@ -37,6 +37,8 @@ import { parseModelIdentifier } from "./opencode/index.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from "./binding-recovery.js"
 import { resolveIssueFields, type IssueFields } from "../actions/issue-fields.js"
 import { createHash } from "node:crypto"
+import { SkillResolver } from "./skill-resolver.js"
+import { buildExecutionEnvelope } from "./execution-envelope.js"
 
 const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -62,6 +64,7 @@ export class WorkExecutor {
     private readonly runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
     private piRuntime: PiRuntime | null = null,
     private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
+    private readonly skillResolver: SkillResolver = new SkillResolver(),
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -247,6 +250,7 @@ export class WorkExecutor {
       signal,
       log,
       piRuntime: this.piRuntime,
+      skillResolver: this.skillResolver,
       exec: async (command, args) => {
         const { runCommand } = await import("../system/process.js")
         const result = await runCommand(command, args?.map(String) ?? [], workDir, signal)
@@ -273,7 +277,10 @@ export class WorkExecutor {
     const self = this
     return {
       async turn(request: AgentTurnRequest): Promise<ActionResult> {
-        const prompt = composeOpencodePrompt(request.prompt, work.parentIssueContext)
+        const skillNames = request.options?.skills ?? []
+        const resolvedSkills = await self.skillResolver.resolve(skillNames, workDir)
+        if (!resolvedSkills.ok) return actionFail(resolvedSkills.code, resolvedSkills.message)
+        const prompt = buildExecutionEnvelope(composeOpencodePrompt(request.prompt, work.parentIssueContext), request.options?.instructions, resolvedSkills.skills)
 
         const runtime = self.openCodeRuntime
         if (!runtime) {
@@ -411,6 +418,7 @@ export class WorkExecutor {
           options: {
             model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
             variant: request.options?.variant ?? null,
+            skills: resolvedSkills.skills,
             unknownKeys: undefined as readonly string[] | undefined,
           },
         }
