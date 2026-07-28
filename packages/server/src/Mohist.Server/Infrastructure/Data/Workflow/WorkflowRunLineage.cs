@@ -39,6 +39,16 @@ public static class WorkflowRunLineage
         };
     }
 
+    internal static WorkflowRunMetadata? NormalizeStartMetadata(WorkflowRunMetadata? metadata)
+    {
+        if (metadata?.IssueNumber is { } issueNumber)
+            return ForIssue(metadata.ProjectId ?? string.Empty, issueNumber, metadata.EpicNumber, metadata);
+        if (metadata?.EpicNumber is not null)
+            throw new ArgumentException("Epic context requires an issue context.", nameof(metadata));
+
+        return metadata;
+    }
+
     internal static void ApplyContext(WorkflowRun run, string projectId, int issueNumber, int? epicNumber)
     {
         run.Metadata = ForIssue(projectId, issueNumber, epicNumber, run.Metadata);

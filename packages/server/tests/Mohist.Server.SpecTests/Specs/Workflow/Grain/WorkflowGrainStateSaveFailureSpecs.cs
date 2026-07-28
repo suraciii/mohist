@@ -84,6 +84,36 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         Assert.Null(await store.LoadAsync(workflowRunId));
     }
 
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(-1, null)]
+    [InlineData(null, 7)]
+    public async Task Start_RejectsInvalidTypedIssueContext(int? issueNumber, int? epicNumber)
+    {
+        var workflowRunId = $"wr-invalid-start-context-{issueNumber}-{epicNumber}";
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var grain = CreateGrain(scope.ServiceProvider, store, workflowRunId);
+        await grain.OnActivateAsync(CancellationToken.None);
+        var input = new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+            null,
+            FixedTime,
+            ProjectId: "proj-invalid-start-context",
+            IssueNumber: issueNumber,
+            EpicNumber: epicNumber));
+
+        if (issueNumber is <= 0)
+        {
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => grain.StartAsync(input));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() => grain.StartAsync(input));
+        }
+
+        Assert.Null(await store.LoadAsync(workflowRunId));
+    }
+
     [Fact]
     public async Task RefreshIssueContext_SaveFailureQuarantinesActivationAndRedeliveryConverges()
     {

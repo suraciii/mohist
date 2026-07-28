@@ -233,7 +233,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private async Task EnsureCreatedRunAsync(WorkflowStartInput? input)
     {
         if (_run is not null) return;
-        var metadata = input?.Metadata ?? BuildRunMetadata(input);
+        var metadata = WorkflowRunLineage.NormalizeStartMetadata(input?.Metadata ?? BuildRunMetadata(input));
         RequireProjectOwnership(metadata);
         var projectId = metadata?.ProjectId;
         var issueNumber = metadata?.IssueNumber;
