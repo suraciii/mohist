@@ -209,7 +209,14 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             EpicNumber: plan.EpicNumber,
             WorkflowRunId: null));
 
-        _state.State.Plan = plan with { Pending = null };
+        _state.State.Plan = plan with
+        {
+            Pending = new AgentLaunchCoordinatorPending(
+                CommandId: Guid.NewGuid().ToString("N"),
+                Kind: AgentLaunchCoordinatorCommand.EnsureInitialLaunch,
+                Payload: null,
+                ExpectedRevision: null),
+        };
         await SaveStateAsync();
         await AdvanceAsync();
     }
@@ -275,7 +282,14 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
             WorkDir: plan.WorkspacePath));
 
-        _state.State.Plan = plan with { Pending = null };
+        _state.State.Plan = plan with
+        {
+            Pending = new AgentLaunchCoordinatorPending(
+                CommandId: Guid.NewGuid().ToString("N"),
+                Kind: AgentLaunchCoordinatorCommand.SubmitJob,
+                Payload: null,
+                ExpectedRevision: null),
+        };
         await SaveStateAsync();
         await AdvanceAsync();
     }

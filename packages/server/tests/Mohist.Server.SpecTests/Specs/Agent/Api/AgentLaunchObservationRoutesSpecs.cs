@@ -130,9 +130,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             // through the same composite read.
             var turnResult = obs.GetProperty("turnResult");
             Assert.NotEqual(JsonValueKind.Null, turnResult.ValueKind);
-            Assert.Equal("completed", turnResult.GetProperty("failureCategory").ValueKind == JsonValueKind.Null
-                ? null
-                : turnResult.GetProperty("failureCategory").GetString());
+            Assert.Equal("all done", turnResult.GetProperty("message").GetString());
         }
         finally
         {

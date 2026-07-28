@@ -114,3 +114,9 @@ replay/conflict tests for T-001 still pending.
 - Web exposes `AgentLaunchObservationDto`, reads the project-scoped observation endpoint, and maps turn status directly to observe/result/reconcile guidance. Session activity remains independently authoritative, so a terminal Job does not close the Session.
 - CLI `mo agent launch` accepts `--idempotency-key`; omitted keys are printed before dispatch and the transport retries once with the same header. Human/table output includes Job, Session, Input, Turn, transcript, Job, and observation references; docs describe original-key recovery.
 - T-003 verification passed: Web typecheck, full Web tests (5153 passed, 1 skipped), FSD boundary check, and CLI tests (1435). `npm test` passed Workflow Definition (175), CLI (1435), Unit (1533), and Arch (35) suites but did not exit within five minutes while running existing Server SpecTests.
+
+## Verification Repair
+
+- The Server SpecTests hang was caused by `AgentLaunchCoordinatorGrain` clearing its pending command after Prepare/Ensure without persisting the next stage, so `AdvanceAsync` restarted Prepare recursively and the launch request never returned.
+- After stage progression was fixed, the observation route exposed a second defect: Orleans could not copy `AgentTurnRecord.InputIds` when its `IReadOnlyList<string>` held the collection-expression `ReadOnlySingleElementList<string>` runtime type. `GetInitialLaunchAsync` now materializes that child list as an array at the grain boundary.
+- Focused Server verification now passes: observation 9/9, validation 17/17, and launch identity 2/2. Runner typecheck passes and Runner tests pass 1438/1438.

@@ -1660,9 +1660,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var turns = session.Status.Turns ?? [];
         if (inputs.Count == 0 && turns.Count == 0)
             return null;
+        var turn = turns.Count > 0 ? turns[0] : null;
         return new AgentInitialLaunchSnapshot(
             SessionId: SessionId,
             Input: inputs.Count > 0 ? inputs[0] : null,
-            Turn: turns.Count > 0 ? turns[0] : null);
+            Turn: turn is null ? null : turn with { InputIds = turn.InputIds.ToArray() });
     }
 }
