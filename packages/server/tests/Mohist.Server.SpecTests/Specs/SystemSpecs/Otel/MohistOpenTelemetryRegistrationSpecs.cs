@@ -2,9 +2,12 @@ using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.SpecTests.Support;
 using OpenTelemetry;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Xunit;
 
@@ -69,6 +72,20 @@ public class MohistOpenTelemetryRegistrationSpecs
 
         Assert.Contains(services, d => d.ImplementationType?.FullName == "OpenTelemetry.Extensions.Hosting.Implementation.TelemetryHostedService");
         Assert.Contains(services, d => d.ServiceType.FullName == "OpenTelemetry.Trace.TracerProvider");
+        Assert.Contains(services, d => d.ServiceType.FullName == "OpenTelemetry.Metrics.MeterProvider");
+    }
+
+    [Fact]
+    public void Enabled_ConfiguresDispatcherMeterProviderAndMetricsExporter()
+    {
+        var services = new ServiceCollection();
+        services.AddMohistOpenTelemetry(BuildConfig(enabled: true, endpoint: "http://collector.test/otel"));
+
+        using var provider = services.BuildServiceProvider();
+        Assert.NotNull(provider.GetService<MeterProvider>());
+        var exporterOptions = provider.GetRequiredService<IOptionsMonitor<OtlpExporterOptions>>().Get("metrics");
+        Assert.Equal(OtlpExportProtocol.HttpProtobuf, exporterOptions.Protocol);
+        Assert.Equal(new Uri("http://collector.test/otel/v1/metrics"), exporterOptions.Endpoint);
     }
 
     [Fact]
@@ -87,6 +104,7 @@ public class MohistOpenTelemetryRegistrationSpecs
         using var provider = services.BuildServiceProvider();
         var tracerProvider = provider.GetService<TracerProvider>();
         Assert.NotNull(tracerProvider);
+        Assert.NotNull(provider.GetService<MeterProvider>());
     }
 
     [Fact]

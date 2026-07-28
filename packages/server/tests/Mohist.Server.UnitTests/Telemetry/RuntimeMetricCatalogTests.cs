@@ -31,6 +31,7 @@ public class RuntimeMetricCatalogTests
             [RuntimeMetricCatalog.ProcessCpuUtilization] = (RuntimeMetricKind.ObservableGauge, "1", []),
             [RuntimeMetricCatalog.ProcessWorkingSet] = (RuntimeMetricKind.ObservableGauge, "By", []),
             [RuntimeMetricCatalog.ProcessGcHeap] = (RuntimeMetricKind.ObservableGauge, "By", []),
+            [RuntimeMetricCatalog.EventDispatcherBlockedSources] = (RuntimeMetricKind.ObservableGauge, "1", []),
         };
 
         Assert.Equal(expected.Count, RuntimeMetricCatalog.Definitions.Count);

@@ -401,7 +401,8 @@ public class EpicAutoDoneSpecs
             null!,
             new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
             new NoopEventStore(),
-            NullLogger<EpicGrain>.Instance);
+            NullLogger<EpicGrain>.Instance,
+            TestServices.BackgroundTasks);
     }
 
     private static async Task SeedEpicAsync(

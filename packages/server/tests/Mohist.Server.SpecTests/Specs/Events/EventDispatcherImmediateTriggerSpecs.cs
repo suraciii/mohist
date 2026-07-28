@@ -1,4 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Epic.Domain;
+using Mohist.Server.Epic.Grains;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Orleans;
@@ -146,6 +152,67 @@ public class EventDispatcherImmediateTriggerSpecs
     }
 
     [Fact]
+    public async Task EpicGrain_EventCommit_PokesDispatcherButIdempotentCommandDoesNot()
+    {
+        var projectId = $"proj_epic_poke_{Guid.NewGuid():N}";
+        const int epicNumber = 1;
+        await SeedEpicAsync(projectId, epicNumber);
+        int beforeCatchAll;
+        lock (_fixture.CatchAllInvocations)
+            beforeCatchAll = _fixture.CatchAllInvocations.Count;
+        var delivered = _fixture.WaitForCatchAllBeyondAsync(beforeCatchAll);
+        var epic = _fixture.Grains.GetGrain<IEpicGrain>(
+            GrainKey.Epic(new EpicKey(projectId, epicNumber)));
+
+        await epic.StartAsync();
+        await AdvanceClusterTurnUntilSettledAsync(delivered);
+        Assert.True(_fixture.BackgroundTasks.LaunchCount > 0);
+
+        _fixture.BackgroundTasks.Reset();
+        await epic.StartAsync();
+        Assert.Equal(0, _fixture.BackgroundTasks.LaunchCount);
+    }
+
+    [Fact]
+    public async Task AgentJobGrain_FailureEventAppend_PokesDispatcherBeforeReminderCadence()
+    {
+        var jobKey = $"agent-job-poke-{Guid.NewGuid():N}";
+        int beforeCatchAll;
+        lock (_fixture.CatchAllInvocations)
+            beforeCatchAll = _fixture.CatchAllInvocations.Count;
+        var delivered = _fixture.WaitForCatchAllBeyondAsync(beforeCatchAll);
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
+
+        await job.FailAsync("runner-lost", "agent-test");
+
+        await AdvanceClusterTurnUntilSettledAsync(delivered);
+        Assert.True(_fixture.BackgroundTasks.LaunchCount > 0);
+    }
+
+    [Fact]
+    public async Task AgentJobGrain_AppendFailure_DoesNotPokeAndRetainsRecoveryObligation()
+    {
+        var jobKey = $"agent-job-poke-recovery-{Guid.NewGuid():N}";
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
+        _fixture.EventStore.ThrowOnAppend = envelope =>
+            envelope.Type == Mohist.Server.Infrastructure.Events.EventCatalog.ReverseDns.AgentJobFailed;
+
+        await job.FailAsync("runner-lost", "agent-test");
+
+        Assert.Equal(0, _fixture.BackgroundTasks.LaunchCount);
+        _fixture.EventStore.ThrowOnAppend = null;
+        int beforeCatchAll;
+        lock (_fixture.CatchAllInvocations)
+            beforeCatchAll = _fixture.CatchAllInvocations.Count;
+        var delivered = _fixture.WaitForCatchAllBeyondAsync(beforeCatchAll);
+        await TestLifecycle.DeactivateAndWait(job, _fixture.Grains);
+        await job.GetStatusAsync();
+
+        await AdvanceClusterTurnUntilSettledAsync(delivered);
+        Assert.True(_fixture.BackgroundTasks.LaunchCount > 0);
+    }
+
+    [Fact]
     public async Task LostImmediateTrigger_LeavesRowUndispatched_AndReminderTickRecovers()
     {
         // Closes out the "Lost immediate trigger is recovered by the
@@ -191,6 +258,25 @@ public class EventDispatcherImmediateTriggerSpecs
         lock (_fixture.SpecificInvocations)
             Assert.Equal(beforeSpecific + 1, _fixture.SpecificInvocations.Count);
         Assert.Equal(0, _fixture.EventStore.PendingCount);
+    }
+
+    private async Task SeedEpicAsync(string projectId, int epicNumber)
+    {
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        db.Epics.Add(new EpicRow
+        {
+            ProjectId = projectId,
+            Number = epicNumber,
+            Title = "Immediate trigger poke",
+            Description = "",
+            Priority = "p2",
+            Status = EpicStatusName.Idle,
+            CreatedAt = EventTime,
+            UpdatedAt = EventTime,
+        });
+        await db.SaveChangesAsync();
     }
 
     private static WorkflowRun BuildRun(string id, string eventId, string? issueId = null)
@@ -303,4 +389,20 @@ public class EventDispatcherImmediateTriggerSpecs
         IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
             => throw new NotSupportedException();
     }
+}
+
+public sealed class RecordingBackgroundTaskLauncher : IBackgroundTaskLauncher
+{
+    private readonly BackgroundTaskLauncher _inner = new();
+    private int _launchCount;
+
+    public int LaunchCount => Volatile.Read(ref _launchCount);
+
+    public void Launch(Func<CancellationToken, Task> work, CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref _launchCount);
+        _inner.Launch(work, cancellationToken);
+    }
+
+    public void Reset() => Interlocked.Exchange(ref _launchCount, 0);
 }

@@ -440,7 +440,7 @@ public class EventDispatcherSpecs
         events.ThrowOnMark = null;
         await dispatcher.DispatchAsync(CancellationToken.None);
 
-        Assert.Equal(new[] { "evt_crash", "evt_crash" }, seenEventIds);
+        Assert.Equal(new[] { "evt_crash" }, seenEventIds);
         Assert.Equal(1, uniqueDeliveries);
         Assert.Single(events.Marked);
         Assert.Empty(events.PendingUndelivered);
@@ -472,7 +472,7 @@ public class EventDispatcherSpecs
         events.ThrowOnMark = null;
         await dispatcher.DispatchAsync(CancellationToken.None);
 
-        Assert.Equal(["evt_1", "evt_1", "evt_2"], seen);
+        Assert.Equal(["evt_1", "evt_2"], seen);
         Assert.Equal([1L, 2L], events.Marked.Select(mark => mark.Id));
     }
 
@@ -605,7 +605,7 @@ public class EventDispatcherSpecs
         events.ThrowOnMark = null;
         await dispatcher.DispatchAsync(CancellationToken.None);
 
-        Assert.Equal(2, attempts);
+        Assert.Equal(1, attempts);
         Assert.Single(events.Marked);
         Assert.Single(dlq.Written);
     }

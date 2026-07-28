@@ -212,27 +212,66 @@ public sealed class FakeAgentSessionTranscriptStore : IAgentSessionTranscriptSto
 {
     public List<AgentSessionTranscriptFlush> Flushes { get; } = [];
     private (string SessionId, Exception Error)? _nextFailure;
+    private readonly object _gate = new();
+    private readonly List<PendingFlushWait> _waiters = [];
 
     public void FailNextSave(string sessionId, Exception error) => _nextFailure = (sessionId, error);
 
     public void Reset()
     {
-        _nextFailure = null;
-        Flushes.Clear();
+        lock (_gate)
+        {
+            _nextFailure = null;
+            Flushes.Clear();
+            foreach (var waiter in _waiters)
+                waiter.Completion.TrySetCanceled();
+            _waiters.Clear();
+        }
     }
 
     public Task SaveAsync(AgentSessionTranscriptFlush transcript, CancellationToken ct = default)
     {
-        if (_nextFailure is { } failure &&
-            string.Equals(failure.SessionId, transcript.Turn.SessionId, StringComparison.Ordinal))
+        lock (_gate)
         {
-            _nextFailure = null;
-            throw failure.Error;
-        }
+            if (_nextFailure is { } failure &&
+                string.Equals(failure.SessionId, transcript.Turn.SessionId, StringComparison.Ordinal))
+            {
+                _nextFailure = null;
+                throw failure.Error;
+            }
 
-        Flushes.Add(transcript);
+            Flushes.Add(transcript);
+            for (var index = _waiters.Count - 1; index >= 0; index--)
+            {
+                var waiter = _waiters[index];
+                if (!waiter.Predicate(transcript))
+                    continue;
+
+                _waiters.RemoveAt(index);
+                waiter.Completion.TrySetResult(transcript);
+            }
+        }
         return Task.CompletedTask;
     }
+
+    public Task<AgentSessionTranscriptFlush> WaitForAsync(Func<AgentSessionTranscriptFlush, bool> predicate)
+    {
+        lock (_gate)
+        {
+            var existing = Flushes.LastOrDefault(predicate);
+            if (existing is not null)
+                return Task.FromResult(existing);
+
+            var completion = new TaskCompletionSource<AgentSessionTranscriptFlush>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            _waiters.Add(new PendingFlushWait(predicate, completion));
+            return completion.Task;
+        }
+    }
+
+    private sealed record PendingFlushWait(
+        Func<AgentSessionTranscriptFlush, bool> Predicate,
+        TaskCompletionSource<AgentSessionTranscriptFlush> Completion);
 }
 
 public sealed class TestLogger<T> : ILogger<T>

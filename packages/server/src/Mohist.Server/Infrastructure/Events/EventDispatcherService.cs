@@ -1,13 +1,17 @@
+using System.Diagnostics.Metrics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Otel;
 
 namespace Mohist.Server.Infrastructure.Events;
 
-public sealed class EventDispatcherService
+public sealed class EventDispatcherService : IDisposable
 {
+    public const string MeterName = "Mohist.Server.EventDispatcher";
+
     private readonly IEventStore _events;
     private readonly IReadOnlyList<Subscription> _subscriptions;
     private readonly IDeadLetterStore _deadLetters;
@@ -17,6 +21,10 @@ public sealed class EventDispatcherService
     private readonly IEventPushQueue _pushQueue;
     private readonly Dictionary<EventKey, Dictionary<int, HandlerState>> _states = [];
     private readonly SemaphoreSlim _dispatchGate = new(1, 1);
+    private readonly Meter _meter;
+    private readonly ObservableGauge<long> _blockedSourcesGauge;
+    private long _lastCompletedCycleBlockedSources;
+    private bool _disposed;
 
     public EventDispatcherService(
         IEventStore events,
@@ -47,6 +55,12 @@ public sealed class EventDispatcherService
             throw new ArgumentOutOfRangeException(nameof(options), "PushQueueCapacity must be positive");
         if (_options.PushDeliveryTimeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(options), "PushDeliveryTimeout must be positive");
+
+        _meter = new Meter(MeterName);
+        _blockedSourcesGauge = _meter.CreateObservableGauge(
+            RuntimeMetricCatalog.EventDispatcherBlockedSources,
+            ReadLastCompletedCycleBlockedSources,
+            "1");
     }
 
     public async Task DispatchAsync(CancellationToken ct)
@@ -65,6 +79,9 @@ public sealed class EventDispatcherService
                 if (!settled)
                     blockedSources.Add(evt.Source);
             }
+            Interlocked.Exchange(
+                ref _lastCompletedCycleBlockedSources,
+                blockedSources.Count);
         }
         finally
         {
@@ -159,6 +176,8 @@ public sealed class EventDispatcherService
         var ticks = Math.Min(_options.BaseBackoff.Ticks * multiplier, _options.MaxBackoff.Ticks);
         return TimeSpan.FromTicks((long)ticks);
     }
+
+    public Meter Meter => _meter;
 
     private async Task<bool> DispatchOneAsync(UndeliveredEvent evt, CancellationToken ct)
     {
@@ -257,13 +276,28 @@ public sealed class EventDispatcherService
         }
         catch
         {
-            _states.Remove(key);
             throw;
         }
     }
 
     private Task MarkDispatchedAsync(UndeliveredEvent evt, CancellationToken ct) =>
         _events.MarkDispatchedAsync(evt.Origin, evt.Source, evt.Id, _time.GetUtcNow(), ct);
+
+    private IEnumerable<Measurement<long>> ReadLastCompletedCycleBlockedSources()
+    {
+        if (_disposed)
+            return [];
+        var snapshot = Interlocked.Read(ref _lastCompletedCycleBlockedSources);
+        return [new Measurement<long>(snapshot)];
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+        _meter.Dispose();
+    }
 
     private DeadLetterRow BuildDeadLetter(
         UndeliveredEvent evt,

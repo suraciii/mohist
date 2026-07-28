@@ -70,7 +70,7 @@ public sealed class OtelTestHost : IAsyncDisposable
         var otelOptions = builder.Configuration.GetSection(OtelOptions.SectionName).Get<OtelOptions>() ?? new OtelOptions();
         if (otelOptions.Enabled)
         {
-            MohistOpenTelemetryRegistration.ConfigureTracing(
+            MohistOpenTelemetryRegistration.ConfigureTelemetry(
                 builder.Services.AddOpenTelemetry(),
                 otelOptions,
                 ConfigureFakeExporter);
