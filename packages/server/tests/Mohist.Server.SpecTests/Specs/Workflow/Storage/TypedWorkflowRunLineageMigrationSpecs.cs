@@ -130,6 +130,38 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
         }
     }
 
+    [Theory]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    [InlineData("\n")]
+    [InlineData("\t \n\r")]
+    public async Task Up_PreservesWhitespaceOnlyLegacyProjectIdInsteadOfMigratingIt(string projectId)
+    {
+        await using var database = TestSqliteDatabase.CreateEmpty();
+        MigratedSqliteTemplate.CopyTo(database.Keeper, BeforeMigration);
+
+        await using (var db = database.CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "EpicNumber", "ETag")
+                VALUES ('wr_blank_project', {LegacyBlankProjectState(projectId)}, NULL, 1);
+                """);
+            await db.Database.GetService<IMigrator>().MigrateAsync(Migration);
+        }
+
+        await using (var db = database.CreateContext())
+        {
+            var row = await db.WorkflowRuns.SingleAsync(x => x.WorkflowRunId == "wr_blank_project");
+            using var json = JsonDocument.Parse(row.State);
+            var metadata = json.RootElement.GetProperty("metadata");
+            var annotations = metadata.GetProperty("annotations");
+            Assert.True(annotations.TryGetProperty("projectId", out var preservedProject), "whitespace-only legacy projectId annotation must be preserved");
+            Assert.Equal(projectId, preservedProject.GetString());
+            Assert.False(metadata.TryGetProperty("projectId", out _), "no typed projectId must be fabricated from whitespace");
+            Assert.False(metadata.TryGetProperty("issueNumber", out _), "no typed issueNumber must be fabricated");
+        }
+    }
+
     private static async Task<IReadOnlyList<string>> ReadValuesAsync(DbContext db, string sql)
     {
         await using var command = db.Database.GetDbConnection().CreateCommand();
@@ -144,4 +176,7 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
 
     private static string LegacyAnnotationState(string issueNumber) =>
         "{\"id\":\"wr_malformed\",\"metadata\":{\"createdAt\":\"2026-01-01T00:00:00Z\",\"annotations\":{\"projectId\":\"proj_1\",\"issueNumber\":" + JsonSerializer.Serialize(issueNumber) + "}},\"status\":\"Running\",\"stages\":[]}";
+
+    private static string LegacyBlankProjectState(string projectId) =>
+        "{\"id\":\"wr_blank_project\",\"metadata\":{\"createdAt\":\"2026-01-01T00:00:00Z\",\"annotations\":{\"projectId\":" + JsonSerializer.Serialize(projectId) + ",\"issueNumber\":\"42\"}},\"status\":\"Running\",\"stages\":[]}";
 }

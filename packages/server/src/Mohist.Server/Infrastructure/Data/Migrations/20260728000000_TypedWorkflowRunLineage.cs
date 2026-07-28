@@ -60,7 +60,71 @@ public partial class TypedWorkflowRunLineage : Migration
         "CREATE INDEX \"IX_WorkflowRuns_MetadataProjectId_WorkflowProfileIdKey\" ON \"WorkflowRuns\" (\"MetadataProjectId\", \"WorkflowProfileIdKey\");",
     ];
 
-    private const string LegacyToTypedJson = """
+    private const string Whitespace = "char(9, 10, 11, 12, 13, 32)";
+
+    private const string LcProjectId = """
+        COALESCE(
+            json_extract("State", '$.metadata.annotations.projectId'),
+            json_extract("State", '$.metadata.annotations.ProjectId'),
+            json_extract("State", '$.Metadata.Annotations.projectId'),
+            json_extract("State", '$.Metadata.Annotations.ProjectId'))
+        """;
+
+    private const string LcIssueNumber = """
+        COALESCE(
+            json_extract("State", '$.metadata.annotations.issueNumber'),
+            json_extract("State", '$.metadata.annotations.IssueNumber'),
+            json_extract("State", '$.Metadata.Annotations.issueNumber'),
+            json_extract("State", '$.Metadata.Annotations.IssueNumber'))
+        """;
+
+    private const string LcEpicNumber = """
+        COALESCE(
+            json_extract("State", '$.metadata.annotations.epicNumber'),
+            json_extract("State", '$.metadata.annotations.EpicNumber'),
+            json_extract("State", '$.Metadata.Annotations.epicNumber'),
+            json_extract("State", '$.Metadata.Annotations.EpicNumber'))
+        """;
+
+    private const string PcProjectId = """
+        COALESCE(
+            json_extract("State", '$.Metadata.Annotations.projectId'),
+            json_extract("State", '$.Metadata.Annotations.ProjectId'))
+        """;
+
+    private const string PcIssueNumber = """
+        COALESCE(
+            json_extract("State", '$.Metadata.Annotations.issueNumber'),
+            json_extract("State", '$.Metadata.Annotations.IssueNumber'))
+        """;
+
+    private const string PcEpicNumber = """
+        COALESCE(
+            json_extract("State", '$.Metadata.Annotations.epicNumber'),
+            json_extract("State", '$.Metadata.Annotations.EpicNumber'))
+        """;
+
+    private static string HasNonWhitespace(string candidate) =>
+        $"length(trim({candidate}, {Whitespace})) > 0";
+
+    private static string ValidPositiveIssueNumber(string candidate)
+    {
+        var trimmed = $"trim({candidate}, {Whitespace})";
+        var digits = $$"""
+            CASE
+                WHEN substr({{trimmed}}, 1, 1) IN ('+', '-')
+                    THEN substr({{trimmed}}, 2)
+                ELSE {{trimmed}}
+            END
+            """;
+        return $$"""
+            CAST({{candidate}} AS INTEGER) > 0
+            AND ({{digits}}) GLOB '[0-9]*'
+            AND ({{digits}}) NOT GLOB '*[^0-9]*'
+            """;
+    }
+
+    private static readonly string LegacyToTypedJson = $$"""
         UPDATE "WorkflowRuns"
         SET "State" = json_set(
             json_remove("State",
@@ -70,67 +134,13 @@ public partial class TypedWorkflowRunLineage : Migration
                 '$.Metadata.Annotations.projectId', '$.Metadata.Annotations.ProjectId',
                 '$.Metadata.Annotations.issueNumber', '$.Metadata.Annotations.IssueNumber',
                 '$.Metadata.Annotations.epicNumber', '$.Metadata.Annotations.EpicNumber'),
-            '$.metadata.projectId', COALESCE(
-                json_extract("State", '$.metadata.annotations.projectId'),
-                json_extract("State", '$.metadata.annotations.ProjectId'),
-                json_extract("State", '$.Metadata.Annotations.projectId'),
-                json_extract("State", '$.Metadata.Annotations.ProjectId')),
-            '$.metadata.issueNumber', CAST(COALESCE(
-                json_extract("State", '$.metadata.annotations.issueNumber'),
-                json_extract("State", '$.metadata.annotations.IssueNumber'),
-                json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER),
-            '$.metadata.epicNumber', COALESCE("EpicNumber", CAST(COALESCE(
-                json_extract("State", '$.metadata.annotations.epicNumber'),
-                json_extract("State", '$.metadata.annotations.EpicNumber'),
-                json_extract("State", '$.Metadata.Annotations.epicNumber'),
-                json_extract("State", '$.Metadata.Annotations.EpicNumber')) AS INTEGER)))
+            '$.metadata.projectId', {{LcProjectId}},
+            '$.metadata.issueNumber', CAST({{LcIssueNumber}} AS INTEGER),
+            '$.metadata.epicNumber', COALESCE("EpicNumber", CAST({{LcEpicNumber}} AS INTEGER)))
         WHERE json_type("State", '$') = 'object'
           AND json_type("State", '$.metadata') = 'object'
-          AND length(trim(COALESCE(
-                json_extract("State", '$.metadata.annotations.projectId'),
-                json_extract("State", '$.metadata.annotations.ProjectId'),
-                json_extract("State", '$.Metadata.Annotations.projectId'),
-                json_extract("State", '$.Metadata.Annotations.ProjectId')))) > 0
-          AND CAST(COALESCE(
-                json_extract("State", '$.metadata.annotations.issueNumber'),
-                json_extract("State", '$.metadata.annotations.IssueNumber'),
-                json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) > 0
-          AND length(CASE
-                WHEN substr(trim(COALESCE(
-                    json_extract("State", '$.metadata.annotations.issueNumber'),
-                    json_extract("State", '$.metadata.annotations.IssueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32)), 1, 1) = '+'
-                    THEN substr(trim(COALESCE(
-                        json_extract("State", '$.metadata.annotations.issueNumber'),
-                        json_extract("State", '$.metadata.annotations.IssueNumber'),
-                        json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                        json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32)), 2)
-                ELSE trim(COALESCE(
-                    json_extract("State", '$.metadata.annotations.issueNumber'),
-                    json_extract("State", '$.metadata.annotations.IssueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32))
-              END) > 0
-          AND (CASE
-                WHEN substr(trim(COALESCE(
-                    json_extract("State", '$.metadata.annotations.issueNumber'),
-                    json_extract("State", '$.metadata.annotations.IssueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32)), 1, 1) = '+'
-                    THEN substr(trim(COALESCE(
-                        json_extract("State", '$.metadata.annotations.issueNumber'),
-                        json_extract("State", '$.metadata.annotations.IssueNumber'),
-                        json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                        json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32)), 2)
-                ELSE trim(COALESCE(
-                    json_extract("State", '$.metadata.annotations.issueNumber'),
-                    json_extract("State", '$.metadata.annotations.IssueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32))
-              END) NOT GLOB '*[^0-9]*';
+          AND {{HasNonWhitespace(LcProjectId)}}
+          AND {{ValidPositiveIssueNumber(LcIssueNumber)}};
 
         UPDATE "WorkflowRuns"
         SET "State" = json_set(
@@ -138,46 +148,14 @@ public partial class TypedWorkflowRunLineage : Migration
                 '$.Metadata.Annotations.projectId', '$.Metadata.Annotations.ProjectId',
                 '$.Metadata.Annotations.issueNumber', '$.Metadata.Annotations.IssueNumber',
                 '$.Metadata.Annotations.epicNumber', '$.Metadata.Annotations.EpicNumber'),
-            '$.Metadata.ProjectId', COALESCE(
-                json_extract("State", '$.Metadata.Annotations.projectId'),
-                json_extract("State", '$.Metadata.Annotations.ProjectId')),
-            '$.Metadata.IssueNumber', CAST(COALESCE(
-                json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER),
-            '$.Metadata.EpicNumber', COALESCE("EpicNumber", CAST(COALESCE(
-                json_extract("State", '$.Metadata.Annotations.epicNumber'),
-                json_extract("State", '$.Metadata.Annotations.EpicNumber')) AS INTEGER)))
+            '$.Metadata.ProjectId', {{PcProjectId}},
+            '$.Metadata.IssueNumber', CAST({{PcIssueNumber}} AS INTEGER),
+            '$.Metadata.EpicNumber', COALESCE("EpicNumber", CAST({{PcEpicNumber}} AS INTEGER)))
         WHERE json_type("State", '$') = 'object'
           AND json_type("State", '$.metadata') IS NULL
           AND json_type("State", '$.Metadata') = 'object'
-          AND length(trim(COALESCE(
-                json_extract("State", '$.Metadata.Annotations.projectId'),
-                json_extract("State", '$.Metadata.Annotations.ProjectId')))) > 0
-          AND CAST(COALESCE(
-                json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) > 0
-          AND length(CASE
-                WHEN substr(trim(COALESCE(
-                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32)), 1, 1) = '+'
-                    THEN substr(trim(COALESCE(
-                        json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                        json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32)), 2)
-                ELSE trim(COALESCE(
-                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32))
-              END) > 0
-          AND (CASE
-                WHEN substr(trim(COALESCE(
-                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32)), 1, 1) = '+'
-                    THEN substr(trim(COALESCE(
-                        json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                        json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32)), 2)
-                ELSE trim(COALESCE(
-                    json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                    json_extract("State", '$.Metadata.Annotations.IssueNumber')), char(9, 10, 11, 12, 13, 32))
-              END) NOT GLOB '*[^0-9]*';
+          AND {{HasNonWhitespace(PcProjectId)}}
+          AND {{ValidPositiveIssueNumber(PcIssueNumber)}};
         """;
 
     private const string TypedToLegacyJson = """
