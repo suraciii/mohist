@@ -1,12 +1,14 @@
 ## Findings
 
-### P1: The blocked-source gauge is never exported
+### P1: The required full test suite is still flaky
 
-`EventDispatcherService` creates `mohist.server.event_dispatcher.blocked_sources` on its own meter at `packages/server/src/Mohist.Server/Infrastructure/Events/EventDispatcherService.cs:59`, but the production OpenTelemetry registration only invokes `WithTracing` at `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistOpenTelemetryRegistration.cs:44` and never configures a metrics provider, subscribes to the dispatcher meter, or adds a metrics OTLP exporter. Consequently, the new `MeterListener` unit test can observe the gauge in-process, but no configured observability backend can receive it. This fails the issue requirement that operators can identify FIFO stalls through this metric. Configure the metrics pipeline to subscribe to the dispatcher meter and export the metric, with an integration-level assertion that the configured pipeline receives it.
+`npm test` fails in `packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/AgentSessionEventDiscardObservabilitySpecs.cs:108`, where `MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents` expects a transcript flush containing `session.activity`. The failure recorded by this change has only an unrelated flush, so `Assert.Single(..., predicate)` finds no matching item. This file was changed by T-001 specifically to handle concurrent unrelated flushes, but the current synchronization still permits the assertion to run before the target flush arrives. Make the test wait on a deterministic signal for the target transcript flush, rather than only waiting for the persistence checkpoint, so `npm test` satisfies the issue's acceptance criteria reliably.
 
 ## Verification
 
-- `git diff --check origin/master...HEAD`
-- Server unit, server spec, and architecture suites pass (1538, 3278, and 35 tests respectively).
+- Focused server unit suite: 1541 passed.
+- Focused server spec suite: 3279 passed.
+- `npm run build` passed.
+- `npm test` failed in the spec above.
 
 <promise>FAIL</promise>
