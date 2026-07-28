@@ -1,0 +1,97 @@
+{
+  "project": "mohist-local",
+  "description": "Split 'make it stop' into a deterministic cancel of a not-yet-executing AgentTurn and a Runtime stop request of an executing AgentTurn, addressed at a specific Turn with an honest Unknown state and one shared Web/CLI vocabulary.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Durable follow-up Turn records and turn-keyed transitions",
+      "spec": "specs/agent-turn-cancel/spec.md#Cancel is deterministic and does not contact the Runtime",
+      "description": "Generalize the Session Turn model from the initial-launch-only MarkInitialTurn* surface to Turn-id-keyed transitions any Turn can use, and record a durable Queued AgentTurn (stable id, linked to its accepted SessionInput) when a follow-up starts an idle turn, before Runner dispatch. Existing launch and terminal flows delegate to the new surface unchanged. Add a Server-only CancelTurn transition and a shared turn-control resolver (find-by-id + terminal/queued/executing classification) that later cancel/stop operations build on.",
+      "acceptanceCriteria": [
+        "A follow-up that starts an idle turn persists exactly one AgentTurnRecord with a stable id in Queued status, linked to its accepted SessionInput, before any Runner dispatch; the Runner does not create a duplicate session.input record for that turn.",
+        "A repeated or redispatched follow-up for the same accepted input does not create a second Turn; the recorded Turn id survives Server restart.",
+        "MarkTurnExecuting and MarkTurnTerminal are keyed by Turn id; the AgentJob launch path delegates via its stored InitialTurnId and behaves identically to today (Queued to Executing, terminal mapping, activity convergence, no-op on an already-terminal Turn).",
+        "CancelTurn(turnId) flips Queued to Cancelled on the Server with no Runner or Runtime contact and converges Session activity to idle; it is a no-op on an already-terminal or Executing Turn.",
+        "The shared turn-control resolver returns the target Turn's current status and a terminal/queued/executing classification, returning turn-not-found for an unknown id, without mutating state.",
+        "Existing launch, follow-up join-active-turn, recovery (compact/reset), and terminal-close flows continue to pass unchanged.",
+        "Server spec tests cover idle-start Turn recording, no-duplicate on retry, turn-keyed executing/terminal transitions, CancelTurn determinism and no-op guards, restart identity preservation, and unchanged launch/follow-up/recovery behaviour, using fake time, storage, and dispatch observers; npm test passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Follow-up idle-start Turn recording; turn-id-keyed Session transition surface with CancelTurn; shared turn-control resolver; AgentJob launch delegation.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D1-D2 and is the prerequisite for both cancel and stop. It records only the current Turn (bounded by the at-most-one-active-Turn invariant); it does not retroactively record historical Turns and adds no cancel/stop endpoint."
+    },
+    {
+      "id": "T-002",
+      "title": "Deterministic cancel of a queued Turn (Server)",
+      "spec": "specs/agent-turn-cancel/spec.md#First-Turn cancel adjudicates the owning AgentJob as cancelled",
+      "description": "Add AgentJobStatus.Cancelled (terminal) and AgentJob.CancelAsync, and wire the Session cancel path. The cancel grain operation resolves the target Turn via the T-001 resolver: a terminal Turn returns turn-already-ended; a Queued launch Turn delegates to its AgentJob (Pending to Cancelled, no dispatch, then marks the Turn Cancelled); a Queued later Turn is cancelled directly on the Session; an Executing Turn is rejected for cancel. Expose POST /agent-sessions/{id}/cancel with a turnId body. Cancel never contacts the Runner.",
+      "acceptanceCriteria": [
+        "POST /agent-sessions/{sessionId}/cancel with a turnId cancels a Queued Turn deterministically on the Server and returns state cancelled; it succeeds even when no Runner is bound and issues no Runner or Runtime request.",
+        "Cancelling the launch Turn while its AgentJob is Pending transitions the Job to AgentJobStatus.Cancelled (terminal, no dispatch) and records the first Turn as Cancelled rather than Failed; IsTerminal includes Cancelled and Unknown remains non-terminal.",
+        "The cancel/dispatch race is decided inside the AgentJob grain: if the Job already dispatched (Turn Executing) the cancel is rejected and the caller is directed to stop; if cancel wins the Job never dispatches.",
+        "Cancelling a later (follow-up) Turn does not contact or rewrite an already-terminal AgentJob; the Turn goes Cancelled and the Job verdict is unchanged.",
+        "A cancel against an already-terminal Turn returns turn-already-ended with the Turn's terminal status, issues no Runner request, and touches no other Turn.",
+        "A cancel against an Executing Turn is not applied as a cancel and reports the honest current state.",
+        "The cancelled Turn record, its SessionInput records, the AgentSession, transcript, and lineage remain present and readable; after cancelling the only non-terminal Turn the Session activity is idle and a subsequently accepted input starts a new Turn.",
+        "All enum projections (list, capacity, observation) handle AgentJobStatus.Cancelled, and architecture tests assert only the Job resolves first-Turn terminal from its own facts.",
+        "Server tests cover queued cancel, first-Turn Job cancellation, the cancel/dispatch race in both outcomes, later-Turn cancel leaving a terminal Job, stale entry, Executing-Turn rejection, and record preservation, with fakes only; npm test passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentJobStatus.Cancelled and AgentJob.CancelAsync; Session cancel grain operation; POST /agent-sessions/{id}/cancel with turnId and stale-guard; first-Turn cancelled terminal mapping.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Implements design D3 plus the cancel half of D5. The Session grain delegates launch-Turn cancel to the Job so dispatch and cancel serialize in one grain; later-Turn cancel is Session-only. Cancel is Server-only; no cancel SignalR method is introduced."
+    },
+    {
+      "id": "T-003",
+      "title": "Runtime stop request of an executing Turn (Server + Runner)",
+      "spec": "specs/agent-turn-stop/spec.md#Stop requests the Runtime to halt a specific executing Turn",
+      "description": "Repurpose the existing cancel transport as the stop path. POST /agent-sessions/{id}/stop carries a turnId; the grain resolves the Turn via the T-001 resolver and applies stop only to an Executing Turn (a Queued Turn is rejected with use-cancel; a terminal Turn returns turn-already-ended). The runner keeps its binding-guarded abort and idle/unknown activity convergence, but its reply and the HTTP response adopt the new vocabulary: confirmed stop to stopped, unconfirmed to unknown with interruptUnconfirmed, request-sent-not-yet-confirmed to stop-requested. First-Turn stop continues to be adjudicated by the AgentJob through the normal result-report/Unknown path; later-Turn stop never touches the Job.",
+      "acceptanceCriteria": [
+        "POST /agent-sessions/{sessionId}/stop with a turnId sends a stop request to the bound Runtime for an Executing Turn and mirrors the state the Runtime actually observed; it is presented as a request, not an immediately guaranteed halt.",
+        "A stop against a Queued Turn issues no Runtime request and directs the caller to cancel; a stop against an already-terminal Turn returns turn-already-ended and touches no other Turn.",
+        "The runner reply and HTTP response use stopped for a confirmed stop (not cancelled), unknown with interruptUnconfirmed for an unconfirmed stop, and stop-requested when the request was sent but halt not yet confirmed; the API never fakes a successful stop.",
+        "An unconfirmed stop leaves the target Turn and the AgentSession activity Unknown; no new Turn is created, no accepted SessionInput is replayed, and no idle/completed/failed verdict is synthesised; Unknown reconciles only on authoritative Runtime evidence.",
+        "A later-Turn stop does not rewrite an already-terminal AgentJob; Turn result and AgentJob status remain independent facts.",
+        "The stopped Turn record, its SessionInput records, the transcript, and any partial output captured before the stop remain present and readable.",
+        "The runner stop handler retains its binding-guarded session.activity outbox fact (confirmed to idle, unconfirmed to unknown) and remains available while the durable snapshot is being recovered.",
+        "Server and Runner tests cover Executing-Turn stop (confirmed and unconfirmed), Queued-Turn rejection, stale entry, Unknown preservation with no replay, later-Turn Job isolation, and record preservation, using a fake Runtime and fake Server connection; npm test, npm run typecheck -w packages/runner, and npm test -w packages/runner pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "POST /agent-sessions/{id}/stop with turnId and stale-guard; Session stop grain operation; runner stop reply and HTTP response remapped to stopped/unknown/stop-requested; existing honesty machinery retained.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Implements design D4 plus the stop half of D5. It reuses the existing CancelAgentSession transport, abort, and binding-guarded activity convergence; the change is turn targeting, the stale-guard, and the vocabulary remap. It does not depend on the cancel task (T-002)."
+    },
+    {
+      "id": "T-004",
+      "title": "Web and CLI cancel/stop experience with one vocabulary",
+      "spec": "specs/agent-turn-control-surface/spec.md#Web and CLI share one cancel and stop vocabulary",
+      "description": "Surface cancel and stop in CLI and Web with one shared vocabulary. CLI exposes mo session cancel (deterministic cancel of a queued Turn) and mo session stop (Runtime stop request of an executing Turn) as distinct operations; the prior mo session cancel stop semantics are removed. Web adds a Turn-level cancel/stop control in the coder-session widget. Both clients render cancelled/stop-requested/stopped/unknown from the Server reply with identical meaning and offer the same verification entry for unknown.",
+      "acceptanceCriteria": [
+        "mo session cancel posts to the cancel endpoint with a turnId and applies only to a queued Turn; mo session stop posts to the stop endpoint with a turnId and requests a Runtime stop of an executing Turn; help text distinguishes a deterministic cancel from a runtime stop request.",
+        "CLI renders cancelled, stop-requested, stopped, and unknown from the Server reply and, for unknown, points to the same verification entry as Web.",
+        "Web exposes a Turn-level cancel/stop control that targets the current Turn and renders the same four labels with the same meaning.",
+        "Web and CLI use the same label for each outcome and never infer a Turn or AgentJob result from Session activity.",
+        "The previous mo session cancel stop semantics are removed (BREAKING) and no second control surface is introduced.",
+        "Web tests cover cancel/stop control targeting, the four labels, and the unknown verification entry; CLI tests cover both verbs, turnId forwarding, and the shared output shape.",
+        "npm run typecheck -w packages/web, npm run test:run -w packages/web, npm run check:fsd -w packages/web, and npm test pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "mo session cancel and mo session stop verbs with shared output; Web Turn-level cancel/stop control and shared label rendering; aligned unknown verification entry.",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Implements the client portion of design D6. Server-side reply labels are owned by T-002 (cancel) and T-003 (stop); this task renders them consistently and adds no new server authority."
+    }
+  ]
+}
