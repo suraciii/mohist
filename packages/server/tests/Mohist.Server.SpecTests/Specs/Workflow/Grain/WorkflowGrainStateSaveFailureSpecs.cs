@@ -175,7 +175,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         IWorkflowRunStore store,
         string workflowRunId)
     {
-        var identity = GrainTestContext.Create(workflowRunId);
+        var identity = GrainTestContext.Create(workflowRunId, new StubProfileCoordinatorGrainFactory());
         return new WorkflowGrain(
             identity.Context,
             identity.Runtime,
@@ -183,14 +183,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             services.GetRequiredService<WorkflowProfileManager>(),
             services.GetRequiredService<WorkflowRunProfileManager>(),
             TimeProvider,
-            NullLogger<WorkflowGrain>.Instance)
-        {
-            BindProfileForTest = static (_, profileId) => Task.FromResult(
-                new WorkflowProfileReferenceResult(
-                    WorkflowProfileReferenceResultCode.Applied,
-                    profileId,
-                    1)),
-        };
+            NullLogger<WorkflowGrain>.Instance);
     }
 
     private async Task SeedWorkflowTemplateAsync(string projectId)
@@ -244,5 +237,105 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
 
         public Task DeleteAsync(string workflowRunId, CancellationToken ct = default) =>
             _inner.DeleteAsync(workflowRunId, ct);
+    }
+
+    /// <summary>
+    /// Minimal <see cref="IGrainFactory"/> that returns a stub
+    /// <see cref="IWorkflowProfileReferenceCoordinatorGrain"/> for any string
+    /// key. The stub yields an <see cref="WorkflowProfileReferenceResultCode.Applied"/>
+    /// result for any bind request, mirroring the pre-removal
+    /// <c>BindProfileForTest</c> behaviour these specs depended on, but via
+    /// the production grain call site — no override hook on
+    /// <see cref="WorkflowGrain"/>.
+    /// </summary>
+    private sealed class StubProfileCoordinatorGrainFactory : IGrainFactory
+    {
+        private static readonly IWorkflowProfileReferenceCoordinatorGrain Stub = new StubCoordinatorGrain();
+
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
+        {
+            if (typeof(TGrainInterface) == typeof(IWorkflowProfileReferenceCoordinatorGrain))
+                return (TGrainInterface)(object)Stub;
+            throw new NotSupportedException(
+                $"{nameof(StubProfileCoordinatorGrainFactory)} does not support {typeof(TGrainInterface).Name}");
+        }
+
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix)
+            => throw new NotSupportedException(
+                $"{nameof(StubProfileCoordinatorGrainFactory)} does not support {typeof(TGrainInterface).Name}");
+
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix)
+            => throw new NotSupportedException(
+                $"{nameof(StubProfileCoordinatorGrainFactory)} does not support {typeof(TGrainInterface).Name}");
+
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix)
+            => throw new NotSupportedException(
+                $"{nameof(StubProfileCoordinatorGrainFactory)} does not support {typeof(TGrainInterface).Name}");
+
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix)
+            => throw new NotSupportedException(
+                $"{nameof(StubProfileCoordinatorGrainFactory)} does not support {typeof(TGrainInterface).Name}");
+
+        TGrainObserverInterface IGrainFactory.CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj)
+            => throw new NotSupportedException();
+
+        void IGrainFactory.DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj)
+            => throw new NotSupportedException();
+
+        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey)
+            => throw new NotSupportedException();
+
+        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey)
+            => throw new NotSupportedException();
+
+        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, string grainPrimaryKey)
+            => throw new NotSupportedException();
+
+        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension)
+            => throw new NotSupportedException();
+
+        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension)
+            => throw new NotSupportedException();
+
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(GrainId grainId)
+            => throw new NotSupportedException();
+
+        IAddressable IGrainFactory.GetGrain(GrainId grainId)
+            => throw new NotSupportedException();
+
+        IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType)
+            => throw new NotSupportedException();
+
+        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string grainClassNamePrefix)
+            => throw new NotSupportedException();
+
+        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
+            => throw new NotSupportedException();
+    }
+
+    private sealed class StubCoordinatorGrain : IWorkflowProfileReferenceCoordinatorGrain
+    {
+        public Task<WorkflowProfileReferenceResult> SetProjectDefaultAsync(
+            WorkflowProfileCommandPayload.SetProjectDefault payload,
+            string commandId,
+            long? expectedRevision) =>
+            throw new NotSupportedException(
+                $"{nameof(StubCoordinatorGrain)} only supports BindWorkflowRunAsync");
+
+        public Task<WorkflowProfileReferenceResult> BindWorkflowRunAsync(
+            WorkflowProfileCommandPayload.BindWorkflowRun payload,
+            string commandId,
+            long? expectedRevision) =>
+            Task.FromResult(new WorkflowProfileReferenceResult(
+                WorkflowProfileReferenceResultCode.Applied,
+                payload.ProfileId,
+                expectedRevision ?? 1L));
+
+        public Task<WorkflowProfileReferenceResult> DeleteProfileAsync(
+            WorkflowProfileCommandPayload.DeleteProfile payload,
+            string commandId,
+            long? expectedRevision) =>
+            throw new NotSupportedException(
+                $"{nameof(StubCoordinatorGrain)} only supports BindWorkflowRunAsync");
     }
 }

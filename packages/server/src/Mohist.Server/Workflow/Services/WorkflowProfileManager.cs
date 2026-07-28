@@ -68,7 +68,9 @@ public class WorkflowProfileManager : IScopedService
         {
             var definition = await _profileProvider.GetDefinitionAsync(context.ProjectId!, boundProfileId!);
             if (definition is null)
-                throw new InvalidOperationException($"Workflow '{runId}' has no current definition for bound Profile '{boundProfileId}'");
+                throw new WorkflowDefinitionResolutionException(
+                    WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+                    $"Workflow '{runId}' has no current definition for bound Profile '{boundProfileId}'");
             return ResolvedTemplate.FromProfile(new WorkflowProfile(
                 boundProfileId!, boundProfileId!, string.Empty, definition));
         }
@@ -150,7 +152,8 @@ public class WorkflowProfileManager : IScopedService
             ?? throw new InvalidOperationException(
                 $"Workflow '{runId}' has no effective workflow template");
         var stage = definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
-            ?? throw new InvalidOperationException(
+            ?? throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
                 $"Workflow '{runId}' has no definition for stage '{stageId}'");
         return stage;
     }
@@ -437,7 +440,9 @@ public class WorkflowProfileManager : IScopedService
             return await LoadTemplateAsync(runId, projectId);
         var definition = await _profileProvider.GetDefinitionAsync(projectId!, profileId);
         if (definition is null)
-            throw new InvalidOperationException($"Workflow '{runId}' has no current definition for bound Profile '{profileId}'");
+            throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+                $"Workflow '{runId}' has no current definition for bound Profile '{profileId}'");
         return ResolvedTemplate.FromProfile(new WorkflowProfile(profileId, profileId, string.Empty, definition));
     }
 

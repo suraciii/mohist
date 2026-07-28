@@ -1,0 +1,57 @@
+## T-001 — WorkflowGrain dead path + backdoor + typed exception
+
+### Codebase Patterns
+- `Mohist.Server.SpecTests/Support/GrainTestContext.cs` builds a manual-grain context pair via `DispatchProxy.Create<IGrainContext, GrainContextProxy>` and `<IGrainRuntime, GrainRuntimeProxy>`. The runtime proxy's `get_GrainFactory` returned `null` by default. Extending it to return a configurable `IGrainFactory` (added a `Create(key, IGrainFactory?)` overload and a settable `GrainFactory` on the proxy) was the cleanest way to drop `BindProfileForTest` without breaking the manual-grain wiring — no other specs needed to change.
+- `IWorkflowProfileReferenceCoordinatorGrain` has three methods on its interface (`SetProjectDefaultAsync`, `BindWorkflowRunAsync`, `DeleteProfileAsync`). The stub coordinator grain only implements `BindWorkflowRunAsync` (the one `WorkflowGrain.PersistProfileBindingAsync` calls) and throws `NotSupportedException` for the other two — they are unreachable from the spec's code path.
+- `WorkflowGrain.EnsureStartedAsync` has an outer `try { ... } catch { RemoveUncommittedRunAsync(); throw; }`. This outer catch ALSO catches the typed resolution exception after the inner CommitAsync catch persists the failed state — the failed state is then deleted. This is the pre-existing behavior; the spec confirms the exception still propagates with the original message text.
+- `Mohist.Server.SpecTests` banned symbols (`BannedSymbols.Tests.txt`) forbid `System.IO.File`, `Path.GetFullPath`, `AppContext.BaseDirectory`, `Task.Yield`, etc. Source-scanning tests belong in `Mohist.Server.ArchTests` (which embeds `ServerSources/**/*.cs` as resources and allows reading them via `assembly.GetManifestResourceStream`). Spec tests must use stub fakes / in-memory stores.
+- ArchTest embedded resource names follow `ServerSources/{RelativePath}` (e.g. `ServerSources/Workflow/Grains/WorkflowGrain.cs`). MSBuild's `RecursiveDir` strips the `src/Mohist.Server/` segment, so resource names do NOT include `Mohist.Server/` in the prefix — verify with `assembly.GetManifestResourceNames()` if uncertain.
+- The `WorkflowRunProfileBindingTests` already asserts `run.FailDefinitionResolution("Workflow 'run-1' has no definition for stage 'implement'")` directly — it doesn't go through the manager's throw, so it didn't need updating when the throw type changed.
+
+### Decisions / Gotchas
+- `WorkflowDefinitionResolutionException` lives in `Mohist.Server.Workflow.Domain` (same namespace as `WorkflowControlRejectionException` and `WorkflowProfileDomainErrors`). It exposes a `ResolutionReason` enum (`NoCurrentDefinition`, `NoStageDefinition`); one enum + one exception is enough — design rejected separate subtypes per reason.
+- The three WorkflowProfileManager throw sites (`LoadTemplateAsync:71`, `LoadStageSpecsAsync:154`, `LoadBoundTemplateAsync:440`) all carry the original message text verbatim so the user-facing error surface is byte-identical.
+- `WorkflowGrain.CommitAsync` is now `(IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default)`. Two callers used `CommitAsync(events, reason)` — both updated to drop the `reason` argument.
+- `WorkflowGrain.PersistProfileBindingAsync` lost the inline `BindProfileForTest` branch; the inline `GrainFactory.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(...)` is the only path now.
+- `WorkflowStageSpecs.LoadStageSpecsAsync_ThrowsWhenStageMissing` previously expected `InvalidOperationException`. It now asserts `WorkflowDefinitionResolutionException` and checks `Reason == NoStageDefinition` plus message substring. Single test, single-line change.
+
+### Test Strategy
+- **Static checks** live in `Mohist.Server.ArchTests/WorkflowGrainContractRules.cs` (8 tests):
+  - `DispatchEvent` absent in `IWorkflowGrainContext`, `WorkflowGrain`, `WorkflowWorkLifecycle`
+  - `On(WorkflowEvent` / `private Task On(` / `WorkflowArtifactRecorded =>` absent from `WorkflowGrain`
+  - `BindProfileForTest` absent in `WorkflowGrain` + `IWorkflowGrainContext`
+  - `CommitAsync` body has no `.Message.Contains(`
+  - `WorkflowProfileManager` has ≥3 `throw new WorkflowDefinitionResolutionException(` sites
+  - `CommitAsync` catches `WorkflowDefinitionResolutionException` (typed) and does NOT catch `InvalidOperationException`
+- **Behavioral check** lives in `Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowGrainProductionContractSpecs.cs`:
+  - `CommitAsync_DifferentResolutionExceptionMessages_ProduceIdenticalControlFlow` — drives `WorkflowGrain.EnsureStartedAsync` with a stub `IWorkflowProfileProvider` that returns a valid definition for the startup call but throws `WorkflowDefinitionResolutionException` with a configurable message on the stage-spec call; asserts both runs throw the typed exception with their respective messages.
+  - `WorkflowDefinitionResolutionException_CarriesReasonDiscriminator_AndPreservesMessage` — sanity check the type's surface.
+
+### Verification
+- `dotnet build Mohist.sln` ✅ (all 5 server assemblies + Cli.Tests + Workflow.Definition.Tests + 3 test projects)
+- Server full suite: Workflow.Definition.Tests 175/175, Mohist.Cli.Tests 1441/1441, Mohist.Server.UnitTests 1535/1535, Mohist.Server.ArchTests 43/43 (including the 8 new), Mohist.Server.SpecTests 3306/3306 ✅
+- grep invariants:
+  - `grep -rn "DispatchEvent(" packages/server/src/` → no matches
+  - `grep -rn "BindProfileForTest" packages/server/src/` → no matches
+  - `grep -rn "ex.Message.Contains" packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.cs` → no matches
+
+### Files touched
+Production:
+- `packages/server/src/Mohist.Server/Workflow/Domain/WorkflowDefinitionResolutionException.cs` (new)
+- `packages/server/src/Mohist.Server/Workflow/Grains/IWorkflowGrainContext.cs` (drop `DispatchEvent`)
+- `packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.cs` (drop `On`, `BindProfileForTest`, reason param; switch catch type)
+- `packages/server/src/Mohist.Server/Workflow/Grains/WorkflowWorkLifecycle.cs` (drop dispatch loop)
+- `packages/server/src/Mohist.Server/Workflow/Services/WorkflowProfileManager.cs` (3 throw sites → typed exception)
+
+Tests:
+- `packages/server/tests/Mohist.Server.SpecTests/Support/GrainTestContext.cs` (extend with `Create(key, IGrainFactory?)`)
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowGrainStateSaveFailureSpecs.cs` (rewire via stub coordinator grain + fake factory)
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Querier/WorkflowStageSpecs.cs` (assert typed exception)
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowGrainProductionContractSpecs.cs` (new — behavioral test)
+- `packages/server/tests/Mohist.Server.ArchTests/WorkflowGrainContractRules.cs` (new — 8 static contract tests)
+
+### Risks for downstream tasks (T-002..T-006)
+- T-002 (WorkflowRunProfileManager → WorkflowRunVariablesStore rename) overlaps `WorkflowProfileManager.cs` for the inline `ResolveLayeredVariablesAsync` removal. The current `WorkflowDefinitionResolutionException` sits in `Mohist.Server.Workflow.Domain`, untouched by T-002's rename target.
+- T-003 (status mapper typed per-enum + WireStatus rename) is independent; no shared files.
+- T-004/T-005 (comment-reference ArchTest + clearance) are independent; no shared files.
+- T-006 (Backoff private) is in Infrastructure/Events, no shared files.

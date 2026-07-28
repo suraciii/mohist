@@ -57,8 +57,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     private string GrainKey => this.GetPrimaryKeyString();
 
-    internal Func<string, string, Task<WorkflowProfileReferenceResult>>? BindProfileForTest { get; set; }
-
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
@@ -87,7 +85,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     void IWorkflowGrainContext.CacheAssignedWorkerId(string? workerId) => _cachedAssignedWorkerId = workerId;
     Task IWorkflowGrainContext.SaveAsync() => SaveRunAsync();
     Task IWorkflowGrainContext.SaveAsyncWithEvents(IReadOnlyList<WorkflowEvent> events) => SaveRunAsync(events);
-    Task IWorkflowGrainContext.DispatchEvent(WorkflowEvent e) => On(e);
     Task IWorkflowGrainContext.ReleaseCurrentStageLocks(string reason) =>
         _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
     string IWorkflowGrainContext.GetProjectId() => GetProjectId();
@@ -273,7 +270,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         EnsureRun();
         var events = _run.Pause();
         _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
-        await CommitAsync(events, reason);
+        await CommitAsync(events);
     }
 
     public async Task StopAsync(string? reason = null)
@@ -289,7 +286,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         var events = abandonedEvents.Concat(stopEvents).ToArray();
 
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
-        await CommitAsync(events, reason);
+        await CommitAsync(events);
     }
 
     public async Task ApproveAsync(string? decidedBy = null)
@@ -611,7 +608,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     private async Task CommitAsync(
         IReadOnlyList<WorkflowEvent> events,
-        string? reason = null,
         CancellationToken ct = default)
     {
         if (_run is not null)
@@ -621,50 +617,18 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             {
                 resolved = await _stageInitializer.InitializeFreshStagesAsync(events);
             }
-            catch (InvalidOperationException ex) when (
-                ex.Message.Contains("no current definition", StringComparison.Ordinal)
-                || ex.Message.Contains("no definition for stage", StringComparison.Ordinal))
+            catch (WorkflowDefinitionResolutionException ex)
             {
                 resolved = _run.FailDefinitionResolution(ex.Message);
                 _runDirty = true;
                 await SaveRunAsync(resolved);
-                foreach (var e in resolved)
-                    await On(e, reason);
                 throw;
             }
             _runDirty = true;
             await SaveRunAsync(resolved);
             events = resolved;
         }
-
-        foreach (var e in events)
-            await On(e, reason);
     }
-
-    private Task On(WorkflowEvent e, string? reason = null) =>
-        e switch
-        {
-            null => Task.CompletedTask,
-            WorkflowRunStarted => Task.CompletedTask,
-            WorkflowRunResumed => Task.CompletedTask,
-            WorkflowRunPaused => Task.CompletedTask,
-            WorkflowRunStopped => Task.CompletedTask,
-            WorkflowRunFailed => Task.CompletedTask,
-            WorkflowRunCompleted => Task.CompletedTask,
-            StageStarted => Task.CompletedTask,
-            StageCompleted => Task.CompletedTask,
-            StageFailed => Task.CompletedTask,
-            StageApprovalRequested => Task.CompletedTask,
-            StageApprovalResolved x => Task.CompletedTask,
-            FeedbackRequested => Task.CompletedTask,
-            TaskStarted => Task.CompletedTask,
-            TaskCompleted => Task.CompletedTask,
-            TaskFailed => Task.CompletedTask,
-            CheckPassed => Task.CompletedTask,
-            CheckFailed => Task.CompletedTask,
-            CheckPending => Task.CompletedTask,
-            WorkflowArtifactRecorded => Task.CompletedTask,
-        };
 
     internal string GetProjectId() =>
         _run?.Metadata?.ProjectId ?? "";
@@ -675,14 +639,12 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private async Task PersistProfileBindingAsync(string projectId, string profileId)
     {
         await _runStore.SaveAsync(_run!);
-        var result = BindProfileForTest is not null
-            ? await BindProfileForTest(projectId, profileId)
-            : await GrainFactory
-                .GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId)
-                .BindWorkflowRunAsync(
-                    new WorkflowProfileCommandPayload.BindWorkflowRun(projectId, GrainKey, profileId),
-                    $"workflow-run:{GrainKey}:profile:{profileId}",
-                    expectedRevision: null);
+        var result = await GrainFactory
+            .GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId)
+            .BindWorkflowRunAsync(
+                new WorkflowProfileCommandPayload.BindWorkflowRun(projectId, GrainKey, profileId),
+                $"workflow-run:{GrainKey}:profile:{profileId}",
+                expectedRevision: null);
         if (!result.IsApplied)
         {
             await _runStore.DeleteAsync(GrainKey);
