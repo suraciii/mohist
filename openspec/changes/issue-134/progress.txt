@@ -50,3 +50,12 @@ T-002: Runner Skill resolution and runtime delivery.
 - `SkillResolver` roots are `<workDir>/.agents/skills`, `$HOME/.agents/skills`, then non-empty `MOHIST_SKILL_ROOTS` colon entries. Names must be one safe segment, file contents are strict UTF-8 and non-empty, and realpath containment prevents symlink escape.
 - `buildExecutionEnvelope` keeps legacy instruction-only prompts byte-compatible, while Skill-bearing turns use a JSON data block delimited by `[mohist-execution-definition]` markers.
 - Empty Skills do not touch the filesystem and are omitted from runtime options. Missing, unreadable, malformed, or unsafe Skills return `skill_not_found` before provider prompt submission.
+
+T-003: Workflow-owned definition-complete Agent dispatch snapshots.
+
+## Implementation Notes
+
+- `WorkflowItemTranslator` keeps the workflow's raw `with.prompt` as the task goal and carries the resolved Agent Instructions in `with.options.instructions`; Model, Variant, and ordered Skill names are siblings in the same transformed payload.
+- `DispatchService` stores the transformed `WorkDispatch` through `WorkflowGrain.StoreActiveWorkDispatchAsync` before offering it, and active-work redelivery returns `TaskRun.DispatchSnapshot` without invoking Agent resolution. New retry TaskRuns have no snapshot and resolve the current definition.
+- Missing or archived Agent resolution continues through `WorkflowDispatchRejectedException(agent_not_found)` and `WorkflowGrain.RejectActiveWorkDispatchAsync`; Workflow owns the failed TaskRun and no AgentJob/direct AgentSession path is involved.
+- Translator tests cover OpenCode/Pi envelopes, ordered and empty Skills, structured resolution failures, retry re-resolution, and raw prompt preservation. Full `npm test` passed: Server SpecTests 3275, UnitTests 1525, ArchTests 35, CLI 1433, Web 5145, Runner 1441.

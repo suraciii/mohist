@@ -298,17 +298,16 @@ EpicNumber: ReadEpicNumber(run),
         }
 
         var rawPrompt = promptElement.Value.GetString()!;
-        var composedPrompt = string.IsNullOrWhiteSpace(snapshot.Instructions)
-            ? rawPrompt
-            : $"{snapshot.Instructions}\n\n{rawPrompt}";
         var options = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(snapshot.Instructions))
+            options["instructions"] = JSON.SerializeToElement(snapshot.Instructions);
         if (snapshot.Model is not null) options["model"] = JSON.SerializeToElement(snapshot.Model);
         if (snapshot.Variant is not null) options["variant"] = JSON.SerializeToElement(snapshot.Variant);
         if (snapshot.Skills.Count > 0) options["skills"] = JSON.SerializeToElement(snapshot.Skills);
 
         var transformed = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
-            ["prompt"] = JSON.SerializeToElement(composedPrompt),
+            ["prompt"] = JSON.SerializeToElement(rawPrompt),
             ["options"] = JSON.SerializeToElement(options),
         };
         CopyIfPresent(with, transformed, "session");
@@ -319,17 +318,6 @@ EpicNumber: ReadEpicNumber(run),
             AgentConfigSchema.PiRuntime => "mohist/pi",
             _ => "mohist/opencode",
         }, transformed);
-    }
-
-    private static string? ReadAgentConfigString(JsonElement? config, string key)
-    {
-        if (config is not { ValueKind: JsonValueKind.Object } value
-            || !value.TryGetProperty(key, out var property)
-            || property.ValueKind != JsonValueKind.String)
-            return null;
-
-        var result = property.GetString();
-        return string.IsNullOrWhiteSpace(result) ? null : result;
     }
 
     private static void CopyIfPresent(

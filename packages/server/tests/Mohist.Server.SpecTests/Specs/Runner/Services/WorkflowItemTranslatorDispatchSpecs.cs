@@ -33,15 +33,15 @@ public partial class WorkflowItemTranslatorSpecs
         Assert.Equal(WorkDispatchOwnerKinds.Workflow, dispatch.OwnerKind);
         Assert.Null(dispatch.AgentJobId);
         using var with = JsonDocument.Parse(dispatch.With!);
-        Assert.Equal("Review the change.\n\nFix ${{ vars.target }}", with.RootElement.GetProperty("prompt").GetString());
+        Assert.Equal("Fix ${{ vars.target }}", with.RootElement.GetProperty("prompt").GetString());
         Assert.Equal("review", with.RootElement.GetProperty("session").GetString());
         Assert.Equal(123, with.RootElement.GetProperty("timeout").GetInt32());
         var options = with.RootElement.GetProperty("options");
         Assert.Equal("model-a", options.GetProperty("model").GetString());
         Assert.Equal("fast", options.GetProperty("variant").GetString());
         Assert.Equal(new[] { "mohist", "review" }, options.GetProperty("skills").EnumerateArray().Select(skill => skill.GetString()));
-        Assert.False(options.TryGetProperty("instructions", out _));
-        Assert.Equal(new[] { "model", "variant" }, options.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("Review the change.", options.GetProperty("instructions").GetString());
+        Assert.Equal(new[] { "instructions", "model", "variant", "skills" }, options.EnumerateObject().Select(p => p.Name));
         Assert.Equal(4, with.RootElement.EnumerateObject().Count());
         Assert.Equal("Fix ${{ vars.target }}", item.With!["prompt"]!.Value.GetString());
     }
@@ -157,6 +157,26 @@ public partial class WorkflowItemTranslatorSpecs
         Assert.Contains("Edited instructions", retried.With, StringComparison.Ordinal);
         Assert.DoesNotContain("Original instructions", retried.With, StringComparison.Ordinal);
         Assert.NotEqual(first.WorkId, retried.WorkId);
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_EmptySkillsOmitsSkillInput()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-empty-skills");
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Keep the response concise.", "opencode", null, null, []);
+
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With("""{"name":"reviewer","prompt":"Review the change."}"""));
+
+        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        using var with = JsonDocument.Parse(dispatch.With!);
+        Assert.Equal("Review the change.", with.RootElement.GetProperty("prompt").GetString());
+        var options = with.RootElement.GetProperty("options");
+        Assert.Equal("Keep the response concise.", options.GetProperty("instructions").GetString());
+        Assert.False(options.TryGetProperty("skills", out _));
     }
 
     [Fact]
