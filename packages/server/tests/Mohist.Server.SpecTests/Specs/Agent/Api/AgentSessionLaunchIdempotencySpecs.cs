@@ -139,31 +139,50 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         var agent = await CreateAgentAsync(projectId, "fence-agent");
         var idempotencyKey = $"fence-{gate}-{Guid.NewGuid():N}";
         var body = new { prompt = "recover across the fence" };
+        var runnerId = gate == LaunchParticipantGate.SubmitJob
+            ? $"launch-fence-submit-runner-{Guid.NewGuid():N}"
+            : null;
 
-        _fixture.LaunchFaults.FailNext(gate, times: 1);
+        if (runnerId is not null)
+            await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
-        using var failing = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, failing.StatusCode);
-        Assert.Equal(
-            "launch_setup_pending",
-            (await failing.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        try
+        {
+            _fixture.LaunchFaults.FailNext(gate, times: 1);
 
-        using var recovered = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
-        Assert.Equal(HttpStatusCode.Created, recovered.StatusCode);
-        var original = await LaunchReferencesAsync(recovered);
+            using var failing = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, failing.StatusCode);
+            Assert.Equal(
+                "launch_setup_pending",
+                (await failing.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
 
-        // The fence no longer fails, so a resume with the same key must
-        // return the persisted outcome rather than a new launch.
-        _fixture.LaunchFaults.StopFailing(gate);
-        using var resumed = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
-        Assert.Equal(HttpStatusCode.Created, resumed.StatusCode);
-        Assert.Equal(original, await LaunchReferencesAsync(resumed));
-        Assert.Single(_fixture.LaunchFaults.CommandIds(gate).Distinct(StringComparer.Ordinal));
+            using var recovered = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, recovered.StatusCode);
+            var original = await LaunchReferencesAsync(recovered);
 
-        await AssertInitialLaunchChildStateAsync(
-            original,
-            inputAcceptance: AgentSessionInputAcceptance.Accepted,
-            turnStatus: AgentTurnStatus.Queued);
+            // The fence no longer fails, so a resume with the same key must
+            // return the persisted outcome rather than a new launch.
+            _fixture.LaunchFaults.StopFailing(gate);
+            using var resumed = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, resumed.StatusCode);
+            Assert.Equal(original, await LaunchReferencesAsync(resumed));
+            Assert.Single(_fixture.LaunchFaults.CommandIds(gate).Distinct(StringComparer.Ordinal));
+            if (runnerId is not null)
+                Assert.Equal(1, _fixture.AgentJobDispatches.PreparedCount(original.JobId));
+
+            await AssertInitialLaunchChildStateAsync(
+                original,
+                inputAcceptance: AgentSessionInputAcceptance.Accepted,
+                turnStatus: AgentTurnStatus.Queued);
+        }
+        finally
+        {
+            if (runnerId is not null)
+            {
+                await DrainDispatchAsync(runnerId);
+                await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+            }
+        }
     }
 
     /// <summary>
