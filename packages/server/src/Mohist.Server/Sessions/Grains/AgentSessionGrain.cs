@@ -131,7 +131,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             command.Metadata,
             Now(),
             runtime: command.AgentRuntime);
-        session.Settings = new AgentSessionSettings(command.Model);
+        session.Settings = new AgentSessionSettings(command.Model, command.Definition);
         return session;
     }
 

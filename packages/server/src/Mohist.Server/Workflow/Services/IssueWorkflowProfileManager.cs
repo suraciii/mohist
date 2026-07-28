@@ -13,13 +13,13 @@ namespace Mohist.Server.Workflow.Services;
 
 /// <summary>
 /// Issue-scope template + variables write endpoint.
-/// 
+///
 /// UpdateTemplateAsync 入参:
 ///   ProjectTemplateId: 指向项目模板 (引用, SourceTemplateId 设置, Template 清空)
 ///   Template:          自定义 YAML 字符串 (Template 设置, SourceTemplateId 清空)
 ///   两个都 null:       清空 issue 级模板 (继承项目默认)
 /// </summary>
-public class IssueWorkflowProfileManager : IScopedService, IAgentRuntimeOverrideResolver
+public class IssueWorkflowProfileManager : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IActionCatalogSource _catalogSource;
@@ -134,27 +134,10 @@ public class IssueWorkflowProfileManager : IScopedService, IAgentRuntimeOverride
         return row is null ? VariableBundle.Empty : VariableBundle.FromJson(row.Variables);
     }
 
-    public async Task<string?> GetAgentRuntimeOverrideAsync(string projectId, int issueNumber)
-    {
-        var variables = await GetVariablesAsync(projectId, issueNumber);
-        if (variables.Vars is not { ValueKind: JsonValueKind.Object } vars
-            || !vars.TryGetProperty("agent", out var agent)
-            || agent.ValueKind != JsonValueKind.Object
-            || !agent.TryGetProperty("runtime", out var runtime)
-            || runtime.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
-
-        var value = runtime.GetString();
-        return string.IsNullOrWhiteSpace(value) ? null : value;
-    }
-
     public async Task<VariableBundle> SetVariablesAsync(string projectId, int issueNumber, VariableBundle bundle)
     {
         VariableBundleShapeValidator.Validate(bundle);
-        ValidateAgentRuntimes(bundle);
-
+        RejectNamedAgentRuntime(bundle);
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.IssueWorkflowProfiles
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.IssueNumber == issueNumber);
@@ -179,6 +162,7 @@ public class IssueWorkflowProfileManager : IScopedService, IAgentRuntimeOverride
     public async Task<VariableBundle> PatchVariablesAsync(string projectId, int issueNumber, VariableBundle patch)
     {
         VariableBundleShapeValidator.Validate(patch);
+        RejectNamedAgentRuntime(patch);
         var current = await GetVariablesAsync(projectId, issueNumber);
         var merged = VariableBundle.Patch(current, patch);
         return await SetVariablesAsync(projectId, issueNumber, merged);
@@ -191,28 +175,21 @@ public class IssueWorkflowProfileManager : IScopedService, IAgentRuntimeOverride
     private static string CustomProfileId(string projectId, int issueNumber) =>
         $"issue-custom:{projectId}#{issueNumber}";
 
-    private static void ValidateAgentRuntimes(VariableBundle bundle)
+    private static void RejectNamedAgentRuntime(VariableBundle bundle)
     {
-        ValidateAgentRuntime(bundle.Vars, "vars.agent.runtime");
-        if (bundle.Stages is null) return;
-
-        foreach (var (stage, stageVariables) in bundle.Stages)
-            ValidateAgentRuntime(stageVariables.Vars, $"stages.{stage}.vars.agent.runtime");
-    }
-
-    private static void ValidateAgentRuntime(JsonElement? vars, string path)
-    {
-        if (vars is not { ValueKind: JsonValueKind.Object }
-            || !vars.Value.TryGetProperty("agent", out var agent)
-            || agent.ValueKind != JsonValueKind.Object)
+        if (ContainsRuntime(bundle.Vars)
+            || bundle.Stages?.Values.Any(stage => ContainsRuntime(stage.Vars)) == true)
         {
-            return;
+            throw new ArgumentException(
+                "vars.agent.runtime is not supported for Issue configuration; configure runtime on the Agent definition.");
         }
-
-        var error = AgentConfigSchema.ValidateRuntime(agent);
-        if (error is not null)
-            throw new ArgumentException(error.Replace("agentConfig.runtime", path, StringComparison.Ordinal));
     }
+
+    private static bool ContainsRuntime(JsonElement? vars) =>
+        vars is { ValueKind: JsonValueKind.Object }
+        && vars.Value.TryGetProperty("agent", out var agent)
+        && agent.ValueKind == JsonValueKind.Object
+        && agent.TryGetProperty("runtime", out _);
 
     private static async Task<IssueWorkflowProfile?> FindProfileAsync(
         MohistDbContext db,

@@ -155,10 +155,10 @@ public enum AgentJobStatus
 ///
 /// <para>
 /// The plan carries the resolved AgentJob input (model, variant,
-/// instructions, agent id, agent name, agent config JSON, prompt) so
-/// recovery after process loss does not re-read mutable Agent
-/// definitions. The agent config is stored as a raw JSON string so
-/// Orleans' serializer keeps the canonical bytes verbatim.
+/// instructions, agent id, agent name, agent config JSON, prompt,
+/// runtime, skills) so recovery after process loss does not re-read
+/// mutable Agent definitions. The agent config is stored as a raw JSON
+/// string so Orleans' serializer keeps the canonical bytes verbatim.
 /// </para>
 ///
 /// <para>
@@ -166,8 +166,16 @@ public enum AgentJobStatus
 /// captured here so editing the Agent's backend
 /// config after launch cannot change the in-flight execution; recovery
 /// reuses the snapshotted runtime rather than re-reading mutable
-/// Agent config. Field id is append-only (next free after Variant /
-/// Prompt).
+/// Agent config. Append-only Orleans field id (next free after Prompt).
+/// </para>
+///
+/// <para>
+/// <see cref="Skills"/> is the resolved ordered Skills snapshot
+/// captured at launch time so the Runner can resolve SKILL.md bodies
+/// from its configured roots without re-reading mutable Agent state.
+/// Absent on persisted plans written before this snapshot was added —
+/// the runner treats an absent list as empty. Append-only Orleans
+/// field id (next free after Runtime).
 /// </para>
 ///
 /// <para>
@@ -177,7 +185,7 @@ public enum AgentJobStatus
 /// stamps the durable failure-event envelope so the issue-grade
 /// <c>com.mohist.agent.job.failed</c> event carries the same
 /// workflow-run lineage as the routed launch source. Append-only
-/// Orleans field id (next free after Runtime).
+/// Orleans field id (next free after Skills).
 /// </para>
 /// </summary>
 [GenerateSerializer]
@@ -202,7 +210,8 @@ public sealed record RoutedAgentLaunchPlan(
     [property: Id(17)] string? Variant = null,
     [property: Id(18)] string? Prompt = null,
     [property: Id(19)] string? Runtime = null,
-    [property: Id(20)] string? WorkflowRunId = null);
+    [property: Id(20)] IReadOnlyList<string>? Skills = null,
+    [property: Id(21)] string? WorkflowRunId = null);
 
 /// <summary>
 /// Whether the canonical routed-launch plan is executable or already
@@ -296,7 +305,18 @@ public sealed record AgentJobInput(
     /// failure-event envelope can stamp the workflow-run lineage.
     /// Append-only Orleans field id (next free after EpicNumber).
     /// </summary>
-    [property: Id(12)] string? WorkflowRunId = null);
+    [property: Id(12)] string? WorkflowRunId = null,
+    /// <summary>
+    /// Ordered Skills captured at launch time from the resolved Agent
+    /// definition. Persisted on the durable AgentJob so the dispatch
+    /// envelope can deliver the configured Skill names to the Runner
+    /// for resolution against its configured Skill roots. Absent on
+    /// records written before this snapshot was added — both the
+    /// launcher and the dispatch builder treat an absent list as
+    /// empty (no Skill input reaches the selected Runtime). Append-only
+    /// Orleans field id (next free after WorkflowRunId).
+    /// </summary>
+    [property: Id(13)] IReadOnlyList<string>? Skills = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

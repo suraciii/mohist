@@ -21,9 +21,8 @@ public partial class WorkflowItemTranslatorSpecs
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var run = await SeedRunningWorkflowAsync(runId, "proj-agent-dispatch");
-        _agentResolver.Snapshot = new AgentExecutionSnapshot(
-            "Review the change.",
-            JsonSerializer.SerializeToElement(new { runtime, model = "model-a", variant = "fast" }));
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Review the change.", runtime, "model-a", "fast", ["mohist", "review"]);
 
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent", With("""
             { "name": "reviewer", "prompt": "Fix ${{ vars.target }}", "session": "review", "timeout": 123 }
@@ -40,6 +39,7 @@ public partial class WorkflowItemTranslatorSpecs
         var options = with.RootElement.GetProperty("options");
         Assert.Equal("model-a", options.GetProperty("model").GetString());
         Assert.Equal("fast", options.GetProperty("variant").GetString());
+        Assert.Equal(new[] { "mohist", "review" }, options.GetProperty("skills").EnumerateArray().Select(skill => skill.GetString()));
         Assert.False(options.TryGetProperty("instructions", out _));
         Assert.Equal(new[] { "model", "variant" }, options.EnumerateObject().Select(p => p.Name));
         Assert.Equal(4, with.RootElement.EnumerateObject().Count());
@@ -144,14 +144,12 @@ public partial class WorkflowItemTranslatorSpecs
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
             With("""{"name":"reviewer","prompt":"Review the change."}"""));
 
-        _agentResolver.Snapshot = new AgentExecutionSnapshot(
-            "Original instructions",
-            JsonSerializer.SerializeToElement(new { runtime = "opencode" }));
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Original instructions", "opencode", null, null, []);
         var first = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
 
-        _agentResolver.Snapshot = new AgentExecutionSnapshot(
-            "Edited instructions",
-            JsonSerializer.SerializeToElement(new { runtime = "opencode" }));
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Edited instructions", "opencode", null, null, []);
         var retried = await _translator.TranslateToDispatchAsync(
             item with { Id = "task-1.2" }, runId, run, "runner-1");
 
@@ -183,9 +181,8 @@ public partial class WorkflowItemTranslatorSpecs
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var run = await SeedRunningWorkflowAsync(runId, "proj-agent-malformed");
-        _agentResolver.Snapshot = new AgentExecutionSnapshot(
-            "Review the change.",
-            JsonSerializer.SerializeToElement(new { runtime = "opencode", model = "model-a" }));
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Review the change.", "opencode", "model-a", null, []);
 
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
             With(@"{ ""name"": ""  "", ""prompt"": ""Review the change."" }"));

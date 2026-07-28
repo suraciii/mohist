@@ -535,7 +535,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 Variant: plan.Variant,
                 IssueNumber: plan.IssueNumber,
                 EpicNumber: plan.EpicNumber,
-                WorkflowRunId: plan.WorkflowRunId);
+                WorkflowRunId: plan.WorkflowRunId,
+                Skills: plan.Skills);
             await SaveAsync();
 
             var reason = plan.PreflightReason ?? AgentJobFailureReasons.WorkspaceUnavailable;
@@ -568,7 +569,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 Variant: plan.Variant,
                 IssueNumber: plan.IssueNumber,
                 EpicNumber: plan.EpicNumber,
-                WorkflowRunId: plan.WorkflowRunId);
+                WorkflowRunId: plan.WorkflowRunId,
+                Skills: plan.Skills);
             State.AgentConfigJson = plan.AgentConfigJson;
             State.Input = input with { AgentConfig = null };
             State.SubmittedAt = _timeProvider.GetUtcNow();
@@ -840,6 +842,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         // select the right runtime (PiRuntime / OpenCodeRuntime).
         if (!string.IsNullOrWhiteSpace(input.Runtime))
             with["runtime"] = JSON.SerializeToElement(input.Runtime);
+        // Carry the captured ordered Skill names verbatim so the runner
+        // resolves SKILL.md bodies from its configured Skill roots
+        // (T-001 design D3). An empty/absent list means no Skills input
+        // — neither resolution nor a Skills envelope is emitted.
+        if (input.Skills is { Count: > 0 })
+            with["skills"] = JSON.SerializeToElement(input.Skills);
         var withJson = JSON.Serialize(with);
 
         return new WorkDispatch(

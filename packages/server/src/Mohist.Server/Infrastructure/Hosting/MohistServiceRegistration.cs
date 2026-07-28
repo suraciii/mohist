@@ -87,8 +87,6 @@ public static class MohistServiceRegistration
         // concrete type — scoped, like IssueQuerier.
         services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
-        services.AddScoped<IAgentRuntimeOverrideResolver>(sp =>
-            sp.GetRequiredService<Mohist.Server.Workflow.Services.IssueWorkflowProfileManager>());
         services.AddSingleton<IAgentJobWorkCoordinator>(sp => sp.GetRequiredService<AgentJobWorkCoordinator>());
         services.AddSingleton<Mohist.Server.Sessions.Services.IAgentSessionConnectionRegistry>(sp =>
             sp.GetRequiredService<Mohist.Server.Runner.Services.SignalR.RunnerConnectionTracker>());

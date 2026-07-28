@@ -301,11 +301,10 @@ EpicNumber: ReadEpicNumber(run),
         var composedPrompt = string.IsNullOrWhiteSpace(snapshot.Instructions)
             ? rawPrompt
             : $"{snapshot.Instructions}\n\n{rawPrompt}";
-        var model = ReadAgentConfigString(snapshot.AgentConfig, "model");
-        var variant = model is null ? null : ReadAgentConfigString(snapshot.AgentConfig, "variant");
         var options = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        if (model is not null) options["model"] = JSON.SerializeToElement(model);
-        if (variant is not null) options["variant"] = JSON.SerializeToElement(variant);
+        if (snapshot.Model is not null) options["model"] = JSON.SerializeToElement(snapshot.Model);
+        if (snapshot.Variant is not null) options["variant"] = JSON.SerializeToElement(snapshot.Variant);
+        if (snapshot.Skills.Count > 0) options["skills"] = JSON.SerializeToElement(snapshot.Skills);
 
         var transformed = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
@@ -315,7 +314,7 @@ EpicNumber: ReadEpicNumber(run),
         CopyIfPresent(with, transformed, "session");
         CopyIfPresent(with, transformed, "timeout");
 
-        return (ReadAgentConfigString(snapshot.AgentConfig, "runtime") switch
+        return (snapshot.Runtime switch
         {
             AgentConfigSchema.PiRuntime => "mohist/pi",
             _ => "mohist/opencode",

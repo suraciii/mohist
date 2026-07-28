@@ -186,7 +186,7 @@ public class AgentConfigSchemaTests
     }
 
     [Fact]
-    public void Filter_Dictionary_RoundTripsRuntimeAlongsideModelAndVariant()
+    public void Filter_Dictionary_DropsRuntimeAlongsideOtherIssueOnlyKeys()
     {
         var input = new Dictionary<string, object?>
         {
@@ -197,14 +197,14 @@ public class AgentConfigSchemaTests
         };
         var filtered = AgentConfigSchema.Filter(input);
         Assert.NotNull(filtered);
-        Assert.Equal(3, filtered!.Count);
+        Assert.Equal(2, filtered!.Count);
         Assert.Equal("openai/gpt-5.5", filtered["model"]?.ToString());
         Assert.Equal("high", filtered["variant"]?.ToString());
-        Assert.Equal("pi", filtered["runtime"]?.ToString());
+        Assert.DoesNotContain("runtime", filtered.Keys);
     }
 
     [Fact]
-    public void Filter_Dictionary_RuntimeOnlySurvives()
+    public void Filter_Dictionary_RuntimeOnlyIsDropped()
     {
         var input = new Dictionary<string, object?>
         {
@@ -212,8 +212,6 @@ public class AgentConfigSchemaTests
             ["type"] = "opencode",
         };
         var filtered = AgentConfigSchema.Filter(input);
-        Assert.NotNull(filtered);
-        Assert.Single(filtered!);
-        Assert.Equal("pi", filtered["runtime"]?.ToString());
+        Assert.Null(filtered);
     }
 }

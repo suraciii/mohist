@@ -265,10 +265,10 @@ public class AgentLauncherSpecs
     }
 
     [Fact]
-    public async Task LaunchRouted_WithIssueRuntimeOverride_OpensSessionWithOverride()
+    public async Task LaunchRouted_UsesAgentRuntimeWithoutIssueOverride()
     {
         var projectId = await CreateProjectAsync("launcher-routed-runtime-override");
-        var agent = await CreateAgentAsync(projectId, "routed-runtime-override-agent");
+        var agent = await CreateAgentAsync(projectId, "routed-runtime-override-agent", runtime: "pi");
         var eventId = $"evt-routed-runtime-override-{Guid.NewGuid():N}";
         var ruleId = "rule-routed-runtime-override";
         var sessionId = StableSessionId(projectId, eventId, ruleId);
@@ -278,7 +278,7 @@ public class AgentLauncherSpecs
             var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
             await launcher.LaunchRoutedAsync(
                 agent,
-                "use the issue override",
+                "use the agent runtime",
                 new RoutedExecutionContext(
                     WorkflowRunId: "workflow-runtime-override",
                     ProjectId: projectId,
@@ -293,7 +293,7 @@ public class AgentLauncherSpecs
                     time: DateTimeOffset.UnixEpoch,
                     data: null),
                 ruleId,
-                runtimeOverride: "pi");
+                ct: default);
         }
 
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -472,7 +472,7 @@ public class AgentLauncherSpecs
             ?? throw new InvalidOperationException($"CreateProject '{name}' returned no id");
     }
 
-    private async Task<AgentInfo> CreateAgentAsync(string projectId, string name)
+    private async Task<AgentInfo> CreateAgentAsync(string projectId, string name, string? runtime = null)
     {
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/agents",
@@ -481,7 +481,9 @@ public class AgentLauncherSpecs
                 name,
                 description = $"description for {name}",
                 instructions = $"instructions for {name}",
-                agentConfig = new { model = "openai/gpt-5.6" },
+                 agentConfig = runtime is null
+                     ? (object)new { model = "openai/gpt-5.6" }
+                     : new { model = "openai/gpt-5.6", runtime },
                 skills = new[] { "coding" },
                 maxConcurrentRuns = 1,
             });

@@ -42,7 +42,6 @@ public sealed class MohistServiceGraphRegistrationTests
         AssertSingleRegistration<InboxProjectionHandler>(services);
         AssertSingleRegistration<RoutingDispatchHandler>(services);
         AssertSingleRegistration<MentionDispatchHandler>(services);
-        AssertSingleRegistration<IAgentRuntimeOverrideResolver>(services);
         Assert.Equal(
             "Mohist.Server.Events.Subscriptions.RoutingDispatchHandler",
             typeof(RoutingDispatchHandler).GetCustomAttribute<SubscriptionAttribute>()?.Identity);
