@@ -6,7 +6,7 @@
 
 - 引入 Agent Readiness 结论：Ready / Needs setup / Unknown。Needs setup 指出可行动的配置缺口和修复入口；Unknown 表示 Mohist 暂时无法确认。Web、CLI 呈现 Mohist 给出的统一结论，不各自维护一套 Runtime 判断规则。
 - 引入 Agent Availability 结论，与 Readiness 分开：Runner 离线、容量不足或达到并发限制属于 Availability，不把 Ready Agent 改成 Needs setup。
-- 让 `MaxConcurrentRuns` 真正作为调度闸门对所有调用入口一致生效（含 launch 与 follow-up、Web / CLI / 事件路由 / 评论提及）：达到限制后提交的工作进入等待。该闸门是实时调度策略，不进入 Agent 执行定义快照，也不属于 AgentSession。
+- 让 `MaxConcurrentRuns` 真正作为调度闸门对所有调用入口一致生效（含 launch 与 follow-up、Web / CLI / 事件路由 / 评论提及）。launch 达到限制后进入等待；follow-up 在会开始新执行且达限制时，以可见、可重试的背压信号拒绝而非排队（v1 取舍：完整 follow-up 排队需在服务端物化 follow-up 输入与轮次并给会话加唤醒，列为后续）。该闸门是实时调度策略，不进入 Agent 执行定义快照，也不属于 AgentSession。
 - **BREAKING（行为）**：AgentJob 在没有 Runner 或容量、或达到并发限制时，不再以 `runner-unavailable` 终态失败，而是进入可见的等待状态，直到容量可用或被显式取消。
 - 调低 `MaxConcurrentRuns` 不会停止正在 active 的工作，也不改写或重启已有 AgentSession；调高后等待中的工作按新策略继续推进，无需用户重新提交。
 - 等待中的工作对用户可见，并说明它在等什么（Runner 离线、容量不足还是并发限制）。

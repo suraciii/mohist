@@ -12,11 +12,11 @@
 
 ### Requirement: The gate applies consistently to every entry point
 
-The concurrency gate SHALL apply to every entry point that starts or continues an execution — Web launch, CLI launch, event routing, comment mention, and follow-up — so that no entry point can bypass the Agent's current MaxConcurrentRuns. Both launches and follow-ups that would start a new execution are subject to the bound.
+The concurrency gate SHALL apply to every entry point that starts or continues an execution — Web launch, CLI launch, event routing, comment mention, and follow-up — so that no entry point can bypass the Agent's current MaxConcurrentRuns. Both launches and follow-ups that would start a new execution are subject to the bound. In this change a launch that would exceed the bound waits; a follow-up that would exceed the bound is rejected with a distinct retryable reason rather than queued (full follow-up queuing is a separate change).
 
 #### Scenario: Follow-up honors the gate
-- **WHEN** a follow-up is submitted to an AgentSession whose Agent has reached its MaxConcurrentRuns limit and would start a new execution
-- **THEN** the follow-up SHALL be subject to the gate and SHALL NOT bypass it merely because it continues an existing session
+- **WHEN** a follow-up that would start a new execution is submitted to an AgentSession whose Agent has reached its MaxConcurrentRuns limit
+- **THEN** the follow-up SHALL be subject to the gate and SHALL NOT bypass it merely because it continues an existing session; in this change it is rejected with a distinct retryable reason (not queued) so the caller retries with the same identity, while a follow-up to a busy session is unaffected by per-session serial execution
 
 #### Scenario: Every launch entry point honors the gate
 - **WHEN** a launch is submitted through any entry point for an Agent at its MaxConcurrentRuns limit

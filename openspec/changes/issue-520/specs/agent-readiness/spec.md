@@ -1,17 +1,17 @@
 ### Requirement: Readiness is one of three outcomes computed from the execution definition
 
-The Server SHALL compute an Agent Readiness conclusion from the Agent's execution definition (Instructions, Runtime, Model, Variant, Skills). The conclusion SHALL be exactly one of `Ready` (the Server has confirmed the definition is sufficient to execute), `Needs setup` (the Server has confirmed a configuration gap), or `Unknown` (the Server cannot currently confirm). The conclusion SHALL reflect the Agent's current definition and SHALL be re-evaluated when the definition changes.
+The Server SHALL compute an Agent Readiness conclusion from the Agent's execution definition (Instructions, Runtime, Model, Variant, Skills) together with what execution has already confirmed about that definition. The conclusion SHALL be exactly one of `Ready` (the definition is complete and the Server has confirmed no gap), `Needs setup` (the Server has confirmed a configuration gap), or `Unknown` (the Server cannot yet confirm). The conclusion SHALL reflect the Agent's current definition and SHALL be re-evaluated when the definition changes or when a new execution outcome is observed. The Server does not proactively probe Runtime credentials (it has no visibility into them); confirmation of executability comes from observed execution outcomes, not from reading a runtime capability catalog.
 
-#### Scenario: Definition confirmed executable
-- **WHEN** the Server can confirm the Agent's referenced Runtime, Model and Variant are executable under the current configuration
+#### Scenario: Complete definition confirmed by execution
+- **WHEN** the Agent's execution definition is structurally complete and consistent, the Server has confirmed no gap, and a prior execution has succeeded (positive evidence that the referenced Runtime, Model and Variant actually run)
 - **THEN** Readiness SHALL be `Ready`
 
 #### Scenario: Confirmed configuration gap
-- **WHEN** the Server confirms a referenced execution-definition input cannot execute (for example, a referenced Runtime whose required credentials are not configured)
+- **WHEN** the Server confirms a gap in the execution definition — a structural or consistency defect (for example a malformed model reference), or a configuration failure revealed by an execution (for example the most recent execution failed with a credential, model, or runtime error the Runner classified)
 - **THEN** Readiness SHALL be `Needs setup` and SHALL list the specific gap
 
-#### Scenario: Server cannot confirm
-- **WHEN** the Server cannot obtain the information needed to confirm whether the definition is executable (for example, the runtime capability catalog is not currently readable)
+#### Scenario: Server cannot yet confirm
+- **WHEN** the Agent has never executed or its most recent result is inconclusive, so the Server can neither confirm the definition executes nor confirm a gap
 - **THEN** Readiness SHALL be `Unknown`, which is neither `Ready` nor `Needs setup`
 
 ### Requirement: Needs setup gives actionable gaps
