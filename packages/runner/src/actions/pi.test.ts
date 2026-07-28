@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { piAction, PI_TURN_DURATION_MS } from "./pi.js"
-import type { JsonObject, ParentIssueContext } from "../core/types.js"
+import type { AgentExecutionDefinition, JsonObject, ParentIssueContext } from "../core/types.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { PiRuntime } from "../runtime/pi/index.js"
 
@@ -17,6 +17,7 @@ type ActionContext = {
   parentIssueContext?: ParentIssueContext | null
   piRuntime?: PiRuntime | null
   serverConnection?: ServerConnection | null
+  agentDefinition?: AgentExecutionDefinition | null
 }
 
 function context(overrides: Partial<ActionContext> = {}): ActionContext {
@@ -112,5 +113,31 @@ describe("mohist/pi Action", () => {
     const result = await piAction(context({ with: { prompt: "hello", options: { model: "provider/model", variant: "high", legacy: true } }, piRuntime: pi as never, serverConnection: connection as never, projectId: "project" }))
     expect(result).not.toHaveProperty("error")
     expect(pi.turns[0]).toMatchObject({ options: { model: "provider/model", variant: "high", unknownKeys: ["legacy"] } })
+  })
+
+  it("uses the dispatch-only Agent definition without expanding Action options", async () => {
+    const pi = runtime()
+    const connection = server()
+    const definition: AgentExecutionDefinition = {
+      instructions: "Review with the configured policy.",
+      runtime: "pi",
+      model: "provider/configured-model",
+      variant: "high",
+      skills: [],
+    }
+
+    const result = await piAction(context({
+      with: { prompt: "review this", options: { model: "provider/caller-model", variant: "low" } },
+      agentDefinition: definition,
+      piRuntime: pi as never,
+      serverConnection: connection as never,
+      projectId: "project",
+    }))
+
+    expect(result).not.toHaveProperty("error")
+    expect(pi.turns[0]).toMatchObject({
+      prompt: "Review with the configured policy.\n\nreview this",
+      options: { model: "provider/configured-model", variant: "high" },
+    })
   })
 })

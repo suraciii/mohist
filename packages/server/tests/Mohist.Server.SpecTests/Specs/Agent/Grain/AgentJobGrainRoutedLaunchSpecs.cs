@@ -190,12 +190,6 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         Assert.NotNull(info);
         Assert.Equal("pi", info!.Runtime);
 
-        var snapshot = await job.GetRuntimeSnapshotAsync();
-        Assert.NotNull(snapshot.ExecutionDefinition);
-        Assert.Equal("pi", snapshot.ExecutionDefinition!.Runtime);
-        Assert.Equal(plan.AgentInstructions, snapshot.ExecutionDefinition.Instructions);
-        Assert.Equal(plan.Skills ?? [], snapshot.ExecutionDefinition.Skills);
-
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);

@@ -152,9 +152,8 @@ public partial class WorkflowItemTranslatorSpecs
         var retried = await _translator.TranslateToDispatchAsync(
             item with { Id = "task-1.2" }, runId, run, "runner-1");
 
-        Assert.Contains("Original instructions", first.With, StringComparison.Ordinal);
-        Assert.Contains("Edited instructions", retried.With, StringComparison.Ordinal);
-        Assert.DoesNotContain("Original instructions", retried.With, StringComparison.Ordinal);
+        Assert.Equal("Original instructions", first.AgentDefinition!.Instructions);
+        Assert.Equal("Edited instructions", retried.AgentDefinition!.Instructions);
         Assert.NotEqual(first.WorkId, retried.WorkId);
     }
 
