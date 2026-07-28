@@ -1,9 +1,7 @@
-## Findings
+## Review
 
-### F1: Event bus source inventory remains unplanned
+The proposal, specification, design, and task graph cover the issue's delivery-latency, retry-state, observability, and documentation objectives. The event bus contract now explicitly inventories WorkflowRun, Issue, Epic, AgentSession, and AgentJob, matching the five origins queried by `IEventStore.ListUndeliveredAsync`; T-004 requires the final table and prose to agree.
 
-`design/eventbus.md` currently says Session events do not enter the bus and lists neither Epic nor AgentJob in its event inventory. This contradicts the dispatcher implementation, which persists and reads `AgentSessionEvents`, `EpicEvents`, and `AgentJobEvents` alongside WorkflowRun and Issue events. The proposal and spec require the document to become a trustworthy description of all durable producers, but T-004 only requires wording for backoff, pokes, retry reset, FIFO blocking, and the metric. It does not explicitly require correcting the inventory table.
+T-001 covers post-persistence Epic and AgentJob pokes with immediate-delivery and lost-poke recovery specs. T-002 covers retaining completed and dead-lettered handler state across a failed settlement write, while preserving the intentional process-restart reset. T-003 defines the untagged blocked-source gauge and deterministic telemetry coverage. The dependency graph is acyclic and the final documentation task depends on all implementation work.
 
-An implementation can therefore satisfy every stated T-004 acceptance criterion while leaving the document internally inconsistent: it can say all durable producers poke the dispatcher while its table still says Session is excluded and omits Epic/AgentJob. Add a T-004 acceptance criterion requiring the event inventory to enumerate the five durable origins consistently with `IEventStore.ListUndeliveredAsync`, and require the document review to verify the table and prose agree.
-
-<promise>FAIL</promise>
+<promise>PASS</promise>
