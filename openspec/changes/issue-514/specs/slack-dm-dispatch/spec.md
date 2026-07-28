@@ -10,8 +10,8 @@ When the Owner sends a task DM to the Bot, the Connection boundary SHALL invoke 
 - **WHEN** the Owner sends a DM whose text is empty or contains only the Bot mention and no usable attachment
 - **THEN** no AgentJob or SessionInput is created and the Bot asks the Owner to supply a task
 
-#### Scenario: A DM dispatched before Setup is complete is rejected
-- **WHEN** a DM arrives at a Connection whose Setup is not yet Complete (for example, before an Owner has been claimed)
+#### Scenario: A non-claim DM before Setup is complete is rejected
+- **WHEN** a DM that is not a valid pending owner-claim code arrives at a Connection whose Setup is not yet Complete
 - **THEN** the DM is rejected with an actionable reason and no AgentJob, AgentSession, SessionInput, AgentTurn, or inbox entry is created
 
 ### Requirement: The Bot reports acceptance, queue, or explicit rejection

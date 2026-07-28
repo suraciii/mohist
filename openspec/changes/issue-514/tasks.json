@@ -119,7 +119,7 @@
         "A bare mention without a task creates no work and the Bot asks the Owner to supply a task; the Bot replies accepted, queued, or an explicit rejection with an actionable reason.",
         "The terminal result is delivered to the same DM conversation; an unconfirmable result is surfaced honestly rather than fabricated.",
         "A second DM task dispatches an independent launch; this issue makes no continuation, queue-merge, or current-Session commitment.",
-        "The /ingress route classifies server-side and the adapter does not pre-classify: a DM dispatched before Setup is Complete is rejected with no Agent resources; a non-owner DM is rejected with no resources; a DM whose text matches a pending claim code is processed as a claim, not a task.",
+        "The /ingress route classifies server-side and the adapter does not pre-classify, with claim-code matching taking precedence over the Setup-not-Complete gate (a pending claim code can only exist once Setup has reached Claim owner): a DM whose text matches a pending claim code is processed as a claim, not a task; a non-claim DM dispatched before Setup is Complete is rejected with no Agent resources; a non-owner DM is rejected with no resources.",
         "The /adapter-session route authenticates the adapter, returns the decrypted App/Bot tokens, and records the Connection heartbeat; tokens never appear in logs.",
         "Adapter routes are authenticated by the operator token and resolve the Connection before any dispatch.",
         "Server tests use fake dispatch, fake storage, and injectable TimeProvider with no real network; npm test passes."
