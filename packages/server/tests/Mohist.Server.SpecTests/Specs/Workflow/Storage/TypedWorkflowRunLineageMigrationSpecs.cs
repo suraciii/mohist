@@ -66,6 +66,40 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
         }
     }
 
+    [Theory]
+    [InlineData("42junk", "numeric suffix")]
+    [InlineData("1e2", "scientific notation")]
+    [InlineData("1.5", "decimal")]
+    [InlineData("042", "leading zeros")]
+    [InlineData("+5", "explicit sign")]
+    public async Task Up_PreservesMalformedLegacyIssueNumberInsteadOfFabricatingIdentity(string issueNumber, string label)
+    {
+        await using var database = TestSqliteDatabase.CreateEmpty();
+        MigratedSqliteTemplate.CopyTo(database.Keeper, BeforeMigration);
+
+        await using (var db = database.CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "EpicNumber", "ETag")
+                VALUES ('wr_malformed', {LegacyAnnotationState(issueNumber)}, NULL, 1);
+                """);
+            await db.Database.GetService<IMigrator>().MigrateAsync(Migration);
+        }
+
+        await using (var db = database.CreateContext())
+        {
+            var row = await db.WorkflowRuns.SingleAsync(x => x.WorkflowRunId == "wr_malformed");
+            using var json = JsonDocument.Parse(row.State);
+            var metadata = json.RootElement.GetProperty("metadata");
+            var annotations = metadata.GetProperty("annotations");
+            Assert.True(annotations.TryGetProperty("issueNumber", out var preservedIssue), $"{label}: legacy issueNumber annotation must be preserved");
+            Assert.Equal(issueNumber, preservedIssue.GetString());
+            Assert.True(annotations.TryGetProperty("projectId", out _), $"{label}: legacy projectId annotation must be preserved");
+            Assert.False(metadata.TryGetProperty("issueNumber", out _), $"{label}: no typed issueNumber must be fabricated");
+            Assert.False(metadata.TryGetProperty("projectId", out _), $"{label}: no typed projectId must be fabricated");
+        }
+    }
+
     private static async Task<IReadOnlyList<string>> ReadValuesAsync(DbContext db, string sql)
     {
         await using var command = db.Database.GetDbConnection().CreateCommand();
@@ -77,4 +111,7 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
             values.Add(reader.GetString(0));
         return values;
     }
+
+    private static string LegacyAnnotationState(string issueNumber) =>
+        "{\"id\":\"wr_malformed\",\"metadata\":{\"createdAt\":\"2026-01-01T00:00:00Z\",\"annotations\":{\"projectId\":\"proj_1\",\"issueNumber\":\"" + issueNumber + "\"}},\"status\":\"Running\",\"stages\":[]}";
 }

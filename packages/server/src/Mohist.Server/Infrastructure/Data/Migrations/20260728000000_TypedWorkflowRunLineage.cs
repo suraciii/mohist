@@ -96,7 +96,17 @@ public partial class TypedWorkflowRunLineage : Migration
                 json_extract("State", '$.metadata.annotations.issueNumber'),
                 json_extract("State", '$.metadata.annotations.IssueNumber'),
                 json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) > 0;
+                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) > 0
+          AND COALESCE(
+                json_extract("State", '$.metadata.annotations.issueNumber'),
+                json_extract("State", '$.metadata.annotations.IssueNumber'),
+                json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                json_extract("State", '$.Metadata.Annotations.IssueNumber')) =
+              CAST(CAST(COALESCE(
+                json_extract("State", '$.metadata.annotations.issueNumber'),
+                json_extract("State", '$.metadata.annotations.IssueNumber'),
+                json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) AS TEXT);
 
         UPDATE "WorkflowRuns"
         SET "State" = json_set(
@@ -121,7 +131,13 @@ public partial class TypedWorkflowRunLineage : Migration
                 json_extract("State", '$.Metadata.Annotations.ProjectId')))) > 0
           AND CAST(COALESCE(
                 json_extract("State", '$.Metadata.Annotations.issueNumber'),
-                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) > 0;
+                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) > 0
+          AND COALESCE(
+                json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                json_extract("State", '$.Metadata.Annotations.IssueNumber')) =
+              CAST(CAST(COALESCE(
+                json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER) AS TEXT);
         """;
 
     private const string TypedToLegacyJson = """
