@@ -38,17 +38,11 @@ Epic priority rates the **milestone's** importance, not any single issue's. Use
 ### Creating an epic
 
 ```bash
-mo epic create "<title>" --description "<markdown>" --priority p2
-# --description: the milestone markdown (see epic-templates.md)
+mo epic create "<title>" --description-file ./epic.md --priority p2
+# --description-file: the milestone markdown (see epic-templates.md); use - for stdin
 # --priority: p0|p1|p2|p3
 # --project <id>: target project (else active project)
 ```
-
-Note: `mo epic create` currently takes the description inline via `--description` only; there
-is no `--description-file` yet. For long descriptions, write the markdown to a
-file first, then pass its contents to `--description` via your shell, or use the API. (A
-`--description-file` flag to match `mo issue create --body-file` is tracked as a
-follow-up.)
 
 ### Linking issues to an epic
 
@@ -108,7 +102,7 @@ epic). This makes autopilot safe to retry from automation without bookkeeping.
 A `running` epic can be observable-but-not-advancing when there are still open
 linked issues but **no startable next issue right now** (e.g. waiting on a
 dependency, next issue is blocked). This **running-but-idle** is NOT a separate
-state — the epic's `status` stays `running`, and `progress.nextIssueReason` in
+state — the epic's `status` stays `running`, and the top-level `nextIssueReason` in
 `mo epic view` explains why. Use it to decide whether to wait, set
 prerequisites, or `Pause` to stop the autopilot until you can unblock it.
 
@@ -119,7 +113,7 @@ mo epic pause  <epic-id-or-number>   # running → paused (current issue keeps r
 mo epic resume <epic-id-or-number>   # paused → running
 
 # Check why a running epic is idle
-mo epic view <epic-id-or-number>     # inspect progress.nextIssue + nextIssueReason
+mo epic view <epic-id-or-number>     # inspect nextIssueNumber + nextIssueReason
 ```
 
 **Recommend autopilot over manual per-issue starts.** Manually `mo issue start`
