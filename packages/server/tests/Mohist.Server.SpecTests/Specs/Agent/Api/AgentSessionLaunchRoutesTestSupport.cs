@@ -184,6 +184,74 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
     }
 
+    /// <summary>
+    /// Issue-512 T-001: POST a manual launch with a generated
+    /// Idempotency-Key header. The route now requires the header (the
+    /// coordinator owns the durable launch identity); existing tests
+    /// that do not assert on idempotency semantics use a per-test
+    /// GUID so the launch returns a fresh plan.
+    /// </summary>
+    protected Task<HttpResponseMessage> LaunchAsync(string projectId, string agentId, object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/projects/{projectId}/agents/{agentId}/sessions")
+        {
+            Content = JsonContent.Create(body),
+        };
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        return _fixture.Client.SendAsync(request);
+    }
+
+    /// <summary>
+    /// Issue-512 T-001: send a launch request with the supplied
+    /// Idempotency-Key. Replays and conflict-resolution assertions
+    /// use this so the test owns the key shape (the helper's
+    /// <see cref="LaunchAsync(string,string,object)"/> uses a fresh
+    /// GUID per call).
+    /// </summary>
+    protected Task<HttpResponseMessage> LaunchAsync(string projectId, string agentId, object body, string idempotencyKey)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/projects/{projectId}/agents/{agentId}/sessions")
+        {
+            Content = JsonContent.Create(body),
+        };
+        request.Headers.Add("Idempotency-Key", idempotencyKey);
+        return _fixture.Client.SendAsync(request);
+    }
+
+    /// <summary>
+    /// Issue-512 T-001: send a launch request without an
+    /// Idempotency-Key header. Used to assert the 400
+    /// missing-header rejection gate.
+    /// </summary>
+    protected Task<HttpResponseMessage> LaunchWithoutIdempotencyKeyAsync(string projectId, string agentId, object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/projects/{projectId}/agents/{agentId}/sessions")
+        {
+            Content = JsonContent.Create(body),
+        };
+        return _fixture.Client.SendAsync(request);
+    }
+
+    /// <summary>
+    /// Companion to <see cref="LaunchAsync(string,string,object)"/>
+    /// for test classes that do not inherit from this support (the
+    /// Sessions spec layer uses its own support). Returns a
+    /// configured <see cref="HttpRequestMessage"/> the caller
+    /// forwards to its own client.
+    /// </summary>
+    public static HttpRequestMessage BuildLaunchRequest(string projectId, string agentId, object body, string? idempotencyKey = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/projects/{projectId}/agents/{agentId}/sessions")
+        {
+            Content = JsonContent.Create(body),
+        };
+        if (!string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            request.Headers.Add("Idempotency-Key", idempotencyKey);
+        }
+        return request;
+    }
+
     protected async Task<AgentRef> CreateAgentAsync(string projectId, string name, string runtime)
     {
         using var response = await _fixture.Client.PostAsJsonAsync(

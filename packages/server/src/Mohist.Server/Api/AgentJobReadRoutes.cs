@@ -67,7 +67,7 @@ public static class AgentJobReadRoutes
             {
                 if (!Enum.TryParse<AgentJobStatus>(token, ignoreCase: true, out var parsed))
                     return ApiResults.BadRequest(
-                        $"Unknown status '{token}'. Valid values: pending, running, completed, failed.");
+                        $"Unknown status '{token}'. Valid values: pending, running, completed, failed, unknown.");
                 statusSet.Add(parsed);
             }
         }
@@ -101,6 +101,10 @@ public static class AgentJobReadRoutes
 
         var status = await grain.GetStatusAsync();
         var isTerminal = status is AgentJobStatus.Completed or AgentJobStatus.Failed;
+        // Issue-512 T-002: Unknown is nonterminal; surface it without
+        // the terminal-result fields. Callers consume it as a
+        // nonterminal, non-dispatchable state — neither successful
+        // nor failed — and act on it via the launch-observation read.
 
         string? message = null;
         string? output = null;
@@ -134,6 +138,7 @@ public static class AgentJobReadRoutes
         AgentJobStatus.Running => "running",
         AgentJobStatus.Completed => "completed",
         AgentJobStatus.Failed => "failed",
+        AgentJobStatus.Unknown => "unknown",
         _ => "unknown",
     };
 }

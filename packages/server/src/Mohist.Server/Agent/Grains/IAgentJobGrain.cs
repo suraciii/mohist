@@ -50,7 +50,63 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// status and no longer recognises the runner/work pair).
     /// </summary>
     Task FailAsync(string reason, string? agentId = null);
+
+    /// <summary>
+    /// Idempotent manual-launch preparation entry point (issue-512
+    /// T-001). The coordinator passes the resolved launch snapshot
+    /// (prompt, agent id, runtime, agent session id, generated input
+    /// and turn ids) the first time it converges; the grain stores
+    /// the snapshot as <c>ManualPlan</c> and returns the canonical
+    /// record on every subsequent call. The grain does not dispatch
+    /// until <see cref="SubmitPreparedLaunchAsync"/> is called.
+    /// </summary>
+    Task<AgentJobInput> PrepareManualLaunchAsync(PrepareManualLaunchCommand command) =>
+        Task.FromResult(new AgentJobInput(command.Prompt, AgentId: command.AgentId, AgentSessionId: command.SessionId, InitialInputId: command.InputId, InitialTurnId: command.TurnId));
+
+    /// <summary>
+    /// Submit a previously-prepared manual launch to dispatch. The
+    /// grain is idempotent: a re-submit with the same input is a
+    /// no-op that bumps dispatch attempts if needed. The grain
+    /// refuses to submit when the launch record is missing or
+    /// belongs to a different plan.
+    /// </summary>
+    Task SubmitPreparedLaunchAsync() => Task.CompletedTask;
+
+    /// <summary>
+    /// Move a non-terminal AgentJob to <see cref="AgentJobStatus.Unknown"/>
+    /// (issue-512 T-002). Used when a Runner disconnect, a status
+    /// timeout, or any inconclusive delivery leaves the original
+    /// first execution unverifiable. The grain preserves the durable
+    /// Job/work/input/turn identities; an authoritative running or
+    /// terminal report later resolves the original Job rather than
+    /// minting a replacement. Idempotent: re-issuing with the same
+    /// reason is a no-op while the Job remains Unknown; a terminal
+    /// Job or a Job already moving to Unknown with a different
+    /// reason is left untouched so the existing transition path is
+    /// never overwritten.
+    /// </summary>
+    Task MarkUnknownAsync(string reason) => Task.CompletedTask;
+
+    Task ReconcileRunningAsync(string runnerId, string workId) => Task.CompletedTask;
 }
+
+[GenerateSerializer]
+public sealed record PrepareManualLaunchCommand(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] string InputId,
+    [property: Id(2)] string TurnId,
+    [property: Id(3)] string Prompt,
+    [property: Id(4)] string? Model = null,
+    [property: Id(5)] string? WorkspacePath = null,
+    [property: Id(6)] string? ProjectId = null,
+    [property: Id(7)] string? Runtime = null,
+    [property: Id(8)] string? AgentId = null,
+    [property: Id(9)] string? AgentInstructions = null,
+    [property: Id(10)] System.Text.Json.JsonElement? AgentConfig = null,
+    [property: Id(11)] string? Variant = null,
+    [property: Id(12)] int? IssueNumber = null,
+    [property: Id(13)] int? EpicNumber = null,
+    [property: Id(14)] string? WorkflowRunId = null);
 
 [GenerateSerializer]
 public sealed record AgentJobReportResult(
@@ -67,7 +123,27 @@ public sealed record AgentJobRuntimeSnapshot(
     [property: Id(5)] bool RunnerAccepted = false,
     [property: Id(6)] bool HasPendingSessionClose = false,
     [property: Id(7)] string? ProjectId = null,
-    [property: Id(8)] AgentExecutionDefinition? ExecutionDefinition = null);
+    [property: Id(8)] AgentExecutionDefinition? ExecutionDefinition = null,
+    /// <summary>
+    /// Linked AgentSession id captured at launch time (issue-512
+    /// T-002). Surface so the composite observation assembler can
+    /// resolve the Session without re-reading the AgentJob input
+    /// snapshot. Null for legacy jobs that pre-date the manual
+    /// coordinator path.
+    /// </summary>
+    [property: Id(9)] string? AgentSessionId = null,
+    /// <summary>
+    /// Launch-time <c>SessionInput</c> id the coordinator durably
+    /// recorded on the AgentSession. Surface so the observation
+    /// assembler can correlate the durable identities without
+    /// round-tripping through the AgentSession.
+    /// </summary>
+    [property: Id(10)] string? InitialInputId = null,
+    /// <summary>
+    /// Launch-time <c>AgentTurn</c> id the coordinator durably
+    /// recorded on the AgentSession.
+    /// </summary>
+    [property: Id(11)] string? InitialTurnId = null);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending
@@ -134,7 +210,17 @@ public enum AgentJobStatus
     Pending,
     Running,
     Completed,
-    Failed
+    Failed,
+    /// <summary>
+    /// Nonterminal, non-dispatchable state (issue-512 T-002). The
+    /// AgentJob grain could not confirm whether the original work
+    /// accepted or completed the prompt; the durable identities (job,
+    /// work, input, turn) are preserved for reconciliation but the
+    /// job MUST NOT auto-replay or synthesise a failed/completed
+    /// verdict. Resolves only on authoritative running or terminal
+    /// Runner evidence.
+    /// </summary>
+    Unknown,
 }
 
 /// <summary>
@@ -318,7 +404,24 @@ public sealed record AgentJobInput(
     /// empty (no Skill input reaches the selected Runtime). Append-only
     /// Orleans field id (next free after WorkflowRunId).
     /// </summary>
-    [property: Id(13)] IReadOnlyList<string>? Skills = null);
+    [property: Id(13)] IReadOnlyList<string>? Skills = null,
+    /// Stable id of the launch-time <c>SessionInput</c> the
+    /// coordinator durably recorded on the AgentSession before the
+    /// AgentJob dispatched. The runner uses this to correlate its
+    /// own reports with the durable input identity and to skip
+    /// emitting a duplicate <c>session.input</c> record for an
+    /// AgentJob launch (<see cref="Issue512"/> T-001). Append-only
+    /// Orleans field id (next free after WorkflowRunId).
+    /// </summary>
+    [property: Id(14)] string? InitialInputId = null,
+    /// <summary>
+    /// Stable id of the launch-time <c>AgentTurn</c> the coordinator
+    /// recorded on the AgentSession. The Runner correlates its
+    /// executing/terminal progress with this id so the Session's
+    /// turn status stays consistent with the Job's lifecycle.
+    /// Append-only Orleans field id (next free after InitialInputId).
+    /// </summary>
+    [property: Id(15)] string? InitialTurnId = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

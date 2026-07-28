@@ -51,6 +51,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IServiceProvider Services => _factory.Services;
     public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
+    public AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
     public AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
@@ -246,6 +247,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IAgentJobDispatchObserver>();
             services.AddSingleton<AgentJobDispatchProbe>();
             services.AddSingleton<IAgentJobDispatchObserver>(provider => provider.GetRequiredService<AgentJobDispatchProbe>());
+            services.RemoveAll<IAgentLaunchParticipantProbe>();
+            services.AddSingleton<AgentLaunchParticipantProbe>();
+            services.AddSingleton<IAgentLaunchParticipantProbe>(provider => provider.GetRequiredService<AgentLaunchParticipantProbe>());
             services.RemoveAll<IAgentSessionPersistenceObserver>();
             services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
             services.RemoveAll<IHubContext<RunnerHub>>();

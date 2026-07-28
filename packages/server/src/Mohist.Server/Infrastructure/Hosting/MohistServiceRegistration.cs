@@ -86,6 +86,7 @@ public static class MohistServiceRegistration
         // without taking on the concrete type. Lifetime matches the
         // concrete type — scoped, like IssueQuerier.
         services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
+        services.AddScoped<AgentLaunchObservationAssembler>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
         services.AddSingleton<IAgentJobWorkCoordinator>(sp => sp.GetRequiredService<AgentJobWorkCoordinator>());
         services.AddSingleton<Mohist.Server.Sessions.Services.IAgentSessionConnectionRegistry>(sp =>
@@ -167,6 +168,7 @@ public static class MohistServiceRegistration
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
         services.TryAddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         services.TryAddSingleton<IAgentSessionPersistenceObserver>(NoopAgentSessionPersistenceObserver.Instance);
+        services.TryAddSingleton<IAgentLaunchParticipantProbe>(NoopAgentLaunchParticipantProbe.Instance);
         services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName));
         services.Configure<CleanupPolicyOptions>(configuration.GetSection(CleanupPolicyOptions.SectionName));
         var otelOptions = configuration

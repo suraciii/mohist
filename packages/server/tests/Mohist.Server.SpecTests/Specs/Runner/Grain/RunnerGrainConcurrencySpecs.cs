@@ -291,7 +291,7 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
             var runtime = await runner.GetRuntimeStateAsync();
             Assert.Equal(RunnerStatus.Offline, runtime.Status);
             Assert.Empty(runtime.ActiveWorks);
-            Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+            Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
             Assert.Equal("runner-lost", terminal.FailureReason);
             var rejected = await job.GetRuntimeSnapshotAsync();
             Assert.Null(rejected.RunnerId);

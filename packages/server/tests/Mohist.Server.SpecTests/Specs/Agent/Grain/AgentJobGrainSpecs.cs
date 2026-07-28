@@ -319,7 +319,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task RunningJob_WithoutReport_JobTimeout_TransitionsToFailed()
+    public async Task RunningJob_WithoutReport_JobTimeout_TransitionsToUnknown()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-timeout-runner-{Guid.NewGuid():N}");
         var jobKey = $"agent-job-timeout-{Guid.NewGuid():N}";
@@ -333,8 +333,8 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         await job.CheckTimeoutsAsync();
 
         var terminal = await job.GetTerminalResultAsync();
-        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
-        Assert.Equal(AgentJobFailureReasons.ReportTimeout, terminal.FailureReason);
+        Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
+        Assert.StartsWith(AgentJobFailureReasons.ReportTimeout, terminal.FailureReason, StringComparison.Ordinal);
     }
 
     [Fact]

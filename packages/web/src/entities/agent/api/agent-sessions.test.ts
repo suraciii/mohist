@@ -13,9 +13,23 @@ import {
   getGenericSessionTranscript,
   launchAgentSession,
   launchAgentSessionMutationOptions,
+  getAgentLaunchObservationMeaning,
   postGenericFollowup,
 } from './agent-sessions'
 useMswServer()
+
+describe('getAgentLaunchObservationMeaning', () => {
+  it.each([
+    ['accepted', 'observe'],
+    ['queued', 'observe'],
+    ['executing', 'observe'],
+    ['completed', 'result'],
+    ['failed', 'result'],
+    ['Unknown', 'reconcile'],
+  ] as const)('maps %s from the DTO without using Session activity', (turnStatus, meaning) => {
+    expect(getAgentLaunchObservationMeaning({ turnStatus })).toBe(meaning)
+  })
+})
 
 function createInvalidationClient() {
   return { invalidateQueries: vi.fn() }
@@ -96,6 +110,20 @@ describe('launchAgentSession (client fn)', () => {
         body: { prompt: 'Hello', context: { issueNumber: 42, } },
       },
     ])
+  })
+
+  it('forwards the idempotency key as a request header', async () => {
+    let key = ''
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentRef/sessions', ({ request }) => {
+        key = request.headers.get('Idempotency-Key') ?? ''
+        return HttpResponse.json({ success: true, data: { sessionId: 's1' } })
+      }),
+    )
+
+    await launchAgentSession('proj-1', 'agent-foo', { prompt: 'Hello' }, 'retry-key')
+
+    expect(key).toBe('retry-key')
   })
 })
 

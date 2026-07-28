@@ -7,8 +7,14 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
 {
     private readonly ConcurrentDictionary<string, TaskCompletionSource<AgentJobDispatchAssignment>> _accepted =
         new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> _preparedCounts =
+        new(StringComparer.Ordinal);
 
-    public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId) => Task.CompletedTask;
+    public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId)
+    {
+        _preparedCounts.AddOrUpdate(agentJobId, 1, (_, count) => count + 1);
+        return Task.CompletedTask;
+    }
 
     public Task RunnerAcceptedAsync(string agentJobId, string runnerId, string workId)
     {
@@ -18,6 +24,9 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
 
     public Task<AgentJobDispatchAssignment> WaitForRunnerAcceptedAsync(string agentJobId) =>
         Signal(agentJobId).Task;
+
+    public int PreparedCount(string agentJobId) =>
+        _preparedCounts.GetValueOrDefault(agentJobId);
 
     private TaskCompletionSource<AgentJobDispatchAssignment> Signal(string agentJobId) =>
         _accepted.GetOrAdd(agentJobId, _ => new(

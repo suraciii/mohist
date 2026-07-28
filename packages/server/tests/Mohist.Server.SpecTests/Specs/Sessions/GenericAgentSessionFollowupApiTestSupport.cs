@@ -69,9 +69,7 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/agents/{agent.Id}/sessions",
-            new { prompt = $"hello from {name}" });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = $"hello from {name}" });
 
         response.EnsureSuccessStatusCode();
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
