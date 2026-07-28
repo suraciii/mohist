@@ -56,7 +56,7 @@
         "The persisted WorkDispatch is reused unchanged after Agent edits, server restart, or grain activation; retry creates a new attempt using the then-current Agent definition",
         "Workflow profile save and validation remain Agent-existence-independent and checks remain unsupported",
         "A missing or archived Agent fails before Runner offer with TaskRun.Error.code equal to agent_not_found, without creating AgentJob or direct AgentSession state",
-        "Workflow translator and Server spec tests cover both OpenCode and Pi envelopes, snapshot reoffer, retry re-resolution, empty Skills, and structured resolution failure; npm test passes without real Runtime, network, process, filesystem, or wall-clock dependencies"
+        "Workflow translator and Server/Runner integration tests cover both OpenCode and Pi envelopes, snapshot reoffer, retry re-resolution, empty Skills, skill_not_found before Runtime submission, and structured Agent resolution failure; npm test passes without real Runtime, network, process, filesystem, or wall-clock dependencies"
       ],
       "priority": 3,
       "mode": "AFK",
