@@ -131,6 +131,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
 
         var final = _state.State.Plan
             ?? throw new InvalidOperationException("Coordinator plan disappeared after advance.");
+        if (!final.Completed)
+            throw new LaunchSetupPendingException(final.IdempotencyKey);
         return new AgentLaunchCoordinatorResult(
             JobKey: final.JobKey,
             SessionId: final.SessionId,
@@ -161,6 +163,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
 
         var final = _state.State.Plan
             ?? throw new InvalidOperationException("Coordinator plan disappeared after resume.");
+        if (!final.Completed)
+            throw new LaunchSetupPendingException(final.IdempotencyKey);
         return new AgentLaunchCoordinatorResult(
             JobKey: final.JobKey,
             SessionId: final.SessionId,

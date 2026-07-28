@@ -122,6 +122,17 @@ public sealed class LaunchIdempotencyConflictException : Exception
     public sealed record Serialized(string IdempotencyKey, string ExistingFingerprint);
 }
 
+public sealed class LaunchSetupPendingException : Exception
+{
+    public LaunchSetupPendingException(string idempotencyKey)
+        : base("Agent launch setup is still recovering. Retry with the original Idempotency-Key.")
+    {
+        IdempotencyKey = idempotencyKey;
+    }
+
+    public string IdempotencyKey { get; }
+}
+
 public static class AgentLaunchCoordinatorCodec
 {
     /// <summary>

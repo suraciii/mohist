@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -116,6 +117,44 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
         var payload = await replay.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("launch_idempotency_conflict", payload.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Coordinator_DoesNotReturnLaunchResultUntilSetupCompletes()
+    {
+        var projectId = $"launch-setup-pending-{Guid.NewGuid():N}";
+        const string idempotencyKey = "launch-setup-pending";
+        var request = new AgentLaunchCoordinatorRequest(
+            Prompt: "persist before accepting",
+            AgentRef: "agent-1",
+            Runtime: null,
+            WorkspacePath: null,
+            IssueNumber: null,
+            EpicNumber: null,
+            Repository: null,
+            Title: null);
+        var coordinator = _fixture.Grains.GetGrain<IAgentLaunchCoordinatorGrain>(
+            AgentLaunchCoordinatorCodec.KeyFor(projectId, idempotencyKey));
+        var command = new AgentLaunchCoordinatorCommandEnvelope(
+            ProjectId: projectId,
+            IdempotencyKey: idempotencyKey,
+            AgentId: "agent-1",
+            AgentName: "Agent",
+            AgentInstructions: null,
+            AgentConfigJson: "{",
+            Model: null,
+            Variant: null,
+            Runtime: null,
+            Prompt: request.Prompt,
+            WorkspacePath: null,
+            IssueNumber: null,
+            EpicNumber: null,
+            Repository: null,
+            Title: null,
+            Request: request);
+
+        await Assert.ThrowsAsync<LaunchSetupPendingException>(() => coordinator.LaunchAsync(command));
+        await Assert.ThrowsAsync<LaunchSetupPendingException>(() => coordinator.ResumeAsync(request));
     }
 
     private static async Task<LaunchReferences> LaunchReferencesAsync(HttpResponseMessage response)

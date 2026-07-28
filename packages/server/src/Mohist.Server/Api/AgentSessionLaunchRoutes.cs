@@ -125,6 +125,10 @@ public static class AgentSessionLaunchRoutes
                     "launch_idempotency_conflict",
                     new { idempotencyKey = ex.IdempotencyKey });
             }
+            catch (LaunchSetupPendingException ex)
+            {
+                return LaunchSetupPending(ex);
+            }
 
             if (string.IsNullOrWhiteSpace(prompt))
             {
@@ -178,6 +182,10 @@ public static class AgentSessionLaunchRoutes
                     "launch_idempotency_conflict",
                     new { idempotencyKey = ex.IdempotencyKey });
             }
+            catch (LaunchSetupPendingException ex)
+            {
+                return LaunchSetupPending(ex);
+            }
 
             return AcceptedLaunch(project.Id, result);
         });
@@ -203,6 +211,13 @@ public static class AgentSessionLaunchRoutes
                         ObservationUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}/launch-observation")),
                 statusCode: 201);
     }
+
+    private static IResult LaunchSetupPending(LaunchSetupPendingException exception) =>
+        ApiResults.Fail(
+            exception.Message,
+            StatusCodes.Status503ServiceUnavailable,
+            "launch_setup_pending",
+            new { idempotencyKey = exception.IdempotencyKey });
 
     private static async Task<IResult?> ValidateContextAsync(
         AgentSessionLaunchContextRef? context,
