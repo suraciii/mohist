@@ -18,7 +18,7 @@ public class CliAgentModelListCommandSpecs
         return (http, handler, output, error, fs, executor, env);
     }
 
-    private static object OpencodeModelsPayload(
+    private static object AgentModelPayload(
         string[]? models = null,
         object? modelVariants = null)
     {
@@ -40,7 +40,7 @@ public class CliAgentModelListCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = OpencodeModelsPayload(),
+                data = AgentModelPayload(),
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -66,7 +66,7 @@ public class CliAgentModelListCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = OpencodeModelsPayload(),
+                data = AgentModelPayload(),
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -90,7 +90,7 @@ public class CliAgentModelListCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = OpencodeModelsPayload(modelVariants: variants),
+                data = AgentModelPayload(modelVariants: variants),
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -145,7 +145,7 @@ public class CliAgentModelListCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = OpencodeModelsPayload(),
+                data = AgentModelPayload(),
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(

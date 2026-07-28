@@ -152,8 +152,8 @@ public class EpicApiSpecs : EpicApiTestSupport
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/issues", new { issueNumber = issue.Number });
         var issueDetail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
-        Assert.NotNull(issueDetail.PrimaryEpic);
-        Assert.Equal(epic.Number, issueDetail.PrimaryEpic!.Number);
+        Assert.NotNull(issueDetail.Epic);
+        Assert.Equal(epic.Number, issueDetail.Epic!.Number);
     }
 
     [Fact]

@@ -12,24 +12,28 @@ internal static class RepositoryCommands
         repository.Subcommands.Add(BuildList(api));
         repository.Subcommands.Add(BuildCreate(api));
         repository.Subcommands.Add(BuildEdit(api));
-        repository.Subcommands.Add(BuildSetDefault(api));
         repository.Subcommands.Add(BuildDelete(api));
 
+        return repository;
+    }
+
+    internal static Command BuildProjectRepository(MohistCliApi api)
+    {
+        var repository = new Command("repo", "Project repository operations");
+        repository.Subcommands.Add(BuildSetDefault(api));
         return repository;
     }
 
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List repositories");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RepoList)));
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             var (mode, exit) = api.ResolveOutputMode(output);
 
@@ -39,7 +43,7 @@ internal static class RepositoryCommands
 
             async Task<int> ListAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintWithOutputAsync(
                     ProjectRepositoriesPath(resolvedProjectId),
@@ -54,17 +58,16 @@ internal static class RepositoryCommands
     {
         var cmd = new Command("create", "Create a repository");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
-        var gitUrlOpt = new Option<string>("--git-url", "-u") { Description = "Git URL" };
-        var baseBranchOpt = new Option<string?>("--base-branch", "-b") { Description = "Base branch" };
-        var setDefaultOpt = new Option<bool>("--set-default", "-d") { Description = "Set as default repository" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var gitUrlOpt = new Option<string>("--git-url") { Description = "Git URL" };
+        var baseBranchOpt = new Option<string?>("--base-branch") { Description = "Base branch" };
+        var setDefaultOpt = new Option<bool>("--set-default") { Description = "Set as default repository" };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RepoList)));
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(gitUrlOpt);
         cmd.Options.Add(baseBranchOpt);
         cmd.Options.Add(setDefaultOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
@@ -73,7 +76,6 @@ internal static class RepositoryCommands
             var baseBranch = ctx.GetValue(baseBranchOpt);
             var setDefault = ctx.GetValue(setDefaultOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             var (mode, exit) = api.ResolveOutputMode(output);
 
@@ -89,7 +91,7 @@ internal static class RepositoryCommands
 
             async Task<int> AddAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 var payload = new Dictionary<string, object?>
                 {
@@ -113,15 +115,14 @@ internal static class RepositoryCommands
     {
         var cmd = new Command("edit", "Update a repository");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
-        var gitUrlOpt = new Option<string?>("--git-url", "-u") { Description = "Git URL" };
-        var baseBranchOpt = new Option<string?>("--base-branch", "-b") { Description = "Base branch" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var gitUrlOpt = new Option<string?>("--git-url") { Description = "Git URL" };
+        var baseBranchOpt = new Option<string?>("--base-branch") { Description = "Base branch" };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RepoList)));
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(gitUrlOpt);
         cmd.Options.Add(baseBranchOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
@@ -129,7 +130,6 @@ internal static class RepositoryCommands
             var gitUrl = ctx.GetValue(gitUrlOpt);
             var baseBranch = ctx.GetValue(baseBranchOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             var (mode, exit) = api.ResolveOutputMode(output);
 
@@ -151,7 +151,7 @@ internal static class RepositoryCommands
 
             async Task<int> UpdateAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintPatchWithOutputAsync(
                     $"{ProjectRepositoriesPath(resolvedProjectId)}/{MohistCliCommands.Escape(name!)}",
@@ -167,17 +167,15 @@ internal static class RepositoryCommands
     {
         var cmd = new Command("set-default", "Set a repository as the project default");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RepoList)));
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var name = ctx.GetValue(nameArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             var (mode, exit) = api.ResolveOutputMode(output);
 
@@ -187,7 +185,7 @@ internal static class RepositoryCommands
 
             async Task<int> SetDefaultAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintPatchWithOutputAsync(
                     $"{ProjectRepositoriesPath(resolvedProjectId)}/{MohistCliCommands.Escape(name!)}",
@@ -203,17 +201,15 @@ internal static class RepositoryCommands
     {
         var cmd = new Command("delete", "Delete a repository");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.RepoList)));
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var name = ctx.GetValue(nameArg);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             var (mode, exit) = api.ResolveOutputMode(output);
 
@@ -223,7 +219,7 @@ internal static class RepositoryCommands
 
             async Task<int> DeleteAsync()
             {
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintDeleteWithOutputAsync(
                     $"{ProjectRepositoriesPath(resolvedProjectId)}/{MohistCliCommands.Escape(name!)}",

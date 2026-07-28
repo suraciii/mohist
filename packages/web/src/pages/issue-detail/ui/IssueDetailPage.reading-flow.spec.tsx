@@ -733,7 +733,7 @@ describe('IssueDetailPage reading-flow — decision surface and rail content exc
         baseBranch: 'master',
         gitUrl: 'https://github.com/suraciii/mohist.git',
       },
-      prerequisites: [
+      prereq: [
         { number: 9, title: 'Prerequisite issue', completed: true },
       ],
       drift: {

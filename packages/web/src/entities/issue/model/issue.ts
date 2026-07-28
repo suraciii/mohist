@@ -138,13 +138,13 @@ export interface Issue {
   archivedAt?: string
   blockedReason?: string
   prerequisiteNumbers?: number[]
-  prerequisites?: IssuePrerequisiteSummary[]
+  prereq?: IssuePrerequisiteSummary[]
   isDraft: boolean
   canStart: boolean
   canBeParent?: boolean
   blocker: IssueStartBlocker | null
   drift?: BaseDriftInfo | null
-  primaryEpic?: { number: number | null; title: string; status: string; priority: string } | null
+  epic?: { number: number | null; title: string; status: string; priority: string } | null
   parentIssueRef?: IssueParentRef | null
   childIssuesSummary?: ChildIssuesSummary | null
   children?: IssueChildRef[]
@@ -170,11 +170,11 @@ export interface IssueListItem extends Pick<Issue, 'number' | 'title' | 'status'
   completedAt?: string
   archivedAt?: string
   prerequisiteNumbers?: number[]
-  prerequisites?: IssuePrerequisiteSummary[]
+  prereq?: IssuePrerequisiteSummary[]
   canBeParent?: boolean
   repository?: Issue['repository']
   repositoryName?: string | null
-  primaryEpic?: Issue['primaryEpic']
+  epic?: Issue['epic']
   parentIssueRef?: IssueParentRef | null
   childIssuesSummary?: ChildIssuesSummary | null
   children?: IssueChildRef[]

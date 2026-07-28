@@ -447,7 +447,7 @@ public class RepositoryPolicyTests
 
         Assert.False(build.IsSuccess);
         Assert.Contains(build.Errors, e => e.Code == "repository_default_deletion_conflict");
-        Assert.Contains("mo repo set-default", build.Errors.Single().Message, StringComparison.Ordinal);
+        Assert.Contains("mo project repo set-default", build.Errors.Single().Message, StringComparison.Ordinal);
     }
 
     [Fact]

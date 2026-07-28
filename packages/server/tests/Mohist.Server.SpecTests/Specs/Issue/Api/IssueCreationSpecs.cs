@@ -450,7 +450,7 @@ public class IssueCreationSpecs
         Assert.True(envelope!.Success);
         var created = Assert.IsType<CreateIssueApiDto>(envelope.Data);
         Assert.Equal(new[] { prereq.Number }, created.PrerequisiteNumbers);
-        var summary = Assert.Single(created.Prerequisites);
+        var summary = Assert.Single(created.Prereq);
         Assert.Equal(prereq.Number, summary.Number);
         Assert.Equal("API prereq", summary.Title);
         Assert.Equal("backlog", summary.Status);
@@ -553,10 +553,10 @@ public class IssueCreationSpecs
         var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
         Assert.NotNull(readModel);
         Assert.Equal(new[] { prereqA.Number, prereqB.Number }, readModel!.PrerequisiteNumbers);
-        Assert.Equal(2, readModel.Prerequisites.Length);
-        var summaryNumbers = readModel.Prerequisites.Select(p => p.Number).OrderBy(n => n).ToArray();
+        Assert.Equal(2, readModel.Prereq.Length);
+        var summaryNumbers = readModel.Prereq.Select(p => p.Number).OrderBy(n => n).ToArray();
         Assert.Equal(new[] { prereqA.Number, prereqB.Number }, summaryNumbers);
-        Assert.All(readModel.Prerequisites, p => Assert.False(p.Completed));
+        Assert.All(readModel.Prereq, p => Assert.False(p.Completed));
         Assert.False(readModel.CanStart);
         var waiting = Assert.IsType<IssueStartBlockerDto.WaitingForBlocker>(readModel.Blocker);
         Assert.Equal(prereqA.Number, waiting.Issue.Number);
@@ -576,7 +576,7 @@ public class IssueCreationSpecs
         Assert.Equal(new[] { prereq.Number }, dependent.PrerequisiteNumbers);
         var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
         Assert.NotNull(readModel);
-        Assert.Single(readModel!.Prerequisites);
+        Assert.Single(readModel!.Prereq);
     }
 
     [Fact]
@@ -589,7 +589,7 @@ public class IssueCreationSpecs
         Assert.Empty(plain.PrerequisiteNumbers);
         var readModel = await GetIssueReadModelAsync(project.Id, plain.Number);
         Assert.NotNull(readModel);
-        Assert.Empty(readModel!.Prerequisites);
+        Assert.Empty(readModel!.Prereq);
         Assert.True(readModel.CanStart || readModel.Blocker is not null);
     }
 
@@ -703,7 +703,7 @@ public class IssueCreationSpecs
         Assert.NotNull(readModel);
         Assert.True(readModel!.CanStart);
         Assert.Null(readModel.Blocker);
-        var prereqSummary = readModel.Prerequisites.Single();
+        var prereqSummary = readModel.Prereq.Single();
         Assert.True(prereqSummary.Completed);
     }
 
@@ -726,7 +726,7 @@ public class IssueCreationSpecs
             $"/api/projects/{project.Id}/issues",
             new { title = "Dependent of archived completed prereq", isDraft = false, prerequisiteNumbers = new[] { prereq.Number } });
 
-        var summary = Assert.Single(dependent.Prerequisites);
+        var summary = Assert.Single(dependent.Prereq);
         Assert.Equal(prereq.Number, summary.Number);
         Assert.True(summary.Completed);
         Assert.True(dependent.CanStart);
@@ -763,7 +763,7 @@ public class IssueCreationSpecs
         Assert.NotNull(envelope);
         var updated = Assert.IsType<CreateIssueApiDto>(envelope!.Data);
         Assert.Empty(updated.PrerequisiteNumbers);
-        Assert.Empty(updated.Prerequisites);
+        Assert.Empty(updated.Prereq);
         Assert.True(updated.CanStart);
         Assert.Null(updated.Blocker);
     }

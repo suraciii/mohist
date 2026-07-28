@@ -104,7 +104,7 @@ internal static class CommandHelpRenderer
             writer.WriteLine();
         }
 
-        writer.WriteLine("Usage:");
+        writer.WriteLine("USAGE");
         writer.WriteLine($"    {FormatUsage(leaf, invocationPath)}");
         writer.WriteLine();
 
@@ -185,7 +185,8 @@ internal static class CommandHelpRenderer
 
     public static void RenderUnknownTopicUsage(TextWriter writer, string? requested)
     {
-        writer.WriteLine($"Usage: mo help <{string.Join("|", CommandHelpTopics.Names)}>");
+        writer.WriteLine("USAGE");
+        writer.WriteLine($"    mo help <{string.Join("|", CommandHelpTopics.Names)}>");
         writer.WriteLine();
         if (requested is not null && !string.IsNullOrWhiteSpace(requested))
             writer.WriteLine($"Unknown help topic: {requested}");
@@ -193,7 +194,8 @@ internal static class CommandHelpRenderer
 
     public static void RenderGroupUsage(TextWriter writer, Command group, string[] invocationPath)
     {
-        writer.WriteLine($"Usage: {FormatUsage(group, invocationPath)}");
+        writer.WriteLine("USAGE");
+        writer.WriteLine($"    {FormatUsage(group, invocationPath)}");
         writer.WriteLine();
         writer.WriteLine($"Run `mo {string.Join(" ", invocationPath)} --help` for the full help.");
     }
@@ -202,7 +204,8 @@ internal static class CommandHelpRenderer
     {
         writer.WriteLine($"Unknown command or area: {requested}");
         writer.WriteLine();
-        writer.WriteLine("Usage: mo <area> [<subarea>] <action> [target] [flags]");
+        writer.WriteLine("USAGE");
+        writer.WriteLine("    mo <area> [<subarea>] <action> [target] [flags]");
         writer.WriteLine("Run `mo --help` for the list of available areas.");
     }
 
@@ -250,7 +253,9 @@ internal static class CommandHelpRenderer
             sb.Append(" (required)");
         if (symbol is Option option && option.Required)
             sb.Append(" (required)");
-        if (symbol is Option optionWithDefault && optionWithDefault.HasDefaultValue)
+        if (symbol is Option optionWithDefault
+            && !string.Equals(optionWithDefault.Name, "--json", StringComparison.Ordinal)
+            && optionWithDefault.HasDefaultValue)
         {
             var defaultValue = optionWithDefault.GetDefaultValue();
             if (defaultValue is not null)

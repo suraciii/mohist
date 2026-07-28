@@ -78,6 +78,18 @@ public sealed class CliRoutingCommandSpecs
     }
 
     [Fact]
+    public async Task RoutingTest_LimitIsForwardedAsQueryParameter()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+        handler.SetResponder((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { events = Array.Empty<object>() } })));
+
+        var exit = await MohistCliCommands.RunAsync(http, ["routing", "test", "--project", "proj_test", "--limit", "42"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("/api/projects/proj_test/routing/test?limit=42", Assert.Single(handler.Requests).RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
     public async Task RoutingCommand_WithoutProject_FailsLocally()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);

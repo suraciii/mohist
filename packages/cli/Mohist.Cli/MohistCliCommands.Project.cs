@@ -14,6 +14,7 @@ internal static class ProjectCommands
         project.Subcommands.Add(BuildView(api));
         project.Subcommands.Add(BuildUse(api));
         project.Subcommands.Add(BuildDelete(api));
+        project.Subcommands.Add(RepositoryCommands.BuildProjectRepository(api));
         project.Subcommands.Add(ProjectWorkflowCommands.Build(api));
         project.Subcommands.Add(VariableCommands.BuildVariableGroup(api, VariableScopeKind.Project));
 
@@ -84,7 +85,7 @@ internal static class ProjectCommands
     {
         var cmd = new Command("view", "Show project details");
         var identifierArg = new Argument<string>("project") { Description = "Project name or ID" };
-        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.ProjectShow)));
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.Project)));
         cmd.Arguments.Add(identifierArg);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
@@ -98,7 +99,7 @@ internal static class ProjectCommands
             return api.PrintWithOutputAsync(
                 $"/api/projects/{MohistCliCommands.Escape(identifier!)}",
                 mode,
-                nameof(MohistCliApi.TableShape.ProjectShow));
+                nameof(MohistCliApi.TableShape.Project));
         });
         return cmd;
     }

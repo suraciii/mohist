@@ -134,6 +134,21 @@ public class CliRunFeedbackSpecs
     }
 
     [Fact]
+    public async Task View_BareJsonDiscoversFieldsBeforeSelectorValidation()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            throw new InvalidOperationException("API must not be called for local JSON discovery"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["run", "feedback", "view", "wr_abc", "--json"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("\"id\"", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task List_IssueWithoutRun_ReportsIssueNumber()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>

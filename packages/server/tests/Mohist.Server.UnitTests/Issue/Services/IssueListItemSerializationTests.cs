@@ -22,6 +22,8 @@ public sealed class IssueListItemSerializationTests
                 RequestedAt = new DateTime(2026, 7, 22, 0, 0, 0, DateTimeKind.Utc),
             },
             WorkflowStageProgress = new WorkflowStageProgress("check", 2, 1, 1, 0),
+            Prereq = [new IssuePrerequisiteSummary { Number = 12, Title = "Prerequisite", Completed = false }],
+            Epic = new IssuePrimaryEpic { Number = 7, Title = "Epic", Status = "running", Priority = "p1" },
             WorkflowProfileId = null,
         };
 
@@ -31,6 +33,8 @@ public sealed class IssueListItemSerializationTests
         Assert.Contains("\"approvalState\"", json);
         Assert.Contains("\"workflowStageProgress\"", json);
         Assert.Contains("\"workflowProfileId\":null", json);
+        Assert.Contains("\"prereq\"", json);
+        Assert.Contains("\"epic\"", json);
         Assert.DoesNotContain("\"stageApproval\"", json);
     }
 }

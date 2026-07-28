@@ -6,7 +6,7 @@ internal sealed record CreateIssueApiDto(
         int Number,
         string Title,
         int[] PrerequisiteNumbers,
-        CreateIssueApiPrerequisiteDto[] Prerequisites,
+        CreateIssueApiPrerequisiteDto[] Prereq,
         bool CanStart,
         CreateIssueApiBlockerDto? Blocker);
 

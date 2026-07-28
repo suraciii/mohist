@@ -13,16 +13,18 @@ internal static partial class IssueCommands
         var bodyOpt = new Option<string?>("--body", "-b") { Description = "Issue body (mutually exclusive with --body-file)" };
         var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read issue body from a UTF-8 file path, or - for stdin (mutually exclusive with --body)" };
         var labelOpt = MohistCliCommands.LabelOption();
-        var priorityOpt = MohistCliCommands.PriorityOption();
+        var priorityOpt = MohistCliCommands.IssuePriorityOption();
+        var riskOpt = new Option<string?>("--risk") { Description = "Risk level (low|medium|high)" };
         var parentOpt = new Option<int?>("--parent") { Description = "Parent issue number" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
-        var riskOpt = new Option<string?>("--risk") { Description = "Risk level (low, medium, high); overrides frontmatter risk" };
         var repositoryOpt = new Option<string?>("--repo") { Description = "Target repository name in multi-repository projects" };
-        var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON or @<file> (e.g. '{\"plan\":\"anthropic/claude-sonnet\"}')" };
-        var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON or @<file> (e.g. '{\"plan\":\"max\"}')" };
+        var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON" };
+        var stageModelsFileOpt = new Option<string?>("--stage-models-file") { Description = "Read the per-stage model map from a JSON file, or - for stdin" };
+        var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON" };
+        var stageModelVariantsFileOpt = new Option<string?>("--stage-model-variants-file") { Description = "Read the per-stage model variant map from a JSON file, or - for stdin" };
         var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("creating");
         var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(titleArg);
@@ -30,16 +32,17 @@ internal static partial class IssueCommands
         cmd.Options.Add(bodyFileOpt);
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
+        cmd.Options.Add(riskOpt);
         cmd.Options.Add(parentOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
         cmd.Options.Add(modelVariantOpt);
         cmd.Options.Add(workflowProfileOpt);
-        cmd.Options.Add(riskOpt);
         cmd.Options.Add(repositoryOpt);
         cmd.Options.Add(stageModelsOpt);
+        cmd.Options.Add(stageModelsFileOpt);
         cmd.Options.Add(stageModelVariantsOpt);
+        cmd.Options.Add(stageModelVariantsFileOpt);
         cmd.Options.Add(readyOpt);
         cmd.Options.Add(draftOpt);
         cmd.Options.Add(jsonOpt);
@@ -50,16 +53,17 @@ internal static partial class IssueCommands
             var bodyFile = ctx.GetValue(bodyFileOpt);
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
+            var risk = ctx.GetValue(riskOpt);
             var parent = ctx.GetValue(parentOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
             var modelVariant = ctx.GetValue(modelVariantOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
-            var risk = ctx.GetValue(riskOpt);
             var repository = ctx.GetValue(repositoryOpt);
             var stageModels = ctx.GetValue(stageModelsOpt);
+            var stageModelsFile = ctx.GetValue(stageModelsFileOpt);
             var stageModelVariants = ctx.GetValue(stageModelVariantsOpt);
+            var stageModelVariantsFile = ctx.GetValue(stageModelVariantsFileOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
             var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
@@ -93,24 +97,24 @@ internal static partial class IssueCommands
                     ApplyFrontmatter(api.Error, bodyText, bodyFile, workflowProfile, risk);
 
                 object? stageModelsPayload = null;
-                if (ctx.GetResult(stageModelsOpt) is not null)
+                if (ctx.GetResult(stageModelsOpt) is not null || ctx.GetResult(stageModelsFileOpt) is not null)
                 {
-                    var sm = await JsonInputResolver.ResolveAsync(stageModels, api.FileSystem, TextWriter.Null, "--stage-models");
+                    var sm = await JsonInputResolver.ResolveAsync(stageModels, stageModelsFile, api.FileSystem, api.StandardInput, TextWriter.Null, "--stage-models", "--stage-models-file");
                     if (sm is JsonInputResolver.Result.Failure failure)
                         return CommandHelpHook.RenderUsageFailure(ctx, api.Error, failure.Message);
                     stageModelsPayload = ((JsonInputResolver.Result.Success)sm).Value;
                 }
 
                 object? stageModelVariantsPayload = null;
-                if (ctx.GetResult(stageModelVariantsOpt) is not null)
+                if (ctx.GetResult(stageModelVariantsOpt) is not null || ctx.GetResult(stageModelVariantsFileOpt) is not null)
                 {
-                    var smv = await JsonInputResolver.ResolveAsync(stageModelVariants, api.FileSystem, TextWriter.Null, "--stage-model-variants");
+                    var smv = await JsonInputResolver.ResolveAsync(stageModelVariants, stageModelVariantsFile, api.FileSystem, api.StandardInput, TextWriter.Null, "--stage-model-variants", "--stage-model-variants-file");
                     if (smv is JsonInputResolver.Result.Failure failure)
                         return CommandHelpHook.RenderUsageFailure(ctx, api.Error, failure.Message);
                     stageModelVariantsPayload = ((JsonInputResolver.Result.Success)smv).Value;
                 }
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 Dictionary<string, string>? labelMap = null;
@@ -153,7 +157,7 @@ internal static partial class IssueCommands
                     data =>
                     {
                         PrintCreateGuidance(data, api.Error);
-                        return api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow);
+                        return api.RenderTableAsync(data, MohistCliApi.TableShape.Issue);
                     });
             }
         });
@@ -215,16 +219,19 @@ internal static partial class IssueCommands
         var bodyOpt = new Option<string?>("--body", "-b") { Description = "New body (mutually exclusive with --body-file)" };
         var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read new body from a UTF-8 file path, or - for stdin (mutually exclusive with --body)" };
         var labelOpt = MohistCliCommands.LabelOption();
-        var priorityOpt = MohistCliCommands.PriorityOption();
+        var priorityOpt = MohistCliCommands.IssuePriorityOption();
+        var riskOpt = new Option<string?>("--risk") { Description = "Risk level (low|medium|high)" };
         var parentOpt = new Option<string?>("--parent") { Description = "Parent issue number or none" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
-        var inheritWorkflowProfileOpt = new Option<bool>("--inherit-workflow-profile") { Description = "Clear the explicit Profile and inherit the Project default" };
+        var inheritWorkflowProfileOpt = new Option<bool>("--inherit-workflow-profile") { Description = "Clear the explicit Profile and inherit the Project default (mutually exclusive with --workflow-profile)" };
         var repositoryOpt = new Option<string?>("--repo") { Description = "Target repository name for an eligible reassignment" };
-        var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON or @<file> (e.g. '{\"plan\":\"anthropic/claude-sonnet\"}')" };
-        var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON or @<file> (e.g. '{\"plan\":\"max\"}')" };
+        var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON" };
+        var stageModelsFileOpt = new Option<string?>("--stage-models-file") { Description = "Read the per-stage model map from a JSON file, or - for stdin" };
+        var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON" };
+        var stageModelVariantsFileOpt = new Option<string?>("--stage-model-variants-file") { Description = "Read the per-stage model variant map from a JSON file, or - for stdin" };
         var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("updating");
         var jsonOpt = MohistCliCommands.JsonSelectionOption(IssueDescriptor);
         cmd.Arguments.Add(numberArg);
@@ -233,19 +240,26 @@ internal static partial class IssueCommands
         cmd.Options.Add(bodyFileOpt);
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
+        cmd.Options.Add(riskOpt);
         cmd.Options.Add(parentOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
         cmd.Options.Add(modelVariantOpt);
         cmd.Options.Add(workflowProfileOpt);
         cmd.Options.Add(inheritWorkflowProfileOpt);
         cmd.Options.Add(repositoryOpt);
         cmd.Options.Add(stageModelsOpt);
+        cmd.Options.Add(stageModelsFileOpt);
         cmd.Options.Add(stageModelVariantsOpt);
+        cmd.Options.Add(stageModelVariantsFileOpt);
         cmd.Options.Add(readyOpt);
         cmd.Options.Add(draftOpt);
         cmd.Options.Add(jsonOpt);
+        cmd.Validators.Add(result =>
+        {
+            if (result.GetResult(workflowProfileOpt) is not null && result.GetResult(inheritWorkflowProfileOpt) is not null)
+                result.AddError("--workflow-profile and --inherit-workflow-profile are mutually exclusive.");
+        });
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
@@ -254,9 +268,9 @@ internal static partial class IssueCommands
             var bodyFile = ctx.GetValue(bodyFileOpt);
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
+            var risk = ctx.GetValue(riskOpt);
             var parent = ctx.GetValue(parentOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
             var modelVariant = ctx.GetValue(modelVariantOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
@@ -266,19 +280,24 @@ internal static partial class IssueCommands
             var draft = ctx.GetValue(draftOpt);
             var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             var stageModels = ctx.GetValue(stageModelsOpt);
+            var stageModelsFile = ctx.GetValue(stageModelsFileOpt);
             var stageModelVariants = ctx.GetValue(stageModelVariantsOpt);
+            var stageModelVariantsFile = ctx.GetValue(stageModelVariantsFileOpt);
             var titleProvided = ctx.GetResult(titleOpt) is not null;
             var bodyProvided = ctx.GetResult(bodyOpt) is not null;
             var bodyFileProvided = ctx.GetResult(bodyFileOpt) is not null;
             var labelsProvided = ctx.GetResult(labelOpt) is not null;
             var priorityProvided = ctx.GetResult(priorityOpt) is not null;
+            var riskProvided = ctx.GetResult(riskOpt) is not null;
             var parentProvided = ctx.GetResult(parentOpt) is not null;
             var modelProvided = ctx.GetResult(modelOpt) is not null;
             var workflowProfileProvided = ctx.GetResult(workflowProfileOpt) is not null;
             var inheritWorkflowProfileProvided = IsOptionProvided(ctx, inheritWorkflowProfileOpt);
             var repositoryProvided = ctx.GetResult(repositoryOpt) is not null;
             var stageModelsProvided = ctx.GetResult(stageModelsOpt) is not null;
+            var stageModelsFileProvided = ctx.GetResult(stageModelsFileOpt) is not null;
             var stageModelVariantsProvided = ctx.GetResult(stageModelVariantsOpt) is not null;
+            var stageModelVariantsFileProvided = ctx.GetResult(stageModelVariantsFileOpt) is not null;
             var readyProvided = IsOptionProvided(ctx, readyOpt);
             var draftProvided = IsOptionProvided(ctx, draftOpt);
             return UpdateAsync();
@@ -324,18 +343,18 @@ internal static partial class IssueCommands
                 }
 
                 object? stageModelsPayload = null;
-                if (stageModelsProvided)
+                if (stageModelsProvided || stageModelsFileProvided)
                 {
-                    var sm = await JsonInputResolver.ResolveAsync(stageModels, api.FileSystem, TextWriter.Null, "--stage-models");
+                    var sm = await JsonInputResolver.ResolveAsync(stageModels, stageModelsFile, api.FileSystem, api.StandardInput, TextWriter.Null, "--stage-models", "--stage-models-file");
                     if (sm is JsonInputResolver.Result.Failure failure)
                         return CommandHelpHook.RenderUsageFailure(ctx, api.Error, failure.Message);
                     stageModelsPayload = ((JsonInputResolver.Result.Success)sm).Value;
                 }
 
                 object? stageModelVariantsPayload = null;
-                if (stageModelVariantsProvided)
+                if (stageModelVariantsProvided || stageModelVariantsFileProvided)
                 {
-                    var smv = await JsonInputResolver.ResolveAsync(stageModelVariants, api.FileSystem, TextWriter.Null, "--stage-model-variants");
+                    var smv = await JsonInputResolver.ResolveAsync(stageModelVariants, stageModelVariantsFile, api.FileSystem, api.StandardInput, TextWriter.Null, "--stage-model-variants", "--stage-model-variants-file");
                     if (smv is JsonInputResolver.Result.Failure failure)
                         return CommandHelpHook.RenderUsageFailure(ctx, api.Error, failure.Message);
                     stageModelVariantsPayload = ((JsonInputResolver.Result.Success)smv).Value;
@@ -345,7 +364,7 @@ internal static partial class IssueCommands
                 if (!labelParse.IsValid)
                     return CommandHelpHook.RenderUsageFailure(ctx, api.Error, labelParse.Error!);
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -356,6 +375,8 @@ internal static partial class IssueCommands
                     payload["body"] = resolvedBody;
                 if (priorityProvided)
                     payload["priority"] = priority;
+                if (riskProvided)
+                    payload["risk"] = risk;
                 if (parentProvided)
                     payload["parentIssueNumber"] = parentIssueNumber;
                 if (modelProvided)
@@ -372,10 +393,10 @@ internal static partial class IssueCommands
                     payload["workflowProfileId"] = null;
                 }
 
-                if (stageModelsProvided)
+                if (stageModelsProvided || stageModelsFileProvided)
                     payload["stageModels"] = stageModelsPayload;
 
-                if (stageModelVariantsProvided)
+                if (stageModelVariantsProvided || stageModelVariantsFileProvided)
                     payload["stageModelVariants"] = stageModelVariantsPayload;
 
                 if (labelsProvided)
@@ -398,7 +419,7 @@ internal static partial class IssueCommands
                     payload,
                     IssueDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.Issue));
             }
         });
         return cmd;

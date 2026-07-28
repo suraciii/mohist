@@ -91,9 +91,9 @@ RoutingRule（项目级，有序表）
 ```
 mo routing rule create --name <n> --match <expr> --agent <agent> \
     --response-prompt <p> [--continue] [--before <rule> | --after <rule>]
-mo routing rule list | show <n> | update <n> | archive <n>
+mo routing rule list | view <n> | edit <n> | archive <n>
 mo routing rule move <n> --before <rule> | --after <rule>
-mo routing test [--last <N>]     # 用最近 N 个事件干跑整张表，逐条显示命中
+mo routing test [--limit <N>]    # 用最近 N 个事件干跑整张表，逐条显示命中
 mo event tail [--match <expr>]   # 用同一 matcher 过滤事件流
 ```
 

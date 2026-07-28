@@ -212,7 +212,7 @@ public class IssueStartReadinessApiSpecs
         Assert.NotNull(waitingIssue.Blocker);
         Assert.Equal("waiting-for", waitingIssue.Blocker!.Kind);
         Assert.Equal(prereq.Number, waitingIssue.Blocker.Issue!.Number);
-        Assert.Contains(waitingIssue.Prerequisites, p => p.Number == prereq.Number && !p.Completed);
+        Assert.Contains(waitingIssue.Prereq, p => p.Number == prereq.Number && !p.Completed);
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public class IssueStartReadinessApiSpecs
         Assert.False(detail.IsDraft);
         Assert.True(detail.CanStart);
         Assert.Null(detail.Blocker);
-        Assert.Empty(detail.Prerequisites);
+        Assert.Empty(detail.Prereq);
     }
 
     [Fact]
@@ -334,7 +334,7 @@ public class IssueStartReadinessApiSpecs
     private sealed record ApiEnvelope(bool Success, string? Error = null, string? Code = null, object? Details = null);
     private sealed record ProjectResponse(string Id);
     private sealed record IssueResponse(int Number, string Id, string Title);
-    private sealed record IssueDto(int Number, string Id, string Title, string Status, string Health, bool IsDraft, bool CanStart, BlockerDto? Blocker, PrerequisiteDto[] Prerequisites);
+    private sealed record IssueDto(int Number, string Id, string Title, string Status, string Health, bool IsDraft, bool CanStart, BlockerDto? Blocker, PrerequisiteDto[] Prereq);
     private sealed record BlockerDto(string Kind, BlockerIssueDto? Issue);
     private sealed record BlockerIssueDto(int Number, string Title);
     private sealed record PrerequisiteDto(int Number, bool Completed);

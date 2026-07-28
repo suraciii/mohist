@@ -17,15 +17,14 @@ internal static partial class IssueCommands
         var numberArg = NumberArg();
         var authorOpt = new Option<string?>("--author") { Description = "Declared comment author (1-100 characters)" };
         var bodyOpt = new Option<string?>("--body", "-b") { Description = "Comment body text (mutually exclusive with --body-file)" };
-        var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read comment body from a UTF-8 file path (recommended for long Markdown; mutually exclusive with --body)" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read comment body from a UTF-8 file path, or - for stdin (recommended for long Markdown; mutually exclusive with --body)" };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.CommentShow)));
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(authorOpt);
         cmd.Options.Add(bodyOpt);
         cmd.Options.Add(bodyFileOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
@@ -34,7 +33,6 @@ internal static partial class IssueCommands
             var body = ctx.GetValue(bodyOpt);
             var bodyFile = ctx.GetValue(bodyFileOpt);
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             return AddAsync();
 
@@ -61,7 +59,7 @@ internal static partial class IssueCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
                 var bodyText = ((BodyInputResolver.Result.Success)resolved).Body;

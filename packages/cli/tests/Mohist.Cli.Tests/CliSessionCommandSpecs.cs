@@ -464,8 +464,23 @@ public class CliSessionCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("--agent, --issue, or --run is required", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo session list", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task SessionList_BareJsonDiscoversFieldsBeforeFilterValidation()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called for local JSON discovery"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["session", "list", "--json"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("\"id\"", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
         Assert.Empty(handler.Requests);
     }
 
@@ -480,7 +495,7 @@ public class CliSessionCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("Only one of", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo session list", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -651,7 +666,7 @@ public class CliSessionCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("text is required", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -667,7 +682,7 @@ public class CliSessionCommandSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 

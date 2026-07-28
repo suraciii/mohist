@@ -1,13 +1,14 @@
 import { CardSection } from '@/shared/ui/components/card-section'
 import { IssueModelSelector } from '../../../../features/select-issue-model'
 import { IssuePrerequisitePicker, type IssuePrerequisitePickerProps } from '../../../../entities/issue'
-import type { Issue, IssueStartBlocker } from '../../../../entities/issue'
+import type { Issue, IssuePrerequisiteSummary, IssueStartBlocker } from '../../../../entities/issue'
 import type { IssueDetailMutations } from '../../model/useIssueDetailMutations'
 
 export type IssueConfigurationCardIssue = Pick<
   Issue,
-  'number' | 'model' | 'stageModels' | 'prerequisites' | 'canStart' | 'blocker'
+  'number' | 'model' | 'stageModels' | 'canStart' | 'blocker'
 > & {
+  prerequisites?: IssuePrerequisiteSummary[]
   isBacklog: boolean
 }
 

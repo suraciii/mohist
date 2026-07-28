@@ -61,9 +61,10 @@ public sealed class RoutingTestRoutesSpecs : ProjectEventsApiTestSupport
         await AppendIssueEventAsync(project.Id, 1, "test.event", FixedTime);
 
         var response = await _client.GetDataAsync<RoutingTestResponse>(
-            $"/api/projects/{project.Id}/routing/test?last=1");
+            $"/api/projects/{project.Id}/routing/test?limit=1");
 
         Assert.Null(response.Message);
+        Assert.Equal(1, response.Last);
         var trace = Assert.Single(response.Events);
         Assert.Collection(trace.Rules,
             first =>

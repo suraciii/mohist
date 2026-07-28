@@ -59,11 +59,10 @@ export interface RuntimeDecisionInput {
     | 'convergence'
     | 'drift'
     | 'workflowStageProgress'
-    | 'prerequisites'
     | 'isDraft'
     | 'canStart'
     | 'blocker'
-  > | null | undefined
+  > & { prerequisites?: Issue['prereq'] } | null | undefined
   timeline?: Pick<WorkflowTimeline, 'currentStage' | 'status' | 'stages' | 'pendingWork' | 'availableActions'> | null
   agentStatus?: Pick<AgentStatus, 'runnerAvailable' | 'runnerMessage' | 'capacity' | 'activeAgents'> | null
   issueNumber?: number
