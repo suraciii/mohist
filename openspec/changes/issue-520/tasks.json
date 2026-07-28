@@ -1,0 +1,105 @@
+{
+  "project": "mohist-local",
+  "description": "Let a user know whether an Agent can execute before submitting: a server-authoritative Readiness conclusion (Ready/Needs setup/Unknown) over the execution definition, an independent Availability conclusion with visible waiting reasons, and MaxConcurrentRuns enforced as a real-time scheduling gate across every entry point so work waits instead of failing.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Per-agent concurrency gate and wait-not-fail for AgentJob launches",
+      "spec": "specs/agent-concurrency/spec.md#Reaching the limit causes waiting, not failure",
+      "description": "Introduce the per-agent AgentConcurrencyGrain as the sole authority for an Agent's active execution permits and FIFO waiter order, wire it into AgentJobGrain dispatch (acquire before runner assignment, release on terminal), and remove the terminal runner-unavailable failure so a launch that cannot start due to runner, capacity, or the agent's MaxConcurrentRuns waits instead of failing. The gate reads MaxConcurrentRuns live (null means no per-agent limit) and never enters the execution-definition snapshot.",
+      "acceptanceCriteria": [
+        "AgentConcurrencyGrain keyed per (project, agent) is the sole authority for the agent's active execution permits and FIFO waiter order; MaxConcurrentRuns is read live from the Agent definition (null => Granted immediately, no per-agent limit); it stores only scheduling state (permit tokens + waiter identities), holds no Job/Session/Run business facts, and never joins a cross-aggregate transaction.",
+        "AgentJobGrain acquires a permit in the dispatch path before runner assignment (Granted => proceed to assign; assignment failure => Release and retry) and releases it when the job's execution reaches a terminal state; editing MaxConcurrentRuns does not alter any captured execution definition or Runtime binding.",
+        "Reaching the concurrency limit leaves a new launch Pending and proceeding when a slot frees, without entering terminal Failed; lowering MaxConcurrentRuns does not stop active executions or rewrite/restart any AgentSession (only later-submitted work is gated); raising it lets waiting work proceed under the new limit without resubmission.",
+        "AgentJobGrain no longer enters terminal Failed with reason runner-unavailable after the dispatch retry bound; a job with no runner or full capacity stays Pending and proceeds when a runner/slot becomes available, or until cancelled. The existing JobTimeout -> Unknown path for already-running jobs is unchanged.",
+        "Orphaned permits are reclaimed: on grain activation and via a periodic reminder the active set is reconciled against authoritative AgentJob/AgentSession active-execution state and dangling permits pruned; lost grant notifications are covered by each waiter's existing recovery retry.",
+        "Server spec/unit tests cover null-limit no-op, at-limit waiting (not failure), raise -> proceed, lower -> no-stop with no session rewrite, runner-unavailable no longer failing terminally, FIFO grant order, and orphan reconciliation, using fake time, storage, dispatch observers, and an injectable concurrency gate; npm test passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentConcurrencyGrain (permit authority + FIFO + reconciliation) with DI registration; AgentJobGrain dispatch acquire/release wiring; removal of the runner-unavailable terminal failure.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D3, D4, and the launch half of D6. Treat the dispatch retry bound removal as the BREAKING behavior change called out in the proposal; a config flag may gate fallback to the old timeout-fail for rollout. Concurrency-limit waiting (agent-concurrency spec) and runner/capacity waiting (agent-availability spec 'Work that cannot start due to runner or capacity waits rather than failing') are both realized here because they share the AgentJobGrain dispatch loop."
+    },
+    {
+      "id": "T-002",
+      "title": "Follow-up honors the per-agent concurrency gate",
+      "spec": "specs/agent-concurrency/spec.md#The gate applies consistently to every entry point",
+      "description": "Make a follow-up that would start a new execution on an idle AgentSession acquire a permit from the per-agent concurrency gate before runner delivery, releasing it when the turn ends; at the limit, reject with a distinct retryable concurrency reason rather than bypassing the gate. v1 rejects at the limit (does not queue follow-up) per design D5.",
+      "acceptanceCriteria": [
+        "A follow-up that would start a new execution on an idle AgentSession acquires a permit from the per-agent gate before runner delivery; on Granted it follows the existing delivery path and releases the permit when the turn ends (hooked at the session.activity idle lease-clearing point).",
+        "When the agent is at its MaxConcurrentRuns limit, the follow-up is rejected with a distinct, retryable concurrency reason (not persisted as an input, not mapped to 503 runner-unavailable), so the caller retries with the same idempotent identity; a follow-up to a busy session is unaffected (per-session serial, no new permit).",
+        "Launch and follow-up share the same per-agent authority, so a follow-up cannot bypass the agent's current MaxConcurrentRuns by continuing an existing session.",
+        "Server tests cover follow-up granted at/under limit, rejected at limit with the retryable reason, release on turn end, busy-session follow-up unaffected, and shared-limit accounting across a launch and a follow-up, using fake runner/connection/concurrency state; npm test passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Concurrency acquire/release wired into the follow-up route/session path; retryable concurrency-limit rejection outcome.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Implements design D5 and the follow-up half of D6. v1 deliberately rejects rather than queues follow-up at the limit; full follow-up queuing (materializing a follow-up AgentTurnRecord and adding a session wake-up reminder) is out of scope and tracked as a design trade-off."
+    },
+    {
+      "id": "T-003",
+      "title": "Server Availability conclusion and waiting visibility",
+      "spec": "specs/agent-availability/spec.md#Availability distinguishes the waiting reason",
+      "description": "Add a read-side AgentAvailabilityService that combines runner presence/capacity with the agent's concurrency state into a per-agent Availability conclusion (CanStartNow or a waiting reason), and expose it plus a per-work waiting list through the agent status API so clients present the server conclusion instead of synthesizing capacity text.",
+      "acceptanceCriteria": [
+        "AgentAvailabilityService computes a per-agent Availability conclusion combining runner presence/capacity (RunnerStatusService) and the agent's concurrency state; it reports CanStartNow or exactly one waiting reason (no-online-runner / capacity-full / concurrency-limit), independent of Readiness.",
+        "Runner offline, capacity full, and concurrency limit never change an agent's Readiness; a Ready agent can be reported as waiting, and Availability never presents these as setup gaps.",
+        "The agent status API exposes the Availability conclusion and waiting reason, plus a waiting-work list (mirroring the ActivityWaitingCardDto per-run shape) that states why each waiting item waits; waiting is distinguishable from executing and terminal.",
+        "Server tests cover each waiting reason, CanStartNow when a runner, a free slot, and concurrency are all available, Readiness-unchanged-when-unavailable, and waiting-work visibility, using fake runner/registry/concurrency state and injectable time; npm test passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentAvailabilityService (read-side); Availability conclusion and waiting-work DTOs on the agent status API.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Implements design D2. It is read-only and consumes T-001's concurrency state; the runner/capacity wait-not-fail behavior itself is implemented in T-001's dispatch changes. Mirrors the first-class per-run waiting pattern of AwaitingApproval rather than today's aggregate dashboard banner."
+    },
+    {
+      "id": "T-004",
+      "title": "Server Readiness evaluation and launch gating",
+      "spec": "specs/agent-readiness/spec.md#Readiness is one of three outcomes computed from the execution definition",
+      "description": "Add a read-side AgentReadinessService that computes Ready / Needs setup / Unknown from the execution definition plus execution-history-derived gap knowledge, expose it through agent view, and gate new launches so Needs setup is rejected with actionable gaps while Unknown remains submittable.",
+      "acceptanceCriteria": [
+        "AgentReadinessService computes Readiness as exactly Ready / Needs setup / Unknown from the execution definition plus execution-history-derived knowledge, computed on read and not persisted on the Agent aggregate.",
+        "Needs setup enumerates confirmed gaps with the single setup entry: structural/consistency gaps (e.g. malformed model reference, variant-without-model) and execution-confirmed config-class failures (credential/model/runtime errors reported by the runner); Ready reflects a complete definition with no known gap (a successful execution is positive evidence); Unknown when never executed or the last result is inconclusive.",
+        "Runner presence, capacity, and concurrency never change Readiness; a Ready agent stays Ready when all runners go offline.",
+        "Launching new work for a Needs-setup agent is rejected with the gaps and setup entry across manual, routed, and mention entry points and creates no AgentJob/AgentSession; Unknown remains submittable and waits for validation. The agent view exposes the conclusion and gaps before launch.",
+        "Server tests cover the three outcomes, structural and execution-history gaps, independence from runner/capacity/concurrency, and Needs-setup launch rejection vs Unknown acceptance, using fakes only; npm test passes."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentReadinessService (read-side); Readiness conclusion and gaps on agent view; Needs-setup launch rejection gate across entry points.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D1. The server cannot see Runtime credentials and the model catalog is ephemeral/non-authoritative, so credential/model-executability is reflected via execution history (Unknown until verified, Needs setup after a config-class failure) rather than proactive probing; proactive server-side credential visibility is a future enhancement."
+    },
+    {
+      "id": "T-005",
+      "title": "Web and CLI surfacing of Readiness, Availability, and waiting states",
+      "spec": "specs/agent-readiness/spec.md#Readiness is the Server's unified conclusion, visible before launch",
+      "description": "Present the server-authoritative Readiness conclusion and gaps, the Availability conclusion and waiting reason, and the waiting-work list in Web and `mo agent view`/launch, removing client-synthesized capacity/runner text and blocking launch for Needs-setup agents while keeping Unknown launchable.",
+      "acceptanceCriteria": [
+        "Web agent view/config and `mo agent view` display the Server's Readiness conclusion and, for Needs setup, the specific gaps and setup entry; clients do not derive a second Readiness verdict from raw Agent config.",
+        "Web and CLI display the Server's Availability conclusion and waiting reason; client-synthesized capacity/runner text (e.g. 'Runner at capacity') is removed in favor of the server conclusion, and waiting work with its reason is visible and distinguishable from executing/terminal.",
+        "A Needs-setup agent blocks the launch action in Web and reports the gaps in CLI launch; Unknown remains launchable with a 'will wait for validation' indication.",
+        "Web tests cover server-conclusion rendering, no client-side Readiness/Availability synthesis, needs-setup launch block, Unknown launchable, and waiting-reason display; CLI tests cover Readiness/Availability/gap output and launch-block output.",
+        "npm run typecheck -w packages/web, npm run test:run -w packages/web, npm run check:fsd -w packages/web, and npm test pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web Readiness/Availability/waiting UI driven by server conclusions; CLI agent view/launch Readiness, Availability, gap, and waiting output; removal of client-synthesized capacity text.",
+      "dependsOn": ["T-003", "T-004"],
+      "passes": false,
+      "notes": "Implements the client portions of design D1 and D2. Web and CLI consume the same server conclusions; no runner changes are required. Update relevant Agent product documentation when the user-visible Readiness/Availability contract lands."
+    }
+  ]
+}
