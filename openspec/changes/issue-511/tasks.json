@@ -1,0 +1,127 @@
+{
+  "project": "mohist-local",
+  "description": "Clear a batch of server-side mechanical debt (dead WorkflowGrain dispatch path, coordinator-bypass backdoor, message-text control flow, misnomers, non-exhaustive status mapping, and rotting comment references) and add gatekeeper ArchTests for the two most recurrence-prone items.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Remove WorkflowGrain dead dispatch path, coordinator backdoor, and message-text control flow",
+      "spec": "specs/workflow-grain-production-contract/spec.md#no-dead-event-dispatch-path-in-workflowgrain-production-code",
+      "description": "Delete the no-op event-dispatch path (IWorkflowGrainContext.DispatchEvent, WorkflowGrain.On and its 19 Task.CompletedTask arms, the WorkflowWorkLifecycle dispatch loop, and the reason parameter threaded through CommitAsync only to feed On). Remove the WorkflowGrain.BindProfileForTest settable delegate so production binding always routes through IWorkflowProfileReferenceCoordinatorGrain; rewire the one manual-grain test (WorkflowGrainStateSaveFailureSpecs) onto a fake IGrainFactory returning a stub coordinator (extend GrainTestContext's runtime proxy, modeled on RegistryGrainFactory). Replace the ex.Message.Contains(...) branching in CommitAsync with a typed WorkflowDefinitionResolutionException (Reason discriminator) thrown by WorkflowProfileManager at its three resolution-failure sites.",
+      "acceptanceCriteria": [
+        "grep for `DispatchEvent(` under packages/server/src/ returns no matches (the test-side DispatchEventsAsync() helper is out of scope and may remain).",
+        "WorkflowGrain.On and the reason parameter on CommitAsync no longer exist; the WorkflowWorkLifecycle event loop that fed them is gone.",
+        "grep for `BindProfileForTest` across packages/server/ returns zero matches in production source, and the rewired WorkflowGrainStateSaveFailureSpecs passes using a fake coordinator grain/factory with no production override hook.",
+        "CommitAsync catches the typed resolution exception and contains no ex.Message.Contains branching; the three WorkflowProfileManager throw sites raise the typed exception.",
+        "Editing the message text of the resolution exception does not change CommitAsync control flow (covered by a spec).",
+        "`dotnet build Mohist.sln` and the full server test suite (unit + spec + ArchTests) are green; observable workflow run state transitions and the profile-resolution user-facing error text are unchanged."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowGrain/IWorkflowGrainContext/WorkflowWorkLifecycle dead path removed; BindProfileForTest gone with its test rewired; typed resolution exception in place; green server build + tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per design D1, the primary test-rewire approach is extending GrainRuntimeProxy to return a fake IGrainFactory; if that proves fragile across other manual grains, fall back to running the spec through InProcessTestCluster with a registered fake coordinator. The spec contract is identical either way. Group A lands first so the coordinator-bypass ArchTest's promise holds for the rest of the work."
+    },
+    {
+      "id": "T-002",
+      "title": "Rename run-scoped Variables persistence to WorkflowRunVariablesStore and inline the layered-variables pass-through",
+      "spec": "specs/workflow-run-variables-store/spec.md#run-scoped-variables-persistence-entry-named-for-what-it-does",
+      "description": "Rename WorkflowRunProfileManager to WorkflowRunVariablesStore repo-wide (confirmed 14 files) and drop Profile wording from its method names where it carries no meaning, keeping signatures and the VariableBundle JSON shape identical. DI registration is implicit via the IScopedService marker. For the backing WorkflowRunProfiles/WorkflowRunProfileRow table, keep it under a recorded decision: add a short design/ note and an inline pointer comment on the row type identifying it as a deliberately-retained historical misnomer. Separately, delete the WorkflowProfileManager.ResolveLayeredVariablesAsync pass-through wrapper, inline ResolveConfiguredVariablesAsync at its one production call site, and switch the 7 spec call sites in WorkflowVariableResolution(Specs|DefaultsSpecs).cs to call ResolveConfiguredVariablesAsync directly.",
+      "acceptanceCriteria": [
+        "grep for `WorkflowRunProfileManager` across the entire repo returns zero matches (production, tests, registration, config).",
+        "The renamed store carries the Store suffix and exposes the get/set/patch/default-seed operations under Profile-free names; no method name contains 'Profile'.",
+        "A design/ note exists documenting WorkflowRunProfiles/WorkflowRunProfileRow as a deliberately-retained misnomer, and the row type carries an inline pointer to that decision; no silent misnomer remains.",
+        "ResolveLayeredVariablesAsync no longer exists; its single production caller and the 7 spec call sites use ResolveConfiguredVariablesAsync, and those specs pass.",
+        "Persisted VariableBundle shape, ETag concurrency behavior, and explicit-vs-default precedence are byte-identical (verified by the existing variable-resolution specs, which stay green).",
+        "`dotnet build Mohist.sln` and the full server test suite are green."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowRunVariablesStore rename complete with table-decision note; ResolveLayeredVariablesAsync inlined; green server build + tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Touches WorkflowGrain.cs and WorkflowProfileManager.cs, which T-001 also edits; priority ordering applies T-002 after T-001 lands. Per design D2 the table rename is intentionally NOT taken (unfavorable cost/benefit for a cosmetic migration) — the recorded decision satisfies the 'must not be left silently' rule."
+    },
+    {
+      "id": "T-003",
+      "title": "Make the status wire-format mapping typed per enum and rename FrontendStatus to WireStatus",
+      "spec": "specs/status-wire-mapping/spec.md#wire-format-status-mapping-is-typed-per-enum-not-string",
+      "description": "Replace WorkflowStatusMapper.FrontendStatus(string) with four typed switch entries — WireStatus(WorkflowRunStatus), WireStatus(StageRunStatus), WireStatus(TaskRunStatus), WireStatus(StageCheckStatus) — each an explicit arm per enum value with no discard and no ToLowerInvariant fallback, every arm emitting the exact current kebab-case wire value (AwaitingApproval -> awaiting-approval; single-word -> lowercase). Add a defensive _ => throw SwitchExpressionException arm per entry. Rename the symbol and the test file/class (WorkflowStatusMapperFrontendStatusTests -> ...WireStatusTests) and update the 4 call sites in WorkflowStatusMapper. Add per-enum exhaustive spec tests using Enum.GetValues. On web, add a comment above each of the four unions (WorkflowRunStatus, WorkflowStageRunStatus, StageStateStatus, WorkflowRecoverySummary) naming its authoritative server enum; do not prune client-only states (skipped/error).",
+      "acceptanceCriteria": [
+        "No production status mapper accepts a string parameter; grep for a string-typed status mapper under packages/server/src/ returns nothing, and grep for `FrontendStatus` returns zero matches.",
+        "Each of the four enums has a typed WireStatus switch entry; adding a new enum value with no arm either fails the per-enum Enum.GetValues spec or hits the SwitchExpressionException at runtime (covered by test).",
+        "Every emitted wire value is kebab-case and byte-identical to today (awaiting-approval preserved; created/running/passed/failed etc. preserved) — verified by the rewritten per-enum specs.",
+        "The four web status unions each carry a comment naming their authoritative server enum, and each union includes every wire value its server enum emits.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` are green; `dotnet build Mohist.sln` and the server unit+spec tests are green."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Typed WireStatus per-enum entries with FrontendStatus gone; per-enum exhaustive specs; web union source-of-truth comments; green server + web verification.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of T-001/T-002 (WorkflowStatusMapper vs the grain/variables files). Note the real check enum is StageCheckStatus (the issue body's 'CheckRunStatus' is a misnomer). Exhaustiveness is guaranteed by the per-enum Enum.GetValues spec test, not by the C# compiler (switch expressions over enums are not exhaustive-checked by default); the throw arm is defense-in-depth and must not be deleted."
+    },
+    {
+      "id": "T-004",
+      "title": "Add the comment-reference ArchTest with a frozen baseline ratchet",
+      "spec": "specs/comment-reference-ban/spec.md#archtest-forbids-issuespecdesign-references-in-server-c-comments",
+      "description": "Add a Roslyn-based ArchTest to Mohist.Server.ArchTests that scans comment trivia (SingleLine/MultiLine/DocumentationComment trivia) of the already-embedded ServerSources/**/*.cs production source for issue-\\d+, T-\\d{3}, design/[path].md, and openspec/ references, using Microsoft.CodeAnalysis.CSharp (already referenced). Add a comment-reference-baseline.json embedded as CommentReferenceBaseline.json mirroring SpecFileSizeBaseline.json, mapping each offending file to its current occurrence count (frozen at today's 38 across 26 files). The test passes when counts are <= baseline (shrink-only), fails on growth, and fails when a baseline entry is stale (file now clean) so the ratchet tightens. Do not clear any offenders in this task — only establish the gate at the frozen baseline.",
+      "acceptanceCriteria": [
+        "The new ArchTest parses embedded ServerSources production C# via CSharpSyntaxTree and scans only comment trivia (not string literals or code), matching the four reference patterns with RegexOptions.ExplicitCapture.",
+        "comment-reference-baseline.json is embedded as CommentReferenceBaseline.json and freezes the current 38 offenders across 26 files as a path->count map.",
+        "The ArchTest passes at the frozen baseline; adding one new offender fails it, and removing one offender without updating the baseline fails it as a stale entry (mirroring spec-file-size-baseline behavior).",
+        "No production comment is modified in this task (zero offenders cleared) — the gate is established but the debt remains frozen.",
+        "`dotnet build Mohist.sln` and the ArchTests project (including the new test) are green."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Comment-reference ArchTest + CommentReferenceBaseline.json (frozen at 38) passing; no offenders cleared yet.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Production source is already embedded as ServerSources/**/*.cs and Microsoft.CodeAnalysis.CSharp is already a package reference in Mohist.Server.ArchTests.csproj, so no new plumbing is needed. This task deliberately only establishes the ratchet; T-005 clears the debt. Splitting the two makes the shrink-only transition visible and proves the ratchet works before relying on it."
+    },
+    {
+      "id": "T-005",
+      "title": "Clear the comment-reference baseline to zero and convert the ban to hard enforcement",
+      "spec": "specs/comment-reference-ban/spec.md#existing-violations-cleared-to-zero-then-hard-ban",
+      "description": "Clear all 38 comment-reference offenders across the 26 files: delete pure provenance tags (e.g. '(issue-490 T-001, design D2)') while preserving surrounding explanatory prose, and rewrite 'why' comments to state the reason inline without the citation. Fix the migration comment citing the non-existent design/workflow/scheduling.md by writing the schema (fairness/VIRTUAL) decision inline or deleting the citational comment. Fix UnifiedSessionRoutes by removing the T-005 marker and restating the old agent-sessions/{sessionId} route coexistence as a plain fact (verified: the CLI still uses that route; if that has changed by implementation time, delete the remark instead). Then empty comment-reference-baseline.json so the ArchTest becomes a no-exemption hard ban.",
+      "acceptanceCriteria": [
+        "grep for `issue-\\d+`, `T-\\d{3}`, `design/[^\\s]+\\.md`, and `openspec/` inside server production C# comments returns zero matches (Roslyn comment-trivia scan).",
+        "The design/workflow/scheduling.md migration citation is removed and its schema decision is stated inline (or the purely-citational comment is deleted).",
+        "The UnifiedSessionRoutes remark no longer cites T-005 and either states the old-route coexistence as a fact or is deleted if the CLI has migrated off agent-sessions/{sessionId}.",
+        "comment-reference-baseline.json is empty and the ArchTest passes with no exemptions, failing on any new offender.",
+        "`dotnet build Mohist.sln` and the full server test suite are green; no public behavior, API, or wire-format change."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "All 38 comment references cleared; empty baseline; hard-ban ArchTest green.",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Depends on T-004 because the shrink must be validated by the ratchet test that T-004 establishes. Re-confirm CLI usage of agent-sessions/{sessionId} at implementation time before deciding fact-rewrite vs delete for UnifiedSessionRoutes. The 26 offender files have no overlap with the files edited by T-001/T-002/T-003, so this task only strictly depends on T-004."
+    },
+    {
+      "id": "T-006",
+      "title": "Make EventDispatcherService.Backoff private and observe retry cadence via FakeTimeProvider",
+      "spec": "specs/workflow-grain-production-contract/spec.md#profile-resolution-failure-classified-by-exception-type-not-message-text",
+      "description": "Reduce EventDispatcherService.Backoff from public to private (its only production caller is DispatchAsync at the NextAttemptTime computation). Rewrite the direct Backoff(n) unit assertions in EventDispatcherSpecs to instead observe retry cadence through DispatchAsync advanced by FakeTimeProvider — asserting the sequence of NextAttemptTime deltas across several attempts so the exponential backoff curve is still pinned, rather than calling Backoff directly. This completes the remaining Group E micro-cleanup.",
+      "acceptanceCriteria": [
+        "EventDispatcherService.Backoff is private; no production or test code calls it directly.",
+        "The rewritten EventDispatcherSpecs assert retry timing (NextAttemptTime deltas for multiple attempts) via DispatchAsync + FakeTimeProvider, covering the exponential curve and the max-backoff clamp.",
+        "No test relies on wall-clock timing (FakeTimeProvider drives all assertions), per the project's no-real-time constraint.",
+        "`dotnet build Mohist.sln` and the full server test suite are green."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Backoff private; EventDispatcherSpecs rewritten to assert cadence via FakeTimeProvider; green server build + tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent module (Infrastructure/Events), no overlap with T-001..T-005. The spec reference is the grain-production-contract capability because this belongs to the same internal-API-surface tightening theme; the behavioral assertion moves from a direct method call to an honest timing observation."
+    }
+  ]
+}
