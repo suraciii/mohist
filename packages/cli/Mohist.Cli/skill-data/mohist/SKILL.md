@@ -72,3 +72,7 @@ Help is local and safe to query. Do not assume a Project, service, or remote
 request is needed just to discover syntax. When help does not answer a product
 decision, return to the First read or the appropriate sibling Skill instead of
 copying command tables into this entry point.
+
+Use `--json <fields>` to select only the fields needed for a decision; for any
+command that returns a resource, bare `--json` lists the available fields locally
+without contacting the Server.
