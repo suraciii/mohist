@@ -22,7 +22,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
             runId: runId,
             issueTemplateJson: SerializeDefinition("empty-vars-template"));
 
-        var result = await Manager.ResolveLayeredVariablesAsync(runId);
+        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
 
         Assert.False(result.Vars.HasValue);
         Assert.Null(result.Stages);
@@ -41,7 +41,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
 
         await SeedAllLayersAsync("proj6", 1, runId, proj, issue);
 
-        var result = await Manager.ResolveLayeredVariablesAsync(runId);
+        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
@@ -77,7 +77,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
             await db.SaveChangesAsync();
         }
 
-        var result = await Manager.ResolveLayeredVariablesAsync(runId);
+        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
@@ -99,7 +99,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
 
         await SeedAllLayersAsync("proj_override", 1, runId, proj, issue);
 
-        var result = await Manager.ResolveLayeredVariablesAsync(runId);
+        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
@@ -210,7 +210,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
             issueTemplateJson: templateJson,
             runtime: runtime);
 
-        var result = await Manager.ResolveLayeredVariablesAsync(runId);
+        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());

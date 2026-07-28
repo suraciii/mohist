@@ -258,3 +258,25 @@ dispatch 流转就足够。
 本 WIP spec 固定目标语义，不把当前 `VariableBundle`、API DTO 或数据库 JSON 当作领域
 对象。实现可以使用 resolver 或 provider 隐藏读取与合并；这些是内部实现细节，不进入
 领域模型。
+
+## `WorkflowRunProfile` row/table name: historical misnomer
+
+The persistence entry point for Run-scoped Variables lives in
+`packages/server/src/Mohist.Server/Workflow/Services/WorkflowRunVariablesStore.cs`
+(the `…VariablesStore` suffix follows [`conventions.md`](../conventions.md)'s Store
+suffix for "persistence boundary for one shape"). The C# type, the `…`
+DbSet, and the database table are **deliberately named** `WorkflowRunProfileRow`,
+`WorkflowRunProfiles`, and `WorkflowRunProfiles` respectively, even though they store
+Variables, never a Profile.
+
+Decision: keep them. The cosmetic rename would require an EF Core
+migration rewriting a live production table plus coordinated down/up scripts, for
+zero behavioral gain. The misnomer must not be left silent — this note plus the
+inline pointer comment at the top of `WorkflowRunProfileRow.cs` make the decision
+discoverable. When the table is next restructured for a real reason (e.g.
+normalization, archival), rename the row and DbSet in the same change.
+
+The `Run-scoped Variables` table/row rename is rejected **only** on cost/benefit
+grounds; the rename is correct in target. The current persisted
+`VariableBundle` JSON shape and ETag behavior are not affected by the type-name
+keep and remain unchanged.

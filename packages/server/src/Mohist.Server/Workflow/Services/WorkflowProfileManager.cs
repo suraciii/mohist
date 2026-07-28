@@ -31,7 +31,7 @@ public class WorkflowProfileManager : IScopedService
     private readonly IPromptLoader _promptLoader;
     private readonly PromptTemplateEngine _engine;
     private readonly ConfigService _configService;
-    private readonly WorkflowRunProfileManager _runProfileManager;
+    private readonly WorkflowRunVariablesStore _runVariablesStore;
     private readonly IWorkflowProfileProvider _profileProvider;
 
     public WorkflowProfileManager(
@@ -39,14 +39,14 @@ public class WorkflowProfileManager : IScopedService
         IPromptLoader promptLoader,
         PromptTemplateEngine engine,
         ConfigService configService,
-        WorkflowRunProfileManager runProfileManager,
+        WorkflowRunVariablesStore runVariablesStore,
         IWorkflowProfileProvider profileProvider)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
         _engine = engine;
         _configService = configService;
-        _runProfileManager = runProfileManager;
+        _runVariablesStore = runVariablesStore;
         _profileProvider = profileProvider;
     }
 
@@ -257,7 +257,7 @@ public class WorkflowProfileManager : IScopedService
         string? ProjectDefaultId,
         string? EffectiveProfileId);
 
-    private async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
+    internal async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
     {
         // Effective Variables are owned by Project, Issue, and WorkflowRun
         // resources only. Initialization defaults seeded on the WorkflowRun
@@ -268,8 +268,8 @@ public class WorkflowProfileManager : IScopedService
         var context = await ResolveRunContextAsync(db, runId);
         var project = await LoadProjectLayerAsync(db, context);
         var issue = await LoadIssueLayerAsync(db, context);
-        var run = await _runProfileManager.GetVariablesAsync(runId);
-        var runDefaults = await _runProfileManager.GetDefaultVariablesAsync(runId);
+        var run = await _runVariablesStore.GetVariablesAsync(runId);
+        var runDefaults = await _runVariablesStore.GetDefaultVariablesAsync(runId);
 
         return MergeRunScopedVariables(runDefaults, project, issue, run);
     }
@@ -349,12 +349,6 @@ public class WorkflowProfileManager : IScopedService
         }
     }
 
-    internal async Task<VariableBundle> ResolveLayeredVariablesAsync(string runId)
-    {
-        var independent = await ResolveConfiguredVariablesAsync(runId);
-        return independent;
-    }
-
     public async Task<JsonElement> ResolveEffectiveVariablesAsync(string runId, string? stage)
     {
         var resolved = await ResolveEffectiveVariableBundleAsync(runId, stage);
@@ -363,7 +357,7 @@ public class WorkflowProfileManager : IScopedService
 
     internal async Task<VariableBundle> ResolveEffectiveVariableBundleAsync(string runId, string? stage)
     {
-        var layered = await ResolveLayeredVariablesAsync(runId);
+        var layered = await ResolveConfiguredVariablesAsync(runId);
         return new VariableBundle(
             layered.ResolveStageVars(stage),
             layered.Stages,

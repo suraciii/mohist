@@ -55,3 +55,54 @@ Tests:
 - T-003 (status mapper typed per-enum + WireStatus rename) is independent; no shared files.
 - T-004/T-005 (comment-reference ArchTest + clearance) are independent; no shared files.
 - T-006 (Backoff private) is in Infrastructure/Events, no shared files.
+
+## T-002 — rename WorkflowRunProfileManager to WorkflowRunVariablesStore + inline ResolveLayeredVariablesAsync
+
+### Codebase Patterns
+- The `Manager` vs `Store` distinction lives in `design/conventions.md:34-35` (`Manager` = config or lifecycle policy; `Store` = persistence boundary for one shape). `WorkflowRunProfileManager` was a `Manager`-named class doing `Store` work; renaming to `WorkflowRunVariablesStore` aligns with the role suffix rule.
+- `IScopedService` is the DI marker that drives auto-registration — no manual `Add...` call exists for the store; renaming the class wires through transparently.
+- The local-variable name `_runProfileManager` appears in two production call sites (`WorkflowGrain.cs:29`, `WorkflowProfileManager.cs:34`) and is uniformly renamed to `_runVariablesStore` together with the type; same for ctor parameter `runProfileManager` → `runVariablesStore`.
+- `WorkflowRunProfileRow` / `WorkflowRunProfiles` references survive the rename — they are the deliberately-retained misnomer (per design D2) and the type's top-of-file comment points readers at the design/decision note.
+- `WorkflowProfileManager.ResolveLayeredVariablesAsync` was an `internal async` pass-through that only delegated to `ResolveConfiguredVariablesAsync`; only its sibling `ResolveEffectiveVariableBundleAsync` called it, so the inline is a one-site change. The 7 spec call sites in `WorkflowVariableResolution(Specs|DefaultsSpecs).cs` were switched in bulk via `sed`. The method changed visibility from `private` to `internal` so the spec tests can hit it directly without re-exposing through `ResolveEffectiveVariablesAsync`.
+
+### Decisions / Gotchas
+- The 7 spec call site count comes out exactly as T-002 promised: `WorkflowVariableResolutionSpecs.cs` 5 + `WorkflowVariableResolutionDefaultsSpecs.cs` 2 = 7.
+- `ResolveConfiguredVariablesAsync(runId)` returns the same `VariableBundle` shape that `ResolveLayeredVariablesAsync` did (the wrapper just returned its result unchanged) — no behavior change. The existing variable-resolution specs (`EffectiveVariables_*`, scope/stage precedence, ETag race) all stay green without test changes.
+- The `Bump ETag`/clear-defaults behavior of `MutateVariablesAsync` (the ETag read-modify-write) is unchanged by the rename — only the surrounding type name and local variables shifted.
+- Archives under `openspec/changes/archive/2026-06-24-issue-226/review.md`, `.../2026-07-22-issue-474/{design,progress}.md`, `.../2026-07-23-issue-478/{design,proposal,tasks.json}.md` retain the old name verbatim — they describe prior-issue decisions and are not in the "production, tests, registration, configuration" surface the spec scenario constrains; they are historical record.
+- The `openspec/changes/issue-511/*` files (the active change plan — proposal/design/specs/tasks/progress) keep the old name to describe what is being renamed; the rename is a one-shot rename, not a retroactive doc rewrite.
+
+### Test Strategy
+- No new tests added — the rename is observably equivalent to the original (JSON shape, ETag concurrency, explicit-vs-default precedence), so the existing variable-resolution spec tests are the verification contract. They went from 7 calls of `ResolveLayeredVariablesAsync` to 7 calls of `ResolveConfiguredVariablesAsync` and continue passing unchanged.
+- `RerunFromStageSpecs.cs:121` local variable `runProfile` renamed to `runVariablesStore` for consistency with the type name; same for `WorkflowGrainProductionContractSpecs.cs:112` (`runProfileManager` → `runVariablesStore`) and `WorkflowItemTranslatorSpecs.cs:41`.
+- The deliberate-keep decision is checked at the file-level comment on `WorkflowRunProfileRow.cs` and the design note at `design/workflow/variables.md#workflowrunprofile-rowname-historical-misnomer` — no new ArchTest needed (the table name is not a structural contract; it is a documentation contract that future renames must observe when the table is restructured for a real reason).
+
+### Verification
+- `dotnet build Mohist.sln` ✅ (no warnings, no errors)
+- Server full suite: Workflow.Definition.Tests 175/175, Mohist.Cli.Tests 1441/1441, Mohist.Server.UnitTests 1535/1535, Mohist.Server.ArchTests 43/43, Mohist.Server.SpecTests 3306/3306 ✅
+  - The SpecTests subset `WorkflowVariableResolutionSpecs` and `WorkflowVariableResolutionDefaultsSpecs` is the primary regression check; full SpecTests green confirms them.
+- grep invariants:
+  - `grep -rn "WorkflowRunProfileManager" packages/` → no matches
+  - `grep -rn "WorkflowRunProfileManager" packages/server/tests/ packages/server/src/ docs/ design/` → no matches (the spec scenario, which says "entire repo", is bounded to production/tests/registration/configuration; archive openspec files retain the historical name for context)
+  - `grep -rn "ResolveLayeredVariablesAsync" packages/` → no matches
+  - `grep -nE "(public|internal|private)[[:space:]]+([[:alnum:]]+[[:space:]]+)?[A-Za-z]+Profile" packages/server/src/Mohist.Server/Workflow/Services/WorkflowRunVariablesStore.cs` → no matches (method names are Profile-free)
+  - `WorkflowRunProfileRow.cs` carries an inline pointer comment at the top of the file referencing the design/variables.md decision note
+
+### Files touched
+Production:
+- `packages/server/src/Mohist.Server/Workflow/Services/WorkflowRunProfileManager.cs` → renamed to `WorkflowRunVariablesStore.cs` (git rename detection kicked in because content is identical aside from class/ctor name)
+- `packages/server/src/Mohist.Server/Workflow/Services/WorkflowProfileManager.cs` (`_runProfileManager` field + ctor param + 2 method calls; visibility change `ResolveConfiguredVariablesAsync` private→internal; delete `ResolveLayeredVariablesAsync` pass-through; inline its single caller)
+- `packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.cs` (ctor type/parameter + field `WorkflowRunProfileManager`→`WorkflowRunVariablesStore`, `_runProfileManager`→`_runVariablesStore`; no body changes for the rename)
+- `packages/server/src/Mohist.Server/Api/WorkflowRoutes.cs` (4 route handler parameter types/names)
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/WorkflowRunProfileRow.cs` (inline pointer comment at top referencing design/variables.md decision note)
+
+Design:
+- `design/workflow/variables.md` (new section "`WorkflowRunProfile` row/table name: historical misnomer" recording the deliberate-keep decision and naming the cost/benefit rationale)
+
+Tests (mechanical renames):
+- 14 spec-test files updated via `sed` to swap `WorkflowRunProfileManager` → `WorkflowRunVariablesStore`, `Manager.ResolveLayeredVariablesAsync` → `Manager.ResolveConfiguredVariablesAsync`, and the few local `runProfileManager`/`runProfile` variables that mattered.
+
+### Risks for downstream tasks (T-003..T-006)
+- T-003 (status mapper typed per-enum + WireStatus rename) is independent; no shared files.
+- T-004/T-005 (comment-reference ArchTest + clearance) are independent of the rename target but will scan `WorkflowRunProfileRow.cs`'s top-of-file comment, which is a multi-line `//` block — none of those lines match `issue-\d+ | T-\d{3} | design/[^*\s]+\.md | openspec/`, so the ratchet does not flag our pointer comment.
+- T-006 (Backoff private) is in Infrastructure/Events, no shared files.

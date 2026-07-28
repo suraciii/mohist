@@ -44,7 +44,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
             issue: VariableBundle.Empty,
             issueTemplateJson: templateJson);
 
-        var resolved = await Manager.ResolveLayeredVariablesAsync(runId);
+        var resolved = await Manager.ResolveConfiguredVariablesAsync(runId);
 
         Assert.Null(resolved.Vars);
         Assert.Null(resolved.Stages);
@@ -128,7 +128,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     {
         var runId = "wr_archive_seed01";
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var manager = new WorkflowRunProfileManager(dbFactory);
+        var manager = new WorkflowRunVariablesStore(dbFactory);
 
         await manager.EnsureArchiveDefaultAsync(runId);
 
@@ -154,7 +154,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     {
         var runId = "wr_archive_seed02";
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var manager = new WorkflowRunProfileManager(dbFactory);
+        var manager = new WorkflowRunVariablesStore(dbFactory);
 
         await manager.SetVariablesAsync(
             runId,
@@ -181,11 +181,11 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
         // contexts both read ETag=1; the first save bumps the row to ETag=2;
         // the second save's WHERE ETag=1 then matches no row and raises
         // DbUpdateConcurrencyException. The ETag is bumped on both sides to
-        // mirror what every real writer (WorkflowRunProfileManager) does, so
+        // mirror what every real writer (WorkflowRunVariablesStore) does, so
         // this isolates the concurrency check rather than the increment.
         var runId = "wr_etag_race01";
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var manager = new WorkflowRunProfileManager(dbFactory);
+        var manager = new WorkflowRunVariablesStore(dbFactory);
         await manager.EnsureArchiveDefaultAsync(runId);
 
         await using var readerA = new MohistDbContext(Database.Options);
@@ -213,7 +213,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     {
         var runId = "wr_default_below01";
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var runManager = new WorkflowRunProfileManager(dbFactory);
+        var runManager = new WorkflowRunVariablesStore(dbFactory);
         await runManager.EnsureArchiveDefaultAsync(runId);
 
         var project = new VariableBundle(
@@ -256,7 +256,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     {
         var runId = "wr_default_wins01";
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var runManager = new WorkflowRunProfileManager(dbFactory);
+        var runManager = new WorkflowRunVariablesStore(dbFactory);
         await runManager.EnsureArchiveDefaultAsync(runId);
 
         await SeedAllLayersAsync(
@@ -274,7 +274,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     {
         var runId = "wr_replace_default01";
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var runManager = new WorkflowRunProfileManager(dbFactory);
+        var runManager = new WorkflowRunVariablesStore(dbFactory);
         await runManager.EnsureArchiveDefaultAsync(runId);
 
         var patch = new VariableBundle(
@@ -310,7 +310,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
         // even though the patch was computed against a snapshot.
         var runId = "wr_patch_preserves_default01";
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var runManager = new WorkflowRunProfileManager(dbFactory);
+        var runManager = new WorkflowRunVariablesStore(dbFactory);
         await runManager.EnsureArchiveDefaultAsync(runId);
 
         await runManager.PatchVariablesAsync(
@@ -334,7 +334,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     {
         var runId = "wr_put_replace01";
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var runManager = new WorkflowRunProfileManager(dbFactory);
+        var runManager = new WorkflowRunVariablesStore(dbFactory);
         await runManager.EnsureArchiveDefaultAsync(runId);
 
         await runManager.SetVariablesAsync(
@@ -359,7 +359,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     {
         var runId = "wr_retry_archive01";
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var runManager = new WorkflowRunProfileManager(dbFactory);
+        var runManager = new WorkflowRunVariablesStore(dbFactory);
         await runManager.EnsureArchiveDefaultAsync(runId);
 
         await SeedAllLayersAsync(
@@ -399,7 +399,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
             project: VariableBundle.Empty,
             issue: VariableBundle.Empty);
 
-        var result = await Manager.ResolveLayeredVariablesAsync(runId);
+        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
         Assert.True(result.Vars is null
             || !result.Vars.Value.EnumerateObject().Any());
     }
@@ -409,7 +409,7 @@ public class WorkflowVariableResolutionDefaultsSpecs : WorkflowProfileManagerTes
     {
         var runId = "wr_archive_idempotent01";
         var dbFactory = new TestDbContextFactory(Database.Options);
-        var runManager = new WorkflowRunProfileManager(dbFactory);
+        var runManager = new WorkflowRunVariablesStore(dbFactory);
 
         for (var attempt = 0; attempt < 5; attempt++)
         {

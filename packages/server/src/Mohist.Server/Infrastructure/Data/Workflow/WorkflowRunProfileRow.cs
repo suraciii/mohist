@@ -1,5 +1,14 @@
 namespace Mohist.Server.Infrastructure.Data.Workflow;
 
+// Historical misnomer: `WorkflowRunProfileRow` (and the `WorkflowRunProfiles` DbSet /
+// table `WorkflowRunProfiles`) actually stores Run-scoped Variables, never a Profile.
+// The deliberately-retained rename decision lives at
+// `design/workflow/variables.md#workflowrunprofile-rowname-historical-misnomer` — the
+// type was named before Run Variables were split out from WorkflowProfile and the
+// class name now misleads readers. The class is being preserved under a documented
+// decision rather than renamed via an EF Core migration (unfavorable cost/benefit
+// for a cosmetic change). When the table is next restructured for a real reason,
+// rename the row and DbSet in the same change.
 public class WorkflowRunProfileRow
 {
     public string WorkflowRunId { get; set; } = string.Empty;

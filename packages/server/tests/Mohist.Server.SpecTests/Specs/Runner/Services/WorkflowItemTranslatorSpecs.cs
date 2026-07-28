@@ -38,11 +38,11 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         _database = TestSqliteDatabase.CreateMigrated();
 
         var factory = new TestDbContextFactory(_database.Options);
-        var runProfileManager = new WorkflowRunProfileManager(factory);
+        var runVariablesStore = new WorkflowRunVariablesStore(factory);
         var promptLoader = new EmptyPromptLoader();
         _profileManager = new WorkflowProfileManager(
             factory, promptLoader, new PromptTemplateEngine(),
-            WorkflowGrainTestHelpers.CreateEmptyConfigService(), runProfileManager,
+            WorkflowGrainTestHelpers.CreateEmptyConfigService(), runVariablesStore,
             new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
         _bindService = new WorkflowArtifactBindService(
             factory, BindNullLogger, new FakeTimeProvider(TestTime.UtcNow));

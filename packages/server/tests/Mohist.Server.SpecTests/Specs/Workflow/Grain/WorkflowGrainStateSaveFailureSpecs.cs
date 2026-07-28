@@ -46,7 +46,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
 
         var run = await store.LoadAsync(workflowRunId);
         var defaults = await scope.ServiceProvider
-            .GetRequiredService<WorkflowRunProfileManager>()
+            .GetRequiredService<WorkflowRunVariablesStore>()
             .GetDefaultVariablesAsync(workflowRunId);
         Assert.NotNull(run);
         Assert.Equal(WorkflowRunStatus.Pending, run!.Status);
@@ -181,7 +181,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             identity.Runtime,
             store,
             services.GetRequiredService<WorkflowProfileManager>(),
-            services.GetRequiredService<WorkflowRunProfileManager>(),
+            services.GetRequiredService<WorkflowRunVariablesStore>(),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
     }
