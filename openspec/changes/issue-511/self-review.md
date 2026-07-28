@@ -1,58 +1,35 @@
-# Self-Review — issue-511 (mechanical-debt cleanup), round 2
+# Self-Review — issue-511 (mechanical-debt cleanup), round 3
 
-Reviewer mode: read-only. This file is the only artifact modified. A separate task fixes every problem reported here.
+Reviewer mode: read-only. This file is the only artifact modified. A separate task fixes any problem reported here.
 
 ## Verdict
 
-Round 1's findings (task↔spec contract for Group E, web-union mapping, `CheckRunStatus` naming, counts) were addressed and verify clean: `tasks.json` is valid JSON with a sound DAG (only edge `T-005 → T-004`), T-006 carries an honestly empty `spec` field, the four capabilities still map 1:1 to spec directories, every requirement has ≥1 `#### Scenario:` (4 hashtags, zero malformed 3-hashtag scenarios), and `StageCheckStatus` is used consistently. However, this round surfaces two substantive **spec↔design contradictions** (plus a proposal wording clash and a stale count) that were tolerated by the round-1 fixes and will mislead a builder.
+Round 3 finds the plan ready to build. Rounds 1 and 2 surfaced and fixed: the task↔spec contract for Group E, the web-union→enum mapping, the `CheckRunStatus` misnomer, accurate reference counts, the test-rewire mechanism contradiction, and the false compile-time-exhaustiveness claim. This round verified those fixes landed and checked the contract surfaces that previous rounds had not fully exercised — every task `spec` anchor now resolves to a real `### Requirement:` heading, and the capability↔spec-directory mapping is exactly 1:1.
 
-## Findings (must fix)
+## Verification performed (all clean)
 
-### F1 — Test-rewire mechanism: spec/proposal mandate "test cluster", design/task choose "fake IGrainFactory via proxy"
+- **Capability ↔ spec directory:** the four capabilities in `proposal.md` (`workflow-grain-production-contract`, `workflow-run-variables-store`, `status-wire-mapping`, `comment-reference-ban`) match the four directories under `specs/` exactly.
+- **Task `spec` anchors resolve:** T-001→`no-dead-event-dispatch-path-…`, T-002→`run-scoped-variables-persistence-entry-named-for-what-it-does`, T-003→`wire-format-status-mapping-is-typed-per-enum-not-string`, T-004→`ArchTest forbids issue/spec/design references…`, T-005→`Existing violations cleared to zero, then hard ban` all match real requirement headings (GitHub-style slug); T-006 is intentionally empty (Backoff has no capability home, documented in its notes).
+- **Spec format:** every requirement uses `### Requirement:`; every scenario uses exactly `#### Scenario:` with WHEN/THEN; every requirement has ≥1 scenario; normative SHALL/MUST throughout; no `## ADDED/MODIFIED/REMOVED` headers; zero malformed 3-hashtag scenarios. Counts: comment-reference-ban 3/10, status-wire-mapping 5/11, workflow-grain-production-contract 3/10, workflow-run-variables-store 4/9.
+- **`tasks.json`:** valid JSON; all six tasks carry every required field; DAG acyclic; the sole dependency (`T-005 → T-004`) is a true output dependency on a strictly lower priority; `passes: false` throughout.
+- **Round-2 contradictions resolved:**
+  - F1 (test-rewire mechanism): spec scenario and proposal now read "a fake coordinator (either registered in the test cluster, or returned by a fake `IGrainFactory` in a manual-grain context)" — mechanism-neutral; design D1 keeps the proxy-factory approach as primary, and the design Open Question's "the spec contract is identical either way" is now literally true.
+  - F2 (exhaustiveness): no "compile error"/"build MUST fail" remains in spec or proposal; both now state exhaustiveness is enforced by the per-enum `Enum.GetValues` test plus a defensive `_ => throw SwitchExpressionException` arm, explicitly noting C# does not compile-check enum switch exhaustiveness. The task (T-003) and design D3 agree.
+  - F3 (web union values): proposal `:32` now reads "no existing union wire value is removed, and `completed` is added to `WorkflowStageRunStatus`", consistent with `:13`.
+  - M1 (count): design `:98` now "~33 occurrences", matching the proposal.
+- **Term consistency:** `StageCheckStatus` used throughout (the only `CheckRunStatus` mentions are deliberate "(the issue body's … is a misnomer)" notes); `WireStatus` rename consistent; `WorkflowStageRunStatus`/`completed` reconciliation consistently reflected in spec, design D3, and T-003's acceptance criteria; the three `StageRunStatus.Completed` producers cited in T-003 (`WorkflowRun.Approval.cs:116`, `WorkflowRun.Stage.cs:50,146`) were verified against the code.
 
-The spec, proposal, and design/task disagree on *how* the former `BindProfileForTest` consumer is rewired:
+## Minor observations (non-blocking, on record only)
 
-- **Spec** (`workflow-grain-production-contract/spec.md:46`): "the test MUST register a fake `IWorkflowProfileReferenceCoordinatorGrain` **in the test cluster**".
-- **Proposal** (`proposal.md:8` and `:29`): "switches to registering a fake coordinator grain **in the test cluster**" / "the fake grain registration hook **in the test cluster**".
-- **Design D1** (`design.md:40-42`) and **T-001** (`tasks.json:9,24`): chosen approach is "a **fake `IGrainFactory`** that returns a stub coordinator, wired through an extended `GrainTestContext`" (GrainRuntimeProxy); the `InProcessTestCluster` route is "Alternative A … **Rejected as the primary path**".
+- **The `_ => throw` arm: "defensive" (spec) vs "optionally" (design).** The spec body calls the `SwitchExpressionException` arm "defensive" and a runtime scenario presupposes it exists; design D3 calls it "optionally". This is not a contradiction in outcome — C# switch expressions already throw `SwitchExpressionException` on no-match by default, so the explicit arm is genuinely optional, and T-003 chooses to add it (satisfying both). A builder cannot go wrong here; flagged only so the wording drift is conscious.
+- **T-002 has no `dependsOn` on T-001** despite both editing `WorkflowGrain.cs` and `WorkflowProfileManager.cs`. Per the `dependsOn` rule (consumes prior output) this is correctly empty; AFK priority ordering handles the file overlap. Carried forward from round 1; still non-blocking.
 
-These are different mechanisms. Taken literally, the spec scenario **fails** if the design's chosen proxy-factory approach is implemented, because no grain is registered in any test cluster. The design's own Open Question (`design.md:116`) claims "the spec contract is identical either way; only the test mechanics differ" — but that is not true while the spec text pins the mechanism to "in the test cluster". A builder cannot satisfy the spec and follow the design simultaneously.
-
-**Resolution direction (for the fix task):** make the spec/proposal mechanism-neutral — the requirement is "no production override hook; the test obtains its `Applied` binding via a fake coordinator (either registered in the test cluster OR returned by a fake `IGrainFactory` in a manual-grain context)" — and let the design pick the proxy-factory approach. Do not mandate "test cluster" in normative spec text.
-
-### F2 — Exhaustiveness: spec/proposal assert a compile error that C# does not provide
-
-The spec and proposal claim compile-time exhaustiveness; the design and task acknowledge the compiler does not provide it:
-
-- **Spec** (`status-wire-mapping/spec.md:18`): "Adding a new value … without adding its mapping **MUST be a compile error**"; scenario (`:23`): "the **build MUST fail** with a non-exhaustive switch error".
-- **Proposal** (`proposal.md:13`): "Adding a new enum value without a mapping is now **a compile error**, not a silent `inprogress`".
-- **Design D3** (`design.md:59`) and **Risk** (`:94`): "C# switch expressions are **non-exhaustive on enums by default**, so the gatekeeper is a per-enum spec test using `Enum.GetValues`, plus optionally a `_ => throw new SwitchExpressionException` arm".
-- **T-003** acceptance criterion (`tasks.json:54`) is honest: "either fails the per-enum `Enum.GetValues` spec or hits the `SwitchExpressionException` at runtime".
-
-So the spec and proposal assert false language behavior. A builder who adds an enum value will see **neither** a build failure nor, necessarily, a silent wrong token — they will get a test failure or a runtime `SwitchExpressionException`. The spec's "MUST be a compile error" / "build MUST fail" is unachievable as written and directly contradicts the design's stated mitigation.
-
-**Resolution direction:** rewrite the spec requirement/scenario to state that exhaustiveness is enforced by the per-enum `Enum.GetValues` test plus a `_ => throw SwitchExpressionException` defense-in-depth arm (i.e. an omission is caught by a **test**, not the compiler), and fix the matching "compile error" sentence in the proposal. The task is already correct; only the spec/proposal over-promise.
-
-### F3 — Proposal contradicts itself on whether web union values change
-
-- `proposal.md:13` says web `WorkflowStageRunStatus` "is reconciled as part of this change" (it gains `completed`).
-- `proposal.md:32` (Impact, Web) says the unions "gain a server-authoritative-source comment; **values unchanged** (verified by typecheck + test)".
-
-Adding `completed` to the union is a change to its permitted value set, so "values unchanged" is now false. (Note: the `:17` "literal wire-format status values all stay byte-identical" claim is fine — the server already emits `completed`; only the `:32` "values unchanged" line is wrong.) **Resolution direction:** reword `:32` to "no existing union wire value is removed; `completed` is added to `WorkflowStageRunStatus`".
-
-## Minor observations
-
-- **M1 — stale count in design.** `design.md:98` still reads "14 files / 32 refs" while the proposal was corrected to "~33 occurrences" (actual: 33 occurrences across 14 files in `packages/server`). Trivial, but the two should agree.
-- **M2 — carried over, still non-blocking.** T-002 has no `dependsOn` on T-001 although both edit `WorkflowGrain.cs` and `WorkflowProfileManager.cs`. Per the `dependsOn` rule (consumes prior output) this is correctly empty; AFK priority ordering handles the file overlap. Noting only so it is a conscious choice, not an oversight.
+These two do not require changes before building.
 
 ## What is correct and need not change
 
-- Capability→spec-directory mapping is 1:1; names match exactly.
-- Spec format: all requirements use `### Requirement:`; all scenarios use exactly `#### Scenario:` with WHEN/THEN; every requirement has ≥1 scenario; normative SHALL/MUST throughout; no `## ADDED/MODIFIED/REMOVED` headers; zero malformed 3-hashtag scenarios.
-- `tasks.json` is valid JSON; all tasks have every required field; DAG is acyclic; the sole dependency (`T-005 → T-004`) is a true output dependency pointing to a strictly lower priority.
-- T-006's empty `spec` field is honest and explained; the `ResolveLayeredVariablesAsync` inline is now backed by the "No pass-through wrapper" requirement in `workflow-run-variables-store/spec.md`.
-- The web-union→enum mapping is now pinned, and the `WorkflowStageRunStatus`/`completed` reconciliation is consistently reflected in spec, design D3, and T-003's acceptance criteria.
-- `StageCheckStatus` is used consistently; the only `CheckRunStatus` mentions are deliberate "(the issue body's … is a misnomer)" explanatory notes.
-- Design decisions cite verified code locations (dead `On` switch at `WorkflowGrain.cs:644-667`, `BindProfileForTest` at `:60`, the `Contains("no current definition")` match at `:624-626`, the embedded `ServerSources/` plumbing + `Microsoft.CodeAnalysis.CSharp` reference enabling the comment-ban ArchTest, and the three `StageRunStatus.Completed` producers at `WorkflowRun.Approval.cs:116` / `WorkflowRun.Stage.cs:50,146`).
+- Design decisions cite verified code locations throughout (dead `On` switch at `WorkflowGrain.cs:644-667`, `BindProfileForTest` at `:60`, the `Contains("no current definition")` match at `:624-626`, the already-embedded `ServerSources/` plumbing + `Microsoft.CodeAnalysis.CSharp` reference enabling the comment-ban ArchTest, and the three `StageRunStatus.Completed` producers).
+- The two-phase comment-ban split (T-004 establish ratchet with frozen 38-entry baseline, T-005 clear to hard ban) remains well-motivated and matches the design's commit plan.
+- Group E is honestly handled: `ResolveLayeredVariablesAsync` inline is backed by the "No pass-through wrapper in variable resolution" requirement in `workflow-run-variables-store/spec.md`; `Backoff` carries an empty `spec` field with a clear justification, and its acceptance criteria are the verification contract.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
