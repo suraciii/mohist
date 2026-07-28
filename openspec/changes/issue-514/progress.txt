@@ -1,0 +1,99 @@
+# Issue 514 / T-001 — Encrypted credential secret store
+
+## Codebase patterns discovered
+
+- `OperatorCredential` (`Infrastructure/Security/OperatorCredential.cs`) is the
+  precedent for "single-instance secret-file discipline": env var override,
+  computed `~/.mohist/<name>` path, generated on first read, `0600`
+  enforced via `UnixFileMode`, `ReparsePoint` rejected, abstract
+  `IOperatorCredentialStore` so tests can drive the surface without
+  touching `System.IO` directly. Existing tests
+  (`tests/.../Security/OperatorCredentialTests.cs`) use exactly that hook.
+- `MohistDbContext` uses `IScopedService`/`ISingletonService` for
+  auto-registration via `AddMohistConventionalServices()`. Tests register
+  fakes by constructing the store directly with a
+  `TestDbContextFactory(...)`. Migrations live in
+  `Infrastructure/Data/Migrations/` with a hand-written
+  `<DateHHMMSS_Name>.cs`, `.Designer.cs`, and a manual edit of
+  `MohistDbContextModelSnapshot.cs` (the snapshot's `BuildModel` calls
+  `BuildModelCore` so a single migration only edits the `.cs` file +
+  inserts its own entity-block into the snapshot plus the matching
+  `Index`/constraint entries).
+- Test infrastructure:
+  - `MigratedSqliteTemplate.CopyTo(...)` clones a prebuilt migrated
+    schema into a fresh in-memory SQLite db (used for both
+    `CreateMigrated()` and `CreateDatabase(targetMigration)`).
+  - `BannedSymbols.Tests.txt` bans `System.IO.File/Directory/FileStream`
+    in tests — we must abstract file ops behind
+    `ISecretKeyStore`/`SecretKeyFile` interfaces just like
+    `OperatorCredential` does.
+  - `MockEnvironmentVariableProvider` lives in the
+    `EnvironmentAbstractions.TestHelpers` package
+    (already referenced by both test projects).
+- `IHermesWebhookClient` + `AddHttpClient<...>()` + `Recording...Fake`
+  is the established typed-HttpClient pattern; not needed for T-001
+  but referenced as a future guidance marker.
+- `ConfigRoutes.cs:99-104` defines
+  `IsSecretKey(key) → contains("token") OR contains("key") OR contains("secret")`.
+  The redaction policy for any field whose name matches the same pattern
+  is reused for token-name filtering and for any logging surface that
+  might print a `Dictionary<string,string>` blob.
+
+## T-001 design notes
+
+- `ISecretStore` lives in
+  `Infrastructure/Security/Secrets/ISecretStore.cs`. `SecretKey` is a
+  connection-scoped address: `(ProjectId, ConnectionId, Kind)`. `Kind`
+  is currently `{AppToken, BotToken}` — the seam extends later for
+  Runner creds, webhook secrets.
+- `ConnectionSecretRow` (EF row, table `ConnectionSecrets`,
+  composite PK on `(ProjectId, ConnectionId, Kind)`) holds a single
+  ciphertext blob (nonce || tag || ciphertext) plus
+  `UpdatedAt`. We do **not** store the master key id; the master key
+  is process-global per `MOHIST_SECRET_KEY_PATH`.
+- `ISecretKeyStore` parallels `IOperatorCredentialStore`:
+  - `EnsureKeyAsync(path, ct)` — returns 32 bytes, creating the file
+    with `0600` (non-Windows) if missing and writing it with
+    `WriteThrough`+`FlushToDisk`. Symlink at the path → invalid op.
+    Honors an `IEnvironmentVariableProvider` injected for tests.
+  - `LoadKeyAsync(path, ct)` — rejects symlinks and any file whose
+    mode grants others read/write/exec (best-effort on Windows).
+  - `Exists(path)` — pure probe.
+- `AesGcmSecretStore` (singleton): derives the master key once (caching
+  it in memory after first `Load`); uses `AesGcm.Encrypt`/
+  `Decrypt` with 12-byte nonce, 16-byte tag. The tag is appended to
+  the ciphertext by `AesGcm`; the blob layout is
+  `nonce (12) || ciphertext (N) || tag (16)` for simplicity and
+  compactness.
+- Redaction is layered on `ISecretStore.Redact<T>` — a small helper that
+  walks a `Dictionary<string,string>` and replaces any value whose key
+  matches the `IsSecretKey` predicate with `***`. The same predicate
+  lives next to `ISecretStore` so `AesGcmSecretStore.LogStored` etc.
+  can share it without a cross-namespace dependency.
+- DI: register `ISecretStore → AesGcmSecretStore` as
+  `Singleton` (cache the master key), `ISecretKeyStore →
+  PhysicalSecretKeyStore` as `Singleton`. Both wired in
+  `MohistServiceRegistration.ConfigureMohistServices`.
+- EF migration: `20260729000000_AddConnectionSecrets` creates the table
+  with the composite PK, no other index (only `Load`/`Delete` are
+  keyed — the inbox/outbox etc. are separate tables in later tasks).
+
+## Codebase patterns to reuse
+
+- Treat spec tests as primary; unit tests for pure file-discipline
+  behavior. Both call directly into `AesGcmSecretStore(...ctor)` with
+  fake args; no `WebApplicationFactory` needed.
+- `TimeProvider` always injectable; never use `DateTimeOffset.UtcNow`
+  in production code or `DateTimeOffset.UtcNow` (banned) in tests.
+- `IEnvironmentVariableProvider` injectable in production
+  (`SystemEnvironmentVariableProvider.Instance`) and faked in tests
+  via the already-referenced `MockEnvironmentVariableProvider`.
+
+## Verification
+
+All tests pass:
+
+- `Mohist.Server.UnitTests` (3336 passed) — includes `AesGcmSecretStoreTests` (round-trip, wrong-key, missing-key, delete, redact, validation), `PhysicalSecretKeyFileTests` (symlink rejection, 0600 mode, world-readable rejection, wrong-length rejection, path resolution), `SecretNameDetectorTests` (redaction predicate).
+- `Mohist.Server.SpecTests` (3336 passed) — includes `ConnectionSecretsMigrationSpecs` (Up creates table with correct columns/index/constraint, Down drops, migration applies on existing schema, DbSet exposed), `AesGcmSecretStoreSpecs` (round-trip both kinds, wrong-key failure, delete, per-connection isolation).
+- `Mohist.Cli.Tests`, `Mohist.Server.ArchTests`, `Mohist.Workflow.Definition.Tests`, web, runner — all pass (no regressions).
+

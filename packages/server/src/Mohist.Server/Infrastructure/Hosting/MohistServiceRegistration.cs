@@ -38,6 +38,7 @@ using Mohist.Server.Otel;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Logging;
 using Mohist.Server.Notifications;
+using Mohist.Server.Infrastructure.Security.Secrets;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -161,6 +162,15 @@ public static class MohistServiceRegistration
         services.Configure<WorkflowArtifactStorageOptions>(configuration.GetSection(WorkflowArtifactStorageOptions.SectionName));
         services.AddSingleton<IAttachmentStorage, FileSystemAttachmentStorage>();
         services.Configure<AttachmentStorageOptions>(configuration.GetSection(AttachmentStorageOptions.SectionName));
+        // issue #514 / T-001 — first encrypted secret-store seam.
+        // Registered explicitly because the file-discipline abstractions
+        // are too constrained for the conventional scanner to wire
+        // correctly. `PhysicalSecretKeyFileOperations` is a static-singleton
+        // adapter over `System.IO`; tests inject a fake here.
+        services.Configure<SecretStoreOptions>(configuration.GetSection(SecretStoreOptions.SectionName));
+        services.AddSingleton<ISecretKeyFileOperations>(PhysicalSecretKeyFileOperations.Instance);
+        services.AddSingleton<ISecretKeyFile, PhysicalSecretKeyFile>();
+        services.AddSingleton<ISecretStore, AesGcmSecretStore>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.AddScoped<Mohist.Server.Workflow.Services.IWorkflowProfileProvider, Mohist.Server.Workflow.Services.WorkflowProfileProvider>();

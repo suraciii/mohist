@@ -22,6 +22,38 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Secrets.ConnectionSecretRow", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Blob")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ProjectId", "ConnectionId", "Kind");
+
+                    b.HasIndex("ProjectId", "ConnectionId")
+                        .HasDatabaseName("IX_ConnectionSecrets_ProjectId_ConnectionId");
+
+                    b.ToTable("ConnectionSecrets", (string)null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ConnectionSecrets_Kind", "\"Kind\" IN ('appToken', 'botToken')");
+                        });
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.AgentRow", b =>
                 {
                     b.Property<string>("Id")

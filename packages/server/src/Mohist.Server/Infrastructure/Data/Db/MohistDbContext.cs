@@ -17,6 +17,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Data.Label;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Inbox;
+using Mohist.Server.Infrastructure.Data.Secrets;
 using Mohist.Server.Inbox;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Sessions.Services;
@@ -75,6 +76,7 @@ public class MohistDbContext : DbContext
     public DbSet<TaskLogEntryRow> TaskLogEntries { get; set; } = null!;
     public DbSet<TaskLogBatchRow> TaskLogBatches { get; set; } = null!;
     public DbSet<AgentJobRow> AgentJobs { get; set; } = null!;
+    public DbSet<ConnectionSecretRow> ConnectionSecrets { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -1071,6 +1073,22 @@ public class MohistDbContext : DbContext
                 .WithOne()
                 .HasForeignKey<InboxSubscriptionRow>(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ConnectionSecretRow>(entity =>
+        {
+            entity.ToTable("ConnectionSecrets");
+            entity.HasKey(e => new { e.ProjectId, e.ConnectionId, e.Kind });
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Kind).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Blob).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_ConnectionSecrets_Kind",
+                "\"Kind\" IN ('appToken', 'botToken')"));
+            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId })
+                .HasDatabaseName("IX_ConnectionSecrets_ProjectId_ConnectionId");
         });
     }
 
