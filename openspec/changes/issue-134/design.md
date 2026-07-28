@@ -11,13 +11,13 @@ The product contract requires the Agent definition to be the sole execution-defi
 - Resolve one immutable execution definition containing Instructions, Runtime, Model, Variant, and ordered Skills for every direct Agent launch and `mohist/agent` task attempt.
 - Persist the resolved definition before a work item can be offered, and reuse it for redelivery, recovery, and an existing direct AgentSession's later turns.
 - Remove request-, Issue-, and routing-derived Runtime overrides for named Agents.
-- Deliver Skills through the existing OpenCode and Pi runtime boundary without adding a new Action, Runner process, or provider dependency.
+- Resolve installed Skills on the Runner and deliver their instruction bodies through the existing OpenCode and Pi runtime boundary without adding a new Action, Runner process, or provider dependency.
 
 **Non-Goals:**
 
 - Change the Runtime selected by ordinary `mohist/opencode` or `mohist/pi` workflow actions.
 - Create an AgentJob, direct AgentSession, or Agent-domain dependency for a `mohist/agent` task.
-- Add a central Skill registry, install Skill assets, validate their availability before dispatch, or introduce a new Skill DSL.
+- Add a Server-side Skill registry, install Skill assets, or introduce a new Skill DSL.
 - Rewrite persisted Issue variables or historical AgentJob/AgentSession records.
 
 ## Decisions
@@ -28,13 +28,13 @@ Introduce an Agent-owned resolved value with `instructions`, `runtime`, `model`,
 
 The direct-launch path snapshots the value into append-only fields on `AgentJobInput` and `RoutedAgentLaunchPlan`. Existing `AgentConfigJson` remains an audit copy but is not a runtime decision input. Both normal and routed launches use the same resolved value when opening the AgentSession and building the work dispatch. Idempotent routed redelivery continues from the persisted canonical plan rather than resolving the Agent again.
 
-For generic Agent-launch sessions, add the immutable execution definition to the Session's persisted settings. This is a Session-local copy needed to execute later follow-up turns and to initialize a replacement physical Runtime Session; it is not a second writable Agent definition. `OpenAgentSessionCommand` sets it only when the session is created, and later opens must preserve it. The Runner's generic-session read contract exposes it only to authenticated Runner commands, not to the public Session read model.
+For generic Agent-launch sessions, add the immutable execution definition to the Session's persisted settings. This is a Session-local copy needed to execute later follow-up turns and to initialize a replacement physical Runtime Session; it is not a second writable Agent definition. `OpenAgentSessionCommand` sets it only when the session is created, and later opens must preserve it. The Server projects it only into authenticated generic `ReceiveFollowup` targets, never into the public Session read model.
 
 Alternative considered: retain the definition only on AgentJob and look it up from the job for follow-ups. Rejected because AgentJob owns only the initial launch and follow-ups have no durable dependency on it. Alternative considered: reread the Agent on each turn. Rejected because edits would silently change an existing Session.
 
 ### Named Agent Runtime has no caller override
 
-Remove `runtime` from `AgentSessionLaunchRequest`, the `IAgentLauncher` launch signatures, and routed-launch call sites. Reject a direct launch body that contains `runtime` before opening a Session or submitting a job. Delete `IAgentRuntimeOverrideResolver`, `IssueWorkflowProfileManager.GetAgentRuntimeOverrideAsync`, and routing reads of `vars.agent.runtime`.
+Replace default model binding for `AgentSessionLaunchRequest` with its existing raw-body/presence pattern: a dedicated `BindAsync` parses the top-level JSON object, records its field names, and accepts only `prompt` and `context`. It rejects `runtime` and every other undeclared top-level field before the route reads the Agent or opens a Session. Remove `runtime` from `AgentSessionLaunchRequest`, the `IAgentLauncher` launch signatures, and routed-launch call sites. Delete `IAgentRuntimeOverrideResolver`, `IssueWorkflowProfileManager.GetAgentRuntimeOverrideAsync`, and routing reads of `vars.agent.runtime`.
 
 Keep Runtime in an Agent definition's `agentConfig`, but split the currently shared validation/projection path so Agent definition writes continue to accept `runtime` while Issue model configuration no longer writes it. Existing persisted `vars.agent.runtime` values remain readable as ordinary historical data but are ignored by named-Agent launch and routing. Remove the corresponding Issue model-selector controls. This does not affect Runtime choice for explicit `mohist/opencode` and `mohist/pi` actions.
 
@@ -48,34 +48,36 @@ The existing persisted WorkDispatch remains the reoffer source. A retry creates 
 
 Alternative considered: defer transformation to Runner. Rejected because reoffers would need the live Agent or a second snapshot store, violating the Workflow persistence boundary.
 
-### Runtime-neutral Skill delivery
+### Runner-owned Skill resolution and Runtime-neutral delivery
 
-Add an optional ordered `skills` field to the Mohist-owned turn-option types for both Runtime adapters. The AgentJob executor and transformed `mohist/agent` payload pass the captured list unchanged. A shared Runner helper creates a deterministic, clearly delimited preamble from that list and places it ahead of the existing Agent instructions and work prompt when a physical Runtime Session is created or replaced. The preamble instructs the installed agent runtime to load the named Skills in order; skill names are serialized as data rather than concatenated as executable syntax.
+Add a Runner `SkillResolver` with configured, ordered roots. Its defaults are `<workDir>/.agents/skills` followed by `$HOME/.agents/skills`; an optional colon-delimited `MOHIST_SKILL_ROOTS` value is appended after those defaults. For each captured name it accepts only a single safe Skill name, finds `<root>/<name>/SKILL.md` in root precedence order, and reads the file as UTF-8 instruction content. It returns an ordered list of `{ name, instructions }` values. A missing, unreadable, or malformed requested Skill returns `skill_not_found` before any provider Runtime call; the resolver never follows a name outside a configured root.
 
-For an already bound Session follow-up, the runtime sends only the user's new input because the established Runtime context already contains the definition. When Reset or confirmed-missing recovery creates a replacement binding, the Runner uses the Session-local execution definition to add the preamble and Instructions to the first input for that binding. An empty Skills list produces no Skills preamble or Runtime option.
+Add this resolved list to the Mohist-owned turn-option types for both Runtime adapters. The AgentJob executor and transformed `mohist/agent` payload pass the captured names to the resolver, then pass its result unchanged into the selected Runtime. A shared Runner helper constructs a deterministic, clearly delimited execution envelope from the resolved name-and-instruction values, Agent Instructions, and the user/work prompt. It serializes Skill data rather than interpolating executable syntax. An empty Skills list does not trigger resolution or add a Skills envelope.
 
-OpenCode and Pi Runtime modules receive only this Mohist-defined option and remain responsible for their SDK calls. Missing or unusable installed Skill assets surface through the existing Runtime turn failure path; the Server does not preflight local Runner assets.
+The Server carries the immutable generic-AgentSession definition in the existing authenticated Server-to-Runner `ReceiveFollowup` target for generic sessions only; it remains absent from public Session DTOs and Workflow targets. The Runner's binding-only resolver projects that optional definition alongside the binding, and every generic follow-up uses the same execution envelope. This deliberately reapplies the immutable definition on every generic follow-up, including after Reset or confirmed-missing recovery, so the command path has no binding-history or “first prompt” state to infer.
 
-Alternative considered: use a provider-specific Skill API. Rejected because neither current runtime boundary exposes one and it would split the Agent contract by backend. Alternative considered: add Skills directly to every raw Workflow Action. Rejected because only the named-Agent transformation needs Agent definition ownership; generic Actions retain their existing public input contract.
+OpenCode and Pi Runtime modules receive only this Mohist-defined resolved input and remain responsible for their SDK calls. The Server does not preflight Runner-local Skill assets.
+
+Alternative considered: use a provider-specific Skill API. Rejected because neither current runtime boundary exposes one and it would split the Agent contract by backend. Alternative considered: pass only Skill names as a prompt instruction. Rejected because it cannot prove loading, identify a missing asset, or produce the required actionable failure. Alternative considered: add Skills directly to every raw Workflow Action. Rejected because only the named-Agent transformation needs Agent definition ownership; generic Actions retain their existing public input contract.
 
 ## Risks / Trade-offs
 
 - [Two persisted copies of a launch-time definition can drift] -> AgentJob and AgentSession copies are written from one resolved value before dispatch; each is immutable and serves a different aggregate's recovery path.
-- [A skill preamble relies on the installed runtime's Skill mechanism] -> retain one Runtime-neutral representation, preserve order, and report missing assets through the existing actionable Runtime failure path rather than silently dropping Skills.
+- [Runner-local Skill roots differ across installations] -> make roots explicit Runner configuration, constrain names to a single path segment, and fail `skill_not_found` before provider submission rather than silently omitting a Skill.
 - [Removing Issue Runtime writes can surprise existing Issue workflows] -> preserve stored values without rewriting them and limit removal to named-Agent launch/routing; explicit Runtime Actions retain their configured `uses` value.
 - [New serialized fields encounter older persisted records] -> use append-only Orleans field identifiers and treat absent Skills as an empty list and absent Runtime as `opencode`.
-- [Binding replacement can lose the original role context] -> keep the immutable definition on the generic AgentSession and reapply it only to the first input of a replacement physical Session.
+- [A generic follow-up can execute after binding replacement] -> carry the immutable definition in the authenticated generic follow-up target and reapply it on every generic follow-up, avoiding hidden binding-history state.
 
 ## Migration Plan
 
-1. Add the resolved definition and append-only AgentJob, routed-plan, and generic-AgentSession snapshot fields; update Runner request types and fakes first.
-2. Route direct, mention, and event launches through the new snapshot builder; update Workflow `mohist/agent` transformation to include Skills.
-3. Remove Runtime override inputs and the Issue override resolver, then remove Web and CLI surfaces that expose those named-Agent overrides.
-4. Update OpenCode and Pi runtime execution/follow-up paths to consume the immutable definition, including first turns after binding replacement.
-5. Add Server, Runner, CLI, and Web tests for snapshot reuse, retry re-resolution, override rejection, empty/ordered Skills, and missing/archived Agent dispatch failures.
+1. Add the resolved definition and append-only AgentJob, routed-plan, and generic-AgentSession snapshot fields; extend the authenticated generic follow-up target and Runner types.
+2. Add strict direct-launch body binding, then route direct, mention, and event launches through the snapshot builder while removing Runtime override resolution.
+3. Add Runner Skill-root configuration, safe resolution, and resolved execution envelopes for both Runtime adapters; update Workflow `mohist/agent` transformation to include captured Skill names.
+4. Remove Issue-level Runtime override controls and reconcile Web/CLI/documentation surfaces.
+5. Add Server, Runner, CLI, and Web tests for strict override rejection, snapshot reuse, generic follow-up, retry re-resolution, empty/ordered/missing Skills, and missing/archived Agent dispatch failures.
 
 No data migration is required. Rollback is a source rollback before deployment; deployed new code tolerates historical records that lack the appended snapshot fields. After deployment, rollback must retain the new persisted fields and ignore them rather than attempting a data downgrade.
 
 ## Open Questions
 
-None. Skill asset discovery and installation remain the existing runtime environment's responsibility; this change only carries the Agent-selected list into execution.
+None.

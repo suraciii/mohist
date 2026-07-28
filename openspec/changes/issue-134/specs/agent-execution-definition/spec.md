@@ -10,7 +10,7 @@ For every new direct AgentJob and `mohist/agent` workflow task attempt, the reso
 - **THEN** its task attempt SHALL dispatch through `mohist/opencode` with that Agent's instructions, model, variant, and Skills while retaining the workflow task prompt as the work goal
 
 ### Requirement: Entry points cannot override execution definition
-The direct Agent launch contract SHALL NOT accept a Runtime override. A request that supplies a Runtime override SHALL be rejected before an AgentSession or AgentJob is created. Issue-scoped variables, routing context, and event-routing rules SHALL NOT override the Runtime or any other execution-definition field of a named Agent.
+The direct Agent launch contract SHALL accept only its declared top-level fields. A request that supplies `runtime` or another undeclared top-level field SHALL be rejected before an AgentSession or AgentJob is created. Issue-scoped variables, routing context, and event-routing rules SHALL NOT override the Runtime or any other execution-definition field of a named Agent.
 
 #### Scenario: Launch request attempts a Runtime override
 - **WHEN** a client submits a direct Agent launch request containing a `runtime` value
@@ -31,6 +31,10 @@ Before a direct AgentJob is offered to a Runner, the system SHALL durably captur
 - **WHEN** an Agent definition is edited and a new direct launch is submitted afterwards
 - **THEN** the new AgentJob SHALL capture the edited execution definition
 
+#### Scenario: Follow-up uses the Session snapshot
+- **WHEN** a direct AgentSession receives a follow-up after its Agent definition is edited
+- **THEN** the Runner SHALL receive and apply the definition captured by that Session rather than the edited Agent definition
+
 ### Requirement: Workflow Agent attempts snapshot the resolved definition
 For a `mohist/agent` task, the system SHALL resolve the referenced active Agent while creating the task attempt dispatch snapshot and persist the concrete transformed dispatch before offering it to a Runner. The persisted attempt SHALL be reoffered verbatim after restart or Agent edits. A retry SHALL resolve the Agent definition again and create a new snapshot. The WorkflowRun SHALL remain the authority for task state and recovery; this Action SHALL NOT create an AgentJob or a direct AgentSession.
 
@@ -43,7 +47,7 @@ For a `mohist/agent` task, the system SHALL resolve the referenced active Agent 
 - **THEN** the retry SHALL create a new dispatch snapshot using the edited execution definition
 
 ### Requirement: Skills are delivered as execution input
-The ordered Skills captured from an Agent definition SHALL be delivered to the selected Runtime for both direct AgentJobs and `mohist/agent` workflow task attempts. The Runtime SHALL receive no Skills that are not in the captured definition, and an Agent with no Skills SHALL produce an execution request with no configured Skills.
+The Runner SHALL resolve each ordered Skill captured from an Agent definition to its installed `SKILL.md` instruction body using the Runner's configured Skill roots. The selected Runtime SHALL receive the resulting ordered name-and-instruction payload for both direct AgentJobs and `mohist/agent` workflow task attempts. The Runtime SHALL receive no Skill that is not in the captured definition, and an Agent with no Skills SHALL produce an execution request with no configured Skills.
 
 #### Scenario: Configured Skills are available to a direct AgentJob
 - **WHEN** a direct AgentJob is launched from an Agent whose Skills are `mohist` and `mohist-explore`
@@ -52,6 +56,10 @@ The ordered Skills captured from an Agent definition SHALL be delivered to the s
 #### Scenario: Workflow Agent task has no configured Skills
 - **WHEN** a `mohist/agent` task references an Agent with an empty Skills list
 - **THEN** the selected Runtime SHALL receive no configured Skills for that task attempt
+
+#### Scenario: A configured Skill is unavailable on the Runner
+- **WHEN** an AgentJob or `mohist/agent` task attempt names a Skill that the assigned Runner cannot resolve from its configured Skill roots
+- **THEN** execution SHALL fail before any Runtime prompt is submitted with the actionable error code `skill_not_found` naming the unavailable Skill
 
 ### Requirement: Workflow Agent references fail only at dispatch
 Workflow profile save and validation SHALL validate the shape of a `mohist/agent` task without requiring its referenced Agent to exist. At dispatch, a missing or archived Agent SHALL fail the task attempt with the structured error code `agent_not_found` before Runner execution.
