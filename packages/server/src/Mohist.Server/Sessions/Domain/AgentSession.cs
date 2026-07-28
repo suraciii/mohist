@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Sessions.Domain;
 
@@ -235,7 +236,9 @@ public sealed record AgentSessionRuntime(
     string? WorkDir,
     string? Runtime = null);
 
-public sealed record AgentSessionSettings(string? Model = null);
+public sealed record AgentSessionSettings(
+    string? Model = null,
+    AgentExecutionDefinition? Definition = null);
 
 public enum AgentSessionActivity
 {

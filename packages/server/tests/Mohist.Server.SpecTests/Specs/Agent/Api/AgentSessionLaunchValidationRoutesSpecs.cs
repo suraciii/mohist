@@ -131,6 +131,21 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
     }
 
     [Fact]
+    public async Task Launch_NonStringPrompt_Returns400_WithoutCreatingSessionOrJob()
+    {
+        var projectId = await CreateProjectAsync("launch-non-string-prompt");
+        var agent = await CreateAgentAsync(projectId, "non-string-prompt-agent");
+        var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+            new { prompt = 1 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
+    }
+
+    [Fact]
     public async Task Launch_UnknownAgent_Returns404_WithoutCreatingSessionOrJob()
     {
         var projectId = await CreateProjectAsync("launch-unknown");

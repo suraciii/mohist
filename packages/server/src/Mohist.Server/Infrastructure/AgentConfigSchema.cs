@@ -6,8 +6,9 @@ namespace Mohist.Server.Infrastructure;
 /// <summary>
 /// Converged AgentConfig schema shared by the issue-level and
 /// agent-definition write surfaces. The
-/// issue-level and agent-definition <c>agentConfig</c> surfaces accept
-/// only <c>model</c> + <c>variant</c>; legacy runtime/liveness keys
+/// issue-level <c>agentConfig</c> surfaces accept only <c>model</c> +
+/// <c>variant</c>; Agent-definition surfaces additionally accept
+/// <c>runtime</c>. Legacy runtime/liveness keys
 /// (<c>type</c>, <c>livenessQuietThresholdMs</c>, <c>probeTimeoutMs</c>,
 /// <c>sessionStartTimeoutMs</c>, <c>compaction</c>) are rejected at the
 /// API boundary with an actionable validation error and never enter the
@@ -19,10 +20,8 @@ namespace Mohist.Server.Infrastructure;
 /// The whitelist also carries the execution
 /// backend dimension (<c>runtime</c>: <c>opencode</c> | <c>pi</c>).
 /// Absent / unset resolves to <c>opencode</c>; any other value is
-/// rejected as invalid. The same validation covers Agent CRUD and the
-/// issue-level <c>agentConfig</c> write surface because both go through
-/// <see cref="Validate"/> (Agent CRUD directly; issue agentConfig via
-/// <c>IssueModelMetadata.ValidateAgentConfig</c> which delegates here).
+/// rejected as invalid. Agent CRUD uses <see cref="Validate"/> and Issue
+/// configuration uses <see cref="ValidateIssue"/> so runtime has one owner.
 /// </para>
 /// </summary>
 public static class AgentConfigSchema
@@ -42,6 +41,28 @@ public static class AgentConfigSchema
         "variant",
         "runtime",
     };
+
+    public static readonly IReadOnlySet<string> IssueAllowedKeys = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "model",
+        "variant",
+    };
+
+    public static string? ValidateIssue(JsonElement? agentConfig)
+    {
+        if (!agentConfig.HasValue || agentConfig.Value.ValueKind != JsonValueKind.Object)
+            return null;
+
+        foreach (var property in agentConfig.Value.EnumerateObject())
+        {
+            if (!IssueAllowedKeys.Contains(property.Name))
+                return property.Name == "runtime"
+                    ? "agentConfig.runtime is not supported for Issue configuration; configure runtime on the Agent definition."
+                    : $"agentConfig.{property.Name} is not allowed; Issue agent config accepts only {string.Join(", ", IssueAllowedKeys)}.";
+        }
+
+        return null;
+    }
 
     public static readonly IReadOnlySet<string> ForbiddenKeys = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -154,7 +175,7 @@ public static class AgentConfigSchema
     {
         if (agentConfig is null || agentConfig.Count == 0) return null;
         Dictionary<string, object?>? result = null;
-        foreach (var key in AllowedKeys)
+        foreach (var key in IssueAllowedKeys)
         {
             if (!agentConfig.TryGetValue(key, out var value) || value is null) continue;
             result ??= new Dictionary<string, object?>(StringComparer.Ordinal);

@@ -14,7 +14,7 @@ beforeEach(() => {
 })
 
 describe('IssueModelSelector per-stage variant chips', () => {
-  it('uses the stage backend when loading its model catalog', async () => {
+  it('does not render a per-stage Runtime override', async () => {
     mocks.useAvailableModelIds.mockImplementation((runtime: string) => ({
       data: { models: runtime === 'pi' ? ['pi/anthropic/claude'] : ['openai/gpt-4'], modelVariants: {} },
       isLoading: false,
@@ -26,9 +26,7 @@ describe('IssueModelSelector per-stage variant chips', () => {
     })
     renderSelector()
     openAdvanced()
-    const buildRuntime = await waitFor(() => screen.getByTestId('issue-stage-runtime-build'))
-    expect(buildRuntime.tagName).not.toBe('SELECT')
-    expect(buildRuntime).toHaveTextContent('OpenCode')
+    expect(screen.queryByTestId('issue-stage-runtime-build')).not.toBeInTheDocument()
     fireEvent.click(await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement))
     expect(await screen.findByText('gpt-4')).toBeInTheDocument()
     expect(screen.queryByText('claude')).not.toBeInTheDocument()

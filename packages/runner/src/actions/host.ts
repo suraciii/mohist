@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from "../core/types.js"
+import type { AgentExecutionDefinition, JsonObject, JsonValue } from "../core/types.js"
 import type {
   ActionCapability,
   ActionManifest,
@@ -8,6 +8,7 @@ import type { TaskLogger } from "../runtime/task-log.js"
 import type { ActionResult } from "../core/types.js"
 import type { IssueFields } from "./issue-fields.js"
 import type { PiRuntime } from "../runtime/pi/index.js"
+import type { SkillResolver } from "../runtime/skill-resolver.js"
 
 export const ALL_CAPABILITIES: ReadonlySet<ActionCapability> = new Set([
   "agent-turn",
@@ -49,6 +50,8 @@ export interface ActionHost {
   signal: AbortSignal
   log: TaskLogger | null
   piRuntime?: PiRuntime | null
+  skillResolver?: SkillResolver
+  agentDefinition?: AgentExecutionDefinition | null
   exec(command: string, args?: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }>
   agent?: AgentTurn
   issue?: IssueFieldsHost

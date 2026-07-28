@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Api;
@@ -123,7 +124,8 @@ public static class AgentJobReadRoutes
             Output: output,
             ArtifactUploadIds: artifactUploadIds,
             FailureReason: failureReason,
-            ExitCode: exitCode));
+            ExitCode: exitCode,
+            ExecutionDefinition: snapshot.ExecutionDefinition));
     }
 
     private static string ToStatusString(AgentJobStatus status) => status switch
@@ -165,4 +167,5 @@ public sealed record AgentJobViewDto(
     string? Output,
     IReadOnlyList<string>? ArtifactUploadIds,
     string? FailureReason,
-    int? ExitCode);
+    int? ExitCode,
+    AgentExecutionDefinition? ExecutionDefinition);

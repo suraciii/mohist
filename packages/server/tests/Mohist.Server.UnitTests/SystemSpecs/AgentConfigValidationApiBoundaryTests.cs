@@ -34,7 +34,6 @@ public class AgentConfigValidationApiBoundaryTests
         Assert.NotNull(error);
         Assert.Contains($"agentConfig.{forbiddenKey}", error);
         Assert.Contains("not allowed", error, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("runtime", error);
     }
 
     [Theory]
@@ -68,11 +67,11 @@ public class AgentConfigValidationApiBoundaryTests
     [Theory]
     [InlineData("opencode")]
     [InlineData("pi")]
-    public void IssueModelMetadata_AcceptsRuntime(string runtime)
+    public void IssueModelMetadata_RejectsRuntime(string runtime)
     {
         var raw = JsonDocument.Parse($$"""{"model":"openai/gpt-5.6","variant":"high","runtime":"{{runtime}}"}""").RootElement;
 
-        Assert.Null(IssueModelMetadata.ValidateAgentConfig(raw));
+        Assert.Contains("configure runtime on the Agent definition", IssueModelMetadata.ValidateAgentConfig(raw));
     }
 
     [Fact]
@@ -84,8 +83,7 @@ public class AgentConfigValidationApiBoundaryTests
 
         Assert.NotNull(error);
         Assert.Contains("agentConfig.runtime", error);
-        Assert.Contains("opencode", error);
-        Assert.Contains("pi", error);
+        Assert.Contains("configure runtime on the Agent definition", error);
     }
 
     [Fact]

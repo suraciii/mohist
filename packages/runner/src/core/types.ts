@@ -75,6 +75,14 @@ export interface ParentIssueContext {
   body: string | null
 }
 
+export interface AgentExecutionDefinition {
+  instructions: string
+  runtime: string
+  model?: string | null
+  variant?: string | null
+  skills: readonly string[]
+}
+
 export type WorkDispatchResponse = {
   workflowRunId: string
   workId: string
@@ -110,6 +118,7 @@ export type WorkDispatchResponse = {
   agentSessionId?: string | null
   recovery?: string | null
   recoveryRemaining?: number | null
+  agentDefinition?: AgentExecutionDefinition | null
 }
 
 /**
@@ -185,6 +194,7 @@ export interface DispatchWorkItem {
   agentSessionId?: string | null
   recovery?: JsonObject | null
   recoveryRemaining?: number | null
+  agentDefinition?: AgentExecutionDefinition | null
 }
 
 export interface AddTaskInput {

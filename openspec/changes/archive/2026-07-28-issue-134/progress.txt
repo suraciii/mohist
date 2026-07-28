@@ -1,0 +1,79 @@
+# Issue 134 — Progress Notes
+
+T-001: Server-owned Agent execution-definition snapshot, strict launch binder, named-Agent Runtime override removal.
+
+## Codebase Patterns
+
+- Agent-owned persisted shape lives in `packages/server/src/Mohist.Server/Agent/Domain/Agent.cs`. `Skills` is `IReadOnlyList<string>` already on the domain model.
+- `AgentLauncher.ResolveRuntime(agentConfig, launchOverride)` is the canonical runtime resolver currently shared by every launch path. Spec says we must drop `launchOverride` and route all paths through `agentConfig.runtime ?? opencode`.
+- `AgentLauncher.ResolveModelAndVariant(agentConfig)` is the read-side helper for model/variant from `agentConfig`.
+- AgentJobInput is `[GenerateSerializer]` record with append-only `[property: Id(N)]` fields; any new field must append the next free id (after Id(12) WorkflowRunId).
+- RoutedAgentLaunchPlan is the same record shape used for routed-launch persistence. Free id after WorkflowRunId is Id(21).
+- AgentSessionSettings is `record AgentSessionSettings(string? Model)` and persisted via `AgentSession.Settings`. The session's `Runtime` is in `AgentSession.Runtime` (AgentSessionRuntime record). We need a new immutable definition field.
+- AgentJobGrain.BuildDispatch projects `prompt/instructions/model/variant/runtime` into the `with` JSON envelope — Skills must be added here too.
+- AgentSessionFollowupRoutes (line 144-166) builds `wireTarget` with two shapes: workflow (no execution-definition needed) and generic. Generic must carry the immutable definition; workflow must not.
+- The merged body for launch currently binds via `AgentSessionLaunchRequest` record with default JSON binding. The spec wants raw-body presence parsing (similar to `AgentUpdateRequest.BindAsync` and `RoutingRuleUpdateRequest.BindAsync`).
+- `IAgentRuntimeOverrideResolver` only has one implementer: `IssueWorkflowProfileManager`. Removing it is safe — only `RoutingDispatchHandler` and `AgentSessionLaunchRoutes` use it.
+- Agent definition already stores `Skills` (`Agent.cs` Id 7 in AgentInfo). The execution-definition snapshot will reuse this list (immutable copy).
+
+## Gotchas / Decisions
+
+- `AgentConfigSchema.AllowedKeys` still lists `runtime` because Agent CRUD must keep accepting it. Issue-level `agentConfig` writes should drop `runtime` per the design. Cleanest split: keep `AllowedKeys` for Agent CRUD; add a separate whitelist for Issue-level (`model`, `variant`) and use it in `IssueModelMetadata.ValidateAgentConfig` route validation. Issue-level `agentConfig` write surfaces (`CreateIssueRequest.AgentConfig` via PATCH/POST) must no longer persist `runtime`.
+- The existing `AgentExecutionSnapshot` has `Instructions` + `AgentConfig`. Rename/extend it with `Runtime/Model/Variant/Skills`. Need to preserve the public surface used by `WorkflowItemTranslator`.
+- The Skills list on the Agent is allowed to be empty (empty Skills ⇒ empty Skills field on snapshot, no resolution on Runner).
+- OpenAgentSessionCommand currently takes `AgentRuntime`. The Session also needs the immutable execution definition. We add a new optional `Definition` field (append-only) on the command. CreateSession stamps it once; later opens must not override.
+- AgentSessionReadModels: check what fields are projected to clients. The spec says "public Session DTOs" must not expose the definition — only the authenticated generic follow-up target carries it.
+
+## Notes
+
+- Server unit tests live in `packages/server/tests/Mohist.Server.UnitTests/Agent/Services/`; spec tests live in `packages/server/tests/Mohist.Server.SpecTests/Specs/Agent/Api/`.
+- Tests must use `Microsoft.Extensions.Time.Testing.FakeTimeProvider` (already in UnitTests project) and avoid network/IO.
+
+## Implementation Notes
+
+- `AgentExecutionDefinition` is an Orleans-serializable value with Instructions, Runtime, Model, Variant, and ordered Skills. AgentJobInput and RoutedAgentLaunchPlan append Skills at Id(13) and Id(20); routed WorkflowRunId remains at Id(21).
+- Generic AgentSession settings now retain the definition only when the session is created. Reopening a session does not replace it. Canonical follow-up projects it only for `agent-launch` targets; workflow targets remain definition-free.
+- Agent-definition writes continue through `AgentConfigSchema.Validate`, while Issue model configuration uses `ValidateIssue` and rejects runtime. Historical Issue variables are not rewritten and are ignored by the named-Agent launch paths.
+- Direct launch binding is raw JSON presence-based and accepts only lowercase `prompt` and `context`; `runtime` and all other top-level fields return `unsupported_field` before Agent resolution.
+- `npm test` passed all Server, CLI, Web, and Runner tests (3274 Server SpecTests, 1525 Server UnitTests, 35 ArchTests, 5145 Web tests, 1438 Runner tests). `npm run build` passed after `npm ci`.
+
+T-002: Runner Skill resolution and runtime delivery.
+
+## Codebase Patterns
+
+- Runner runtime boundaries remain Mohist-owned: OpenCode and Pi receive resolved `{ name, instructions }` values through their turn options; provider SDK DTOs are unchanged.
+- AgentJob dispatch carries captured Skill names in `work.with.skills`; Workflow Agent transforms carry them in `with.options.skills`. Both paths resolve against the current task workspace.
+- Generic authenticated follow-up targets carry an optional immutable `definition`; workflow targets remain definition-free. The runner re-resolves its Skills and rebuilds the execution envelope for each follow-up submission.
+
+## Implementation Notes
+
+- `SkillResolver` roots are `<workDir>/.agents/skills`, `$HOME/.agents/skills`, then non-empty `MOHIST_SKILL_ROOTS` colon entries. Names must be one safe segment, file contents are strict UTF-8 and non-empty, and realpath containment prevents symlink escape.
+- `buildExecutionEnvelope` keeps legacy instruction-only prompts byte-compatible, while Skill-bearing turns use a JSON data block delimited by `[mohist-execution-definition]` markers.
+- Empty Skills do not touch the filesystem and are omitted from runtime options. Missing, unreadable, malformed, or unsafe Skills return `skill_not_found` before provider prompt submission.
+
+T-003: Workflow-owned definition-complete Agent dispatch snapshots.
+
+## Implementation Notes
+
+- `WorkflowItemTranslator` keeps the workflow's raw `with.prompt` as the task goal and carries the resolved Agent Instructions in `with.options.instructions`; Model, Variant, and ordered Skill names are siblings in the same transformed payload.
+- `DispatchService` stores the transformed `WorkDispatch` through `WorkflowGrain.StoreActiveWorkDispatchAsync` before offering it, and active-work redelivery returns `TaskRun.DispatchSnapshot` without invoking Agent resolution. New retry TaskRuns have no snapshot and resolve the current definition.
+- Missing or archived Agent resolution continues through `WorkflowDispatchRejectedException(agent_not_found)` and `WorkflowGrain.RejectActiveWorkDispatchAsync`; Workflow owns the failed TaskRun and no AgentJob/direct AgentSession path is involved.
+- Translator tests cover OpenCode/Pi envelopes, ordered and empty Skills, structured resolution failures, retry re-resolution, and raw prompt preservation. Full `npm test` passed: Server SpecTests 3275, UnitTests 1525, ArchTests 35, CLI 1433, Web 5145, Runner 1441.
+
+T-004: Web and documentation surfaces.
+
+## Implementation Notes
+
+- Removed Issue create/edit and per-stage Runtime selectors and all Web writes of `vars.agent.runtime`; Issue model/Variant controls remain for explicit Workflow Action configuration and use the default OpenCode catalog.
+- Direct Agent session launch already sends only `prompt` and `context`; its client request test confirms no Runtime override field is emitted.
+- Agent profile editor remains the only Web surface for named-Agent Runtime, Model, Variant, and Skills. Product docs describe launch/attempt snapshots, fixed Skills, retry re-resolution, and the separate `uses` Runtime behavior of explicit Workflow Actions.
+
+## Review Fixes
+
+- Routed AgentJob plan recovery now stamps an `AgentExecutionDefinition` into the generic AgentSession from the persisted canonical plan, so routed follow-ups retain their original instructions, runtime, model, variant, and Skills.
+- Workflow `mohist/agent` transformations carry the complete resolved definition in an append-only `WorkDispatch.AgentDefinition` transport field. Instructions and Skills no longer expand the public `mohist/opencode` or `mohist/pi` Action option contracts.
+- AgentJob read responses now expose the persisted execution definition, while public AgentSession DTOs remain definition-free.
+- Generic follow-ups resolve Skills before claiming an operation or recording `session.input`; Pi follow-ups now apply captured model and variant before prompt or steer submission.
+- Empty resolved Skills are omitted from OpenCode runtime requests.
+- Verification after the review fixes: `npm test` and `npm run build` both pass. Runner coverage now verifies dispatch-only Agent definition precedence for Pi workflow work and Pi follow-up model/variant application.
+- Strict launch binding now treats non-string `prompt` values as malformed input rather than throwing from `JsonElement.GetString`; the Agent launch validation specs verify a 400 response without a created Session or AgentJob.

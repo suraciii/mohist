@@ -99,6 +99,7 @@ export interface RunnerSignalRClientOptions {
   sessionCommandJournal?: SessionCommandJournalStore | null
   followupOperationJournal?: FollowupOperationJournalStore | null
   bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
+  skillResolver?: import("../runtime/skill-resolver.js").SkillResolver
   allowUnverifiedWorkspaceQueriesForTest?: boolean
 }
 
@@ -116,6 +117,7 @@ export class RunnerSignalRClient {
   private readonly sessionCommandJournal: SessionCommandJournalStore | null
   private readonly followupOperationJournal: FollowupOperationJournalStore | null
   private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null
+  private readonly skillResolver: RunnerSignalRClientOptions["skillResolver"]
   private readonly allowUnverifiedWorkspaceQueriesForTest: boolean
 
   constructor(
@@ -145,6 +147,7 @@ export class RunnerSignalRClient {
     this.sessionCommandJournal = options.sessionCommandJournal ?? null
     this.followupOperationJournal = options.followupOperationJournal ?? null
     this.bindingRecoveryCoordinator = options.bindingRecoveryCoordinator ?? null
+    this.skillResolver = options.skillResolver
     this.allowUnverifiedWorkspaceQueriesForTest = options.allowUnverifiedWorkspaceQueriesForTest === true
 
     this.registerHandlers()
@@ -225,6 +228,7 @@ export class RunnerSignalRClient {
       runnerId: this.serverConnection?.runnerId ?? null,
       followupOperationJournal: this.followupOperationJournal,
       bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
+      skillResolver: this.skillResolver,
     })
 
     registerCancelHandler(this.connection, {

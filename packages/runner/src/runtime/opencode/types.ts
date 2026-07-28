@@ -92,6 +92,7 @@ export interface RuntimeTurnOptions {
   readonly model?: { providerID: string; modelID: string } | null
   readonly variant?: string | null
   readonly unknownKeys?: readonly string[]
+  readonly skills?: readonly { readonly name: string; readonly instructions: string }[]
 }
 
 export interface RuntimeTurnFacts {

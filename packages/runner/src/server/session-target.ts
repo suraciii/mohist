@@ -14,9 +14,17 @@ export interface RuntimeSessionBinding {
   workDir: string | null
 }
 
+export interface AgentExecutionDefinition {
+  readonly instructions?: string | null
+  readonly runtime?: string | null
+  readonly model?: string | null
+  readonly variant?: string | null
+  readonly skills?: readonly string[] | null
+}
+
 export type SessionTarget =
   | { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string; binding?: RuntimeSessionBinding }
-  | { kind: "generic"; projectId: string; sessionId: string; binding?: RuntimeSessionBinding }
+  | { kind: "generic"; projectId: string; sessionId: string; definition?: AgentExecutionDefinition; binding?: RuntimeSessionBinding }
 
 /**
  * The resolver's return value. A pure Mohist-owned value object:
@@ -30,6 +38,7 @@ export interface FollowupTarget {
   readonly runtimeSessionId: string
   readonly workDir: string
   readonly projectId: string
+  readonly definition?: AgentExecutionDefinition
 }
 
 /**
@@ -72,6 +81,7 @@ export interface ReceiveFollowupSessionTarget {
   sessionName?: string
   sessionId?: string
   binding?: Partial<RuntimeSessionBinding>
+  definition?: AgentExecutionDefinition
 }
 
 /**
@@ -157,6 +167,7 @@ export function sessionTargetFromWireTarget(target: ReceiveFollowupSessionTarget
       kind: "generic",
       projectId,
       sessionId: target.sessionId,
+      ...(target.definition ? { definition: target.definition } : {}),
       ...(binding ? { binding } : {}),
     }
   }

@@ -18,7 +18,7 @@ task 获得该 Agent 的指令与执行配置快照，按 Inline Agent 同一套
     prompt: ${{ prompts.review }}
 ```
 
-`name` 指向的 Agent 提供身份指令、执行后端（OpenCode 或 Pi）与模型配置；
+`name` 指向的 Agent 提供身份指令、执行后端（OpenCode 或 Pi）、模型、Variant 与 Skills；
 `prompt` 是本次任务输入。适合同一个「角色」被多个 task、多个 Profile 复用，
 或要和路由规则、`@` 提及共用同一个 Agent 身份的场景；一次性任务继续用
 [`mohist/opencode`](opencode.md) 或 [`mohist/pi`](pi.md) 内联。
@@ -32,7 +32,8 @@ task 获得该 Agent 的指令与执行配置快照，按 Inline Agent 同一套
 | `session` | 否 | — | WorkflowRun 内的逻辑 Session 名称；省略时使用当前 Work ID |
 | `timeout` | 否 | 与后端 Action 相同 | 本次执行的期限 |
 
-执行后端与模型由 Agent 配置决定，task 不覆盖。`expect`、`artifacts`、`setVars`
+执行后端、模型、Variant 与 Skills 由 Agent 配置决定，task 不覆盖；`prompt` 只是本次工作的
+目标输入，不能修改 Agent 定义。`expect`、`artifacts`、`setVars`
 与 recovery 等 task 级构造的行为与其它 Action 相同。
 
 `name` 的解析顺序与 `mo` 命令面相同：以 `agent_` 开头的引用只按 id
@@ -40,10 +41,12 @@ task 获得该 Agent 的指令与执行配置快照，按 Inline Agent 同一套
 
 ## 解析与快照
 
-- `name` 在**每次 dispatch 时**解析为当时定义的 snapshot：指令、执行后端与
-  模型配置随该 attempt 固定。
+- `name` 在**每次 dispatch 时**解析为当时定义的 snapshot：指令、执行后端、模型、Variant
+  与有序 Skills 随该 attempt 固定。
 - 编辑 Agent 不影响已 dispatch 的 attempt；retry 重新解析——修复定义后 retry
   立即生效。
+- 普通客户端可以提供 prompt 和上下文，但不能通过 task input 或上下文选择另一个 Runtime、
+  Model、Variant 或 Skills。
 - Profile 保存与 `mo workflow validate` 只校验输入形状（`name`、`prompt` 必填），
   不校验 Agent 是否存在——Profile 的生命周期不被 Agent 的增删卡住。
 

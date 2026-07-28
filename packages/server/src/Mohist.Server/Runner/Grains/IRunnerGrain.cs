@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Orleans.Concurrency;
@@ -174,7 +175,8 @@ public record WorkDispatch(
     /// Resolved Agent profile identity for AgentJob dispatches. Required
     /// for AgentJob ownership and absent on workflow dispatches.
     /// </summary>
-    [property: Id(20)] string? AgentId = null)
+    [property: Id(20)] string? AgentId = null,
+    [property: Id(21)] AgentExecutionDefinition? AgentDefinition = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

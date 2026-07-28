@@ -12,9 +12,9 @@ AgentJob 与 AgentSession。完整产品边界见[核心概念](concepts.md)。
 
 - **Agent 先独立可用**：没有 Slack 等外部接入时，用户也能完整配置、启动、继续对话、
   读取结果和处理异常。
-- **配置只有一份**：Instructions、执行后端、模型、Skills 和并发限制由 Mohist Agent
-  拥有；名称、头像和描述也构成同一个 Agent 身份。Web、CLI 和 Agent 接入不能保存或
-  覆盖另一份定义。
+- **配置只有一份**：Instructions、执行后端、模型、Variant、Skills 和并发限制由 Mohist
+  Agent 拥有；名称、头像和描述也构成同一个 Agent 身份。Web、CLI 和 Agent 接入不能
+  保存或覆盖另一份定义。
 - **入口不改变语义**：一次新的委托创建 AgentJob、AgentSession、首条 SessionInput 和首个
   AgentTurn；对已有会话继续输入会创建新的 SessionInput，但不创建第二个 AgentJob。
 - **执行状态可追溯**：AgentJob 回答首次 launch 是否成功，AgentSession 回答发生了什么、
@@ -98,8 +98,9 @@ Agent 或 Agent 接入。Agent 只引用 Runtime、Model 与 Variant；Readiness
 真的可执行，并把缺失凭据指向唯一的设置入口。
 
 本次委托可以附带 Issue、Epic、Repository 等上下文引用，但上下文不是 Agent 配置。普通
-客户端只能提供任务文本和上下文，不能覆盖 Instructions、Runtime、Model、Variant、Skills
-或并发限制。这样，从 Web 测试通过的 Agent 接入 Slack 后仍然是同一个 Agent。
+客户端只能提供任务文本和上下文，不能覆盖这些执行定义或并发限制。Agent 的定义在一次
+launch 或 Workflow Agent task attempt 开始时固定；该次执行加载的 Skills 也随之固定。
+这样，从 Web 测试通过的 Agent 接入 Slack 后仍然是同一个 Agent。
 
 名称、头像和描述是展示身份，编辑后立即用于 Mohist 的发现与展示；Agent 接入异步同步
 支持更新的外部身份，并明确显示未同步状态。Instructions、Runtime、Model、Variant 和
@@ -107,6 +108,10 @@ Skills 是执行定义，只影响之后创建的 AgentJob。每个 AgentJob 保
 AgentSession 的后续输入继续使用该会话建立时的配置与上下文，不因 Agent 被编辑而悄悄换
 模型或能力。Max concurrent runs 是 Agent 当前的调度策略，所有 Session 的下一次执行都按
 最新值排队；修改它不改变任何 Session 的执行定义。
+
+Workflow 的 `mohist/agent` task 也会在每次 attempt 开始时固定完整 Agent 定义。编辑 Agent
+不会改变已经 dispatch 的 attempt；retry 会重新读取当时的定义，因此修复 Runtime、Model、
+Variant、Instructions 或 Skills 后，新的 retry 才会采用修改。
 
 ## Readiness 与可用性
 
@@ -272,8 +277,7 @@ AgentJob。Web UI 和 CLI 已能创建、编辑、启动 Mohist Agent，并读�
 Runtime Session 缺失时的自动重建与重新绑定尚未完整落地；当前部分执行路径仍会失败并
 要求用户 Reset。对应实施 issue 待从本 spec 创建。
 
-Agent 配置中的 Skills 当前只保存和展示，执行时尚未加载；Max concurrent runs 尚未真正
-限制并发。手动启动接口当前仍允许调用方覆盖 Runtime，与“配置只有一份”的产品规则不符。
+Max concurrent runs 尚未真正限制并发。
 
 Agent 当前没有头像与统一 Readiness 诊断；Web 的配置字段也尚未完全由 Runtime 能力目录
 驱动，部分缺口只能在启动失败后看到。

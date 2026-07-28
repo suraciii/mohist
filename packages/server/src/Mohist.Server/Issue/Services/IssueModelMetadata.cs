@@ -174,7 +174,7 @@ public static class IssueModelMetadata
     /// first user-facing error message.
     /// </summary>
     public static string? ValidateAgentConfig(JsonElement? agentConfig) =>
-        AgentConfigSchema.Validate(agentConfig);
+        AgentConfigSchema.ValidateIssue(agentConfig);
 
     /// <summary>
     /// Compute the new top-level <c>vars</c> element with a SET-replace

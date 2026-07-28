@@ -472,9 +472,9 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     private sealed class FakeAgentExecutionSnapshotResolver : IAgentExecutionSnapshotResolver
     {
-        public AgentExecutionSnapshot? Snapshot { get; set; }
+        public AgentExecutionDefinition? Snapshot { get; set; }
 
-        public Task<AgentExecutionSnapshot?> ResolveAsync(string projectId, string agentRef) =>
+        public Task<AgentExecutionDefinition?> ResolveAsync(string projectId, string agentRef) =>
             Task.FromResult(Snapshot);
     }
 

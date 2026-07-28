@@ -36,6 +36,7 @@ import { loadBuildInfo } from "./build-info.js"
 import type { DispatchWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
 import { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
+import { SkillResolver } from "./skill-resolver.js"
 import {
   type FollowupTarget,
   type FollowupTargetResolution,
@@ -137,6 +138,7 @@ export class RunnerHost {
    */
   private readonly sessionCommandJournal: SessionCommandJournal
   private readonly followupOperationJournal: FollowupOperationJournal
+  private readonly skillResolver = new SkillResolver()
 
   // The active outer-run signal. The onReconnected callback fires from
   // outside the run loop, so we capture the signal here to bound the
@@ -214,6 +216,7 @@ export class RunnerHost {
         sessionCommandJournal: this.sessionCommandJournal,
         followupOperationJournal: this.followupOperationJournal,
         bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
+        skillResolver: this.skillResolver,
       },
     )
   }
@@ -231,6 +234,7 @@ export class RunnerHost {
       runtimeSessionId: binding.runtimeSessionId,
       workDir: binding.workDir,
       projectId: target.projectId,
+      ...(target.kind === "generic" && target.definition ? { definition: target.definition } : {}),
     }
     return resolved
   }
@@ -434,11 +438,12 @@ export class RunnerHost {
       new AgentJobExecutor(this.connection, {
         openCode: () => this.openCodeRuntime,
         pi: () => this.piRuntime,
-      }, this.bindingRecoveryCoordinator),
+      }, this.bindingRecoveryCoordinator, process.cwd(), this.skillResolver),
       this.agentSessionRuntimeEventOutbox,
       undefined,
       this.piRuntime,
       this.bindingRecoveryCoordinator,
+      this.skillResolver,
     )
   }
 

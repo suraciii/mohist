@@ -24,6 +24,8 @@ import type {
 import { resolveAccessor, type RuntimeAccessor } from "../server/command-runtime.js"
 import type { ServerConnection } from "../server/connection.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from "./binding-recovery.js"
+import { SkillResolver, type ResolvedSkill } from "./skill-resolver.js"
+import { buildExecutionEnvelope } from "./execution-envelope.js"
 
 /**
  * Agent-owned execution entry for `ownerKind === "agent-job"` work.
@@ -62,6 +64,7 @@ export class AgentJobExecutor {
     private readonly runtimes: AgentJobRuntimeAccessors,
     private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
     private readonly defaultWorkDir: string = process.cwd(),
+    private readonly skillResolver: SkillResolver = new SkillResolver(),
   ) {}
 
   async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -76,7 +79,7 @@ export class AgentJobExecutor {
     }
 
     const instructions = readOptionalString(payload, "instructions")
-    const composed = composePrompt(prompt, instructions)
+    const skillNames = readSkillNames(payload)
 
     const runtimeName = readRuntime(payload)
     const modelInput = readOptionalString(payload, "model")
@@ -92,6 +95,10 @@ export class AgentJobExecutor {
     }
     const workDir = workspacePath.kind === "resolved" ? workspacePath.path : this.defaultWorkDir
 
+    const resolvedSkills = await this.skillResolver.resolve(skillNames, workDir)
+    if (!resolvedSkills.ok) return failureResult(resolvedSkills.code, resolvedSkills.message)
+    const composed = buildExecutionEnvelope(prompt, instructions, resolvedSkills.skills)
+
     let binding: BindingResolution
     try {
       binding = await resolveBinding(work, this.connection, signal)
@@ -100,9 +107,9 @@ export class AgentJobExecutor {
     }
 
     if (runtimeName === "pi") {
-      return this.executePi(work, signal, payload, composed, model, modelInput, variant, workDir, binding)
+      return this.executePi(work, signal, payload, composed, model, modelInput, variant, workDir, binding, resolvedSkills.skills)
     }
-    return this.executeOpenCode(work, signal, payload, composed, model, modelInput, variant, workDir, binding)
+    return this.executeOpenCode(work, signal, payload, composed, model, modelInput, variant, workDir, binding, resolvedSkills.skills)
   }
 
   private async executeOpenCode(
@@ -115,6 +122,7 @@ export class AgentJobExecutor {
     variant: string | null,
     workDir: string,
     binding: BindingResolution,
+    skills: readonly ResolvedSkill[],
   ): Promise<WorkItemResult> {
     const runtime = resolveAccessor(this.runtimes.openCode)
     if (!runtime) {
@@ -167,6 +175,7 @@ export class AgentJobExecutor {
       options: {
         model: model.kind === "ok" ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
         variant: variant ?? null,
+        ...(skills.length > 0 ? { skills } : {}),
         unknownKeys: collectUnknownKeys(payload),
       },
     }
@@ -204,6 +213,7 @@ export class AgentJobExecutor {
     variant: string | null,
     workDir: string,
     binding: BindingResolution,
+    skills: readonly ResolvedSkill[],
   ): Promise<WorkItemResult> {
     const runtime = resolveAccessor(this.runtimes.pi)
     if (!runtime) {
@@ -257,6 +267,7 @@ export class AgentJobExecutor {
       options: {
         model: model.kind === "ok" ? `${model.value.providerID}/${model.value.modelID}` : null,
         variant: variant ?? null,
+        ...(skills.length > 0 ? { skills } : {}),
         unknownKeys: collectUnknownKeys(payload),
       },
     }
@@ -360,12 +371,18 @@ function parseModel(input: string | null): ParsedModel {
 
 function collectUnknownKeys(payload: JsonObject | null): readonly string[] | undefined {
   if (!payload || typeof payload !== "object") return undefined
-  const known = new Set(["prompt", "instructions", "model", "variant", "runtime"])
+  const known = new Set(["prompt", "instructions", "model", "variant", "runtime", "skills"])
   const unknown: string[] = []
   for (const key of Object.keys(payload)) {
     if (!known.has(key)) unknown.push(key)
   }
   return unknown.length > 0 ? unknown : undefined
+}
+
+function readSkillNames(payload: JsonObject | null): readonly string[] {
+  const value = payload?.["skills"]
+  if (value === undefined || value === null) return []
+  return Array.isArray(value) ? value as string[] : [String(value)]
 }
 
 interface AgentSessionEventSink {

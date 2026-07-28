@@ -1,0 +1,89 @@
+{
+  "project": "mohist-local",
+  "description": "Make a named Mohist Agent's saved execution definition the sole, snapshot-fixed source for direct AgentJobs and Workflow Agent task attempts.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server: snapshot the Agent execution definition and remove named-Agent Runtime overrides",
+      "spec": "specs/agent-execution-definition/spec.md#agent-definition-owns-execution-selection, specs/agent-execution-definition/spec.md#entry-points-cannot-override-execution-definition, specs/agent-execution-definition/spec.md#direct-agentjobs-retain-a-durable-execution-snapshot",
+      "description": "Create one Agent-owned resolved execution-definition value for Instructions, Runtime, Model, Variant, and ordered Skills. Use it for direct, mention, and routed Agent launches; persist it with append-only fields on AgentJob and routed plans, retain it as immutable generic-AgentSession settings, and project that setting only into the authenticated generic ReceiveFollowup target. Replace default launch-body binding with a strict raw JSON binder accepting only prompt and context, remove request and Issue/Routing Runtime override paths, and keep historical Issue values ignored without a data rewrite.",
+      "acceptanceCriteria": [
+        "A direct, mention, and routed launch snapshot the active Agent's Instructions, Runtime, Model, Variant, and ordered Skills before runner offer; subsequent Agent edits do not affect the accepted job, routed redelivery, or generic Session settings",
+        "A new direct launch after an Agent edit uses the edited definition, while AgentJob recovery and reoffer use only persisted snapshot data",
+        "An Agent configured for pi opens a pi Session and produces a pi AgentJob dispatch even when Issue context contains a different historical Runtime",
+        "The direct launch binder rejects runtime and every undeclared top-level JSON property before Agent lookup, AgentSession creation, or AgentJob submission; prompt and context remain accepted",
+        "Issue runtime override lookup, routing consumption, and Issue configuration write support are removed; persisted vars.agent.runtime values do not alter named-Agent launches",
+        "The Server-to-Runner ReceiveFollowup target carries the immutable definition only for generic AgentSessions; public Session DTOs and Workflow follow-up targets do not expose it",
+        "New Orleans fields are append-only and records lacking Skills or Runtime remain readable with empty Skills and the opencode default",
+        "Focused Server unit/spec tests use fakes and injected time, and dotnet build Mohist.sln plus the affected Server tests pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server-owned immutable Agent execution-definition snapshot and authenticated generic follow-up definition target, with strict direct-launch input validation and named-Agent Runtime override paths removed.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The AgentSession copy is immutable session-local execution context, not a writable second Agent definition. Use the existing raw-body presence pattern instead of relying on default JSON unknown-property handling."
+    },
+    {
+      "id": "T-002",
+      "title": "Runner: resolve captured Skills and deliver definition envelopes to OpenCode and Pi",
+      "spec": "specs/agent-execution-definition/spec.md#skills-are-delivered-as-execution-input, specs/agent-execution-definition/spec.md#direct-agentjobs-retain-a-durable-execution-snapshot",
+      "description": "Add a safe SkillResolver whose ordered roots are <workDir>/.agents/skills, $HOME/.agents/skills, then optional colon-delimited MOHIST_SKILL_ROOTS additions. It resolves each captured name to a SKILL.md body, returning ordered name-and-instruction values or skill_not_found before provider submission. Extend the Mohist-owned OpenCode and Pi inputs with those resolved values and build one shared data-delimited execution envelope. Consume the generic definition supplied on ReceiveFollowup and apply it to every generic follow-up, while keeping SDK calls inside the existing runtime deep modules.",
+      "acceptanceCriteria": [
+        "A configured ordered Skill list resolves only from deterministic Runner roots in this order: <workDir>/.agents/skills, $HOME/.agents/skills, then colon-delimited MOHIST_SKILL_ROOTS additions; it sends exactly those ordered name-and-instruction values to both selected Runtime request paths, while an empty list adds neither resolution nor Skills input",
+        "Skill names are restricted to safe single path segments, root precedence is deterministic, and the shared execution envelope serializes names and instruction bodies as data rather than executable prompt syntax",
+        "OpenCode and Pi AgentJob execution continue to select the snapshotted Runtime, model, and variant without rereading Agent state",
+        "A generic Session follow-up consumes the immutable definition carried on its authenticated target and applies its Instructions and resolved Skills on every follow-up, including after Reset or confirmed-missing binding recovery",
+        "A missing, unreadable, or malformed requested SKILL.md fails before any OpenCode or Pi prompt submission with actionable error code skill_not_found naming the Skill",
+        "Runner unit tests use temporary configured Skill roots and fake Runtime implementations to cover ordered Skills, root precedence, unsafe names, missing assets, empty Skills, generic follow-up, binding recovery, and both Runtime paths; npm run typecheck and npm test -w packages/runner pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner SkillResolver plus OpenCode and Pi turn paths that consume resolved Skill instruction bodies and generic Session definitions.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Do not add a provider-specific Skill API, SDK DTO leak, Server-side Skill registry, or new Runner process. The Runner is the local asset authority."
+    },
+    {
+      "id": "T-003",
+      "title": "Workflow: persist definition-complete mohist/agent task attempts",
+      "spec": "specs/agent-execution-definition/spec.md#workflow-agent-attempts-snapshot-the-resolved-definition, specs/agent-execution-definition/spec.md#workflow-agent-references-fail-only-at-dispatch, specs/agent-execution-definition/spec.md#skills-are-delivered-as-execution-input",
+      "description": "Extend the Agent read-side execution snapshot and WorkflowItemTranslator so mohist/agent resolves the active Agent into a fully transformed WorkDispatch: composed Instructions plus raw workflow prompt, resolved Runtime, Model, Variant, and Skills. Persist that envelope before offer, reoffer it verbatim, and create a fresh definition snapshot only on retry while preserving Workflow as the task and recovery authority.",
+      "acceptanceCriteria": [
+        "A mohist/agent task for an active Agent dispatches through the Agent Runtime with the Agent's model, variant, and ordered Skills while keeping the raw workflow prompt as the task goal",
+        "The persisted WorkDispatch is reused unchanged after Agent edits, server restart, or grain activation; retry creates a new attempt using the then-current Agent definition",
+        "Workflow profile save and validation remain Agent-existence-independent and checks remain unsupported",
+        "A missing or archived Agent fails before Runner offer with TaskRun.Error.code equal to agent_not_found, without creating AgentJob or direct AgentSession state",
+        "Workflow translator and Server/Runner integration tests cover both OpenCode and Pi envelopes, snapshot reoffer, retry re-resolution, empty Skills, skill_not_found before Runtime submission, and structured Agent resolution failure; npm test passes without real Runtime, network, process, filesystem, or wall-clock dependencies"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Workflow-owned mohist/agent dispatch snapshots carrying the complete resolved execution definition and compatible with the Runner Skill input.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Do not create an AgentJob or direct AgentSession from Workflow. The persisted WorkDispatch, not live Agent lookup, is the reoffer authority."
+    },
+    {
+      "id": "T-004",
+      "title": "Web and documentation: expose Agent configuration as the only named-Agent execution control",
+      "spec": "specs/agent-execution-definition/spec.md#entry-points-cannot-override-execution-definition, specs/agent-execution-definition/spec.md#agent-definition-owns-execution-selection",
+      "description": "Remove Issue-level Runtime controls and direct-launch override affordances for named Agents while retaining Runtime, Model, Variant, and Skills in the Agent profile editor. Update product and design documentation to state that client task/context input cannot override an Agent definition, that its Skills are fixed for the launch or task attempt, and that explicit Workflow Runtime Actions remain separate.",
+      "acceptanceCriteria": [
+        "The Web has no Issue-level or direct-launch Runtime control that can alter a named Agent execution, while the Agent profile editor remains the Runtime, Model, Variant, and Skills configuration surface",
+        "Web client requests no longer write Issue vars.agent.runtime for named-Agent execution and handle the Server's removed override contract",
+        "docs/agents.md and docs/actions/agent.md describe the snapshot-fixed ownership and retry behavior without introducing Server or Runner implementation details; design gap notes reflect the landed behavior",
+        "Web tests cover the removed override control and retained Agent definition editor; npm run typecheck -w packages/web and npm run test:run -w packages/web pass"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web and documentation surfaces that present the Agent definition as the only execution-definition authority for named Agent work.",
+      "dependsOn": ["T-001", "T-003"],
+      "passes": false,
+      "notes": "Explicit mohist/opencode and mohist/pi Workflow Actions keep their existing uses-selected Runtime behavior."
+    }
+  ]
+}

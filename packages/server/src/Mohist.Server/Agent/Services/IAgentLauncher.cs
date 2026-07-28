@@ -21,15 +21,17 @@ public interface IAgentLauncher
     /// Mints a session id, opens a generic AgentSession with the launching
     /// Agent's identity wired into <see cref="GenericAgentSessionContext"/>,
     /// submits an <see cref="AgentJobGrain.AgentJobInput"/> carrying the
-    /// Agent's <c>Instructions</c> + <c>AgentConfig</c> snapshot plus the
-    /// provided prompt, and returns the resulting session identity.
+    /// Agent's resolved execution-definition snapshot (Instructions,
+    /// Runtime, Model, Variant, ordered Skills) plus the provided prompt,
+    /// and returns the resulting session identity.
     /// </summary>
     /// <param name="agent">
     /// Resolved Agent read model. Must be a non-archived Agent; the
     /// archived-rejection check is HTTP layer's responsibility (so the
-    /// launcher stays path-agnostic), but the snapshot fields
-    /// (<see cref="AgentInfo.Id"/>, <see cref="AgentInfo.Instructions"/>,
-    /// <see cref="AgentInfo.AgentConfig"/>) are captured verbatim here.
+    /// launcher stays path-agnostic). The execution-definition snapshot
+    /// is captured verbatim here — every later launch path (mention,
+    /// routed, watch, preflight) consumes the same resolver so the
+    /// accepted job's stored snapshot cannot drift across paths.
     /// </param>
     /// <param name="prompt">
     /// Caller prompt or (for the subscription path) the rendered
@@ -49,33 +51,24 @@ public interface IAgentLauncher
     /// downstream visibility queries can resolve triggering event back
     /// from session.
     /// </param>
-    /// <param name="runtimeOverride">
-    /// Optional launch-time override of the execution backend.
-    /// When non-null, wins over the Agent's
-    /// configured backend; when null, the Agent's configured backend
-    /// resolves, defaulting to <c>opencode</c>. Manual HTTP launch
-    /// passes the caller-supplied <c>runtime</c> from the request body;
-    /// the subscription dispatch path passes <c>null</c> because the
-    /// routed backend is the Agent's configured value.
-    /// </param>
     /// <param name="ct">Cancellation token propagated to grain calls.</param>
     Task<AgentLaunchResult> LaunchAsync(
         AgentInfo agent,
         string prompt,
         AgentLaunchContext context,
         IReadOnlyDictionary<string, string>? triggerLabels = null,
-        string? runtimeOverride = null,
         CancellationToken ct = default);
 
     /// <summary>
     /// Routed-launch path. Builds the
     /// canonical <see cref="RoutedAgentLaunchPlan"/> from the resolved
-    /// routing execution context, calls <c>EnsurePreparedAsync</c> on
-    /// the AgentJob grain, and advances the prepared launch to Session
-    /// open + LaunchReady + dispatch (or preflight-failed terminal
-    /// delivery). Redelivery reuses the persisted canonical plan — the
-    /// caller's <paramref name="executionContext"/> is only consulted to
-    /// mint the very first plan; subsequent calls observe the persisted
+    /// Agent execution definition + routing execution context, calls
+    /// <c>EnsurePreparedAsync</c> on the AgentJob grain, and advances
+    /// the prepared launch to Session open + LaunchReady + dispatch (or
+    /// preflight-failed terminal delivery). Redelivery reuses the
+    /// persisted canonical plan — the caller's
+    /// <paramref name="executionContext"/> is only consulted to mint the
+    /// very first plan; subsequent calls observe the persisted
     /// workspace and lineage, never newly resolved caller values.
     /// </summary>
     Task<RoutedAgentLaunchOutcome> LaunchRoutedAsync(
@@ -84,7 +77,6 @@ public interface IAgentLauncher
         RoutedExecutionContext executionContext,
         CloudEvent triggeringEvent,
         string ruleId,
-        string? runtimeOverride = null,
         CancellationToken ct = default);
 
     /// <summary>

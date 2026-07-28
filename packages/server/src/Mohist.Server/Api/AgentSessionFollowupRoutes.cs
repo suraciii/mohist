@@ -162,6 +162,7 @@ public static class AgentSessionFollowupRoutes
                 kind = "generic",
                 projectId,
                 sessionId = target.SessionId,
+                definition = target.Definition,
                 binding,
             };
         object payload = new { target = wireTarget, text, operationId = reservation.OperationId };

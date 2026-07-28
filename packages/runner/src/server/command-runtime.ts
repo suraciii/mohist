@@ -32,6 +32,7 @@ import type {
   PiRuntime,
   PiTurnObserver,
 } from "../runtime/pi/index.js"
+import { parseModelIdentifier } from "../runtime/opencode/index.js"
 import type { RuntimeSessionBinding } from "./session-target.js"
 import type { SessionCommand, SessionCommandError, SessionCommandResult } from "./session-command-handler.js"
 
@@ -92,6 +93,7 @@ export interface FollowupCallTarget {
 export interface FollowupCallRequest {
   readonly target: FollowupCallTarget
   readonly prompt: string
+  readonly options?: { readonly model?: string | null; readonly variant?: string | null; readonly skills?: readonly { readonly name: string; readonly instructions: string }[] }
 }
 
 export interface CancelCallTarget {
@@ -188,6 +190,11 @@ async function callOpenCodeFollowup(
   const opencodeRequest: RuntimeFollowupRequest = {
     target: { runtime: "opencode", runtimeSessionId: request.target.runtimeSessionId, workDir: request.target.workDir },
     prompt: request.prompt,
+    ...(request.options ? { options: {
+      model: parseFollowupModel(request.options.model),
+      variant: request.options.variant ?? null,
+      ...(request.options.skills ? { skills: request.options.skills } : {}),
+    } } : {}),
   }
   return await runtime.followup(opencodeRequest)
 }
@@ -200,8 +207,19 @@ async function callPiFollowup(
   const piRequest: PiFollowupRequest = {
     target: { runtime: "pi", runtimeSessionId: request.target.runtimeSessionId, workDir: request.target.workDir },
     prompt: request.prompt,
+    ...(request.options ? { options: {
+      model: request.options.model ?? null,
+      variant: request.options.variant ?? null,
+      ...(request.options.skills ? { skills: request.options.skills } : {}),
+    } } : {}),
   }
   return await runtime.followup(piRequest, observer ?? undefined)
+}
+
+function parseFollowupModel(value: string | null | undefined): { providerID: string; modelID: string } | null {
+  if (!value) return null
+  const parsed = parseModelIdentifier(value)
+  return parsed.kind === "ok" ? parsed.value : null
 }
 
 async function callOpenCodeCancel(

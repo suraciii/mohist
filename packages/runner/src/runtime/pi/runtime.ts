@@ -217,6 +217,8 @@ export class PiRuntime {
     if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
     const session = await this.resolveFollowupSession(path, request.target.workDir)
     if (!session.ok) return session.failure
+    const configured = await this.applyFollowupOptions(session.value, request.options)
+    if (configured) return configured
 
     if (session.value.isStreaming) {
       try {
@@ -269,6 +271,26 @@ export class PiRuntime {
         }
       })
     })
+  }
+
+  private async applyFollowupOptions(
+    session: PiSdkSession,
+    options: PiFollowupRequest["options"],
+  ): Promise<PiFollowupResult | null> {
+    const model = options?.model
+    if (model) {
+      const parsed = splitModel(model)
+      if (!parsed) return this.failure("invalid-input", "options.model must use provider/model syntax")
+      try {
+        await session.setModel(this.state.services!.model(parsed.provider, parsed.id))
+      } catch (cause) {
+        return this.failure("turn-failed", "Pi rejected the selected model", [
+          diagnostic("model-rejected", this.mask(message(cause))),
+        ])
+      }
+    }
+    if (options?.variant) session.setThinkingLevel(options.variant)
+    return null
   }
 
   /**

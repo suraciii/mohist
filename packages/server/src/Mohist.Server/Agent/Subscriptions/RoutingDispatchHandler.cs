@@ -111,35 +111,23 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             if (!execution.IsReady)
             {
                 var (_, _) = PreflightLineage(evt, execution);
-                var issueRuntimeOverride = await ResolveIssueRuntimeOverrideAsync(
-                    services,
-                    projectId,
-                    issueNumber,
-                    ct);
                 await RecordPreflightFailureAsync(
                     services,
                     agent,
                     outcome,
                     evt,
                     execution,
-                    issueRuntimeOverride,
                     ct);
                 launchedAgentIds.Add(agent.Id);
                 continue;
             }
 
-            var runtimeOverride = await ResolveIssueRuntimeOverrideAsync(
-                services,
-                projectId,
-                issueNumber,
-                ct);
             await launcher.LaunchRoutedAsync(
                 agent,
                 outcome.RenderedPromptPreview!,
                 execution.Context!,
                 evt,
                 outcome.Rule.Id,
-                runtimeOverride,
                 ct);
             launchedAgentIds.Add(agent.Id);
         }
@@ -222,34 +210,22 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             var ruleId = $"{WatchRuleIdPrefix}{agent.Id}";
             if (!execution.IsReady)
             {
-                var issueRuntimeOverride = await ResolveIssueRuntimeOverrideAsync(
-                    services,
-                    projectId,
-                    issueNumber,
-                    ct);
                 await RecordWatchPreflightFailureAsync(
                     services,
                     agent,
                     evt,
                     execution,
                     ruleId,
-                    issueRuntimeOverride,
                     ct);
                 continue;
             }
 
-            var runtimeOverride = await ResolveIssueRuntimeOverrideAsync(
-                services,
-                projectId,
-                issueNumber,
-                ct);
             await launcher.LaunchRoutedAsync(
                 agent,
                 prompt,
                 execution.Context!,
                 evt,
                 ruleId,
-                runtimeOverride,
                 ct);
         }
     }
@@ -308,7 +284,6 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         CloudEvent evt,
         RoutedExecutionContextResolution resolution,
         string ruleId,
-        string? runtimeOverride,
         CancellationToken ct)
     {
         var detail = resolution.FailureMessage ?? "watch launch preflight failed";
@@ -328,6 +303,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         var jobGrain = services.GetRequiredService<IGrainFactory>().GetGrain<IAgentJobGrain>(jobKey);
         var (issueNumber, epicNumber) = PreflightLineage(evt, resolution);
         var prompt = BuildWatchPrompt(evt, issueNumber ?? 0);
+        var definition = AgentLauncher.ResolveExecutionDefinition(agent);
         var preflightPlan = new RoutedAgentLaunchPlan(
             ProjectId: CloudEventLineage.TryReadProjectId(evt.Extensions, out var pid) ? pid : string.Empty,
             EventId: evt.Id,
@@ -343,12 +319,13 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             PreparedAt: services.GetRequiredService<TimeProvider>().GetUtcNow(),
             AgentId: agent.Id,
             AgentName: agent.Name,
-            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentInstructions: string.IsNullOrWhiteSpace(definition.Instructions) ? null : definition.Instructions,
             AgentConfigJson: agent.AgentConfig is { ValueKind: not System.Text.Json.JsonValueKind.Undefined } config ? config.GetRawText() : null,
-            Model: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Model,
-            Variant: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Variant,
+            Model: definition.Model,
+            Variant: definition.Variant,
             Prompt: prompt,
-            Runtime: AgentLauncher.ResolveRuntime(agent.AgentConfig, runtimeOverride),
+            Runtime: definition.Runtime,
+            Skills: definition.Skills,
             WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId));
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
@@ -382,7 +359,6 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         RuleOutcome outcome,
         CloudEvent evt,
         RoutedExecutionContextResolution resolution,
-        string? runtimeOverride,
         CancellationToken ct)
     {
         var detail = resolution.FailureMessage ?? "routed launch preflight failed";
@@ -401,6 +377,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         var (sessionId, jobKey) = triggerIdentity.Value;
         var jobGrain = services.GetRequiredService<IGrainFactory>().GetGrain<IAgentJobGrain>(jobKey);
         var (issueNumber, epicNumber) = PreflightLineage(evt, resolution);
+        var definition = AgentLauncher.ResolveExecutionDefinition(agent);
         var preflightPlan = new RoutedAgentLaunchPlan(
             ProjectId: CloudEventLineage.TryReadProjectId(evt.Extensions, out var pid) ? pid : string.Empty,
             EventId: evt.Id,
@@ -416,28 +393,16 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             PreparedAt: services.GetRequiredService<TimeProvider>().GetUtcNow(),
             AgentId: agent.Id,
             AgentName: agent.Name,
-            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentInstructions: string.IsNullOrWhiteSpace(definition.Instructions) ? null : definition.Instructions,
             AgentConfigJson: agent.AgentConfig is { ValueKind: not System.Text.Json.JsonValueKind.Undefined } config ? config.GetRawText() : null,
-            Model: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Model,
-            Variant: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Variant,
+            Model: definition.Model,
+            Variant: definition.Variant,
             Prompt: outcome.RenderedPromptPreview,
-            Runtime: AgentLauncher.ResolveRuntime(agent.AgentConfig, runtimeOverride),
+            Runtime: definition.Runtime,
+            Skills: definition.Skills,
             WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId));
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
-    }
-
-    private static async Task<string?> ResolveIssueRuntimeOverrideAsync(
-        IServiceProvider services,
-        string projectId,
-        int? issueNumber,
-        CancellationToken ct)
-    {
-        if (issueNumber is not > 0)
-            return null;
-
-        return await services.GetRequiredService<IAgentRuntimeOverrideResolver>()
-            .GetAgentRuntimeOverrideAsync(projectId, issueNumber.Value);
     }
 
     internal static (int? IssueNumber, int? EpicNumber) PreflightLineage(

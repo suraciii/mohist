@@ -1,10 +1,11 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Domain;
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Workflow.Services;
 
@@ -19,9 +20,9 @@ namespace Mohist.Server.Api;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The route now delegates the canonical mint-session → open-generic-session
+/// The route delegates the canonical mint-session → open-generic-session
 /// → build-AgentJobInput → submit-to-grain pipeline to
-/// <see cref="IAgentLauncher"/>. The route keeps its three domain-level
+/// <see cref="IAgentLauncher"/>. The route keeps its domain-level
 /// gates (whitespace prompt → 400; unresolved agent → 404; archived agent
 /// → 409) and composes the 201 response from
 /// <see cref="AgentLaunchResult"/> (carrying both the AgentJob key and the
@@ -29,14 +30,22 @@ namespace Mohist.Server.Api;
 /// URL (product surfaces owned by the API layer, not the launcher).
 /// </para>
 /// <para>
-/// Empty/whitespace prompt is rejected with 400 before any session or job
-/// is created; unknown agentRef is rejected with 404 before any session is
-/// created; archived agents are rejected with 409 before any session is
-/// created.
+/// The launch body is bound through <see cref="AgentSessionLaunchBody"/>'s
+/// raw-JSON presence binder, which rejects every undeclared top-level
+/// field before the Agent lookup so caller-supplied execution-backend
+/// overrides cannot alter a named Agent's runtime. The binder accepts
+/// only <c>prompt</c> and <c>context</c>; any extra property surfaces an
+/// actionable 400 before any session or job is created.
 /// </para>
 /// </remarks>
 public static class AgentSessionLaunchRoutes
 {
+    internal static readonly IReadOnlySet<string> AllowedTopLevelFields = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "prompt",
+        "context",
+    };
+
     public static WebApplication MapAgentSessionLaunchRoutes(this WebApplication app)
     {
         var group = app.MapGroup("/api/projects/{projectRef}/agents/{agentRef}")
@@ -46,15 +55,30 @@ public static class AgentSessionLaunchRoutes
             HttpContext context,
             string projectRef,
             string agentRef,
-            AgentSessionLaunchRequest req,
+            AgentSessionLaunchBody body,
             AgentQuerier agentQuerier,
             IssueQuerier issueQuerier,
-            IssueWorkflowProfileManager issueWorkflowProfileManager,
             EpicQuerier epicQuerier,
             IAgentLauncher launcher,
             CancellationToken ct) =>
         {
-            var prompt = req?.Prompt;
+            if (body is null)
+            {
+                return ApiResults.BadRequest(
+                    "request body is required",
+                    "body_required");
+            }
+
+            if (body.UndeclaredFields.Count > 0)
+            {
+                return ApiResults.BadRequest(
+                    $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}; " +
+                    "the launch body accepts only prompt and context.",
+                    "unsupported_field",
+                    new { fields = body.UndeclaredFields.ToArray() });
+            }
+
+            var prompt = body.Prompt;
             if (string.IsNullOrWhiteSpace(prompt))
             {
                 return ApiResults.BadRequest(
@@ -74,30 +98,17 @@ public static class AgentSessionLaunchRoutes
                 return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
             }
 
-            var contextError = await ValidateContextAsync(req!.Context, project.Id, issueQuerier, epicQuerier);
+            var contextError = await ValidateContextAsync(body.Context, project.Id, issueQuerier, epicQuerier);
             if (contextError is not null)
                 return contextError;
 
             var launchContext = new AgentLaunchContext(
                 ProjectId: project.Id,
-                IssueNumber: req.Context?.IssueNumber,
-                EpicNumber: req.Context?.EpicNumber,
-                Repository: req.Context?.Repository,
-                WorkspacePath: req.Context?.WorkspacePath,
+                IssueNumber: body.Context?.IssueNumber,
+                EpicNumber: body.Context?.EpicNumber,
+                Repository: body.Context?.Repository,
+                WorkspacePath: body.Context?.WorkspacePath,
                 Title: null);
-
-            var runtimeOverride = req.Runtime;
-            if (runtimeOverride is null && req.Context?.IssueNumber is int issueNumber)
-            {
-                runtimeOverride = await issueWorkflowProfileManager
-                    .GetAgentRuntimeOverrideAsync(project.Id, issueNumber);
-            }
-
-            var runtimeError = ValidateRuntimeOverride(runtimeOverride);
-            if (runtimeError is not null)
-            {
-                return ApiResults.BadRequest(runtimeError, "runtime_invalid");
-            }
 
             AgentLaunchResult result;
             try
@@ -107,7 +118,6 @@ public static class AgentSessionLaunchRoutes
                     prompt,
                     launchContext,
                     triggerLabels: null,
-                    runtimeOverride: runtimeOverride,
                     ct: ct);
             }
             catch (ArgumentException ex)
@@ -157,37 +167,95 @@ public static class AgentSessionLaunchRoutes
 
         return null;
     }
-
-    private static string? ValidateRuntimeOverride(string? runtime)
-    {
-        if (runtime is null) return null;
-        if (!Mohist.Server.Infrastructure.AgentConfigSchema.AllowedRuntimes.Contains(runtime))
-        {
-            return $"runtime '{runtime}' is not supported; the agent runtime accepts only " +
-                string.Join(", ", Mohist.Server.Infrastructure.AgentConfigSchema.AllowedRuntimes) + ".";
-        }
-        return null;
-    }
-
 }
 
 /// <summary>
-/// Body for <c>POST /api/projects/{projectRef}/agents/{agentRef}/sessions</c>.
-/// The prompt is required; <see cref="Context"/> is optional and records
-/// context references (issue, epic, repository, workspace path) as session
-/// metadata without creating scope/mount/supervisor lifecycle.
+/// Raw-JSON presence-bound body for
+/// <c>POST /api/projects/{projectRef}/agents/{agentRef}/sessions</c>.
+/// Records every top-level JSON property name so the route can reject
+/// callers that try to override the Agent's execution definition
+/// (e.g. a <c>runtime</c> field). Only <c>prompt</c> and <c>context</c>
+/// are accepted; any other property surfaces an actionable 400 before
+/// Agent lookup, AgentSession creation, or AgentJob submission.
 /// </summary>
-public sealed record AgentSessionLaunchRequest(
-    string? Prompt = null,
-    AgentSessionLaunchContextRef? Context = null,
-    /// <summary>
-    /// Optional launch-time override of the execution backend
-    ///. When set, wins over the Agent's configured
-    /// <c>runtime</c> in <c>agentConfig</c>; when absent, the Agent's
-    /// configured backend applies (defaulting to <c>opencode</c>).
-    /// Accepted values: <c>opencode</c>, <c>pi</c>.
-    /// </summary>
-    string? Runtime = null);
+public sealed record AgentSessionLaunchBody(
+    string? Prompt,
+    AgentSessionLaunchContextRef? Context,
+    IReadOnlyList<string> UndeclaredFields,
+    JsonElement Raw)
+{
+    public static async ValueTask<AgentSessionLaunchBody?> BindAsync(HttpContext context)
+    {
+        try
+        {
+            return await BindCoreAsync(context);
+        }
+        catch (JsonException)
+        {
+            return new AgentSessionLaunchBody(null, null, [], default);
+        }
+    }
+
+    private static async ValueTask<AgentSessionLaunchBody> BindCoreAsync(HttpContext context)
+    {
+        var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
+        if (raw.ValueKind != JsonValueKind.Object)
+        {
+            return new AgentSessionLaunchBody(
+                Prompt: null,
+                Context: null,
+                UndeclaredFields: [],
+                Raw: raw);
+        }
+
+        var undeclared = new List<string>();
+        foreach (var property in raw.EnumerateObject())
+        {
+            if (!AgentSessionLaunchRoutes.AllowedTopLevelFields.Contains(property.Name))
+                undeclared.Add(property.Name);
+        }
+
+        var prompt = raw.TryGetProperty("prompt", out var promptElement)
+                     && promptElement.ValueKind != JsonValueKind.Null
+            ? promptElement.ValueKind == JsonValueKind.String
+                ? promptElement.GetString()
+                : throw new JsonException("prompt must be a string")
+            : null;
+
+        AgentSessionLaunchContextRef? ctx = null;
+        if (raw.TryGetProperty("context", out var ctxElement)
+            && ctxElement.ValueKind == JsonValueKind.Object)
+        {
+            ctx = new AgentSessionLaunchContextRef(
+                IssueNumber: TryReadPositiveInt(ctxElement, "issueNumber"),
+                EpicNumber: TryReadPositiveInt(ctxElement, "epicNumber"),
+                Repository: TryReadString(ctxElement, "repository"),
+                WorkspacePath: TryReadString(ctxElement, "workspacePath"));
+        }
+
+        return new AgentSessionLaunchBody(
+            Prompt: prompt,
+            Context: ctx,
+            UndeclaredFields: undeclared,
+            Raw: raw);
+    }
+
+    private static string? TryReadString(JsonElement parent, string name) =>
+        !parent.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null
+            ? null
+            : value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : throw new JsonException($"context.{name} must be a string");
+
+    private static int? TryReadPositiveInt(JsonElement parent, string name)
+    {
+        if (!parent.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            return null;
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var number))
+            throw new JsonException($"context.{name} must be an integer");
+        return number;
+    }
+}
 
 public sealed record AgentSessionLaunchContextRef(
     int? IssueNumber = null,

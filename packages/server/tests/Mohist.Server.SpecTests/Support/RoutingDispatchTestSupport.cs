@@ -338,8 +338,6 @@ internal static class RoutingDispatchTestSupport
                 services.AddScoped<WorkflowRunQuerier>();
                 services.AddSingleton<IActionCatalogSource>(NullActionCatalogSource.Instance);
                 services.AddScoped<IssueWorkflowProfileManager>();
-                services.AddScoped<IAgentRuntimeOverrideResolver>(provider =>
-                    provider.GetRequiredService<IssueWorkflowProfileManager>());
                 services.AddScoped<RoutingTableEvaluator>();
                 configure?.Invoke(services);
                 return services.BuildServiceProvider();
@@ -417,7 +415,6 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         RoutedExecutionContext executionContext,
         CloudEvent triggeringEvent,
         string ruleId,
-        string? runtimeOverride = null,
         CancellationToken ct = default)
     {
         var sequence = _routedLaunches.Count;
@@ -447,7 +444,6 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         string prompt,
         AgentLaunchContext context,
         IReadOnlyDictionary<string, string>? triggerLabels = null,
-        string? runtimeOverride = null,
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher captures routed launches only.");
 
