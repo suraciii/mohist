@@ -52,6 +52,7 @@
         "ISlackApiClient is registered as a typed HttpClient with a recording fake usable by tests.",
         "Verification advances SetupProgress to ClaimOwner only when workspace/App/Bot are consistent and required scopes are present; any inconsistency yields FixSlackSetup with a confirmed, actionable reason.",
         "When mohist-slack is offline, the Connection stays in WaitingForSlackService and retains saved credentials and prior confirmed steps.",
+        "When a fresh adapter heartbeat is recorded (a successful /adapter-session call), SetupProgress can advance past Waiting for Slack service; a stale heartbeat (against injectable TimeProvider) reads as adapter-offline independently of stored Setup progress.",
         "Verification loads the Bot token via ISecretStore and never logs it; SetupProgress advances independently of Agent Readiness.",
         "A Connection whose identity cannot be verified does not present the claim action and never invites a user to wait for an unreceivable DM.",
         "Server tests use a fake ISlackApiClient and injectable TimeProvider with no real network; npm test passes."
@@ -111,23 +112,25 @@
       "id": "T-006",
       "title": "Connection dispatch through the Agent API",
       "spec": "specs/slack-dm-dispatch/spec.md#A DM task dispatches one launch through the Agent API",
-      "description": "Add `IAgentLauncher.LaunchConnectionAsync(agent, prompt, ConnectionLaunchOrigin)` mirroring LaunchMentionAsync; derive the idempotency key as `KeyFor(projectId, \"slack:{teamId}:{conversationId}:{messageTs}\")`; stamp `source-kind=agent-connection` plus connection-id/slack-user-id/slack-conversation-id audit labels on the Session; carry a ConnectionOrigin field through the existing coordinator envelope (no new coordinator grain). Add the three adapter HTTP routes authenticated by the operator token: POST .../ingress (durable inbox write before ack), POST .../dispatch (owner-only gating → LaunchConnectionAsync → Bot replies accepted/queued/rejected), POST .../deliveries/claim + /ack (outbox drain). Redelivery resolves to the same SessionInput; the final result returns to the same DM conversation via the outbox. This issue dispatches one task per DM with no continuation semantics.",
+      "description": "Add `IAgentLauncher.LaunchConnectionAsync(agent, prompt, ConnectionLaunchOrigin)` reusing the origin-in-key encoding pattern shared by the routed/mention launch paths; derive the idempotency key as `KeyFor(projectId, \"slack:{teamId}:{conversationId}:{messageTs}\")` and route through `AgentLaunchCoordinatorGrain` exactly like the manual `LaunchIdempotentAsync` path so redelivery collapses to the same plan; stamp `source-kind=agent-connection` plus connection-id/slack-user-id/slack-conversation-id audit labels on the Session; carry a ConnectionOrigin field through the existing coordinator envelope (no new coordinator grain). Add the adapter HTTP routes authenticated by the operator token: POST .../ingress (single inbound route — durable inbox write before ack, then server-side classification: reject if Setup not Complete, process claim if text matches a pending code, reject if sender is not Owner, otherwise call LaunchConnectionAsync and reply accepted/queued/rejected), POST .../adapter-session (credential lease + heartbeat, returns decrypted App/Bot tokens and records LastHeartbeatAt), and POST .../deliveries/claim + /ack (outbox drain). Redelivery resolves to the same SessionInput; the final result returns to the same DM conversation via the outbox. This issue dispatches one task per DM with no continuation semantics.",
       "acceptanceCriteria": [
         "One owner DM task creates exactly one AgentJob, one AgentSession, one first SessionInput, and one first AgentTurn via LaunchConnectionAsync; the idempotency key is derived from (team, conversation, messageTs).",
         "Slack redelivery of the same message — including after adapter or Server restart — resolves to the same SessionInput and creates no second job, input, or turn.",
         "A bare mention without a task creates no work and the Bot asks the Owner to supply a task; the Bot replies accepted, queued, or an explicit rejection with an actionable reason.",
         "The terminal result is delivered to the same DM conversation; an unconfirmable result is surfaced honestly rather than fabricated.",
         "A second DM task dispatches an independent launch; this issue makes no continuation, queue-merge, or current-Session commitment.",
+        "The /ingress route classifies server-side and the adapter does not pre-classify: a DM dispatched before Setup is Complete is rejected with no Agent resources; a non-owner DM is rejected with no resources; a DM whose text matches a pending claim code is processed as a claim, not a task.",
+        "The /adapter-session route authenticates the adapter, returns the decrypted App/Bot tokens, and records the Connection heartbeat; tokens never appear in logs.",
         "Adapter routes are authenticated by the operator token and resolve the Connection before any dispatch.",
         "Server tests use fake dispatch, fake storage, and injectable TimeProvider with no real network; npm test passes."
       ],
       "priority": 4,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "LaunchConnectionAsync + source-kind=agent-connection labels + coordinator ConnectionOrigin + ingress/dispatch/deliveries HTTP routes.",
+      "output": "LaunchConnectionAsync (coordinator-routed) + source-kind=agent-connection labels + coordinator ConnectionOrigin + ingress (classifying) / adapter-session (lease+heartbeat) / deliveries HTTP routes.",
       "dependsOn": ["T-002", "T-003", "T-004", "T-005"],
       "passes": false,
-      "notes": "Implements design D4 + D5. Reuses AgentLaunchCoordinatorGrain unchanged — the connection-scoped key inherits #512's redelivery/restart idempotency. Precedent for an origin-encoded launch method is LaunchMentionAsync (IAgentLauncher.cs:119). source-kind=agent-connection distinguishes Slack sessions for audit and for the later DM-conversation feature."
+      "notes": "Implements design D4 + D5. LaunchConnectionAsync routes through AgentLaunchCoordinatorGrain (like LaunchIdempotentAsync) — the connection-derived key IS the coordinator idempotency key, which is what makes a redelivered Slack message resolve to the same SessionInput (#512 inherited). The origin-in-key encoding pattern is shared with the routed/mention paths (IAgentLauncher.cs:98, 119); it does not reuse those methods' call paths. Dispatch is internal to the /ingress handler (server-side classification); there is no separate adapter-facing dispatch route. source-kind=agent-connection distinguishes Slack sessions for audit and for the later DM-conversation feature."
     },
     {
       "id": "T-007",
@@ -173,11 +176,13 @@
       "id": "T-009",
       "title": "mohist-slack adapter package",
       "spec": "specs/mohist-slack-adapter/spec.md#The adapter is a stateless protocol translator",
-      "description": "Add `packages/mohist-slack/` as a new npm workspace package (append to root workspaces) using `@slack/socket-mode` + `@slack/web-api`. Implement: Socket Mode connect, normalize events to envelopes with a stable provider identity, POST ingress/dispatch to the T-006 routes, drain the outbox via deliveries/claim+ack, render and post replies via chat.postMessage, report delivery results, lease tokens from the Server at startup/reconnect (in-memory only), apply an in-flight concurrency cap, and hold no durable state. Authenticate to the Server with the operator token. Include an end-to-end fake round-trip against the T-006 routes.",
+      "description": "Add `packages/mohist-slack/` as a new npm workspace package (append to root workspaces) using `@slack/socket-mode` + `@slack/web-api`. Implement: Socket Mode connect, normalize events to envelopes with a stable provider identity, call POST .../adapter-session on start and on a short interval (credential lease + heartbeat), forward every normalized event to the single POST .../ingress route (the adapter does not pre-classify owner/claim/non-owner), drain the outbox via deliveries/claim+ack, render and post replies via chat.postMessage, report delivery results, hold leased tokens in memory only, apply an in-flight concurrency cap, and hold no durable state. Authenticate to the Server with the operator token. Include an end-to-end fake round-trip against the T-006 routes.",
       "acceptanceCriteria": [
         "The package is added to root workspaces and builds a dist/cli.js; root build/test include it.",
-        "The adapter connects Socket Mode, normalizes events to envelopes, forwards them to /ingress and /dispatch, drains the outbox via claim/ack, and posts replies via chat.postMessage.",
-        "The adapter holds tokens in memory only and persists no inbox/mapping/pending/Agent-config state; reconnect re-leases tokens and resumes pulling unconverged items from the Server.",
+        "The adapter connects Socket Mode, normalizes events to envelopes, and forwards every event to /ingress without classifying it; it does not call a separate dispatch route.",
+        "The adapter calls /adapter-session on start and on a short interval to lease tokens and record its heartbeat; tokens are held in memory only and never persisted.",
+        "The adapter drains the outbox via claim/ack and posts replies via chat.postMessage.",
+        "The adapter persists no inbox/mapping/pending/Agent-config state; reconnect re-leases tokens, re-heartbeats, and resumes pulling unconverged items from the Server.",
         "The adapter bounds its in-flight concurrency and does not own a persistent queue or apply product-level backpressure (the Server decides Backpressured).",
         "The adapter reaches execution only through the Connection boundary and does not call mo, the database, grains, Runner, or Runtime protocols directly.",
         "One adapter carries multiple Connections, each with independent App/Bot credentials.",
@@ -186,7 +191,7 @@
       "priority": 5,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/mohist-slack workspace package: Socket Mode client + envelope normalization + ingress/dispatch/delivery-drain + reply posting + token lease + concurrency cap.",
+      "output": "packages/mohist-slack workspace package: Socket Mode client + envelope normalization + single ingress forward + adapter-session lease/heartbeat + delivery-drain + reply posting + concurrency cap.",
       "dependsOn": ["T-004", "T-006"],
       "passes": false,
       "notes": "Implements design D8 (adapter half) and honors architecture.md:49 (Slack protocol in mohist-slack) + :233-234 (stateless; anything that must survive restart lives in Server). Using the official @slack SDKs avoids hand-rolling the Socket Mode WebSocket protocol (design D8 alternative rejected)."

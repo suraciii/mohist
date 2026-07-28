@@ -38,6 +38,10 @@ Setup SHALL advance through the steps Create app & add credentials, Waiting for 
 - **WHEN** `mohist-slack` is not installed or is offline after credentials have been saved
 - **THEN** the Connection remains in Waiting for Slack service, retains the saved credentials and prior confirmed steps, and surfaces the service install or start action as the next step
 
+#### Scenario: Service available advances past Waiting
+- **WHEN** `mohist-slack` records a fresh heartbeat after a period offline
+- **THEN** the Connection advances past Waiting for Slack service toward identity verification, without losing previously confirmed steps
+
 #### Scenario: Invalid token surfaces a fixable step
 - **WHEN** the saved token is invalid, the App and Bot do not belong to the same install, or a required scope is missing
 - **THEN** the Connection enters Fix Slack setup, lists only the confirmed problems and the concrete remediation actions, and does not lose previously completed steps
@@ -89,6 +93,10 @@ Generating an owner claim code SHALL produce one short-lived, single-use code an
 #### Scenario: An expired code cannot claim
 - **WHEN** a code is used after its validity window has elapsed
 - **THEN** the claim is rejected and the user is told to generate a new code
+
+#### Scenario: A claim-code DM is treated as a claim, not a task
+- **WHEN** an inbound DM's text matches a pending, unused owner-claim code
+- **THEN** the DM is processed as a claim attempt and creates no AgentJob, AgentSession, or SessionInput
 
 ### Requirement: DM access is owner-only after claim
 

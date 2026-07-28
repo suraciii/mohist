@@ -10,6 +10,10 @@ When the Owner sends a task DM to the Bot, the Connection boundary SHALL invoke 
 - **WHEN** the Owner sends a DM whose text is empty or contains only the Bot mention and no usable attachment
 - **THEN** no AgentJob or SessionInput is created and the Bot asks the Owner to supply a task
 
+#### Scenario: A DM dispatched before Setup is complete is rejected
+- **WHEN** a DM arrives at a Connection whose Setup is not yet Complete (for example, before an Owner has been claimed)
+- **THEN** the DM is rejected with an actionable reason and no AgentJob, AgentSession, SessionInput, AgentTurn, or inbox entry is created
+
 ### Requirement: The Bot reports acceptance, queue, or explicit rejection
 
 Immediately after a DM task is processed, the Bot SHALL reply in the same DM conversation with one of: accepted (the input is durably accepted and execution is starting), queued (the input is accepted but execution is waiting for a slot), or an explicit rejection with an actionable reason. The Bot MUST NOT stay silent or report success before Mohist has durably recorded the outcome.
@@ -62,6 +66,6 @@ This issue SHALL deliver exactly one launch per dispatched DM task. DM continuou
 - **WHEN** the Owner sends a second task DM after the first task has completed
 - **THEN** the second DM dispatches a new independent launch rather than continuing the first AgentSession
 
-#### Scenario: No continuation semantics are implied
+#### Scenario: A follow-up DM during a running task starts independent work
 - **WHEN** the Owner sends a follow-up DM while an earlier task is still running
-- **THEN** the behavior for that case is governed by a later issue, and this issue makes no commitment to continue, queue, or merge it into the running turn
+- **THEN** that DM dispatches its own independent launch (a second AgentJob and AgentSession) and does not continue, queue into, or merge with the running turn

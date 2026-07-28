@@ -29,7 +29,7 @@ Mohist Agent 目前只能从 Web 和 CLI 使用，从未以同一身份出现在
 - **Server**（`packages/server/src/Mohist.Server/`）:
   - 新增 AgentConnection 聚合与 grain（Agent 域，`Agent/`）：绑定、访问策略、Setup progress、四类事实、生命周期与 Project+workspace+Agent 唯一性。
   - 新增 Slack provider infrastructure（Server infra，与 Agent/Session 域隔离）：受保护凭据加密存储、provider inbox（按 Slack 消息身份去重）、DM conversation mapping、有界 outbound outbox、Delivery uncertain / Backpressured 状态。
-  - 新增 Connection boundary API surface：供 adapter 提交规范化 envelope、领取出站 intent、回报投递结果；dispatch 复用 `IAgentLauncher.LaunchIdempotentAsync` + `AgentLaunchCoordinatorGrain`（`Agent/Services/AgentLauncher.cs:122`）与 `Idempotency-Key` 契约（`Api/AgentSessionLaunchRoutes.cs:82`），不新建第二条启动路径。
+  - 新增 Connection boundary API surface：供 adapter 提交规范化 envelope（单一 `/ingress` 路由由 Server 侧分类：Setup 未完成则拒绝、匹配认领码则认领、非 Owner 则拒绝、Owner 任务则派活）、租赁凭据并上报心跳（`/adapter-session`）、领取出站 intent 并回报投递结果（`/deliveries`）；dispatch 经新增的 `LaunchConnectionAsync` 入口复用 `AgentLaunchCoordinatorGrain` 的幂等启动机制（`Agent/Services/AgentLauncher.cs:122`）与 `Idempotency-Key` 契约（`Api/AgentSessionLaunchRoutes.cs:82`），不新建第二条启动路径，也不暴露单独的 dispatch 路由。
 - **CLI**（`packages/cli/Mohist.Cli/`）:
   - 新增 `mo agent connection` 子组（`create`/`configure`/`claim-owner`/`view`/`list`/`edit`/`delete`），凭据走隐藏输入或 `--credentials-file`。
   - `MohistCliCommands.Service.cs:7` 的 `ServiceTarget` 增加 `Slack`；新增 `mo install slack` / `mo service status slack` / `mo update slack`。
