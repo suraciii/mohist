@@ -392,10 +392,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 ### spec 在前，实现追赶
 
-- Issue 字段目录补齐：`issue view/list --json` 增加 `risk`、`prereq`、`epic`、`createdAt`、`updatedAt`；
-  `issue list` 增加 `--epic` 过滤；`issue edit` 增加 `--risk`（`create` 已有）。依赖 server read
-  model 暴露 epic 归属与 prereq。
-- Epic 字段目录真实化，并增加 `progress`（含 `nextIssueNumber`、`nextIssueReason`）。
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
 - `agent connection` 命令组与 Slack setup。
@@ -403,6 +399,13 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - Agent launch/follow-up 暴露稳定的 SessionInput 与 AgentTurn 身份。
 - `issue workflow status/timeline` 是 Run 状态在 `run` 之外的第二条读取路径，且子区边界文案
   与实际动作名实不符；由 issue #498 推进退役，能力并入 `run`。
+
+### 已闭合
+
+- Issue 字段目录补齐：`issue view/list --json` 增加 `risk`、`prereq`、`epic`、`createdAt`、`updatedAt`；
+  `issue list` 增加 `--epic` 过滤；`issue edit` 增加 `--risk`（`create` 已有）。依赖 server read
+  model 暴露 epic 归属与 prereq。
+- Epic 字段目录真实化，并增加 `progress`（含 `nextIssueNumber`、`nextIssueReason`）。
 - 输入通道统一：`workflow create/edit --file` 替换 `--yaml <source|@file>`；`--stage-models-file`
   等 file flag 补齐；`@<file>` 写法整体退役。
 - `routing test --last` 改为 `--limit`；`agent launch --repository` 改为 `--repo`。
@@ -416,16 +419,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
   返回排队应答而非资源，不在此列）。
 - `project repo set-default`（自 `repo set-default` 迁移）。
 - `project workflow prompt` 等命令的 JSON FIELDS 替换为真实字段目录，移除兜底默认字段集。
-
-### 实现越界，需向 spec 收敛
-
-- `--effective` 只应出现在 `run variable list/get`；当前 `project`/`issue` variable 与
-  `set`/`unset` 也暴露了它。
-- `--project-id` 隐藏残留与相关死代码需删除。
-- help 文案缺陷：`creatinging`/`updatinging` 拼写、空选项描述、`issue create/edit --priority`
-  复用 filter 描述、`USAGE`/`Usage:` 大小写不一、`--json` 描述不一致。
-
-### 已闭合
 
 - `runner` / `server` / `service` 三层职责：`runner` 只表示 Server 已注册的远程执行资源（`list`/`view`/`status`），`server` 只表示当前连接的 Mohist Server 应用（`status`/`health`/`info`/`logs`，其中 `logs` 是应用日志）；已实装的本机受管进程统一为 `mo service <verb> server|runner`，目标命令面再增加可选 `slack` service。`project status` 已迁移到 `server status`；`system logs` 已合并到 `server logs`，`system` 命令组整体退役。
 - Agent launch 同时暴露 Job 与 Session 的稳定身份：`mo agent launch <agent>` 直接挂在 `agent` 下（不再经过 `agent session launch`），打印 `jobId` 与 `sessionId`；HTTP 201 同样同时返回 `jobId`、`sessionId` 与各自读取链接，`jobId` 被 `agent job view` 原样接受（无 id 翻译）。
