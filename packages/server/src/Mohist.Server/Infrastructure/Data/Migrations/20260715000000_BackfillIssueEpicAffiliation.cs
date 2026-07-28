@@ -9,7 +9,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
     /// One-time idempotent backfill of the denormalized <c>epicId</c> field in
     /// the <c>Issues.State</c> JSON column for issues already linked to an
     /// epic at cutover. The <c>epicId</c> field was added to the
-    /// <c>Issue</c> aggregate in issue #412 (T-003) so issue.* events can
+    /// <c>Issue</c> aggregate so issue.* events can
     /// stamp <c>epicid</c> from their own state — without a cross-aggregate
     /// query at stamp time (D5).
     ///

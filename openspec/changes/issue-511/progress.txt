@@ -211,3 +211,71 @@ Tests:
 ### Risks for downstream tasks (T-005, T-006)
 - **T-005** must clear 53 offenders across 27 files (not the proposal's estimate of 38 across 26); the highest-count files are `AgentSessionQuerier.cs`/`AgentSessionReadModels.cs`/`MohistDbContext.cs`/`RoutingDispatchHandler.cs` (4 each) and `Api/UnifiedSessionRoutes.cs`/`AgentJobGrain.cs` (3 each). `WorkflowRunProfileRow.cs` is now in scope (T-002's deliberate-keep pointer comment needs to drop its `design/workflow/variables.md` reference).
 - **T-006** is independent; no shared files with this task.
+
+## T-005 — clear the 53 comment-reference offenders to zero and turn the ban hard
+
+### Codebase Patterns
+- Every offender lived in either `///` XML-doc blocks (most) or `//` single-line block comments (the DbContext / Grain / `WorkflowRunProfileRow` cluster). No `/* */` or `/** */` blocks were in scope, so the cleanup was uniformly a "delete the tag fragment and re-flow the surrounding sentence" pass — no multi-line re-arrangements.
+- The 4 migration files all use `///` `<summary>` blocks for the class doc. Pure provenance tags sit in the lead sentence of those summaries (e.g. `Issue-318 T-004:`) so dropping the tag left a natural sentence ("Materializes the new ... state machine on the durable schema.").
+- The ArchTest's `Ratchet_PassesWhenCurrentCountShrinksBelowBaseline` unit test documented that shrinking with a non-zero baseline entry is **allowed** without immediately failing. This is the path T-005 takes: shrink to zero, then delete the baseline entries — the test fails-on-stale at every shrink step, so the right sequence is "shrink first, then delete the baseline entry in the same commit." Doing them in separate commits means an intermediate state where the test fails on every stale entry.
+
+### Decisions / Gotchas
+- **No string-literal false positives.** `MohistDefaultWorkflowProjection.cs:107` reads `$"openspec/changes/{ChangeName(issueNumber)}"` — a string interpolation, not a comment. The ArchTest's `SyntaxTrivia`-only scanner correctly ignores it. `rg` over plain text does NOT mirror this guarantee and flags it; reviewers should trust the ArchTest, not raw grep.
+- **`Issue-NNN` (capital I) is not in the regex `issue-\d+`** but is the same kind of provenance tag, so cleanup is consistent (`AddAgentLaunchLabelComputedColumns.cs:8`, `WorkflowRunStatus.cs:8`, `IssueQuerier.cs:524`). All three were cleaned in this pass; the baseline counts listed in T-004 only count the lowercase form.
+- **Three exceptions to "drop only the tag fragment":**
+  1. `UnifiedSessionRoutes.cs:22` (`T-005` remark): the surrounding remark is *only* about the migration timing, so removing the `T-005` reference would leave a bare "until" without an anchor. Rewrote the sentence to state the external reason ("until the CLI migrates onto this unified surface"). The CLI is still on `agent-sessions/{sessionId}` (verified — `MohistCliCommands.Session.cs:65` builds URLs with `/agent-sessions/...`, and `CliAgentSessionRecoverySpecs.cs:50,127` / `CliSessionCommandSpecs.cs:569,752,860,906` assert the same URL pattern for followup + cancel).
+  2. `20260706120000_AddWorkflowRunReadySince.cs:20`: the dangling `design/workflow/scheduling.md` reference (the file does not exist). Dropped the `(see <c>design/workflow/scheduling.md</c> §Fairness)` parenthetical; the surrounding prose already explains the round-robin fairness semantics and the VIRTUAL vs STORED trade-off inline.
+  3. `WorkflowRunProfileRow.cs:6`: the T-002 deliberate-keep pointer to `design/workflow/variables.md#...`. Dropped the design-doc line; the remaining block now states the historical-misnomer rationale + the cost/benefit call inline (T-002's progress note had wrongly claimed this would not match the regex).
+- **`WorkflowRunStatus.cs:19`** had a `T-002 (D3)` reference embedded mid-sentence ("...DbContext model already declared both at the end of T-002 (D3); this migration is what EF needs..."). Re-flowed to "...DbContext model already declared both; this migration is what EF needs..." — dropping the parenthetical cleanly because the substantive claim stands on its own.
+
+### Test Strategy
+- No new tests added — the ratchet logic from T-004 already covers the empty-baseline case (`Ratchet_PassesWhenCurrentCountEqualsBaseline` with current=0 passes when baseline is empty, and the integration test with a 53-to-0 shrink passes once the baseline is empty too).
+- Hard-ban smoke test: temporarily injected `// TODO test offender (issue-999 T-999) - revert me` at the top of `AgentJobGrain.cs`, ran the ArchTest → failed with `Agent/Grains/AgentJobGrain.cs has 2 comment-reference offender(s) and no baseline entry`. Reverted the injection (the test DLL embeds the production source as resources, so a `rm -rf bin obj` rebuild was required to flush the cached embedded resource before the test went green again).
+- The 6 unit tests in `CommentReferenceRules.cs` already cover the ratchet's fail-on-stale and fail-on-missing-source-file behaviors; the empty-baseline case is exercised naturally by the integration test with `baseline.Count == 0` and `currentCounts` summing to zero.
+
+### Verification
+- `dotnet build Mohist.sln` ✅ (no warnings, no errors)
+- `npm test` ✅:
+  - Mohist.Workflow.Definition.Tests 175/175
+  - Mohist.Cli.Tests 1441/1441
+  - Mohist.Server.UnitTests 1553/1553
+  - **Mohist.Server.ArchTests 50/50** (1 integration `ServerSourceComments_…BeyondBaseline` + 6 `Ratchet_*` unit tests still green with the empty baseline)
+  - Mohist.Server.SpecTests 3306/3306
+- Runner `npm run typecheck` + `npm run test:run`: 1443 passed
+- Web `npm run typecheck` + `npm run test:run` + `npm run check:fsd`: 5145 passed | 1 skipped
+- Hard-ban smoke (add → fail → revert → pass): see Test Strategy above.
+- grep invariants:
+  - `rg -n "issue-\d+|T-\d{3}|design/[^\s]+\.md|openspec/" packages/server/src/Mohist.Server/` → only one match, `MohistDefaultWorkflowProjection.cs:107`, which is a string interpolation, not a comment (ArchTest ignores it).
+
+### Files touched
+Production (27 files, 53 occurrences cleared):
+- `packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs` (3 occurrences: line 864 + lines 1225/1227)
+- `packages/server/src/Mohist.Server/Agent/Grains/AgentJobLineage.cs` (1)
+- `packages/server/src/Mohist.Server/Agent/Grains/IAgentJobGrain.cs` (1)
+- `packages/server/src/Mohist.Server/AgentOps/Services/AgentActivityFeedAssembler.cs` (2)
+- `packages/server/src/Mohist.Server/Agent/Services/AgentLauncher.cs` (2)
+- `packages/server/src/Mohist.Server/Agent/Services/AgentQuerier.cs` (1)
+- `packages/server/src/Mohist.Server/Agent/Services/IAgentLauncher.cs` (2)
+- `packages/server/src/Mohist.Server/Agent/Subscriptions/MentionDispatchHandler.cs` (2)
+- `packages/server/src/Mohist.Server/Agent/Subscriptions/MentionTokenParser.cs` (1)
+- `packages/server/src/Mohist.Server/Agent/Subscriptions/RoutingDispatchHandler.cs` (4)
+- `packages/server/src/Mohist.Server/Api/AgentJobReadRoutes.cs` (2)
+- `packages/server/src/Mohist.Server/Api/UnifiedSessionRoutes.cs` (3 — 2 simple tags + 1 T-005 rewrite as fact)
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Db/MohistDbContext.cs` (4)
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260629112745_AddAgentLaunchLabelComputedColumns.cs` (1)
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260702060000_WorkflowRunStatus.cs` (2)
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260706120000_AddWorkflowRunReadySince.cs` (1 — dangling `design/workflow/scheduling.md` removed, fairness/VIRTUAL rationale left inline)
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260715000000_BackfillIssueEpicAffiliation.cs` (1)
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionRow.cs` (1)
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/WorkflowRunProfileRow.cs` (1 — design-doc reference removed; misnomer rationale left inline)
+- `packages/server/src/Mohist.Server/Issue/Grains/IssueGrain.cs` (2)
+- `packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs` (1)
+- `packages/server/src/Mohist.Server/Otel/OtelStorageRecoveryMaintenance.cs` (1)
+- `packages/server/src/Mohist.Server/Sessions/AgentSessionReadModels.cs` (4)
+- `packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuerier.cs` (4)
+- `packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuery.cs` (2)
+- `packages/server/src/Mohist.Server/Sessions/Services/AgentSessionResolver.cs` (2)
+- `packages/server/src/Mohist.Server/Sessions/Services/GenericAgentSessionMetadata.cs` (2)
+
+ArchTests:
+- `packages/server/tests/Mohist.Server.ArchTests/comment-reference-baseline.json` — emptied to `{}` (the no-exemption hard-ban end state).

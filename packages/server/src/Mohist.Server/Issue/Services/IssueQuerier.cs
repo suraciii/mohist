@@ -521,8 +521,8 @@ public class IssueQuerier : IScopedService
             {
                 if (byNumber.TryGetValue(link.IssueNumber, out var issue) && epics.TryGetValue(link.EpicNumber, out var epic))
                 {
-                    // Issue-179: primaryEpic reflects the issue's NON-TERMINAL
-                    // epic membership. After T-001, an issue may belong to at
+                    // primaryEpic reflects the issue's NON-TERMINAL
+                    // epic membership. An issue may belong to at
                     // most one non-terminal epic, so filtering terminal
                     // owners leaves at most one candidate per issue. The
                     // "last write wins" loop naturally resolves to that

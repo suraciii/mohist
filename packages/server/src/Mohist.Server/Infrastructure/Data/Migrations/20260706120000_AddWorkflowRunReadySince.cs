@@ -16,8 +16,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
     /// <para>
     /// <c>ReadySince</c> is the moment the run last (re-)entered Ready; the
     /// scheduler serves Ready runs oldest-first so a just-served run re-queues
-    /// at the tail with zero scheduler state (see
-    /// <c>design/workflow/scheduling.md</c> §Fairness). VIRTUAL because the
+    /// at the tail with zero scheduler state. VIRTUAL because the
     /// column is read only to ORDER BY, never filtered on — no need to pay the
     /// storage/write cost of a STORED column.
     /// </para>

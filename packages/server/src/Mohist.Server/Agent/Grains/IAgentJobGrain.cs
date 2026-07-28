@@ -327,8 +327,8 @@ public sealed record AgentJobInput(
     [property: Id(2)] string? WorkspacePath = null,
     [property: Id(3)] string? ProjectId = null,
     /// <summary>
-    /// Resolved execution backend snapshot captured at launch time
-    /// (issue-452 design D2). Resolved launches pin the runtime (defaulting to
+    /// Resolved execution backend snapshot captured at launch time.
+    /// Resolved launches pin the runtime (defaulting to
     /// <c>AgentConfigSchema.OpenCodeRuntime</c>) so the runner
     /// executor can pick the right runtime and recovery reuses the
     /// snapshotted value rather than re-reading mutable Agent config.

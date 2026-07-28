@@ -9,7 +9,7 @@ namespace Mohist.Server.Api;
 
 /// <summary>
 /// Source-agnostic AgentSession read surface addressed by the stable session
-/// id (issue-479 T-004 / design D4). The <c>show</c> / <c>transcript</c>
+/// id. The <c>show</c> / <c>transcript</c>
 /// routes resolve a session by id WITHOUT the <c>source-kind == agent-launch</c>
 /// gate that the generic-session route applies, so an agent-launch session and
 /// a workflow-originated session resolve by the same stable id. The
@@ -19,7 +19,7 @@ namespace Mohist.Server.Api;
 /// </summary>
 /// <remarks>
 /// The older <c>GET .../agent-sessions/{sessionId}</c> route stays for the
-/// agent-launch transcript link until T-005 switches the CLI onto this
+/// agent-launch transcript link until the CLI migrates onto this
 /// unified surface. Follow-up / cancel already resolve canonically by id for
 /// both sources and are unchanged here.
 /// </remarks>

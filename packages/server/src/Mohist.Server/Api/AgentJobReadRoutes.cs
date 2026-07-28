@@ -9,7 +9,7 @@ using Mohist.Server.Project.Services;
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// Product read surface for <see cref="IAgentJobGrain"/> (issue-479 T-002).
+/// Product read surface for <see cref="IAgentJobGrain"/>.
 /// <c>list</c> reads the relational <c>AgentJobs</c> mirror (the queryable
 /// index, written through by the grain); <c>view</c> reads the grain directly
 /// so the detail is always authoritative — including for jobs in-flight or

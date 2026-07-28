@@ -491,8 +491,8 @@ public class AgentSessionQuerier : IScopedService
 
     /// <summary>
     /// Builds the unified source-agnostic session summary surfaced by
-    /// <c>GET /api/projects/{projectRef}/sessions/{sessionId}</c>
-    /// (issue-479 T-004 / design D4). Resolves the row by id WITHOUT the
+    /// <c>GET /api/projects/{projectRef}/sessions/{sessionId}</c>.
+    /// Resolves the row by id WITHOUT the
     /// <c>source-kind == agent-launch</c> gate applied by
     /// <see cref="FindGenericSessionAsync"/> — a workflow-originated session
     /// resolves here by the same stable id as an agent-launch session. The
@@ -552,8 +552,8 @@ public class AgentSessionQuerier : IScopedService
 
     /// <summary>
     /// Builds the unified source-agnostic transcript surfaced by
-    /// <c>GET /api/projects/{projectRef}/sessions/{sessionId}/transcript</c>
-    /// (issue-479 T-004 / design D4). Resolves the row by id WITHOUT the
+    /// <c>GET /api/projects/{projectRef}/sessions/{sessionId}/transcript</c>.
+    /// Resolves the row by id WITHOUT the
     /// <c>source-kind == agent-launch</c> gate, so a workflow-originated
     /// session's transcript resolves here by the same stable id as an
     /// agent-launch session's. Returns <c>null</c> for an unknown id, a

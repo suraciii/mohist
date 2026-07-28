@@ -5,7 +5,7 @@
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     /// <summary>
-    /// Issue-130 T-001: make the direct-Agent (agent-launch) labels
+    /// Make the direct-Agent (agent-launch) labels
     /// queryable. Adds six STORED computed columns to
     /// <c>AgentSessions</c> mirroring the established
     /// <c>json_extract("State", '$.metadata.labels."…')'</c> pattern,
