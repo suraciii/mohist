@@ -167,7 +167,7 @@ public sealed class EventDispatcherService : IDisposable
         return new DeadLetterRedeliveryResult(true, true, 1, null);
     }
 
-    public TimeSpan Backoff(int attemptCount)
+    private TimeSpan Backoff(int attemptCount)
     {
         if (attemptCount <= 0)
             throw new ArgumentOutOfRangeException(nameof(attemptCount));

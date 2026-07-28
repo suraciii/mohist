@@ -279,3 +279,44 @@ Production (27 files, 53 occurrences cleared):
 
 ArchTests:
 - `packages/server/tests/Mohist.Server.ArchTests/comment-reference-baseline.json` — emptied to `{}` (the no-exemption hard-ban end state).
+
+## T-006 — make EventDispatcherService.Backoff private and observe retry cadence via FakeTimeProvider
+
+### Codebase Patterns
+- `EventDispatcherService.Backoff(int)` had a single production caller (`state.NextAttemptTime = now + Backoff(state.AttemptCount)` at `EventDispatcherService.cs:241`); the helper itself was only exposed publicly so a unit test (`Backoff_DoublesAndCapsAtConfiguredMaximum` at `EventDispatcherSpecs.cs:866`) could assert the schedule directly. Once `Backoff` is private, the retry cadence becomes observable only through the public dispatch loop — i.e. the handler is invoked at the times the dispatcher chooses, given a `FakeTimeProvider` driving the clock forward.
+- The handler-invocation timestamp is the most direct observable surface for `NextAttemptTime`. `state.NextAttemptTime > now` gates re-invocation, so the inter-attempt deltas are the backoff schedule (`t_1 - t_0 = Backoff(1)`, etc.). Recording `time.GetUtcNow()` inside the handler is enough — no reflection, no private API access.
+- `Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs` is on the test-file-size ratchet baseline (`spec-file-size-baseline.json`); a legitimate rewrite that pushes the file past its allowance must bump the baseline entry (mirrors the comment-reference-baseline ratchet pattern: tighten (here, raise the allowance) only when the growth is justified by the change, never silently).
+
+### Decisions / Gotchas
+- The new test name is `DispatchAsync_BackoffSchedule_DoublesAndCapsAtMaxViaFakeTimeProvider`; the old `Backoff_DoublesAndCapsAtConfiguredMaximum` is gone. The new test uses `baseBackoff=2s, maxBackoff=5s, handlerMaxAttempts=5` so the sequence of inter-attempt deltas is `[2, 4, 5, 5]` — that covers the exponential curve (`2 → 4`) and the max-backoff clamp (`4 → 5 → 5`). Attempt 5 dead-letters, so the follow-up `DispatchAsync` proves the row is gone from the undelivered queue.
+- The test loops over `expectedDeltas` with `time.Advance(delta)` + `DispatchAsync` rather than hardcoding per-attempt `Advance` calls. The single `Assert.Equal(expectedDeltas, ...)` against `attemptTimes.Zip(...).ToArray()` reads as the backoff schedule itself — adding a new attempt or changing a delta in the array would push the failure message right at the offending delta.
+- The intermediate “just-shy-of-the-deadline” assertions that the verbose first draft carried were dropped: the acceptance criteria call for asserting the *deltas*, not asserting that the gate is precise at every boundary. Keeping them would have ballooned the file further (each “not-yet” check adds ~5 lines) for marginal additional coverage. The exponential-and-clamp schedule is fully pinned by the four deltas.
+- `spec-file-size-baseline.json` bumped from `41204` to `43029` for the same file (a +1825-byte growth from the rewrite). Mirrors the ratchet pattern — the allowance tracks the file rather than the other way around.
+
+### Test Strategy
+- **Static check**: the `Backoff` method is `private` (compile-time guarantee); no production or test code can call it. `grep -rn "dispatcher.Backoff(" packages/server/` and `grep -rn "\.Backoff(" packages/server/` return zero hits.
+- **Behavioral check**: `DispatchAsync_BackoffSchedule_DoublesAndCapsAtMaxViaFakeTimeProvider` (1 test) drives the dispatch loop 5 times across four `time.Advance(delta)` boundaries and asserts the four inter-attempt deltas equal `[2s, 4s, 5s, 5s]`. A follow-up `DispatchAsync` must not re-invoke the handler (dead-letter row absorbs the event). All assertions are on `FakeTimeProvider`-driven timestamps, never on wall-clock time.
+- **Regression check**: every other `EventDispatcherSpecs` test continues to pass without modification — the existing tests already exercise the dispatch loop with `FakeTimeProvider` and observe the same surface (attempt counts, marks, dead-letter rows), so the rewrite is additive for them.
+
+### Verification
+- `dotnet build Mohist.sln` ✅ (no warnings, no errors)
+- `dotnet test Mohist.sln -p:SkipWebBuild=true`:
+  - Mohist.Workflow.Definition.Tests 175/175
+  - Mohist.Cli.Tests 1441/1441
+  - Mohist.Server.UnitTests 1553/1553
+  - Mohist.Server.ArchTests 50/50 (size-ratchet baseline entry bumped; no other ArchTests changed)
+  - Mohist.Server.SpecTests 3306/3306
+- npm workspaces: web 5145 passed, runner 1443 passed ✅
+- grep invariants:
+  - `grep -rn "\.Backoff(" packages/server/` → no matches (only `AgentJobBackoffSchedule` is unrelated and not on `EventDispatcherService`)
+  - `grep -rn "Backoff_DoublesAndCapsAtConfiguredMaximum" packages/server/` → no matches (old test name gone)
+
+### Files touched
+Production:
+- `packages/server/src/Mohist.Server/Infrastructure/Events/EventDispatcherService.cs` — `Backoff` made `private` (only caller, the `state.NextAttemptTime` computation at `:241`, is in the same class)
+
+Tests:
+- `packages/server/tests/Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs` — replaced `Backoff_DoublesAndCapsAtConfiguredMaximum` with `DispatchAsync_BackoffSchedule_DoublesAndCapsAtMaxViaFakeTimeProvider`; drives `DispatchAsync` + `FakeTimeProvider` and asserts the inter-attempt deltas `[2s, 4s, 5s, 5s]` plus dead-letter exhaustion
+
+ArchTests:
+- `packages/server/tests/Mohist.Server.ArchTests/spec-file-size-baseline.json` — `EventDispatcherSpecs.cs` entry raised from 41204 to 43029 bytes to accommodate the legitimate rewrite
