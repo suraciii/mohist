@@ -59,3 +59,11 @@ T-003: Workflow-owned definition-complete Agent dispatch snapshots.
 - `DispatchService` stores the transformed `WorkDispatch` through `WorkflowGrain.StoreActiveWorkDispatchAsync` before offering it, and active-work redelivery returns `TaskRun.DispatchSnapshot` without invoking Agent resolution. New retry TaskRuns have no snapshot and resolve the current definition.
 - Missing or archived Agent resolution continues through `WorkflowDispatchRejectedException(agent_not_found)` and `WorkflowGrain.RejectActiveWorkDispatchAsync`; Workflow owns the failed TaskRun and no AgentJob/direct AgentSession path is involved.
 - Translator tests cover OpenCode/Pi envelopes, ordered and empty Skills, structured resolution failures, retry re-resolution, and raw prompt preservation. Full `npm test` passed: Server SpecTests 3275, UnitTests 1525, ArchTests 35, CLI 1433, Web 5145, Runner 1441.
+
+T-004: Web and documentation surfaces.
+
+## Implementation Notes
+
+- Removed Issue create/edit and per-stage Runtime selectors and all Web writes of `vars.agent.runtime`; Issue model/Variant controls remain for explicit Workflow Action configuration and use the default OpenCode catalog.
+- Direct Agent session launch already sends only `prompt` and `context`; its client request test confirms no Runtime override field is emitted.
+- Agent profile editor remains the only Web surface for named-Agent Runtime, Model, Variant, and Skills. Product docs describe launch/attempt snapshots, fixed Skills, retry re-resolution, and the separate `uses` Runtime behavior of explicit Workflow Actions.

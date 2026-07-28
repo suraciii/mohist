@@ -427,17 +427,15 @@ describe('CreateIssueDialog model + variant chips', () => {
     }))
   })
 
-  it('loads Pi models and sends the selected backend on create', async () => {
-    _modelsData.models = ['pi/anthropic/claude']
+  it('does not expose or submit an Issue Runtime override', async () => {
+    _modelsData.models = ['openai/gpt-4']
     renderDialog()
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Pi issue' } })
-    fireEvent.change(screen.getByTestId('create-issue-runtime'), { target: { value: 'pi' } })
-    fireEvent.click(modelTrigger())
-    expect(await screen.findByText('pi/anthropic/claude')).toBeInTheDocument()
-    expect(screen.queryByText('gpt-4')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('create-issue-runtime')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Issue' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    expect((await createIssueHandler.mock.calls[0][0].request.clone().json()).agentConfig).toEqual({ runtime: 'pi' })
+    const body = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(body.agentConfig).not.toHaveProperty('runtime')
   })
 
   it('does not transiently clear the variant when a chip is clicked', async () => {

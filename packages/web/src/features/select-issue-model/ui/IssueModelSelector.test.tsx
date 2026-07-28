@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { mocks, renderSelector, resetIssueModelSelectorTestState } from './IssueModelSelectorTestSupport'
 
 beforeEach(() => {
@@ -10,7 +9,7 @@ beforeEach(() => {
 })
 
 describe('IssueModelSelector default-model variant chips', () => {
-  it('loads the Pi catalog after selecting the Pi backend', async () => {
+  it('does not expose a named-Agent Runtime override', async () => {
     mocks.useAvailableModelIds.mockImplementation((runtime: string) => ({
       data: {
         models: runtime === 'pi' ? ['pi/anthropic/claude'] : ['openai/gpt-4'],
@@ -21,22 +20,13 @@ describe('IssueModelSelector default-model variant chips', () => {
     }))
     renderSelector()
 
-    const user = userEvent.setup()
-    const runtimeSelector = await screen.findByTestId('issue-runtime-selector')
-    expect(runtimeSelector.tagName).not.toBe('SELECT')
-    await user.click(runtimeSelector)
-    await user.click(await screen.findByRole('option', { name: 'Pi' }))
-
-    await waitFor(() => {
-      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(42, 'agent', { runtime: 'pi' }, 'proj_test')
-    })
-
-    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
-    fireEvent.click(trigger)
-
-    expect(await waitFor(() => document.querySelector('[data-model-id="pi/anthropic/claude"]'))).toBeInTheDocument()
-    expect(document.querySelector('[data-model-id="openai/gpt-4"]')).not.toBeInTheDocument()
-    expect(runtimeSelector).toHaveTextContent('Pi')
+    await waitFor(() => expect(screen.queryByTestId('issue-runtime-selector')).not.toBeInTheDocument())
+    expect(mocks.patchIssueWorkflowDefinitionVar).not.toHaveBeenCalledWith(
+      42,
+      'agent',
+      expect.objectContaining({ runtime: expect.anything() }),
+      'proj_test',
+    )
   })
 
   it('renders no variant chips for a model that has no variants', async () => {
