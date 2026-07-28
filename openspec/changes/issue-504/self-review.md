@@ -2,6 +2,6 @@
 
 ## Findings
 
-1. **P1: Workflow task-log project routing is omitted from the implementation plan.** The plan removes `projectId` from every WorkflowRun annotation and requires all lineage consumers to use typed metadata, but [TaskLogService.cs:221](/home/szf/.mohist/projects/workspaces/wr_77d13891d59e4a93981fad5104d979cd/packages/server/src/Mohist.Server/Runner/Services/TaskLogService.cs:221) still resolves a workflow task log's publish scope from `run.Metadata.Annotations["projectId"]`. Neither the design's implementation scope nor `T-001` names this consumer or requires coverage for it. After migration, `ResolvePublishScopeAsync` will return a scope with a null project ID, so task-log notification routing can no longer select the project's subscribers. Add the typed-field switchover and a workflow task-log routing regression test to the design and task acceptance criteria.
+No blocking findings. The revised design and T-001 now include `TaskLogService.ResolvePublishScopeAsync` as a typed Project ID consumer and require workflow task-log project-routing coverage. The artifacts retain the issue's typed-context, migration, external-contract, and rollback requirements.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
