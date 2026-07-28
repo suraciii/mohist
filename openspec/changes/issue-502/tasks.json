@@ -59,7 +59,7 @@
       "type": "WRITE",
       "output": "Blocked-source observable gauge, runtime metric catalog entry, and deterministic telemetry/dispatcher tests.",
       "dependsOn": ["T-002"],
-      "passes": false,
+      "passes": true,
       "notes": "Build on the retained dispatch-cycle state from T-002 so the gauge reports the finalized cycle outcome."
     },
     {
