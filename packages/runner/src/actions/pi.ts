@@ -12,6 +12,7 @@ import { actionErrorMessage, fail, succeed } from "./action-result.js"
 import type { PromptLoaderContext } from "../core/prompt.js"
 import { SkillResolver } from "../runtime/skill-resolver.js"
 import { buildExecutionEnvelope } from "../runtime/execution-envelope.js"
+import type { AgentExecutionDefinition } from "../core/types.js"
 
 export const PI_USES = "mohist/pi"
 export const PI_TURN_DURATION_MS = 60 * 60 * 1000
@@ -31,6 +32,7 @@ interface ActionInvocationContext {
   parentIssueContext?: ParentIssueContext | null
   piRuntime?: PiRuntime | null
   skillResolver?: SkillResolver
+  agentDefinition?: AgentExecutionDefinition | null
   serverConnection?: ServerConnection | null
   log?: TaskLogger | null
 }
@@ -41,7 +43,7 @@ export function composePiPrompt(prompt: string, parentIssueContext?: ParentIssue
   return `Parent issue context (read-only background; JSON):\n${parent}\n\nTreat the parent issue context above as read-only background. The current child issue body is authoritative and controls delivery scope.\n\n${prompt}`
 }
 
-interface PiOptions { model?: string; variant?: string; instructions?: string | null; skills?: readonly string[]; unknownKeys?: readonly string[] }
+interface PiOptions { model?: string; variant?: string; unknownKeys?: readonly string[] }
 
 export function piAction(context: ActionInvocationContext): Promise<ActionResult>
 export function piAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult>
@@ -54,18 +56,21 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
       with: contextOrInputs as JsonObject,
       workDir: host.workDir,
       signal: host.signal,
-       piRuntime: host.piRuntime,
-       skillResolver: host.skillResolver,
+      piRuntime: host.piRuntime,
+      skillResolver: host.skillResolver,
+      agentDefinition: host.agentDefinition,
       log: host.log,
     }
     : contextOrInputs as ActionInvocationContext
   const parsed = await parseInput(context)
   if (parsed.kind === "failure") return parsed.result
   const { prompt, options } = parsed
-  const resolvedSkills = await (context.skillResolver ?? new SkillResolver()).resolve(options.skills, context.workDir)
+  const definition = context.agentDefinition
+  const resolvedSkills = await (context.skillResolver ?? new SkillResolver()).resolve(definition?.skills, context.workDir)
   if (!resolvedSkills.ok) return fail(resolvedSkills.code, resolvedSkills.message)
-  const executionPrompt = buildExecutionEnvelope(prompt, options.instructions, resolvedSkills.skills)
-  const executionOptions = { ...options, skills: resolvedSkills.skills }
+  const executionPrompt = buildExecutionEnvelope(prompt, definition?.instructions, resolvedSkills.skills)
+  const model = definition?.model ?? options.model
+  const variant = definition?.variant ?? options.variant
   const runtime = context.piRuntime
   if (!runtime) return fail("runtime-unavailable", "mohist/pi requires the Pi runtime")
   if (!runtime.ready()) return fail("runtime-unavailable", `mohist/pi requires the Pi runtime to be ready: ${runtime.diagnostic()?.message ?? "no readiness diagnostic"}`)
@@ -99,7 +104,7 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
       try {
         await context.serverConnection!.attachWorkflowAgentSession(
           context.projectId!, context.workflowRunId, sessionName,
-          { runtimeSessionId, workDir: context.workDir, processPid: null, model: options.model ?? null, workId: context.workId, runtime: "pi", expectedRuntime, expectedRuntimeSessionId },
+          { runtimeSessionId, workDir: context.workDir, processPid: null, model: model ?? null, workId: context.workId, runtime: "pi", expectedRuntime, expectedRuntimeSessionId },
           context.signal,
         )
       } catch (error) {
@@ -124,7 +129,7 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
     return fail("session-reporting-failed", "Workflow AgentSession rejected session.input; prompt was not submitted", { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
 
-  const request: PiTurnRequest = { target: { runtime: "pi", runtimeSessionId, workDir: context.workDir }, prompt: executionPrompt, durationMs: PI_TURN_DURATION_MS, options: { model: executionOptions.model ?? null, variant: executionOptions.variant ?? null, ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}), unknownKeys: executionOptions.unknownKeys } }
+  const request: PiTurnRequest = { target: { runtime: "pi", runtimeSessionId, workDir: context.workDir }, prompt: executionPrompt, durationMs: PI_TURN_DURATION_MS, options: { model: model ?? null, variant: variant ?? null, ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}), unknownKeys: options.unknownKeys } }
   let result
   try {
     result = await runtime.runTurn(request, context.signal, { onEvent: (event) => { events.push(event) } })
@@ -208,17 +213,7 @@ async function parseInput(context: ActionInvocationContext): Promise<{ kind: "ok
     }
     options[key] = value
   }
-  if ("instructions" in record) {
-    const value = record.instructions
-    if (value !== undefined && value !== null && typeof value !== "string") return { kind: "failure", result: fail("invalid-input", "mohist/pi 'options.instructions' must be a string when present") }
-    options.instructions = value as string | null | undefined
-  }
-  if ("skills" in record) {
-    const value = record.skills
-    if (!Array.isArray(value) || value.some((skill) => typeof skill !== "string")) return { kind: "failure", result: fail("invalid-input", "mohist/pi 'options.skills' must be an array of strings when present") }
-    options.skills = value
-  }
-  const unknownKeys = Object.keys(record).filter((key) => !["model", "variant", "instructions", "skills"].includes(key))
+  const unknownKeys = Object.keys(record).filter((key) => key !== "model" && key !== "variant")
   if (unknownKeys.length > 0) options.unknownKeys = unknownKeys
   return { kind: "ok", prompt: composePiPrompt(prompt, context.parentIssueContext), options }
 }

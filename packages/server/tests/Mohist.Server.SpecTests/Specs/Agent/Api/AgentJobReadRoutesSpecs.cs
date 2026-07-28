@@ -122,6 +122,26 @@ public class AgentJobReadRoutesSpecs
     }
 
     [Fact]
+    public async Task View_ReturnsPersistedExecutionDefinition()
+    {
+        var definition = new AgentExecutionDefinition(
+            "Review the change.", "pi", "anthropic/claude", "high", ["mohist", "review"]);
+        var grain = new ReadAgentJobGrain(
+            AgentJobStatus.Running, Project.Id, terminalResult: null, executionDefinition: definition);
+
+        var result = await AgentJobReadRoutes.HandleViewAsync(
+            Project, "job-definition", FactoryFor(grain));
+
+        var payload = await AsPayloadAsync(result);
+        var value = payload.GetProperty("data").GetProperty("executionDefinition");
+        Assert.Equal("Review the change.", value.GetProperty("instructions").GetString());
+        Assert.Equal("pi", value.GetProperty("runtime").GetString());
+        Assert.Equal("anthropic/claude", value.GetProperty("model").GetString());
+        Assert.Equal("high", value.GetProperty("variant").GetString());
+        Assert.Equal(["mohist", "review"], value.GetProperty("skills").EnumerateArray().Select(item => item.GetString()));
+    }
+
+    [Fact]
     public async Task View_TerminalFailed_ReturnsFailureReasonAndExitCode()
     {
         var terminal = new AgentJobTerminalResult(
@@ -314,12 +334,18 @@ internal sealed class ReadAgentJobGrain : IAgentJobGrain
     private readonly AgentJobStatus _status;
     private readonly string? _projectId;
     private readonly AgentJobTerminalResult? _terminalResult;
+    private readonly AgentExecutionDefinition? _executionDefinition;
 
-    public ReadAgentJobGrain(AgentJobStatus status, string? projectId, AgentJobTerminalResult? terminalResult)
+    public ReadAgentJobGrain(
+        AgentJobStatus status,
+        string? projectId,
+        AgentJobTerminalResult? terminalResult,
+        AgentExecutionDefinition? executionDefinition = null)
     {
         _status = status;
         _projectId = projectId;
         _terminalResult = terminalResult;
+        _executionDefinition = executionDefinition;
     }
 
     public int TerminalResultCalls { get; private set; }
@@ -341,7 +367,7 @@ internal sealed class ReadAgentJobGrain : IAgentJobGrain
         return Task.FromResult(_terminalResult ?? new AgentJobTerminalResult(_status, null, null, null, null, null));
     }
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() =>
-        Task.FromResult(new AgentJobRuntimeSnapshot(_status, null, null, null, 0, false, false, _projectId));
+        Task.FromResult(new AgentJobRuntimeSnapshot(_status, null, null, null, 0, false, false, _projectId, _executionDefinition));
     public Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan) => Task.FromResult(plan);
     public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
     public Task FailAsync(string reason, string? agentId = null) => Task.CompletedTask;

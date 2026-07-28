@@ -36,13 +36,12 @@ public partial class WorkflowItemTranslatorSpecs
         Assert.Equal("Fix ${{ vars.target }}", with.RootElement.GetProperty("prompt").GetString());
         Assert.Equal("review", with.RootElement.GetProperty("session").GetString());
         Assert.Equal(123, with.RootElement.GetProperty("timeout").GetInt32());
-        var options = with.RootElement.GetProperty("options");
-        Assert.Equal("model-a", options.GetProperty("model").GetString());
-        Assert.Equal("fast", options.GetProperty("variant").GetString());
-        Assert.Equal(new[] { "mohist", "review" }, options.GetProperty("skills").EnumerateArray().Select(skill => skill.GetString()));
-        Assert.Equal("Review the change.", options.GetProperty("instructions").GetString());
-        Assert.Equal(new[] { "instructions", "model", "variant", "skills" }, options.EnumerateObject().Select(p => p.Name));
-        Assert.Equal(4, with.RootElement.EnumerateObject().Count());
+        Assert.Equal(3, with.RootElement.EnumerateObject().Count());
+        Assert.Equal("Review the change.", dispatch.AgentDefinition!.Instructions);
+        Assert.Equal(runtime, dispatch.AgentDefinition.Runtime);
+        Assert.Equal("model-a", dispatch.AgentDefinition.Model);
+        Assert.Equal("fast", dispatch.AgentDefinition.Variant);
+        Assert.Equal(["mohist", "review"], dispatch.AgentDefinition.Skills);
         Assert.Equal("Fix ${{ vars.target }}", item.With!["prompt"]!.Value.GetString());
     }
 
@@ -174,9 +173,8 @@ public partial class WorkflowItemTranslatorSpecs
 
         using var with = JsonDocument.Parse(dispatch.With!);
         Assert.Equal("Review the change.", with.RootElement.GetProperty("prompt").GetString());
-        var options = with.RootElement.GetProperty("options");
-        Assert.Equal("Keep the response concise.", options.GetProperty("instructions").GetString());
-        Assert.False(options.TryGetProperty("skills", out _));
+        Assert.Equal("Keep the response concise.", dispatch.AgentDefinition!.Instructions);
+        Assert.Empty(dispatch.AgentDefinition.Skills);
     }
 
     [Fact]

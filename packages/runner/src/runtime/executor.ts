@@ -251,6 +251,7 @@ export class WorkExecutor {
       log,
       piRuntime: this.piRuntime,
       skillResolver: this.skillResolver,
+      agentDefinition: work.agentDefinition,
       exec: async (command, args) => {
         const { runCommand } = await import("../system/process.js")
         const result = await runCommand(command, args?.map(String) ?? [], workDir, signal)
@@ -277,10 +278,17 @@ export class WorkExecutor {
     const self = this
     return {
       async turn(request: AgentTurnRequest): Promise<ActionResult> {
-        const skillNames = request.options?.skills ?? []
+        const definition = work.agentDefinition
+        const skillNames = definition?.skills ?? []
         const resolvedSkills = await self.skillResolver.resolve(skillNames, workDir)
         if (!resolvedSkills.ok) return actionFail(resolvedSkills.code, resolvedSkills.message)
-        const prompt = buildExecutionEnvelope(composeOpencodePrompt(request.prompt, work.parentIssueContext), request.options?.instructions, resolvedSkills.skills)
+        const prompt = buildExecutionEnvelope(
+          composeOpencodePrompt(request.prompt, work.parentIssueContext),
+          definition?.instructions,
+          resolvedSkills.skills,
+        )
+        const modelName = definition?.model ?? request.options?.model
+        const variant = definition?.variant ?? request.options?.variant
 
         const runtime = self.openCodeRuntime
         if (!runtime) {
@@ -329,7 +337,7 @@ export class WorkExecutor {
         }
 
         if (binding.runtimeSessionId === null && sessionName && self.connection && work.projectId) {
-          const modelResult = request.options?.model ? parseModelIdentifier(request.options.model) : null
+          const modelResult = modelName ? parseModelIdentifier(modelName) : null
           const model = modelResult?.kind === "ok" ? { providerID: modelResult.value.providerID, modelID: modelResult.value.modelID } : null
           const created = await runtime.createSession({
             target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
@@ -349,7 +357,7 @@ export class WorkExecutor {
                 runtimeSessionId: created.value.runtimeSessionId,
                 workDir: created.value.workDir,
                 processPid: null,
-                model: request.options?.model ?? null,
+                model: modelName ?? null,
                 workId: work.workId,
                 runtime: "opencode",
               },
@@ -367,7 +375,7 @@ export class WorkExecutor {
         }
 
         const deadlineMs = request.deadlineMs ?? DEFAULT_TURN_DEADLINE_MS
-        const modelOptions = request.options?.model ? parseModelIdentifier(request.options.model) : null
+        const modelOptions = modelName ? parseModelIdentifier(modelName) : null
         if (binding.runtimeSessionId && self.connection && work.projectId) {
           const expected = binding
           const recovery = await resolveOrRecoverBinding({
@@ -417,8 +425,8 @@ export class WorkExecutor {
           deadlineMs,
           options: {
             model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
-            variant: request.options?.variant ?? null,
-            skills: resolvedSkills.skills,
+            variant: variant ?? null,
+            ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}),
             unknownKeys: undefined as readonly string[] | undefined,
           },
         }

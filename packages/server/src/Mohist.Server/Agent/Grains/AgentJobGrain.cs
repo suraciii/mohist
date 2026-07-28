@@ -162,7 +162,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.DispatchAttempts,
             State.RunnerAccepted,
             State.PendingSessionClose is not null,
-            State.Input?.ProjectId ?? State.RoutedPlan?.ProjectId));
+            State.Input?.ProjectId ?? State.RoutedPlan?.ProjectId,
+            ExecutionDefinitionFrom(State.Input)));
 
     /// <summary>
     /// Returns the job's terminal result. Before the job has reached a terminal
@@ -506,7 +507,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             RunnerId: string.Empty,
             AgentRuntime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
             WorkDir: plan.WorkspacePath,
-            Metadata: metadata));
+            Metadata: metadata,
+            Definition: new AgentExecutionDefinition(
+                plan.AgentInstructions ?? string.Empty,
+                plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                plan.Model,
+                plan.Variant,
+                plan.Skills ?? [])));
 
         if (plan.Disposition == RoutedLaunchDisposition.PreflightFailed)
         {
@@ -595,6 +602,16 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         string.IsNullOrWhiteSpace(json)
             ? null
             : System.Text.Json.JsonDocument.Parse(json).RootElement.Clone();
+
+    private static AgentExecutionDefinition? ExecutionDefinitionFrom(AgentJobInput? input) =>
+        input is null || string.IsNullOrWhiteSpace(input.AgentId)
+            ? null
+            : new AgentExecutionDefinition(
+                input.AgentInstructions ?? string.Empty,
+                input.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                input.Model,
+                input.Variant,
+                input.Skills ?? []);
 
     private static bool EquivalentInput(AgentJobInput left, AgentJobInput right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)

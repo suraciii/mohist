@@ -48,8 +48,6 @@ export function composeOpencodePrompt(prompt: string, parentIssueContext?: { tit
 export interface OpencodeOptions {
   model?: string
   variant?: string
-  skills?: readonly string[]
-  instructions?: string | null
 }
 
 type OptionsParse =
@@ -102,15 +100,6 @@ function parseOpencodeOptions(raw: Record<string, unknown>): ParsedOptions {
     } else {
       options.variant = value
     }
-  }
-  if ("instructions" in raw && raw.instructions !== null && raw.instructions !== undefined) {
-    if (typeof raw.instructions !== "string") return { kind: "failure", result: fail("invalid-input", "mohist/opencode 'options.instructions' must be a string when present") }
-    options.instructions = raw.instructions
-  }
-  if ("skills" in raw) {
-    const value = raw.skills
-    if (!Array.isArray(value) || value.some((skill) => typeof skill !== "string")) return { kind: "failure", result: fail("invalid-input", "mohist/opencode 'options.skills' must be an array of strings when present") }
-    options.skills = value
   }
   return { kind: "ok", options }
 }

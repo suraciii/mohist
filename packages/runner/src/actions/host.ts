@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from "../core/types.js"
+import type { AgentExecutionDefinition, JsonObject, JsonValue } from "../core/types.js"
 import type {
   ActionCapability,
   ActionManifest,
@@ -29,7 +29,7 @@ export function capabilitySet(manifest: ActionManifest): ActionCapabilitySet {
 export interface AgentTurnRequest {
   prompt: string
   session?: string
-  options?: { model?: string; variant?: string; skills?: readonly string[]; instructions?: string | null }
+  options?: { model?: string; variant?: string }
   deadlineMs?: number
 }
 
@@ -51,6 +51,7 @@ export interface ActionHost {
   log: TaskLogger | null
   piRuntime?: PiRuntime | null
   skillResolver?: SkillResolver
+  agentDefinition?: AgentExecutionDefinition | null
   exec(command: string, args?: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }>
   agent?: AgentTurn
   issue?: IssueFieldsHost

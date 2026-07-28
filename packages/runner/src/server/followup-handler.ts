@@ -169,6 +169,13 @@ async function handleFollowup(
     selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId! }
   }
 
+  const definition = sessionTarget.kind === "generic" ? target.definition : undefined
+  const resolvedSkills = await (deps.skillResolver ?? new SkillResolver()).resolve(
+    definition?.skills,
+    selectedTarget.workDir,
+  )
+  if (!resolvedSkills.ok) return unavailable()
+
   if (operationId && operationKey && deps.followupOperationJournal) {
     try {
       const claim = await deps.followupOperationJournal.claim(operationKey, operationId)
@@ -190,10 +197,6 @@ async function handleFollowup(
     return unavailable()
   }
 
-  const definition = sessionTarget.kind === "generic" ? target.definition : undefined
-  const skillNames = definition?.skills ?? []
-  const resolvedSkills = await (deps.skillResolver ?? new SkillResolver()).resolve(skillNames, selectedTarget.workDir)
-  if (!resolvedSkills.ok) return unavailable()
   const followupRequest = {
     target: { runtime: binding.runtime, runtimeSessionId: selectedTarget.runtimeSessionId, workDir: selectedTarget.workDir },
     prompt: buildExecutionEnvelope(payload.text, definition?.instructions, resolvedSkills.skills),

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Agent.Grains;
@@ -65,7 +66,8 @@ public sealed record AgentJobRuntimeSnapshot(
     [property: Id(4)] int DispatchAttempts = 0,
     [property: Id(5)] bool RunnerAccepted = false,
     [property: Id(6)] bool HasPendingSessionClose = false,
-    [property: Id(7)] string? ProjectId = null);
+    [property: Id(7)] string? ProjectId = null,
+    [property: Id(8)] AgentExecutionDefinition? ExecutionDefinition = null);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending

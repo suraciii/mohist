@@ -103,9 +103,10 @@ public sealed class WorkflowItemTranslator : IScopedService
         var variables = JSON.Serialize(payload);
         var with = item.With;
         var uses = item.Uses;
+        AgentExecutionDefinition? agentDefinition = null;
         if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
         {
-            (uses, with) = await ResolveAgentTaskAsync(item, run, workId);
+            (uses, with, agentDefinition) = await ResolveAgentTaskAsync(item, run, workId);
         }
         var withStr = SerializeRaw(with);
         var expectStr = SerializeRaw(item.Expect);
@@ -128,7 +129,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             Recovery: item.Recovery is not null ? JSON.Serialize(item.Recovery) : null,
             RecoveryRemaining: item.RecoveryRemaining,
 EpicNumber: ReadEpicNumber(run),
-            Expect: expectStr);
+            Expect: expectStr,
+            AgentDefinition: agentDefinition);
     }
 
     private async Task<WorkDispatch> BuildChecksDispatchAsync(
@@ -257,7 +259,7 @@ EpicNumber: ReadEpicNumber(run),
         return payload;
     }
 
-    private async Task<(string Uses, Dictionary<string, JsonElement?> With)> ResolveAgentTaskAsync(
+    private async Task<(string Uses, Dictionary<string, JsonElement?> With, AgentExecutionDefinition Definition)> ResolveAgentTaskAsync(
         WorkItem item,
         WorkflowRun run,
         string workId)
@@ -298,17 +300,9 @@ EpicNumber: ReadEpicNumber(run),
         }
 
         var rawPrompt = promptElement.Value.GetString()!;
-        var options = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        if (!string.IsNullOrWhiteSpace(snapshot.Instructions))
-            options["instructions"] = JSON.SerializeToElement(snapshot.Instructions);
-        if (snapshot.Model is not null) options["model"] = JSON.SerializeToElement(snapshot.Model);
-        if (snapshot.Variant is not null) options["variant"] = JSON.SerializeToElement(snapshot.Variant);
-        if (snapshot.Skills.Count > 0) options["skills"] = JSON.SerializeToElement(snapshot.Skills);
-
         var transformed = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
             ["prompt"] = JSON.SerializeToElement(rawPrompt),
-            ["options"] = JSON.SerializeToElement(options),
         };
         CopyIfPresent(with, transformed, "session");
         CopyIfPresent(with, transformed, "timeout");
@@ -317,7 +311,7 @@ EpicNumber: ReadEpicNumber(run),
         {
             AgentConfigSchema.PiRuntime => "mohist/pi",
             _ => "mohist/opencode",
-        }, transformed);
+        }, transformed, snapshot);
     }
 
     private static void CopyIfPresent(
