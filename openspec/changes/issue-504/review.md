@@ -1,7 +1,7 @@
 ## Findings
 
-### P1: Preserve tab- and newline-padded legacy Issue numbers
+### P2: Include Unicode whitespace in legacy context validation
 
-`packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260728000000_TypedWorkflowRunLineage.cs:101` uses SQLite's no-argument `trim()`, which removes ASCII spaces but not tabs or newlines. The preceding reader used `int.TryParse`, whose default integer style accepts leading and trailing whitespace, including `"\t42\t"`. The current `NOT GLOB '*[^0-9]*'` condition then rejects that otherwise valid legacy value, leaving the old annotations in a Run that the new code no longer reads; ownership and event lineage fail after reload. Trim the same accepted whitespace set before optional-sign/digit validation in both migration branches, and add tab/newline-padded migration fixtures alongside the existing space-padded one.
+`packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260728000000_TypedWorkflowRunLineage.cs:63` defines `Whitespace` as only ASCII whitespace code points. The old reader used .NET `int.TryParse` and `string.IsNullOrWhiteSpace`, which also recognize Unicode whitespace such as U+00A0 (non-breaking space). As a result, a legacy `"\u00A042\u00A0"` Issue number that the old reader accepts is left annotation-backed after upgrade, while a U+00A0-only Project ID can still be migrated as a non-empty typed Project. This leaves behavior dependent on which whitespace character was stored and can again produce Runs whose new lineage path is unusable. Extend the SQL trim character set to match the accepted .NET whitespace set, and add U+00A0-padded Issue and Project migration cases.
 
 <promise>FAIL</promise>
