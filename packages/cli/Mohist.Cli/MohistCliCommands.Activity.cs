@@ -26,7 +26,7 @@ internal static class ActivityCommands
         var cmd = new Command(
             "list",
             "List bounded, read-only Activity evidence for the resolved Project. Includes recorded Issue/WorkflowRun/AgentSession history, current AgentSession/waiting and global Runner snapshots, and labels provenance (recorded/snapshot) and scope (project/global). Re-readable after exit; not a subscription.");
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var projectOpt = MohistCliCommands.ProjectRefOption();
         var limitOpt = new Option<int>("--limit")
         {
             Description = $"Maximum entries to return (1-{MaxLimit})",
@@ -34,13 +34,11 @@ internal static class ActivityCommands
         };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(ActivityListDescriptor);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(limitOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
             var limit = ctx.GetValue(limitOpt);
             var json = ctx.GetValue(jsonOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
@@ -59,7 +57,7 @@ internal static class ActivityCommands
                     return CliExitCode.For(CliExitOutcome.UsageFailure);
                 }
 
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId).ConfigureAwait(false);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project).ConfigureAwait(false);
                 if (resolveExit != 0)
                     return resolveExit;
 

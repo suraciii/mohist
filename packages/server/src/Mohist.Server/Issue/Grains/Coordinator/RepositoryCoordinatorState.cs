@@ -81,7 +81,8 @@ public abstract record RepositoryCommandPayload
         string? WorkflowProfileId,
         IReadOnlySet<string>? PresentFields,
         string? Title,
-        int? ParentIssueNumber = null) : RepositoryCommandPayload
+        int? ParentIssueNumber = null,
+        string? Risk = null) : RepositoryCommandPayload
     {
         public override string Kind => RepositoryCommandPayloadKinds.Change;
     }

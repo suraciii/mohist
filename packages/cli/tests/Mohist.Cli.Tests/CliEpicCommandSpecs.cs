@@ -267,7 +267,7 @@ public class CliEpicCommandSpecs
     }
 
     [Fact]
-    public async Task EpicList_ProjectIdOverride_UsesProjectIdArgument()
+    public async Task EpicList_ProjectReferenceOverride_UsesProjectReferenceArgument()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })));
@@ -290,10 +290,10 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "--json", "id,title"], output, error, fileSystem, executor);
+            http, ["epic", "list", "--json", "number,title"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("\"id\": \"epic_8\"", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("\"number\": 8", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("\"title\": \"Labels\"", output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("number  title", output.ToString(), StringComparison.Ordinal);
         Assert.Single(handler.Requests);

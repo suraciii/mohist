@@ -1,7 +1,7 @@
 # Mohist Epic Description Template
 
 Epics are lightweight milestones — no frontmatter, no workflow, no risk. The
-`description` is the only content artifact, handed to `mo epic create -d` (or the
+`description` is the only content artifact, handed to `mo epic create --description` (or the
 API). Structure it as below. Contrast with `issue-templates.md`, which carries
 frontmatter and a five-section PRD.
 

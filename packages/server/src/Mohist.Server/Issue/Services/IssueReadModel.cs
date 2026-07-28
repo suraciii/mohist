@@ -44,7 +44,8 @@ public class IssueReadModel
     public int[] PrerequisiteNumbers { get; set; } = [];
     public IssueCommentDto[] Comments { get; set; } = [];
     public AttachmentInfo[] Attachments { get; set; } = [];
-    public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];
+    [JsonPropertyName("prereq")]
+    public IssuePrerequisiteSummary[] Prereq { get; set; } = [];
     public bool IsDraft { get; set; }
     public bool CanStart { get; set; }
     public bool CanBeParent { get; set; }
@@ -52,7 +53,8 @@ public class IssueReadModel
     public string? RepositoryName { get; set; }
     public RepositoryInfo? Repository { get; set; }
     public IssueRepositoryProblem? RepositoryProblem { get; set; }
-    public IssuePrimaryEpic? PrimaryEpic { get; set; }
+    [JsonPropertyName("epic")]
+    public IssuePrimaryEpic? Epic { get; set; }
     public IssueParentRef? ParentIssueRef { get; set; }
     public ChildIssuesSummary? ChildIssuesSummary { get; set; }
     public IssueChildRef[] Children { get; set; } = [];

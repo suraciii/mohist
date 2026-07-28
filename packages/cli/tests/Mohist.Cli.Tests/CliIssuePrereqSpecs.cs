@@ -152,7 +152,7 @@ public class CliIssuePrereqSpecs
     }
 
     [Fact]
-    public async Task IssuePrereqAdd_AcceptsProjectIdFlag()
+    public async Task IssuePrereqAdd_AcceptsProjectReferenceFlag()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
@@ -178,7 +178,7 @@ public class CliIssuePrereqSpecs
     }
 
     [Fact]
-    public async Task IssuePrereqRemove_AcceptsProjectIdFlag()
+    public async Task IssuePrereqRemove_AcceptsProjectReferenceFlag()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {

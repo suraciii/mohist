@@ -506,7 +506,7 @@ public class CliLabelCatalogSpecs
     }
 
     [Fact]
-    public async Task LabelDelete_ProjectIdFlag_RoutesCorrectly()
+    public async Task LabelDelete_ProjectReferenceFlag_RoutesCorrectly()
     {
         var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>

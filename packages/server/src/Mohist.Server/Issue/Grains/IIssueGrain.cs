@@ -132,8 +132,9 @@ public sealed record IssueChangeRepositoryCommand(
     [property: Id(5)] bool? IsDraft,
     [property: Id(6)] string[]? AttachmentIds,
     [property: Id(7)] string? WorkflowProfileId,
-     [property: Id(8)] IReadOnlySet<string>? PresentFields,
-     [property: Id(9)] int? ParentIssueNumber);
+    [property: Id(8)] IReadOnlySet<string>? PresentFields,
+    [property: Id(9)] int? ParentIssueNumber,
+    [property: Id(10)] string? Risk = null);
 
 [GenerateSerializer]
 public sealed record IssueWorkflowStatus(

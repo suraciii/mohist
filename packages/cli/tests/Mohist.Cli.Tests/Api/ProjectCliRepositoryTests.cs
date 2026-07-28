@@ -11,7 +11,7 @@ namespace Mohist.Cli.Tests.Api;
 public class ProjectCliRepositoryTests
 {
     [Fact]
-    public void RepoListHelp_DocumentsProjectAndProjectIdOptions()
+    public void RepoListHelp_DocumentsProjectReferenceOptions()
     {
         var help = RenderHelp(["repo", "list", "--help"]);
 
@@ -21,7 +21,7 @@ public class ProjectCliRepositoryTests
     }
 
     [Fact]
-    public void RepoAddHelp_DocumentsProjectAndProjectIdOptions()
+    public void RepoAddHelp_DocumentsProjectReferenceOptions()
     {
         var help = RenderHelp(["repo", "create", "--help"]);
 
@@ -33,7 +33,7 @@ public class ProjectCliRepositoryTests
     }
 
     [Fact]
-    public void RepoUpdateHelp_DocumentsProjectAndProjectIdOptions()
+    public void RepoUpdateHelp_DocumentsProjectReferenceOptions()
     {
         var help = RenderHelp(["repo", "edit", "--help"]);
 
@@ -42,16 +42,16 @@ public class ProjectCliRepositoryTests
     }
 
     [Fact]
-    public void RepoSetDefaultHelp_DocumentsProjectAndProjectIdOptions()
+    public void RepoSetDefaultHelp_DocumentsProjectReferenceOptions()
     {
-        var help = RenderHelp(["repo", "set-default", "--help"]);
+        var help = RenderHelp(["project", "repo", "set-default", "--help"]);
 
         Assert.Contains("--project", help);
         Assert.DoesNotContain("--project-id", help);
     }
 
     [Fact]
-    public void RepoDeleteHelp_DocumentsProjectAndProjectIdOptions()
+    public void RepoDeleteHelp_DocumentsProjectReferenceOptions()
     {
         var help = RenderHelp(["repo", "delete", "--help"]);
 
@@ -60,7 +60,7 @@ public class ProjectCliRepositoryTests
     }
 
     [Fact]
-    public void ProjectHelp_DoesNotListRepoSubcommand()
+    public void ProjectHelp_ListsProjectRepositorySubcommand()
     {
         var help = RenderHelp(["project", "--help"]);
 
@@ -69,7 +69,7 @@ public class ProjectCliRepositoryTests
         Assert.Contains("view", help);
         Assert.Contains("use", help);
         Assert.Contains("delete", help);
-        Assert.DoesNotContain("repo", help);
+        Assert.Contains("repo", help);
         Assert.DoesNotContain("show", help);
         Assert.DoesNotContain("update", help);
     }

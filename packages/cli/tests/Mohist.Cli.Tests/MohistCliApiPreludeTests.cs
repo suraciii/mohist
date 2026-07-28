@@ -89,44 +89,10 @@ public class MohistCliApiPreludeTests
     {
         var (api, _, _) = CreateApi();
 
-        var (projectId, exit) = await api.ResolveProject("proj_xyz", null);
+        var (projectId, exit) = await api.ResolveProject("proj_xyz");
 
         Assert.Equal("proj_xyz", projectId);
         Assert.Equal(0, exit);
-    }
-
-    [Fact]
-    public async Task ResolveProject_ProjectId_ReturnsThatIdAndExitZero()
-    {
-        var (api, _, _) = CreateApi();
-
-        var (projectId, exit) = await api.ResolveProject(null, "proj_qrs");
-
-        Assert.Equal("proj_qrs", projectId);
-        Assert.Equal(0, exit);
-    }
-
-    [Fact]
-    public async Task ResolveProject_BothMatching_ReturnsThatIdAndExitZero()
-    {
-        var (api, _, _) = CreateApi();
-
-        var (projectId, exit) = await api.ResolveProject("proj_aaa", "proj_aaa");
-
-        Assert.Equal("proj_aaa", projectId);
-        Assert.Equal(0, exit);
-    }
-
-    [Fact]
-    public async Task ResolveProject_BothConflicting_WritesErrorAndExitsOne()
-    {
-        var (api, _, error) = CreateApi();
-
-        var (projectId, exit) = await api.ResolveProject("proj_aaa", "proj_bbb");
-
-        Assert.Equal("", projectId);
-        Assert.Equal(1, exit);
-        Assert.Contains("--project and --project-id resolve to different values", error.ToString());
     }
 
     [Fact]
@@ -134,7 +100,7 @@ public class MohistCliApiPreludeTests
     {
         var (api, _, _) = CreateApi(activeProjectId: "proj_active");
 
-        var (projectId, exit) = await api.ResolveProject(null, null);
+        var (projectId, exit) = await api.ResolveProject(null);
 
         Assert.Equal("proj_active", projectId);
         Assert.Equal(0, exit);
@@ -145,7 +111,7 @@ public class MohistCliApiPreludeTests
     {
         var (api, _, error) = CreateApi(activeProjectId: null);
 
-        var (projectId, exit) = await api.ResolveProject(null, null);
+        var (projectId, exit) = await api.ResolveProject(null);
 
         Assert.Equal("", projectId);
         Assert.Equal(1, exit);
@@ -159,7 +125,7 @@ public class MohistCliApiPreludeTests
         fs.AddFile(CliStatePath(), "{\"activeProjectId\":\"  \"}");
         var api = new MohistCliApi(http, new StringWriter(), error, fs, executor);
 
-        var (projectId, exit) = await api.ResolveProject(null, null);
+        var (projectId, exit) = await api.ResolveProject(null);
 
         Assert.Equal("", projectId);
         Assert.Equal(1, exit);
@@ -173,7 +139,7 @@ public class MohistCliApiPreludeTests
         fs.AddFile(CliStatePath(), "not valid json {{{");
         var api = new MohistCliApi(http, new StringWriter(), error, fs, executor);
 
-        var (projectId, exit) = await api.ResolveProject(null, null);
+        var (projectId, exit) = await api.ResolveProject(null);
 
         Assert.Equal("", projectId);
         Assert.Equal(1, exit);

@@ -180,7 +180,7 @@ public class CliProjectUseCommandSpecs
     }
 
     [Fact]
-    public async Task ProjectUse_ServerRejection_WithExistingState_LeavesActiveProjectIdUnmodified()
+    public async Task ProjectUse_ServerRejection_WithExistingState_LeavesActiveProjectReferenceUnmodified()
     {
         // If a state file already exists for a different project, a failed
         // `project use` must NOT overwrite it.

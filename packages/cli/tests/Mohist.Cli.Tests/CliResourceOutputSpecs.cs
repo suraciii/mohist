@@ -8,6 +8,66 @@ namespace Mohist.Cli.Tests;
 public sealed class CliResourceOutputSpecs
 {
     [Fact]
+    public void EveryTableShapeHasAnOutputDescriptor()
+    {
+        foreach (var shape in Enum.GetValues<MohistCliApi.TableShape>())
+        {
+            var descriptor = ResourceOutputCatalog.For(shape.ToString());
+            Assert.NotEmpty(descriptor.Fields);
+        }
+    }
+
+    [Fact]
+    public void AgentListAndShowUseTheSameFieldCatalog()
+    {
+        Assert.Same(
+            ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentList)).Fields,
+            ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentShow)).Fields);
+        Assert.Same(
+            AgentCommands.AgentDescriptor.Fields,
+            ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentShow)).Fields);
+        Assert.Equal(
+            ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentShow)).Fields,
+            ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentList)).Fields);
+    }
+
+    [Fact]
+    public async Task AgentCommands_BareJsonUseOneFieldCatalogWithoutRequest()
+    {
+        var commands = new[]
+        {
+            new[] { "agent", "list", "--json" },
+            new[] { "agent", "view", "anything", "--json" },
+            new[] { "agent", "create", "--json" },
+            new[] { "agent", "edit", "anything", "--json" },
+            new[] { "agent", "archive", "anything", "--json" },
+        };
+        var expected = AgentCommands.AgentDescriptor.Fields;
+
+        foreach (var args in commands)
+        {
+            var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+            var exit = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
+
+            Assert.Equal(0, exit);
+            Assert.Equal(expected, JsonNode.Parse(output.ToString())!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+            Assert.Empty(error.ToString());
+            Assert.Empty(handler.Requests);
+        }
+    }
+
+    [Fact]
+    public void WorkflowPromptAndEpicListCatalogsExposeReadModelFields()
+    {
+        Assert.Equal(
+            ["key", "displayName", "description", "tags", "stage", "body", "source"],
+            ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.WorkflowProfilePrompt)).Fields);
+        Assert.Equal(
+            ["projectId", "number", "title", "description", "priority", "status", "createdAt", "updatedAt", "progress", "pauseReason"],
+            ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.EpicList)).Fields);
+    }
+
+    [Fact]
     public async Task Info_BareJsonDiscoversFieldsWithoutCollectingOrRequesting()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
@@ -48,14 +108,14 @@ public sealed class CliResourceOutputSpecs
 
         Assert.Equal(0, exit);
         Assert.Equal(
-            ["number", "title", "status", "stage", "priority", "labels"],
+            ["number", "title", "status", "stage", "priority", "risk", "labels", "prereq", "epic", "createdAt", "updatedAt"],
             JsonNode.Parse(output.ToString())!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
         Assert.Empty(error.ToString());
         Assert.Empty(handler.Requests);
     }
 
     [Fact]
-    public async Task IssueShow_ProjectsSingleResourceWithoutEnvelope()
+    public async Task IssueView_ProjectsSingleResourceWithoutEnvelope()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
             RecordingHttpHandler.Json(new
@@ -126,7 +186,7 @@ public sealed class CliResourceOutputSpecs
     }
 
     [Fact]
-    public async Task IssueShow_LegacyOutputIsRejectedBeforeRequest()
+    public async Task IssueView_LegacyOutputIsRejectedBeforeRequest()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
@@ -227,7 +287,7 @@ public sealed class CliResourceOutputSpecs
 
         Assert.Equal(0, exit);
         Assert.Equal(
-            ["number", "title", "description", "status", "state", "priority", "createdAt", "updatedAt"],
+            ["projectId", "number", "title", "description", "priority", "status", "createdAt", "updatedAt", "linkedIssues", "progress", "nextIssueNumber", "nextIssueReason", "pauseReason"],
             JsonNode.Parse(output.ToString())!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
         Assert.Empty(handler.Requests);
     }

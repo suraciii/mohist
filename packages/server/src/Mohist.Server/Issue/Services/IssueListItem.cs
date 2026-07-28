@@ -33,7 +33,8 @@ public sealed class IssueListItem
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? WorkflowProfileId { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
-    public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];
+    [JsonPropertyName("prereq")]
+    public IssuePrerequisiteSummary[] Prereq { get; set; } = [];
     public bool IsDraft { get; set; }
     public bool CanStart { get; set; }
     public bool CanBeParent { get; set; }
@@ -41,7 +42,8 @@ public sealed class IssueListItem
     public string? RepositoryName { get; set; }
     public RepositoryInfo? Repository { get; set; }
     public IssueRepositoryProblem? RepositoryProblem { get; set; }
-    public IssuePrimaryEpic? PrimaryEpic { get; set; }
+    [JsonPropertyName("epic")]
+    public IssuePrimaryEpic? Epic { get; set; }
     public IssueParentRef? ParentIssueRef { get; set; }
     public ChildIssuesSummary? ChildIssuesSummary { get; set; }
     public IssueChildRef[] Children { get; set; } = [];
@@ -71,7 +73,7 @@ public sealed class IssueListItem
         WorkflowStageProgress = issue.WorkflowStageProgress,
         WorkflowProfileId = issue.WorkflowProfileId,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
-        Prerequisites = issue.Prerequisites,
+        Prereq = issue.Prereq,
         IsDraft = issue.IsDraft,
         CanStart = issue.CanStart,
         CanBeParent = issue.CanBeParent,
@@ -79,7 +81,7 @@ public sealed class IssueListItem
         RepositoryName = issue.RepositoryName,
         Repository = issue.Repository,
         RepositoryProblem = issue.RepositoryProblem,
-        PrimaryEpic = issue.PrimaryEpic,
+        Epic = issue.Epic,
         ParentIssueRef = issue.ParentIssueRef,
         ChildIssuesSummary = issue.ChildIssuesSummary,
         Children = issue.Children,

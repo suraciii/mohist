@@ -60,7 +60,7 @@ public class CliOtelCommandSpecs
 
         var exitCode = await RunAsync(
             handler,
-            ["otel", "query", "SELECT COUNT(*) AS total FROM traces", "-d", dbPath],
+            ["otel", "query", "SELECT COUNT(*) AS total FROM traces", "--db", dbPath],
             output,
             error,
             fileSystem: fileSystem,
@@ -89,7 +89,7 @@ public class CliOtelCommandSpecs
 
         var exitCode = await RunAsync(
             handler,
-            ["otel", "query", "SELECT value FROM traces", "-d", dbPath],
+            ["otel", "query", "SELECT value FROM traces", "--db", dbPath],
             output,
             error,
             fileSystem: fileSystem,
@@ -119,7 +119,7 @@ public class CliOtelCommandSpecs
 
         var exitCode = await RunAsync(
             handler,
-            ["otel", "query", "SELECT COUNT(*) AS total FROM traces", "-d", dbPath],
+            ["otel", "query", "SELECT COUNT(*) AS total FROM traces", "--db", dbPath],
             output,
             error,
             fileSystem: fileSystem,
@@ -143,7 +143,7 @@ public class CliOtelCommandSpecs
 
         var exitCode = await RunAsync(
             handler,
-            ["otel", "query", "SELECT 1", "-d", dbPath],
+            ["otel", "query", "SELECT 1", "--db", dbPath],
             output,
             error,
             fileSystem: fileSystem,
@@ -169,7 +169,7 @@ public class CliOtelCommandSpecs
 
         var exitCode = await RunAsync(
             handler,
-            ["otel", "query", "SELECT * FROM nonexistent", "-d", dbPath],
+            ["otel", "query", "SELECT * FROM nonexistent", "--db", dbPath],
             output,
             error,
             fileSystem: fileSystem,
@@ -196,7 +196,7 @@ public class CliOtelCommandSpecs
 
         var exitCode = await RunAsync(
             handler,
-            ["otel", "query", "INSERT INTO traces (trace_id) VALUES ('abc')", "-d", dbPath],
+            ["otel", "query", "INSERT INTO traces (trace_id) VALUES ('abc')", "--db", dbPath],
             output,
             error,
             fileSystem: fileSystem,
@@ -221,7 +221,7 @@ public class CliOtelCommandSpecs
 
         var exitCode = await RunAsync(
             handler,
-            ["otel", "query", "SELECT FROM WHERE", "-d", dbPath],
+            ["otel", "query", "SELECT FROM WHERE", "--db", dbPath],
             output,
             error,
             fileSystem: fileSystem,
@@ -250,7 +250,7 @@ public class CliOtelCommandSpecs
 
         var exitCode = await RunAsync(
             handler,
-            ["otel", "query", "SELECT * FROM traces WHERE 1=0", "-d", dbPath],
+            ["otel", "query", "SELECT * FROM traces WHERE 1=0", "--db", dbPath],
             output,
             error,
             fileSystem: fileSystem,

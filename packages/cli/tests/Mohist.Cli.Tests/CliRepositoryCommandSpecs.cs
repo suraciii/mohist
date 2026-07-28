@@ -17,8 +17,8 @@ public class CliRepositoryCommandSpecs
         yield return [new[] { "repo", "create", "origin", "--git-url", "git@example.com:repo.git", "--project", "proj_by_id" }, HttpMethod.Post, "/api/projects/proj_by_id/repositories"];
         yield return [new[] { "repo", "edit", "origin", "--base-branch", "develop", "--project", "proj_by_name" }, HttpMethod.Patch, "/api/projects/proj_by_name/repositories/origin"];
         yield return [new[] { "repo", "edit", "origin", "--base-branch", "develop", "--project", "proj_by_id" }, HttpMethod.Patch, "/api/projects/proj_by_id/repositories/origin"];
-        yield return [new[] { "repo", "set-default", "origin", "--project", "proj_by_name" }, HttpMethod.Patch, "/api/projects/proj_by_name/repositories/origin"];
-        yield return [new[] { "repo", "set-default", "origin", "--project", "proj_by_id" }, HttpMethod.Patch, "/api/projects/proj_by_id/repositories/origin"];
+        yield return [new[] { "project", "repo", "set-default", "origin", "--project", "proj_by_name" }, HttpMethod.Patch, "/api/projects/proj_by_name/repositories/origin"];
+        yield return [new[] { "project", "repo", "set-default", "origin", "--project", "proj_by_id" }, HttpMethod.Patch, "/api/projects/proj_by_id/repositories/origin"];
         yield return [new[] { "repo", "delete", "origin", "--project", "proj_by_name" }, HttpMethod.Delete, "/api/projects/proj_by_name/repositories/origin"];
         yield return [new[] { "repo", "delete", "origin", "--project", "proj_by_id" }, HttpMethod.Delete, "/api/projects/proj_by_id/repositories/origin"];
     }
@@ -34,7 +34,7 @@ public class CliRepositoryCommandSpecs
         yield return [new[] { "repo", "list" }];
         yield return [new[] { "repo", "create", "origin", "--git-url", "git@example.com:repo.git" }];
         yield return [new[] { "repo", "edit", "origin", "--base-branch", "release" }];
-        yield return [new[] { "repo", "set-default", "origin" }];
+        yield return [new[] { "project", "repo", "set-default", "origin" }];
         yield return [new[] { "repo", "delete", "origin" }];
     }
 
@@ -42,8 +42,8 @@ public class CliRepositoryCommandSpecs
     {
         yield return [new[] { "repo", "edit", "origin", "--base-branch", "release", }, false];
         yield return [new[] { "repo", "edit", "origin", "--base-branch", "release", "--json", "name,isDefault" }, true];
-        yield return [new[] { "repo", "set-default", "origin", }, false];
-        yield return [new[] { "repo", "set-default", "origin", "--json", "name,isDefault" }, true];
+        yield return [new[] { "project", "repo", "set-default", "origin", }, false];
+        yield return [new[] { "project", "repo", "set-default", "origin", "--json", "name,isDefault" }, true];
         yield return [new[] { "repo", "delete", "origin", }, false];
         yield return [new[] { "repo", "delete", "origin", "--json", "name,isDefault" }, true];
     }
@@ -78,7 +78,7 @@ public class CliRepositoryCommandSpecs
         Assert.Contains("list", stdout, StringComparison.Ordinal);
         Assert.Contains("add", stdout, StringComparison.Ordinal);
         Assert.Contains("edit", stdout, StringComparison.Ordinal);
-        Assert.Contains("set-default", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("set-default", stdout, StringComparison.Ordinal);
         Assert.Contains("delete", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("update", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("remove", stdout, StringComparison.Ordinal);
@@ -291,7 +291,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "set-default", "origin"],
+            ["project", "repo", "set-default", "origin"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -321,7 +321,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "set-default", "origin",],
+            ["project", "repo", "set-default", "origin",],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -350,7 +350,7 @@ public class CliRepositoryCommandSpecs
     {
         var (handler, http, output, error, fs, executor) = SetupEnv(_ =>
             RecordingHttpHandler.JsonError(
-                "Repository 'origin' is the default. Run 'mo repo set-default <other-name>' first.",
+                "Repository 'origin' is the default. Run 'mo project repo set-default <other-name>' first.",
                 "repository_default_deletion_conflict",
                 HttpStatusCode.Conflict));
 
@@ -362,7 +362,7 @@ public class CliRepositoryCommandSpecs
         Assert.NotEqual(0, exitCode);
         Assert.Single(handler.Requests);
         Assert.Contains("origin", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("mo repo set-default", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mo project repo set-default", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -536,7 +536,7 @@ public class CliRepositoryCommandSpecs
     }
 
     [Fact]
-    public async Task RepoList_AcceptsProjectIdAlias()
+    public async Task RepoList_AcceptsProjectReferenceAlias()
     {
         var (handler, http, output, error, fs, executor) = SetupEnv(activeProjectId: null);
 
@@ -553,7 +553,7 @@ public class CliRepositoryCommandSpecs
 
     [Theory]
     [MemberData(nameof(RepoProjectScopeCases))]
-    public async Task RepoSubcommands_AcceptProjectAndProjectId(string[] args, HttpMethod expectedMethod, string expectedPath)
+    public async Task RepoSubcommands_AcceptProjectAndProjectReference(string[] args, HttpMethod expectedMethod, string expectedPath)
     {
         var (handler, http, output, error, fs, executor) = SetupEnv(activeProjectId: null);
 

@@ -222,7 +222,7 @@ public class CliIssueLabelSpecs
         Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
         Assert.NotEqual("", error.ToString());
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -235,7 +235,7 @@ public class CliIssueLabelSpecs
         Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
         Assert.NotEqual("", error.ToString());
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -248,7 +248,7 @@ public class CliIssueLabelSpecs
         Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
         Assert.NotEqual("", error.ToString());
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -333,7 +333,7 @@ public class CliIssueLabelSpecs
         Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
         Assert.NotEqual("", error.ToString());
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

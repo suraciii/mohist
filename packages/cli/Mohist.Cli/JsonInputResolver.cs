@@ -13,59 +13,72 @@ internal static class JsonInputResolver
         public sealed record Failure(string Message) : Result;
     }
 
-    /// <summary>
-    /// Resolves a JSON-or-<c>@file</c> reference into a deserialized object.
-    /// If <paramref name="raw"/> starts with <c>@</c>, the suffix is treated
-    /// as a UTF-8 file path and the file content is parsed as JSON. Otherwise
-    /// the value itself is parsed as JSON. Returns <see cref="Result.Failure"/>
-    /// with a user-facing message on bad input; the caller writes it to the
-    /// error stream and exits with code 1.
-    /// </summary>
     public static async Task<Result> ResolveAsync(
         string? raw,
         IFileSystem fileSystem,
         TextWriter error,
         string optionName)
     {
-        if (string.IsNullOrWhiteSpace(raw))
+        return await ResolveAsync(raw, null, fileSystem, TextReader.Null, error, optionName, null).ConfigureAwait(false);
+    }
+
+    public static async Task<Result> ResolveAsync(
+        string? inline,
+        string? file,
+        IFileSystem fileSystem,
+        TextReader standardInput,
+        TextWriter error,
+        string inlineOptionName,
+        string? fileOptionName)
+    {
+        var hasInline = inline is not null;
+        var hasFile = file is not null;
+        if (hasInline && hasFile)
         {
-            await error.WriteLineAsync(
-                $"{optionName} requires a JSON object or @<file> reference").ConfigureAwait(false);
-            return new Result.Failure($"{optionName} requires a JSON object or @<file> reference");
+            var message = $"{inlineOptionName} and {fileOptionName} are mutually exclusive";
+            await error.WriteLineAsync(message).ConfigureAwait(false);
+            return new Result.Failure(message);
         }
 
-        var text = raw!;
-        if (text.StartsWith('@'))
+        if (!hasInline && !hasFile)
         {
-            var path = text[1..];
-            if (string.IsNullOrWhiteSpace(path))
+            await error.WriteLineAsync(
+                $"{inlineOptionName} or {fileOptionName ?? "a JSON value"} is required").ConfigureAwait(false);
+            return new Result.Failure($"{inlineOptionName} or {fileOptionName ?? "a JSON value"} is required");
+        }
+
+        var text = inline;
+        if (hasFile)
+        {
+            if (file == "-")
             {
-                await error.WriteLineAsync(
-                    $"{optionName}: '@' must be followed by a file path").ConfigureAwait(false);
-                return new Result.Failure($"{optionName}: missing file path after '@'");
+                text = await standardInput.ReadToEndAsync().ConfigureAwait(false);
             }
-            try
+            else
             {
-                text = await fileSystem.ReadAllTextAsync(path).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                await error.WriteLineAsync(
-                    $"{optionName}: could not read file '{path}' ({ex.Message})").ConfigureAwait(false);
-                return new Result.Failure($"{optionName}: could not read file '{path}'");
+                try
+                {
+                    text = await fileSystem.ReadAllTextAsync(file!).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    var message = $"{fileOptionName}: could not read file '{file}' ({ex.Message})";
+                    await error.WriteLineAsync(message).ConfigureAwait(false);
+                    return new Result.Failure(message);
+                }
             }
         }
 
         try
         {
-            var value = JsonSerializer.Deserialize<object?>(text);
+            var value = JsonSerializer.Deserialize<object?>(text ?? string.Empty);
             return new Result.Success(value);
         }
         catch (JsonException ex)
         {
             await error.WriteLineAsync(
-                $"{optionName}: invalid JSON ({ex.Message})").ConfigureAwait(false);
-            return new Result.Failure($"{optionName}: invalid JSON");
+                $"{inlineOptionName}: invalid JSON ({ex.Message})").ConfigureAwait(false);
+            return new Result.Failure($"{inlineOptionName}: invalid JSON");
         }
     }
 }

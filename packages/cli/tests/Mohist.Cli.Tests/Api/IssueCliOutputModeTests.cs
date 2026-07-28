@@ -100,7 +100,7 @@ public class IssueCliOutputModeTests
         var output = new StringWriter();
         var api = BuildApiWithOutput(BuildHandler(json), output, new StringWriter());
 
-        await api.PrintWithOutputAsync("/api/projects/proj_1/issues/168", "json", "IssueShow");
+        await api.PrintWithOutputAsync("/api/projects/proj_1/issues/168", "json", "Issue");
 
         var result = output.ToString();
         Assert.Contains("视图", result);

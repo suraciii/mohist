@@ -35,10 +35,10 @@ public class IssueQuerierPrimaryEpicSpecs
             .ListAsync(project.Id, project));
 
         Assert.Equal(42, item.Number);
-        Assert.NotNull(item.PrimaryEpic);
-        Assert.Equal(7, item.PrimaryEpic!.Number);
-        Assert.Equal("Epic 7", item.PrimaryEpic.Title);
-        Assert.Equal(status, item.PrimaryEpic.Status);
+        Assert.NotNull(item.Epic);
+        Assert.Equal(7, item.Epic!.Number);
+        Assert.Equal("Epic 7", item.Epic.Title);
+        Assert.Equal(status, item.Epic.Status);
     }
 
     [Theory]
@@ -55,7 +55,7 @@ public class IssueQuerierPrimaryEpicSpecs
         var item = Assert.Single(await scope.ServiceProvider.GetRequiredService<IssueQuerier>()
             .ListAsync(project.Id, project));
 
-        Assert.Null(item.PrimaryEpic);
+        Assert.Null(item.Epic);
     }
 
     [Fact]
@@ -71,8 +71,27 @@ public class IssueQuerierPrimaryEpicSpecs
         var item = Assert.Single(await scope.ServiceProvider.GetRequiredService<IssueQuerier>()
             .ListAsync(project.Id, project));
 
-        Assert.NotNull(item.PrimaryEpic);
-        Assert.Equal(9, item.PrimaryEpic!.Number);
+        Assert.NotNull(item.Epic);
+        Assert.Equal(9, item.Epic!.Number);
+    }
+
+    [Fact]
+    public async Task List_WithEpicNumber_ReturnsOnlyIssuesInThatEpic()
+    {
+        var project = NewProject();
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedEpicAsync(db, project.Id, 7, EpicStatusName.Idle);
+        await SeedEpicAsync(db, project.Id, 9, EpicStatusName.Idle);
+        await SeedIssueAsync(db, project.Id, 42, epicNumber: 7);
+        await SeedIssueAsync(db, project.Id, 43, epicNumber: 9);
+
+        var filtered = await scope.ServiceProvider.GetRequiredService<IssueQuerier>()
+            .ListAsync(project.Id, project, epicNumber: 7);
+
+        var item = Assert.Single(filtered);
+        Assert.Equal(42, item.Number);
+        Assert.Equal(7, item.Epic?.Number);
     }
 
     private static ProjectInfo NewProject() => new()

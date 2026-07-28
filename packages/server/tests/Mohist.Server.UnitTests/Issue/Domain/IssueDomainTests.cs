@@ -149,6 +149,16 @@ public class IssueDomainTests
     }
 
     [Fact]
+    public void Update_WithRisk_ReplacesStoredValue()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Risked", risk: "low", repositoryRef: "main");
+
+        issue.Update(null, null, null, null, risk: "high", updateRisk: true);
+
+        Assert.Equal("high", issue.Risk);
+    }
+
+    [Fact]
     public void State_RoundTripsRisk()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Risked", risk: "low", repositoryRef: "main");

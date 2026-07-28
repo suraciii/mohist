@@ -701,7 +701,7 @@ public class VariableCommandsSpecs
 
         Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("read-only", error.ToString());
+        Assert.Contains("Unrecognized command or argument '--effective'", error.ToString());
     }
 
     [Fact]

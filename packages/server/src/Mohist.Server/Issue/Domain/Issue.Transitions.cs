@@ -61,7 +61,14 @@ public sealed partial class Issue
         return issue;
     }
 
-    public void Update(string? title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, DateTime? now = null)
+    public void Update(
+        string? title,
+        string? body,
+        IReadOnlyDictionary<string, string>? labels,
+        string? priority,
+        string? risk = null,
+        bool updateRisk = false,
+        DateTime? now = null)
     {
         var changed = false;
         var labelsChanged = false;
@@ -93,6 +100,15 @@ public sealed partial class Issue
             if (oldPriority != newPriority)
             {
                 RecordEvent(new IssuePriorityChanged(oldPriority, newPriority));
+                changed = true;
+            }
+        }
+        if (updateRisk)
+        {
+            var nextRisk = IssueRisk.From(risk)?.Value;
+            if (!string.Equals(_risk, nextRisk, StringComparison.Ordinal))
+            {
+                _risk = nextRisk;
                 changed = true;
             }
         }

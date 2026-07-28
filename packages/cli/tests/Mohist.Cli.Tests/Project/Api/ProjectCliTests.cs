@@ -245,7 +245,7 @@ public class ProjectCliTests
     }
 
     [Fact]
-    public async Task IssueList_UsesPersistedActiveProjectWhenProjectIdIsOmitted()
+    public async Task IssueList_UsesPersistedActiveProjectWhenProjectReferenceIsOmitted()
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(

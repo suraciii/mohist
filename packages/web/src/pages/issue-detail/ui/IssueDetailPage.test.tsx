@@ -74,10 +74,10 @@ afterEach(() => {
   cleanup()
 })
 
-describe('IssueDetailPage primaryEpic numbered display', () => {
+describe('IssueDetailPage epic numbered display', () => {
   it('renders #N as the primary epic identifier on the issue detail page when number is present', async () => {
     mockIssue(makeIssue({
-      primaryEpic: {
+      epic: {
         number: 7,
         title: 'Numbered epic',
         status: 'active',
@@ -94,7 +94,7 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
 
   it('does not display a truncated UUID as the primary epic identifier on the issue detail page when number is present', async () => {
     mockIssue(makeIssue({
-      primaryEpic: {
+      epic: {
         number: 7,
         title: 'Numbered epic',
         status: 'active',
@@ -114,7 +114,7 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
 
   it('uses the generic epic label when the epic has no number', async () => {
     mockIssue(makeIssue({
-      primaryEpic: {
+      epic: {
         number: null,
         title: 'Legacy epic',
         status: 'active',

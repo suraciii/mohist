@@ -121,7 +121,7 @@ public class IssueCliBodyInputTests
         Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         Assert.Contains("issue body is required", error.ToString());
-        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public class IssueCliBodyInputTests
         Assert.Contains("--body", err);
         Assert.Contains("--body-file", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Usage:", err, StringComparison.Ordinal);
+        Assert.Contains("USAGE", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -170,7 +170,7 @@ public class IssueCliBodyInputTests
         var err = error.ToString();
         Assert.Contains("could not read body file", err);
         Assert.Contains("missing.md", err);
-        Assert.Contains("Usage:", err, StringComparison.Ordinal);
+        Assert.Contains("USAGE", err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public class IssueCliBodyInputTests
         Assert.Contains("--body", err);
         Assert.Contains("--body-file", err);
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Usage:", err, StringComparison.Ordinal);
+        Assert.Contains("USAGE", err, StringComparison.Ordinal);
     }
 
     [Fact]
