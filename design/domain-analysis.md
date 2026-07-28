@@ -16,8 +16,8 @@ contracts. Direct use of a runtime-specific Action is an Inline Agent execution,
 |---|---|---|
 | Issue | what work is, how organized, what progress | issue, epic, sub-issue, parent issue, status, prerequisite, priority, risk, draft, done |
 | Project Space | environment, isolation, config | project, repository (named resource, default, git URL, base branch), variable, prompt |
-| Agent | reusable named intelligence and its execution jobs | Mohist Agent, AgentJob, AgentJobInput, WorkResult |
-| Session | logical execution conversation, compression, query, audit | AgentSession, Runtime Binding, Activity, Transcript, Context, Usage |
+| Agent | reusable named intelligence, execution jobs and external connections | Mohist Agent, Agent Readiness, Agent Availability, AgentJob, Agent Connection, provider identity, access policy, WorkResult |
+| Session | logical execution conversation, input delivery, turn execution, compression, query, audit | AgentSession, SessionInput, AgentTurn, Runtime Binding, Activity, Transcript, Context, Usage |
 | Runner | execution resource availability and capacity | resource, presence, registration, capacity |
 | Skill·Explore | refine vague needs into bounded issues | — |
 
@@ -48,7 +48,9 @@ Cross-domain read-only reports (activity feed, delivery cost, cross-aggregate bo
 
 - Artifact: belongs to Workflow. No independent problem class.
 - OpenSpec: external tool. Never a domain concept.
-- External Agent hosts, Skills, CLI, and Web UI are interaction adapters, not business domains.
+- External Agent hosts, Skills, CLI, Web UI, Slack and the Slack adapter are interaction adapters, not
+  business domains. Agent Connection belongs to Agent because its binding, access policy and lifecycle
+  are persistent Agent-facing product behavior; Slack protocol state does not.
 - Generic: Label, User, SystemInfo — infrastructure.
 - Technical layers: Events, Api, Infrastructure — not business domains.
 
@@ -73,6 +75,7 @@ DDD patterns: Customer/Supplier (C/S), Conformist (C), ACL, OHS, Published Langu
 | 13 | Session/Issue/Workflow/Runner | AgentOps | OHS | cross-domain report assembly |
 | 14 | Issue | IssueRepositoryCoordinator | C | narrow participant commands (create / reassign / reopen) |
 | 15 | Project Space | IssueRepositoryCoordinator | C | narrow participant commands (repository removal) |
+| 16 | Agent/Session | Web, CLI, provider adapters | OHS+PL | Agent and Connection management, launch, Job result, Session Input/Turn/transcript/events |
 
 Runner process (TS) is infrastructure, not a context. It follows Workflow Action contracts
 and AgentJob dispatch contracts.
@@ -102,6 +105,12 @@ and AgentJob dispatch contracts.
   Inline Agent identity, shared runtime not coupling Workflow to Agent) are listed once in
   [`agent-execution.md`](agent-execution.md).
 - Agent is a leaf (only one-way coupling to Session for association and cleanup).
+- Agent context owns Agent Connection as a separate resource. Connection references one Agent but does
+  not copy or modify its execution definition; adding Slack does not add provider fields to Mohist Agent.
+- Agent Connection is the authority for external binding, lifecycle and access policy. Slack delivery and
+  thread mappings belong to the adapter and cannot become a second authority for Agent, Job or Session.
+- SessionInput and AgentTurn are AgentSession-owned child records. They express ordered input and one
+  continuous Runtime processing lifecycle, not new top-level work or a replacement for AgentJob result.
 - Session is horizontal leaf. Model evolves independently. No reverse dependencies.
 - runner process is infrastructure: conforms to Workflow + Agent contracts, registers with Runner and proves presence by polling.
 - ProjectId is shared identity, not a Workflow model dependency.
@@ -121,6 +130,7 @@ and AgentJob dispatch contracts.
 | work unit properties, lifecycle, deps, organization | Issue |
 | repo binding, isolation, execution config, prompt library | Project Space |
 | agent definition, job dispatch, report validation | Agent |
+| external Agent binding, provider identity, access policy, connection lifecycle | Agent |
 | execution recording, transcript, context, usage, query | Session |
 | resource registration, presence, capacity | Runner |
 | cross-domain read report assembly | AgentOps |

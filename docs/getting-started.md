@@ -1,7 +1,8 @@
 # 快速上手
 
-目标：30 分钟内从零启动 Mohist，通过外部 Agent 或 `mo` 跑通一个真实的 Issue，看到
-代码被合并。Web UI 作为可选的观察与人工操作平面。
+目标：30 分钟内从零启动 Mohist，通过 Mohist Agent、第三方外部 Agent 或 `mo` 跑通
+一个真实的 Issue，看到代码被合并。Web UI 作为备用的操作与可视化平面，也可以直接
+配置和使用 Mohist Agent。
 
 ## 前置条件
 
@@ -19,10 +20,10 @@
 ```bash
 git clone <your-fork-or-mohist-url> mohist
 cd mohist
-npm install
+npm ci
 ```
 
-`npm install` 会装好 Web UI 和 Runner 的所有依赖。
+`npm ci` 会按 lockfile 安装 Web UI 和 Runner 的所有依赖。
 
 ## 2. 构建后端
 
@@ -51,13 +52,24 @@ npm run dev:runner
 npm run dev:web
 ```
 
-打开 `http://localhost:3456` 可以查看看板；外部 Agent 和 `mo` 不依赖 Web UI 运行。
+打开 `http://localhost:3456` 可以查看看板、配置并直接使用 Mohist Agent；第三方外部
+Agent 和 `mo` 不依赖 Web UI 运行。
 
 > 生产或长跑场景请参考 [Self-host 部署](self-host.md)，无需分别启动这些开发进程。
 
-## 4. 让外部 Agent 认识 Mohist
+## 4. 选择交互路径
 
-把 Mohist Skill 安装到本机支持的外部 Agent：
+Mohist 支持三条互补路径。它们操作同一个 Project、Issue 与 Workflow，不会形成三套
+状态：
+
+- **Mohist Agent**：在 Mohist 中保存身份、Instructions、执行配置和 Skills，可以从
+  Web UI 或 CLI 直接使用，之后还能把同一个 Agent 接入 Slack。
+- **第三方外部 Agent**：运行在 Slack、IDE 或其它产品中，通过 Mohist Skill 与 `mo`
+  查询、委托和操作 Mohist；它不是 Mohist Agent。
+- **直接使用 `mo`**：适合确定性的人工操作、脚本和排障。
+
+要直接试用 Mohist Agent，先按[Agent 与 AgentSession](agents.md)创建并启动一个 Agent。
+要让第三方外部 Agent 认识 Mohist，则把 Mohist Skill 安装到本机支持的 Agent：
 
 ```bash
 mo skill install
@@ -67,7 +79,8 @@ mo skill install
 当前有哪些 Issue 在推进，是否需要我处理”。外部 Agent 会按场景读取 Skill，并通过 `mo`
 查询或操作 Mohist。具体机制见 [Skill 机制](skills.md)。
 
-不使用外部 Agent 时，可以直接执行本文中的 `mo` 命令。
+本快速上手后续以第三方外部 Agent 或 `mo` 为例，不要求先创建 Mohist Agent；不使用
+外部 Agent 时，可以直接执行本文中的 `mo` 命令。
 
 ## 5. 配置 Inline Agent 模型
 
@@ -189,6 +202,8 @@ Integrate 完成后，issue 进入 Done。这时：
 ## 下一步
 
 - [Skill 机制](skills.md) — 让外部 Agent 查询、委托和操作 Mohist
+- [Agent 与 AgentSession](agents.md) — 配置并直接使用一个 Mohist Agent
+- [把 Mohist Agent 接入 Slack](agent-connections.md) — 把已经测试好的 Agent 带到 Slack
 - [核心概念](concepts.md) — 理解你刚才用到的所有名词
 - [Issue 管理](issues.md) — 学会 prerequisites、comments、force stop、retry 等
 - [用 Epic 规划](epics.md) — 把零散 issue 组织成可自动推进的产品路线

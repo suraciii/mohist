@@ -1,11 +1,13 @@
 # Web UI 指南
 
 Web UI 是 Mohist 的备用操作和可视化平面，不是用户日常协作的工作站点。用户通常在
-Slack、IDE 或其他场所通过外部 Agent 使用 Mohist；需要查看全局与复杂状态、核对执行
-证据、调整配置，或在外部 Agent 不可用时人工接管，才进入 Web UI。
+Slack、IDE 或其他场所直接使用接入的 Mohist Agent，或通过外部 Agent 使用 Mohist；需要
+查看全局与复杂状态、核对执行证据、调整配置，或在外部入口不可用时人工接管，才进入
+Web UI。
 
 备用不等于功能残缺。启动、审批、拒绝、恢复、停止和配置等关键操作必须可以在 Web UI
-完成；同一操作的结果仍由 Mohist 裁决，Web UI 不建立另一套状态或规则。
+完成；Mohist Agent 也必须能在 Web 中直接配置、启动和继续对话。同一操作的结果仍由
+Mohist 裁决，Web UI 不建立另一套状态或规则。
 
 打开 `http://localhost:3456`。进入任一页面时，应当能回答：发生了什么、为什么、是否需要
 人工处理，以及当前可以安全执行什么操作。
@@ -17,6 +19,7 @@ Slack、IDE 或其他场所通过外部 Agent 使用 Mohist；需要查看全局
 | **看板（Home）** | 默认页。查看全局推进情况和需要处理的 Issue |
 | **Issue 详情** | 查看单个 Issue 的执行状态、证据和人工操作 |
 | **Issue 改动文件** | 看一个 issue 改了哪些文件、diff |
+| **Agents** | 配置、测试和启动 Mohist Agent，查看 Jobs、Sessions 与外部接入 |
 | **AgentSession** | 理解执行会话的归属、状态、结果、诊断证据和恢复操作 |
 | **Epics** | Epic 列表和详情 |
 | **Activity** | 实时活动流 |
@@ -121,24 +124,61 @@ URL: `/issues/<number>/files`
 
 显示一个 issue 改动的所有文件，含 diff 视图。
 
+## Agents 页
+
+Agent 列表用于发现和管理 Project 内的 Mohist Agent。列表首先显示头像、名称、描述、
+active / archived、Ready / Needs setup / Unknown、Runtime / Model、正在执行与排队的工作数，
+以及外部接入健康，不用用户先打开 Session 才能判断 Agent 是否可用。Runner 离线或容量
+不足作为单独的执行可用性显示，不能伪装成 Needs setup。
+
+Agent 详情页包含四个连续区域：
+
+1. **Definition**：头像、名称、描述、Instructions、Runtime、Model、Variant、Skills、
+   并发限制与 active / archived 状态。配置控件由 Mohist 返回的 Runtime 能力与 Readiness
+   驱动，缺口直接链接到对应字段或凭据设置。Needs setup 禁用启动；Unknown 仍允许提交并
+   显示“等待 Runner 验证”；Ready 但没有空闲 Runner 时显示排队，不改成配置错误。
+2. **Start session**：输入一个真实任务和可选 Issue / Epic / Repository 上下文，直接创建
+   AgentJob、AgentSession、首条 SessionInput 与首个 AgentTurn。这是接入 Slack 前的规范测试
+   入口。
+3. **Work and conversations**：分别展示 AgentJob 结果和 AgentSession activity，不能用
+   “Session 失败”代替失败的 Job。
+4. **Connections**：把 Agent Readiness、Slack 安装进度、连接健康、能力验证和身份同步分开
+   展示。Add Slack 是可中断的步骤流，每次只突出一个下一步；Allowlist 通过姓名与头像搜索
+   工作区成员。页面同时支持 Owner 转移、凭据轮换、重新验证、Enable、Disable 和 Delete，
+   不让用户从一个笼统的 Connected / Failed 状态猜问题。
+
+Agent archived 后，Start session 与 Add connection 不可用；历史 Jobs、Sessions 和
+Connections 仍可读。active Agent 的 Add connection 不受 Readiness 阻塞，因为连接健康与执行
+准备度是两件事。Agent 编辑只影响之后的新 Job，页面在保存前明确这个生效时机。
+
+### 实装差距
+
+当前 Agent 列表、编辑、直接启动和 Session 读取已经存在。AgentJob、SessionInput、AgentTurn
+与并发/排队信息尚未完整汇总到 Agent 页；头像、Readiness、Connections 与 Slack setup 尚未
+实装。
+
 ## AgentSession 页
 
 从 Issue 的 Workflow Session 列表或 Mohist Agent 的 Session 列表进入。
 
-这里展示 Workflow 或 Mohist Agent 的执行会话。它是证据与诊断视图，不是用户和外部
-Agent 日常对话的工作场所。
+这里展示 Workflow 或 Mohist Agent 的执行会话。Workflow 来源的 Session 主要是证据与
+诊断视图；Agent launch 来源的 Session 同时是备用的直接对话入口，可以完整提交 follow-up。
+它不需要成为用户的日常工作站，但不能是只读或残缺的调试页。
 
 页面必须先解释这段会话，再展示原始消息。首屏应当回答：
 
 - 为什么创建，以及它服务于哪个 Issue、Workflow task 或 Mohist Agent 工作
-- 当前是执行中、空闲还是状态未知，最近一次执行产生了什么结果
+- 当前是排队、执行中、空闲还是状态未知，当前 AgentTurn 包含哪些输入、最近一次执行产生了
+  什么结果
 - 是否需要人工处理，以及当前有哪些安全操作
 
 在此基础上，可以：
 
-- 按顺序查看消息和工具调用
+- 按顺序查看消息和工具调用；每条用户消息显示 SessionInput 的受理/投递状态，多条输入可以
+  归在同一个 AgentTurn 下
 - 看模型、用量、压缩记录和当前活动状态
 - 提交 follow-up：执行中加入当前执行，空闲时开始新的执行
+- 取消 queued Turn，或请求停止 active Turn；停止结果未知时保留明确的 Unknown 状态
 - Compact：使用当前执行后端的原生能力压缩上下文
 - Reset：让后续输入从空 Runtime 上下文继续，同时保留已记录的会话内容
 - 调试一次执行为什么产生当前结果
@@ -150,8 +190,8 @@ Session 来源与身份见 [Agent 与 AgentSession](agents.md)。
 
 ### 实装差距
 
-缺失恢复尚未落地，当前页面还不能展示“后续从空上下文开始”这一状态。对应
-实施 issue 待从 AgentSession spec 创建。
+缺失恢复尚未落地，当前页面还不能展示“后续从空上下文开始”这一状态；SessionInput 与
+AgentTurn 也尚未形成上述稳定分组和状态展示。对应实施 issue 待从 AgentSession spec 创建。
 
 ## Epics 页
 

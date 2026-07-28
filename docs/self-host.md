@@ -4,7 +4,7 @@ Mohist 是 self-hosted 产品。这篇覆盖长跑部署、开机自启、远程
 
 ## 两种部署模式
 
-Mohist server 支持两种长跑部署模式，选其一即可。**两种模式下 runner 都跑在宿主机上**（它要操作你的 git 仓库、调 opencode/git/gh 等 shell 工具，不属于容器）。
+Mohist server 支持两种长跑部署模式，选其一即可。**两种模式下 runner 都跑在宿主机上**（它要操作你的 git 仓库、调 opencode/git/gh 等 shell 工具，不属于容器）。使用 Slack Agent 接入时，可选的 `mohist-slack` 也作为宿主机受管服务运行，只需主动连接 Slack 和 Server，不需要公网入站端口。
 
 Server 默认启用受资源预算保护的内置观测：Trace 最长保留 72 小时，观测存储预算为 1 GiB，
 OTLP 接收端只监听 `localhost:4318`，默认部署不会发布 `4318`。运行 `mo otel status` 查看
@@ -29,7 +29,7 @@ OTLP 接收端只监听 `localhost:4318`，默认部署不会发布 `4318`。运
 
 # systemd 模式
 
-通过 `mo` CLI 把 server（可选 runner）装成 systemd user service。下面按场景给步骤。
+通过 `mo` CLI 把 server（可选 runner 与 Slack 接入服务）装成 systemd user service。下面按场景给步骤。
 
 ## 场景 1：本地 daemon（你的笔记本）
 
@@ -37,15 +37,17 @@ OTLP 接收端只监听 `localhost:4318`，默认部署不会发布 `4318`。运
 
 ### Linux（systemd user service）
 
-前提：已按 [快速上手](getting-started.md) `npm install && npm run build` 构建过，并装好 `mo` CLI（仓库内 `bash scripts/install-mo.sh`）。
+前提：已按 [快速上手](getting-started.md) `npm ci && npm run build` 构建过，并装好 `mo` CLI（仓库内 `bash scripts/install-mo.sh`）。
 
 ```bash
 # 安装为 systemd user service（自动写 unit、enable、启动、enable-linger）
 mo install server
 mo install runner
+# 只有使用 Slack Agent 接入时才需要（目标能力，当前尚未实装）
+mo install slack
 ```
 
-两个 unit：`mohist.service`（server）、`mohist-runner.service`（runner）。`mo install` 已自动 `enable` + `restart` + `loginctl enable-linger`，所以**未登录或开机也会运行**。
+核心有两个 unit：`mohist.service`（server）、`mohist-runner.service`（runner）；安装 Slack 接入后再增加 `mohist-slack.service`。`mo install` 已自动 `enable` + `restart` + `loginctl enable-linger`，所以**未登录或开机也会运行**。
 
 常用命令：
 
@@ -66,6 +68,8 @@ journalctl --user -u mohist -f               # 实时日志
 ```bash
 mo install server
 mo install runner
+# 只有使用 Slack Agent 接入时才需要（目标能力，当前尚未实装）
+mo install slack
 ```
 
 会按平台自动在 Task Scheduler 里创建登录时启动的任务。
@@ -77,13 +81,15 @@ mo install runner
 ### 步骤
 
 1. **装系统依赖**：.NET 11 SDK、Node.js 22.19.0 或更高版本、opencode（按官方文档）
-2. **clone Mohist 仓库**：`git clone <mohist> /opt/mohist && cd /opt/mohist && npm install && npm run build`
+2. **clone Mohist 仓库**：`git clone <mohist> /opt/mohist && cd /opt/mohist && npm ci && npm run build`
 3. **创建专用用户**（推荐）：`sudo useradd -m -s /bin/bash mohist`
 4. **装为 systemd user service**（在专用用户下运行）：
 
 ```bash
 sudo -u mohist mo install server --repo-root /opt/mohist
 sudo -u mohist mo install runner --repo-root /opt/mohist
+# 只有使用 Slack Agent 接入时才需要（目标能力，当前尚未实装）
+sudo -u mohist mo install slack --repo-root /opt/mohist
 ```
 
 Mohist 目前只提供 systemd **user** service（非 system service）。专用用户 + `enable-linger`（`mo install` 会自动执行）即可实现 always-on、开机自启。
@@ -264,6 +270,15 @@ cloudflared tunnel run mohist
 
 通过 Cloudflare 的边缘网络访问，免维护证书。
 
+## Slack 中的备用 Web 链接
+
+Slack Agent 接入不依赖远程 Web；回复必须在 Slack 中自包含。只有完成上述任一种远程访问
+方案后，才在 Server 设置中填写 Slack 成员实际可访问的 **External Web URL**。Mohist 随后
+可以在回复中显示 **Open in Mohist**，把 Web 作为查看完整执行证据和人工接管的备用平面。
+
+未配置时只显示稳定的 Job / Session 标识。`localhost`、`127.0.0.1` 和只对 Server 宿主机
+有效的地址不能配置为 External Web URL，也不能出现在 Slack 消息中。
+
 ## 数据备份
 
 Mohist 的数据分两类：
@@ -295,6 +310,9 @@ find ~/.mohist/ -name "mohist.db.*.bak" -mtime +30 -delete
 
 **Docker 模式**：备份命名卷，命令见上文「Docker 模式 → 数据持久化」。
 
+Slack 接入落地时，恢复所需数据和凭据也必须进入同一备份策略；具体存储位置由实现确定后
+补充，产品设计不预先固定第二个数据库或密钥文件布局。
+
 **严肃**（两种模式都适用）：用 restic / borg backup 增量备份到异地。systemd 模式备份 `~/.mohist/`，Docker 模式备份命名卷或绑定挂载的宿主目录：
 
 ```bash
@@ -310,10 +328,10 @@ restic -r /backup/mohist backup ~/.mohist <repo>/openspec
 ```bash
 cd /opt/mohist
 git pull
-npm install
+npm ci
 npm run build
-mo update            # 重建并以受管理方式重启 server + runner（同步更新 mo CLI）
-# 或只更新其一：mo update server / mo update runner
+mo update            # 重建并重启已安装的 server、runner、slack（同步更新 mo CLI）
+# 或只更新其一：mo update server / mo update runner / mo update slack
 ```
 
 **Docker 模式**：
@@ -326,7 +344,7 @@ docker compose build
 docker compose up -d     # 重启到新镜像，数据卷保留
 ```
 
-> ⚠️ Docker 模式下 runner 仍在宿主机上，升级 server 不会动 runner。runner 自己的升级照 systemd 模式的 `mo update runner` 或重新 `npm run build:runner`。
+> ⚠️ Docker 模式下 runner 与可选的 `mohist-slack` 仍在宿主机上，升级 server 容器不会更新它们。分别使用 `mo update runner` 与 `mo update slack`。
 
 ## 监控（可选）
 

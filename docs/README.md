@@ -6,10 +6,10 @@
 
 ## 板块 1：入门
 
-- [产品愿景](vision.md) —— Mohist 要去哪里、用户如何通过外部 Agent 使用它
-- [快速上手](getting-started.md) —— 从零启动，通过外部 Agent 或 `mo` 看一个 Issue 走完全流程
+- [产品愿景](vision.md) —— Mohist 要去哪里、独立 Agent 与外部交互场所如何配合
+- [快速上手](getting-started.md) —— 从零启动，通过 Mohist Agent、外部 Agent 或 `mo` 看一个 Issue 走完全流程
 - [核心概念](concepts.md) —— 理解 Mohist 的生产线模型
-- [Agent 与 AgentSession](agents.md) —— Mohist 执行层内的 Agent、工作与会话关系
+- [Agent 与 AgentSession](agents.md) —— 配置并直接使用 Mohist Agent，理解工作与会话关系
 
 ## 板块 2：工作流
 
@@ -33,7 +33,8 @@
 
 - [Action 契约](actions/README.md) —— Workflow Action 的输入、输出与行为；当前包括 `mohist/opencode` 与 `mohist/pi`
 - [Runner 指南](runner.md) —— 执行平面怎么跑、怎么调并发
-- [Skill 机制](skills.md) —— 外部 Agent 如何查询、委托和操作 Mohist
+- [Skill 机制](skills.md) —— Mohist Agent 与外部 Agent 如何获得可复用能力
+- [把 Mohist Agent 接入 Slack](agent-connections.md) —— 以 Standard Bot 或 Slack Agent 身份安装、配置并使用已配置 Agent
 - [Agent 事件路由](event-routing.md) —— 项目级路由表：一条表达式订阅任何实体的事件，按序触发 Mohist Agent 响应
 - [Agent 监管](agent-supervision.md) —— 一条命令安装监管 Agent：替你审批、替你修复失败，只有它停手时才轮到你
 
@@ -61,6 +62,6 @@
 - **WIP 产品方案**：尚未对齐需求、还在探索方向的产品方案收录在「板块 7」，用 frontmatter `status: wip-not-implemented` 标注，用「将支持 / 计划 / （开放）」等表述。需求对齐、spec 定稿后搬到对应板块，移除 WIP 标记。
 - **语言统一**：正文使用中文；产品规范术语、配置字段、命令和代码符号保留原名。
 - **不用技术语言**：正文不出现 API 端点、字段名、组件类名、源码路径——这些属于 `design/`。唯一例外：文末可以有一行「对应源码：」页脚，指向实现入口。
-- **术语一致**：Project / Issue / Workflow / Epic / Inline Agent / Mohist Agent / AgentSession / Skill 等术语在各篇保持一致。
+- **术语一致**：Project / Issue / Workflow / Epic / Inline Agent / Mohist Agent / Agent Connection / AgentSession / Skill 等术语在各篇保持一致。
 
 发现过时描述欢迎提 issue。

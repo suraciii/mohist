@@ -3,14 +3,16 @@
 ## Boundary
 
 ```
-User in Slack / IDE / chat
-       │
-       v
-External Agent ── Mohist Skill ── mo CLI ──┐
-                                            │
-User ── direct CLI fallback ────────────────┤
-User ── Web UI (backup operation + view) ───┤
-                                            v
+User in Slack ── Slack Bot / mohist-slack ── Agent API ──┐
+User ── Web UI (backup operation + view) ── API ─────────┤
+User ── direct CLI ──────────────────────── API ─────────┤
+                                                         │
+User in IDE / chat                                       │
+       │                                                 │
+       v                                                 │
+External Agent ── Mohist Skill ── mo CLI ── API ────────┘
+                                                         │
+                                                         v
 Control Plane        owns state, makes decisions
        │
        v
@@ -24,8 +26,11 @@ User Project
 
 | Concern | Belongs in | Not in |
 |---|---|---|
-| user conversation and interaction context | external Agent host | Mohist Web / Server |
-| user commands | CLI | Server |
+| third-party external Agent conversation | external Agent host | Mohist Web / Server |
+| external presentation and provider thread context | Web / CLI / `mohist-slack` | Agent / Session domains |
+| Mohist Agent transcript, SessionInput, AgentTurn and activity | Session context | `mohist-slack` / Web local state |
+| CLI command grammar and local interaction | CLI | Server |
+| official client Agent invocation contract | Server Agent API | `mohist-slack` / Runner |
 | fallback observe & act | Web UI + API | Runner |
 | state authority | Server | Runner |
 | decide workflow | Server | Runner |
@@ -35,7 +40,13 @@ User Project
 | git side effects | Runner | Server |
 | OpenSpec side effects | Runner | Server |
 | Mohist daemon self-management process execution (inspect, update, install, restart, and determine the status of Mohist and its managed services) | Server | Runner for user-project workspace, git, shell, and agent execution |
-| explore, status conversation, and delegation | external Agent + Skill | Mohist runtime / Web UI |
+| Mohist Agent identity, instructions, config, skills, and jobs | Agent context | Slack adapter / Web / CLI |
+| Agent Connection binding and access policy | Agent context | Agent definition / Slack thread state |
+| Slack credentials and service authentication | Server infrastructure | Agent / Session domains |
+| Slack events, thread mapping, retries, and message delivery | `mohist-slack` | Server Agent / Session contexts |
+| `mohist-slack` process lifecycle | CLI managed service + adapter process | Agent Connection aggregate / Runner |
+| third-party Agent exploration and delegation | external Agent + Skill | Mohist Runtime / Web UI |
+| Mohist Agent conversation from any client | Agent API + AgentSession | provider adapter local state |
 | skill install | CLI | Server |
 | product design | docs/ | design/ |
 | domain model | code | design/ |
@@ -177,23 +188,39 @@ runtime 绑定——这些不走协调者。
 - Artifact: persist (audit trail).
 - Authority grains: no `[Reentrant]`.
 
-## Interaction is external
+## Interaction surfaces and Agent ownership
 
-Mohist does not own AI chat or the user's primary interaction context. Exploration, status questions,
-delegation, and follow-up conversation stay in an external Agent host such as Slack or an IDE. The
-external Agent uses Mohist Skills and the `mo` CLI to translate that conversation into domain queries
-and commands, then presents Mohist's results back in the original context.
+Mohist does not require the user to move daily collaboration into its Web UI. The presentation surface
+may be Slack, an IDE, a terminal, or Web, but that does not decide which Agent owns the work.
+
+There are two distinct paths:
+
+1. A Mohist Agent is launched through Web, CLI, an Agent Connection, an event, or a mention. Every client
+   calls the same Agent API. Mohist owns the Agent definition, AgentJob, AgentSession, SessionInput,
+   AgentTurn, durable transcript, activity, result, and evidence; the external surface owns only provider
+   identity, presentation, delivery recovery, and conversation mapping.
+2. A third-party external Agent keeps its own conversation in its host and uses Mohist Skills + `mo` to
+   issue domain commands. That external conversation does not become an AgentSession merely because it
+   caused Mohist work. If it explicitly launches a Mohist Agent, the launched work follows path 1.
+
+Slack Bot therefore is not a Runtime or another Agent. One `mohist-slack` service operates the Slack
+Connections for one Server. It uses Agent API and never reads Mohist storage, shells out to `mo`, parses
+Runner logs, or stores a shadow copy of Agent instructions/config/skills. Detailed contracts:
+[`agent-api.md`](agent-api.md) and [`slack-agent-connection.md`](slack-agent-connection.md).
 
 External skills read projects, call `mo` CLI, and may write ordinary files. They never touch the Mohist
-database. Mohist owns durable execution state and evidence; the external conversation does not become an
-AgentSession merely because it caused Mohist work.
-Runner may adapt OpenCode or another runtime for Workflow TaskRun and AgentJob work.
+database. Runner may adapt OpenCode or another runtime for Workflow TaskRun and AgentJob work.
 Agent/Session ownership invariants: [`agent-execution.md`](agent-execution.md).
 
 ## Constraints
 
 - CLI never merges into Server.
+- Official Agent clients use Agent API; provider adapters do not bypass it through CLI, database, grain,
+  Runner, or Runtime protocols.
+- Provider credentials and delivery/thread state stay outside Agent/Session domains; Agent Connection
+  owns only the external binding, access policy and lifecycle.
 - All shell/agent/git/OpenSpec execution goes to Runner.
-- Single daemon today. Actor model for state, not distribution.
+- Single control-plane daemon today. `mohist-slack` is a separate managed adapter process, not another
+  state authority or a distributed control-plane node.
 - Durable dispatcher notifies. Never executes tasks or calls runner.
 - OpenSpec is not architecture authority.

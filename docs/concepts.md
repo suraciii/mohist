@@ -4,7 +4,8 @@
 
 ## 一句话版本
 
-> 你通常在已有工作场所与**外部 Agent**协作；外部 Agent 通过 **Skill** 操作 Mohist。
+> 你通常留在已有工作场所：可以通过 **Agent 接入**直接调用一个已配置的
+> **Mohist Agent**，也可以让第三方的**外部 Agent**通过 **Skill** 操作 Mohist。
 > Mohist 在 **Project** 中把产品目标记录为 **Issue**，由 **Workflow** 推进到 Done。多个
 > 相关 Issue 组成 **Epic**；**Inline Agent**执行 task，**Mohist Agent**作为稳定代理人
 > 接受委托或响应事件。
@@ -97,7 +98,7 @@ Epic 是为一个产品目标持续供料的单位。新建的 Epic 默认 `idle
 
 详见 [用 Epic 规划](epics.md) 了解完整生命周期。
 
-## 外部 Agent、Inline Agent 与 Mohist Agent
+## 外部 Agent、Inline Agent、Mohist Agent 与 Agent 接入
 
 外部 Agent 在 Mohist 之外与用户交互，例如运行在 Slack、IDE 或其他支持 Agent 的工具中。
 它通过 Mohist Skill 和 `mo` 查询、委托或操作执行层，但不是 Mohist 资源，也不由 Mohist
@@ -105,13 +106,20 @@ Epic 是为一个产品目标持续供料的单位。新建的 Epic 默认 `idle
 
 Inline Agent 是 Workflow 直接通过 `mohist/opencode` 等 Action 调用 Agent 能力的
 方式，没有独立 Agent ID。Mohist Agent 则是 Project 内有稳定 ID、名称、Instructions
-和配置的 Named Agent，可以手动启动或响应事件。
+和配置的 Agent，可以从 Web UI、CLI、Agent 接入、事件路由或评论提及启动。
+
+Agent 接入把一个 Mohist Agent 暴露到外部交互场所。例如 Slack Agent 接入让一个 Slack
+Bot 代表指定的 Mohist Agent：Slack 负责接收消息和展示回复，Mohist Agent 仍负责理解、
+执行和会话。接入不复制 Agent 配置，也不能在同一段对话中临时切换成另一个 Agent。
 
 AgentSession 不是 Agent，也不是工作结果；它记录一段对话的消息、上下文、用量、
-活动状态和当前 Runtime Session。Workflow TaskRun 或 AgentJob 负责工作生命周期，
-AgentSession 只负责会话与审计。
+活动状态和当前 Runtime Session。Workflow TaskRun 负责 Workflow 工作，AgentJob 负责一次
+Mohist Agent launch 的首次执行；后续输入继续同一个 AgentSession，但不改写 AgentJob。
+AgentSession 中每条被接受的输入是 SessionInput，一次连续的 Runtime 处理是 AgentTurn；一个
+Turn 可以按顺序处理多条 Input，因此消息、执行过程和工作结果不会被混成同一个状态。
 
-完整关系见 [Agent 与 AgentSession](agents.md)；OpenCode Action 配置见
+完整关系见 [Agent 与 AgentSession](agents.md)；Slack 使用方式见
+[把 Mohist Agent 接入 Slack](agent-connections.md)；OpenCode Action 配置见
 [`mohist/opencode` Action](actions/opencode.md)。
 
 ## Approval（审批）
@@ -128,10 +136,11 @@ Workflow 不区分这些来源。谁来发起审批，是 Mohist Agent、CLI、W
 
 approve / reject 可以附带审批者名称，供历史记录回答“这道门是谁放的”。这个名称只是可选署名，不是登录身份、权限认证或作出决策的前提。人通过 Web UI 操作时无需填写；CLI 可用 `--author` 署名。Agent 和自动化应主动署名，以便与人的操作区分。未署名时 Mohist 保持为空，不用 `web`、`owner` 等合成值代替。
 
-## Skill（外部 Agent 能力）
+## Skill（Agent 能力）
 
-Skill 让外部 Agent 理解 Mohist 的领域动作和操作边界。外部 Agent 使用 Skill 查询项目
-推进、创建和启动 Issue、作出审批、处理恢复，也可以完成需要实时互动的需求探索。
+Skill 是可复用的 Agent 能力说明。外部 Agent 可以安装 Mohist 分发的 Skill，理解 Mohist
+的领域动作和操作边界；Mohist Agent 也可以在自己的配置中选择 Skills，并在任何入口使用
+同一组能力。入口不能替 Agent 增删 Skills。
 
 Mohist 分发四个 Skill：
 
@@ -142,17 +151,20 @@ Mohist 分发四个 Skill：
 | `mohist-create-issue` | 把已明确的需求创建为可独立交付的 Issue |
 | `mohist-create-epic` | 创建产品目标并组织、驱动相关 Issue |
 
-典型路径：用户留在原来的交互场所，外部 Agent 按需加载这些 Skill，通过 `mo` 把意图交给
-Mohist，再把执行状态和结果带回原会话。完整工作流见 [Skill 机制](skills.md)。
+外部 Agent 的典型路径是按需加载这些 Skill，通过 `mo` 把意图交给 Mohist，再把执行状态
+和结果带回原会话。Mohist Agent 的 Skills 则随 Agent 配置，在启动时固定到本次工作。
+完整关系见 [Skill 机制](skills.md)。
 
 ## 它们怎么咬合
 
-```
-[Slack / IDE / 其他交互场所]
-     │
-     │  外部 Agent + Mohist Skill
-     ▼
-[Project]
+```text
+[Slack] ── Agent 接入 ── Mohist Agent ── AgentJob + AgentSession
+   │
+[IDE / 其他 Agent host] ── 外部 Agent + Mohist Skill + mo ──┐
+                                                              │
+[Web UI / CLI] ── 直接使用 Mohist Agent 或领域命令 ─────────┤
+                                                              ▼
+                                                         [Project]
      │
      ├── [Epic] ────┐
      │     │ 多个 issue 组成 epic
@@ -168,10 +180,10 @@ Mohist，再把执行状态和结果带回原会话。完整工作流见 [Skill 
 [产品向前进一步]
 ```
 
-记住一个心智模型：**你在外部 Agent 所在的场所工作；Mohist 是执行层；Project 是产品与
-执行边界；Epic 负责目标和供料；Issue 是工件；Workflow 是生产线；Inline Agent 直接执行
-task；Mohist Agent 是可复用的代理人；AgentSession 记录执行会话；Web UI 是备用操作和
-可视化平面。**
+记住一个心智模型：**你通常留在已有工作场所；Mohist Agent 是可独立使用的代理人，Agent
+接入只是把它带到 Slack；外部 Agent 也可以通过 Skill 使用 Mohist。Project 是产品与执行
+边界；Epic 负责目标和供料；Issue 是工件；Workflow 是生产线；Inline Agent 直接执行
+task；AgentSession 记录执行会话；Web UI 是备用操作和可视化平面。**
 
 ---
 

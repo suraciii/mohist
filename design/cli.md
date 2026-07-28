@@ -33,12 +33,12 @@ CLI 导航以用户意图为主，同时尊重领域所有权。顶层命令不�
 | `epic` | Epic | 与 Issue 同一限界上下文，但有独立身份和生命周期 |
 | `workflow` | WorkflowProfile | Project 范围的 Workflow 定义入口，不表示一次执行 |
 | `run` | WorkflowRun | 一次 Workflow 执行及其审批、恢复和终止动作 |
-| `agent` | Mohist Agent | Project 范围的可复用 Named Agent；AgentJob 是其工作子资源 |
+| `agent` | Mohist Agent | Project 范围的可复用 Agent；AgentJob 是工作子资源，Agent Connection 是外部接入子资源 |
 | `session` | AgentSession | 稳定的逻辑会话，与来源无关地统一寻址 |
 | `activity` | AgentOps Activity feed | Project 范围的跨领域只读活动记录 |
 | `runner` | Runner | Server 已注册的执行资源、presence 与 capacity |
 | `server` | Mohist Server | 当前连接的控制平面应用及其状态、健康和应用日志 |
-| `service` | Managed Service | 本机受管的 Server 或 Runner 进程；不是领域上下文 |
+| `service` | Managed Service | 本机受管的 Server、Runner 或可选 `mohist-slack` 进程；不是领域上下文 |
 | `event` | Event delivery operations | 实时信封流与 dead-letter 恢复；不是业务领域资源 |
 | `label` | Label definition | Project 范围的标签词汇定义，供 Issue / Epic 引用 |
 | `routing` | Routing rule | Project 范围的有序事件路由规则及其干跑评估 |
@@ -69,14 +69,17 @@ aggregate 是内部实现，不机械决定命令导航。跨 context 的关系�
 - `project workflow set-default` 修改 Project 的默认 Profile 引用；`workflow` 只管理 Profile
   collection，Issue 的显式选择由 `issue create/edit --workflow-profile` 修改，并由
   `issue edit --inherit-workflow-profile` 清除；两个 flag 互斥。
-- `agent launch` 启动 Mohist Agent 工作并返回 AgentJob 与 AgentSession；Job 的工作结果从
-  `agent job` 读取，Session 不裁定 Job。
+- `agent launch` 启动 Mohist Agent 并返回 AgentJob、AgentSession、首条 SessionInput 与首个
+  AgentTurn；Job 裁定首次 launch execution，Session 承载持续对话，二者不互相冒充状态或结果。
+- `agent connection create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`
+  管理一个 Agent 的外部接入关系；它不修改 Agent 定义，也不复制 Slack 专用的根命令组。
 - `session transcript/followup/compact/reset/cancel` 改变或读取 AgentSession；不按 Issue 来源和 Agent 来源复制两套路径。
 - `epic add/remove` 表达 Epic membership 这一用户意图；Issue 仍是当前 EpicNumber 的唯一
   写入权威，CLI 不暴露跨 aggregate 协调过程。
 - `--issue`、`--run`、`--agent` 是解析或筛选条件，不转移动作所有权。
 
-subarea 用于没有独立操作入口的从属资源（`issue comment`、`project prompt`、`agent job`），
+subarea 用于没有独立操作入口的从属资源（`issue comment`、`project prompt`、`agent job`、
+`agent connection`），
 只服务于一个 area 的窄目录（`issue template`、`routing rule`、`agent model`），或表达拥有者
 scope 下的关系（`project workflow`）。AgentSession 有稳定 ID、独立生命周期且经常直接
 操作，因此必须是顶层 `session`。
@@ -130,6 +133,8 @@ resource command 表达资源及其状态变化。subarea 最多一层，用于 
 | 用 `server logs --source` 合并应用日志与本机服务日志 | 命令表更短，但两种日志的连接、权限、流和失败结果不同 | 不采用；保留 `server logs` 与 `service logs server` 两个明确行为 |
 | 为执行后端建立 `runtime list/view/model list` | 看似对称，但把 Runner 内部 adapter 与配置目录提升成不存在的产品资源 | 不采用；Runtime 只作为配置维度，模型目录放在 `agent model list --runtime` |
 | 保留根级 `config get/set` | 容易增加设置，却隐藏 Project、Agent、Workflow 与本机 Service 的不同所有权 | 不采用；只增加由明确资源拥有的类型化设置入口 |
+| 增加根级 `slack`，或按 provider 增加一组命令 | 首个 provider 看似直接，但会让 Agent 绑定、权限与生命周期散落到平台名下 | 不采用；使用 `agent connection`，`--provider slack` 只选择 provider-specific setup |
+| 用 `--agent-config <json>` 作为 Agent 的长期配置面 | 实现短，但把 schema、互斥和错误推给用户及 Agent | 不采用；公开 CLI 使用 `--runtime`、`--model`、`--variant`、`--skills`、`--avatar-file` 等类型化 flags |
 
 ## Context architecture
 
@@ -332,8 +337,14 @@ CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、
 - Project / Issue / Run 的 `variable` 命令共享 dotted key path 与 `--stage`；位置形式
   `set <key> <value>` 始终保存 string，boolean、number、object 或 array 必须通过互斥的
   `--value-json <json>` 输入；`--json` 仍只表示输出字段选择，不能被重载成输入值。
-- `agent launch` 返回 Job ID 与 Session ID；AgentJob read model 与 AgentSession 命令不会互相
-  声称拥有对方的状态或结果。
+- `agent launch` 返回 Job、Session、首个 Input 与 Turn ID；AgentJob read model 与
+  AgentSession 命令不会互相声称拥有对方的状态或结果。`session followup` 返回新 Input ID
+  与已知时的 Turn ID。
+- Agent create/edit 的 profile、Runtime、Model、Variant、Skills 与并发限制使用类型化
+  flags；命令不暴露任意 Agent config JSON，并显示 Server 提供的 Readiness 缺口。
+- `agent connection` 的 create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete
+  只有一组规范路径；create 建立可恢复 Connection，configure 安全提交凭据，view 始终显示
+  当前事实和下一步，Owner 通过明确认领建立。命令面不复制 Agent 配置，也不暴露 token。
 - `runner` / `server` 命令不得调用本机 service manager，`service` 命令不得依赖 Project 或
   把本机进程状态表示成 Runner resource 状态。
 - Activity list、Event tail 和 dead-letter recovery 分别锁定持久读模型、实时流和投递恢复

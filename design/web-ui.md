@@ -5,8 +5,9 @@ relationships, and safe user actions when the owner needs a global view or must 
 
 ## Product boundary
 
-- The user's primary conversation stays in an external Agent host. Web does not recreate Slack, an IDE,
-  or an Agent chat workspace.
+- The user's primary conversation usually stays in Slack, an IDE, or another external surface. Web does
+  not recreate those products, but it provides a complete direct Mohist Agent client for configuration,
+  launch, follow-up, Job result, Session evidence, and recovery.
 - Backup means infrequent, not incomplete. Critical lifecycle, approval, recovery, and configuration
   actions remain available without an external Agent.
 - Web emphasizes relationships and evidence that are hard to understand from a short Agent summary:
@@ -14,6 +15,8 @@ relationships, and safe user actions when the owner needs a global view or must 
   health.
 - New domain actions cannot exist only in Web. Web submits the same server-owned intent available to other
   clients and never creates a second interpretation of Workflow state.
+- Web, CLI and Slack adapter consume the same Agent API. Web cannot add launch-time Agent config overrides
+  merely because it owns the editor UI.
 
 ## What belongs where
 
@@ -25,6 +28,8 @@ relationships, and safe user actions when the owner needs a global view or must 
 | workflow decisions | WorkflowGrain |
 | shell/agent/git execution | Runner |
 | realtime push | Server → Web UI |
+| Agent definition and AgentJob result | Agent context via Agent API |
+| Agent Connection binding and policy | Agent context via API |
 
 Web UI never interprets workflow rules. It shows server state and submits user intent.
 
@@ -48,6 +53,35 @@ WorkflowRun 继续使用 `workflowRunId`。
 - UI state stores view prefs, filters, drafts. Never workflow truth.
 - Runner details stay behind API. UI never depends on process internals.
 
+## Agent product surface
+
+Agent list/detail is a management and test surface, not a decorative catalog. It must expose definition,
+launch, separate Job/Session status, and Connections without requiring users to infer relationships from
+raw transcript events.
+
+Identity, lifecycle, configuration Readiness, execution availability and Connection health are separate
+signals. The UI never turns an offline Runner into an Agent configuration error or collapses Slack health
+and Agent Readiness into one badge. Missing configuration points to the place where the Agent is edited;
+Unknown remains visibly different from Ready and Needs setup.
+
+Direct launch uses the same Agent API request as CLI and Slack except for authenticated actor/source
+metadata. Agent fields are edited before launch; the composer only accepts prompt, context refs and
+attachments. Runtime/Model/Skills overrides do not belong in the composer.
+
+AgentSession page renders two modes from the same Session model:
+
+- Workflow source emphasizes task ownership, evidence and recovery.
+- Agent launch source also provides a complete follow-up composer and is the backup direct conversation
+  client.
+
+The route mode cannot change Session lifecycle or API. AgentJob result is displayed separately from
+Session activity and Turn progress. Connection setup and health belong on Agent detail because the user
+starts from the Agent they intend to expose.
+
+The Connection panel presents resumable setup, next action, access policy, identity alignment and health.
+Allowlist editing uses member names and avatars as the human-facing control; display names are never used
+as authorization identity, and Web never reads Slack tokens.
+
 ## 前端模块边界
 
 Web 按 Feature-Sliced Design 组织为 `app`、`pages`、`widgets`、`features`、`entities` 和
@@ -67,7 +101,9 @@ Web 按 Feature-Sliced Design 组织为 `app`、`pages`、`widgets`、`features`
 
 ## Preference
 
-Dense, scannable screens. No landing pages or chat-first composition.
+Dense, scannable screens. No landing pages or chat-first application composition. A direct AgentSession
+may use a conversation layout because conversation is the task on that route; it does not become the app
+home page.
 
 First screens: attention-first production overview → Issue execution detail → approval and recovery →
 execution evidence → runner status.
