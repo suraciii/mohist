@@ -276,6 +276,62 @@ public class DispatcherGrainSpecs
         await _fixture.EventDispatcher.DispatchNowAsync();
     }
 
+    [Fact]
+    public async Task PoisonSettlementFailure_RecoverySettlesWithoutReinvokingHandler()
+    {
+        // The DispatcherPoisonHandler exhausts MaxAttempts (3) invocations
+        // before the dead-letter settlement write throws. After the store
+        // recovers, the next dispatch must settle the row using the
+        // retained in-process state — the handler is not invoked again
+        // and the dead-letter row records the original attempt count.
+        var eventId = $"evt_poison_recovery_{Guid.NewGuid():N}";
+        var envelope = new CloudEvent(
+            id: eventId,
+            source: new Uri($"/mohist/issues/issue_poison_recovery_{Guid.NewGuid():N}", UriKind.Relative),
+            type: "test.poison",
+            time: EventTime,
+            data: null);
+        _fixture.DeadLetterStore.ThrowAfterSourceMark = true;
+
+        try
+        {
+            await _fixture.EventPublisher.PublishAsync(envelope);
+            await _fixture.EventDispatcher.DispatchNowAsync();
+            await _fixture.EventDispatcher.DispatchNowAsync();
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _fixture.EventDispatcher.DispatchNowAsync());
+
+            Assert.Contains(
+                await _fixture.EventStore.ListUndeliveredAsync(),
+                row => row.EventId == eventId);
+            Assert.DoesNotContain(
+                _fixture.DeadLetterStore.Written,
+                row => row.EventId == eventId);
+        }
+        finally
+        {
+            _fixture.DeadLetterStore.ThrowAfterSourceMark = false;
+        }
+
+        await _fixture.EventDispatcher.DispatchNowAsync();
+
+        var deadLetter = Assert.Single(
+            _fixture.DeadLetterStore.Written,
+            row => row.EventId == eventId);
+        Assert.Equal(typeof(DispatcherPoisonHandler).FullName, deadLetter.FailingHandler);
+        Assert.Equal(3, deadLetter.AttemptCount);
+        Assert.Equal(0, _fixture.EventStore.PendingCount);
+
+        // A subsequent cycle must not rewrite the dead-letter row or
+        // re-invoke the handler — the source row is already marked
+        // dispatched and the dispatcher's in-process state is empty.
+        await _fixture.EventDispatcher.DispatchNowAsync();
+        Assert.Single(
+            _fixture.DeadLetterStore.Written,
+            row => row.EventId == eventId);
+        Assert.Equal(0, _fixture.EventStore.PendingCount);
+    }
+
     private Task PublishWorkflowCompletedAsync(string eventId, string issueId) =>
         _fixture.EventPublisher.PublishAsync(new CloudEvent(
             id: eventId,

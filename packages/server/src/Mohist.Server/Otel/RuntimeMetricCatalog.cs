@@ -37,6 +37,7 @@ public static class RuntimeMetricCatalog
     public const string ProcessCpuUtilization = "mohist.process.cpu.utilization";
     public const string ProcessWorkingSet = "mohist.process.memory.working_set";
     public const string ProcessGcHeap = "mohist.process.runtime.dotnet.gc.heap";
+    public const string EventDispatcherBlockedSources = "mohist.server.event_dispatcher.blocked_sources";
 
     public static readonly IReadOnlyList<string> HttpAttributeKeys =
         Array.AsReadOnly(["http.route", "http.request.method", "http.response.status_code"]);
@@ -68,6 +69,7 @@ public static class RuntimeMetricCatalog
             Definition(ProcessCpuUtilization, RuntimeMetricKind.ObservableGauge, "1", EmptyAttributes),
             Definition(ProcessWorkingSet, RuntimeMetricKind.ObservableGauge, "By", EmptyAttributes),
             Definition(ProcessGcHeap, RuntimeMetricKind.ObservableGauge, "By", EmptyAttributes),
+            Definition(EventDispatcherBlockedSources, RuntimeMetricKind.ObservableGauge, "1", EmptyAttributes),
         ]);
 
     public static IReadOnlyList<RuntimeMetricDefinition> Instruments => Definitions;

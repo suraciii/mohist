@@ -52,6 +52,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IAgentJobDispatchObserver _dispatchObserver;
     private readonly IAgentJobStore _jobStore;
     private readonly IEventStore _eventStore;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
     private IDisposable? _dispatchTimer;
     private IDisposable? _jobTimeoutTimer;
 
@@ -62,7 +63,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         [PersistentState("agent-job")] IPersistentState<AgentJobState> state,
         IEventStore eventStore,
         IAgentJobDispatchObserver dispatchObserver,
-        IAgentJobStore jobStore)
+        IAgentJobStore jobStore,
+        IBackgroundTaskLauncher backgroundTasks)
     {
         _log = log;
         _options = options.Value;
@@ -71,6 +73,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _eventStore = eventStore;
         _dispatchObserver = dispatchObserver;
         _jobStore = jobStore;
+        _backgroundTasks = backgroundTasks;
         // The backoff schedule is captured at activation time from the current
         // snapshot of AgentJobOptions. Hot-reload of the configuration section
         // is not applied to an already-active grain; it takes effect on the
@@ -1041,6 +1044,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         try
         {
             await _eventStore.AppendAsync(envelope, CancellationToken.None);
+            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
         }
         catch (Exception ex)
         {

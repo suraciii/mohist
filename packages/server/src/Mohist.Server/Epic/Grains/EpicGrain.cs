@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Epic.Domain;
 using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Services;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -24,6 +25,7 @@ public class EpicGrain : Grain, IEpicGrain
     private readonly TimeProvider _timeProvider;
     private readonly IEventStore _eventStore;
     private readonly ILogger<EpicGrain> _log;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
 
     internal EpicGrain(
         Orleans.Runtime.IGrainContext context,
@@ -32,7 +34,8 @@ public class EpicGrain : Grain, IEpicGrain
         IGrainFactory grains,
         TimeProvider timeProvider,
         IEventStore eventStore,
-        ILogger<EpicGrain> log)
+        ILogger<EpicGrain> log,
+        IBackgroundTaskLauncher backgroundTasks)
         : base(context, runtime)
     {
         _dbFactory = dbFactory;
@@ -40,6 +43,7 @@ public class EpicGrain : Grain, IEpicGrain
         _timeProvider = timeProvider;
         _eventStore = eventStore;
         _log = log;
+        _backgroundTasks = backgroundTasks;
     }
 
     public EpicGrain(
@@ -47,13 +51,15 @@ public class EpicGrain : Grain, IEpicGrain
         IGrainFactory grains,
         TimeProvider timeProvider,
         IEventStore eventStore,
-        ILogger<EpicGrain> log)
+        ILogger<EpicGrain> log,
+        IBackgroundTaskLauncher backgroundTasks)
     {
         _dbFactory = dbFactory;
         _grains = grains;
         _timeProvider = timeProvider;
         _eventStore = eventStore;
         _log = log;
+        _backgroundTasks = backgroundTasks;
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
@@ -77,7 +83,7 @@ public class EpicGrain : Grain, IEpicGrain
         db.Epics.Add(row);
         var pending = DrainPendingEvents(epic);
         await PersistEpicEventsAsync(db, epic, pending, now);
-        await db.SaveChangesAsync();
+        await SaveEpicChangesAsync(db, pending);
         return ToDto(row);
     }
 
@@ -190,7 +196,7 @@ public class EpicGrain : Grain, IEpicGrain
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
         await PersistEpicEventsAsync(db, domain, pending, now);
-        await db.SaveChangesAsync();
+        await SaveEpicChangesAsync(db, pending);
         return ToDto(row);
     }
 
@@ -220,7 +226,7 @@ public class EpicGrain : Grain, IEpicGrain
         // together. The handler re-drives recompute if the command-path
         // TryStartNextAsync never runs (crash after commit).
         await PersistEpicEventsAsync(db, domain, pending, now);
-        await db.SaveChangesAsync();
+        await SaveEpicChangesAsync(db, pending);
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
@@ -251,7 +257,7 @@ public class EpicGrain : Grain, IEpicGrain
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
         await PersistEpicEventsAsync(db, domain, pending, now);
-        await db.SaveChangesAsync();
+        await SaveEpicChangesAsync(db, pending);
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
@@ -290,7 +296,7 @@ public class EpicGrain : Grain, IEpicGrain
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
         await PersistEpicEventsAsync(db, domain, pending, now);
-        await db.SaveChangesAsync();
+        await SaveEpicChangesAsync(db, pending);
         return ToDto(row);
     }
 
@@ -315,7 +321,7 @@ public class EpicGrain : Grain, IEpicGrain
 
         var pending = DrainPendingEvents(domain);
         await PersistEpicEventsAsync(db, domain, pending, now);
-        await db.SaveChangesAsync();
+        await SaveEpicChangesAsync(db, pending);
         return ToDto(row);
     }
 
@@ -334,7 +340,7 @@ public class EpicGrain : Grain, IEpicGrain
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
         await PersistEpicEventsAsync(db, domain, pending, now);
-        await db.SaveChangesAsync();
+        await SaveEpicChangesAsync(db, pending);
         return ToDto(row);
     }
 
@@ -402,7 +408,7 @@ public class EpicGrain : Grain, IEpicGrain
             MapToRow(domain, row, now);
             var pending = DrainPendingEvents(domain);
             await PersistEpicEventsAsync(db, domain, pending, now);
-            await db.SaveChangesAsync();
+            await SaveEpicChangesAsync(db, pending);
             return await TryStartNextAsync(db, projectId, epicNumber, row, links, startFailureMode);
         }
         if (open.Count == 0)
@@ -413,7 +419,7 @@ public class EpicGrain : Grain, IEpicGrain
             MapToRow(domain, row, now);
             var pending = DrainPendingEvents(domain);
             await PersistEpicEventsAsync(db, domain, pending, now);
-            await db.SaveChangesAsync();
+            await SaveEpicChangesAsync(db, pending);
             return ToDto(row);
         }
 
@@ -491,7 +497,7 @@ public class EpicGrain : Grain, IEpicGrain
                 MapToRow(domain, row, now);
                 var pending = DrainPendingEvents(domain);
                 await PersistEpicEventsAsync(db, domain, pending, now);
-                await db.SaveChangesAsync();
+                await SaveEpicChangesAsync(db, pending);
                 return ToDto(row);
             }
             throw;
@@ -524,7 +530,7 @@ public class EpicGrain : Grain, IEpicGrain
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
         await PersistEpicEventsAsync(db, domain, pending, now);
-        await db.SaveChangesAsync();
+        await SaveEpicChangesAsync(db, pending);
         return ToDto(row);
     }
 
@@ -693,6 +699,15 @@ public class EpicGrain : Grain, IEpicGrain
         var pending = epic.PendingEvents.ToList();
         epic.ClearPendingEvents();
         return pending;
+    }
+
+    private async Task SaveEpicChangesAsync(
+        MohistDbContext db,
+        IReadOnlyCollection<Epic.Domain.Events.EpicEvent> pending)
+    {
+        await db.SaveChangesAsync();
+        if (pending.Count > 0)
+            EventDispatcherPoke.PokeAfterCommit(_grains, _log, nameof(EpicGrain), _backgroundTasks);
     }
 
     /// <summary>

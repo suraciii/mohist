@@ -6,7 +6,9 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Hosting;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Runner;
@@ -45,8 +47,12 @@ public sealed class CapturingEventStore : IEventStore
     private long _nextId;
     private readonly object _gate = new();
 
+    public Func<CloudEvent, bool>? ThrowOnAppend { get; set; }
+
     public Task AppendAsync(CloudEvent envelope, CancellationToken ct = default)
     {
+        if (ThrowOnAppend?.Invoke(envelope) == true)
+            throw new InvalidOperationException("simulated event append failure");
         lock (_gate)
         {
             _rows.Add(new UndeliveredEvent(
@@ -120,6 +126,7 @@ public sealed class CapturingEventStore : IEventStore
         {
             _rows.Clear();
             _nextId = 0;
+            ThrowOnAppend = null;
         }
     }
 
@@ -440,14 +447,6 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
         };
 }
 
-/// <summary>
-/// Self-contained silo fixture for the dispatcher integration tests.
-/// Wires the production <see cref="EventDispatcherService"/> with
-/// <see cref="CapturingEventStore"/> as the dispatcher's <see cref="IEventStore"/>
-/// and <see cref="NoopDeadLetterStore"/> for the dead-letter sink. Exposes
-/// the dispatcher grain via its fixed global key so specs can drive
-/// deterministic ticks via <see cref="IEventDispatcherGrain.DispatchNowAsync"/>.
-/// </summary>
 public sealed class DispatcherFixture : IAsyncLifetime
 {
     public InProcessTestCluster Cluster { get; private set; } = null!;
@@ -458,6 +457,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
     public CapturingDeadLetterStore DeadLetterStore { get; }
     public FakeRunnerWorkspaceClient RunnerWorkspace { get; private set; } = null!;
     public SharedReminderTable ReminderTable { get; } = new();
+    public RecordingBackgroundTaskLauncher BackgroundTasks { get; } = new();
 
     public IEventDispatcherGrain EventDispatcher => Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global);
 
@@ -524,6 +524,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
     {
         EventStore.Reset();
         DeadLetterStore.Reset();
+        BackgroundTasks.Reset();
         lock (ClosedGenericInvocations)
             ClosedGenericInvocations.Clear();
         lock (CatchAllInvocations)
@@ -635,6 +636,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Issue.IIssueStore, Mohist.Server.Infrastructure.Data.Issue.IssueStore>();
         siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Sessions.IAgentSessionStore, Mohist.Server.Infrastructure.Data.Sessions.AgentSessionStore>();
+        siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();
         siloBuilder.Services.AddScoped<RunnerWorkStore>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
         siloBuilder.Services.AddScoped<WorkflowRunProfileManager>();
@@ -657,8 +659,6 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddSingleton<IDeadLetterStore>(DeadLetterStore);
 
         siloBuilder.Services.AddCloudEventBus();
-        // Add the fixture as a singleton so the test handlers can resolve
-        // it and record their invocations on the fixture's shared lists.
         siloBuilder.Services.AddSingleton(this);
         siloBuilder.Services.AddCloudEventHandlersFromAssembly(typeof(DispatcherFixture).Assembly);
 
@@ -684,6 +684,8 @@ public sealed class DispatcherFixture : IAsyncLifetime
             opts.JobTimeout = TimeSpan.FromSeconds(10);
         });
         siloBuilder.Services.AddRequiredInfrastructure();
+        siloBuilder.Services.RemoveAll<IBackgroundTaskLauncher>();
+        siloBuilder.Services.AddSingleton<IBackgroundTaskLauncher>(BackgroundTasks);
         siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
     }
 

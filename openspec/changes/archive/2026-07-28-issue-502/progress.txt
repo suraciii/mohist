@@ -1,0 +1,62 @@
+## Codebase Patterns
+
+- Durable producers call `EventDispatcherPoke.PokeAfterCommit` only after their own persistence boundary succeeds; the helper owns fire-and-forget execution and failure logging.
+- Epic state and events share one `MohistDbContext` commit. `SaveEpicChangesAsync` centralizes the post-commit poke and skips it when the drained event list is empty.
+- AgentJob failure events use the standalone `IEventStore.AppendAsync` boundary. The poke follows that append directly; append failure leaves `PendingFailureEvent` for activation/reminder recovery and never launches a poke.
+- Dispatcher immediate-trigger specs use a one-hour reminder period plus handler-owned completion signals, so immediate delivery and reminder recovery require no wall-clock waiting.
+- Settlement state retention is enforced by `EventDispatcherService.DispatchOneAsync` via the existing L199-200 short-circuit on `state.Status != Pending || state.NextAttemptTime > now`; once `_states` is preserved across a failed settlement, those guards naturally skip already completed or dead-lettered handlers on the next cycle.
+
+## T-001
+
+- Added EpicGrain and AgentJobGrain `IBackgroundTaskLauncher` wiring and shared post-append dispatcher pokes.
+- Added immediate-delivery coverage for Epic and AgentJob, no-event/no-poke coverage for idempotent Epic commands, and AgentJob append-failure recovery coverage.
+- Immediate Epic delivery can advance an empty running Epic to done before the next API call; the running-reopen spec now links an open Issue to preserve the intended running precondition.
+- The full suite exposed a pre-existing parallel transcript flush in `MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents`; its assertion now selects the unique flush containing `session.activity` rather than requiring no unrelated flushes.
+- Verification passed: `npm run build`, focused dispatcher/Epic/AgentJob specs, architecture tests, and `npm test` (3277 server specs, 5146 web tests with one existing skip, 1438 runner tests).
+
+## T-002
+
+- Removed the `_states.Remove(key)` from the settlement failure catch in `EventDispatcherService.DispatchOneAsync` so handler state survives a failed `MarkDispatchedAsync` or `IDeadLetterStore.SettleAsync`; the next cycle retries only the settlement write and, under the existing L199-200 short-circuit, does not re-invoke already completed handlers or reset a dead-lettered handler's attempt count.
+- The process-local dispatch gate already serializes cycles, so the change is concurrency-safe; a dispatcher restart still intentionally clears `_states` and the reminder re-runs the row from scratch.
+- Several `EventDispatcherSpecs` tests previously relied on the catch's `_states.Remove` to re-invoke handlers when settlement failed. Updated assertions to the new contract: handler-attempt counters are retained across a settlement failure, dead-lettered handlers are not re-invoked on the next cycle, and FIFO settlement still proceeds after the first-handler mark fails.
+- Focus-specific T-002 coverage lives in a new `EventDispatcherSettlementRetentionSpecs` file because the existing `EventDispatcherSpecs` file is at its 24 KB ratchet baseline; the focused file keeps the baseline file stable while adding the dedicated `DeadLetterSettlementFailure_RecoveryReusesHandlerState` and `MarkFailure_RecoveryReusesHandlerState` scenarios.
+- Added the silo-level `PoisonSettlementFailure_RecoverySettlesWithoutReinvokingHandler` spec in `DispatcherGrainSpecs` to prove the in-process retention flow through the production `IEventDispatcherGrain` → `EventDispatcherService` → `IDeadLetterStore` chain with the fixture's `MaxAttempts=3` and `BaseBackoff=TimeSpan.Zero`. It asserts the dead-letter row carries `AttemptCount=3` (the original budget) and that a subsequent cycle neither re-invokes the handler nor rewrites the row.
+- `BaseBackoff=TimeSpan.Zero` in the silo fixture means the existing `PoisonSettlementFailure_RollsBackSourceMarkAndDeadLetterRows` test still ticks the handler on every advance (its 3 DispatchNow calls land the handler at `AttemptCount=3` because the time gate is always satisfied); the T-002 assertion is that the new recovery spec sees the same `AttemptCount=3` after settlement recovery, proving the in-process state survived the failed write.
+- Verification passed: `npm run build`, focused dispatcher unit + silo + ArchTests, and `npm test` (1535 server units, 3278 server specs, 35 arch tests, 1438 runner tests, 5145 web tests with 1 existing skip).
+
+## T-003
+
+- Registered `mohist.server.event_dispatcher.blocked_sources` in `RuntimeMetricCatalog` as a unitless `ObservableGauge` with no attribute keys, so the catalog contract enforces the bounded cardinality spec.
+- `EventDispatcherService` now owns its own `Meter` (`Mohist.Server.EventDispatcher`) — separate from `RuntimeObservability`'s `Mohist.Server.Runtime` meter — so the dispatcher singleton disposes its gauge when the silo tears the service down. The service implements `IDisposable` and the gauge reader returns no measurements after disposal.
+- `DispatchAsync` records the completed cycle's `blockedSources.Count` via `Interlocked.Exchange` on `_lastCompletedCycleBlockedSources`. The ObservableGauge callback returns that snapshot as a single `Measurement<long>` per poll, with no tags.
+- Exposed `EventDispatcherService.Meter` so unit tests can register a `MeterListener` against the specific dispatcher instance; matching by `Meter.Name` alone collides with parallel test instances that share the meter name.
+- Focus-specific T-003 coverage lives in `EventDispatcherBlockedSourcesGaugeSpecs`. Three scenarios cover the spec:
+  - `PendingRetry_PublishesPositiveBlockedSourceCount_AndSkipsLaterRowsInSameSource` proves the gauge reports 1 after a cycle where one handler is awaiting retry, and that the later row in the same source is skipped without re-invoking the handler.
+  - `NoBlockedSource_PublishesZero_AfterRecoveryCycle` advances `FakeTimeProvider` past the backoff, re-dispatches, and asserts the gauge reports 0 once the previously-blocked source is settled.
+  - `Gauge_PublishesNoSourceTags_OrOtherHighCardinalityAttributes` asserts the observation's `TagList` is empty so source identifiers never become metric attributes.
+- The first version of `NoBlockedSource_PublishesZero_AfterRecoveryCycle` accidentally used `MaxAttempts=1`, which dead-letters the handler on the first call and never produces a "blocked" cycle (the source is settled in one shot). Reworked the scenario to use `MaxAttempts=3` with a one-second base backoff and a handler that throws on the first attempt, so cycle 1 records a blocked source and cycle 2 recovers it.
+- Verification passed: `npm run build`, focused dispatcher unit + ArchTests, and `npm test` (1538 server units +3, 3278 server specs, 35 arch tests, 1432 CLI tests, 175 workflow definition tests, 1438 runner tests, 5145 web tests with 1 existing skip).
+
+## T-004
+
+- Rewrote `design/eventbus.md` to converge with the dispatcher contract actually deployed after T-001/T-002/T-003.
+- Event inventory: table + prose now name the five durable origins the dispatcher queries (`WorkflowRun`, `Issue`, `Epic`, `AgentSession`, `AgentJob`); the previous `Runner Disconnected` and `Session — no` rows were stale and got removed.
+- Backoff: replaced every Polly mention (diagram + error ladder) with `EventDispatcherOptions.BaseBackoff` × 2^(attempt-1) capped by `MaxBackoff`, plus `MaxAttempts`. The `手写指数退避` heading matches the inline `Backoff(int)` calculation in `EventDispatcherService` and the configured options.
+- Wake-up: dropped the "生产者只追加，绝不唤醒分发器" claim and added a 唤醒 subsection that names all five producers and the `EventDispatcherPoke.PokeAfterCommit` helper; reminder is stated as the correctness path.
+- Settlement retention: new 结算保留 subsection states that the in-process handler-state map survives a failed `MarkDispatchedAsync`/`SettleAsync`, that the next cycle retries only the settlement write, and that a dispatcher restart clears the map (no persistence promised).
+- FIFO + visibility: new FIFO 阻塞与可见性 subsection explains the per-source skip rule and names `mohist.server.event_dispatcher.blocked_sources` as the attribute-free ObservableGauge; no source/event/attempt attribute is promised.
+- DLQ: 崩溃与恢复 explicitly says no new DLQ query/replay API is introduced; the existing `IDeadLetterStore.StartRedeliveryAsync`/`ResolveAsync`/`RecordRedeliveryFailureAsync` flow is unchanged.
+- Removed the original "未来：N 个分发器按 hash(Source) % N 分片" line because the document must describe the deployed contract, not future dispatcher architecture.
+- Verification passed: `npm run build`, `npm test` (1538 server units, 3278 server specs, 35 arch tests, 1432 CLI tests, 175 workflow definition tests, 1438 runner tests, 5145 web tests with 1 existing skip).
+
+## Review Fix
+
+- Added the production metrics pipeline for `EventDispatcherService.MeterName`, exporting the blocked-source gauge through OTLP HTTP protobuf at the configured `/v1/metrics` endpoint.
+- Kept trace and metrics exporters on named signal-specific options so the trace endpoint cannot override the metrics endpoint.
+- Extended the registration specs to assert the hosted `MeterProvider` and the named metrics exporter configuration for the dispatcher meter, including its `/v1/metrics` endpoint, without a real collector.
+- Verification passed: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore -p:SkipWebBuild=true` (1541 tests) and `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true` (3279 tests). `npm run build` passed. `npm test` reached the server specs but failed in the unrelated, intermittent `AgentSessionEventDiscardObservabilitySpecs.MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents` assertion.
+
+## Review Fix: Transcript Flush Synchronization
+
+- Added a predicate-based completion signal to `FakeAgentSessionTranscriptStore` and registered the `session.activity` wait before submitting the mixed event batch. The spec now waits for its own flush instead of relying on a persistence checkpoint that can complete before transcript persistence.
+- Scoped the no-transcript assertions in the same shared fixture to the session under test, so delayed flushes from unrelated session activations do not invalidate their behavior checks.
