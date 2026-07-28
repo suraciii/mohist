@@ -102,7 +102,7 @@ task-command     = mo <task> [target] [flags]
 | `label` | `list`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
 | `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
-| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；只读 `model list --runtime` |
+| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；`connection list/view/create/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`；只读 `model list --runtime` |
 | `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
 | `activity` | `list` |
 | `routing` | `rule list/view/create/edit/archive/move`；`test` 评估整张路由表 |
@@ -113,13 +113,13 @@ task-command     = mo <task> [target] [flags]
 |---|---|
 | `runner` | `list`、`view`、`status` |
 | `server` | `status`、`health`、`info`、`logs` |
-| `service` | `start`、`stop`、`restart`、`status`、`logs`、`uninstall`，target 为 `server` 或 `runner` |
+| `service` | `start`、`stop`、`restart`、`status`、`logs`、`uninstall`，target 为 `server`、`runner` 或 `slack` |
 | `event` | `tail`；`dead-letter list/redeliver` |
 | `notification` | `setup` |
 | `otel` | `status`、`query` |
 | `skill` | `list`、`view`、`install`、`path`、`sync` |
 | `help` | 查看 `output`、`environment`、`exit-codes` 等共用规则 |
-| `install` | 安装 `server` 或 `runner` |
+| `install` | 安装 `server`、`runner` 或 `slack` |
 | `update` | 更新全部组件或一个指定组件 |
 | `info` | 查看本机 CLI、安装来源与有效环境 |
 
@@ -186,11 +186,18 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 
 ## Agent、AgentJob 与 Session
 
-`agent` 是 Project 内有稳定身份的 Mohist Agent。AgentJob 是该 Agent 的一次工作，回答
-执行是否完成及结果是什么；AgentSession 是可独立寻址的对话，回答发生了哪些消息、上下文
-和用量。CLI 不用 Session 状态代替 AgentJob 结果。
+`agent` 是 Project 内有稳定身份的 Mohist Agent。AgentJob 是该 Agent 一次 launch 的首次
+执行，回答这次启动是否完成及结果是什么；AgentSession 是可独立寻址的持续对话，回答发生
+了哪些消息、上下文和用量。CLI 不用 Session 状态代替 AgentJob 结果，也不把 Job completed
+解释为对话关闭或用户目标已经交付。
 
-- `mo agent launch <agent>` 创建 AgentJob 与 AgentSession，并返回 Job ID 和 Session ID。
+- `mo agent launch <agent>` 创建 AgentJob、AgentSession、首条 SessionInput 与首个 AgentTurn，
+  并返回四个稳定 ID。
+- `mo agent create/edit` 使用类型化的 `--runtime`、`--model`、`--variant`、`--skills` 和
+  `--max-concurrent-runs` 配置 Agent；头像使用 `--avatar-file`，Instructions 使用互斥的
+  `--instructions` 或 `--instructions-file`。CLI 不要求调用方拼 Agent config JSON。
+  `mo agent view` 显示统一 Readiness、配置缺口与当前执行可用性；并发限制实时约束 launch
+  和 follow-up，但不强停已在运行的执行。
 - `mo agent install <name>` 安装内置 Agent 预设（如 `supervisor`：监管 Agent 与审批、
   失败两条路由规则），幂等且不覆盖已有内容；产物是普通 Agent 与 RoutingRule。
 - `mo agent job list <agent>` 与 `mo agent job view <job-id>` 读取工作状态和结果。
@@ -199,7 +206,30 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 - `mo session list --agent <agent>` 查看该 Agent 发起的 Session。
 - `mo session list --issue <number>` 查看该 Issue 的 Workflow 产生的 Session。
 - `mo session list --run <run-id>` 查看该 Run 的 Session。
-- 后续读取、follow-up、compact、reset 和 cancel 都使用稳定的 Session ID。
+- 后续读取、follow-up、compact、reset 和 cancel 都使用稳定的 Session ID。follow-up 返回新的
+  Input ID；已经归入当前 Turn 或新 Turn 时同时返回 Turn ID，否则稍后从 Session 读取归属。
+
+`agent connection` 管理一个 Mohist Agent 与外部交互身份的绑定。第一版 provider 是 Slack：
+
+- `mo agent connection create <agent> --provider slack --experience <standard|agent>` 只创建
+  可恢复 Connection，输出 Slack identity preview、预填创建地址与 Connection ID；不要求
+  `mohist-slack` 在线，也不读取凭据。
+- `mo agent connection configure <connection-id>` 使用隐藏输入提交 Slack 凭据，不接受 token
+  literal flag。非交互环境增加 `--credentials-file <path>`；缺少时立即失败，不等待输入。
+  接入服务离线时保存后返回 Waiting for Slack service。
+- `mo agent connection claim-owner <connection-id>` 只在 identity verification 完成后生成并
+  显示一次 setup claim、有效期和 Slack DM 步骤；再次运行立即使旧 claim 失效。
+- `mo agent connection view <connection-id>` 始终返回 setup progress、capabilities 和唯一
+  next action；命令可以退出，安装与认领不依赖原进程存活。
+- `mo agent connection list <agent>` 读取该 Agent 的所有接入；
+  `view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete <connection-id>` 管理一个
+  接入。`edit --access-policy allowlist` 用可重复的 `--allow-member <slack-member-id>` 原子
+  替换非 Owner 成员；Owner 转移通过新的单次认领完成。
+- `disable` 可恢复并保留 Agent 与全部执行历史；`delete --yes` 删除连接凭据与关系，但不
+  删除 Agent、AgentJob 或 AgentSession，也不代替用户从 Slack 卸载 App。
+
+Connection 只拥有外部身份、权限和连接状态；Agent 配置仍由 `agent edit` 修改。完整产品
+语义见[把 Mohist Agent 接入 Slack](agent-connections.md)。
 
 来源只是筛选和便捷查找条件，不创造 `mo issue session` 与 `mo agent session` 两套重复能力。
 `session cancel` 请求中断当前 Runtime 执行；它不表示取消或重写 AgentJob 生命周期。
@@ -212,7 +242,8 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 
 `runner` 只表示 Server 已注册的执行资源及其 presence、capacity 和状态。`server` 只表示
 当前连接的 Mohist Server 应用。对本机受管进程的启动、停止和日志读取统一使用
-`mo service <action> <server|runner>`。因此 `server logs` 返回应用日志，
+`mo service <action> <server|runner|slack>`；`slack` 是可选的 `mohist-slack` 接入服务，
+不是 Slack Connection 资源。因此 `server logs` 返回应用日志，
 `service logs server` 返回本机服务管理器日志，不用 `--source` 在两种行为间切换。
 
 CLI 不提供泛化的根级 `config`。Project Variables、Prompt、Agent 配置和其它产品设置由各自
@@ -344,10 +375,16 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `project prompt get/set/clear/preview` 已在命令地图登记，命令树尚未实装。
 - `agent restore` 已在命令地图登记，命令树尚未实装（`archive` 已有）。
+- `agent create/edit` 当前仍通过 `--agent-config <json-or-file>` 设置 Runtime、Model 与 Variant；
+  目标类型化 flags、`--avatar-file` 与 Readiness 输出尚未实装。
+- `agent connection` 命令组与 Slack setup 尚未实装。
+- `install/update/service ... slack` 与 `mohist-slack` 受管服务尚未实装。
+- Agent launch/follow-up 目前尚未暴露稳定的 SessionInput 与 AgentTurn 身份；现有已闭合项只
+  覆盖 Job 与 Session 两层身份。
 
 ### 已闭合
 
-- `runner` / `server` / `service` 三层职责：`runner` 只表示 Server 已注册的远程执行资源（`list`/`view`/`status`），`server` 只表示当前连接的 Mohist Server 应用（`status`/`health`/`info`/`logs`，其中 `logs` 是应用日志）；本机受管进程统一为 `mo service <verb> server|runner`。`project status` 已迁移到 `server status`；`system logs` 已合并到 `server logs`，`system` 命令组整体退役。
+- `runner` / `server` / `service` 三层职责：`runner` 只表示 Server 已注册的远程执行资源（`list`/`view`/`status`），`server` 只表示当前连接的 Mohist Server 应用（`status`/`health`/`info`/`logs`，其中 `logs` 是应用日志）；已实装的本机受管进程统一为 `mo service <verb> server|runner`，目标命令面再增加可选 `slack` service。`project status` 已迁移到 `server status`；`system logs` 已合并到 `server logs`，`system` 命令组整体退役。
 - Agent launch 同时暴露 Job 与 Session 的稳定身份：`mo agent launch <agent>` 直接挂在 `agent` 下（不再经过 `agent session launch`），打印 `jobId` 与 `sessionId`；HTTP 201 同样同时返回 `jobId`、`sessionId` 与各自读取链接，`jobId` 被 `agent job view` 原样接受（无 id 翻译）。
 - AgentSession 对话统一到顶层 `mo session`：`mo session` 直接挂在根下，`view` / `transcript` / `followup` / `compact` / `reset` / `cancel` 都以稳定 Session ID 寻址，不论该 Session 来自 Agent launch 还是 Workflow run；`list` 通过 `--agent <agent>` / `--issue <number>` / `--run <run-id>` 之一筛选，不创建 `mo issue session` 与 `mo agent session` 两套重复能力。`mo issue sessions <number>` 与 `mo agent session …` 已退役，运行返回 command-not-found。
 - `workflow` / `run` 分工：`workflow` 管理 Project 范围的 Workflow Profile，`run` 管理 WorkflowRun 的执行与控制；两组帮助互相链接，Run 控制动词只保留 `run` 入口，Issue 号作为 `--issue` 选择器。

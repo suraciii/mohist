@@ -5,7 +5,7 @@ status: wip
 # Agent 事件路由（Routing Table）
 
 Mohist Agent 通过项目级**事件路由表**自动响应系统事件，取代手动 launch。
-本文的 Agent 均指 Mohist Agent（Named Agent，术语与所有权不变量见
+本文的 Agent 均指 Mohist Agent（术语与所有权不变量见
 [`agent-execution.md`](agent-execution.md)）；信封协议与匹配表达式语法见
 [`event-protocol.md`](event-protocol.md)。
 
@@ -77,7 +77,8 @@ RoutingRule（项目级，有序表）
   重复起 job（沿用现有 AgentLauncher 机制，subscriptionId 换 ruleId）。
 - 触发的 AgentSession 打标签：`mohist.io/trigger/event-id`、
   `mohist.io/trigger/rule-id`。事件 → 规则 → AgentJob 双向可查。
-- AgentJob 裁定响应完成；AgentSession 提供对话与审计证据。
+- AgentJob 裁定响应完成；AgentSession 以 SessionInput、AgentTurn 和 transcript 提供对话与
+  审计证据。
 
 ## 与系统 handler 的关系
 

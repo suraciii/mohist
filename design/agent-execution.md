@@ -42,6 +42,11 @@ Workflow 工作负责，AgentJob 对 Mohist Agent 工作负责。每个入口把
 AgentSession 目标交给 Runtime adapter，Runtime 事实写回该 Session。共享 Runtime
 代码不能制造 Workflow -> Agent 的领域依赖。
 
+Web、CLI、Agent Connection、事件路由和评论提及只是“启动 Mohist Agent”这条路径的不同
+调用来源，不增加第三条执行路径。交互客户端经 [`agent-api.md`](agent-api.md) 提交任务和
+上下文；Agent context 统一解析定义并创建 AgentJob，Session context 统一持有会话。Slack
+Bot 等 provider adapter 不能自行 snapshot Agent、创建 Runtime Session 或拥有工作结果。
+
 ## Action 语义
 
 `mohist/opencode` 和 `mohist/pi` 是 Runtime 特有的 Action，回答“用这个 Runtime 执行
@@ -76,7 +81,7 @@ TaskRun 与 AgentJob 拥有以下决策：
 
 AgentSession 拥有以下事实：
 
-- 按顺序记录的输入、回复、tool calls 与 Runtime 状态；
+- 按顺序记录的 SessionInput、AgentTurn、回复、tool calls 与 Runtime 状态；
 - context 与 usage；
 - model / Runtime observations；
 - 当前 activity 与 Runtime binding。
@@ -86,8 +91,19 @@ Workflow Action adapter 向 TaskRun 报告工作结果，AgentJob executor 向 A
 也不会让 AgentJob 进入终态。工作失败可以成为 transcript 中的诊断，但 Session 不是
 工作结果的裁判。
 
-Session 命令不是工作 dispatch。Follow-up 只向现有 AgentSession 追加输入，不创建
-TaskRun 或 AgentJob。Compact 与 Reset 同样只改变 Session；它们不轮换 AgentSession ID。
+Session 命令不是工作 dispatch。Follow-up 只向现有 AgentSession 追加 SessionInput，不创建
+TaskRun 或 AgentJob。它由当前执行处理，或在同一 Session 中形成后续 AgentTurn。Compact
+与 Reset 同样只改变 Session；它们不轮换 AgentSession ID。
+
+AgentJob 关联 launch 创建的首个 SessionInput 与 AgentTurn。`Completed` 表示这次 launch
+工作成功返回，不表示 AgentSession 关闭，也不对自然语言任务作语义完成判断。首次回复
+可以是澄清问题；之后的 Follow-up 由新的 SessionInput 和相应 AgentTurn 记录，不重开或
+改写原 AgentJob。需要业务生命周期的输出必须进入 Issue / Workflow，而不是让 AgentJob
+等待整段对话结束。
+
+Agent launch 时固定 Instructions、Runtime、Model、Variant 与 Skills，并由该 AgentSession
+的后续输入继续使用。Agent 的并发与调度策略由 Mohist 统一执行；入口不能绕过，策略变化
+也不强行改写已经开始的执行。
 
 ## AgentSession 模型
 
@@ -100,9 +116,25 @@ AgentSession
   WorkDir
   Activity
   CurrentBinding?
+  Inputs
+  Turns
   Transcript
   Context
   Usage
+
+SessionInput
+  Id
+  Sequence
+  Text?
+  TurnId?
+  Source
+  Attachments
+
+AgentTurn
+  Id
+  Sequence
+  Status
+  InputIds
 
 RuntimeBinding
   RunnerId
@@ -120,6 +152,9 @@ RuntimeBinding
   与累计 `Usage` 不随 binding 替换清空。
 - 同一 AgentSession 同时最多有一次 Runtime 执行；该串行约束使 transcript 的 Session
   内顺序足以表达会话。
+- Session 最多有一个 active Turn，等待执行的 Input 与 Turn 保持 Session 内顺序。
+- 已经接受的 Input 不会因容量限制被丢弃、覆盖或换 ID；容量不足时拒绝新的输入。
+- 用户输入必须包含可见文本或明确附件；attachment-only 输入不生成隐藏 prompt。
 - AgentSession 没有 `completed`、`failed`、`stopped` 或 `closed` 生命周期。
 
 `CurrentBinding` 允许初始为空。首次执行先创建物理 Session，再把 binding 持久化；只有
@@ -133,8 +168,8 @@ AgentSession 的活动状态只有：
 
 | 值 | 含义 |
 |---|---|
-| `idle` | 没有确认仍在执行的输入，可以开始新的执行、Compact 或 Reset |
-| `active` | Runtime 正在处理输入；Follow-up 可以进入当前执行，Cancel 可以尝试停止 |
+| `idle` | 没有未终结 Turn，可以开始新的 Turn、Compact 或 Reset |
+| `active` | 至少有一个 queued 或 active Turn；Turn 状态区分等待与 Runtime 正在处理 |
 | `unknown` | 无法确认输入是否已被接受或执行是否已停止；不得当作安全空闲 |
 
 新 AgentSession 的初始 activity 是 `idle`，此时允许 `CurrentBinding` 为空。
@@ -142,9 +177,9 @@ AgentSession 的活动状态只有：
 状态转换为：
 
 ```text
-idle + input accepted                 -> active
-active + follow-up accepted           -> active
-active + execution confirmed stopped  -> idle
+idle + input accepted                    -> active
+active + follow-up accepted              -> active
+active + all Turns confirmed terminal    -> idle
 active + stop result uncertain        -> unknown
 idle + input acceptance uncertain     -> unknown
 unknown + runtime evidence             -> active | idle
@@ -156,41 +191,18 @@ transcript 中的 Runtime 诊断表达，不能成为 AgentSession 终态。Runt
 
 ### Transcript 契约
 
-Transcript 是扁平、按 Session 排序的会话事实。它不为单次输入建立子实体、额外身份、
-分组存储或物理 Session 历史。
+SessionInput 与 AgentTurn 是 AgentSession 拥有的子记录，不是可独立寻址和修改的聚合。
+Session 是输入顺序、Turn 归属和状态转换的唯一写入权威。Transcript 仍是扁平、按 Session
+顺序追加的会话事实；Input 与 Turn ID 只提供稳定关联，不建立第二份消息树或物理 Session
+历史。
 
-`session.input` 是输入已被 Mohist 接受的规范事实：
+每条被接受的输入都对应一个稳定 SessionInput，同一调用重试不能复制输入。AgentTurn 记录
+一段连续处理的排队、执行和结果；一个 Input 只属于一个 Turn。消息、reasoning、tool、usage、
+model、provider retry、compaction 和状态事实继续按发生顺序进入同一 transcript。
 
-```json
-{
-  "type": "session.input",
-  "payload": {
-    "text": "...",
-    "source": "task-run | agent-job | followup | system",
-    "acceptedAt": "2026-07-22T10:00:00Z"
-  }
-}
-```
-
-每条被接受的输入各有一个 `session.input`。它是 transcript 中的输入边界，不创建另一个
-领域资源。消息、reasoning、tool、usage、model、provider retry、compaction 和 status
-事实按发生顺序追加在同一 transcript 中。
-
-`session.activity` 是 activity 变化的规范事实：
-
-```json
-{
-  "type": "session.activity",
-  "payload": {
-    "activity": "idle | active | unknown",
-    "observedAt": "2026-07-22T10:02:00Z"
-  }
-}
-```
-
-`session.input` 与所需的 `idle -> active` 转换由 Session 原子接受；执行中的 Follow-up
-只追加输入，activity 保持 `active`。执行结束或状态核对只报告新的 activity，不重复表达
-TaskRun 或 AgentJob 结果。所有时间使用 UTC ISO 8601。
+Input 是否已被 Runtime 接受、Turn 是否仍在执行，都由 Session 记录。结果不确定时保留
+`unknown` 并核对原记录，不能换一个新 ID 自动重投。Session activity 只表达当前是否仍有
+执行，不重复表达 TaskRun 或 AgentJob 结果。
 
 已有 binding 被替换时，`session.context_reset` 是 transcript 中的用户可见边界：
 
@@ -209,31 +221,27 @@ binding 历史。首次从无 binding 建立物理 Session 时不写该事实。
 `session.context_reset` 必须原子完成；该事实在替换后的下一条 `session.input` 之前。
 
 `session.closed` 不属于目标 DSL：一次执行结束不关闭 Session。
-`session.followup_completed` / `session.followup_failed` 同样不属于目标 DSL：Follow-up
-的受理结果不等于 agent 执行结果。
+`session.followup_completed` / `session.followup_failed` 同样不属于目标 DSL：Input 与 Turn
+分别表达受理和执行，不能用一个 follow-up 事件混合两者。
 
 消费者不能从历史错误、完成或停止事实推导当前 activity。当前 activity 由 Session
 状态和最新 Runtime 证据决定。
 
 ## Follow-up 与 Cancel
 
-Follow-up 的目标由 AgentSession 当前 activity 决定：
+空闲 Session 收到 Follow-up 时开始新的 Turn。执行中的 Session 在 Runtime 支持时把输入加入
+当前 Turn，否则按顺序等待后续 Turn；`unknown` 时拒绝新输入并先核对状态。API 的同步结果
+只确认 Input 是否已被 Mohist 接受，不能假装 Runtime 已经完成处理。
 
-| Activity | 行为 |
-|---|---|
-| `idle` | 向当前 Runtime Session 提交输入并开始执行 |
-| `active` | 通过 Runtime 原生 steer / async prompt 能力加入当前执行 |
-| `unknown` | 拒绝新输入，先核对当前执行状态 |
+Follow-up 命令只需要三种同步结果：
 
-Follow-up 命令只需要三种结果：
-
-- `accepted`：Runtime 已确认接受输入；
-- `rejected`：Runtime 已确认没有接受输入；
+- `accepted`：Mohist 已持久接受 SessionInput，它可能仍在排队；
+- `rejected`：Mohist 已确认没有接受输入；
 - `unknown`：无法确认是否接受，不能自动重新发送。
 
-`operationId` 可以作为命令幂等和状态核对键，但不是 AgentSession 内的新实体，也不用于
-把 transcript 分组。`unknown` 后只能使用同一 operation 核对结果；创建新 operation
-重新发送可能产生重复副作用。
+调用幂等键用于找到同一个 SessionInput，不是 AgentSession 内的另一个领域实体，也不用于
+把 transcript 分组。`unknown` 后只能使用同一调用身份核对或重试；创建新身份重新发送可能
+产生重复副作用。
 
 Compact 与 Reset 这类 recovery 命令在调用方省略显式幂等键时，由 grain 每次生成唯一键
 （与 `operationId` 同格式），不再退化为固定值；显式提供幂等键时同键重放、异键 join
@@ -241,8 +249,9 @@ Compact 与 Reset 这类 recovery 命令在调用方省略显式幂等键时，�
 reservation 不会被后续缺省调用误命中，缺省调用落入 `BeginSessionCommandAsync` 开启新
 操作。需要重试幂等的调用方必须显式提供键。
 
-Cancel 只针对当前 binding 上唯一可能执行中的操作，不需要额外的执行身份。Runtime 无法确认
-已经停止时，Session 进入 `unknown`；停止请求本身不能伪造 idle。
+Cancel 只针对当前未终结 Turn。等待中的 Turn 可以直接取消；正在执行的 Turn 请求 Runtime
+停止。无法确认停止结果时，Turn 与 Session activity 保持 `unknown`，不能伪造 idle。首个
+Turn 的结果由 AgentJob 裁定，后续 Turn 的取消不改写已经终结的 AgentJob。
 
 ## AgentSession 来源
 
@@ -381,8 +390,8 @@ AgentSession 工作目录。两者都保留已有 transcript，不迁移或重�
 
 - Workflow 拥有 TaskRun 和 Workflow Action 契约，不解释 Session transcript。
 - Agent 拥有 Mohist Agent 与 AgentJob，不解释 Session activity。
-- Session 拥有 AgentSession 身份、source、workDir、activity、current binding、transcript、
-  context 与 usage。
+- Session 拥有 AgentSession 身份、source、workDir、SessionInput、AgentTurn、activity、current
+  binding、transcript、context 与 usage。
 - Runner 执行已经解析的工作，创建或恢复 Runtime Session，并报告物理事实。
 - Runtime adapter 隐藏 SDK / protocol、缓存、进程、文件、事件核对和错误分类。
 - Web 和 CLI 只消费 Server 给出的 activity、current binding 与 transcript，不自行从
@@ -396,7 +405,8 @@ Server 是 binding 与 activity 的唯一状态裁判。Runner 不能自行决�
 默认测试不访问真实 Runtime、网络、进程、文件系统 Session 或墙钟。至少覆盖：
 
 - 同一 AgentSession 跨 task、retry、Follow-up 与 Runner 重启复用 current binding；
-- `session.input` 和 Runtime 事实按 AgentSession 顺序持久化，不要求额外的执行身份；
+- SessionInput 与 AgentTurn 的身份、归属和顺序在进程重启后保持不变；
+- 相同输入重试不产生重复记录，已接受输入不会因背压丢失；
 - binding 替换与 `session.context_reset` 原子持久化，且事件不包含物理 Session 沿革；
 - 一次执行完成、失败或取消后 activity 回到 `idle`，没有 Session 终态；
 - 停止或输入受理不确定时进入 `unknown`，不会自动重放；
@@ -406,6 +416,9 @@ Server 是 binding 与 activity 的唯一状态裁判。Runner 不能自行决�
 - TaskRun / AgentJob 结果与 AgentSession activity 互不覆盖。
 
 ## 实装差距
+
+SessionInput 与 AgentTurn 尚未作为上述稳定子记录落地；当前 transcript 不能完整区分
+Input 受理与 Turn 排队、执行和结果。
 
 #484 已落地扁平 transcript 与独立 activity：不再写入 `session.closed` /
 `session.followup_*`，状态与命令资格只读当前 activity；终态以 `session.activity`

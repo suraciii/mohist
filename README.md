@@ -4,14 +4,17 @@ Mohist 是面向个人开发者、对 Agent 友好的 AI 软件生产线控制�
 
 它把产品想法整理成可执行的 issue，让 Agent 按 workflow 持续完成规划、实现、检查和集成。Agent 是 owner 的代理人，可以进入流水线上原本由人负责的位置。质量不靠 owner 盯住每个交付点，而靠清晰输入、自动检查、审查任务、审批决策、失败恢复和必要时的人工升级共同保障。
 
-用户通常在 Slack、IDE 或其他已有场所与外部 Agent 协作。外部 Agent 通过 Mohist Skill
-和 `mo` 查询、委托和操作执行层，再把结果带回原来的交互场所。Mohist Web 是备用操作和
-可视化平面，用于查看全局状态、核对执行证据和人工接管，不是另一个工作站点。
+用户通常留在 Slack、IDE 或其他已有场所。已配置的 Mohist Agent 可以直接从 Web 或 CLI
+使用，也可以作为独立 Bot 接入 Slack；第三方外部 Agent 则通过 Mohist Skill 和 `mo`
+查询、委托和操作执行层。Mohist Web 是备用操作和可视化平面，用于配置和测试 Agent、
+查看全局状态、核对执行证据和人工接管，不是另一个日常工作站点。
 
 ## 产品界面
 
-- **Mohist Skill + `mo`**：外部 Agent 使用 Mohist 的默认交互路径；人也可以直接使用同一套命令。
-- **Web UI**：备用操作和可视化平面；关键操作完整，但不承载日常对话。
+- **Mohist Agent**：Project 内独立可用的 Agent；从 Web、CLI、外部接入、事件或评论提及启动，配置与执行语义保持一致。
+- **Agent 接入**：把一个已配置 Agent 暴露到 Slack 等已有场所；接入只处理身份、消息和呈现。
+- **Mohist Skill + `mo`**：第三方外部 Agent 使用 Mohist 的路径；人也可以直接使用同一套命令。
+- **Web UI**：备用操作和可视化平面；关键操作完整，也能直接配置、启动和继续 Mohist Agent。
 - **通知**：把需要关注的变化推到用户已有的聊天工具，不拥有执行状态。
 
 ## 工作流
@@ -33,7 +36,8 @@ workflow、issue、epic、runner、agent session 都产生事件。Agent 事件�
 | ✅ 可用 | 🚧 接线中 | 💭 方案（spec 已定稿） |
 |---|---|---|
 | 五阶段 Workflow、审批点、Epic 自动推进 | Agent 监管预设、评论 @提及、issue 关注 | 复合与子 issue |
-| `mo` CLI、Web UI、Hermes 通知、事件路由 | Profile collection 迁移 | 移动端 PWA |
+| `mo` CLI、Web UI、Mohist Agent 直接启动与会话 | Profile collection 迁移 | Agent API 外部调用契约、Slack Agent 接入 |
+| Hermes 通知、事件路由 | Agent Skills 执行与并发限制 | 移动端 PWA |
 | OpenCode / Pi runtime、GitHub PR profile | | 可观测性 |
 
 🚧 / 💭 项由对应 issue 推进落地，见各篇「实装差距」。

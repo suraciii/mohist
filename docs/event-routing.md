@@ -1,6 +1,6 @@
 # Agent 事件路由
 
-本文的 Agent 均指有稳定 ID、名称和 Instructions 的 **Mohist Agent（Named Agent）**，
+本文的 Agent 均指有稳定 ID、名称和 Instructions 的 **Mohist Agent**，
 不是 Workflow 直接调用的 Inline Agent。两者关系见 [Agent 与 AgentSession](agents.md)。
 
 ## 它解决什么问题
@@ -12,8 +12,8 @@ Mohist 是一条软件生产线。Workflow、issue、epic、runner、AgentSessio
 声明匹配什么事件、由哪个 Agent 响应、响应时用什么提示词。事件发生后，系统按表
 匹配，命中的 Agent 自动启动，按提示词读取上下文并执行动作。
 
-每次命中都会创建一次 AgentJob 和一段 AgentSession。AgentJob 记录这次响应是否完成，
-AgentSession 记录对话和工具调用。
+每次命中都会创建一次 AgentJob、AgentSession、首条 SessionInput 和首个 AgentTurn。
+AgentJob 记录这次响应是否完成，AgentSession 记录输入、执行轮次、对话和工具调用。
 
 Agent 在这里是代理人。它进入流水线上原本由 owner 负责的位置：owner 能审批，
 Agent 也能审批；owner 能分析失败、写总结、创建后续 issue，Agent 也通过同一套
