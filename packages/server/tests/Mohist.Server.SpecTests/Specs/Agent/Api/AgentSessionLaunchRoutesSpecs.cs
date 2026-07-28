@@ -180,45 +180,16 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
     }
 
     [Fact]
-    public async Task Launch_WithRuntimeOverride_PersistsRuntimeOnSessionAndDispatch()
+    public async Task Launch_WithRuntimeOverride_IsRejectedBeforeAgentLookup()
     {
-        // Agent config runtime is opencode; the request body overrides
-        // to pi. The resolved backend must flow into both the session
-        // (so generic open/attach see it) and the dispatch envelope.
         var projectId = await CreateProjectAsync("launch-runtime-override");
-        var runnerId = $"launch-runtime-override-runner-{Guid.NewGuid():N}";
-        var agent = await CreateAgentAsync(projectId, "runtime-override-agent", runtime: "opencode");
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/does-not-exist/sessions",
+            new { prompt = "execute on pi", runtime = "pi" });
 
-        try
-        {
-            using var response = await _fixture.Client.PostAsJsonAsync(
-                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-                new
-                {
-                    prompt = "execute on pi",
-                    runtime = "pi",
-                });
-
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
-
-            var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-            var sessionInfo = await sessionGrain.GetAsync();
-            Assert.NotNull(sessionInfo);
-            Assert.Equal("pi", sessionInfo!.Runtime);
-
-            var snapshot = await PollDispatchForSessionAsync(runnerId, sessionId);
-            Assert.False(string.IsNullOrWhiteSpace(snapshot.WorkId));
-
-            var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
-            Assert.Equal("pi", ReadRuntimeFromDispatch(polledDispatch));
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("unsupported_field", body.GetProperty("code").GetString());
     }
 
     [Fact]
@@ -290,7 +261,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
     }
 
     [Fact]
-    public async Task Launch_WithIssueRuntimeOverride_UsesIssueRuntimeWhenRequestOmitsRuntime()
+    public async Task Launch_WithIssueRuntime_IsRejectedAndDoesNotOverrideAgent()
     {
         var projectId = await CreateProjectAsync("launch-issue-runtime-override");
         var agent = await CreateAgentAsync(projectId, "issue-runtime-override-agent", runtime: "opencode");
@@ -299,13 +270,13 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         using var patch = await _fixture.Client.PatchAsJsonAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/variables",
             new { vars = new { agent = new { runtime = "pi" } } });
-        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, patch.StatusCode);
 
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
             new
             {
-                prompt = "use the issue backend",
+                 prompt = "use the agent backend",
                 context = new { issueNumber },
             });
 
@@ -316,7 +287,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         var info = await session.GetAsync();
 
         Assert.NotNull(info);
-        Assert.Equal("pi", info!.Runtime);
+        Assert.Equal("opencode", info!.Runtime);
     }
 
     [Fact]
@@ -381,7 +352,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("runtime_invalid", body.GetProperty("code").GetString());
+        Assert.Equal("unsupported_field", body.GetProperty("code").GetString());
     }
 
     [Fact]

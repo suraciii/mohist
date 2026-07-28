@@ -430,3 +430,7 @@ runtime 事件并映射为同名片段类型；事件 feed 仍把终态 `session
 
 Runtime Session 确认缺失后的自动创建与 expected-binding replacement 尚未覆盖全部入口；
 当前部分路径仍要求用户 Reset。该差距按本文的最小 current-binding 模型实施。
+
+命名 Agent 的 launch 与 `mohist/agent` attempt 已按 Agent 定义固定 Instructions、Runtime、
+Model、Variant 和 Skills；客户端 task/context 输入不能覆盖这些字段。显式
+`mohist/opencode` 与 `mohist/pi` Action 仍由各自的 `uses` 选择 Runtime。

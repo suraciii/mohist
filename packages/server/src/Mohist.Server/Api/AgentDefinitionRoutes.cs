@@ -21,7 +21,7 @@ public static class AgentDefinitionRoutes
             if (string.IsNullOrWhiteSpace(req.Name)) return ApiResults.BadRequest("name is required");
             if (string.IsNullOrWhiteSpace(req.Instructions)) return ApiResults.BadRequest("instructions is required");
 
-            var agentConfigError = IssueModelMetadata.ValidateAgentConfig(req.AgentConfig);
+            var agentConfigError = AgentConfigSchema.Validate(req.AgentConfig);
             if (agentConfigError is not null)
                 return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
 
@@ -67,7 +67,7 @@ public static class AgentDefinitionRoutes
 
             if (req.Fields.Contains(nameof(AgentUpdateRequest.AgentConfig)))
             {
-                var agentConfigError = IssueModelMetadata.ValidateAgentConfig(req.AgentConfig);
+            var agentConfigError = AgentConfigSchema.Validate(req.AgentConfig);
                 if (agentConfigError is not null)
                     return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
             }

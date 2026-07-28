@@ -10,6 +10,9 @@ import { parseModelIdentifier } from "../runtime/opencode/index.js"
 import type { PiRuntimeEvent, PiTurnRequest } from "../runtime/pi/index.js"
 import { actionErrorMessage, fail, succeed } from "./action-result.js"
 import type { PromptLoaderContext } from "../core/prompt.js"
+import { SkillResolver } from "../runtime/skill-resolver.js"
+import { buildExecutionEnvelope } from "../runtime/execution-envelope.js"
+import type { AgentExecutionDefinition } from "../core/types.js"
 
 export const PI_USES = "mohist/pi"
 export const PI_TURN_DURATION_MS = 60 * 60 * 1000
@@ -28,6 +31,8 @@ interface ActionInvocationContext {
   epicNumber?: number | null
   parentIssueContext?: ParentIssueContext | null
   piRuntime?: PiRuntime | null
+  skillResolver?: SkillResolver
+  agentDefinition?: AgentExecutionDefinition | null
   serverConnection?: ServerConnection | null
   log?: TaskLogger | null
 }
@@ -52,12 +57,20 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
       workDir: host.workDir,
       signal: host.signal,
       piRuntime: host.piRuntime,
+      skillResolver: host.skillResolver,
+      agentDefinition: host.agentDefinition,
       log: host.log,
     }
     : contextOrInputs as ActionInvocationContext
   const parsed = await parseInput(context)
   if (parsed.kind === "failure") return parsed.result
   const { prompt, options } = parsed
+  const definition = context.agentDefinition
+  const resolvedSkills = await (context.skillResolver ?? new SkillResolver()).resolve(definition?.skills, context.workDir)
+  if (!resolvedSkills.ok) return fail(resolvedSkills.code, resolvedSkills.message)
+  const executionPrompt = buildExecutionEnvelope(prompt, definition?.instructions, resolvedSkills.skills)
+  const model = definition?.model ?? options.model
+  const variant = definition?.variant ?? options.variant
   const runtime = context.piRuntime
   if (!runtime) return fail("runtime-unavailable", "mohist/pi requires the Pi runtime")
   if (!runtime.ready()) return fail("runtime-unavailable", `mohist/pi requires the Pi runtime to be ready: ${runtime.diagnostic()?.message ?? "no readiness diagnostic"}`)
@@ -91,7 +104,7 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
       try {
         await context.serverConnection!.attachWorkflowAgentSession(
           context.projectId!, context.workflowRunId, sessionName,
-          { runtimeSessionId, workDir: context.workDir, processPid: null, model: options.model ?? null, workId: context.workId, runtime: "pi", expectedRuntime, expectedRuntimeSessionId },
+          { runtimeSessionId, workDir: context.workDir, processPid: null, model: model ?? null, workId: context.workId, runtime: "pi", expectedRuntime, expectedRuntimeSessionId },
           context.signal,
         )
       } catch (error) {
@@ -111,12 +124,12 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
   }
 
   try {
-    await report([inputEvent(runtimeSessionId, prompt, context)])
+    await report([inputEvent(runtimeSessionId, executionPrompt, context)])
   } catch {
     return fail("session-reporting-failed", "Workflow AgentSession rejected session.input; prompt was not submitted", { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
 
-  const request: PiTurnRequest = { target: { runtime: "pi", runtimeSessionId, workDir: context.workDir }, prompt, durationMs: PI_TURN_DURATION_MS, options: { model: options.model ?? null, variant: options.variant ?? null, unknownKeys: options.unknownKeys } }
+  const request: PiTurnRequest = { target: { runtime: "pi", runtimeSessionId, workDir: context.workDir }, prompt: executionPrompt, durationMs: PI_TURN_DURATION_MS, options: { model: model ?? null, variant: variant ?? null, ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}), unknownKeys: options.unknownKeys } }
   let result
   try {
     result = await runtime.runTurn(request, context.signal, { onEvent: (event) => { events.push(event) } })

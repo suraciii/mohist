@@ -162,7 +162,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.DispatchAttempts,
             State.RunnerAccepted,
             State.PendingSessionClose is not null,
-            State.Input?.ProjectId ?? State.RoutedPlan?.ProjectId));
+            State.Input?.ProjectId ?? State.RoutedPlan?.ProjectId,
+            ExecutionDefinitionFrom(State.Input)));
 
     /// <summary>
     /// Returns the job's terminal result. Before the job has reached a terminal
@@ -506,7 +507,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             RunnerId: string.Empty,
             AgentRuntime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
             WorkDir: plan.WorkspacePath,
-            Metadata: metadata));
+            Metadata: metadata,
+            Definition: new AgentExecutionDefinition(
+                plan.AgentInstructions ?? string.Empty,
+                plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                plan.Model,
+                plan.Variant,
+                plan.Skills ?? [])));
 
         if (plan.Disposition == RoutedLaunchDisposition.PreflightFailed)
         {
@@ -535,7 +542,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 Variant: plan.Variant,
                 IssueNumber: plan.IssueNumber,
                 EpicNumber: plan.EpicNumber,
-                WorkflowRunId: plan.WorkflowRunId);
+                WorkflowRunId: plan.WorkflowRunId,
+                Skills: plan.Skills);
             await SaveAsync();
 
             var reason = plan.PreflightReason ?? AgentJobFailureReasons.WorkspaceUnavailable;
@@ -568,7 +576,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 Variant: plan.Variant,
                 IssueNumber: plan.IssueNumber,
                 EpicNumber: plan.EpicNumber,
-                WorkflowRunId: plan.WorkflowRunId);
+                WorkflowRunId: plan.WorkflowRunId,
+                Skills: plan.Skills);
             State.AgentConfigJson = plan.AgentConfigJson;
             State.Input = input with { AgentConfig = null };
             State.SubmittedAt = _timeProvider.GetUtcNow();
@@ -593,6 +602,16 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         string.IsNullOrWhiteSpace(json)
             ? null
             : System.Text.Json.JsonDocument.Parse(json).RootElement.Clone();
+
+    private static AgentExecutionDefinition? ExecutionDefinitionFrom(AgentJobInput? input) =>
+        input is null || string.IsNullOrWhiteSpace(input.AgentId)
+            ? null
+            : new AgentExecutionDefinition(
+                input.AgentInstructions ?? string.Empty,
+                input.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                input.Model,
+                input.Variant,
+                input.Skills ?? []);
 
     private static bool EquivalentInput(AgentJobInput left, AgentJobInput right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
@@ -840,6 +859,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         // select the right runtime (PiRuntime / OpenCodeRuntime).
         if (!string.IsNullOrWhiteSpace(input.Runtime))
             with["runtime"] = JSON.SerializeToElement(input.Runtime);
+        // Carry the captured ordered Skill names verbatim so the runner
+        // resolves SKILL.md bodies from its configured Skill roots
+        // (T-001 design D3). An empty/absent list means no Skills input
+        // — neither resolution nor a Skills envelope is emitted.
+        if (input.Skills is { Count: > 0 })
+            with["skills"] = JSON.SerializeToElement(input.Skills);
         var withJson = JSON.Serialize(with);
 
         return new WorkDispatch(

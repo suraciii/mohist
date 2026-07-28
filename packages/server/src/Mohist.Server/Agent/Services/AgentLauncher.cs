@@ -58,7 +58,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string prompt,
         AgentLaunchContext context,
         IReadOnlyDictionary<string, string>? triggerLabels = null,
-        string? runtimeOverride = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
@@ -80,29 +79,30 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ? metadata
             : WithTriggerLabels(metadata, triggerLabels);
 
-        var resolvedRuntime = ResolveRuntime(agent.AgentConfig, runtimeOverride);
+        var definition = ResolveExecutionDefinition(agent);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
             new OpenAgentSessionCommand(
                 RunnerId: string.Empty,
-                AgentRuntime: resolvedRuntime,
+                AgentRuntime: definition.Runtime,
                 WorkDir: context.WorkspacePath,
-                Metadata: durableMetadata));
+                Metadata: durableMetadata,
+                Definition: definition));
 
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
-        var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
         var jobInput = new AgentJobInput(
             Prompt: trimmedPrompt,
-            Model: resolvedModel,
+            Model: definition.Model,
             WorkspacePath: context.WorkspacePath,
             ProjectId: context.ProjectId,
-            Runtime: resolvedRuntime,
+            Runtime: definition.Runtime,
             AgentId: agent.Id,
-            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentInstructions: string.IsNullOrWhiteSpace(definition.Instructions) ? null : definition.Instructions,
             AgentConfig: agent.AgentConfig?.Clone(),
             AgentSessionId: sessionId,
-            Variant: resolvedVariant,
+            Variant: definition.Variant,
+            Skills: definition.Skills,
             IssueNumber: context.IssueNumber,
             EpicNumber: context.EpicNumber);
         if (triggerLabels is null)
@@ -158,7 +158,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         RoutedExecutionContext executionContext,
         CloudEvent triggeringEvent,
         string ruleId,
-        string? runtimeOverride = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
@@ -175,12 +174,10 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(prompt));
         }
 
-        var triggerIdentity = $"{executionContext.ProjectId}\n{triggeringEvent.Id}\n{ruleId}";
         var sessionId = _sessions.StableSessionId(executionContext.ProjectId, triggeringEvent.Id, ruleId);
         var jobKey = _sessions.StableJobKey(executionContext.ProjectId, triggeringEvent.Id, ruleId);
 
-        var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
-        var resolvedRuntime = ResolveRuntime(agent.AgentConfig, runtimeOverride);
+        var definition = ResolveExecutionDefinition(agent);
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()
             : null;
@@ -200,12 +197,13 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             PreparedAt: _timeProvider.GetUtcNow(),
             AgentId: agent.Id,
             AgentName: agent.Name,
-            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentInstructions: string.IsNullOrWhiteSpace(definition.Instructions) ? null : definition.Instructions,
             AgentConfigJson: agentConfigJson,
-            Model: resolvedModel,
-            Variant: resolvedVariant,
+            Model: definition.Model,
+            Variant: definition.Variant,
             Prompt: trimmedPrompt,
-            Runtime: resolvedRuntime,
+            Runtime: definition.Runtime,
+            Skills: definition.Skills,
             WorkflowRunId: executionContext.WorkflowRunId);
 
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
@@ -268,29 +266,30 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         };
         var durableMetadata = WithTriggerLabels(metadata, triggerLabels);
 
-        var resolvedRuntime = ResolveRuntime(agent.AgentConfig, launchOverride: null);
+        var definition = ResolveExecutionDefinition(agent);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
             new OpenAgentSessionCommand(
                 RunnerId: string.Empty,
-                AgentRuntime: resolvedRuntime,
+                AgentRuntime: definition.Runtime,
                 WorkDir: context.WorkspacePath,
-                Metadata: durableMetadata));
+                Metadata: durableMetadata,
+                Definition: definition));
 
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
-        var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
         var jobInput = new AgentJobInput(
             Prompt: trimmedPrompt,
-            Model: resolvedModel,
+            Model: definition.Model,
             WorkspacePath: context.WorkspacePath,
             ProjectId: context.ProjectId,
-            Runtime: resolvedRuntime,
+            Runtime: definition.Runtime,
             AgentId: agent.Id,
-            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentInstructions: string.IsNullOrWhiteSpace(definition.Instructions) ? null : definition.Instructions,
             AgentConfig: agent.AgentConfig?.Clone(),
             AgentSessionId: sessionId,
-            Variant: resolvedVariant,
+            Variant: definition.Variant,
+            Skills: definition.Skills,
             IssueNumber: context.IssueNumber,
             EpicNumber: context.EpicNumber);
         await jobGrain.EnsureSubmittedAsync(jobInput);
@@ -366,24 +365,16 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
     /// <summary>
     /// Resolves the execution backend as
-    /// <c>launchOverride ?? agentConfig.runtime ?? "opencode"</c>
-    /// The launch-time override wins over the
-    /// Agent's configured backend; absent an override, the Agent's
-    /// configured backend is used; absent both, the backend resolves to
-    /// <see cref="AgentConfigSchema.OpenCodeRuntime"/>. Manual HTTP
-    /// launch passes the caller-supplied override from
-    /// <c>AgentSessionLaunchRequest.Runtime</c>; the routed
-    /// subscription launch passes no override so the Agent's configured
-    /// backend applies.
+    /// <c>agentConfig.runtime ?? "opencode"</c>. Out-of-set values fall
+    /// back to the same default. Editing the Agent's runtime config
+    /// after launch cannot change the snapshotted result because the
+    /// helper runs only at the launcher level; callers (manual launch,
+    /// mention launch, routed launch, routed preflight) all consume
+    /// the resolver output and stamp it onto the durable
+    /// <see cref="AgentJobInput"/> or <see cref="RoutedAgentLaunchPlan"/>.
     /// </summary>
-    internal static string ResolveRuntime(JsonElement? agentConfig, string? launchOverride)
+    internal static string ResolveRuntime(JsonElement? agentConfig)
     {
-        if (!string.IsNullOrWhiteSpace(launchOverride)
-            && AgentConfigSchema.AllowedRuntimes.Contains(launchOverride))
-        {
-            return launchOverride;
-        }
-
         if (agentConfig is { ValueKind: JsonValueKind.Object } obj
             && obj.TryGetProperty("runtime", out var value)
             && value.ValueKind == JsonValueKind.String)
@@ -397,6 +388,27 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         }
 
         return AgentConfigSchema.OpenCodeRuntime;
+    }
+
+    /// <summary>
+    /// Build the immutable execution-definition value for a launch or
+    /// read-side snapshot. Wraps <see cref="ResolveRuntime"/> and
+    /// <see cref="ResolveModelAndVariant"/> with the Agent's stored
+    /// Instructions and ordered Skills. Skills are returned as a defensive
+    /// copy so callers cannot mutate the Agent's stored list.
+    /// </summary>
+    internal static AgentExecutionDefinition ResolveExecutionDefinition(AgentInfo agent)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        var (model, variant) = ResolveModelAndVariant(agent.AgentConfig);
+        var runtime = ResolveRuntime(agent.AgentConfig);
+        var skills = agent.Skills.ToArray();
+        return new AgentExecutionDefinition(
+            Instructions: agent.Instructions,
+            Runtime: runtime,
+            Model: model,
+            Variant: variant,
+            Skills: skills);
     }
 
     private static string? TryReadString(JsonElement obj, string propertyName)

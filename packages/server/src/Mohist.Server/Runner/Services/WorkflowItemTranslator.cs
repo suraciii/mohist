@@ -103,9 +103,10 @@ public sealed class WorkflowItemTranslator : IScopedService
         var variables = JSON.Serialize(payload);
         var with = item.With;
         var uses = item.Uses;
+        AgentExecutionDefinition? agentDefinition = null;
         if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
         {
-            (uses, with) = await ResolveAgentTaskAsync(item, run, workId);
+            (uses, with, agentDefinition) = await ResolveAgentTaskAsync(item, run, workId);
         }
         var withStr = SerializeRaw(with);
         var expectStr = SerializeRaw(item.Expect);
@@ -128,7 +129,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             Recovery: item.Recovery is not null ? JSON.Serialize(item.Recovery) : null,
             RecoveryRemaining: item.RecoveryRemaining,
 EpicNumber: ReadEpicNumber(run),
-            Expect: expectStr);
+            Expect: expectStr,
+            AgentDefinition: agentDefinition);
     }
 
     private async Task<WorkDispatch> BuildChecksDispatchAsync(
@@ -257,7 +259,7 @@ EpicNumber: ReadEpicNumber(run),
         return payload;
     }
 
-    private async Task<(string Uses, Dictionary<string, JsonElement?> With)> ResolveAgentTaskAsync(
+    private async Task<(string Uses, Dictionary<string, JsonElement?> With, AgentExecutionDefinition Definition)> ResolveAgentTaskAsync(
         WorkItem item,
         WorkflowRun run,
         string workId)
@@ -298,39 +300,18 @@ EpicNumber: ReadEpicNumber(run),
         }
 
         var rawPrompt = promptElement.Value.GetString()!;
-        var composedPrompt = string.IsNullOrWhiteSpace(snapshot.Instructions)
-            ? rawPrompt
-            : $"{snapshot.Instructions}\n\n{rawPrompt}";
-        var model = ReadAgentConfigString(snapshot.AgentConfig, "model");
-        var variant = model is null ? null : ReadAgentConfigString(snapshot.AgentConfig, "variant");
-        var options = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        if (model is not null) options["model"] = JSON.SerializeToElement(model);
-        if (variant is not null) options["variant"] = JSON.SerializeToElement(variant);
-
         var transformed = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
-            ["prompt"] = JSON.SerializeToElement(composedPrompt),
-            ["options"] = JSON.SerializeToElement(options),
+            ["prompt"] = JSON.SerializeToElement(rawPrompt),
         };
         CopyIfPresent(with, transformed, "session");
         CopyIfPresent(with, transformed, "timeout");
 
-        return (ReadAgentConfigString(snapshot.AgentConfig, "runtime") switch
+        return (snapshot.Runtime switch
         {
             AgentConfigSchema.PiRuntime => "mohist/pi",
             _ => "mohist/opencode",
-        }, transformed);
-    }
-
-    private static string? ReadAgentConfigString(JsonElement? config, string key)
-    {
-        if (config is not { ValueKind: JsonValueKind.Object } value
-            || !value.TryGetProperty(key, out var property)
-            || property.ValueKind != JsonValueKind.String)
-            return null;
-
-        var result = property.GetString();
-        return string.IsNullOrWhiteSpace(result) ? null : result;
+        }, transformed, snapshot);
     }
 
     private static void CopyIfPresent(

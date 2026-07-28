@@ -1,5 +1,6 @@
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Sessions.Grains;
 
@@ -49,7 +50,8 @@ public sealed record OpenAgentSessionCommand(
     [property: Id(1)] string AgentRuntime,
     [property: Id(2)] string? WorkDir = null,
     [property: Id(3)] string? Model = null,
-    [property: Id(4)] AgentSessionMetadata? Metadata = null);
+    [property: Id(4)] AgentSessionMetadata? Metadata = null,
+    [property: Id(5)] AgentExecutionDefinition? Definition = null);
 
 [GenerateSerializer]
 public sealed record AttachPhysicalSessionCommand(
