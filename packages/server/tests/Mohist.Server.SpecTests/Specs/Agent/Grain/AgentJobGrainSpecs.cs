@@ -274,8 +274,6 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Failed, terminal.Status);
         Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
-        await sessionGrain.WaitForPersistenceAsync(_fixture.Persistence);
-
         var closedPayload = await WaitForAsync(
             async () =>
             {
@@ -418,8 +416,6 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             "prompt timed out",
             Output: JSON.DeserializeElement("""{"failureCategory":"prompt_timeout"}"""),
             ExitCode: 1));
-        await session.WaitForPersistenceAsync(_fixture.Persistence);
-
         await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
         var turnIds = await db.AgentSessionTranscriptTurns
             .Where(turn => turn.SessionId == sessionId)

@@ -13,8 +13,12 @@ public static class AgentSessionPersistenceTestHelper
         IGrainFactory grains,
         AgentSessionPersistenceTestProbe persistence)
     {
-        await grains.GetGrain<IAgentSessionGrain>(sessionId).WaitForPersistenceAsync(persistence);
         var count = await CountTranscriptPartsAsync(dbFactory, sessionId);
+        if (count >= expectedCount)
+            return;
+
+        await grains.GetGrain<IAgentSessionGrain>(sessionId).WaitForPersistenceAsync(persistence);
+        count = await CountTranscriptPartsAsync(dbFactory, sessionId);
         if (count < expectedCount)
             throw new InvalidOperationException(
                 $"Expected at least {expectedCount} transcript part(s) for session {sessionId}, but found {count}");

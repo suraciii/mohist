@@ -275,7 +275,6 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
         var session = Grains.GetGrain<IAgentSessionGrain>(plan.SessionId);
-        await session.WaitForPersistenceAsync(_fixture.Persistence);
 
         // Verify the Session was actually opened from the canonical plan.
         var info = await session.GetAsync();
@@ -425,7 +424,6 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
 
         // Confirm first delivery produced its single activity fact.
         var session = Grains.GetGrain<IAgentSessionGrain>(preflight.SessionId);
-        await session.WaitForPersistenceAsync(_fixture.Persistence);
         var firstParts = (await ListSessionClosedPartsAsync(preflight.SessionId))
             .Where(p => p.Type == TranscriptPartTypes.SessionActivity)
             .ToList();

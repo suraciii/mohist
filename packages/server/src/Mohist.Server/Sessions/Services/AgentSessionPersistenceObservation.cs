@@ -14,6 +14,7 @@ public readonly record struct AgentSessionPersistenceResult(
 
 public interface IAgentSessionPersistenceObserver
 {
+    long StartCycle(string sessionId);
     void Report(AgentSessionPersistenceResult result);
 }
 
@@ -24,6 +25,8 @@ public sealed class NoopAgentSessionPersistenceObserver : IAgentSessionPersisten
     private NoopAgentSessionPersistenceObserver()
     {
     }
+
+    public long StartCycle(string sessionId) => 0;
 
     public void Report(AgentSessionPersistenceResult result)
     {

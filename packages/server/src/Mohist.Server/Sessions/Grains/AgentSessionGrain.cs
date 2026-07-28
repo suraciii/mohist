@@ -30,7 +30,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private AgentSessionTranscriptSummary? _cachedSummary;
     private long _realtimeSequence;
     private IDisposable? _persistTimer;
-    private long _persistenceCycle;
     private bool _stateDirty;
     private readonly List<AgentSessionEvent> _pendingDomainEvents = new();
     private string? _lastHealthStatus;
@@ -1210,8 +1209,27 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return;
         }
 
-        if (await FlushAsync(CancellationToken.None))
-            DisposePersistTimer();
+        var cycleId = _persistenceObserver.StartCycle(SessionId);
+        try
+        {
+            var success = await FlushAsync(CancellationToken.None);
+            _persistenceObserver.Report(new AgentSessionPersistenceResult(
+                SessionId,
+                cycleId,
+                success
+                    ? AgentSessionPersistenceOutcome.Succeeded
+                    : AgentSessionPersistenceOutcome.TranscriptFailed));
+            if (success)
+                DisposePersistTimer();
+        }
+        catch
+        {
+            _persistenceObserver.Report(new AgentSessionPersistenceResult(
+                SessionId,
+                cycleId,
+                AgentSessionPersistenceOutcome.StateFailed));
+            throw;
+        }
     }
 
     /// <summary>
@@ -1262,30 +1280,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (!hasPendingPersistence)
             return true;
 
-        var cycleId = ++_persistenceCycle;
-        try
-        {
-            var success = await FlushCoreAsync(session, ct);
-            _persistenceObserver.Report(new AgentSessionPersistenceResult(
-                SessionId,
-                cycleId,
-                success
-                    ? AgentSessionPersistenceOutcome.Succeeded
-                    : AgentSessionPersistenceOutcome.TranscriptFailed));
-            return success;
-        }
-        catch
-        {
-            _persistenceObserver.Report(new AgentSessionPersistenceResult(
-                SessionId,
-                cycleId,
-                AgentSessionPersistenceOutcome.StateFailed));
-            throw;
-        }
-    }
-
-    private async Task<bool> FlushCoreAsync(AgentSession session, CancellationToken ct)
-    {
         // A prior event-aware save on this activation failed and quarantined
         // it; do not attempt another flush from the same dirty state.
         if (_sessionReloadRequired)
