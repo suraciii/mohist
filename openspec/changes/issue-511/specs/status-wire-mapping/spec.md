@@ -15,12 +15,13 @@ The mapping from a run/stage/task/check status enum to its wire-format string MU
 
 ### Requirement: Mapping is exhaustive by construction with no string fallback
 
-Every typed mapping entry MUST be a switch expression that covers all values of its enum with no `_` (discard) fallback and no `ToLowerInvariant()` fallback. Adding a new value to any of the four enums without adding its mapping MUST be a compile error, so that a new multi-word enum value can never silently produce a wrong wire token like `inprogress`.
+Every typed mapping entry MUST be a switch expression that covers all values of its enum with no `_` (discard) fallback that derives a wire token, and no `ToLowerInvariant()` fallback. C# does not exhaustiveness-check switch expressions over enums at compile time, so exhaustiveness SHALL be enforced by a per-enum spec test that iterates `Enum.GetValues` and asserts each value has an arm emitting kebab-case, backed by a defensive `_ => throw new SwitchExpressionException(...)` arm so an unmapped value is loud at runtime rather than silently producing a wrong token like `inprogress`.
 
-#### Scenario: New enum value without a mapping fails to compile
+#### Scenario: New enum value without a mapping is caught by the per-enum spec
 
 - **WHEN** a value is added to `WorkflowRunStatus`, `StageRunStatus`, `TaskRunStatus`, or `StageCheckStatus` and no corresponding mapping arm is added
-- **THEN** the build MUST fail with a non-exhaustive switch error
+- **THEN** the per-enum `Enum.GetValues` spec test MUST fail (listing the unmapped value)
+- **AND** if the value reaches the mapper at runtime, the `_ => throw SwitchExpressionException` arm MUST throw rather than emit a derived token
 
 #### Scenario: No ToLowerInvariant fallback exists
 

@@ -40,11 +40,11 @@ The WorkflowGrain production code MUST NOT carry a domain-event dispatch path wh
 - **THEN** it MUST obtain the `WorkflowProfileReferenceResult` by calling `IWorkflowProfileReferenceCoordinatorGrain.BindWorkflowRunAsync`
 - **AND** no production code path SHALL be able to substitute that call with an inline delegate
 
-#### Scenario: Former test consumer uses a fake coordinator grain
+#### Scenario: Former test consumer uses a fake coordinator with no production hook
 
 - **WHEN** a spec that previously set `BindProfileForTest` needs an applied binding result
-- **THEN** the test MUST register a fake `IWorkflowProfileReferenceCoordinatorGrain` in the test cluster that returns the desired result
-- **AND** MUST NOT rely on any production-side override hook
+- **THEN** the test MUST obtain that result from a fake `IWorkflowProfileReferenceCoordinatorGrain` (either registered in the test cluster, or returned by a fake `IGrainFactory` in a manual-grain context) that yields the desired result
+- **AND** MUST NOT rely on any production-side override hook on `WorkflowGrain`
 
 ### Requirement: Profile-resolution failure classified by exception type, not message text
 

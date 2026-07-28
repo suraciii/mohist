@@ -95,7 +95,7 @@ The existing type-based coordinator ArchTest needs **no change** — once the fi
 - **[Table misnomer left in place]** -> A future reader could re-introduce Profile-flavored logic against the table. Mitigation: the inline comment pointer on `WorkflowRunProfileRow` + the `design/` note make the decision discoverable; the rename is revisited whenever the table is restructured for a real reason.
 - **[Comment baseline maintenance burden]** -> A ratchet that must be hand-edited can drift. Mitigation: mirror the proven `spec-file-size-baseline.json` mechanics (stale-entry detection forces removal); the baseline is empty after this issue, so ongoing burden is zero.
 - **[Backoff test rewrite changes what is asserted]** -> Moving from direct `Backoff(n)` asserts to timing-via-`FakeTimeProvider` is a behaviorally weaker-but-more-honest assertion. Mitigation: assert the *sequence* of `NextAttemptTime` deltas for several attempts, not just one, so the exponential curve is still pinned.
-- **[Rename span is wide]** -> 14 files / 32 refs for the VariablesStore rename alone. Mitigation: land Group B as its own commit so a revert is a single `git revert`.
+- **[Rename span is wide]** -> 14 files / ~33 occurrences for the VariablesStore rename alone. Mitigation: land Group B as its own commit so a revert is a single `git revert`.
 
 ## Migration Plan
 
