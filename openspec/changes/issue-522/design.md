@@ -86,7 +86,7 @@ The current `POST /agent-sessions/{id}/cancel` route, the `CancelAgentSession` S
 
 Cancel and stop carry `turnId` in the request body of the session-scoped endpoints (`POST /agent-sessions/{sessionId}/cancel` and `…/stop`), not as a path segment. The Session grain resolves the Turn by id and applies the stale-guard:
 
-- Turn not found or already terminal (`Completed|Failed|Cancelled|Stopped|Unknown`) → return `turn-already-ended` with the Turn's terminal status; issue **no** Runner request and touch **no** other Turn.
+- Turn not found or already terminal (`Completed|Failed|Cancelled|Unknown`) → return `turn-already-ended` with the Turn's terminal status; issue **no** Runner request and touch **no** other Turn. (`Stopped` is not a Turn status — the `AgentTurnStatus` enum is `Queued|Executing|Completed|Failed|Unknown|Cancelled`; a stopped Turn's status is driven through Completed/Failed/Unknown, and `stopped` is only a reply label, see D6.)
 - Turn non-terminal but not in the operation's required state → return the honest current state and the correct verb (`queued → use cancel`, `executing → use stop`).
 - Turn in the matching state → apply the operation to that Turn only.
 
@@ -117,7 +117,25 @@ CLI exposes two operations under `session`: `mo session cancel <id>` (determinis
 
 ### D7. Test at ownership boundaries
 
-Server specs use the in-process grain cluster, in-memory SQLite, fake `TimeProvider`, and a fake dispatch/result observer. They cover: follow-up Turn recorded as `Queued` before dispatch; deterministic cancel with no Runner connected; cancel dispatch-race (cancel wins and loses vs. `AgentJob` dispatch); first-Turn cancel → `AgentJobStatus.Cancelled` and Turn `Cancelled`; later-Turn cancel leaves a terminal Job unchanged; stop of an executing Turn (confirmed → `stopped`/`idle`, unconfirmed → `unknown`); no new Turn or SessionInput replay after an unconfirmed stop; stale entry returns `turn-already-ended` and does not stop a later Turn; record/transcript preservation after cancel and stop. Runner tests inject a fake Runtime and assert the stop reply vocabulary and the binding-guarded activity fact. Web tests assert the four labels and the unknown verification entry; CLI tests assert both verbs and reused output shape. No test uses a real Runtime, network, process, filesystem, or clock.
+Server specs use the in-process grain cluster, in-memory SQLite, fake `TimeProvider`, and a fake dispatch/result observer. They cover: follow-up Turn recorded as `Queued` before dispatch; deterministic cancel with no Runner connected; cancel dispatch-race (cancel wins and loses vs. `AgentJob` dispatch); first-Turn cancel → `AgentJobStatus.Cancelled` and Turn `Cancelled`; later-Turn cancel leaves a terminal Job unchanged; stop of an executing Turn (confirmed → `stopped`/`idle`, unconfirmed → `unknown`); no new Turn or SessionInput replay after an unconfirmed stop; stale entry returns `turn-already-ended` and does not stop a later Turn; non-launch Turn promoted `Queued → Executing` on `session.input` and terminated on a terminal `session.activity`; record/transcript preservation after cancel and stop. Runner tests inject a fake Runtime and assert the stop reply vocabulary and the binding-guarded activity fact. Web tests assert the four labels and the unknown verification entry; CLI tests assert both verbs and reused output shape. No test uses a real Runtime, network, process, filesystem, or clock.
+
+### D8. The Session grain drives non-launch Turn status from runtime facts
+
+The launch Turn's Executing and terminal transitions are driven by AgentJob today (`AgentJobGrain.cs:235,362,810,1324`); runtime events only set activity (`ApplyRuntimeEventToDomain`). For Turn-status-based cancel/stop to apply to follow-up Turns, those Turns must also move `Queued → Executing → terminal`, with one authority and no new Runner contract.
+
+The Runner already emits the two facts a follow-up Turn needs, through `followup-handler.ts`: a `session.input` event before it invokes the runtime (line 332) and a terminal `session.activity` event (`status: completed|failed`, `activity: idle|unknown`) when the turn ends (lines 335-368). The Session grain — already the Turn-status write authority — derives the non-launch Turn transitions from these existing facts:
+
+- `Queued → Executing`: when the grain processes a `session.input` runtime event for the current Turn, it promotes that Turn to Executing.
+- `Executing → terminal` (`Completed|Failed`): when the grain processes a terminal `session.activity` for the current Turn, it marks that Turn terminal, in addition to converging activity as today.
+- Stop → terminal: the stop path's `session.activity` (`idle|unknown`) drives the current Turn to terminal through the same path; an unconfirmed stop leaves it `Unknown`, matching activity.
+
+The launch Turn is unaffected: issue-512 removed the Runner's initial `session.input`, so the activity-driven promotion never fires for it and AgentJob's dispatch/result-driven transitions remain authoritative. Both transitions are idempotent (no-op once terminal), so any overlap is harmless.
+
+**Rationale:** Turn-status-based eligibility requires Turns to actually pass through Queued/Executing/terminal. The Session already observes the runtime facts that distinguish these states and is the Turn-status authority, so it is the natural driver for non-launch Turns; reusing the existing `session.input`/terminal-`session.activity` emissions adds no Runner contract.
+
+**Alternatives considered:** a new per-Turn Runner `turn-started`/`turn-ended` event was rejected as a new contract for signals the Server already receives; basing eligibility on activity alone was rejected because it loses the per-Turn addressing and stale-guard the issue requires; driving Executing at Server delivery time was rejected because follow-up delivery is synchronous and would erase the Queued window.
+
+**Limitation (follow-up cancel):** follow-up input is delivered to the Runner synchronously at confirmation, so a cancelled follow-up Turn may still be processed by a runtime that already received it — the Server marks the Turn Cancelled and will not drive it further, but cannot un-deliver. Launch-Turn cancel remains fully deterministic (it prevents dispatch). This tradeoff is accepted; withholding follow-up cancel entirely was rejected because marking the Turn Cancelled still gives the caller an honest, stoppable target and a clean record, and an already-executing follow-up Turn is stoppable through D4.
 
 ## Risks / Trade-offs
 
@@ -127,10 +145,12 @@ Server specs use the in-process grain cluster, in-memory SQLite, fake `TimeProvi
 - [Stop vocabulary change is a wire-visible break for any existing cancel consumer] -> Accepted under active development; the runner reply and HTTP response move to `stopped`/`unknown`/`stop-requested`, and `interruptUnconfirmed` is retained.
 - [A queued Turn cancelled just as the Runner begins executing could race the Runner's executing report] -> The grain's terminal no-op guard (`Transitions.cs:492`) already makes a late `Executing` report a no-op once `Cancelled`; cancel is adjudicated before dispatch for launch Turns and before Runner contact for later Turns.
 - [`stop-requested` vs `stopped` synchronous availability differs per runtime] -> Each runtime reports only what it can confirm; the label is never fabricated and `unknown` is always honestly available.
+- [Follow-up cancel cannot un-deliver a synchronously delivered input] -> Launch-Turn cancel stays deterministic (it prevents dispatch); follow-up cancel marks the Turn Cancelled and stops the Server driving it, with the limitation documented in D8; an already-executing follow-up Turn remains stoppable through D4.
+- [Driving non-launch Turn status from runtime facts couples Turn terminal to session.activity] -> Both transitions are idempotent no-ops once terminal, the launch Turn is unaffected (issue-512 removed its Runner session.input so the activity-driven path never fires for it), and a missing terminal fact leaves the Turn Executing under the existing Unknown reconciliation rather than fabricating a terminal.
 
 ## Migration Plan
 
-1. Add `AgentTurnRecord` recording on the follow-up idle-start path (D1) and the Turn-id-keyed transition surface (D2), preserving current `MarkInitialTurn*` callers via delegation.
+1. Add `AgentTurnRecord` recording on the follow-up idle-start path (D1), the Turn-id-keyed transition surface (D2), and the Session-grain lifecycle driving for non-launch Turns from `session.input`/terminal-`session.activity` facts (D8), preserving current `MarkInitialTurn*` callers via delegation.
 2. Add `AgentJobStatus.Cancelled`, the `Cancelled` terminal branch, and `AgentJob.CancelAsync`; wire first-Turn cancel delegation (D3).
 3. Add `turnId` to the cancel/stop endpoints and implement the grain stale-guard (D5); split the route into `cancel` (Server-only) and `stop` (existing runner path) (D4).
 4. Remap the runner stop reply and HTTP response to the shared vocabulary; add `mo session stop` and repurpose `mo session cancel`; add the Web Turn-level control (D6).
