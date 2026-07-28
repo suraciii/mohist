@@ -113,12 +113,8 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var metadata = new WorkflowRunMetadata(
             Name: null,
             CreatedAt: TestTime.UtcNow,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-                ["issueId"] = "issue_abc",
-                ["issueNumber"] = "109",
-            });
+            ProjectId: projectId,
+            IssueNumber: 109);
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await SeedWorkflowTemplateAsync(workflowId, ApprovalStage(), projectId);

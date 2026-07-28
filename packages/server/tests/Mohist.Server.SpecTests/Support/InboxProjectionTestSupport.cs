@@ -198,17 +198,14 @@ internal static class InboxProjectionTestSupport
         string? projectId,
         int? issueNumber)
     {
-        var annotations = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (projectId is not null) annotations["projectId"] = projectId;
-        if (issueNumber is not null) annotations["issueNumber"] = issueNumber.Value.ToString();
-
         return new WorkflowRun
         {
             Id = workflowRunId,
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: TestTime.UtcNow,
-                Annotations: annotations),
+                ProjectId: projectId,
+                IssueNumber: issueNumber),
             Stages = new List<StageRun>(),
         };
     }

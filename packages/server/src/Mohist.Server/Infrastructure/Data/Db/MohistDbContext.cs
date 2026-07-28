@@ -709,7 +709,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.State).IsRequired();
             entity.Property<long>("ETag").IsConcurrencyToken();
             entity.Property(e => e.MetadataProjectId)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.projectId'), json_extract(State, '$.Metadata.ProjectId'))", stored: true);
             entity.Property(e => e.CreatedAt)
                 .HasComputedColumnSql("json_extract(State, '$.metadata.createdAt')", stored: false);
             entity.Property(e => e.AssignedWorkerId)
@@ -732,7 +732,7 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("LOWER(COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status')))", stored: true);
             entity.Property(e => e.IssueNumber)
                 .HasComputedColumnSql(
-                    "CAST(COALESCE(json_extract(State, '$.metadata.annotations.issueNumber'), json_extract(State, '$.Metadata.Annotations.issueNumber'), json_extract(State, '$.Metadata.Annotations.IssueNumber')) AS INTEGER)",
+                    "CAST(COALESCE(json_extract(State, '$.metadata.issueNumber'), json_extract(State, '$.Metadata.IssueNumber')) AS INTEGER)",
                     stored: true);
             entity.HasIndex(e => e.MetadataProjectId);
             entity.HasIndex(e => e.AssignedWorkerId);

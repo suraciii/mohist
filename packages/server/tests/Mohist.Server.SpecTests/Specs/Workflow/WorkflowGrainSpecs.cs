@@ -129,15 +129,11 @@ public abstract class WorkflowGrainSpecs
     {
         projectId ??= _workflowId is null ? "test-project" : TestProjectId(_workflowId);
         issueNumber ??= 1;
-        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["projectId"] = projectId,
-            ["issueNumber"] = issueNumber.Value.ToString(),
-        };
         return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: TestTime.UtcNow,
-            Annotations: annotations));
+            ProjectId: projectId,
+            IssueNumber: issueNumber));
     }
 
     protected static string TestProjectId(string workflowId) => $"test-project-{workflowId}";

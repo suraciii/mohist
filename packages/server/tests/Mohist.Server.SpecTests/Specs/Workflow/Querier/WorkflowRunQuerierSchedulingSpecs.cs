@@ -403,11 +403,8 @@ public class WorkflowRunQuerierSchedulingSpecs
         var metadata = new WorkflowRunMetadata(
             Name: null,
             CreatedAt: TestTime.UtcNow,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-                ["issueNumber"] = "1",
-            });
+            ProjectId: projectId,
+            IssueNumber: 1);
 
         var run = WorkflowRun.Create(id, BuildMinimalDefinition(), DateTimeOffset.UnixEpoch, metadata);
         run.Stages.Clear();

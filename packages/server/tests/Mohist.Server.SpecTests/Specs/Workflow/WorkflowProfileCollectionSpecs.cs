@@ -472,7 +472,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         var state = JsonSerializer.Serialize(new
         {
             status,
-            metadata = new { annotations = new { projectId, workflowProfileId = (string?)selectedProfile } },
+            metadata = new { projectId, issueNumber = 1, annotations = new { workflowProfileId = (string?)selectedProfile } },
         });
         db.WorkflowRuns.Add(new WorkflowRunRow
         {

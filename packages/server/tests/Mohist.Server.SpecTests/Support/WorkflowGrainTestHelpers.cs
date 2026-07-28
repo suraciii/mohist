@@ -37,16 +37,10 @@ public static class WorkflowGrainTestHelpers
     public static WorkflowStartInput TestInput(IGrainFactory grains, string workflowId, string? projectId = null, string? issueId = null)
     {
         projectId ??= TestProjectId(workflowId);
-        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["projectId"] = projectId,
-        };
-        if (!string.IsNullOrWhiteSpace(issueId))
-            annotations["issueId"] = issueId;
         return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: TestTime.UtcNow,
-            Annotations: annotations));
+            ProjectId: projectId));
     }
 
     public static string TestIssueId(string workflowId) => $"test-issue-{workflowId}";

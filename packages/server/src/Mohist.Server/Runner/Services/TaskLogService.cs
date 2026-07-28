@@ -218,7 +218,7 @@ public sealed class TaskLogService : IScopedService
             return null;
         }
 
-        var projectId = run.Metadata.Annotations?.GetValueOrDefault("projectId");
+        var projectId = run.Metadata.ProjectId;
 
         foreach (var stage in run.Stages)
         {

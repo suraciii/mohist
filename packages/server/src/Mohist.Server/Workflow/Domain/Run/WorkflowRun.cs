@@ -31,7 +31,10 @@ public sealed record WorkflowRunMetadata(
     [property: Id(0)] string? Name,
     [property: Id(1)] DateTimeOffset CreatedAt,
     [property: Id(2)] Dictionary<string, string>? Labels = null,
-    [property: Id(3)] Dictionary<string, string>? Annotations = null);
+    [property: Id(3)] Dictionary<string, string>? Annotations = null,
+    [property: Id(4)] string? ProjectId = null,
+    [property: Id(5)] int? IssueNumber = null,
+    [property: Id(6)] int? EpicNumber = null);
 
 [GenerateSerializer]
 public sealed record WorkspaceIdentity(

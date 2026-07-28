@@ -576,11 +576,8 @@ public class IssueFeedbackApiSpecs
                 name = "test-run",
                 createdAt = TestTime.UtcNow.ToString("o"),
                 labels = new Dictionary<string, string>(),
-                annotations = new Dictionary<string, string>
-                {
-                    ["projectId"] = projectId,
-                    ["issueNumber"] = issueNumber.ToString(),
-                },
+                projectId,
+                issueNumber,
             },
             stages = new[]
             {

@@ -43,11 +43,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: _fixture.TimeProvider.GetUtcNow(),
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-                ["issueNumber"] = issueNumber.ToString(),
-            })));
+             ProjectId: projectId,
+             IssueNumber: issueNumber)));
         await workflow.AssignWorkerAsync(runnerId);
 
         var work = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(Services);

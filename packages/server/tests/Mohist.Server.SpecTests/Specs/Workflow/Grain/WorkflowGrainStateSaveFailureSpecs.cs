@@ -50,12 +50,68 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             .GetDefaultVariablesAsync(workflowRunId);
         Assert.NotNull(run);
         Assert.Equal(WorkflowRunStatus.Pending, run!.Status);
-        Assert.Equal(projectId, run.Metadata.Annotations!["projectId"]);
-        Assert.Equal("1", run.Metadata.Annotations["issueNumber"]);
-        Assert.Equal("2", run.Metadata.Annotations["epicNumber"]);
+        Assert.Equal(projectId, run.Metadata.ProjectId);
+        Assert.Equal(1, run.Metadata.IssueNumber);
+        Assert.Equal(2, run.Metadata.EpicNumber);
         Assert.Equal(string.Empty, defaults.DefaultVars!.Value.GetProperty("archive").GetString());
         Assert.Single(await events.ListAsync(workflowRunId), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStarted);
+    }
+
+    [Theory]
+    [InlineData("", 1)]
+    [InlineData("proj-invalid-initial-context", 0)]
+    [InlineData("proj-invalid-initial-context", -1)]
+    public async Task EnsureStarted_RejectsInvalidInitialIssueContext(string projectId, int issueNumber)
+    {
+        var workflowRunId = $"wr-invalid-initial-context-{issueNumber}-{(string.IsNullOrWhiteSpace(projectId) ? "blank" : "project")}";
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var grain = CreateGrain(scope.ServiceProvider, store, workflowRunId);
+        await grain.OnActivateAsync(CancellationToken.None);
+
+        if (issueNumber <= 0)
+        {
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+                grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, issueNumber, null)));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, issueNumber, null)));
+        }
+
+        Assert.Null(await store.LoadAsync(workflowRunId));
+    }
+
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(-1, null)]
+    [InlineData(null, 7)]
+    public async Task Start_RejectsInvalidTypedIssueContext(int? issueNumber, int? epicNumber)
+    {
+        var workflowRunId = $"wr-invalid-start-context-{issueNumber}-{epicNumber}";
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var grain = CreateGrain(scope.ServiceProvider, store, workflowRunId);
+        await grain.OnActivateAsync(CancellationToken.None);
+        var input = new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+            null,
+            FixedTime,
+            ProjectId: "proj-invalid-start-context",
+            IssueNumber: issueNumber,
+            EpicNumber: epicNumber));
+
+        if (issueNumber is <= 0)
+        {
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => grain.StartAsync(input));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() => grain.StartAsync(input));
+        }
+
+        Assert.Null(await store.LoadAsync(workflowRunId));
     }
 
     [Fact]
@@ -88,7 +144,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
 
         var persisted = await store.LoadAsync(workflowRunId);
         Assert.NotNull(persisted);
-        Assert.Equal("2", persisted!.Metadata.Annotations!["epicNumber"]);
+        Assert.Equal(2, persisted!.Metadata.EpicNumber);
         Assert.Equal(2, failingStore.StateOnlySaveAttempts);
     }
 
@@ -111,7 +167,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         var persisted = await store.LoadAsync(workflowRunId);
         Assert.NotNull(persisted);
         Assert.Equal(WorkflowRunStatus.Stopped, persisted!.Status);
-        Assert.False(persisted.Metadata.Annotations!.ContainsKey("epicNumber"));
+        Assert.Null(persisted.Metadata.EpicNumber);
     }
 
     private static WorkflowGrain CreateGrain(

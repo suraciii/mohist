@@ -318,10 +318,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
         return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: TestTime.UtcNow,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-            }));
+            ProjectId: projectId));
     }
 
     private async Task DispatchStageFailedAsync(string workflowRunId, string stage)

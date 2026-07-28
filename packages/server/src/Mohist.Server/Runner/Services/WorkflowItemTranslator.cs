@@ -206,7 +206,7 @@ EpicNumber: ReadEpicNumber(run),
         payload["work"] = JSON.SerializeToElement(work);
         payload["issue"] = JSON.SerializeToElement(new
         {
-            projectId = TryGetAnnotation(run, "projectId", out var projectId) ? projectId : null,
+            projectId = run.Metadata.ProjectId,
             number = ReadIssueNumber(run),
         });
         payload["repository"] = run.Repository is { } repository
@@ -286,7 +286,7 @@ EpicNumber: ReadEpicNumber(run),
                     $"Workflow task '{workId}' declares an mohist/agent task without a non-empty 'name' or 'prompt'."));
         }
 
-        var projectId = TryGetAnnotation(run, "projectId", out var value) ? value : null;
+        var projectId = run.Metadata.ProjectId;
         var snapshot = projectId is null
             ? null
             : await _agentSnapshots.ResolveAsync(projectId, nameElement.Value.GetString()!);
@@ -401,25 +401,11 @@ EpicNumber: ReadEpicNumber(run),
                 && !string.IsNullOrWhiteSpace(failIf.GetString()));
     }
 
-    private static bool TryGetAnnotation(WorkflowRun run, string key, out string value)
-    {
-        value = "";
-        return run.Metadata?.Annotations?.TryGetValue(key, out value!) == true;
-    }
-
     private static int? ReadIssueNumber(WorkflowRun run) =>
-        TryGetAnnotation(run, "issueNumber", out var raw)
-        && int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
-        && number > 0
-            ? number
-            : null;
+        run.Metadata.IssueNumber is > 0 ? run.Metadata.IssueNumber : null;
 
     private static int? ReadEpicNumber(WorkflowRun run) =>
-        TryGetAnnotation(run, "epicNumber", out var raw)
-        && int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
-        && number > 0
-            ? number
-            : null;
+        run.Metadata.EpicNumber is > 0 ? run.Metadata.EpicNumber : null;
 
     private static TaskRun? FindFailedTask(WorkflowRun run, string taskId)
     {
@@ -486,7 +472,7 @@ EpicNumber: ReadEpicNumber(run),
                 result.ArtifactUploadIds,
                 item.Artifacts,
                 variables: await ResolveBindVariablesAsync(workflowRunId, run, item.Stage),
-                projectId: run.Metadata?.Annotations?.GetValueOrDefault("projectId"),
+                projectId: run.Metadata.ProjectId,
                 issueNumber: ReadIssueNumber(run));
 
             if (!bindResult.IsSuccess)

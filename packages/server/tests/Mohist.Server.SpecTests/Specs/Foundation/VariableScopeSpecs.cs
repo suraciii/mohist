@@ -55,10 +55,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: TestTime.UtcNow,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-            })));
+             ProjectId: projectId)));
 
         await EnqueueWorkflowForTestAsync(workflowId, projectId);
         var (work, _) = await PollWorkAnyAsync();
@@ -95,10 +92,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: TestTime.UtcNow,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-            })));
+             ProjectId: projectId)));
 
         await EnqueueWorkflowForTestAsync(workflowId, projectId);
         var (work, _) = await PollWorkAnyAsync();

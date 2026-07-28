@@ -240,10 +240,7 @@ public class IssueWorkflowReadPathSpecs
                 Name: "read-path-test",
                 CreatedAt: FixedNow,
                 Labels: null,
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = projectId,
-                }),
+                ProjectId: projectId),
             Status = WorkflowRunStatus.Completed,
             CurrentStageId = "integrate",
             StartedAt = FixedNow.AddMinutes(-30),

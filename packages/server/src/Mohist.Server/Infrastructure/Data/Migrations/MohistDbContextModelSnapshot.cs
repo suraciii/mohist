@@ -1913,12 +1913,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<int?>("IssueNumber")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("INTEGER")
-                        .HasComputedColumnSql("CAST(COALESCE(json_extract(State, '$.metadata.annotations.issueNumber'), json_extract(State, '$.Metadata.Annotations.issueNumber'), json_extract(State, '$.Metadata.Annotations.IssueNumber')) AS INTEGER)", true);
+                        .HasComputedColumnSql("CAST(COALESCE(json_extract(State, '$.metadata.issueNumber'), json_extract(State, '$.Metadata.IssueNumber')) AS INTEGER)", true);
 
                     b.Property<string>("MetadataProjectId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", true);
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.projectId'), json_extract(State, '$.Metadata.ProjectId'))", true);
 
                     b.Property<DateTime?>("ReadySince")
                         .ValueGeneratedOnAddOrUpdate()
