@@ -13,3 +13,4 @@
 - Full `npm test` and Web `typecheck` pass after updating the remaining workflow/session/API fixtures to the typed state representation.
 - Verification diagnosis: the implementation and all focused checks pass; the only stale completion marker was `tasks.json` still set to `passes: false`. `npm run verify` now completes successfully, and build/test commands leave no Git-visible changes.
 - Issue-context Run creation now reuses `WorkflowRunLineage.ForIssue`, so it rejects blank Projects and non-positive Issues and normalizes a non-positive Epic to absent before profile resolution or persistence. `WorkflowGrainStateSaveFailureSpecs` covers invalid initial contexts; its full Server Spec run passes (3284 tests).
+- The review fix passes root `npm test` (including 3284 Server Specs, 5145 Web tests, and 1438 Runner tests) and `npm run typecheck -w packages/web`.
