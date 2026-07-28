@@ -181,7 +181,7 @@ public sealed class DispatchService : IScopedService
                 return (workKey, activeWork.DispatchSnapshot);
 
             var dispatch = await _translator.TranslateToDispatchAsync(activeWork.Item, workflowRunId, run, runnerId);
-            var concrete = WithIssueFromRunAnnotations(dispatch, run);
+            var concrete = WithIssueFromRun(dispatch, run);
             if (activeWork.IsChecks)
                 return (workKey, concrete);
             var stored = await StoreDispatchAsync(workflowRunId, workerId, workId, concrete);
@@ -221,7 +221,7 @@ public sealed class DispatchService : IScopedService
         try
         {
             var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, runnerId);
-            var concrete = WithIssueFromRunAnnotations(dispatch, run);
+            var concrete = WithIssueFromRun(dispatch, run);
             if (item.IsChecks)
                 return concrete;
             return await StoreDispatchAsync(
@@ -269,14 +269,12 @@ public sealed class DispatchService : IScopedService
             .RejectActiveWorkDispatchAsync(workerId, workId, exception.Error);
     }
 
-    private static WorkDispatch WithIssueFromRunAnnotations(WorkDispatch dispatch, WorkflowRun run)
+    private static WorkDispatch WithIssueFromRun(WorkDispatch dispatch, WorkflowRun run)
     {
         if (dispatch.Issue is not null) return dispatch;
-        if (run.Metadata?.Annotations is not { } annotations) return dispatch;
-        if (!annotations.TryGetValue("projectId", out var projectId)
-            || !annotations.TryGetValue("issueNumber", out var numberStr)
-            || !int.TryParse(numberStr, out var number))
+        if (string.IsNullOrWhiteSpace(run.Metadata.ProjectId)
+            || run.Metadata.IssueNumber is not > 0)
             return dispatch;
-        return dispatch with { Issue = new WorkIssueRef(projectId, number) };
+        return dispatch with { Issue = new WorkIssueRef(run.Metadata.ProjectId, run.Metadata.IssueNumber.Value) };
     }
 }

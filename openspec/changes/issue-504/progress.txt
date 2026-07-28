@@ -1,0 +1,13 @@
+## Codebase Patterns
+
+- WorkflowRun metadata is an Orleans generated record; new fields must be appended after field IDs 0..3.
+- SQLite WorkflowRuns projections are generated columns and the profile-binding FK uses `(MetadataProjectId, WorkflowProfileIdKey)`.
+- Spec tests use `TestSqliteDatabase.CreateMigrated()` and in-process grains; no physical database or external dependency is needed.
+
+## Notes
+
+- Typed `ProjectId`, `IssueNumber`, and `EpicNumber` are now the sole WorkflowRun lineage source. User annotations remain untouched and are no longer interpreted as system identity.
+- The row-level `WorkflowRuns.EpicNumber` still overrides metadata Epic on reload when non-null and remains the save-side snapshot.
+- The migration rebuilds `WorkflowRuns`, migrates both lower-camel and Pascal-case legacy metadata paths, preserves indexes and the profile-binding FK, and has an inverse JSON/projection path in `Down`.
+- Existing focused and profile-binding tests that constructed annotation-backed runs were updated to construct typed metadata; the generated-column blocker fixture now seeds typed JSON projections directly.
+- Full `npm test` and Web `typecheck` pass after updating the remaining workflow/session/API fixtures to the typed state representation.

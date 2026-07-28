@@ -90,7 +90,7 @@ public class WorkflowRunStore : IWorkflowRunStore
     /// <summary>
     /// Build the CloudEvent envelope for a workflow domain event, stamping its
     /// full business lineage onto <c>extensions</c> from the producing run's own
-    /// metadata annotations (no cross-aggregate query). <c>workflowrunid</c> is
+    /// typed metadata (no cross-aggregate query). <c>workflowrunid</c> is
     /// stamped unconditionally because the run itself is the producer. <c>stage</c>
     /// is stamped when the unwrapped <see cref="WorkflowEvent"/> variant exposes
     /// a <c>Stage</c> member — see <c>WorkflowRunLineage.StageOf</c>.

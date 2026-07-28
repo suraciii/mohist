@@ -513,7 +513,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             // Issue metadata lives on the run (annotations), not the work
             // item — project it so the read model keeps the issue reference
             // for active workflow work.
-            var issue = IssueFromAnnotations(run);
+            var issue = IssueFromRun(run);
             var stage = run.CurrentStage();
             var task = stage.RunningTask;
             if (task is not null)
@@ -863,18 +863,16 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     /// <summary>
     /// Resolves the issue reference carried on a workflow run's metadata
-    /// annotations (projectId / issueNumber). Returns null when the run has no
-    /// issue annotation pair. Used to project the issue ref for
+    /// typed metadata. Returns null when the run has no issue context. Used to
+    /// project the issue ref for
     /// active workflow work — issue metadata lives on the run, not the work
     /// item, so without this the read model would lose the issue reference.
     /// </summary>
-    private static WorkIssueRef? IssueFromAnnotations(WorkflowRun run)
+    private static WorkIssueRef? IssueFromRun(WorkflowRun run)
     {
-        if (run.Metadata?.Annotations is not { } annotations) return null;
-        if (!annotations.TryGetValue("projectId", out var projectId)
-            || !annotations.TryGetValue("issueNumber", out var numberStr)
-            || !int.TryParse(numberStr, out var number))
+        if (string.IsNullOrWhiteSpace(run.Metadata.ProjectId)
+            || run.Metadata.IssueNumber is not > 0)
             return null;
-        return new WorkIssueRef(projectId, number);
+        return new WorkIssueRef(run.Metadata.ProjectId, run.Metadata.IssueNumber.Value);
     }
 }

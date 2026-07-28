@@ -287,12 +287,8 @@ public class EventDispatcherImmediateTriggerSpecs
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: EventTime,
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = "proj_poke",
-                    ["issueId"] = issueId ?? string.Empty,
-                    ["issueNumber"] = issueId is null ? string.Empty : "1",
-                }),
+                ProjectId: "proj_poke",
+                IssueNumber: issueId is null ? null : 1),
             Stages = [],
         };
     }

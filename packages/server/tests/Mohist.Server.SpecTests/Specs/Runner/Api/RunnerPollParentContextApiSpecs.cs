@@ -154,10 +154,7 @@ public sealed class RunnerPollParentContextApiSpecs
         await workflow.StartAsync(new WorkflowStartInput(Metadata: new(
             Name: null,
             CreatedAt: DateTimeOffset.UnixEpoch,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-                ["issueNumber"] = "2",
-            })));
+             ProjectId: projectId,
+             IssueNumber: 2)));
     }
 }

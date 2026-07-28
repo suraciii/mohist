@@ -6,7 +6,7 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 /// <summary>
 /// Pure helper that builds the lineage extensions dictionary for a workflow
 /// CloudEvent from the producing run's own state (<see cref="WorkflowRun"/>
-/// / <see cref="WorkflowRunMetadata.Annotations"/>) and the unwrapped
+/// / <see cref="WorkflowRunMetadata"/>) and the unwrapped
 /// <see cref="WorkflowEvent"/> variant. No cross-aggregate query is issued —
 /// stamping uses only identity the run already holds.
 /// </summary>
@@ -20,68 +20,49 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 /// </remarks>
 public static class WorkflowRunLineage
 {
-    internal static Dictionary<string, string> AnnotationsFor(string projectId, int issueNumber, int? epicNumber)
+    internal static WorkflowRunMetadata ForIssue(
+        string projectId,
+        int issueNumber,
+        int? epicNumber,
+        WorkflowRunMetadata? existing = null)
     {
         if (string.IsNullOrWhiteSpace(projectId))
             throw new ArgumentException("Project id is required.", nameof(projectId));
         if (issueNumber <= 0)
             throw new ArgumentOutOfRangeException(nameof(issueNumber));
 
-        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
+        return (existing ?? new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch)) with
         {
-            ["projectId"] = projectId,
-            ["issueNumber"] = issueNumber.ToString(),
+            ProjectId = projectId,
+            IssueNumber = issueNumber,
+            EpicNumber = epicNumber is > 0 ? epicNumber : null,
         };
-        if (epicNumber is > 0)
-            annotations["epicNumber"] = epicNumber.Value.ToString();
-        return annotations;
     }
 
     internal static void ApplyContext(WorkflowRun run, string projectId, int issueNumber, int? epicNumber)
     {
-        var annotations = run.Metadata.Annotations is null
-            ? new Dictionary<string, string>(StringComparer.Ordinal)
-            : new Dictionary<string, string>(run.Metadata.Annotations, StringComparer.Ordinal);
-        annotations["projectId"] = projectId;
-        annotations["issueNumber"] = issueNumber.ToString();
-        if (epicNumber is > 0)
-            annotations["epicNumber"] = epicNumber.Value.ToString();
-        else
-            annotations.Remove("epicNumber");
-        run.Metadata = run.Metadata with { Annotations = annotations };
+        run.Metadata = ForIssue(projectId, issueNumber, epicNumber, run.Metadata);
     }
 
     internal static bool ContextEquals(WorkflowRun run, string projectId, int issueNumber, int? epicNumber) =>
-        string.Equals(run.Metadata.Annotations?.GetValueOrDefault("projectId"), projectId, StringComparison.Ordinal)
-        && string.Equals(run.Metadata.Annotations?.GetValueOrDefault("issueNumber"), issueNumber.ToString(), StringComparison.Ordinal)
+        string.Equals(run.Metadata.ProjectId, projectId, StringComparison.Ordinal)
+        && run.Metadata.IssueNumber == issueNumber
         && EpicAffiliationOf(run) == epicNumber;
 
     internal static void RestoreStoredEpicNumber(WorkflowRun run, int? epicNumber)
     {
-        var projectId = run.Metadata.Annotations?.GetValueOrDefault("projectId");
-        var issueNumberText = run.Metadata.Annotations?.GetValueOrDefault("issueNumber");
-        if (string.IsNullOrWhiteSpace(projectId)
-            || !int.TryParse(issueNumberText, out var issueNumber)
-            || issueNumber <= 0)
-        {
-            return;
-        }
-
-        ApplyContext(run, projectId, issueNumber, epicNumber);
+        if (epicNumber is not null)
+            run.Metadata = run.Metadata with { EpicNumber = epicNumber };
     }
 
     internal static int? EpicAffiliationOf(WorkflowRun run) =>
-        run.Metadata.Annotations?.GetValueOrDefault("epicNumber") is { } epicNumber
-        && int.TryParse(epicNumber, out var parsed)
-        && parsed > 0
-            ? parsed
-            : null;
+        run.Metadata.EpicNumber is > 0 ? run.Metadata.EpicNumber : null;
 
     /// <summary>
     /// Build the <c>extensions</c> dictionary for the given workflow event.
     /// <c>workflowrunid</c> is always stamped (the run is the producer);
     /// <c>projectid</c>, <c>issue</c>, and <c>epic</c> are stamped only
-    /// when their value is present on the run's metadata annotations (absent
+    /// when their value is present on the run's typed metadata (absent
     /// affiliations are omitted, never empty). <c>stage</c> is stamped when
     /// the variant exposes a <c>Stage</c> member — see <see cref="StageOf"/>.
     /// </summary>
@@ -89,10 +70,13 @@ public static class WorkflowRunLineage
     {
         ArgumentNullException.ThrowIfNull(run);
 
-        var annotations = run.Metadata?.Annotations;
-        var projectId = RequiredAnnotation(annotations, "projectId", run.Id);
-        var issueNumber = annotations?.GetValueOrDefault("issueNumber");
-        var epicNumber = annotations?.GetValueOrDefault("epicNumber");
+        var projectId = run.Metadata.ProjectId;
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new InvalidOperationException(
+                $"Workflow run '{run.Id}' cannot emit events without a project context.");
+
+        var issueNumber = run.Metadata.IssueNumber?.ToString();
+        var epicNumber = EpicAffiliationOf(run)?.ToString();
         var stage = StageOf(evt);
 
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -108,18 +92,6 @@ public static class WorkflowRunLineage
             extensions[EventCatalog.Lineage.Stage] = stage!;
 
         return extensions;
-    }
-
-    private static string RequiredAnnotation(
-        IReadOnlyDictionary<string, string>? annotations,
-        string key,
-        string workflowRunId)
-    {
-        if (annotations?.TryGetValue(key, out var value) == true && !string.IsNullOrWhiteSpace(value))
-            return value;
-
-        throw new InvalidOperationException(
-            $"Workflow run '{workflowRunId}' cannot emit events without the required '{key}' annotation.");
     }
 
     /// <summary>

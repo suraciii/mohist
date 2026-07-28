@@ -78,11 +78,8 @@ public abstract class ProjectEventsApiTestSupport
             {
                 createdAt = FixedTime,
                 name = "test",
-                annotations = new Dictionary<string, string>
-                {
-                    ["projectId"] = projectId,
-                    ["issueNumber"] = issueNumber.ToString(),
-                },
+                projectId,
+                issueNumber,
             },
             status = "Running",
             currentStageId = "build",

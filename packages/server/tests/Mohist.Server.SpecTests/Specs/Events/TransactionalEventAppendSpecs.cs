@@ -219,10 +219,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: TestTime.UtcNow,
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = ProjectId,
-                }),
+                ProjectId: ProjectId),
             Stages = [],
         };
 
@@ -343,7 +340,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => store.SaveAsync(run, [new WorkflowRunCompleted()]));
 
-        Assert.Contains("projectId", ex.Message);
+        Assert.Contains("project context", ex.Message);
     }
 
     [Fact]
@@ -466,35 +463,25 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
 
     private static WorkflowRun BuildRun(string id, bool includeAnnotations, int? epicNumber = null)
     {
-        Dictionary<string, string>? annotations = null;
-        if (includeAnnotations)
-        {
-            annotations = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = ProjectId,
-                ["issueNumber"] = "1",
-            };
-            if (epicNumber is > 0)
-                annotations["epicNumber"] = epicNumber.Value.ToString();
-        }
         return new WorkflowRun
         {
             Id = id,
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: TestTime.UtcNow,
-                Annotations: annotations),
+                ProjectId: includeAnnotations ? ProjectId : null,
+                IssueNumber: includeAnnotations ? 1 : null,
+                EpicNumber: includeAnnotations ? epicNumber : null),
             Stages = [],
         };
     }
 
     private static ProducerLineageContext WorkflowContext(WorkflowRun run, WorkflowEvent evt)
     {
-        var annotations = run.Metadata.Annotations;
         return new ProducerLineageContext(
-            ProjectId: annotations?.GetValueOrDefault("projectId"),
-            Issue: annotations?.GetValueOrDefault("issueNumber"),
-            Epic: annotations?.GetValueOrDefault("epicNumber"),
+            ProjectId: run.Metadata.ProjectId,
+            Issue: run.Metadata.IssueNumber?.ToString(),
+            Epic: run.Metadata.EpicNumber?.ToString(),
             WorkflowRunId: run.Id,
             Stage: WorkflowRunLineage.StageOf(evt),
             StageRequired: WorkflowRunLineage.CarriesStage(evt));

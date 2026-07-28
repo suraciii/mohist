@@ -281,10 +281,7 @@ public class RuntimeEntrySpecs
             var startInput = new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: TestTime.UtcNow,
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = workflowProjectId,
-                }));
+                 ProjectId: workflowProjectId));
             await workflowAGrain.StartAsync(startInput);
             await workflowBGrain.StartAsync(startInput);
             await workflowAGrain.AssignWorkerAsync(runnerId);

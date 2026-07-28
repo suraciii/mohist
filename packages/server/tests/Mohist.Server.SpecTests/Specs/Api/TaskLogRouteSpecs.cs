@@ -94,9 +94,7 @@ public class TaskLogRouteSpecs
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: _fixture.TimeProvider.GetUtcNow(),
-                Annotations: projectId is null
-                    ? null
-                    : new Dictionary<string, string>(StringComparer.Ordinal) { ["projectId"] = projectId }),
+                ProjectId: projectId),
             CurrentStageId = "build",
             Status = WorkflowRunStatus.Running,
             Assignment = new WorkflowAssignment(RunnerId, _fixture.TimeProvider.GetUtcNow()),

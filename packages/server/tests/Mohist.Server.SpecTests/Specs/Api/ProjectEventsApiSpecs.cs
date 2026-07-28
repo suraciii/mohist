@@ -132,11 +132,8 @@ public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
                 Metadata = new WorkflowRunMetadata(
                     Name: null,
                     CreatedAt: FixedTime,
-                    Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                    {
-                        ["projectId"] = project.Id,
-                        ["issueNumber"] = "42",
-                    }),
+                     ProjectId: project.Id,
+                     IssueNumber: 42),
                 Stages = [],
             }, [new WorkflowRunFailed("failed")]);
         }

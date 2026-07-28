@@ -50,9 +50,9 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             .GetDefaultVariablesAsync(workflowRunId);
         Assert.NotNull(run);
         Assert.Equal(WorkflowRunStatus.Pending, run!.Status);
-        Assert.Equal(projectId, run.Metadata.Annotations!["projectId"]);
-        Assert.Equal("1", run.Metadata.Annotations["issueNumber"]);
-        Assert.Equal("2", run.Metadata.Annotations["epicNumber"]);
+        Assert.Equal(projectId, run.Metadata.ProjectId);
+        Assert.Equal(1, run.Metadata.IssueNumber);
+        Assert.Equal(2, run.Metadata.EpicNumber);
         Assert.Equal(string.Empty, defaults.DefaultVars!.Value.GetProperty("archive").GetString());
         Assert.Single(await events.ListAsync(workflowRunId), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStarted);
@@ -88,7 +88,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
 
         var persisted = await store.LoadAsync(workflowRunId);
         Assert.NotNull(persisted);
-        Assert.Equal("2", persisted!.Metadata.Annotations!["epicNumber"]);
+        Assert.Equal(2, persisted!.Metadata.EpicNumber);
         Assert.Equal(2, failingStore.StateOnlySaveAttempts);
     }
 
@@ -111,7 +111,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         var persisted = await store.LoadAsync(workflowRunId);
         Assert.NotNull(persisted);
         Assert.Equal(WorkflowRunStatus.Stopped, persisted!.Status);
-        Assert.False(persisted.Metadata.Annotations!.ContainsKey("epicNumber"));
+        Assert.Null(persisted.Metadata.EpicNumber);
     }
 
     private static WorkflowGrain CreateGrain(

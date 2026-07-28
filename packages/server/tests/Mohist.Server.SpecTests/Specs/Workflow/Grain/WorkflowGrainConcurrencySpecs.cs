@@ -190,11 +190,8 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
         new(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: _fixture.TimeProvider.GetUtcNow(),
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-                ["issueNumber"] = issueNumber.ToString(),
-            }));
+             ProjectId: projectId,
+             IssueNumber: issueNumber));
 
     private static void AssertAllowedSerializedState(string? status)
     {

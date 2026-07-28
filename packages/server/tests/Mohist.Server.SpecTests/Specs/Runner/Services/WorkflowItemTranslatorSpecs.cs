@@ -79,12 +79,6 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     private async Task<WorkflowRun> SeedRunningWorkflowAsync(string workflowRunId, string projectId)
     {
-        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["projectId"] = projectId,
-            ["issueNumber"] = "42",
-            ["epicNumber"] = "7",
-        };
         var run = WorkflowRunExtensions.Create(
             workflowRunId,
             new WorkflowDefinition(
@@ -94,7 +88,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
                     [new("check-1", "Check 1", "spec/check")]),
             ]),
             DateTimeOffset.UnixEpoch,
-            new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch, Annotations: annotations));
+            new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch, ProjectId: projectId, IssueNumber: 42, EpicNumber: 7));
 
         await SeedProfileAsync(projectId, workflowRunId, run);
         return run;

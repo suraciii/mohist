@@ -309,7 +309,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         var run = new WorkflowRun
         {
             Id = workflowRunId,
-            Metadata = new WorkflowRunMetadata(Name: null, CreatedAt: now, Annotations: new Dictionary<string, string> { ["projectId"] = "proj-1" }),
+            Metadata = new WorkflowRunMetadata(Name: null, CreatedAt: now, ProjectId: "proj-1"),
             Status = WorkflowRunStatus.Running,
             Assignment = new WorkflowAssignment("runner-A", now),
             CurrentStageId = "stage-1",
