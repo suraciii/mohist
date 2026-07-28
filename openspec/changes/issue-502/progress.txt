@@ -36,3 +36,15 @@
   - `Gauge_PublishesNoSourceTags_OrOtherHighCardinalityAttributes` asserts the observation's `TagList` is empty so source identifiers never become metric attributes.
 - The first version of `NoBlockedSource_PublishesZero_AfterRecoveryCycle` accidentally used `MaxAttempts=1`, which dead-letters the handler on the first call and never produces a "blocked" cycle (the source is settled in one shot). Reworked the scenario to use `MaxAttempts=3` with a one-second base backoff and a handler that throws on the first attempt, so cycle 1 records a blocked source and cycle 2 recovers it.
 - Verification passed: `npm run build`, focused dispatcher unit + ArchTests, and `npm test` (1538 server units +3, 3278 server specs, 35 arch tests, 1432 CLI tests, 175 workflow definition tests, 1438 runner tests, 5145 web tests with 1 existing skip).
+
+## T-004
+
+- Rewrote `design/eventbus.md` to converge with the dispatcher contract actually deployed after T-001/T-002/T-003.
+- Event inventory: table + prose now name the five durable origins the dispatcher queries (`WorkflowRun`, `Issue`, `Epic`, `AgentSession`, `AgentJob`); the previous `Runner Disconnected` and `Session — no` rows were stale and got removed.
+- Backoff: replaced every Polly mention (diagram + error ladder) with `EventDispatcherOptions.BaseBackoff` × 2^(attempt-1) capped by `MaxBackoff`, plus `MaxAttempts`. The `手写指数退避` heading matches the inline `Backoff(int)` calculation in `EventDispatcherService` and the configured options.
+- Wake-up: dropped the "生产者只追加，绝不唤醒分发器" claim and added a 唤醒 subsection that names all five producers and the `EventDispatcherPoke.PokeAfterCommit` helper; reminder is stated as the correctness path.
+- Settlement retention: new 结算保留 subsection states that the in-process handler-state map survives a failed `MarkDispatchedAsync`/`SettleAsync`, that the next cycle retries only the settlement write, and that a dispatcher restart clears the map (no persistence promised).
+- FIFO + visibility: new FIFO 阻塞与可见性 subsection explains the per-source skip rule and names `mohist.server.event_dispatcher.blocked_sources` as the attribute-free ObservableGauge; no source/event/attempt attribute is promised.
+- DLQ: 崩溃与恢复 explicitly says no new DLQ query/replay API is introduced; the existing `IDeadLetterStore.StartRedeliveryAsync`/`ResolveAsync`/`RecordRedeliveryFailureAsync` flow is unchanged.
+- Removed the original "未来：N 个分发器按 hash(Source) % N 分片" line because the document must describe the deployed contract, not future dispatcher architecture.
+- Verification passed: `npm run build`, `npm test` (1538 server units, 3278 server specs, 35 arch tests, 1432 CLI tests, 175 workflow definition tests, 1438 runner tests, 5145 web tests with 1 existing skip).

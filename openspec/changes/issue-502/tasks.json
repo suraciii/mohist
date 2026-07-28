@@ -79,7 +79,7 @@
       "type": "WRITE",
       "output": "Updated design/eventbus.md describing the verified event-dispatcher contract.",
       "dependsOn": ["T-001", "T-002", "T-003"],
-      "passes": false,
+      "passes": true,
       "notes": "Keep the document converged only after wording and implementation agree; do not introduce future dispatcher architecture."
     }
   ]
