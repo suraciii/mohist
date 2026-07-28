@@ -1,27 +1,26 @@
 {
   "project": "mohist-local",
-  "description": "Converge WorkflowRun reads on the Run CLI surface and retire the duplicate Issue workflow subtree.",
+  "description": "Retire the duplicate Issue workflow subtree and retain WorkflowRun detail as the sole Run read.",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Unify WorkflowRun CLI reads",
+      "title": "Retire duplicate Issue workflow reads",
       "spec": "specs/workflow-run-cli/spec.md#workflowrun-reads-use-the-run-command-surface",
-      "description": "Add `mo run timeline` beside the existing Run reads, using the established Run ID or `--issue` target resolver and the WorkflowRun detail response. Remove the `mo issue workflow` command subtree, update CLI help and the CLI reference, and retain Issue Workflow Profile selection only on create/edit. Extend the CLI contract tests for timeline reads, retired-command rejection, and command discovery.",
+      "description": "Remove the `mo issue workflow` command subtree and retain `mo run view` as the sole WorkflowRun detail read, including its existing ordered stage progression. Do not add `mo run timeline`; update CLI help and the CLI reference, retain Issue Workflow Profile selection only on create/edit, and extend CLI contract tests for retired-command rejection and command discovery.",
       "acceptanceCriteria": [
-        "`mo run timeline` accepts exactly one Run ID or `--issue <number>` and displays the selected Run's existing timeline data.",
-        "A missing or ambiguous Run target returns a local usage failure without HTTP requests, and an Issue without a bound Run returns the established actionable failure.",
-        "`mo issue workflow`, `mo issue workflow status`, and `mo issue workflow timeline` are unknown commands with no compatibility alias or HTTP request.",
-        "`mo run --help` and `docs/cli-reference.md` list timeline under Run reads; Issue help and documentation do not expose an Issue workflow read subarea; Workflow Profile options remain discoverable on issue create/edit.",
-        "Focused CLI tests cover Run-ID and Issue timeline targets, target validation, retired command rejection, and group-help/documentation contracts.",
+        "`mo run view` remains the only Run detail command and continues to accept exactly one Run ID or `--issue <number>` while presenting the Run's ordered stages.",
+        "`mo issue workflow`, `mo issue workflow status`, `mo issue workflow timeline`, and `mo run timeline` are unknown commands with no compatibility alias or HTTP request.",
+        "`mo run --help` and `docs/cli-reference.md` retain `view` as the Run detail read and do not list timeline; Issue help and documentation do not expose an Issue workflow read subarea; Workflow Profile options remain discoverable on issue create/edit.",
+        "Focused CLI tests cover preserved Run view targeting, all retired-command rejection paths, and group-help/documentation contracts.",
         "`npm test` passes."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Updated CLI command tree, Run timeline read, CLI reference, and CLI contract tests.",
+      "output": "Updated CLI command tree, CLI reference, and CLI contract tests with no duplicate timeline read.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Reuse RunCommands target resolution and the existing WorkflowRun detail DTO. Do not add server routes, change workflow state behavior, or retain aliases for retired Issue commands."
+      "notes": "Keep RunCommands target resolution and the existing WorkflowRun detail DTO unchanged. Do not add server routes, change workflow state behavior, add a Run timeline command, or retain aliases for retired Issue commands."
     }
   ]
 }
