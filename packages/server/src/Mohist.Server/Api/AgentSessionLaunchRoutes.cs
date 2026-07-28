@@ -98,6 +98,42 @@ public static class AgentSessionLaunchRoutes
             }
 
             var project = context.GetResolvedProject();
+            var launchRequest = new AgentLaunchCoordinatorRequest(
+                Prompt: prompt?.Trim() ?? string.Empty,
+                AgentRef: agentRef,
+                Runtime: null,
+                WorkspacePath: body.Context?.WorkspacePath,
+                IssueNumber: body.Context?.IssueNumber,
+                EpicNumber: body.Context?.EpicNumber,
+                Repository: body.Context?.Repository,
+                Title: null);
+
+            try
+            {
+                var resumed = await launcher.ResumeIdempotentAsync(
+                    project.Id,
+                    idempotencyKey,
+                    launchRequest,
+                    ct);
+                if (resumed is not null)
+                    return AcceptedLaunch(project.Id, resumed);
+            }
+            catch (LaunchIdempotencyConflictException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "launch_idempotency_conflict",
+                    new { idempotencyKey = ex.IdempotencyKey });
+            }
+
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                return ApiResults.BadRequest(
+                    "prompt is required",
+                    "prompt_required",
+                    new { fields = new[] { "prompt" } });
+            }
+
             var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
             if (agent is null)
             {
@@ -125,9 +161,10 @@ public static class AgentSessionLaunchRoutes
             {
                 result = await launcher.LaunchIdempotentAsync(
                     agent,
-                    prompt,
+                    prompt!,
                     launchContext,
                     idempotencyKey,
+                    launchRequest,
                     ct: ct);
             }
             catch (ArgumentException ex)
@@ -142,7 +179,15 @@ public static class AgentSessionLaunchRoutes
                     new { idempotencyKey = ex.IdempotencyKey });
             }
 
-            return Results.Json(
+            return AcceptedLaunch(project.Id, result);
+        });
+
+        return app;
+    }
+
+    private static IResult AcceptedLaunch(string projectId, AgentLaunchResult result)
+    {
+        return Results.Json(
                 new ApiResponse<AgentSessionLaunchResponse>(
                     true,
                     new AgentSessionLaunchResponse(
@@ -153,13 +198,10 @@ public static class AgentSessionLaunchRoutes
                         AgentId: result.AgentId,
                         AgentName: result.AgentName,
                         Status: "queued",
-                        TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-sessions/{Uri.EscapeDataString(result.SessionId)}/transcript",
-                        JobUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}",
-                        ObservationUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}/launch-observation")),
+                        TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-sessions/{Uri.EscapeDataString(result.SessionId)}/transcript",
+                        JobUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}",
+                        ObservationUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}/launch-observation")),
                 statusCode: 201);
-        });
-
-        return app;
     }
 
     private static async Task<IResult?> ValidateContextAsync(

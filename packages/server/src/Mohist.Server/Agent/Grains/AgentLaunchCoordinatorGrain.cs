@@ -141,6 +141,36 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AlreadyPersisted: existing?.Completed == true);
     }
 
+    public async Task<AgentLaunchCoordinatorResult?> ResumeAsync(AgentLaunchCoordinatorRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var existing = _state.State.Plan;
+        if (existing is null)
+            return null;
+
+        var fingerprint = AgentLaunchCoordinatorCodec.Fingerprint(request);
+        if (!string.Equals(existing.RequestFingerprint, fingerprint, StringComparison.Ordinal))
+            throw new LaunchIdempotencyConflictException(existing.IdempotencyKey, existing.RequestFingerprint);
+
+        if (!existing.Completed)
+        {
+            await EnsureRecoveryReminderAsync();
+            await AdvanceAsync();
+        }
+
+        var final = _state.State.Plan
+            ?? throw new InvalidOperationException("Coordinator plan disappeared after resume.");
+        return new AgentLaunchCoordinatorResult(
+            JobKey: final.JobKey,
+            SessionId: final.SessionId,
+            InputId: final.InputId,
+            TurnId: final.TurnId,
+            AgentId: final.AgentId,
+            AgentName: final.AgentName,
+            AlreadyPersisted: true);
+    }
+
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
         if (!string.Equals(reminderName, RecoveryReminderName, StringComparison.Ordinal))

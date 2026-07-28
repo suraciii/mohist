@@ -124,6 +124,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string prompt,
         AgentLaunchContext context,
         string idempotencyKey,
+        AgentLaunchCoordinatorRequest request,
         string? runtimeOverride = null,
         CancellationToken ct = default)
     {
@@ -153,15 +154,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
         var coordinator = _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
             AgentLaunchCoordinatorCodec.KeyFor(context.ProjectId, idempotencyKey));
-        var request = new AgentLaunchCoordinatorRequest(
-            Prompt: trimmedPrompt,
-            AgentRef: agent.Id,
-            Runtime: runtimeOverride,
-            WorkspacePath: context.WorkspacePath,
-            IssueNumber: context.IssueNumber,
-            EpicNumber: context.EpicNumber,
-            Repository: context.Repository,
-            Title: context.Title);
         var outcome = await coordinator.LaunchAsync(new AgentLaunchCoordinatorCommandEnvelope(
             ProjectId: context.ProjectId,
             IdempotencyKey: idempotencyKey,
@@ -187,6 +179,30 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             TurnId: outcome.TurnId,
             AgentId: outcome.AgentId,
             AgentName: outcome.AgentName);
+    }
+
+    public async Task<AgentLaunchResult?> ResumeIdempotentAsync(
+        string projectId,
+        string idempotencyKey,
+        AgentLaunchCoordinatorRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(idempotencyKey);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var coordinator = _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
+            AgentLaunchCoordinatorCodec.KeyFor(projectId, idempotencyKey));
+        var outcome = await coordinator.ResumeAsync(request);
+        return outcome is null
+            ? null
+            : new AgentLaunchResult(
+                SessionId: outcome.SessionId,
+                JobKey: outcome.JobKey,
+                InputId: outcome.InputId,
+                TurnId: outcome.TurnId,
+                AgentId: outcome.AgentId,
+                AgentName: outcome.AgentName);
     }
 
     private (string SessionId, string JobKey) ResolveSessionAndJobKeys(

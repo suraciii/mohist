@@ -122,3 +122,10 @@ replay/conflict tests for T-001 still pending.
 - Focused Server verification now passes: observation 9/9, validation 17/17, and launch identity 2/2. Runner typecheck passes and Runner tests pass 1438/1438.
 - A subsequent full `npm test` reached all 3283 Server SpecTests but found six stale assertions: four expected timeout/runner-loss `Failed` or failure events instead of the specified `Unknown`, one expected a queued initial Session turn to be inactive, and one contextless runner-loss test expected a retryable failure event. Those tests now verify the issue-512 Unknown/recovery contract; the OpenTelemetry `localhost:4318` connection-refused messages are exporter diagnostics and were not failed test cases.
 - Final full verification passes: Workflow Definition 175, CLI 1435, Unit 1533, Arch 35, Server SpecTests 3283, Web 5153 passed/1 skipped, and Runner 1438; FSD and test-boundary checks also pass.
+
+## Review Fixes
+
+- Manual launch now asks the idempotency coordinator to resume a matching raw request before resolving the current Agent, context, or runtime override. The raw path Agent reference is fingerprinted, so a renamed or archived Agent can still replay the accepted launch while a different supplied reference conflicts.
+- Unknown initial turns now leave Session activity `unknown`; reconciliation to the original running work restores the turn to `executing` and Session activity to `active`.
+- Added Server specs for replay after Agent rename/archive, conflicting supplied Agent references, and Unknown-to-running composite observation convergence.
+- Direct `dotnet test` Server SpecTests run executed 3287 tests and exposed one unrelated existing flaky failure in `AgentSessionEventDiscardObservabilitySpecs.MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents`; the previous full suite had passed before these fixes.

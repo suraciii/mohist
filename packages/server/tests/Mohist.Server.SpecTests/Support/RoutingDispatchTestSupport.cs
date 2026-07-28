@@ -477,7 +477,15 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         string prompt,
         AgentLaunchContext context,
         string idempotencyKey,
+        AgentLaunchCoordinatorRequest request,
         string? runtimeOverride = null,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("RecordingAgentLauncher does not exercise the manual launch path.");
+
+    public Task<AgentLaunchResult?> ResumeIdempotentAsync(
+        string projectId,
+        string idempotencyKey,
+        AgentLaunchCoordinatorRequest request,
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher does not exercise the manual launch path.");
 }

@@ -455,6 +455,7 @@ public static partial class AgentSessionExtensions
             {
                 return [];
             }
+            var wasUnknown = turns[index].Status == AgentTurnStatus.Unknown;
             turns[index] = turns[index] with
             {
                 Status = AgentTurnStatus.Executing,
@@ -463,7 +464,9 @@ public static partial class AgentSessionExtensions
             session.Status = session.Status with
             {
                 Turns = turns,
+                Activity = wasUnknown ? AgentSessionActivity.Active : session.Status.Activity,
                 LastDataAt = now,
+                CurrentTurnEndedAt = wasUnknown ? null : session.Status.CurrentTurnEndedAt,
             };
             return [];
         }
@@ -508,9 +511,12 @@ public static partial class AgentSessionExtensions
                 Turns = turns,
                 Inputs = updatedInputs,
                 LastDataAt = now,
-                Activity = status == AgentTurnStatus.Queued
-                    ? session.Status.Activity
-                    : AgentSessionActivity.Idle,
+                Activity = status switch
+                {
+                    AgentTurnStatus.Queued => session.Status.Activity,
+                    AgentTurnStatus.Unknown => AgentSessionActivity.Unknown,
+                    _ => AgentSessionActivity.Idle,
+                },
                 CurrentTurnEndedAt = status is AgentTurnStatus.Completed
                     or AgentTurnStatus.Failed
                     or AgentTurnStatus.Cancelled
