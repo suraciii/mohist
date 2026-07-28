@@ -344,8 +344,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `project prompt get/set/clear/preview` 已在命令地图登记，命令树尚未实装。
 - `agent restore` 已在命令地图登记，命令树尚未实装（`archive` 已有）。
-- `issue workflow status/timeline` 是 Run 状态在 `run` 之外的第二条读取路径，且子区边界文案
-  与实际动作名实不符；由 issue #498 推进退役，能力并入 `run`。
 
 ### 已闭合
 

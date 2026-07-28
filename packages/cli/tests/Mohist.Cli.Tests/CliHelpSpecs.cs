@@ -84,6 +84,63 @@ public sealed class CliHelpSpecs
         Assert.Empty(handler.Requests);
     }
 
+    public static IEnumerable<object[]> RetiredWorkflowReadCases()
+    {
+        yield return [new[] { "issue", "workflow" }];
+        yield return [new[] { "issue", "workflow", "status", "42" }];
+        yield return [new[] { "issue", "workflow", "timeline", "42" }];
+        yield return [new[] { "run", "timeline", "wr_abc123" }];
+    }
+
+    [Theory]
+    [MemberData(nameof(RetiredWorkflowReadCases))]
+    public async Task RetiredWorkflowReads_AreUnknownWithoutHttp(string[] args)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
+
+        Assert.Equal(2, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Empty(output.ToString());
+        Assert.Contains("Unrecognized command", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RunHelp_ListsViewAndExcludesTimeline()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["run", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("view", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("timeline", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task IssueHelp_ExcludesWorkflowAndRetainsProfileSelectionOnWrites()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var issueExit = await MohistCliCommands.RunAsync(http, ["issue", "--help"], output, error, fs, executor);
+        Assert.Equal(0, issueExit);
+        Assert.DoesNotContain("workflow", output.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        output.GetStringBuilder().Clear();
+        var createExit = await MohistCliCommands.RunAsync(http, ["issue", "create", "--help"], output, error, fs, executor);
+        Assert.Equal(0, createExit);
+        Assert.Contains("--workflow-profile", output.ToString(), StringComparison.Ordinal);
+
+        output.GetStringBuilder().Clear();
+        var editExit = await MohistCliCommands.RunAsync(http, ["issue", "edit", "--help"], output, error, fs, executor);
+        Assert.Equal(0, editExit);
+        Assert.Contains("--inherit-workflow-profile", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task LeafHelp_DoesNotMarkOptionalValueOptionsAsRequired()
     {

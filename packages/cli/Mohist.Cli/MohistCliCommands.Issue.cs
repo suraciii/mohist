@@ -24,7 +24,6 @@ internal static partial class IssueCommands
         issue.Subcommands.Add(BuildGetSub("events", api));
         issue.Subcommands.Add(BuildGetSub("diff", api));
         issue.Subcommands.Add(BuildGetSub("commits", api));
-        issue.Subcommands.Add(BuildWorkflow(api));
         issue.Subcommands.Add(BuildPrereq(api));
         issue.Subcommands.Add(BuildComment(api));
         issue.Subcommands.Add(BuildTemplate(api));

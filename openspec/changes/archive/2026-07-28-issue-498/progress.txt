@@ -1,0 +1,12 @@
+## Codebase Patterns
+
+- CLI command groups are registered from partial `MohistCliCommands.*` files; removing a subtree requires removing its registration and implementation file so retired forms use standard unknown-command parsing.
+- CLI contract tests use `CliTestFactory` and `RecordingHttpHandler` to assert both exit codes and no HTTP dispatch.
+- Run detail remains implemented by `RunCommands.RegisterReads` through `BuildView`; no changes were needed to target resolution or the WorkflowRun detail DTO.
+
+## T-001
+
+- Removed `issue workflow` registration and obsolete implementation.
+- Removed obsolete Issue workflow status/timeline HTTP/help tests and added unknown-command, group-help, and profile-selection discovery coverage.
+- Removed the issue #498 implementation-gap note from `docs/cli-reference.md`.
+- Focused CLI tests passed: 1433 tests.

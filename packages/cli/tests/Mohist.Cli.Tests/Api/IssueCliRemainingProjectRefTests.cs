@@ -49,15 +49,6 @@ public class IssueCliRemainingProjectRefTests
     }
 
     [Fact]
-    public void IssueWorkflowTimeline_Help_ListsProjectAndProjectIdOptions()
-    {
-        var help = RenderHelp(["issue", "workflow", "timeline", "--help"]);
-
-        Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
-    }
-
-    [Fact]
     public void IssueCreate_Help_DoesNotAdvertiseOutputOption()
     {
         var help = RenderHelp(["issue", "create", "--help"]);
@@ -84,14 +75,6 @@ public class IssueCliRemainingProjectRefTests
     public void IssueSubcommand_Help_DoesNotAdvertiseOutputOption(string subcommand)
     {
         var help = RenderHelp(["issue", subcommand, "--help"]);
-
-        Assert.DoesNotContain("--output", help);
-    }
-
-    [Fact]
-    public void IssueWorkflowTimeline_Help_DoesNotAdvertiseOutputOption()
-    {
-        var help = RenderHelp(["issue", "workflow", "timeline", "--help"]);
 
         Assert.DoesNotContain("--output", help);
     }
@@ -211,29 +194,6 @@ public class IssueCliRemainingProjectRefTests
         var req = http.Requests.Single();
         Assert.Equal(HttpMethod.Get, req.Method);
         Assert.Equal("/api/projects/mohist-local/issues/83/logs", req.RequestUri!.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task IssueWorkflowTimeline_ByProjectName_SendsGetToResolvedProjectRoute()
-    {
-        var http = new RecordingHttpHandler();
-        http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "events": [] } }""");
-
-        var output = new StringWriter();
-        var error = new StringWriter();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "workflow", "timeline", "83", "--project", "mohist-local"],
-            output,
-            error,
-            new FakeFileSystem(),
-            new NoopCommandExecutor());
-
-        Assert.Equal(0, exitCode);
-        var req = http.Requests.Single();
-        Assert.Equal(HttpMethod.Get, req.Method);
-        Assert.Equal("/api/projects/mohist-local/issues/83/workflow/timeline", req.RequestUri!.PathAndQuery);
     }
 
     [Fact]

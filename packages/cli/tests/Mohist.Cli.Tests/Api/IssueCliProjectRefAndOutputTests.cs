@@ -44,16 +44,6 @@ public class IssueCliProjectRefAndOutputTests
     }
 
     [Fact]
-    public void IssueWorkflowStatus_Help_ListsProjectProjectIdAndOutputOptions()
-    {
-        var help = RenderHelp(["issue", "workflow", "status", "--help"]);
-
-        Assert.Contains("--project", help);
-        Assert.DoesNotContain("--project-id", help);
-        Assert.Contains("--json", help);
-    }
-
-    [Fact]
     public void IssueList_Help_OutputOptionDefaultsToJson()
     {
         var help = RenderHelp(["issue", "list", "--help"]);
@@ -186,27 +176,6 @@ public class IssueCliProjectRefAndOutputTests
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/mohist-local/sessions?issue=83", http.Requests.Single().RequestUri!.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task IssueWorkflowStatus_ByProjectName_SendsGetOnResolvedPath()
-    {
-        var http = new RecordingHttpHandler();
-        http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "currentStage": "build" } }""");
-
-        var output = new StringWriter();
-        var error = new StringWriter();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "workflow", "status", "83", "--project", "mohist-local"],
-            output,
-            error,
-            new FakeFileSystem(),
-            new NoopCommandExecutor());
-
-        Assert.Equal(0, exitCode);
-        Assert.Equal("/api/projects/mohist-local/issues/83/workflow/status", http.Requests.Single().RequestUri!.PathAndQuery);
     }
 
     [Fact]

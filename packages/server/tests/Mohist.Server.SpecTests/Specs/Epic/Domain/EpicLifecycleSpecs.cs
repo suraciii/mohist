@@ -522,7 +522,9 @@ public class EpicLifecycleSpecs
     public async Task Reopen_OnRunningEpic_Returns409EpIcNotTerminal()
     {
         var project = await CreateProjectAsync();
+        var issue = await CreateIssueAsync(project.Id, "Running issue");
         var epic = await CreateEpicAsync(project.Id, "Running epic");
+        await LinkIssueAsync(project.Id, epic.Number, issue.Number);
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/start", null);
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Number}/reopen", null);
