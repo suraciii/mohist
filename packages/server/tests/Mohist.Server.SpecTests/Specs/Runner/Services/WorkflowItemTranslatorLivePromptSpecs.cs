@@ -76,11 +76,8 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
             new WorkflowRunMetadata(
                 null,
                 DateTimeOffset.UnixEpoch,
-                Annotations: new Dictionary<string, string>
-                {
-                    ["projectId"] = projectId,
-                    ["issueNumber"] = "42",
-                }));
+                 ProjectId: projectId,
+                 IssueNumber: 42));
         var definitionJson = WorkflowGrainTestHelpers.SerializeProfile(definition);
 
         await using var db = new MohistDbContext(_database.Options);

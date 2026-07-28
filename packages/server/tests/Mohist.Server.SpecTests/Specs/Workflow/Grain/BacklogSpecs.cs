@@ -87,10 +87,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: TestTime.UtcNow,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-            }));
+            ProjectId: projectId));
     }
 
     private static string TestProjectId(string workflowId) => $"test-project-{workflowId}";

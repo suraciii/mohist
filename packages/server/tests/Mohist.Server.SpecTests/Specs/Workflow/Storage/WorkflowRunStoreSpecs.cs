@@ -50,11 +50,8 @@ public class WorkflowRunStoreSpecs
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: TestTime.UtcNow,
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = ProjectId,
-                    ["issueNumber"] = IssueNumber.ToString(),
-                }),
+                ProjectId: ProjectId,
+                IssueNumber: IssueNumber),
             Stages = [],
         };
 
@@ -121,8 +118,9 @@ public class WorkflowRunStoreSpecs
         await using (var db = new MohistDbContext(database.Options))
         {
             var row = await db.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == run.Id);
-            row.Status = "running";
-            row.State = row.State.Replace("\"status\":\"completed\"", "\"status\":\"running\"", StringComparison.Ordinal);
+            var state = JsonNode.Parse(row.State)!.AsObject();
+            state["status"] = "running";
+            row.State = state.ToJsonString();
             await db.SaveChangesAsync();
         }
 
@@ -146,11 +144,8 @@ public class WorkflowRunStoreSpecs
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: TestTime.UtcNow,
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = ProjectId,
-                    ["issueNumber"] = IssueNumber.ToString(),
-                }),
+                ProjectId: ProjectId,
+                IssueNumber: IssueNumber),
             Stages = [],
         };
 
@@ -158,6 +153,31 @@ public class WorkflowRunStoreSpecs
 
         var stored = Assert.Single(await eventStore.ListAsync(WorkflowRunId));
         Assert.Equal(IssueNumber.ToString(), stored.Envelope.Extensions[EventCatalog.Lineage.Issue]);
+    }
+
+    [Fact]
+    public async Task SaveAsync_PreservesUserAnnotationsWithoutMixingLineageIntoTheBag()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var store = CreateStore(factory, new EventStore(factory, NullLogger<EventStore>.Instance));
+        var run = CreateRun("wr_user_annotations", epicNumber: 7);
+        run.Metadata = run.Metadata with
+        {
+            Annotations = new Dictionary<string, string>(StringComparer.Ordinal) { ["owner"] = "human" },
+        };
+
+        await store.SaveAsync(run);
+
+        var loaded = await store.LoadAsync(run.Id);
+        Assert.NotNull(loaded);
+        Assert.Equal(ProjectId, loaded!.Metadata.ProjectId);
+        Assert.Equal(IssueNumber, loaded.Metadata.IssueNumber);
+        Assert.Equal(7, loaded.Metadata.EpicNumber);
+        Assert.Equal("human", loaded.Metadata.Annotations!["owner"]);
+        Assert.DoesNotContain("projectId", loaded.Metadata.Annotations.Keys);
+        Assert.DoesNotContain("issueNumber", loaded.Metadata.Annotations.Keys);
+        Assert.DoesNotContain("epicNumber", loaded.Metadata.Annotations.Keys);
     }
 
     [Fact]
@@ -180,7 +200,7 @@ public class WorkflowRunStoreSpecs
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => store.SaveAsync(run, [new WorkflowRunFailed("failed")]));
 
-        Assert.Contains("projectId", ex.Message);
+        Assert.Contains("project context", ex.Message);
         Assert.Empty(await eventStore.ListAsync(WorkflowRunId));
     }
 
@@ -198,11 +218,8 @@ public class WorkflowRunStoreSpecs
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: TestTime.UtcNow,
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = ProjectId,
-                    ["issueNumber"] = IssueNumber.ToString(),
-                }),
+                    ProjectId: ProjectId,
+                    IssueNumber: IssueNumber),
             Stages = [],
         };
 
@@ -234,20 +251,17 @@ public class WorkflowRunStoreSpecs
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: FixedTime,
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = ProjectId,
-                    ["issueNumber"] = IssueNumber.ToString(),
-                }),
+                    ProjectId: ProjectId,
+                    IssueNumber: IssueNumber),
             Stages = [],
         };
 
         await store.SaveAsync(run, [new WorkflowRunStarted()]);
 
-        run.Metadata.Annotations!["epicNumber"] = "2";
+        run.Metadata = run.Metadata with { EpicNumber = 2 };
         await store.SaveAsync(run, [new WorkflowRunResumed()]);
 
-        run.Metadata.Annotations.Remove("epicNumber");
+        run.Metadata = run.Metadata with { EpicNumber = null };
         await store.SaveAsync(run, [new WorkflowRunPaused()]);
 
         var events = await eventStore.ListAsync(run.Id);
@@ -440,18 +454,10 @@ public class WorkflowRunStoreSpecs
 
     private static WorkflowRun CreateRun(string workflowRunId, int? epicNumber)
     {
-        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["projectId"] = ProjectId,
-            ["issueNumber"] = IssueNumber.ToString(),
-        };
-        if (epicNumber is not null)
-            annotations["epicNumber"] = epicNumber.Value.ToString();
-
         return new WorkflowRun
         {
             Id = workflowRunId,
-            Metadata = new WorkflowRunMetadata(null, FixedTime, Annotations: annotations),
+            Metadata = new WorkflowRunMetadata(null, FixedTime, ProjectId: ProjectId, IssueNumber: IssueNumber, EpicNumber: epicNumber),
             Stages = [],
         };
     }

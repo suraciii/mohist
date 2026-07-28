@@ -247,12 +247,8 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         await workflow.StartAsync(new WorkflowStartInput(Metadata: new(
             Name: null,
             CreatedAt: DateTimeOffset.UnixEpoch,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-                ["issueId"] = $"issue-{workflowRunId}",
-                ["issueNumber"] = "1",
-            })));
+             ProjectId: projectId,
+             IssueNumber: 1)));
     }
 
     private async Task<JsonElement> PollAsync(string runnerId)

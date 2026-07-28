@@ -577,8 +577,7 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
     {
         using var doc = JsonDocument.Parse(workflowStateJson);
         if (doc.RootElement.TryGetProperty("metadata", out var metadata)
-            && metadata.TryGetProperty("annotations", out var annotations)
-            && annotations.TryGetProperty("projectId", out var projectId))
+            && metadata.TryGetProperty("projectId", out var projectId))
         {
             return projectId.GetString() ?? string.Empty;
         }
@@ -591,9 +590,8 @@ public sealed class AgentStatusHistoryBoundedSelectionSpecs
           "id": "{{workflowRunId}}",
           "status": "{{status}}",
           "metadata": {
-            "annotations": {
-              "projectId": "{{projectId}}"
-            },
+            "projectId": "{{projectId}}",
+            "issueNumber": 1,
             "createdAt": "2026-06-30T00:00:00Z"
           }
         }

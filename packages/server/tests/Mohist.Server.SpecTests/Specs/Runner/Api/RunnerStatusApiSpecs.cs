@@ -45,10 +45,7 @@ public class RunnerStatusApiSpecs
         await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: FixedNow,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-            })));
+             ProjectId: projectId)));
         await workflow.AssignWorkerAsync(runnerId);
 
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);

@@ -233,13 +233,10 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private async Task EnsureCreatedRunAsync(WorkflowStartInput? input)
     {
         if (_run is not null) return;
-        var metadata = input?.Metadata ?? BuildRunMetadata(input);
+        var metadata = WorkflowRunLineage.NormalizeStartMetadata(input?.Metadata ?? BuildRunMetadata(input));
         RequireProjectOwnership(metadata);
-        var projectId = metadata?.Annotations?.GetValueOrDefault("projectId");
-        var issueNumber = metadata?.Annotations?.GetValueOrDefault("issueNumber") is { } rawNumber
-            && int.TryParse(rawNumber, out var parsedNumber)
-            ? parsedNumber
-            : (int?)null;
+        var projectId = metadata?.ProjectId;
+        var issueNumber = metadata?.IssueNumber;
         var structure = await _profileManager.LoadStartupStructureAsync(GrainKey, projectId, issueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
         if (!string.IsNullOrWhiteSpace(structure.Id))
@@ -250,10 +247,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     private async Task EnsureCreatedRunAsync(WorkflowIssueContext context)
     {
-        var metadata = new WorkflowRunMetadata(
-            Name: null,
-            CreatedAt: Now(),
-            Annotations: WorkflowRunLineage.AnnotationsFor(context.ProjectId, context.IssueNumber, context.EpicNumber));
+        var metadata = WorkflowRunLineage.ForIssue(
+            context.ProjectId,
+            context.IssueNumber,
+            context.EpicNumber,
+            new WorkflowRunMetadata(null, Now()));
         var structure = await _profileManager.LoadStartupStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
         if (!string.IsNullOrWhiteSpace(structure.Id))
@@ -669,14 +667,10 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         };
 
     internal string GetProjectId() =>
-        _run?.Metadata?.Annotations?.TryGetValue("projectId", out var v) == true ? v : "";
+        _run?.Metadata?.ProjectId ?? "";
 
     internal int? GetIssueNumber() =>
-        _run?.Metadata?.Annotations?.TryGetValue("issueNumber", out var v) == true
-            && int.TryParse(v, out var number)
-            && number > 0
-            ? number
-            : null;
+        _run?.Metadata?.IssueNumber is > 0 ? _run.Metadata.IssueNumber : null;
 
     private async Task PersistProfileBindingAsync(string projectId, string profileId)
     {
@@ -706,12 +700,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     private void RequireProjectOwnership(WorkflowRunMetadata? metadata)
     {
-        if (metadata?.Annotations?.TryGetValue("projectId", out var projectId) == true
-            && !string.IsNullOrWhiteSpace(projectId))
+        if (!string.IsNullOrWhiteSpace(metadata?.ProjectId))
             return;
 
         throw new InvalidOperationException(
-            $"Workflow '{GrainKey}' cannot start without the required projectId annotation.");
+            $"Workflow '{GrainKey}' cannot start without the required project context.");
     }
 
     private async Task ClearStoppedRunStaleApprovalGateAsync(CancellationToken ct)

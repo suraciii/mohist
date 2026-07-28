@@ -209,11 +209,8 @@ internal static class RoutingDispatchTestSupport
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: FixedEventTime,
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = projectId,
-                    ["issueNumber"] = issueNumber.ToString(),
-                }),
+                ProjectId: projectId,
+                IssueNumber: issueNumber),
             Stages = new List<StageRun>(),
             Status = WorkflowRunStatus.Running,
             Workspace = new WorkspaceIdentity(Path: workspacePath),

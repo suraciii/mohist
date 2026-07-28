@@ -262,11 +262,8 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
             new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: DateTimeOffset.UnixEpoch,
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = projectId,
-                    ["issueNumber"] = issueNumber.ToString(),
-                }));
+                ProjectId: projectId,
+                IssueNumber: issueNumber));
         row.State = JSON.Serialize(run);
         await db.SaveChangesAsync();
     }
@@ -366,11 +363,8 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
                 Metadata = new
                 {
                     CreatedAt = TestTime.UtcNow,
-                    Annotations = new Dictionary<string, string>
-                    {
-                        ["projectId"] = projectId,
-                        ["issueNumber"] = issueNumber.ToString(),
-                    },
+                    ProjectId = projectId,
+                    IssueNumber = issueNumber,
                 },
                 Status = "Failed",
                 Stages = Array.Empty<object>(),

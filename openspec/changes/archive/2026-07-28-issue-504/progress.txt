@@ -1,0 +1,24 @@
+## Codebase Patterns
+
+- WorkflowRun metadata is an Orleans generated record; new fields must be appended after field IDs 0..3.
+- SQLite WorkflowRuns projections are generated columns and the profile-binding FK uses `(MetadataProjectId, WorkflowProfileIdKey)`.
+- Spec tests use `TestSqliteDatabase.CreateMigrated()` and in-process grains; no physical database or external dependency is needed.
+
+## Notes
+
+- Typed `ProjectId`, `IssueNumber`, and `EpicNumber` are now the sole WorkflowRun lineage source. User annotations remain untouched and are no longer interpreted as system identity.
+- The row-level `WorkflowRuns.EpicNumber` still overrides metadata Epic on reload when non-null and remains the save-side snapshot.
+- The migration rebuilds `WorkflowRuns`, migrates both lower-camel and Pascal-case legacy metadata paths, preserves indexes and the profile-binding FK, and has an inverse JSON/projection path in `Down`.
+- Existing focused and profile-binding tests that constructed annotation-backed runs were updated to construct typed metadata; the generated-column blocker fixture now seeds typed JSON projections directly.
+- Full `npm test` and Web `typecheck` pass after updating the remaining workflow/session/API fixtures to the typed state representation.
+- Verification diagnosis: the implementation and all focused checks pass; the only stale completion marker was `tasks.json` still set to `passes: false`. `npm run verify` now completes successfully, and build/test commands leave no Git-visible changes.
+- Issue-context Run creation now reuses `WorkflowRunLineage.ForIssue`, so it rejects blank Projects and non-positive Issues and normalizes a non-positive Epic to absent before profile resolution or persistence. `WorkflowGrainStateSaveFailureSpecs` covers invalid initial contexts; its full Server Spec run passes (3284 tests).
+- The review fix passes root `npm test` (including 3284 Server Specs, 5145 Web tests, and 1438 Runner tests) and `npm run typecheck -w packages/web`.
+- `StartAsync` now normalizes typed metadata through `WorkflowRunLineage`: Issue-backed metadata uses `ForIssue`, while an Epic without an Issue is rejected. Server Specs cover invalid Issue and Epic-only start metadata (3287 tests pass).
+- The second review fix passes root `npm test` (3287 Server Specs, 5145 Web tests, and 1438 Runner tests) and `npm run typecheck -w packages/web`.
+- Third review finding: the migration validated legacy `issueNumber` with `CAST(... AS INTEGER) > 0`, which accepts numeric prefixes (`'42junk'`→42, `'1e2'`→1, `'1.5'`→1), so malformed annotation state was migrated to a fabricated typed Issue number and the original lineage annotations were dropped. Both casing branches now limit migration to positive integer-shaped values so suffix, scientific-notation, and decimal inputs keep their legacy annotations untouched.
+- The fourth review fix preserves positive legacy Issue numbers accepted by the previous `int.TryParse` reader: optional `+`, leading zeros, and surrounding spaces migrate to their typed integer, while suffix, exponent, and decimal forms remain untouched. Server Specs pass with 3293 tests.
+- The fourth review fix passes root `npm test` (3293 Server Specs, 5145 Web tests, and 1438 Runner tests) and `npm run typecheck -w packages/web`.
+- The fifth review fix preserves tab- and CRLF-padded positive legacy Issue numbers by trimming the ASCII whitespace set accepted by the prior reader before validation. Migration fixtures serialize control characters safely and Server Specs pass with 3295 tests.
+- The fifth review fix passes root `npm test` (3295 Server Specs, 5145 Web tests, and 1438 Runner tests) and `npm run typecheck -w packages/web`.
+- Sixth review finding: the legacy `projectId` predicate still used no-argument `trim()`, so a tab/newline-only `projectId` passed and was written into typed `ProjectId`, breaking the migrated Run's event lineage. The migration JSON has been rewritten so each casing branch references a single candidate expression for project/issue/epic and validates both fields with the same whitespace set the previous reader used: `HasNonWhitespace` matches `!string.IsNullOrWhiteSpace` for Project ID, and `ValidPositiveIssueNumber` matches the `int.TryParse`-and-positive acceptance set for Issue number (optional sign, leading zeros, surrounding ASCII whitespace) while still rejecting suffix, exponent, and decimal forms. The rewritten predicates are built once in C# and interpolated, removing the per-branch COALESCE duplication. Migration fixtures now also assert whitespace-only Project IDs (space, tab, newline, mixed) are left untouched.
