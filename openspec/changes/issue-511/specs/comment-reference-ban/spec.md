@@ -1,6 +1,6 @@
 ### Requirement: ArchTest forbids issue/spec/design references in server C# comments
 
-An architecture test MUST fail when server C# source comments contain any of: an issue reference (`issue-\d+`), a task identifier (`T-\d{3}`), a design-doc path (`design/…/*.md`), or an `openspec/` reference. The rule follows the AGENTS.md convention that comments must not cite issue, spec, or document numbers, because such references rot (one already points at a non-existent `design/workflow/scheduling.md`). The test scope is server C# source only; runner / web / cli comment cleanup is explicitly out of scope for this change.
+An architecture test MUST fail when server C# source comments contain any of: an issue reference (`issue-\d+`), a task identifier (`T-\d{3}`), a design-doc path (`design/…/*.md`), or an `openspec/` reference. The rule follows the AGENTS.md convention that comments must not cite issue, spec, or document numbers, because such references rot (one already points at a non-existent `design/workflow/scheduling.md`). The test scope is **`Mohist.Server` production C# only** (the embedded `ServerSources/` resources) — the `Mohist.Cli` project is also C# but its comment cleanup is explicitly out of scope for this change; runner / web / cli comment cleanup is excluded entirely.
 
 #### Scenario: A new issue-number reference fails the build
 

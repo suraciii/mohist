@@ -60,7 +60,10 @@ The existing type-based coordinator ArchTest needs **no change** — once the fi
 
 **Rename.** `FrontendStatus` → `WireStatus` and the test file/class `WorkflowStatusMapperFrontendStatusTests` → `…WireStatusTests`. Call sites in `WorkflowStatusMapper.cs` (4) and the test file update mechanically. No external (API/CLI) caller names the symbol.
 
-**Web unions.** `packages/web/src/entities/issue/model/{workflow-run,stage-state,recovery}.ts`: add a JSDoc/comment above each of the four unions naming its authoritative server enum (`WorkflowRunStatus`, `StageRunStatus`/`StageCheckStatus` for the stage unions, `WorkflowRunStatus` for recovery summary). Do **not** prune client-only states (`skipped`, `error`) — the spec only requires the union *include* every server wire value and name the source of truth. Verified by typecheck + existing tests.
+**Web unions.** `packages/web/src/entities/issue/model/{workflow-run,stage-state,recovery}.ts`: add a JSDoc/comment above each of the four unions naming the server enum it tracks. The fixed mapping is: web `WorkflowRunStatus` ← server `WorkflowRunStatus`; web `WorkflowStageRunStatus` and `StageStateStatus` ← server `StageRunStatus`; web `WorkflowRecoverySummary` ← a client-side projection **derived from** `WorkflowRunStatus` (not a 1:1 mirror — it carries `waiting-for-recovery`, which no server enum emits). Two concrete reconciliations fall out of this:
+- **`WorkflowStageRunStatus` currently lacks `completed`.** Server `StageRunStatus.Completed` is produced in three places (`WorkflowRun.Approval.cs:116`, `WorkflowRun.Stage.cs:50,146`) and the exhaustive `WireStatus(StageRunStatus)` mapping emits `completed`, so the union at `workflow-run.ts:16` MUST gain `completed`. This is an additive web-type change (a new permitted value), not an emitted-wire-value change, so it stays within the "wire values preserved verbatim" contract.
+- **`StageStateStatus` already includes `completed`** — no change beyond the comment.
+- Client-only states (`skipped`, `passed`, `waiting-for-recovery`) are retained, not pruned. Verified by typecheck + existing tests.
 
 ### D4 — Group D: Roslyn-based comment ArchTest with a baseline ratchet
 
@@ -82,8 +85,8 @@ The existing type-based coordinator ArchTest needs **no change** — once the fi
 
 ### D5 — Group E: micro-cleanups (with their test rewrites)
 
-- `EventDispatcherService.Backoff`: make `private`. The current direct unit assertions (`EventDispatcherSpecs.cs:876-879`) are rewritten to observe retry cadence through `DispatchAsync` advanced by `FakeTimeProvider` — i.e. assert `NextAttemptTime` advances by the expected backoff, not by calling `Backoff` directly. This is a real test rewrite, not a visibility tweak.
-- `WorkflowProfileManager.ResolveLayeredVariablesAsync`: delete the pass-through wrapper; inline `ResolveConfiguredVariablesAsync(runId)` at the one production call site (`:363`). The 7 spec call sites in `WorkflowVariableResolutionSpecs.cs` / `WorkflowVariableResolutionDefaultsSpecs.cs` switch to `ResolveConfiguredVariablesAsync` (same return shape).
+- `EventDispatcherService.Backoff`: make `private`. The current direct unit assertions (`EventDispatcherSpecs.cs:876-879`) are rewritten to observe retry cadence through `DispatchAsync` advanced by `FakeTimeProvider` — i.e. assert `NextAttemptTime` advances by the expected backoff, not by calling `Backoff` directly. This is a real test rewrite, not a visibility tweak. `Backoff` lives in the unrelated Infrastructure/Events module and has no natural capability home, so its task carries no `spec` reference — its acceptance criteria are the verification contract.
+- `WorkflowProfileManager.ResolveLayeredVariablesAsync`: delete the pass-through wrapper; inline `ResolveConfiguredVariablesAsync(runId)` at the one production call site (`:363`). The 7 spec call sites in `WorkflowVariableResolutionSpecs.cs` / `WorkflowVariableResolutionDefaultsSpecs.cs` switch to `ResolveConfiguredVariablesAsync` (same return shape). This is backed by the "No pass-through wrapper in variable resolution" requirement in `specs/workflow-run-variables-store/spec.md`.
 
 ## Risks / Trade-offs
 

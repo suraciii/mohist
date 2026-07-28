@@ -48,3 +48,18 @@ The backing table and row (`WorkflowRunProfiles` / `WorkflowRunProfileRow`, whic
 
 - **WHEN** the repository is inspected for how the Variables backing table got its name
 - **THEN** either the table name MUST reflect Variables, or a recorded design decision explaining the keep MUST exist
+
+### Requirement: No pass-through wrapper in variable resolution
+
+`WorkflowProfileManager.ResolveLayeredVariablesAsync` (which only delegates to `ResolveConfiguredVariablesAsync` and returns its result unchanged) SHALL be removed. Its single production call site MUST call `ResolveConfiguredVariablesAsync` directly, and every test call site MUST be switched to the same direct call. The resolved `VariableBundle` shape and the variable-resolution behavior MUST be identical to before the wrapper's removal.
+
+#### Scenario: The pass-through wrapper is gone
+
+- **WHEN** the repository is searched for `ResolveLayeredVariablesAsync`
+- **THEN** zero matches MUST appear in production source and tests
+- **AND** the former production call site MUST invoke `ResolveConfiguredVariablesAsync` directly
+
+#### Scenario: Variable resolution is unchanged after inlining
+
+- **WHEN** effective variables are resolved for a run and stage
+- **THEN** the resulting `VariableBundle` (vars, stage vars, defaults, default stage vars) MUST be identical to what the pass-through wrapper produced before its removal

@@ -57,16 +57,23 @@ The mapping symbol MUST be named to express that it defines a wire-format contra
 - **THEN** zero matches MUST appear
 - **AND** all call sites MUST reference the renamed wire-format symbol
 
-### Requirement: Web status unions mirror their authoritative server enums
+### Requirement: Web status unions name their authoritative server enum and cover its wire values
 
-Each of the four web status unions (`WorkflowRunStatus`, `WorkflowStageRunStatus`, `StageStateStatus`, `WorkflowRecoverySummary`) MUST include every wire value its authoritative server enum emits, and each union type MUST carry a comment naming the server enum that is the source of truth. The web unions MAY legitimately model additional client-only states, but they MUST NOT omit a wire value that the server can emit.
+The authoritative union-to-enum mapping is fixed as: web `WorkflowRunStatus` tracks server `WorkflowRunStatus`; web `WorkflowStageRunStatus` and `StageStateStatus` track server `StageRunStatus`; web `WorkflowRecoverySummary` is a client-side **projection derived from** `WorkflowRunStatus` (not a 1:1 mirror — it contains `waiting-for-recovery`, which no server enum emits). Each union type MUST carry a comment naming the server enum it tracks (or is derived from, for the recovery summary). A union that tracks a server enum MUST include every wire value that enum emits as a permitted member; it MAY additionally carry client-only states (`skipped`, `passed`, `waiting-for-recovery`). A union MUST NOT omit a wire value the server can emit for its tracked enum.
 
-#### Scenario: Each web union names its authoritative server enum
+#### Scenario: Each web union names its tracked server enum
 
 - **WHEN** each of the four web status union types is inspected
-- **THEN** a comment at the type declaration MUST identify the server enum whose wire values it mirrors
+- **THEN** a comment at the type declaration MUST identify the server enum it tracks (`WorkflowRunStatus` for `WorkflowRunStatus`; `StageRunStatus` for `WorkflowStageRunStatus` and `StageStateStatus`; `WorkflowRunStatus` as the derivation basis for `WorkflowRecoverySummary`)
 
-#### Scenario: No server-emitted wire value is missing from the web union
+#### Scenario: WorkflowStageRunStatus reconciles the missing completed value
 
-- **WHEN** a typed mapping entry emits a wire value for any enum
-- **THEN** the corresponding web union MUST include that value as a permitted member
+- **WHEN** web `WorkflowStageRunStatus` is inspected against server `StageRunStatus`
+- **THEN** it MUST include `completed` (which `StageRunStatus` emits and the union currently lacks), in addition to its existing client-only `passed`/`skipped` states
+- **AND** no existing wire value carried by the union is removed
+
+#### Scenario: No server-emitted wire value is missing from a tracking union
+
+- **WHEN** a typed mapping entry emits a wire value for `WorkflowRunStatus` or `StageRunStatus`
+- **THEN** the web union that tracks that enum MUST include that value as a permitted member
+- **AND** the recovery-summary union is exempt from this completeness obligation because it is a projection, not a tracker
