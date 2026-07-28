@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Mohist.Server.Infrastructure;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -7,12 +8,47 @@ namespace Mohist.Server.Workflow.Services;
 
 public static class WorkflowStatusMapper
 {
-    public static string FrontendStatus(string raw) =>
-        raw switch
-        {
-            "AwaitingApproval" => "awaiting-approval",
-            _ => raw.ToLowerInvariant(),
-        };
+    public static string WireStatus(WorkflowRunStatus status) => status switch
+    {
+        WorkflowRunStatus.Created => "created",
+        WorkflowRunStatus.Pending => "pending",
+        WorkflowRunStatus.Ready => "ready",
+        WorkflowRunStatus.Running => "running",
+        WorkflowRunStatus.AwaitingApproval => "awaiting-approval",
+        WorkflowRunStatus.Paused => "paused",
+        WorkflowRunStatus.Stopped => "stopped",
+        WorkflowRunStatus.Completed => "completed",
+        WorkflowRunStatus.Failed => "failed",
+        _ => throw new SwitchExpressionException($"No wire mapping for WorkflowRunStatus value {status}"),
+    };
+
+    public static string WireStatus(StageRunStatus status) => status switch
+    {
+        StageRunStatus.Pending => "pending",
+        StageRunStatus.Running => "running",
+        StageRunStatus.AwaitingApproval => "awaiting-approval",
+        StageRunStatus.Completed => "completed",
+        StageRunStatus.Failed => "failed",
+        _ => throw new SwitchExpressionException($"No wire mapping for StageRunStatus value {status}"),
+    };
+
+    public static string WireStatus(TaskRunStatus status) => status switch
+    {
+        TaskRunStatus.Pending => "pending",
+        TaskRunStatus.Running => "running",
+        TaskRunStatus.Completed => "completed",
+        TaskRunStatus.Failed => "failed",
+        _ => throw new SwitchExpressionException($"No wire mapping for TaskRunStatus value {status}"),
+    };
+
+    public static string WireStatus(StageCheckStatus status) => status switch
+    {
+        StageCheckStatus.Pending => "pending",
+        StageCheckStatus.Running => "running",
+        StageCheckStatus.Passed => "passed",
+        StageCheckStatus.Failed => "failed",
+        _ => throw new SwitchExpressionException($"No wire mapping for StageCheckStatus value {status}"),
+    };
     public static WorkflowStatusView? BuildStatusView(
         WorkflowRun? run,
         WorkflowDefinition? definition)
@@ -33,7 +69,7 @@ public static class WorkflowStatusMapper
 
             return new StageStatusView(
                 s.Id,
-                FrontendStatus(s.Status.ToString()),
+                WireStatus(s.Status),
                 i,
                 MapTasks(s, definition),
                 MapChecks(s, definition),
@@ -61,7 +97,7 @@ public static class WorkflowStatusMapper
 
         return new WorkflowStatusView(
             run.Id,
-            FrontendStatus(run.Status.ToString()),
+            WireStatus(run.Status),
             run.CurrentStageId,
             stages,
             pending,
@@ -103,7 +139,7 @@ public static class WorkflowStatusMapper
                     t.Id,
                     t.Title,
                     t.Uses,
-                    FrontendStatus(t.Status.ToString()),
+                    WireStatus(t.Status),
                     t.RequiredFiles,
                     t.Classification,
                     TaskRunExtensions.ExtractSessionName(t.WithInput),
@@ -149,7 +185,7 @@ public static class WorkflowStatusMapper
     public static List<CheckStatusView> MapChecks(StageRun stage, WorkflowDefinition? definition)
     {
         if (stage.Checks.Count > 0)
-            return stage.Checks.Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, FrontendStatus(c.Status.ToString()), c.Message, c.Error)).ToList();
+            return stage.Checks.Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, WireStatus(c.Status), c.Message, c.Error)).ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
         if (stageDefinition is null) return [];

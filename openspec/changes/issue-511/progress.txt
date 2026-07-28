@@ -106,3 +106,55 @@ Tests (mechanical renames):
 - T-003 (status mapper typed per-enum + WireStatus rename) is independent; no shared files.
 - T-004/T-005 (comment-reference ArchTest + clearance) are independent of the rename target but will scan `WorkflowRunProfileRow.cs`'s top-of-file comment, which is a multi-line `//` block — none of those lines match `issue-\d+ | T-\d{3} | design/[^*\s]+\.md | openspec/`, so the ratchet does not flag our pointer comment.
 - T-006 (Backoff private) is in Infrastructure/Events, no shared files.
+
+## T-003 — typed per-enum wire mapping + FrontendStatus → WireStatus + web union comments
+
+### Codebase Patterns
+- The four consuming enums live in three adjacent files under `packages/server/src/Mohist.Server/Workflow/Domain/Run/`: `WorkflowRun.cs` (WorkflowRunStatus), `StageRun.cs` (StageRunStatus), `StageCheck.cs` (StageCheckStatus), `TaskRun.cs` (TaskRunStatus). They share the `Mohist.Server.Workflow.Domain.Run` namespace, which `WorkflowStatusMapper.cs` already imports.
+- `WorkflowStatusMapper` had a single `FrontendStatus(string raw)` method that special-cased `"AwaitingApproval"` and `ToLowerInvariant()`'d everything else. The 4 call sites passed `*.Status.ToString()` from each enum — the canonical "stringly-typed" anti-pattern.
+- The existing `WorkflowStatusMapperFrontendStatusTests.cs` test class mixed symbol-targeted unit tests for `FrontendStatus` (string form) with view-projection tests (`BuildStatusView_*`, `BuildPendingWork_*`). The view-projection tests exercise the new typed mapper under the hood without needing changes — they only read the wire string out of the view.
+- Web unions live in `packages/web/src/entities/issue/model/`: `workflow-run.ts` (WorkflowRunStatus, WorkflowStageRunStatus), `stage-state.ts` (StageTaskStatus, StageCheckStatus, StageStateStatus), `recovery.ts` (WorkItemAttemptState, WorkflowRecoverySummary). `WorkflowRunStatusPill.tsx` is the only consumer that uses a union as a `Record<...>` key — TypeScript's exhaustiveness check would have failed if `WorkflowRunStatus` lost a value, but here we only added a member to `WorkflowStageRunStatus` which is NOT used as a `Record<>` key anywhere.
+
+### Decisions / Gotchas
+- Each `WireStatus(Enum)` switch has an explicit arm per enum value plus a defensive `_ => throw new SwitchExpressionException(...)` arm. The throw arm is **defense-in-depth**: C# switch expressions over enums are NOT exhaustiveness-checked by default, and the per-enum `Enum.GetValues` spec test is the hard guarantee (the throw arm only fires if a runtime value reaches the mapper without a corresponding arm — e.g. via reflection or future reflection-injected values).
+- The 4 call sites were mechanical: `FrontendStatus(s.Status.ToString())` → `WireStatus(s.Status)`, etc. The four sites are exactly at `WorkflowStatusMapper.cs:72` (stage), `:100` (run), `:142` (task), `:188` (check).
+- `SwitchExpressionException` lives in `System.Runtime.CompilerServices` (BCL since net5). One `using` added at the top of `WorkflowStatusMapper.cs` covers all four entries.
+- Web `WorkflowStageRunStatus` already contained `passed`/`skipped` as client-only projections; adding `completed` is purely additive. The existing union members remain in their original order with `completed` slotted in alphabetically among the server-emitted values (after `awaiting-approval`, before `passed`) so the server-emitted and client-only clusters remain readable.
+- Web union comments are JSDoc/`/** ... */` (not `//` single-line) so they appear in hoverdocs in editors that surface TypeScript doc comments. They follow the project's product+domain language convention (server enum reference is the domain-language pointer).
+- The `Mohist.Server.SpecTests` `BannedSymbols.Tests.txt` keeps blocking reflection patterns and filesystem access, so the per-enum exhaustiveness test had to live in `Mohist.Server.UnitTests` (pure logic, no infra) — no test cluster or DB needed.
+
+### Test Strategy
+- **Per-enum Enum.GetValues spec**: four `[Theory]`s driven by `MemberData` (one per enum) assert each enum value's wire mapping matches an `ExpectedWireFor(string)` helper that mirrors the production rule (`AwaitingApproval → awaiting-approval`; `char.ToLowerInvariant(enumName[0]) + enumName[1..]` for everything else). Adding a new enum value without an arm makes the test fail because the new value's wire would not equal `ExpectedWireFor(newValue.ToString())`.
+- **Per-enum distinctness spec**: four `[Fact]`s assert the number of distinct wire values produced equals the number of enum values — i.e. no two enum values share a wire token (catches future mistakes like mapping both `Pending` and `Pending*` to `pending`).
+- **Discard / `ToLowerInvariant` absence spec**: an `[Fact]` that asserts each enum has one distinct wire value per value, but goes one step further — if anyone reintroduces a discard fallback that returns the same wire value for every unmapped input, distinctness would collapse and the test would catch it.
+- **Wire-shape spec**: asserts every emitted wire token is `ToLowerInvariant` invariant, contains no space, and only contains lowercase letters or `-`. Catches accidental upper-case regressions or `_`-leaks.
+- **`AwaitingApproval` per-enum specific spec**: two `[Fact]`s assert the kebab-case form for `WorkflowRunStatus.AwaitingApproval` and `StageRunStatus.AwaitingApproval` (the two enums where `AwaitingApproval` exists).
+- **Existing `BuildStatusView_*` and `BuildPendingWork_*` tests retained**: they exercise `WireStatus` via the `WorkflowStatusView` projection and continue passing without modification, giving us a second-order behavioral check that the view-model wire strings are unchanged.
+- **No ArchTest needed**: the per-enum Enum.GetValues spec test is sufficient for exhaustiveness (one static scan vs one per-enum dynamic check); adding a Roslyn-based ArchTest would duplicate the guarantee.
+
+### Verification
+- `dotnet build Mohist.sln` ✅ (no warnings, no errors)
+- Server full suite: Workflow.Definition.Tests 175/175, Mohist.Cli.Tests 1441/1441, Mohist.Server.UnitTests 1553/1553 (8 new facts/theories from the per-enum `Enum.GetValues` set, replacing 4 obsolete `FrontendStatus_*` facts), Mohist.Server.ArchTests 43/43, Mohist.Server.SpecTests 3306/3306 ✅
+- `npm run typecheck -w packages/web` ✅
+- `npm run test:run -w packages/web` ✅ (5145 passed; the new `completed` member of `WorkflowStageRunStatus` is purely additive — no consumer that previously returned a finite set of values broke)
+- `npm run check:fsd -w packages/web` ✅
+- grep invariants:
+  - `grep -rn "FrontendStatus" packages/server/src/ packages/cli/ packages/runner/` → no matches
+  - `grep -rn "FrontendStatus" packages/` (entire repo, including tests) → no matches
+  - `grep -rEn "public static string [A-Za-z]+Status\(string " packages/server/src/` → no matches (no string-typed status mapper remains)
+
+### Files touched
+Production:
+- `packages/server/src/Mohist.Server/Workflow/Services/WorkflowStatusMapper.cs` (drop `FrontendStatus(string)`; add four `WireStatus(Enum)` switch entries with `_ => throw SwitchExpressionException`; update 4 call sites; add `using System.Runtime.CompilerServices`)
+
+Web:
+- `packages/web/src/entities/issue/model/workflow-run.ts` (JSDoc on `WorkflowRunStatus` naming server `WorkflowRunStatus`; JSDoc on `WorkflowStageRunStatus` naming server `StageRunStatus`; add `completed` member to `WorkflowStageRunStatus` reconciling the divergence; preserve `passed`/`skipped` as client-only projections)
+- `packages/web/src/entities/issue/model/stage-state.ts` (JSDoc on `StageStateStatus` naming server `StageRunStatus`)
+- `packages/web/src/entities/issue/model/recovery.ts` (JSDoc on `WorkflowRecoverySummary` naming it as a client-side projection derived from server `WorkflowRunStatus`, with `waiting-for-recovery` flagged as recovery-domain synthesis)
+
+Tests:
+- `packages/server/tests/Mohist.Server.UnitTests/Workflow/Grain/WorkflowStatusMapperFrontendStatusTests.cs` → renamed to `WorkflowStatusMapperWireStatusTests.cs` (git rename detection: file rename, content rewritten; class renamed `WorkflowStatusMapperFrontendStatusTests` → `WorkflowStatusMapperWireStatusTests`; old `[Theory]` `FrontendStatus_EmitsLowercaseForAllEnumValues(string, string)` removed since the string-input entry is gone; old `FrontendStatus_*` facts replaced by typed `WireStatus_*` facts/theories; per-enum Enum.GetValues exhaustiveness tests added; kebab-case / distinctness / `AwaitingApproval` per-enum facts added; `BuildStatusView_*` and `BuildPendingWork_*` tests retained verbatim)
+
+### Risks for downstream tasks (T-004..T-006)
+- T-004/T-005 (comment-reference ArchTest + clearance) will scan `WorkflowStatusMapper.cs` and the test file's new comments; none of the new comments match `issue-\d+ | T-\d{3} | design/[^*\s]+\.md | openspec/`, so the ratchet does not flag us.
+- T-006 (Backoff private) is in Infrastructure/Events, no shared files.
