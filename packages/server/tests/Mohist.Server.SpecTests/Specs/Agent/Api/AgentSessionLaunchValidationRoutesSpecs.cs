@@ -307,7 +307,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             Assert.True(report.Accepted, "AgentJob rejected completed report");
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains);
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains, _fixture.Persistence);
             var closePayload = Assert.Single(await LoadSessionClosedPayloadsAsync(dbFactory, sessionId));
             // Issue 484: terminal delivery writes a session.activity
             // (activity=idle) part. The work result status remains on
@@ -388,7 +388,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             Assert.Equal(agent.Id, record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains);
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains, _fixture.Persistence);
             var closePayload = Assert.Single(await LoadSessionClosedPayloadsAsync(dbFactory, sessionId));
             Assert.Equal("failed", closePayload.GetProperty("status").GetString());
             Assert.Contains(AgentJobFailureReasons.ReportTimeout, closePayload.GetProperty("failureReason").GetString(), StringComparison.Ordinal);

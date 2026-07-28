@@ -39,9 +39,6 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.FlushForTestAsync();
-
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
         var bound = Assert.Single(
@@ -67,7 +64,7 @@ public class AgentSessionLifecycleDedupSpecs
         });
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -108,9 +105,6 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.FlushForTestAsync();
-
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
         Assert.Equal(0, stored.Count(s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionRuntimeBound));
@@ -133,7 +127,7 @@ public class AgentSessionLifecycleDedupSpecs
         });
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -162,7 +156,7 @@ public class AgentSessionLifecycleDedupSpecs
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -178,7 +172,7 @@ public class AgentSessionLifecycleDedupSpecs
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -195,7 +189,7 @@ public class AgentSessionLifecycleDedupSpecs
         await AppendLivenessAsync(session, status: "running");
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -225,7 +219,7 @@ public class AgentSessionLifecycleDedupSpecs
         });
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -287,7 +281,7 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.Single(_fixture.RecordingTranscriptPublisher.Published, p => p.Type == "session.activity");
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
         Assert.Equal(0, stored.Count(s => s.Envelope.Type == "session.activity"));
@@ -309,7 +303,7 @@ public class AgentSessionLifecycleDedupSpecs
         });
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
         Assert.Contains(stored,

@@ -281,7 +281,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
                 Type: RuntimeEventTypes.SessionActivity,
                 PayloadJson: "{\"activity\":\"active\"}"),
         }, sessionId));
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
@@ -299,7 +299,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
                     Type: RuntimeEventTypes.SessionActivity,
                     PayloadJson: "{\"activity\":\"idle\",\"status\":\"completed\",\"operationId\":\"terminal-delivery\"}"),
             }, sessionId));
-            await grain.FlushForTestAsync();
+            await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
             using var terminalResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "after close" });
             Assert.Equal(HttpStatusCode.OK, terminalResponse.StatusCode);
@@ -357,7 +357,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
                 Type: RuntimeEventTypes.SessionActivity,
                 PayloadJson: "{\"activity\":\"active\"}"),
         }, sessionId));
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();

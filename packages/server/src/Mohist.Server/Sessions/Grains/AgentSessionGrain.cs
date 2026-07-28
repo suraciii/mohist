@@ -20,6 +20,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly IAgentSessionTranscriptStore _transcriptStore;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ITranscriptEventPublisher _transcriptPublisher;
+    private readonly IAgentSessionPersistenceObserver _persistenceObserver;
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TimeProvider _timeProvider;
     private readonly IAgentSessionConnectionRegistry _connections;
@@ -29,6 +30,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private AgentSessionTranscriptSummary? _cachedSummary;
     private long _realtimeSequence;
     private IDisposable? _persistTimer;
+    private long _persistenceCycle;
     private bool _stateDirty;
     private readonly List<AgentSessionEvent> _pendingDomainEvents = new();
     private string? _lastHealthStatus;
@@ -39,6 +41,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IAgentSessionTranscriptStore transcriptStore,
         IDbContextFactory<MohistDbContext> dbFactory,
         ITranscriptEventPublisher transcriptPublisher,
+        IAgentSessionPersistenceObserver persistenceObserver,
         TimeProvider timeProvider,
         IAgentSessionConnectionRegistry connections,
         ILogger<AgentSessionGrain> log)
@@ -47,6 +50,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _transcriptStore = transcriptStore;
         _dbFactory = dbFactory;
         _transcriptPublisher = transcriptPublisher;
+        _persistenceObserver = persistenceObserver;
         _timeProvider = timeProvider;
         _connections = connections;
         _log = log;
@@ -1206,8 +1210,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return;
         }
 
-        var success = await FlushAsync(CancellationToken.None);
-        if (success)
+        if (await FlushAsync(CancellationToken.None))
             DisposePersistTimer();
     }
 
@@ -1251,17 +1254,48 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private async Task<bool> FlushAsync(CancellationToken ct)
     {
-        if (_session is null) return true;
+        var session = _session;
+        if (session is null) return true;
+        var hasPendingPersistence = _stateDirty
+            || _transcript.HasPending
+            || session.Status.PendingTranscriptEvidence?.Count > 0;
+        if (!hasPendingPersistence)
+            return true;
+
+        var cycleId = ++_persistenceCycle;
+        try
+        {
+            var success = await FlushCoreAsync(session, ct);
+            _persistenceObserver.Report(new AgentSessionPersistenceResult(
+                SessionId,
+                cycleId,
+                success
+                    ? AgentSessionPersistenceOutcome.Succeeded
+                    : AgentSessionPersistenceOutcome.TranscriptFailed));
+            return success;
+        }
+        catch
+        {
+            _persistenceObserver.Report(new AgentSessionPersistenceResult(
+                SessionId,
+                cycleId,
+                AgentSessionPersistenceOutcome.StateFailed));
+            throw;
+        }
+    }
+
+    private async Task<bool> FlushCoreAsync(AgentSession session, CancellationToken ct)
+    {
         // A prior event-aware save on this activation failed and quarantined
         // it; do not attempt another flush from the same dirty state.
         if (_sessionReloadRequired)
             throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
 
-        if (!await FlushPendingTranscriptEvidenceAsync(_session, ct))
+        if (!await FlushPendingTranscriptEvidenceAsync(session, ct))
             return false;
 
         var now = Now();
-        var transcript = _transcript.BuildFlush(_session, now);
+        var transcript = _transcript.BuildFlush(session, now);
 
         if (_stateDirty)
         {
@@ -1270,7 +1304,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 : _pendingDomainEvents.ToArray();
             try
             {
-                await _stateStore.SaveAsync(SessionId, _session, pendingEvents, ct);
+                await _stateStore.SaveAsync(SessionId, session, pendingEvents, ct);
             }
             catch (Exception ex)
             {
@@ -1346,18 +1380,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         session.SetActivity(AgentSessionActivity.Unknown, now);
         var payload = JSON.Serialize(new { activity = "unknown", observedAt = now.ToString("o"), reason = "runner-disconnected" });
         await AppendEventsAsync([new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, payload)], session.Status.AgentRuntimeSessionId, true);
-    }
-
-    public Task DeactivateForTestAsync()
-    {
-        DeactivateOnIdle();
-        return Task.CompletedTask;
-    }
-
-    public async Task FlushForTestAsync()
-    {
-        if (await FlushAsync(CancellationToken.None))
-            DisposePersistTimer();
     }
 
     private async Task<AgentSession> GetRequiredAsync()

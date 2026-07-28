@@ -108,45 +108,11 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
     private async Task SeedWorkflowTemplateAsync(string workflowId, WorkflowDefinition definition, string projectId)
     {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_fixture.ConnectionString)
-            .Options;
-
-        await using var db = new MohistDbContext(options);
-        var templateId = workflowId;
-        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(definition, templateId);
-        var template = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
-        if (template is null)
-        {
-            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-            {
-                ProjectId = projectId,
-                TemplateId = templateId,
-                Template = templateJson,
-            });
-        }
-        else
-        {
-            template.Template = templateJson;
-            template.UpdatedAt = TestTime.UtcNow;
-        }
-
-        var profile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
-        if (profile is null)
-        {
-            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
-            {
-                ProjectId = projectId,
-                DefaultTemplateId = templateId,
-            });
-        }
-        else
-        {
-            profile.DefaultTemplateId = templateId;
-            profile.UpdatedAt = TestTime.UtcNow;
-        }
-
-        await db.SaveChangesAsync();
+        await WorkflowGrainTestHelpers.SeedWorkflowTemplateAsync(
+            _fixture.ConnectionString,
+            workflowId,
+            definition,
+            projectId);
     }
 
 

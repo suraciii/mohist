@@ -129,13 +129,18 @@ public abstract class EpicProgressionTestSupport
             _eventStore = eventStore ?? new NoopEventStore();
         }
 
-        public IEpicGrain GetEpicGrain(string grainKey) =>
-            new EpicGrain(
+        public IEpicGrain GetEpicGrain(string grainKey)
+        {
+            var identity = GrainTestContext.Create(grainKey);
+            return new EpicGrain(
+                identity.Context,
+                identity.Runtime,
                 _dbFactory,
                 this,
                 new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
                 _eventStore,
-                NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
+                NullLogger<EpicGrain>.Instance);
+        }
 
         public IIssueGrain GetIssueGrain(string issueKey) => new RecordingIssueGrain(this, issueKey);
 
@@ -218,7 +223,6 @@ public abstract class EpicProgressionTestSupport
         public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
         public Task StartCompositeAsync() => throw new NotSupportedException();
         public Task<Mohist.Server.Issue.Grains.IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
-        public Task DeactivateForTestAsync() => throw new NotSupportedException();
         public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
         public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
         public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber)

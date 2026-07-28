@@ -179,7 +179,10 @@ public class IssueWorkflowReadPathSpecs
         string projectId,
         int issueNumber)
     {
+        var identity = GrainTestContext.Create(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         return new IssueGrain(
+            identity.Context,
+            identity.Runtime,
             stateStore,
             services.GetRequiredService<IssueWorkflowProfileRegistry>(),
             services.GetRequiredService<WorkflowQuerier>(),
@@ -195,10 +198,8 @@ public class IssueWorkflowReadPathSpecs
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<TimeProvider>(),
-            services.GetRequiredService<ILogger<IssueGrain>>())
-        {
-            GrainKeyForTest = GrainKey.Issue(new IssueKey(projectId, issueNumber)),
-        };
+            services.GetRequiredService<ILogger<IssueGrain>>(),
+            services.GetRequiredService<IWorkflowProfileProvider>());
     }
 
     private static async Task SeedIssueAsync(
@@ -287,7 +288,8 @@ public class IssueWorkflowReadPathSpecs
             IGrainFactory grainFactory,
             ILogger<IssueStore> log)
         {
-            _delegate = new IssueStore(dbFactory, new NoopEventStore(), grainFactory, log);
+            _delegate = new IssueStore(dbFactory, new NoopEventStore(), grainFactory, log,
+                new Mohist.Server.Infrastructure.BackgroundTaskLauncher());
         }
 
         public IReadOnlyList<string> SaveCalls => _saveCalls;

@@ -56,7 +56,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains, _fixture.Persistence);
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
@@ -104,7 +104,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains, _fixture.Persistence);
 
         var summaries = await _client.GetDataAsync<AgentSessionSummaryDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
         var summary = Assert.Single(summaries);
@@ -169,7 +169,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new { runtimeSessionId = session.Id, runtimeEvents });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains, _fixture.Persistence);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var parts = await LoadTranscriptPartsAsync(db, session.Id);
@@ -243,7 +243,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4, _fixture.Grains, _fixture.Persistence);
 
         await using var db = await dbFactory.CreateDbContextAsync();
         var dbParts = await LoadTranscriptPartsAsync(db, session.Id);

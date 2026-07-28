@@ -69,10 +69,8 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
 
     private async Task ClearBacklogAsync()
     {
+        await _fixture.ClearActiveAgentJobsAsync();
         await ClearGlobalRunnerRegistryAsync();
-
-        var management = Grains.GetGrain<IManagementGrain>(0);
-        await management.ForceActivationCollection(TimeSpan.Zero);
     }
 
     private async Task ClearGlobalRunnerRegistryAsync()
@@ -356,8 +354,7 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
             : agentJobIdB;
         Assert.Contains(runtime.ActiveWorks, w => w.WorkId == acceptedWorkId);
 
-        await runner.DeactivateForTestAsync();
-        await Grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+        await TestLifecycle.DeactivateAndWait(runner, Grains);
 
         var reactivated = Grains.GetGrain<IRunnerGrain>(runnerId);
         var reactivatedRuntime = await reactivated.GetRuntimeStateAsync();
@@ -531,8 +528,7 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         Assert.True((await report).Tracked);
         Assert.Equal(RunnerWorkAssignmentStatus.Assigned, (await assignment).Status);
 
-        await runner.DeactivateForTestAsync();
-        await Grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+        await TestLifecycle.DeactivateAndWait(runner, Grains);
 
         var reactivated = Grains.GetGrain<IRunnerGrain>(runnerId);
         var activeWork = Assert.Single((await reactivated.GetRuntimeStateAsync()).ActiveWorks);

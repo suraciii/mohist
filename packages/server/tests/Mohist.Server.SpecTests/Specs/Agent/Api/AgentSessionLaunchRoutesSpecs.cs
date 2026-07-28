@@ -99,7 +99,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
                     Type: RuntimeEventTypes.SessionInput,
                     PayloadJson: "{\"text\":\"open product transcript\",\"kind\":\"task\"}"),
             }, "runtime-launch-read"));
-            await grain.FlushForTestAsync();
+            await grain.WaitForPersistenceAsync(_fixture.Persistence);
 
             using var metadata = await _fixture.Client.GetAsync(
                 $"/api/projects/{projectId}/agent-sessions/{sessionId}");

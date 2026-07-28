@@ -159,6 +159,7 @@ public sealed class AgentJobGrainPersistenceSpecs
 
     private async Task ClearRunnerRegistryAsync()
     {
+        await _fixture.ClearActiveAgentJobsAsync();
         var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         foreach (var runnerId in await registry.ListRunnerIdsAsync())
             await registry.UnregisterAsync(runnerId);

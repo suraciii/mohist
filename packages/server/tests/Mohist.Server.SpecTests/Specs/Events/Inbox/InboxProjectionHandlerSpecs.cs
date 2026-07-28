@@ -230,7 +230,7 @@ public class InboxProjectionHandlerSpecs
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         var eventStore = new EventStore(new TestDbContextFactory(database.Options), NullLogger<EventStore>.Instance);
-        var runStore = new WorkflowRunStore(new TestDbContextFactory(database.Options), eventStore, new NullEventDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var runStore = InboxProjectionTestSupport.CreateRunStore(new TestDbContextFactory(database.Options), eventStore);
         var run = InboxProjectionTestSupport.BuildWorkflowRun(
             workflowRunId: "wf_store_replay",
             projectId: "proj_a",

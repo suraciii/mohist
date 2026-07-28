@@ -63,7 +63,7 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"second-answer\"}"),
             }, "runtime-1"));
 
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(Fixture.Persistence);
 
         Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
         var firstFlush = Fixture.TranscriptStore.Flushes[0];
@@ -132,7 +132,7 @@ public class AgentSessionGrainInputBoundaryPersistFailureSpecs : AgentSessionGra
         // Retry persistence deterministically (no scheduler waits, no
         // fake time): the next flush must surface the first turn
         // unchanged, with no second-input parts anywhere.
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(Fixture.Persistence);
 
         Assert.Single(Fixture.TranscriptStore.Flushes);
         var retryFlush = Fixture.TranscriptStore.Flushes[0];

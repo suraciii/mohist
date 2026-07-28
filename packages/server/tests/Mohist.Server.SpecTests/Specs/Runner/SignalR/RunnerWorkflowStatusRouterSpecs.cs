@@ -205,7 +205,6 @@ public class RunnerWorkflowStatusRouterSpecs
             Task.FromResult<Mohist.Server.Workflow.Grains.WorkflowFeedbackRecord?>(null);
         public Task<IReadOnlyList<Mohist.Server.Workflow.Grains.WorkflowFeedbackRecord>> ListFeedbackAsync() =>
             Task.FromResult<IReadOnlyList<Mohist.Server.Workflow.Grains.WorkflowFeedbackRecord>>(Array.Empty<Mohist.Server.Workflow.Grains.WorkflowFeedbackRecord>());
-        public Task DeactivateForTestAsync() => Task.CompletedTask;
     }
 
     private sealed class StubGrainFactory : IGrainFactory

@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Grains;
 
@@ -7,54 +6,18 @@ namespace Mohist.Server.SpecTests.Support;
 
 public static class AgentSessionPersistenceTestHelper
 {
-    public static readonly TimeSpan DefaultFlushTimeout = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan DefaultFlushStep = TimeSpan.FromMilliseconds(50);
-
-    public static Task WaitForTranscriptPartsAsync(
-        this IDbContextFactory<MohistDbContext> dbFactory,
-        string sessionId,
-        int expectedCount,
-        IGrainFactory grains,
-        TimeSpan? timeout = null)
-        => WaitForTranscriptPartsAsync(
-            dbFactory,
-            sessionId,
-            expectedCount,
-            timeout,
-            async () => await grains.GetGrain<IAgentSessionGrain>(sessionId).FlushForTestAsync());
-
-    public static Task WaitForTranscriptPartsAsync(
-        this IDbContextFactory<MohistDbContext> dbFactory,
-        string sessionId,
-        int expectedCount,
-        FakeTimeProvider timeProvider,
-        TimeSpan? timeout = null)
-        => WaitForTranscriptPartsAsync(
-            dbFactory,
-            sessionId,
-            expectedCount,
-            timeout,
-            () =>
-            {
-                timeProvider.Advance(TimeSpan.FromMilliseconds(250));
-                return Task.CompletedTask;
-            });
-
     public static async Task WaitForTranscriptPartsAsync(
         this IDbContextFactory<MohistDbContext> dbFactory,
         string sessionId,
         int expectedCount,
-        TimeSpan? timeout = null,
-        Func<Task>? advance = null)
+        IGrainFactory grains,
+        AgentSessionPersistenceTestProbe persistence)
     {
-        var maxWait = timeout ?? DefaultFlushTimeout;
-        await TestWait.ForAsync(
-            async () => await CountTranscriptPartsAsync(dbFactory, sessionId),
-            count => count >= expectedCount,
-            maxWait,
-            DefaultFlushStep,
-            $"at least {expectedCount} transcript part(s) for session {sessionId}",
-            advance);
+        await grains.GetGrain<IAgentSessionGrain>(sessionId).WaitForPersistenceAsync(persistence);
+        var count = await CountTranscriptPartsAsync(dbFactory, sessionId);
+        if (count < expectedCount)
+            throw new InvalidOperationException(
+                $"Expected at least {expectedCount} transcript part(s) for session {sessionId}, but found {count}");
     }
 
     private static async Task<int> CountTranscriptPartsAsync(IDbContextFactory<MohistDbContext> dbFactory, string sessionId)

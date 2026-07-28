@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Otel;
 using Mohist.Server.Project.Services;
@@ -195,7 +196,8 @@ public static class GrainTestConfig
         string connectionString,
         IEventPublisher eventBus,
         IEventStore eventStore,
-        FakeTimeProvider? timeProvider = null)
+        FakeTimeProvider? timeProvider = null,
+        AgentSessionPersistenceTestProbe? persistence = null)
     {
         siloBuilder.UseInMemoryReminderService();
         // Issue-362: the dispatcher grain registers a ~1s reminder; the
@@ -226,6 +228,9 @@ public static class GrainTestConfig
             options.ConfigureWarnings(w => w.Ignore(
                 RelationalEventId.PendingModelChangesWarning));
         });
+        siloBuilder.Services.AddRequiredInfrastructure();
+        siloBuilder.Services.AddSingleton<IActionCatalogSource>(NullActionCatalogSource.Instance);
+        siloBuilder.Services.AddScoped<IWorkflowProfileProvider, WorkflowProfileProvider>();
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         siloBuilder.Services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
@@ -272,6 +277,8 @@ public static class GrainTestConfig
         });
         siloBuilder.Services.AddSingleton<EventDispatcherService>();
         siloBuilder.Services.AddSingleton<ITranscriptEventPublisher, NoopTranscriptEventPublisher>();
+        siloBuilder.Services.AddSingleton<IAgentSessionPersistenceObserver>(
+            persistence ?? new AgentSessionPersistenceTestProbe());
         siloBuilder.Services.AddSingleton<TimeProvider>(timeProvider ?? new FakeTimeProvider(TestTime.UtcNow));
          siloBuilder.Services.AddSingleton<RunnerConnectionTracker>();
          siloBuilder.Services.AddSingleton<IAgentSessionConnectionRegistry>(sp =>
@@ -285,7 +292,6 @@ public static class GrainTestConfig
             opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
             opts.JobTimeout = TimeSpan.FromSeconds(10);
         });
-        siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         // WorkflowOptions is retained as a binding anchor; the former
         // WorkCompletionTimeout knob has been removed (no server-side
         // work-completion wall clock under the reconciliation model).

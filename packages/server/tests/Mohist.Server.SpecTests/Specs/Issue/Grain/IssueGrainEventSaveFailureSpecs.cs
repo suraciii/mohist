@@ -168,7 +168,10 @@ public class IssueGrainEventSaveFailureSpecs
         IIssueStore stateStore,
         string grainKey)
     {
+        var identity = GrainTestContext.Create(grainKey);
         return new IssueGrain(
+            identity.Context,
+            identity.Runtime,
             stateStore,
             services.GetRequiredService<IssueWorkflowProfileRegistry>(),
             services.GetRequiredService<WorkflowQuerier>(),
@@ -184,10 +187,8 @@ public class IssueGrainEventSaveFailureSpecs
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<TimeProvider>(),
-            services.GetRequiredService<ILogger<IssueGrain>>())
-        {
-            GrainKeyForTest = grainKey,
-        };
+            services.GetRequiredService<ILogger<IssueGrain>>(),
+            services.GetRequiredService<IWorkflowProfileProvider>());
     }
 
     private static async Task SeedIssueAsync(
@@ -234,7 +235,8 @@ public class IssueGrainEventSaveFailureSpecs
                 scopeFactory.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
                 scopeFactory.GetRequiredService<IEventStore>(),
                 scopeFactory.GetRequiredService<IGrainFactory>(),
-                scopeFactory.GetRequiredService<ILoggerFactory>().CreateLogger<IssueStore>());
+                scopeFactory.GetRequiredService<ILoggerFactory>().CreateLogger<IssueStore>(),
+                scopeFactory.GetRequiredService<IBackgroundTaskLauncher>());
             _eventsSaveFailures = failEventsSaveOnce ? 1 : 0;
         }
 

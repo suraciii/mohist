@@ -67,7 +67,8 @@ public abstract class WorkflowGrainSpecs
                 promptLoader,
                 new PromptTemplateEngine(),
                 WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-                new Mohist.Server.Workflow.Services.WorkflowRunProfileManager(factory)),
+                new Mohist.Server.Workflow.Services.WorkflowRunProfileManager(factory),
+                new Mohist.Server.Workflow.Services.WorkflowProfileProvider(factory, NullActionCatalogSource.Instance)),
             new WorkflowArtifactQuerier(factory));
     }
 
@@ -146,7 +147,7 @@ public abstract class WorkflowGrainSpecs
     protected async Task DeactivateWorkflowAsync(string workflowId)
     {
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await workflow.DeactivateForTestAsync();
+        await TestLifecycle.Deactivate(workflow);
 
         var management = Grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);
@@ -340,49 +341,8 @@ public abstract class WorkflowGrainSpecs
         JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json)!;
 
     protected async Task SeedWorkflowTemplateAsync(string workflowId, WorkflowDefinition definition, string? projectId = null)
-    {
-        projectId ??= TestProjectId(workflowId);
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_fixture.ConnectionString)
-            .Options;
-
-        await using var db = new MohistDbContext(options);
-        var templateId = workflowId;
-        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(definition, templateId);
-
-        var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
-        if (existingTemplate is null)
-        {
-            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-            {
-                ProjectId = projectId,
-                TemplateId = templateId,
-                Template = templateJson,
-            });
-        }
-        else
-        {
-            existingTemplate.Template = templateJson;
-            existingTemplate.UpdatedAt = TestTime.UtcNow;
-        }
-
-        var projectProfile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
-        if (projectProfile is null)
-        {
-            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
-            {
-                ProjectId = projectId,
-                DefaultTemplateId = templateId,
-            });
-        }
-        else
-        {
-            projectProfile.DefaultTemplateId = templateId;
-            projectProfile.UpdatedAt = TestTime.UtcNow;
-        }
-
-        await db.SaveChangesAsync();
-    }
+        => await WorkflowGrainTestHelpers.SeedWorkflowTemplateAsync(
+            _fixture.ConnectionString, workflowId, definition, projectId);
 
     protected async Task PatchProjectVariablesAsync(string projectId, VariableBundle patch)
     {

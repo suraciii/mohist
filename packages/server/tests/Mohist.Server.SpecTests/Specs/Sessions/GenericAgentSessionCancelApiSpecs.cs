@@ -203,7 +203,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         {
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, """{"activity":"idle","status":"completed","operationId":"terminal-delivery"}"""),
         }, sessionId));
-        await grain.FlushForTestAsync();
+        await grain.WaitForPersistenceAsync(_fixture.Persistence);
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         await grain.ResetAsync(new ResetAgentSessionCommand(sessionId, "runtime-replacement"));
 

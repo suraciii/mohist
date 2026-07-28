@@ -391,16 +391,18 @@ public class EpicAutoDoneSpecs
         Assert.Equal("idle", stored.Status);
     }
 
-    private static EpicGrain CreateGrain(TestDbContextFactory factory, string grainKey) =>
-        new(
+    private static EpicGrain CreateGrain(TestDbContextFactory factory, string grainKey)
+    {
+        var identity = GrainTestContext.Create(grainKey);
+        return new EpicGrain(
+            identity.Context,
+            identity.Runtime,
             factory,
             null!,
             new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
             new NoopEventStore(),
-            NullLogger<EpicGrain>.Instance)
-        {
-            GrainKeyForTest = grainKey,
-        };
+            NullLogger<EpicGrain>.Instance);
+    }
 
     private static async Task SeedEpicAsync(
         TestDatabase database,

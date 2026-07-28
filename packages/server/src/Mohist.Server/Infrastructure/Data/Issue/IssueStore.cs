@@ -35,13 +35,13 @@ public class IssueStore : IIssueStore
         IEventStore eventStore,
         IGrainFactory grainFactory,
         ILogger<IssueStore> log,
-        IBackgroundTaskLauncher? backgroundTasks = null)
+        IBackgroundTaskLauncher backgroundTasks)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
         _grainFactory = grainFactory;
         _log = log;
-        _backgroundTasks = backgroundTasks ?? new BackgroundTaskLauncher();
+        _backgroundTasks = backgroundTasks;
     }
 
     public async Task<DomainIssue?> LoadAsync(string key)
