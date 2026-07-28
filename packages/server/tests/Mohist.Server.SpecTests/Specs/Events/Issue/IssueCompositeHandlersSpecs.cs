@@ -543,7 +543,6 @@ public class IssueCompositeHandlersSpecs
         public Task RecomputeCompositeStatusAsync() => Task.CompletedTask;
         public Task StartCompositeAsync() => Task.CompletedTask;
         public Task<IssueCommentResult> AddCommentAsync(string a, string b, string[]? ids = null) => Task.FromResult(new IssueCommentResult("cmt_test", b, a));
-        public Task DeactivateForTestAsync() => Task.CompletedTask;
         public Task<bool> AssignEpicAsync(int epicNumber) => Task.FromResult(true);
         public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => Task.FromResult(true);
         public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => Task.FromResult(true);

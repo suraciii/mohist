@@ -59,9 +59,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
 
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
-
         var closed = await GetSingleClosedAsync(sessionId);
         Assert.Equal("failed", closed.GetProperty("status").GetString());
         Assert.Equal(
@@ -109,9 +106,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             new WorkResult(Status: "completed", Message: "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
-
         var closed = await GetSingleClosedAsync(sessionId);
         Assert.Equal("completed", closed.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, closed.GetProperty("failureReason").ValueKind);
@@ -133,8 +127,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
                     && evt.Envelope.Source.ToString() == $"/mohist/agent-job/{jobKey}");
 
             _fixture.EventStore.ThrowOnAppend = null;
-            var management = Grains.GetGrain<IManagementGrain>(0);
-            await management.ForceActivationCollection(TimeSpan.Zero);
+            await TestLifecycle.DeactivateAndWait(job, Grains);
 
             await job.GetStatusAsync();
 
@@ -183,9 +176,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
                     Message: "runtime-failed")));
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
-
         var closed = await GetSingleClosedAsync(sessionId);
         // Issue 484: the session.activity part no longer carries the
         // job's failureCategory (that stays the job's own verdict); the
@@ -226,9 +216,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
                     Message: "missing workspace.path")));
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
-
         var closed = await GetSingleClosedAsync(sessionId);
         // Issue 484: failureCategory is no longer surfaced on the
         // session.activity part; the runner-reported message is still
@@ -262,9 +249,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             new WorkResult(Status: "failed", Message: "boom", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
-
         var closed = await GetSingleClosedAsync(sessionId);
         // Issue 484: failureCategory is no longer carried on the
         // session.activity part; the job's own Failed verdict is still
@@ -292,9 +276,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await job.CheckTimeoutsAsync();
 
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
-
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
 
         var closed = await GetSingleClosedAsync(sessionId);
         Assert.Equal("failed", closed.GetProperty("status").GetString());
@@ -326,9 +307,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
 
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
-
         var closed = await GetSingleClosedAsync(sessionId);
         // Issue 484: the report-timeout category is the AgentJob's own
         // verdict and is no longer mirrored onto the session.activity
@@ -354,9 +332,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await job.FailAsync("runner-lost");
 
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
-
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
 
         var closed = await GetSingleClosedAsync(sessionId);
         Assert.Equal("runner-lost", closed.GetProperty("failureReason").GetString());
@@ -390,9 +365,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             result: new WorkResult(Status: "completed", Message: "first result", Output: JSON.DeserializeElement("{}"), ExitCode: 0));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.FlushForTestAsync();
-
         var firstClosed = await GetSingleClosedAsync(sessionId);
         // Issue 484: the delivery id is recorded as `operationId` on the
         // session.activity part.
@@ -407,8 +379,6 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             result: new WorkResult(Status: "failed", Message: "redelivered", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
         Assert.False(redeliver.Tracked,
             "Already-terminal AgentJob rejects report replay but still owns the original delivery");
-
-        await session.FlushForTestAsync();
 
         var parts = await ListSessionClosedPartsAsync(sessionId);
         var activityParts = parts

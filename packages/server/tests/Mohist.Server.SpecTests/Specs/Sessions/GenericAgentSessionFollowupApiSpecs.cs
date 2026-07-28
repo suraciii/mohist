@@ -275,13 +275,14 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-lifecycle");
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var activePersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionActivity,
                 PayloadJson: "{\"activity\":\"active\"}"),
         }, sessionId));
-        await grain.FlushForTestAsync();
+        await activePersistence.WaitAsync();
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
@@ -293,13 +294,14 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             using var activeResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "while alive" });
             Assert.Equal(HttpStatusCode.OK, activeResponse.StatusCode);
 
+            var terminalPersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
             await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
             {
                 new AgentSessionRuntimeEventInput(
                     Type: RuntimeEventTypes.SessionActivity,
                     PayloadJson: "{\"activity\":\"idle\",\"status\":\"completed\",\"operationId\":\"terminal-delivery\"}"),
             }, sessionId));
-            await grain.FlushForTestAsync();
+            await terminalPersistence.WaitAsync();
 
             using var terminalResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "after close" });
             Assert.Equal(HttpStatusCode.OK, terminalResponse.StatusCode);
@@ -351,13 +353,14 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-resolve-target");
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionActivity,
                 PayloadJson: "{\"activity\":\"active\"}"),
         }, sessionId));
-        await grain.FlushForTestAsync();
+        await persistence.WaitAsync();
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();

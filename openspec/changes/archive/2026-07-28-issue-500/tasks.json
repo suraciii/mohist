@@ -1,0 +1,64 @@
+{
+  "project": "mohist-local",
+  "description": "Remove test-only server production contracts and replace forced AgentSession persistence with deterministic test-host observation.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Remove grain lifecycle and identity test controls",
+      "spec": "specs/server-production-contracts/spec.md#production-grain-contracts-exclude-test-controls",
+      "description": "Remove forced-deactivation operations from the six production grain contracts and implementations, and replace their specification callers with one shared `IManagementGrain.ForceActivationCollection` helper. Remove the Agent, Epic, Issue, and Workflow grain key overrides, migrating identity-dependent tests to known keys on real InProcessTestCluster activations or to narrower non-grain collaborators.",
+      "acceptanceCriteria": [
+        "IIssueGrain, IIssueRepositoryCoordinatorGrain, IAgentSessionGrain, IWorkflowGrain, IRunnerGrain, and IWorkflowProfileReferenceCoordinator expose no test-only deactivation operation, and their implementations contain no corresponding method.",
+        "AgentGrain, EpicGrain, IssueGrain, and WorkflowGrain derive identity exclusively from their authoritative Orleans grain keys and contain no GrainKeyForTest fallback.",
+        "All rehydration tests formerly forcing one grain inactive use the shared SpecTests management-grain helper; direct tests that require an Orleans key run through a real test-cluster activation.",
+        "Focused grain lifecycle, rehydration, and identity regression coverage passes, and architecture coverage prevents reintroduction of the removed test controls."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Production grain contracts with Orleans-owned lifecycle and identity, plus migrated server specs and architecture guards.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep WorkflowGrain.BindProfileForTest unchanged; it is explicitly outside this change."
+    },
+    {
+      "id": "T-002",
+      "title": "Make registered server collaborators required",
+      "spec": "specs/server-production-contracts/spec.md#always-registered-services-are-required-dependencies",
+      "description": "Make audited production collaborators non-nullable wherever normal registration guarantees them: workflow profile resolution, event push, required background work, and AgentJob storage and dispatch observation. Remove unreachable null fallbacks, select EventPushQueue or NullEventPushQueue explicitly at composition, and preserve only documented non-authoritative cache and diagnostic dependencies as optional.",
+      "acceptanceCriteria": [
+        "Issue, workflow-profile, and profile-reference paths require IWorkflowProfileProvider and no longer use a missing-provider legacy template fallback.",
+        "EventDispatcherService requires IEventPushQueue; every composition explicitly registers either a live queue or NullEventPushQueue, and no constructor-level null fallback remains.",
+        "Audited IBackgroundTaskLauncher, IAgentJobStore, and IAgentJobDispatchObserver consumers declare production-required collaborators explicitly; tests provide real collaborators or named fakes rather than relying on omitted dependencies.",
+        "Only genuinely optional cache and diagnostic side channels remain nullable with a local reason, while focused dependency, profile-resolution, event-dispatch, and architecture tests pass without changing external API, CLI, workflow, or persistence behavior."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Explicit server composition and non-null production collaborator contracts with regression coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Audit every current nullable occurrence before tightening it; do not make an intentionally optional side channel mandatory merely for uniformity."
+    },
+    {
+      "id": "T-003",
+      "title": "Observe complete deferred AgentSession persistence cycles",
+      "spec": "specs/agent-session-persistence-observation/spec.md#persistence-completion-is-observable-per-operation",
+      "description": "Add an internal persistence-cycle reporter at AgentSessionGrain.PersistCallback that assigns a session-scoped cycle identifier and records the terminal FlushAsync outcome only after the complete deferred flush returns or throws. The production host uses a no-op reporter while SpecTests uses a checkpointed probe; migrate every FlushForTestAsync caller to await that correlated cycle or the existing deterministic scheduler boundary, then remove the flush command without changing FlushAsync production semantics.",
+      "acceptanceCriteria": [
+        "Each PersistCallback invocation reports one session-scoped cycle outcome after FlushAsync finishes: succeeded only after the full deferred flush is durable, transcript-failed after state/events commit but transcript persistence fails, or state-failed when the state/event save fails and quarantines the activation.",
+        "The probe records cycle outcomes after a per-session checkpoint, allowing a wait to observe a completed cycle while excluding synchronous input-fence and immediate evidence writes that use the same transcript store.",
+        "All former FlushForTestAsync callers await a correlated deferred-cycle outcome or deterministically drive the existing scheduler; no migrated test uses polling, Task.Delay, wall-clock waits, or a forced grain flush.",
+        "IAgentSessionGrain and AgentSessionGrain expose no test-only flush command; production registers a no-op internal reporter that performs no persistence operation, scheduling, or blocking work.",
+        "Focused AgentSession persistence tests prove successful ordering, state/event-save quarantine, transcript-only retry, failed observation, and unobserved production-equivalent timer behavior; relevant server unit, spec, and architecture suites pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Correlated deferred-persistence cycle observation and flush-free AgentSession persistence specifications.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "T-001 first removes AgentSession's separate deactivation control from the shared grain contract. The reporter observes only final PersistCallback outcomes; it must never own clearing, retry, ordering, quarantine, or timer decisions."
+    }
+  ]
+}

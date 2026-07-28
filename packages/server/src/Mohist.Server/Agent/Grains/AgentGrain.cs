@@ -11,6 +11,19 @@ public class AgentGrain : Grain, IAgentGrain
     private readonly TimeProvider _timeProvider;
     private Domain.Agent? _agent;
 
+    internal AgentGrain(
+        Orleans.Runtime.IGrainContext context,
+        Orleans.Runtime.IGrainRuntime runtime,
+        IStateStore<Domain.Agent> agentStore,
+        AgentQuerier querier,
+        TimeProvider timeProvider)
+        : base(context, runtime)
+    {
+        _agentStore = agentStore;
+        _querier = querier;
+        _timeProvider = timeProvider;
+    }
+
     public AgentGrain(IStateStore<Domain.Agent> agentStore, AgentQuerier querier, TimeProvider timeProvider)
     {
         _agentStore = agentStore;
@@ -19,8 +32,6 @@ public class AgentGrain : Grain, IAgentGrain
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
-
-    internal string GrainKeyForTest { get; set; } = string.Empty;
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
@@ -115,5 +126,5 @@ public class AgentGrain : Grain, IAgentGrain
     private static System.Text.Json.JsonElement? Clone(System.Text.Json.JsonElement? value) =>
         value is null ? null : value.Value.Clone();
 
-    private string CurrentKey() => string.IsNullOrEmpty(GrainKeyForTest) ? GrainKey : GrainKeyForTest;
+    private string CurrentKey() => GrainKey;
 }

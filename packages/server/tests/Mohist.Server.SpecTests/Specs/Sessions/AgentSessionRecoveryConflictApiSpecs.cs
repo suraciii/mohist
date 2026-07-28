@@ -133,13 +133,14 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         // longer flips the session to active; a session.activity record
         // does. Mark the session active so the idle boundary rejects Reset.
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
                 "{\"activity\":\"active\"}"),
         }, currentSession.Id));
-        await grain.FlushForTestAsync();
+        await persistence.WaitAsync();
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
 
@@ -233,13 +234,14 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         // does. Mark the session active so the idle boundary rejects the
         // canonical recovery command.
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
                 "{\"activity\":\"active\"}"),
         }, session.Id));
-        await grain.FlushForTestAsync();
+        await persistence.WaitAsync();
 
         using var response = await _client.PostAsync(
             $"/api/projects/{project.Id}/agent-sessions/{session.Id}/{operation}",

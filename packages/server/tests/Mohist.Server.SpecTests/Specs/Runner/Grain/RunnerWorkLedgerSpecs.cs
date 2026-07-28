@@ -196,7 +196,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
     private async Task DeactivateRunnerAsync(string runnerId)
     {
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.DeactivateForTestAsync();
+        await TestLifecycle.Deactivate(runner);
 
         var management = Grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);

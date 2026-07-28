@@ -58,18 +58,16 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     public async Task CompactEndpoint_ActiveSession_ReturnsConflict()
     {
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-active", sessionName: "plan", attachAndStart: true);
-        // Under the activity model (issue-484) attaching the runtime no
-        // longer flips the session to active; a session.activity record
-        // does. Mark the session active so the idle boundary rejects
-        // Compact without dispatching to the runner.
+        // Attaching the runtime does not make the session active; session.activity does.
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
                 "{\"activity\":\"active\"}"),
         }, currentSession.Id));
-        await grain.FlushForTestAsync();
+        await persistence.WaitAsync();
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
 
@@ -434,7 +432,6 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     Assert.Equal(afterReset.Status, afterStaleEvent?.Status);
     Assert.Equal(afterReset.LastDataAt, afterStaleEvent?.LastDataAt);
 
-    await grain.FlushForTestAsync();
     await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
     var closedParts = await db.AgentSessionTranscriptParts.AsNoTracking()
       .Join(
@@ -482,18 +479,16 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
     {
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-pi-active", sessionName: "plan", attachAndStart: true);
         await SetPersistedRuntimeAsync(currentSession.Id, "pi");
-        // Under the activity model (issue-484) attaching the runtime no
-        // longer flips the session to active; a session.activity record
-        // does. Mark the session active so the idle boundary still rejects
-        // Compact even for a pi-bound session.
+        // Attaching the runtime does not make the session active; session.activity does.
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
                 "{\"activity\":\"active\"}"),
         }, currentSession.Id));
-        await grain.FlushForTestAsync();
+        await persistence.WaitAsync();
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
 

@@ -117,13 +117,11 @@ public abstract class AgentJobGrainTestSupport
     protected async Task ClearBacklogAsync()
     {
         await ClearGlobalRunnerRegistryAsync();
-
-        var management = Grains.GetGrain<IManagementGrain>(0);
-        await management.ForceActivationCollection(TimeSpan.Zero);
     }
 
     protected async Task ClearGlobalRunnerRegistryAsync()
     {
+        await _fixture.ClearActiveAgentJobsAsync();
         var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var ids = await registry.ListRunnerIdsAsync();
         foreach (var id in ids)

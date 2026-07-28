@@ -295,6 +295,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             Assert.False(string.IsNullOrWhiteSpace(polled.AgentJobId));
 
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(polled.AgentJobId!);
+            var persistence = _fixture.Persistence.Checkpoint(sessionId);
             var report = await jobGrain.ReportResultAsync(
                 runnerId,
                 polled.WorkId,
@@ -307,7 +308,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             Assert.True(report.Accepted, "AgentJob rejected completed report");
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains);
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, persistence);
             var closePayload = Assert.Single(await LoadSessionClosedPayloadsAsync(dbFactory, sessionId));
             // Issue 484: terminal delivery writes a session.activity
             // (activity=idle) part. The work result status remains on
@@ -362,6 +363,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             // enter a terminal lifecycle state; the job's terminal
             // delivery writes a session.activity (activity=idle) event
             // carrying the work result status/reason.
+            var persistence = _fixture.Persistence.Checkpoint(sessionId);
             await WaitForJobTerminalAsync(
                 jobGrain!,
                 AgentJobStatus.Failed,
@@ -388,7 +390,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             Assert.Equal(agent.Id, record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains);
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, persistence);
             var closePayload = Assert.Single(await LoadSessionClosedPayloadsAsync(dbFactory, sessionId));
             Assert.Equal("failed", closePayload.GetProperty("status").GetString());
             Assert.Contains(AgentJobFailureReasons.ReportTimeout, closePayload.GetProperty("failureReason").GetString(), StringComparison.Ordinal);

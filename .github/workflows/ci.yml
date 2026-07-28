@@ -54,6 +54,15 @@ jobs:
         run: dotnet test Mohist.sln -p:SkipWebBuild=true --no-build
         timeout-minutes: 15
 
+      - name: Upload failed test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results-${{ github.run_attempt }}
+          path: "**/TestResults/*.log"
+          if-no-files-found: warn
+          retention-days: 7
+
   node:
     name: Node build and test
     runs-on: ubuntu-latest

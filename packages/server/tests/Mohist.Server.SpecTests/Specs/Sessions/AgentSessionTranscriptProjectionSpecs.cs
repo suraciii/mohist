@@ -35,6 +35,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
     public async Task LoadLatestEventsActivity_DoesNotSuppressTerminalOrLivenessEventTypes()
     {
         var (project, issue, _, session) = await CreateStartedAgentSessionAsync("activity-no-filter", title: "Activity no filter");
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
         // Under the activity model `session.closed` is a no-op (the grain no
@@ -56,7 +57,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
@@ -88,6 +89,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
     public async Task RuntimeEvents_RefreshSessionSummaryActivityWithoutDomainEvents()
     {
         var (project, issue, _, session) = await CreateStartedAgentSessionAsync("summary-activity", sessionName: "check");
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
         var beforeSummaries = await _client.GetDataAsync<AgentSessionSummaryDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
         var beforeSummary = Assert.Single(beforeSummaries);
         Assert.NotNull(beforeSummary.LastDataAt);
@@ -104,7 +106,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
 
         var summaries = await _client.GetDataAsync<AgentSessionSummaryDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
         var summary = Assert.Single(summaries);
@@ -160,6 +162,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var session = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         var runtimeEvents = Enumerable.Range(0, 96)
             .Select(i => new { type = "reasoning.delta", payload = new { text = i.ToString("D2"), messageId = "reasoning-1" } })
@@ -169,7 +172,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new { runtimeSessionId = session.Id, runtimeEvents });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var parts = await LoadTranscriptPartsAsync(db, session.Id);
@@ -195,6 +198,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var session = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
@@ -243,7 +247,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4, persistence);
 
         await using var db = await dbFactory.CreateDbContextAsync();
         var dbParts = await LoadTranscriptPartsAsync(db, session.Id);

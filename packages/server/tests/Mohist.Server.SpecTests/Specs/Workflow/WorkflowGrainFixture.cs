@@ -19,6 +19,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public RecordingEventStore EventStore => _sharedEventStore;
     public string ConnectionString => _keeper.ConnectionString;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    public AgentSessionPersistenceTestProbe Persistence { get; }
     public ControllableDispatchPollObserver DispatchPollObserver { get; } = new();
 
     private readonly RecordingEventStore _sharedEventStore = new();
@@ -27,6 +28,8 @@ public class WorkflowGrainFixture : IAsyncLifetime
 
     public WorkflowGrainFixture()
     {
+        Persistence = new AgentSessionPersistenceTestProbe(
+            () => TimeProvider.Advance(TimeSpan.FromSeconds(1)));
         _sharedEventBus = new InMemoryEventBus(
             _sharedEventStore,
             TimeProvider,
@@ -46,7 +49,13 @@ public class WorkflowGrainFixture : IAsyncLifetime
         builder.Options.InitialSilosCount = 1;
         builder.ConfigureSilo((_, siloBuilder) =>
         {
-            GrainTestConfig.ConfigureSilo(siloBuilder, connectionString, _sharedEventBus, _sharedEventStore, TimeProvider);
+            GrainTestConfig.ConfigureSilo(
+                siloBuilder,
+                connectionString,
+                _sharedEventBus,
+                _sharedEventStore,
+                TimeProvider,
+                Persistence);
             siloBuilder.Services.AddSingleton<IDispatchPollObserver>(DispatchPollObserver);
         });
         Cluster = builder.Build();
