@@ -80,14 +80,6 @@ public static class AgentSessionLaunchRoutes
             }
 
             var prompt = body.Prompt;
-            if (string.IsNullOrWhiteSpace(prompt))
-            {
-                return ApiResults.BadRequest(
-                    "prompt is required",
-                    "prompt_required",
-                    new { fields = new[] { "prompt" } });
-            }
-
             var idempotencyKey = ReadIdempotencyKey(context.Request);
             if (string.IsNullOrWhiteSpace(idempotencyKey))
             {
