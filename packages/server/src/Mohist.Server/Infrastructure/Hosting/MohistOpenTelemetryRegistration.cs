@@ -1,17 +1,20 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Events;
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Instrumentation.Http;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
 /// <summary>
-/// Wires the server's trace-only OpenTelemetry pipeline into host DI.
+/// Wires the server's OpenTelemetry pipeline into host DI.
 /// </summary>
 public static class MohistOpenTelemetryRegistration
 {
@@ -41,19 +44,20 @@ public static class MohistOpenTelemetryRegistration
             return services;
         }
 
-        ConfigureTracing(services.AddOpenTelemetry(), options);
+        ConfigureTelemetry(services.AddOpenTelemetry(), options);
         return services;
     }
 
-    internal static void ConfigureTracing(OpenTelemetryBuilder builder, OtelOptions options)
-        => ConfigureTracing(builder, options, configureExporter: null);
+    internal static void ConfigureTelemetry(OpenTelemetryBuilder builder, OtelOptions options)
+        => ConfigureTelemetry(builder, options, configureExporter: null);
 
-    internal static void ConfigureTracing(
+    internal static void ConfigureTelemetry(
         OpenTelemetryBuilder builder,
         OtelOptions options,
         Action<OtlpExporterOptions>? configureExporter)
     {
-        var exportEndpoint = ResolveExportEndpoint(options.Endpoint);
+        var traceExportEndpoint = ResolveExportEndpoint(options.Endpoint);
+        var metricsExportEndpoint = ResolveMetricsExportEndpoint(options.Endpoint);
 
         builder.WithTracing(tracing =>
         {
@@ -66,27 +70,29 @@ public static class MohistOpenTelemetryRegistration
                 .AddSource(OrleansActivitySourceNames[2])
                 .AddSource(OrleansActivitySourceNames[3])
                 .AddHttpClientInstrumentation(o => o.FilterHttpRequestMessage = msg =>
-                    !IsExporterSelfFeedback(msg.RequestUri, exportEndpoint))
+                    !IsExporterSelfFeedback(msg.RequestUri, traceExportEndpoint))
                 .AddEntityFrameworkCoreInstrumentation()
-                .AddOtlpExporter(otlp =>
-                {
-                    otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-                    otlp.Endpoint = exportEndpoint;
-                    configureExporter?.Invoke(otlp);
-                });
+                .AddOtlpExporter("tracing", configure: null);
+            tracing.ConfigureServices(services => services.PostConfigure<OtlpExporterOptions>("tracing", otlp =>
+            {
+                otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
+                otlp.Endpoint = traceExportEndpoint;
+                configureExporter?.Invoke(otlp);
+            }));
         });
 
-        // Mirror the trace-OTLP configuration into the Options pattern
-        // so production observability tooling (and tests) can resolve
-        // IOptions<OtlpExporterOptions> without invoking the SDK's
-        // internal TracerProvider builder. The SDK does not register
-        // an IConfigureOptions<OtlpExporterOptions> on its own for the
-        // trace-only path, so without this mirroring the configured
-        // values would be opaque to anyone reading via DI.
-        builder.Services.Configure<OtlpExporterOptions>(otlp =>
+        builder.WithMetrics(metrics =>
         {
-            otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-            otlp.Endpoint = exportEndpoint;
+            metrics
+                .ConfigureResource(resource => resource.AddService(ServiceName))
+                .AddMeter(EventDispatcherService.MeterName)
+                .AddOtlpExporter("metrics", configure: null);
+            metrics.ConfigureServices(services => services.PostConfigure<OtlpExporterOptions>("metrics", otlp =>
+            {
+                otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
+                otlp.Endpoint = metricsExportEndpoint;
+                configureExporter?.Invoke(otlp);
+            }));
         });
     }
 
@@ -96,15 +102,21 @@ public static class MohistOpenTelemetryRegistration
     /// base URL does not already end with it.
     /// </summary>
     internal static Uri ResolveExportEndpoint(string baseEndpoint)
+        => ResolveExportEndpoint(baseEndpoint, "traces");
+
+    internal static Uri ResolveMetricsExportEndpoint(string baseEndpoint)
+        => ResolveExportEndpoint(baseEndpoint, "metrics");
+
+    private static Uri ResolveExportEndpoint(string baseEndpoint, string signal)
     {
         var uri = new Uri(baseEndpoint);
-        if (uri.AbsolutePath.EndsWith("/v1/traces", StringComparison.OrdinalIgnoreCase))
+        if (uri.AbsolutePath.EndsWith($"/v1/{signal}", StringComparison.OrdinalIgnoreCase))
         {
             return uri;
         }
 
         var trimmed = uri.AbsolutePath.TrimEnd('/');
-        return new Uri(uri, $"{trimmed}/v1/traces");
+        return new Uri(uri, $"{trimmed}/v1/{signal}");
     }
 
     internal static bool ExcludeOtelIngestPath(HttpContext httpContext)

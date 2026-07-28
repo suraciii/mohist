@@ -48,3 +48,10 @@
 - DLQ: 崩溃与恢复 explicitly says no new DLQ query/replay API is introduced; the existing `IDeadLetterStore.StartRedeliveryAsync`/`ResolveAsync`/`RecordRedeliveryFailureAsync` flow is unchanged.
 - Removed the original "未来：N 个分发器按 hash(Source) % N 分片" line because the document must describe the deployed contract, not future dispatcher architecture.
 - Verification passed: `npm run build`, `npm test` (1538 server units, 3278 server specs, 35 arch tests, 1432 CLI tests, 175 workflow definition tests, 1438 runner tests, 5145 web tests with 1 existing skip).
+
+## Review Fix
+
+- Added the production metrics pipeline for `EventDispatcherService.MeterName`, exporting the blocked-source gauge through OTLP HTTP protobuf at the configured `/v1/metrics` endpoint.
+- Kept trace and metrics exporters on named signal-specific options so the trace endpoint cannot override the metrics endpoint.
+- Extended the registration specs to assert the hosted `MeterProvider` and the named metrics exporter configuration for the dispatcher meter, including its `/v1/metrics` endpoint, without a real collector.
+- Verification passed: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore -p:SkipWebBuild=true` (1541 tests) and `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true` (3279 tests). `npm run build` passed. `npm test` reached the server specs but failed in the unrelated, intermittent `AgentSessionEventDiscardObservabilitySpecs.MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents` assertion.
