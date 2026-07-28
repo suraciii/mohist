@@ -261,7 +261,8 @@ public abstract class EpicAutoDoneHandlerTestSupport
                 this,
                 new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
                 new NoopEventStore(),
-                NullLogger<EpicGrain>.Instance);
+                NullLogger<EpicGrain>.Instance,
+                TestServices.BackgroundTasks);
         }
 
         private IIssueGrain GetIssueGrain(string issueId) => new TestIssueGrain(this, issueId);

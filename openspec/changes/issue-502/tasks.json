@@ -19,7 +19,7 @@
       "type": "WRITE",
       "output": "EpicGrain and AgentJobGrain post-append poke wiring with focused server dispatcher specs.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Reuse EventDispatcherPoke.PokeAfterCommit; do not add an event-store callback or invoke DispatchNowAsync inline."
     },
     {

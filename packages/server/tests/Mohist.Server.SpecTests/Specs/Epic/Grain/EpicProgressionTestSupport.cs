@@ -139,7 +139,8 @@ public abstract class EpicProgressionTestSupport
                 this,
                 new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
                 _eventStore,
-                NullLogger<EpicGrain>.Instance);
+                NullLogger<EpicGrain>.Instance,
+                TestServices.BackgroundTasks);
         }
 
         public IIssueGrain GetIssueGrain(string issueKey) => new RecordingIssueGrain(this, issueKey);

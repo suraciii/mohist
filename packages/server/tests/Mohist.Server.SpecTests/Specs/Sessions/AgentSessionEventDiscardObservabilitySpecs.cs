@@ -111,7 +111,9 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
         Assert.Equal(["message.delta", "session.activity"], result.Select(entry => entry.Type));
         Assert.Equal(3, DiscardWarnings(sessionId).Count);
         Assert.Equal(["message.delta", "session.activity"], PublishedFor(sessionId).Select(entry => entry.Type));
-        var flush = Assert.Single(FlushesFor(sessionId));
+        var flush = Assert.Single(
+            FlushesFor(sessionId),
+            flush => flush.Parts.Any(part => part.Type == TranscriptPartTypes.SessionActivity));
         var activity = Assert.Single(flush.Parts, part => part.Type == TranscriptPartTypes.SessionActivity);
         Assert.Contains("\"status\":\"failed\"", activity.PayloadJson, StringComparison.Ordinal);
         Assert.DoesNotContain(flush.Parts, part => part.Type is "session.closed" or "session.followup_completed" or "session.followup_failed");

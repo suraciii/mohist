@@ -123,7 +123,8 @@ public class EpicEventLineageSpecs
             var grains = new RecordingGrainFactory();
             var identity = GrainTestContext.Create($"{ProjectId}:{EpicNumber}");
             var grain = new EpicGrain(identity.Context, identity.Runtime, database.Factory, grains,
-                new FakeTimeProvider(FixedTime), eventStore, NullLogger<EpicGrain>.Instance);
+                new FakeTimeProvider(FixedTime), eventStore, NullLogger<EpicGrain>.Instance,
+                TestServices.BackgroundTasks);
 
             await grain.LinkIssueAsync(1, ProjectId);
             await grain.UnlinkIssueAsync(1, ProjectId);
@@ -155,7 +156,7 @@ public class EpicEventLineageSpecs
             var identity = GrainTestContext.Create($"{ProjectId}:{EpicNumber}");
             var grain = new EpicGrain(identity.Context, identity.Runtime, database.Factory,
                 new ThrowingAffiliationGrainFactory(), new FakeTimeProvider(FixedTime), eventStore,
-                NullLogger<EpicGrain>.Instance);
+                NullLogger<EpicGrain>.Instance, TestServices.BackgroundTasks);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() => grain.LinkIssueAsync(1, ProjectId));
 

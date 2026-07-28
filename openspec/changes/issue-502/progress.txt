@@ -1,0 +1,14 @@
+## Codebase Patterns
+
+- Durable producers call `EventDispatcherPoke.PokeAfterCommit` only after their own persistence boundary succeeds; the helper owns fire-and-forget execution and failure logging.
+- Epic state and events share one `MohistDbContext` commit. `SaveEpicChangesAsync` centralizes the post-commit poke and skips it when the drained event list is empty.
+- AgentJob failure events use the standalone `IEventStore.AppendAsync` boundary. The poke follows that append directly; append failure leaves `PendingFailureEvent` for activation/reminder recovery and never launches a poke.
+- Dispatcher immediate-trigger specs use a one-hour reminder period plus handler-owned completion signals, so immediate delivery and reminder recovery require no wall-clock waiting.
+
+## T-001
+
+- Added EpicGrain and AgentJobGrain `IBackgroundTaskLauncher` wiring and shared post-append dispatcher pokes.
+- Added immediate-delivery coverage for Epic and AgentJob, no-event/no-poke coverage for idempotent Epic commands, and AgentJob append-failure recovery coverage.
+- Immediate Epic delivery can advance an empty running Epic to done before the next API call; the running-reopen spec now links an open Issue to preserve the intended running precondition.
+- The full suite exposed a pre-existing parallel transcript flush in `MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents`; its assertion now selects the unique flush containing `session.activity` rather than requiring no unrelated flushes.
+- Verification passed: `npm run build`, focused dispatcher/Epic/AgentJob specs, architecture tests, and `npm test` (3277 server specs, 5146 web tests with one existing skip, 1438 runner tests).

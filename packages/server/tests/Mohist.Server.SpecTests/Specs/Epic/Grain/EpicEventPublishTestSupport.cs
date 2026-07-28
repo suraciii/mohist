@@ -215,7 +215,8 @@ internal static class EpicEventPublishTestSupport
             grains ?? new StubGrainFactory(),
             timeProvider,
             eventStore,
-            NullLogger<EpicGrain>.Instance);
+            NullLogger<EpicGrain>.Instance,
+            TestServices.BackgroundTasks);
     }
 
     public static async Task SeedEpicAsync(
