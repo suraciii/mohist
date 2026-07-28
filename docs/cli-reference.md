@@ -412,9 +412,9 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - 互斥关系由参数定义声明并写进叶子帮助（`--all/--archived`、`--before/--after`、
   `--feedback/--latest`、`--yaml/--json`、`--inherit-workflow-profile/--workflow-profile` 等）。
 - 裸 `--json` 字段发现优先于其它参数校验（当前 `session list --json` 先报筛选缺失）。
-- 返回资源的 mutation 一律接受 `--json`（当前 `agent create/edit/archive`、`issue rebase` 等缺）。
+- 返回资源的 mutation 一律接受 `--json`（当前 `agent create/edit/archive` 等缺；`issue rebase`
+  返回排队应答而非资源，不在此列）。
 - `project repo set-default`（自 `repo set-default` 迁移）。
-- bare `mo update` 更新全部组件。
 - `project workflow prompt` 等命令的 JSON FIELDS 替换为真实字段目录，移除兜底默认字段集。
 
 ### 实现越界，需向 spec 收敛
