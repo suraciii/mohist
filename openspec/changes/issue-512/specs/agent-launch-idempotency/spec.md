@@ -30,6 +30,10 @@ Once Mohist has accepted a launch call identity, its Agent, prompt, context, and
 - **WHEN** a retry uses an already accepted call identity but supplies a different prompt
 - **THEN** Mohist rejects the retry as a conflicting reuse and leaves the original launch unchanged
 
+#### Scenario: Retry follows an Agent or context change
+- **WHEN** a caller retries an accepted launch with the same request and call identity after its Agent is archived or renamed, or a referenced context is changed or removed
+- **THEN** Mohist returns or resumes the original launch from its canonical snapshot without revalidating the changed Agent, context, or execution configuration
+
 ### Requirement: Accepted launch records the first input and turn durably
 
 Mohist SHALL not report a launch as accepted until the AgentJob, AgentSession, first SessionInput, and first AgentTurn are durably linked to the same launch intent. The first SessionInput MUST retain its stable identity and accepted content, and the first AgentTurn MUST retain its stable identity and association with that input and AgentJob across Server restart, Runner restart, queueing, and client disconnection.
@@ -44,7 +48,7 @@ Mohist SHALL not report a launch as accepted until the AgentJob, AgentSession, f
 
 ### Requirement: Invalid launch does not consume a call identity
 
-A launch with invalid input, an unresolved Agent or context reference, or an archived Agent MUST be rejected before any launch resources are created. Such rejection MUST NOT create an AgentJob, AgentSession, SessionInput, or AgentTurn for the supplied call identity.
+A new launch identity with invalid input, an unresolved Agent or context reference, or an archived Agent MUST be rejected before any launch resources are created. Such rejection MUST NOT create an AgentJob, AgentSession, SessionInput, or AgentTurn for the supplied call identity.
 
 #### Scenario: Whitespace prompt is rejected
 - **WHEN** a caller submits a launch with a whitespace-only prompt

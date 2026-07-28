@@ -8,13 +8,13 @@
       "spec": "specs/agent-launch-idempotency/spec.md#A call identity has one launch outcome",
       "description": "Replace the manual random-ID open-then-submit path with the `Idempotency-Key`-keyed `AgentLaunchCoordinatorGrain`. The coordinator must persist the canonical launch plan and one-at-a-time command fence, prepare the AgentJob, atomically create the AgentSession's first accepted Input and queued Turn, then submit the prepared Job; update the Runner contract so it carries those identities and does not create a second initial session.input event.",
       "acceptanceCriteria": [
-        "POST agent launch rejects a missing or empty Idempotency-Key before creating a launch plan, while preserving the existing invalid prompt, unknown Agent/context, and archived Agent rejection gates.",
+        "POST agent launch rejects a missing or empty Idempotency-Key. For an identity with no plan, it preserves the existing invalid prompt, unknown Agent/context, and archived Agent rejection gates and creates no plan.",
         "For one (ProjectId, Idempotency-Key), concurrent and retried matching requests return the same Job, Session, Input, and Turn IDs and issue exactly one Job dispatch; different keys create independent launches.",
-        "A replay whose Agent, prompt, context, or resolved execution snapshot differs returns launch_idempotency_conflict and leaves the original plan and resources unchanged.",
+        "The route looks up an existing plan before mutable Agent/context/runtime validation. A matching replay returns or resumes the original snapshot after Agent archive/rename or referenced-context mutation, while a replay whose normalized client request differs returns launch_idempotency_conflict and leaves the original plan and resources unchanged.",
         "The coordinator resumes the same prepared command after activation, Server restart, or a failed participant acknowledgement; it never uses a cross-aggregate transaction or stores Job/Session business state as a second authority.",
         "Before a launch returns accepted, its AgentSession durably contains one accepted initial Input and one queued initial Turn associated with the Job; Server restart or queueing preserves those identities and the input content.",
         "AgentJob dispatch and Runner reports propagate the generated Input/Turn identities, and the Runner no longer publishes a duplicate initial session.input record for an AgentJob launch.",
-        "Server spec tests cover validation-before-plan, duplicate and concurrent retries, conflicting reuse, all coordinator recovery fences, initial Input/Turn persistence, queue delay, and exactly-one dispatch using fake time, storage, and dispatch observers.",
+        "Server spec tests cover new-identity validation without plan creation, duplicate and concurrent retries, conflicting reuse, replay after Agent archive/rename and referenced-context mutation, all coordinator recovery fences, initial Input/Turn persistence, queue delay, and exactly-one dispatch using fake time, storage, and dispatch observers.",
         "Runner tests cover identity propagation and no duplicate initial input using a fake Runtime and Server connection; npm test, npm run typecheck -w packages/runner, and npm test -w packages/runner pass."
       ],
       "priority": 1,

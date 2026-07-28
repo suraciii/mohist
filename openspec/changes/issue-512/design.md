@@ -25,13 +25,13 @@ The change implements `agent-launch-idempotency` and `agent-launch-observation`.
 
 ### D1. Use `Idempotency-Key` as the manual launch identity
 
-`POST /api/projects/{projectRef}/agents/{agentRef}/sessions` requires a non-empty `Idempotency-Key`. The key scope is `(ProjectId, key)`; it is opaque to Server business logic. The route continues all existing validation before it creates a launch plan.
+`POST /api/projects/{projectRef}/agents/{agentRef}/sessions` requires a non-empty `Idempotency-Key`. The key scope is `(ProjectId, key)`; it is opaque to Server business logic. After validating that header, the route first asks the coordinator for an existing plan. An existing plan compares the incoming normalized client request to its stored request fingerprint and returns or resumes its original snapshot without resolving the current Agent, context, or runtime override. Only an identity without a plan follows the existing prompt, Agent, archive, context, and runtime validation path before it creates a plan.
 
 Web generates the key before its first mutation and retains it with the pending composer attempt until that attempt receives its result. CLI accepts `--idempotency-key`; when omitted, it generates a UUID, prints it before sending the request, and reuses it for in-process transport retries. A new CLI process retries an interrupted request with the emitted `--idempotency-key` value. Neither client derives a key from prompt content.
 
-The coordinator stores a canonical request fingerprint and resolved Agent snapshot with the key. A replay with matching canonical content resumes or returns the original plan. A replay with different Agent, prompt, context, or resolved execution snapshot returns `409 launch_idempotency_conflict` and cannot mutate the original plan.
+The coordinator stores a canonical request fingerprint and resolved Agent snapshot with the key. The fingerprint is derived from the original normalized client request, including its supplied Agent reference, so a replay remains comparable even when that reference no longer resolves after rename or archive. A replay with matching content resumes or returns the original plan. A replay with a different Agent reference, prompt, context, or runtime override returns `409 launch_idempotency_conflict` and cannot mutate the original plan.
 
-**Rationale:** the existing recovery commands already use this header, so it is a single transport convention rather than a second request-id language. Content-derived keys would collapse intentional identical launches; server-generated keys cannot recover a lost response.
+**Rationale:** the existing recovery commands already use this header, so it is a single transport convention rather than a second request-id language. Looking up an existing plan before mutable validation preserves the launch-time snapshot promised to an accepted Job; content-derived keys would collapse intentional identical launches, and server-generated keys cannot recover a lost response.
 
 **Alternatives considered:** a body `requestId` was rejected because it duplicates the established command boundary; a client-local retry journal was rejected because it introduces retention and cleanup semantics while still not helping another client; random IDs per retry were rejected because they duplicate work.
 
