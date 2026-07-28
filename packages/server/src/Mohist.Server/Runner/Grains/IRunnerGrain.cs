@@ -182,7 +182,7 @@ public record WorkDispatch(
     /// recorded on the AgentSession before the AgentJob dispatched.
     /// The runner uses this to correlate its reports with the
     /// durable input and to skip emitting a duplicate <c>session.input</c>
-    /// record for an AgentJob launch (issue-512 T-001). Null for
+    /// record for an AgentJob launch. Null for
     /// legacy dispatches that predate the idempotent launch path;
     /// the runner treats null as "publish the initial input as
     /// before".

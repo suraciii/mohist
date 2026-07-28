@@ -60,7 +60,7 @@ public interface IAgentLauncher
         CancellationToken ct = default);
 
     /// <summary>
-    /// Idempotent manual launch (issue-512 T-001). The route forwards
+    /// Idempotent manual launch. The route forwards
     /// the caller-supplied <paramref name="idempotencyKey"/> to the
     /// <see cref="Grains.AgentLaunchCoordinatorGrain"/> keyed by
     /// <c>(ProjectId, IdempotencyKey)</c>. The coordinator persists

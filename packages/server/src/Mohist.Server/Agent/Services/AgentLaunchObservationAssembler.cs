@@ -5,8 +5,8 @@ using Mohist.Server.Sessions.Grains;
 namespace Mohist.Server.Agent.Services;
 
 /// <summary>
-/// Composite, read-only observation for a single launch (issue-512
-/// T-002, design D5). Returns the canonical Job+Session+Input+Turn
+/// Composite, read-only observation for a single launch. Returns the
+/// canonical Job+Session+Input+Turn
 /// facts and the composite observation URL; Job result fields come
 /// from <see cref="IAgentJobGrain"/> and Session/Input/Turn/activity/
 /// transcript fields come from <see cref="IAgentSessionGrain"/>. The
@@ -47,7 +47,7 @@ public sealed record AgentTurnResultDto(
 
 /// <summary>
 /// Read-only assembler for <see cref="AgentLaunchObservationDto"/>
-/// (issue-512 T-002). Composes the Job and Session owners'
+/// Composes the Job and Session owners'
 /// authoritative state into the composite DTO; never mints new
 /// SessionInput, AgentTurn, or AgentJob resources and never advances
 /// the Job lifecycle. Returns <c>null</c> when the Job does not
@@ -95,7 +95,7 @@ public sealed class AgentLaunchObservationAssembler
         }
         else if (status == AgentJobStatus.Unknown)
         {
-            // Issue-512 T-002: Unknown is nonterminal and
+            // Unknown is nonterminal and
             // non-dispatchable. Surface the recorded failureReason so
             // the observation can describe why Server cannot confirm
             // the first execution.

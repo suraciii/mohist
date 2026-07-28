@@ -332,3 +332,15 @@ ArchTests:
 ### Verification
 - `dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj` — 50/50 passed.
 - `dotnet build Mohist.sln` — passed with 0 warnings and 0 errors.
+
+## CI repair — comment references introduced by merge base
+
+### Root cause
+- PR #234's .NET check failed only in `CommentReferenceRules.ServerSourceComments_DoNotIntroduceNewIssueSpecDesignPathReferences_BeyondBaseline`. The CI merge checkout included nine production files with 32 `issue-512`, `T-001`, `T-002`, and `design D5` provenance references in comments. The hard-ban baseline is intentionally empty, so every one became an unapproved offender.
+
+### Repair
+- Removed the provenance markers from those comments while retaining the behavioral rationale for Unknown-state reconciliation, idempotent launch preparation, and the observation read model. No runtime code or ArchTest behavior changed.
+
+### Verification
+- `dotnet build Mohist.sln` — passed with 0 warnings and 0 errors.
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` — Workflow.Definition 175/175, CLI 1443/1443, Unit 1553/1553, Arch 50/50, Spec 3324/3324.

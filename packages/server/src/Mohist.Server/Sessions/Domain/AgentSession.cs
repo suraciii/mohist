@@ -347,7 +347,7 @@ public sealed record AgentSessionTranscriptEvidence(
 /// <summary>
 /// One child input recorded on the AgentSession. Inputs are addressed
 /// through their Session and surfaced via the composite observation
-/// surface (issue-512 T-002) — they are not independent top-level
+/// surface — they are not independent top-level
 /// resources. The launch-time input is created by the
 /// <see cref="Mohist.Server.Agent.Grains.AgentLaunchCoordinatorGrain"/>
 /// before the AgentJob dispatches so the durable launch identity

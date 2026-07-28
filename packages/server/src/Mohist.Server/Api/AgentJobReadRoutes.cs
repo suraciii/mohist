@@ -101,7 +101,7 @@ public static class AgentJobReadRoutes
 
         var status = await grain.GetStatusAsync();
         var isTerminal = status is AgentJobStatus.Completed or AgentJobStatus.Failed;
-        // Issue-512 T-002: Unknown is nonterminal; surface it without
+        // Unknown is nonterminal; surface it without
         // the terminal-result fields. Callers consume it as a
         // nonterminal, non-dispatchable state — neither successful
         // nor failed — and act on it via the launch-observation read.
