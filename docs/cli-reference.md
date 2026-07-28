@@ -77,6 +77,16 @@ task-command     = mo <task> [target] [flags]
 - `pause` 中断当前推进但保留恢复入口；`resume` 继续同一条 Run。
 - `stop` 使 Run 永久终止，不能再 `resume`。
 
+### Flag 约定
+
+flag 词汇在全命令面唯一，同一个词不表达两种含义：
+
+- 集合规模只有 `--limit`（`service logs --lines` 是日志尾部语意的例外，沿用行业惯例）。
+- 资源引用 flag 唯一：仓库一律 `--repo`，Project 一律 `--project`，不并列同义词。
+- 互斥关系由参数定义声明，并且必须在叶子帮助中可见。
+- 短 flag 是白名单：只保留全局字母唯一、行业惯例明确的 `-l`（`--label`）、`-p`（`--priority`）、`-b`（`--body`）、`-m`（`--message`）、`-y`（`--yes`）、`-f`（`--follow`）、`-n`（`--lines`）、`-v`（`--verbose`），且必须渲染进叶子帮助；白名单之外不新增短 flag。
+- Project 的默认引用（默认仓库、默认 Workflow Profile）是 Project 的属性，统一由 `project` area 承载：`project repo set-default`、`project workflow set-default`。
+
 ## 命令地图
 
 根帮助按用户任务分组，而不是输出一条没有层次的长列表。
@@ -95,13 +105,13 @@ task-command     = mo <task> [target] [flags]
 
 | 命令组 | 规范动作 |
 |---|---|
-| `project` | `list`、`view`、`create`、`use`、`delete`；`workflow set-default`；`prompt get/set/clear/preview`；`variable list/get/set/unset` |
-| `repo` | `list`、`create`、`edit`、`set-default`、`delete` |
+| `project` | `list`、`view`、`create`、`use`、`delete`；`workflow set-default`；`workflow prompt get/set/clear/preview`；`repo set-default`；`variable list/get/set/unset` |
+| `repo` | `list`、`create`、`edit`、`delete` |
 | `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`、`commits`、`logs`、`events`；`comment create`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset`；`watch list/add/remove` |
 | `epic` | `list`、`view`、`create`、`edit`、`add`、`remove`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
 | `label` | `list`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
-| `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
+| `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`view --yaml` 读取 Run 绑定的 Definition 快照；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
 | `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；`connection list/view/create/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`；只读 `model list --runtime` |
 | `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
 | `activity` | `list` |
@@ -129,6 +139,10 @@ task-command     = mo <task> [target] [flags]
 
 `mo issue` 管理工作本身：内容、组织关系、目标仓库、Profile 选择，以及 Draft / Done / Closed / Archived 等 Issue 生命周期。`mo issue start <number>` 表达“开始这项工作”，成功后创建并绑定一条 WorkflowRun。
 
+`issue create` 与 `issue edit` 使用同一组类型化 flags 设置规划元数据：`--priority`、`--risk low|medium|high`、`--label`、`--repo`、`--parent`、`--workflow-profile`。这些字段是结构化数据，不需要写进正文 frontmatter。
+
+`issue list` 支持 `--stage`、`--priority`、`--label`、`--repo`、`--parent`、`--epic` 过滤；配合 `--json` 的字段选择，一次调用即可完成跨 Issue 的对照排查，不需要逐条 `issue view`。
+
 审批、恢复、暂停和终止改变的是 WorkflowRun，因此只放在 `mo run`。Issue 的评论、前置条件、模板、变量、diff 和 commit 仍留在 `mo issue`，因为它们描述或辅助这项工作。
 
 ## Workflow Profile
@@ -147,8 +161,7 @@ Profile collection 属于 Workflow；Project 默认选择和 Issue 显式选择�
 
 `workflow` 与 `run` 的分工沿用 GitHub CLI 中 workflow definition 与 run execution 的心智模型，但使用 Mohist 自己的 WorkflowProfile 和 WorkflowRun 语义。
 
-`mo workflow validate --file <path>` 纯本地校验 Workflow Definition；`--file -` 从 stdin
-读取。该命令不解析 Project，也不连接 Server。
+`mo workflow create` 与 `mo workflow edit` 用 `--file <path>` 提供 Workflow Definition，`--file -` 从 stdin 读取。`mo workflow validate --file <path>` 纯本地校验 Workflow Definition；该命令不解析 Project，也不连接 Server。
 
 ## WorkflowRun
 
@@ -162,6 +175,8 @@ mo run retry --issue 42
 ```
 
 位置参数直接使用 WorkflowRun ID；`--issue` 解析该 Issue 当前绑定的 Run。两者必须且只能提供一个。Issue 号在 Project 内唯一，因此可同时使用 `--project`。
+
+`mo run view --yaml` 读取该 Run 启动时绑定的 Workflow Definition 快照——即这次执行实际使用的定义，而不是 Profile 的当前内容。它与 `workflow view --yaml` 同属资源 source view，与 `--json` 互斥。
 
 Project、Issue 和 WorkflowRun 各自拥有一份 Variables。三个 scope 使用相同的
 `variable list/get/set/unset` 键值语言；`run variable list/get --effective` 读取 Project →
@@ -195,7 +210,8 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
   并返回四个稳定 ID。
 - `mo agent create/edit` 使用类型化的 `--runtime`、`--model`、`--variant`、`--skills` 和
   `--max-concurrent-runs` 配置 Agent；头像使用 `--avatar-file`，Instructions 使用互斥的
-  `--instructions` 或 `--instructions-file`。CLI 不要求调用方拼 Agent config JSON。
+  `--instructions` 或 `--instructions-file`。CLI 不要求调用方拼 Agent config JSON，
+  `--agent-config` 透传入口退役。
   `mo agent view` 显示统一 Readiness、配置缺口与当前执行可用性；并发限制实时约束 launch
   和 follow-up，但不强停已在运行的执行。
 - `mo agent install <name>` 安装内置 Agent 预设（如 `supervisor`：监管 Agent 与审批、
@@ -263,8 +279,9 @@ Project 范围内的命令遵循同一套解析规则：
 ## 输入与交互
 
 - 短文本使用 `--body`、`--message` 或该命令明确声明的参数。
-- 长文本使用与短文本同名的 file flag，例如 `--body-file`、`--prompt-file`、`--text-file`；传 `-` 表示从 stdin 读取。
+- 长文本与结构化值使用与短文本同名的 file flag，例如 `--body-file`、`--prompt-file`、`--text-file`、`--stage-models-file`；传 `-` 表示从 stdin 读取。
 - Workflow Definition 等完整文档使用 `--file <path>`；传 `-` 表示从 stdin 读取。
+- 文件与 stdin 只有 `--<name>-file` 和 `--file` 两条通道；不接受 `@<file>` 写法。
 - 在 TTY 中，少数安装、setup 和 create 命令可以在缺少可选输入时询问。
 - 在非 TTY 中，任何命令都不询问；缺少必填输入时立即失败并给出可执行提示。
 - `MOHIST_PROMPT_DISABLED=1` 在任何环境中关闭询问，便于 Agent、脚本和 CI 获得确定行为。
@@ -286,8 +303,10 @@ mo run view --issue 42 --json id,status,currentStage
 - `--json <fields>` 只输出请求的字段。字段顺序不影响语义。
 - 不提供通用 `-o` / `--output`；命令只有默认人类视图和显式字段选择两条常规输出路径。
 - 单资源输出一个 JSON object；集合输出一个 JSON array。不增加 `{ ok, data, error }` 包装。
-- 单独传 `--json` 时列出该命令可选的字段并退出，不要求 Agent 猜字段名。
+- 单独传 `--json` 时列出该命令可选的字段并退出，不要求 Agent 猜字段名；字段发现优先于其它参数校验，不要求先补齐必填项。
 - JSON 字段是命令契约。叶子帮助列出当前版本支持的字段。
+- 每个资源只有一份字段目录：同一资源的 `list`、`view` 与返回该资源的 mutation 共享同一组字段名与语义；字段目录覆盖该资源 read model 的全部用户可见字段（例如 Issue 含 `number`、`title`、`status`、`stage`、`priority`、`risk`、`labels`、`repository`、`prereq`、`epic`、`workflowRunId`、`createdAt`、`updatedAt`），不放置该资源并不拥有的占位字段。
+- 返回资源的 mutation 同样接受 `--json`，字段与对应 `view` 相同。
 - 连续事件与日志使用一行一个 JSON object 的 NDJSON；不会把无限流包装成数组。
 - 正常结果只写 stdout。错误、提示、确认和进度只写 stderr。
 - 人类输出允许改善排版；脚本和 Agent 只依赖 JSON 或 NDJSON。
@@ -371,16 +390,40 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 ## 实装差距
 
-当前命令面仍有以下主要差距：
+### spec 在前，实现追赶
 
-- `project prompt get/set/clear/preview` 已在命令地图登记，命令树尚未实装。
-- `agent restore` 已在命令地图登记，命令树尚未实装（`archive` 已有）。
-- `agent create/edit` 当前仍通过 `--agent-config <json-or-file>` 设置 Runtime、Model 与 Variant；
-  目标类型化 flags、`--avatar-file` 与 Readiness 输出尚未实装。
-- `agent connection` 命令组与 Slack setup 尚未实装。
-- `install/update/service ... slack` 与 `mohist-slack` 受管服务尚未实装。
-- Agent launch/follow-up 目前尚未暴露稳定的 SessionInput 与 AgentTurn 身份；现有已闭合项只
-  覆盖 Job 与 Session 两层身份。
+- Issue 字段目录补齐：`issue view/list --json` 增加 `risk`、`prereq`、`epic`、`createdAt`、`updatedAt`；
+  `issue list` 增加 `--epic` 过滤；`issue edit` 增加 `--risk`（`create` 已有）。依赖 server read
+  model 暴露 epic 归属与 prereq。
+- Epic 字段目录真实化，并增加 `progress`（含 `nextIssueNumber`、`nextIssueReason`）。
+- `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
+  Readiness 输出；`--agent-config` 透传入口退役。
+- `agent connection` 命令组与 Slack setup。
+- `install/update/service ... slack` 与 `mohist-slack` 受管服务。
+- Agent launch/follow-up 暴露稳定的 SessionInput 与 AgentTurn 身份。
+- `issue workflow status/timeline` 是 Run 状态在 `run` 之外的第二条读取路径，且子区边界文案
+  与实际动作名实不符；由 issue #498 推进退役，能力并入 `run`。
+- 输入通道统一：`workflow create/edit --file` 替换 `--yaml <source|@file>`；`--stage-models-file`
+  等 file flag 补齐；`@<file>` 写法整体退役。
+- `routing test --last` 改为 `--limit`；`agent launch --repository` 改为 `--repo`。
+- 短 flag 白名单化：保留 `-l/-p/-b/-m/-y/-f/-n/-v` 并渲染进叶子帮助；删除白名单之外的
+  `-s/-d/-u/-i`，以及 `-b` 在 `--base-branch` 上的复用（`-b` 只属于 `--body`）；
+  Skill 示例中的 `-d`/`-p` 引用随之一并更新。
+- 互斥关系由参数定义声明并写进叶子帮助（`--all/--archived`、`--before/--after`、
+  `--feedback/--latest`、`--yaml/--json`、`--inherit-workflow-profile/--workflow-profile` 等）。
+- 裸 `--json` 字段发现优先于其它参数校验（当前 `session list --json` 先报筛选缺失）。
+- 返回资源的 mutation 一律接受 `--json`（当前 `agent create/edit/archive`、`issue rebase` 等缺）。
+- `project repo set-default`（自 `repo set-default` 迁移）。
+- bare `mo update` 更新全部组件。
+- `project workflow prompt` 等命令的 JSON FIELDS 替换为真实字段目录，移除兜底默认字段集。
+
+### 实现越界，需向 spec 收敛
+
+- `--effective` 只应出现在 `run variable list/get`；当前 `project`/`issue` variable 与
+  `set`/`unset` 也暴露了它。
+- `--project-id` 隐藏残留与相关死代码需删除。
+- help 文案缺陷：`creatinging`/`updatinging` 拼写、空选项描述、`issue create/edit --priority`
+  复用 filter 描述、`USAGE`/`Usage:` 大小写不一、`--json` 描述不一致。
 
 ### 已闭合
 
@@ -393,5 +436,7 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - 未知 area 或 action 返回用法错误 `2`，只展示最近一级的相关 usage，不回退根帮助并成功退出。
 - Project 作用域与输出模式统一：Project-scoped 命令共享 `--project <name-or-id>`，资源结果共享字段选择式 `--json`。
 - 根帮助分组与命令地图一致：Work / Automation / Operations / Tools 四组归属同本文登记。
+- Project Prompt 已实装于 `project workflow prompt get/set/clear/preview`。
+- `run view --yaml` 已实装并登记进 spec：读取 Run 绑定的 Definition 快照，与 `--json` 互斥。
 
 对应源码：`packages/cli/`。

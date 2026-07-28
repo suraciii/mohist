@@ -68,7 +68,8 @@ aggregate 是内部实现，不机械决定命令导航。跨 context 的关系�
 - `run approve/reject/retry/rerun/pause/resume/stop` 改变 WorkflowRun；不在 `issue` 下复制。
 - `project workflow set-default` 修改 Project 的默认 Profile 引用；`workflow` 只管理 Profile
   collection，Issue 的显式选择由 `issue create/edit --workflow-profile` 修改，并由
-  `issue edit --inherit-workflow-profile` 清除；两个 flag 互斥。
+  `issue edit --inherit-workflow-profile` 清除；两个 flag 互斥。默认仓库同理，由
+  `project repo set-default` 修改。
 - `agent launch` 启动 Mohist Agent 并返回 AgentJob、AgentSession、首条 SessionInput 与首个
   AgentTurn；Job 裁定首次 launch execution，Session 承载持续对话，二者不互相冒充状态或结果。
 - `agent connection create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`
@@ -78,10 +79,10 @@ aggregate 是内部实现，不机械决定命令导航。跨 context 的关系�
   写入权威，CLI 不暴露跨 aggregate 协调过程。
 - `--issue`、`--run`、`--agent` 是解析或筛选条件，不转移动作所有权。
 
-subarea 用于没有独立操作入口的从属资源（`issue comment`、`project prompt`、`agent job`、
+subarea 用于没有独立操作入口的从属资源（`issue comment`、`project workflow prompt`、`agent job`、
 `agent connection`），
 只服务于一个 area 的窄目录（`issue template`、`routing rule`、`agent model`），或表达拥有者
-scope 下的关系（`project workflow`）。AgentSession 有稳定 ID、独立生命周期且经常直接
+scope 下的关系（`project workflow`、`project repo`）。AgentSession 有稳定 ID、独立生命周期且经常直接
 操作，因此必须是顶层 `session`。
 
 ## Command language
@@ -104,7 +105,8 @@ resource command 表达资源及其状态变化。subarea 最多一层，用于 
 - 状态变化使用领域动词。`retry`、`rerun`、`pause`、`stop` 的语义不能由 CRUD 词替代。
 - 同一 action 在所有 area 保持同一动作类别。不同语义不能只因实现复用而使用同一个词。
 - 命名对称不是新增命令的理由。没有独立产品行为的 action 不进入命令树。
-- flag 使用完整、稳定的 kebab-case 名称。高频且行业惯例明确时才增加短 flag。
+- flag 使用完整、稳定的 kebab-case 名称，且全命令面唯一：同一个词不表达两种含义。集合规模只有 `--limit`；资源引用 flag 唯一（仓库一律 `--repo`，不并列 `--repository`）。
+- 短 flag 是白名单：只保留全局字母唯一、行业惯例明确的 `-l/-p/-b/-m/-y/-f/-n/-v`，必须渲染进 leaf help；白名单之外不新增。
 
 ### One capability, one path
 
@@ -113,6 +115,9 @@ resource command 表达资源及其状态变化。subarea 最多一层，用于 
 - 动作变体使用 flag，例如 `run rerun --from-stage`，不增加 `rerun-from-stage`。
 - Project 名称与 ID 都由 `--project` 解析，不增加 `--project-id`。
 - 互斥输入只有一个表达通道：长文本统一使用对应的 `--<name>-file -` 读取 stdin，不增加 `--stdin` 布尔开关。
+- 文件与 stdin 只有 `--<name>-file <path>|-` 和完整文档 `--file <path>|-` 两条通道；不接受 `@<file>` 写法。
+- 互斥关系由参数定义声明，并渲染进 leaf help；不依赖 prose 提示。
+- Project 的默认引用（默认仓库、默认 Workflow Profile）由 `project` area 承载：`project repo set-default`、`project workflow set-default`；被引用的资源 area 不复制该动作。
 - 只有共享同一语义、校验和结果的变体才能合并为 flag。行为不同就保留不同 action。
 
 ### Reference baseline
@@ -135,6 +140,9 @@ resource command 表达资源及其状态变化。subarea 最多一层，用于 
 | 保留根级 `config get/set` | 容易增加设置，却隐藏 Project、Agent、Workflow 与本机 Service 的不同所有权 | 不采用；只增加由明确资源拥有的类型化设置入口 |
 | 增加根级 `slack`，或按 provider 增加一组命令 | 首个 provider 看似直接，但会让 Agent 绑定、权限与生命周期散落到平台名下 | 不采用；使用 `agent connection`，`--provider slack` 只选择 provider-specific setup |
 | 用 `--agent-config <json>` 作为 Agent 的长期配置面 | 实现短，但把 schema、互斥和错误推给用户及 Agent | 不采用；公开 CLI 使用 `--runtime`、`--model`、`--variant`、`--skills`、`--avatar-file` 等类型化 flags |
+| 增加存储 / DB 审计命令（表体积、freelist、行数统计） | 能覆盖 server 内部审计场景，但那是开发行为不是产品操作；架构禁令约束的是领域操作，不为一次性审计扩大命令面 | 不采用；`otel` 是遥测入口，server 内部审计直接读库是开发者的合理路径 |
+| `run view` 只提供 `--json` | 少一个 source view，但「这次 Run 实际用了哪份 Definition」无法回答 | 不采用；`run view --yaml` 读取 Run 绑定的 Definition 快照，与 `workflow view --yaml` 同属资源内容视图 |
+| `set-default` 挂在被默认资源的 area（`repo set-default`、`workflow set-default`） | 路径更短，但默认引用是 Project 的状态，两处惯例不如一处规则可推导 | 不采用；统一为 `project repo set-default`、`project workflow set-default` |
 
 ## Context architecture
 
@@ -358,6 +366,11 @@ CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、
 - target / selector、body / body-file 等互斥输入在本地失败，且没有远程调用。
 - 每个错误路径非零退出，并包含 stable code；有 hint 时其命令也能被命令树解析。
 - help 文案检查禁止 API route、HTTP method、grain、handler、源码路径、历史 issue 和迁移 alias。
+- 每个资源只有一份字段目录：`list` / `view` / 返回该资源的 mutation 共享字段名与语义；目录覆盖
+  read model 的全部用户可见字段，不存在兜底默认字段集。
+- 裸 `--json` 字段发现优先于其它参数校验，且不触发远程请求。
+- 短 flag 全在白名单内、全局字母唯一，且渲染进对应 leaf help。
+- help 的选项描述非空、无拼写错误；`USAGE` 标题与 `--json` 描述在所有叶子一致；互斥关系可见。
 
 不要用整页 snapshot 作为唯一测试。结构测试锁定必须存在的区块和语义，少量 golden test 只覆盖确实属于公开排版契约的输出。
 
