@@ -51,6 +51,8 @@ public class AgentSessionLifecycleDedupSpecs
     public async Task AttachThenFirstRuntimeAppend_PersistsRuntimeBoundOnceAcrossRuntimeEvents()
     {
         var session = await CreateSessionWithoutAttachAsync("attach-append");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         await _fixture.Client.PostOkAsync(RunnerAgentSessionAttachPath(session),
             new { runtimeSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
@@ -63,8 +65,7 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -114,6 +115,8 @@ public class AgentSessionLifecycleDedupSpecs
     public async Task AppendRuntimeEventsAsync_TerminalActivityIsDeliveryIdempotentWithoutDomainEvent()
     {
         var session = await CreateStartedSessionAsync("dedup-completed");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
@@ -126,8 +129,7 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -151,12 +153,13 @@ public class AgentSessionLifecycleDedupSpecs
     public async Task AppendRuntimeEventsAsync_FailedClosedObservationDoesNotPersistFailedDomainEvent()
     {
         var session = await CreateStartedSessionAsync("dedup-failed");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         await AppendTerminalAsync(session, status: "failed", exitCode: 1, failureReason: "boom");
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
 
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -167,12 +170,13 @@ public class AgentSessionLifecycleDedupSpecs
     public async Task AppendRuntimeEventsAsync_CancelledClosedObservationDoesNotPersistCancelledDomainEvent()
     {
         var session = await CreateStartedSessionAsync("dedup-cancelled");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         await AppendTerminalAsync(session, status: "cancelled", exitCode: 0, failureReason: "user-cancel");
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
 
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -183,13 +187,14 @@ public class AgentSessionLifecycleDedupSpecs
     public async Task AppendRuntimeEventsAsync_LivenessDoesNotPersistDomainStatusEvents()
     {
         var session = await CreateStartedSessionAsync("dedup-liveness");
-
-        await AppendLivenessAsync(session, status: "running");
-        await AppendLivenessAsync(session, status: "running");
-        await AppendLivenessAsync(session, status: "running");
-
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
+
+        await AppendLivenessAsync(session, status: "running");
+        await AppendLivenessAsync(session, status: "running");
+        await AppendLivenessAsync(session, status: "running");
+
+        await persistence.WaitAsync();
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -201,6 +206,8 @@ public class AgentSessionLifecycleDedupSpecs
     public async Task AppendRuntimeEventsAsync_TranscriptRows_DoNotPersistAsDomainEvents()
     {
         var session = await CreateStartedSessionAsync("dedup-transcript");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         await AppendEventsAsync(session, new
         {
@@ -218,8 +225,7 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
 
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -266,6 +272,8 @@ public class AgentSessionLifecycleDedupSpecs
     public async Task AppendRuntimeEventsAsync_TerminalActivityPublishesOnlyTranscriptChannel()
     {
         var session = await CreateStartedSessionAsync("dedup-terminal-publishes");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
@@ -280,8 +288,7 @@ public class AgentSessionLifecycleDedupSpecs
 
         Assert.Single(_fixture.RecordingTranscriptPublisher.Published, p => p.Type == "session.activity");
 
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
         Assert.Equal(0, stored.Count(s => s.Envelope.Type == "session.activity"));
@@ -291,6 +298,8 @@ public class AgentSessionLifecycleDedupSpecs
     public async Task AppendRuntimeEventsAsync_UsageAndModelEventsPersistReverseDnsType()
     {
         var session = await CreateStartedSessionAsync("dedup-bus-type");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         await AppendEventsAsync(session, new
         {
@@ -302,8 +311,7 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
         Assert.Contains(stored,

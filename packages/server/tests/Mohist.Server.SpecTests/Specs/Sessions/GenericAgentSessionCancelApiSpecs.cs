@@ -199,11 +199,12 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     {
         var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-reset-terminal");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, """{"activity":"idle","status":"completed","operationId":"terminal-delivery"}"""),
         }, sessionId));
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         await grain.ResetAsync(new ResetAgentSessionCommand(sessionId, "runtime-replacement"));
 

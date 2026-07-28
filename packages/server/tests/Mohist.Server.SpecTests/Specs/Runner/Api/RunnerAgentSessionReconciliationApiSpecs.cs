@@ -87,6 +87,7 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));
         if (activity != AgentSessionActivity.Idle)
         {
+            var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
             await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
                 new[]
                 {
@@ -95,7 +96,7 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs
                         $"{{\"activity\":\"{activity.ToString().ToLowerInvariant()}\"}}")
                 },
                 runtimeSessionId));
-            await grain.WaitForPersistenceAsync(_fixture.Persistence);
+            await persistence.WaitAsync();
         }
         return sessionId;
     }

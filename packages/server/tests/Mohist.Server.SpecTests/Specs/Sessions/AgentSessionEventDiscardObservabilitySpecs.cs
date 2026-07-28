@@ -88,6 +88,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
     public async Task MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents()
     {
         var grain = await OpenBoundGrainAsync("runtime-current");
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
@@ -99,7 +100,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
                 new(RuntimeEventTypes.SessionActivity, "{\"activity\":\"idle\",\"status\":\"failed\",\"operationId\":\"delivery-1\"}"),
             },
             "runtime-current"));
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
 
         Assert.Equal(["message.delta", "session.activity"], result.Select(entry => entry.Type));
         Assert.Equal(3, DiscardWarnings().Count);

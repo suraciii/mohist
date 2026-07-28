@@ -37,6 +37,7 @@ public class IssueSessionApiSpecs
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        var persistence = _fixture.Persistence.Checkpoint(currentSession.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
@@ -94,7 +95,7 @@ public class IssueSessionApiSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 5, _fixture.Grains, _fixture.Persistence);
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 5, persistence);
 
         var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         using var doc = JsonDocument.Parse(raw);
@@ -151,6 +152,7 @@ public class IssueSessionApiSpecs
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        var persistence = _fixture.Persistence.Checkpoint(currentSession.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
@@ -176,7 +178,7 @@ public class IssueSessionApiSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 2, _fixture.Grains, _fixture.Persistence);
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 2, persistence);
 
         var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(currentSession.Id);
@@ -203,6 +205,7 @@ public class IssueSessionApiSpecs
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "build", work, "Build session");
+        var persistence = _fixture.Persistence.Checkpoint(currentSession.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
@@ -256,7 +259,7 @@ public class IssueSessionApiSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 4, _fixture.Grains, _fixture.Persistence);
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 4, persistence);
 
         var response = await _client.GetDataAsync<IssueSessionTranscriptResponseDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/transcript");
 

@@ -60,13 +60,14 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-active", sessionName: "plan", attachAndStart: true);
         // Attaching the runtime does not make the session active; session.activity does.
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
                 "{\"activity\":\"active\"}"),
         }, currentSession.Id));
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
 
@@ -480,13 +481,14 @@ public class AgentSessionRecoveryApiSpecs : AgentSessionRecoveryApiTestSupport
         await SetPersistedRuntimeAsync(currentSession.Id, "pi");
         // Attaching the runtime does not make the session active; session.activity does.
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
                 "{\"activity\":\"active\"}"),
         }, currentSession.Id));
-        await grain.WaitForPersistenceAsync(_fixture.Persistence);
+        await persistence.WaitAsync();
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
 

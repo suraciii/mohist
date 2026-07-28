@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.SpecTests.Support;
 
@@ -10,14 +9,13 @@ public static class AgentSessionPersistenceTestHelper
         this IDbContextFactory<MohistDbContext> dbFactory,
         string sessionId,
         int expectedCount,
-        IGrainFactory grains,
-        AgentSessionPersistenceTestProbe persistence)
+        AgentSessionPersistenceCheckpoint persistence)
     {
         var count = await CountTranscriptPartsAsync(dbFactory, sessionId);
         if (count >= expectedCount)
             return;
 
-        await grains.GetGrain<IAgentSessionGrain>(sessionId).WaitForPersistenceAsync(persistence);
+        await persistence.WaitAsync();
         count = await CountTranscriptPartsAsync(dbFactory, sessionId);
         if (count < expectedCount)
             throw new InvalidOperationException(

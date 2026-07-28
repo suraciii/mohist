@@ -126,10 +126,4 @@ public static class AgentSessionPersistenceTestExtensions
         this IAgentSessionGrain grain,
         AgentSessionPersistenceTestProbe probe) =>
         probe.Checkpoint(grain.GetPrimaryKeyString());
-
-    public static Task<AgentSessionPersistenceResult> WaitForPersistenceAsync(
-        this IAgentSessionGrain grain,
-        AgentSessionPersistenceTestProbe probe,
-        CancellationToken cancellationToken = default) =>
-        grain.PersistenceCheckpoint(probe).WaitAsync(cancellationToken);
 }
