@@ -52,7 +52,7 @@
 - 经 agent status API 暴露（扩展 `AgentStatusResponse` 或新增 per-agent 字段）+ 等待工作列表（沿用 `ActivityWaitingCardDto` 的 per-run surfacing 模式，区别于今天的聚合看板）。
 - Web/CLI 只呈现 Server 结论，删除客户端自合成的「Runner at capacity」等文案。
 
-Availability 不读 Readiness，反之亦然——两者互不折叠（满足 spec 的独立性）。
+Availability 不读 Readiness，反之亦然——两者互不折叠（满足 spec 的独立性）。Availability 是提交前的**提示性**结论，不是派发预留：Runner 容量全局共享，两个 Agent 可能同时读到 `CanStartNow` 并在 dispatch 时争用同一 slot；最终能否开始仍由 dispatch 时的 runner/capacity/concurrency 闸门裁定。
 
 ### D3 — `AgentConcurrencyGrain`（per-Agent）作为并发许可权威 + FIFO 等待队列
 
@@ -62,6 +62,7 @@ Availability 不读 Readiness，反之亦然——两者互不折叠（满足 sp
 - `Release(token)`：移除许可，随后把空出的名额授予 FIFO 队首，经**持久命令**通知该 waiter「许可就绪，推进」（coordinator→participant 单向，符合架构约束；不在 participant 同步栈回调协调者）。
 - 许可与**执行（轮次）生命周期**绑定，而非与 AgentJob 绑定：launch 在 dispatch 时获牌、轮次终态时释放；follow-up 在开始新执行时获牌、轮次结束时释放。
 - **孤儿许可兜底**：grain 激活时与周期 reminder 按权威态（该 Agent 的 active AgentJob + 有 active 轮次的 Session）对账并修剪悬空许可；waiter 侧各自保留自重试（D4 的 recovery reminder）作为丢通知的安全网。
+- **架构归类**：该 grain 是**共享权威资源 grain**（类比 `RunnerRegistryGrain` / `RunnerGrain` 持有 presence / slots / agent-job ledger），**不是** `design/architecture.md:137-186` 所述的命令串行 process manager（如 `IssueRepositoryCoordinatorGrain`）。process manager 约束（只持久化命令投递 fence、不持业务态）针对的是「跨参与者串行命令」的协调者；本 grain 不串行跨聚合命令，只作为被参与者 acquire/release 的信号量与队列，因此它合法地拥有自己的调度态。它仍须遵守：只拥有调度态（许可 token + 等待者顺序 + MaxConcurrentRuns 副本），不持有 Issue/Run/transcript 等业务事实，不跨聚合写，不成为这些事实的第二权威。grant-on-release 通知**异步**派发（持久 reminder/handler，不在 `Release` 调用栈内同步进入 participant），避免同步回调环；participant 不在该通知栈中回调本 grain。
 
 **为何集中计数**：per-session 串行只在单 Session 内生效；MaxConcurrentRuns 要跨该 Agent 的**所有** Session 收敛并发，必须有单一权威计数点。grain 单激活天然串行化 check-then-grant，避免跨 grain 的 check-then-dispatch 竞态。
 
@@ -70,6 +71,8 @@ Availability 不读 Readiness，反之亦然——两者互不折叠（满足 sp
 ### D4 — 取消 `runner-unavailable` 终态失败，改为等待（BREAKING）
 
 在 `AgentJobGrain` 移除 `DispatchRetryBoundExceeded → Failed(runner-unavailable)`（`TryDispatchCoreAsync:984` / `ScheduleNextDispatchAsync:1155` / `CheckTimeoutsAsync:932` 三处）。缺 Runner、容量满或并发满时 AgentJob 保持 `Pending`（等待），由既有 dispatch 定时器与 D3 的 grant 通知推进；用户可显式取消以停止。保留 `JobTimeout` 对**已运行** Job 超时 → `Unknown`（与并发无关，不变）。语义向 WorkflowRun 看齐（无限等待而非失败）。
+
+**等待态唤醒与回收**：等待中的 AgentJob 保持 `Pending`、不终态失败（对齐 WorkflowRun 与 AC #3）。为避免空轮询抖动与孤儿累积，稳定等待的 Job 卸下 dispatch 定时器，仅由 permit-grant（并发释放/调高）或 runner 上线信号唤醒，`agent-job-recovery` reminder 作为丢通知兜底；等待 Job 在 Availability 等待列表中可见、可被用户取消，无隐式超时失败。若日后发现被放弃的等待 Job 造成资源累积，可再加可配置的空闲回收，但默认不做终态失败。
 
 ### D5 — follow-up 受闸门约束：v1 达限即以可重试原因拒绝（不做完整排队）
 
