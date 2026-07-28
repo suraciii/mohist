@@ -1,7 +1,7 @@
 ## Findings
 
-### P2: Validate typed metadata supplied through StartAsync
+### P1: Preserve all positive legacy Issue numbers accepted before the migration
 
-`packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.cs:233` accepts `WorkflowStartInput.Metadata` verbatim and `RequireProjectOwnership` at line 701 only checks that `ProjectId` is non-empty. Consequently, the public `StartAsync` path can persist `ProjectId = "proj_1", IssueNumber = 0` (or a negative value), or a generic Run with `IssueNumber = null, EpicNumber = 7`. This bypasses the `ForIssue` validation added for `EnsureStartedAsync`, stores an invalid/non-generic typed context, and permits an Epic lineage extension without an Issue. Normalize or reject typed metadata at this creation boundary: an Issue-backed input must have a positive Issue and use the same normalization as `ForIssue`; a generic input must clear or reject both Issue and Epic. Add coverage for these `StartAsync` metadata cases.
+`packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260728000000_TypedWorkflowRunLineage.cs:100` now requires the legacy string to equal `CAST(CAST(value AS INTEGER) AS TEXT)`. That rejects `"+5"`, `"042"`, and whitespace-padded positive numbers, even though the preceding implementation used `int.TryParse` for lineage and accepted those values. The new test at `packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Storage/TypedWorkflowRunLineageMigrationSpecs.cs:73` incorrectly classifies `"042"` and `"+5"` as malformed. On upgrade, these previously usable historical Runs retain only their annotations, which the new code no longer reads, so ownership and event lineage fail after reload. Validate without prefix truncation, but preserve the old positive-integer acceptance set (or explicitly transform it to the canonical typed integer), and distinguish those cases from suffix, exponent, and decimal inputs in the migration specs.
 
 <promise>FAIL</promise>
