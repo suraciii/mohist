@@ -142,7 +142,7 @@ Agent 详情页包含四个连续区域：
    入口。
 3. **Work and conversations**：分别展示 AgentJob 结果和 AgentSession activity，不能用
    “Session 失败”代替失败的 Job。
-4. **Connections**：把 Agent Readiness、Slack 安装进度、连接健康、能力验证和身份同步分开
+4. **Connections**：把 Agent Readiness、Slack 安装进度、连接健康和身份同步分开
    展示。Add Slack 是可中断的步骤流，每次只突出一个下一步；Allowlist 通过姓名与头像搜索
    工作区成员。页面同时支持 Owner 转移、凭据轮换、重新验证、Enable、Disable 和 Delete，
    不让用户从一个笼统的 Connected / Failed 状态猜问题。

@@ -106,7 +106,7 @@
 
 - [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、SessionInput、AgentTurn、AgentSession 与 Runtime Session 的分层、生命周期所有权、activity 和 transcript DSL。
 - [agent-api.md](agent-api.md) — Web、CLI 与外部接入共用的 Agent 调用边界：统一能力、状态、身份和可靠性决策。
-- [slack-agent-connection.md](slack-agent-connection.md) — Slack Agent Connection 的产品形态、组件边界、访问策略、对话路由和实施顺序。
+- [slack-agent-connection.md](slack-agent-connection.md) — Slack Agent Connection 的组件边界：adapter 为什么独立且无状态、Session 边界取舍、可靠性契约与实施顺序；产品行为见 `docs/agent-connections.md`。
 - [event-routing.md](event-routing.md) — Agent 事件路由：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
 - [agent-supervision.md](agent-supervision.md) — Agent 监管预设（**WIP**）：一条命令安装监管 Agent 与审批/失败两条路由规则；升级靠通知全开 + `[supervisor]` comment 纪律，不引入 escalate 命令与系统级频控。
 - [agent-mentions.md](agent-mentions.md) — 评论提及（**WIP**）：在 issue comment 里 `@` Agent 名直接启动它；第三条触发路径，零配置，mention 即路由决策。

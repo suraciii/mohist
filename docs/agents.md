@@ -152,7 +152,7 @@ SessionInput，完整记录用 `mo session transcript`。CLI 与 Web 调用的�
 |---|---|---|
 | Web UI | 选择 Agent，输入任务和可选上下文 | 创建 AgentJob、AgentSession、首条 Input 和首个 Turn，并进入会话页 |
 | CLI | `mo agent launch <agent>` | 创建相同的 AgentJob、AgentSession、首条 Input 和首个 Turn，返回对应 ID |
-| Agent 接入 | Slack 私聊或一次新的根提及 | 接入把消息交给已绑定的 Agent，不改变 Agent 配置 |
+| Agent 接入 | Slack 私聊中的首项任务、明确的 New task，或一次新的频道根提及 | 接入把消息交给已绑定的 Agent，不改变 Agent 配置 |
 | 事件路由 | 规则命中的事件和响应提示词 | 为该事件创建一次 AgentJob 与 AgentSession |
 | Issue 评论提及 | `@<agent-name>` 后的评论内容 | 以评论为任务，并关联该 Issue 上下文 |
 
