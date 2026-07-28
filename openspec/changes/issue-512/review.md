@@ -2,14 +2,21 @@
 
 ## Findings
 
-### P1: The launch route can report acceptance before all four launch facts are durable
+### P1: Fence recovery changes the Prepare command identity instead of resuming it
 
-`AgentLaunchCoordinatorGrain.AdvanceAsync` catches every participant exception and only logs it (`packages/server/src/Mohist.Server/Agent/Grains/AgentLaunchCoordinatorGrain.cs:186-208`). `LaunchAsync` then unconditionally returns the plan's Job, Session, Input, and Turn IDs after `AdvanceAsync` returns (`lines 126-141`), and the HTTP route converts that result to `201` (`packages/server/src/Mohist.Server/Api/AgentSessionLaunchRoutes.cs:139-163`).
+When a persisted `PrepareJob` fence is retried, `ResumePendingAsync` calls `BeginPrepareAsync` (`packages/server/src/Mohist.Server/Agent/Grains/AgentLaunchCoordinatorGrain.cs:262-270`). `BeginPrepareAsync` always generates a new `commandId` and writes it into `Pending` (`lines 218-229`), overwriting the identifier of the durable command that failed. This differs from the Ensure and Submit paths, which reuse `plan.Pending.CommandId` (`lines 282-293` and `336-347`).
 
-For example, if `PrepareManualLaunchAsync` succeeds but `EnsureInitialLaunchAsync` throws, the nested `AdvanceAsync` call swallows the failure, leaves the persisted plan fenced at `EnsureInitialLaunch`, and control returns all the way to the route. The caller receives `201` although the Session may not yet exist and the accepted Input and queued Turn have not been stored. This violates D2/D3's requirement that `201` is returned only after the Job, Session, Input, and Turn are durable. Keep the reminder-based retry for recovery, but make the synchronous launch path expose incomplete setup as non-accepted (or propagate the participant failure) until `Plan.Completed` is true. Add failure-injection specs for each coordinator fence that assert no `201` before the corresponding durable participant write completes.
+D2 requires activation/retry to resume the same prepared command, with the persisted command fence retained until the participant explicitly reports applied or already-applied. Reusing generated Job/Session/Input/Turn IDs happens to make the current participants idempotent, but it does not preserve the actual fence contract and will break correlation or participant-level command deduplication as soon as either uses `CommandId`. Retain the existing pending Prepare `CommandId` on recovery, and add an assertion that the durable fence identity remains unchanged across a failed Prepare retry.
+
+### P1: The failure probe fires before the participant call and cannot cover an applied-but-unacknowledged command
+
+`IAgentLaunchParticipantProbe` is invoked immediately before each participant method (`packages/server/src/Mohist.Server/Agent/Grains/AgentLaunchCoordinatorGrain.cs:231-233`, `313-314`, and `349-351`). The test probe throws there (`packages/server/tests/Mohist.Server.SpecTests/Support/AgentLaunchParticipantProbe.cs:54-64`), so `Launch_ParticipantFailureAtFence_Returns503AndRecoversWithSameKey` only proves recovery when no participant received the command.
+
+The D2 recovery case also includes a participant that durably applied the command but whose acknowledgement was lost. That is the case requiring the same command fence and an `AlreadyApplied` response; it is not exercised by the new probe or route-level specs. Add a test seam that fails after each participant has applied its idempotent command but before the coordinator advances its fence, then verify same-key recovery issues no duplicate Job dispatch, Input, or Turn.
 
 ## Verification
 
-- Previous full validation recorded in `progress.txt`: `npm test`, Runner typecheck/tests, and Web typecheck/tests/FSD check passed.
+- Focused: `AgentSessionLaunchIdempotencySpecs` 8/8 pass; all launch/session/job spec classes 449/449 pass.
+- `npm test`: Workflow Definition 175, Server Unit 1533, CLI 1435, Arch 35, Server SpecTests 3291/3292 pass. The single SpecTests failure is the pre-existing, unrelated `AgentSessionEventDiscardObservabilitySpecs.MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents` flake (documented in `progress.txt`; uses a separate `AgentSessionGrainFixture`, passes in isolation, fails intermittently only under full-suite load). Runner/Web typechecks pass.
 
 <promise>FAIL</promise>
