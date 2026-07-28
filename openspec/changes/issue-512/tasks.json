@@ -1,0 +1,73 @@
+{
+  "project": "mohist-local",
+  "description": "Make manual Agent launch idempotent and durably observable: one client call identity creates one Job, Session, initial Input, and initial Turn; reconnecting clients observe their authoritative state without replaying work.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Durable idempotent manual Agent launch",
+      "spec": "specs/agent-launch-idempotency/spec.md#A call identity has one launch outcome",
+      "description": "Replace the manual random-ID open-then-submit path with the `Idempotency-Key`-keyed `AgentLaunchCoordinatorGrain`. The coordinator must persist the canonical launch plan and one-at-a-time command fence, prepare the AgentJob, atomically create the AgentSession's first accepted Input and queued Turn, then submit the prepared Job; update the Runner contract so it carries those identities and does not create a second initial session.input event.",
+      "acceptanceCriteria": [
+        "POST agent launch rejects a missing or empty Idempotency-Key before creating a launch plan, while preserving the existing invalid prompt, unknown Agent/context, and archived Agent rejection gates.",
+        "For one (ProjectId, Idempotency-Key), concurrent and retried matching requests return the same Job, Session, Input, and Turn IDs and issue exactly one Job dispatch; different keys create independent launches.",
+        "A replay whose Agent, prompt, context, or resolved execution snapshot differs returns launch_idempotency_conflict and leaves the original plan and resources unchanged.",
+        "The coordinator resumes the same prepared command after activation, Server restart, or a failed participant acknowledgement; it never uses a cross-aggregate transaction or stores Job/Session business state as a second authority.",
+        "Before a launch returns accepted, its AgentSession durably contains one accepted initial Input and one queued initial Turn associated with the Job; Server restart or queueing preserves those identities and the input content.",
+        "AgentJob dispatch and Runner reports propagate the generated Input/Turn identities, and the Runner no longer publishes a duplicate initial session.input record for an AgentJob launch.",
+        "Server spec tests cover validation-before-plan, duplicate and concurrent retries, conflicting reuse, all coordinator recovery fences, initial Input/Turn persistence, queue delay, and exactly-one dispatch using fake time, storage, and dispatch observers.",
+        "Runner tests cover identity propagation and no duplicate initial input using a fake Runtime and Server connection; npm test, npm run typecheck -w packages/runner, and npm test -w packages/runner pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Idempotency-Key launch boundary; AgentLaunchCoordinatorGrain and participant commands; durable initial SessionInput/AgentTurn records; AgentJob dispatch and Runner correlation update.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D1-D3. The coordinator is a narrow durable application process manager: it persists only canonical command payload and delivery fence, invokes one participant aggregate per command, and resumes through durable retry. Scope is manual Web/CLI launch only; routed, mention, and follow-up paths remain unchanged."
+    },
+    {
+      "id": "T-002",
+      "title": "Unknown-safe launch reconciliation and observation API",
+      "spec": "specs/agent-launch-observation/spec.md#Unknown remains a recoverable authoritative state",
+      "description": "Make an inconclusive initial execution observable as Unknown instead of Failed or replayable, and reconcile it only against the original Job/work/Input/Turn identity after Runner reconnect. Add the project-scoped composite launch observation read API and expanded launch response so callers can retrieve authoritative Job, Session, Input, Turn, and transcript references without turning Input or Turn into top-level resources.",
+      "acceptanceCriteria": [
+        "AgentJob and the initial AgentTurn expose Unknown as a nonterminal, non-dispatchable state; Runner loss or inconclusive delivery never fabricates failed, idle, completed, or a second prompt submission.",
+        "Runner reconnect reconciliation uses the original Job/work identity: authoritative running and terminal reports update the original Turn and Job, while inconclusive evidence leaves them Unknown.",
+        "GET /api/projects/{projectRef}/agent-jobs/{jobId}/launch-observation enforces project isolation and returns a composite DTO with authoritative Job status/result, Session activity/runtime/transcript reference, initial Input acceptance, and initial Turn status/result.",
+        "The launch 201 response returns Job, Session, Input, and Turn IDs plus the observation URL; existing focused Job, Session, and transcript reads remain valid and reads create no new Input, Turn, or Job.",
+        "A completed initial Job leaves its AgentSession usable; queued Input/Turn state does not claim the Job completed or failed before an authoritative result.",
+        "Server and Runner tests cover Unknown on Runner disconnect, reconciliation to running or terminal, no replay, composite observation during queued/running/terminal/Unknown states, repeated observation, and cross-project rejection with fakes only.",
+        "npm test, npm run typecheck -w packages/runner, and npm test -w packages/runner pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Unknown Job/Turn convergence contract; original-work Runner reconciliation; AgentLaunchObservationDto and project-scoped launch-observation route; expanded launch response.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Implements design D4-D5. It consumes T-001's stable initial Input/Turn IDs and coordinator-linked Job/Session. The observation assembler is read-only: Job remains the result authority and Session remains the authority for activity, children, and transcript."
+    },
+    {
+      "id": "T-003",
+      "title": "Web and CLI resilient launch experience",
+      "spec": "specs/agent-launch-observation/spec.md#Web and CLI use the same launch-state meaning and recovery guidance",
+      "description": "Adopt the idempotent launch and composite observation contract in the Web composer/session view and `mo agent launch`. Web retains a generated key for a pending launch retry; CLI forwards an explicit or generated key, prints it before dispatch when generated, returns all four identities and the observation location, and both clients render the same server-defined pending, executing, terminal, and Unknown meanings without inferring Job results from Session activity.",
+      "acceptanceCriteria": [
+        "Web generates one Idempotency-Key before its first launch mutation, preserves it for retry after response loss, and navigates only to the Session returned by that launch rather than creating a replacement attempt.",
+        "mo agent launch accepts --idempotency-key, forwards it unchanged, and when it generates one, prints it before the request so a later invocation can retry with that value; in-process retries reuse the same key.",
+        "Successful Web and CLI launches expose the stable Job, Session, Input, and Turn identities and the composite observation location.",
+        "Web and CLI consume the composite observation DTO for status meaning: pending/queued/executing direct the user to observe, terminal states direct to result/transcript, and Unknown directs a re-read or retry with the original key rather than a new launch.",
+        "The Session view continues to show transcript updates after reconnect and does not mark the Session closed when the initial Job is terminal.",
+        "Web tests cover retained-key mutation retry, returned-identity navigation, DTO-driven queued/terminal/Unknown rendering, and no client-side Job-from-Session inference; CLI tests cover key forwarding/reuse guidance, four-id output, and observation output.",
+        "npm run typecheck -w packages/web, npm run test:run -w packages/web, npm run check:fsd -w packages/web, and npm test pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web idempotent launch mutation and observation-driven Session UI; CLI idempotency-key option/output and four-reference launch presentation; aligned client recovery guidance.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Implements the client portions of design D1 and D5. This task adds no follow-up, cancellation, Slack, or separate Input/Turn management surface. Update the relevant Agent and CLI product documentation when the user-visible command and recovery contract lands."
+    }
+  ]
+}
