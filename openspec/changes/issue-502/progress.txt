@@ -4,6 +4,7 @@
 - Epic state and events share one `MohistDbContext` commit. `SaveEpicChangesAsync` centralizes the post-commit poke and skips it when the drained event list is empty.
 - AgentJob failure events use the standalone `IEventStore.AppendAsync` boundary. The poke follows that append directly; append failure leaves `PendingFailureEvent` for activation/reminder recovery and never launches a poke.
 - Dispatcher immediate-trigger specs use a one-hour reminder period plus handler-owned completion signals, so immediate delivery and reminder recovery require no wall-clock waiting.
+- Settlement state retention is enforced by `EventDispatcherService.DispatchOneAsync` via the existing L199-200 short-circuit on `state.Status != Pending || state.NextAttemptTime > now`; once `_states` is preserved across a failed settlement, those guards naturally skip already completed or dead-lettered handlers on the next cycle.
 
 ## T-001
 
@@ -12,3 +13,13 @@
 - Immediate Epic delivery can advance an empty running Epic to done before the next API call; the running-reopen spec now links an open Issue to preserve the intended running precondition.
 - The full suite exposed a pre-existing parallel transcript flush in `MixedBatch_DiscardsRetiredTypesAndProcessesSupportedEvents`; its assertion now selects the unique flush containing `session.activity` rather than requiring no unrelated flushes.
 - Verification passed: `npm run build`, focused dispatcher/Epic/AgentJob specs, architecture tests, and `npm test` (3277 server specs, 5146 web tests with one existing skip, 1438 runner tests).
+
+## T-002
+
+- Removed the `_states.Remove(key)` from the settlement failure catch in `EventDispatcherService.DispatchOneAsync` so handler state survives a failed `MarkDispatchedAsync` or `IDeadLetterStore.SettleAsync`; the next cycle retries only the settlement write and, under the existing L199-200 short-circuit, does not re-invoke already completed handlers or reset a dead-lettered handler's attempt count.
+- The process-local dispatch gate already serializes cycles, so the change is concurrency-safe; a dispatcher restart still intentionally clears `_states` and the reminder re-runs the row from scratch.
+- Several `EventDispatcherSpecs` tests previously relied on the catch's `_states.Remove` to re-invoke handlers when settlement failed. Updated assertions to the new contract: handler-attempt counters are retained across a settlement failure, dead-lettered handlers are not re-invoked on the next cycle, and FIFO settlement still proceeds after the first-handler mark fails.
+- Focus-specific T-002 coverage lives in a new `EventDispatcherSettlementRetentionSpecs` file because the existing `EventDispatcherSpecs` file is at its 24 KB ratchet baseline; the focused file keeps the baseline file stable while adding the dedicated `DeadLetterSettlementFailure_RecoveryReusesHandlerState` and `MarkFailure_RecoveryReusesHandlerState` scenarios.
+- Added the silo-level `PoisonSettlementFailure_RecoverySettlesWithoutReinvokingHandler` spec in `DispatcherGrainSpecs` to prove the in-process retention flow through the production `IEventDispatcherGrain` → `EventDispatcherService` → `IDeadLetterStore` chain with the fixture's `MaxAttempts=3` and `BaseBackoff=TimeSpan.Zero`. It asserts the dead-letter row carries `AttemptCount=3` (the original budget) and that a subsequent cycle neither re-invokes the handler nor rewrites the row.
+- `BaseBackoff=TimeSpan.Zero` in the silo fixture means the existing `PoisonSettlementFailure_RollsBackSourceMarkAndDeadLetterRows` test still ticks the handler on every advance (its 3 DispatchNow calls land the handler at `AttemptCount=3` because the time gate is always satisfied); the T-002 assertion is that the new recovery spec sees the same `AttemptCount=3` after settlement recovery, proving the in-process state survived the failed write.
+- Verification passed: `npm run build`, focused dispatcher unit + silo + ArchTests, and `npm test` (1535 server units, 3278 server specs, 35 arch tests, 1438 runner tests, 5145 web tests with 1 existing skip).

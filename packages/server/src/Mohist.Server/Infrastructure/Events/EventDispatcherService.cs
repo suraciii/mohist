@@ -257,7 +257,6 @@ public sealed class EventDispatcherService
         }
         catch
         {
-            _states.Remove(key);
             throw;
         }
     }
