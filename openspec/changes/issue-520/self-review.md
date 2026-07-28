@@ -1,80 +1,40 @@
-# Self-Review — issue-520
+# Self-Review — issue-520（第二轮，修复后复评）
 
-评审对象：`proposal.md`、`specs/{agent-readiness,agent-availability,agent-concurrency}/spec.md`、`design.md`、`tasks.json`，对照 issue #520 的 User Voice / Product Shape / Domain Model / Acceptance Criteria / Non-Goals。
+复评对象：`proposal.md`、`specs/{agent-readiness,agent-availability,agent-concurrency}/spec.md`、`design.md`、`tasks.json`，对照 issue #520。本轮在前一轮 FAIL 及其修复之后进行。
 
-结论：发现必须在构建前修复的问题（跨制品自相矛盾、与验收标准偏离）。**FAIL**。
-
----
-
-## High — 必须修复
-
-### H1. Proposal 与 Design 在 follow-up 并发行为上直接矛盾，且偏离 AC #3
-
-- `proposal.md:9` 明确写：「让 MaxConcurrentRuns …对所有调用入口一致生效（含 launch 与 **follow-up**…）：达到限制后提交的工作**进入等待**。」
-- `design.md:74-78`（D5）却决定 follow-up 达限时「**以独立的并发原因拒绝**（可重试）…不做完整排队」。
-- issue AC #3：「MaxConcurrentRuns 对所有调用入口一致生效；达到限制后提交的工作**进入等待而不是失败**。」follow-up 是「调用入口」之一，也是「提交的工作」。
-- `specs/agent-concurrency/spec.md:17-19` 的 follow-up 场景只要求「受闸门约束、不绕过」，对「等待 vs 拒绝」保持中立，因此**没有**调和这一矛盾。
-
-**影响**：proposal（follow-up 等待）与 design（follow-up 拒绝）互相冲突；无论实现者遵循哪一份，都会违反另一份，且二者合起来都不能同时满足 AC #3 对 follow-up 的字面要求（「进入等待」）。这是交付前必须收敛的硬矛盾。
-
-**方向**：二选一并贯通三份制品——(a) 让 follow-up 也排队等待（需为 follow-up 物化轮次记录 + 给 `AgentSessionGrain` 加唤醒），或 (b) 把 AC #3 显式收窄为「launch 等待；follow-up 达限以可重试原因拒绝」，并同步修订 proposal 与 concurrency spec 使之与 design 一致、与 AC 对齐。当前 design 的 D5 取舍本身合理，但它是单方面偏离 proposal/AC，未回写到 spec/proposal。
-
-### H2. Readiness 的 spec 场景描述的是一套 design 明确判为不可行的机制
-
-- `specs/agent-readiness/spec.md:5-7`「Definition confirmed executable」→ Ready，要求「the Server can confirm the Agent's referenced Runtime, Model and Variant are **executable under the current configuration**」。
-- `specs/agent-readiness/spec.md:13-15` Unknown 的示例是「the runtime capability **catalog is not currently readable**」。
-- 但 `design.md:10,32-44`（D1）明确：Server 架构上**无法**主动确认凭据/executability（无凭据存储；`RunnerRegistryGrain` 目录是内存态、无 Runner 即空、且 `design/runtimes/opencode.md` 声明目录非执行合法性权威、不参与 readiness），Readiness 实际由**执行历史**派生（成功→Ready、配置类失败→Needs setup、从未执行/非结论性→Unknown），**根本不读目录**。
-
-**影响**：spec 的三个场景示例（「confirm executable under current configuration」「catalog not readable」）与 design 的真实机制相反。实现者若按 spec 去做主动确认/读目录，会撞上 design 已判定的不可行；spec 与 design 必须先对齐才能交给自主构建。
-
-**方向**：把 readiness spec 的场景改写为 design D1 的执行历史机制（Ready=定义完备且无已知缺口、且有成功执行作正向证据；Needs setup=结构缺口或执行已揭示的配置类失败；Unknown=从未执行/非结论性），或在该 spec 内显式标注 proactively-confirm 的限制。注意 design 的取景本身诚实且与 issue 一致（Unknown=Mohist 暂无法确认），问题在于 spec 没跟上。
+结论：前一轮的阻塞问题均已修复，制品内部自洽、与验收标准对齐、可交付自主构建。仅余两条非阻塞的清晰性建议。**PASS**。
 
 ---
 
-## Medium — 建议修复
+## 前一轮问题修复确认
 
-### M1. `AgentConcurrencyGrain` 的持久化许可/等待态与架构 process-manager 约束的关系未交代
+- **H1（proposal↔design 在 follow-up 上直接矛盾）已修复**：proposal:9、concurrency spec「The gate applies consistently to every entry point」、design D5、tasks T-002 现统一表述——launch 达限进入等待；follow-up（会开始新执行且达限）以可重试背压信号拒绝、不排队（v1，完整排队列为后续）。四处一致，不再矛盾。
+- **H2（readiness spec 描述了 design 判为不可行的主动确认机制）已修复**：readiness spec 三个场景已改为执行历史机制——Ready 需「结构完备 + 无缺口 + 有成功执行作正向证据」；Needs setup 为结构缺陷或执行揭示的配置类失败；Unknown 为从未执行/非结论性；并在要求文内显式声明「Server 不主动探测凭据」。与 design D1 一致。
+- **M1（并发 grain 与架构 process-manager 约束的关系）已修复**：design D3 新增「架构归类」，将其定位为共享权威资源 grain（类比 `RunnerRegistryGrain`/`RunnerGrain`），而非命令串行 process manager；并约束 grant-on-release 异步派发、participant 不在通知栈回调，避免同步回调环。
+- **M2（D4 无限等待缺少回收/边界）已修复**：design D4 新增「等待态唤醒与回收」：稳定等待 Job 卸下定时器、仅由 permit-grant 或 runner 上线唤醒、reminder 兜底、可见且可取消、无隐式超时失败。
+- **L2（Availability 提示性）已修复**：design D2 注明 `CanStartNow` 是提交前提示、非派发预留（全局容量共享）。
+- **L1（T-001 体量）/L3（T-004 数据已具备）**：非阻塞，按前一轮判断保留；L3 已核对 `AgentJobGrain.cs` 确认 Runner error code 作为 `FailureCategory` 已持久化，T-004 仅需分类映射。
 
-- `design.md:57-66`（D3）按 agent 持久化「活动许可集合 + FIFO 等待者列表」。
-- `design/architecture.md:137-186` 对持久化 application process manager 的约束很严：只持久化命令投递 fence（commandId/kind/payload/expectedRevision），**不**存业务/调度事实，且不得成为第二业务权威。
-- design 只断言该 grain「只持有调度态、不存业务事实」，但未把它**映射**到架构认可的类别（是像 `RunnerRegistryGrain` 那样的共享资源 grain，还是受约束的 process manager），也未说明 FIFO 等待队列为何不违反「不持久化调度/业务态」。
+## 非阻塞观察（建议后续抛光，不阻断构建）
 
-**影响**：构建时可能触发 ArchTest 或边界争议；需在 design 中给出该 grain 的归类与正当性，否则实现者要自行猜测边界。
+### O1. concurrency spec 内部措辞存在表面张力（清晰性）
+「Reaching the limit causes waiting, not failure」要求写「newly submitted work … SHALL enter a waiting state」，未限定 launch；而「The gate applies consistently to every entry point」明确 follow-up 达限是「拒绝而非排队」。两者对 follow-up 的表述需读者用「特殊覆盖一般」来调和。建议把前者显式限定为 launch，或交叉引用后者，消除表面矛盾。**不阻断**：tasks T-001/T-002 对 launch-等待 / follow-up-拒绝的描述明确无歧义，构建者按任务执行不会出错。
 
-### M2. D4 无限等待缺少对「永久等待 AgentJob」的回收/边界
+### O2. Readiness 在「执行定义被编辑后」的重置语义建议显式化（完整性）
+readiness 要求已含「reflect the current definition and re-evaluated when the definition changes」，可隐含推出「编辑 model/runtime 后，旧的成功执行不再确认新定义→回退 Unknown 直到新定义执行」。建议把这条显式写出，避免实现者把编辑前的成功误用于编辑后的定义（出现对未验证新定义的陈旧 Ready）。**不阻断**：当前要求文已可推出正确行为，属于「点明更稳」。
 
-- `design.md:70-72`（D4）移除 `runner-unavailable` 终态失败后，缺 Runner/容量/并发的 AgentJob 无限等待。
-- 与 WorkflowRun 不同，AgentJob 没有 issue 生命周期兜底；被用户放弃的等待 Job 会持续占用 grain + `agent-job-recovery` reminder。
+## 验收标准覆盖核对
 
-**影响**：运维/资源累积风险在 design 的 Risks 中只提到 feature-flag 回退，未给等待 Job 的上限或清理。建议补一条回收策略或显式接受「无限等待 + 监控」。
-
----
-
-## Low — 提示
-
-### L1. T-001 体量偏大
-T-001 把「新增有状态 grain（FIFO + 对账 + 持久化）+ `AgentJobGrain` dispatch 改造 + BREAKING 的 D4 移除 + 全量测试」捆在一个任务。耦合度高（grain 离开首消费者不可用）使合并有据，但交付风险偏高；若实施中过大，可把 grain 作为前置准备任务拆出。
-
-### L2. Availability 的 `CanStartNow` 是建议性，非派发保证
-Runner 容量是全局共享，两个 Agent 可同时读到「can start now」并在 dispatch 时争用。spec/design 未声明 Availability 只是提交前提示、不保证派发时仍有 slot，建议补一句以免被过度解读。
-
-### L3. T-004 执行历史分类已具备数据基础（非阻塞）
-已核对 `AgentJobGrain.cs:326-330,1600-1613`：Runner 的 error code 已作为 `FailureCategory` 持久化（precedence: output failureCategory → `WorkResult.Error.Code` → status）。因此 T-004 把配置类失败映射为 Readiness 缺口是可行的（只需加一层分类映射），原先担心的「需先增强结果捕获」不成立——此条仅供实现参考，不构成阻塞。
-
----
-
-## 覆盖度核对
-
-- AC#1（三态区分 + 缺口/下一步）：readiness spec + T-004 覆盖（受 H2 措辞影响）。
-- AC#2（Runner/容量不改 Readiness，看到 Availability）：readiness 独立性 + availability 覆盖。✓
-- AC#3（所有入口一致、达限等待不失败）：launch 由 T-001 覆盖；**follow-up 偏离（H1）**。
+- AC#1（三态区分 + 缺口/下一步）：readiness spec + T-004 覆盖。✓
+- AC#2（Runner/容量不改 Readiness，看到 Availability）：readiness 独立性 + availability + T-003 覆盖。✓
+- AC#3（所有入口一致、达限等待不失败）：launch 由 T-001 等待；follow-up 由 T-002 以可重试背压拒绝（v1）。依「已接受的工作进入等待，达边界拒绝新输入」的可靠性契约解读，rejected-at-gate 的 follow-up 非已接受工作，不触发终态失败——与 AC#3「而不是失败」一致；完整 follow-up 排队已显式列为后续。可接受。✓（建议见 O1）
 - AC#4（调低不停 active、不改 Session）：concurrency spec + T-001 覆盖。✓
-- AC#5（调高后等待工作自动推进）：launch 由 T-001 覆盖；follow-up 无等待项（因 D5 拒绝），不适用。✓
+- AC#5（调高后等待工作自动推进、无需重提）：launch 由 T-001 的 grant 推进覆盖；follow-up 无已接受等待项（达限即拒），不适用。✓
 - AC#6（等待工作可见 + 原因）：availability + T-003/T-005 覆盖。✓
-- Non-Goals：均被尊重（执行定义内容、Web 布局、Slack Connection、跨 Agent 调度）。
+- Non-Goals：均被尊重。
 
-tasks.json：JSON 合法、DAG 无环、`dependsOn` 均指向更低优先级任务、每个任务含测试验收。结构无误。
+tasks.json：JSON 合法、DAG 无环、`dependsOn` 均指向更低优先级、每任务含测试验收；spec 格式（`### Requirement`/`#### Scenario`、每要求≥1 场景）完整。
 
 ---
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
