@@ -397,8 +397,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - `agent connection` 命令组与 Slack setup。
 - `install/update/service ... slack` 与 `mohist-slack` 受管服务。
 - Agent launch/follow-up 暴露稳定的 SessionInput 与 AgentTurn 身份。
-- `issue workflow status/timeline` 是 Run 状态在 `run` 之外的第二条读取路径，且子区边界文案
-  与实际动作名实不符；由 issue #498 推进退役，能力并入 `run`。
 
 ### 已闭合
 
@@ -419,6 +417,7 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
   返回排队应答而非资源，不在此列）。
 - `project repo set-default`（自 `repo set-default` 迁移）。
 - `project workflow prompt` 等命令的 JSON FIELDS 替换为真实字段目录，移除兜底默认字段集。
+- `issue workflow status/timeline` 已随 issue #498 退役，Run 读取收敛到 `run`。
 
 - `runner` / `server` / `service` 三层职责：`runner` 只表示 Server 已注册的远程执行资源（`list`/`view`/`status`），`server` 只表示当前连接的 Mohist Server 应用（`status`/`health`/`info`/`logs`，其中 `logs` 是应用日志）；已实装的本机受管进程统一为 `mo service <verb> server|runner`，目标命令面再增加可选 `slack` service。`project status` 已迁移到 `server status`；`system logs` 已合并到 `server logs`，`system` 命令组整体退役。
 - Agent launch 同时暴露 Job 与 Session 的稳定身份：`mo agent launch <agent>` 直接挂在 `agent` 下（不再经过 `agent session launch`），打印 `jobId` 与 `sessionId`；HTTP 201 同样同时返回 `jobId`、`sessionId` 与各自读取链接，`jobId` 被 `agent job view` 原样接受（无 id 翻译）。
