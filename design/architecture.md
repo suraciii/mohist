@@ -3,16 +3,19 @@
 ## Boundary
 
 ```
-User in Slack ── Slack Bot / mohist-slack ── Agent API ──┐
-User ── Web UI (backup operation + view) ── API ─────────┤
-User ── direct CLI ──────────────────────── API ─────────┤
-                                                         │
-User in IDE / chat                                       │
-       │                                                 │
-       v                                                 │
-External Agent ── Mohist Skill ── mo CLI ── API ────────┘
-                                                         │
-                                                         v
+User in Slack ── Slack Bot / mohist-slack ── Connection boundary ──┐
+User ── Web UI (backup operation + view) ── API ───────────────────┤
+User ── direct CLI ──────────────────────── API ───────────────────┤
+                                                                  │
+User in IDE / chat                                                │
+       │                                                          │
+       v                                                          │
+External Agent ── Mohist Skill ── mo CLI ── API ──────────────────┘
+                                                                  │
+                                                                  v
+Agent API
+       │
+       v
 Control Plane        owns state, makes decisions
        │
        v
@@ -27,7 +30,7 @@ User Project
 | Concern | Belongs in | Not in |
 |---|---|---|
 | third-party external Agent conversation | external Agent host | Mohist Web / Server |
-| external presentation and provider thread context | Web / CLI / `mohist-slack` | Agent / Session domains |
+| external presentation and provider protocol translation | Web / CLI / `mohist-slack` | Agent / Session domains |
 | Mohist Agent transcript, SessionInput, AgentTurn and activity | Session context | `mohist-slack` / Web local state |
 | CLI command grammar and local interaction | CLI | Server |
 | official client Agent invocation contract | Server Agent API | `mohist-slack` / Runner |
@@ -43,8 +46,9 @@ User Project
 | Mohist Agent identity, instructions, config, skills, and jobs | Agent context | Slack adapter / Web / CLI |
 | Agent Connection binding and access policy | Agent context | Agent definition / Slack thread state |
 | Slack credentials and service authentication | Server infrastructure | Agent / Session domains |
-| Slack events, thread mapping, retries, and message delivery | `mohist-slack` | Server Agent / Session contexts |
-| `mohist-slack` process lifecycle | CLI managed service + adapter process | Agent Connection aggregate / Runner |
+| Slack protocol: receiving events, sending messages | `mohist-slack` | Server Agent / Session contexts |
+| Slack provider inbox, conversation mapping, and pending outbound delivery | Server infrastructure | `mohist-slack` local storage / Agent or Session aggregates |
+| `mohist-slack` process lifecycle | CLI managed service | Agent Connection aggregate / Runner |
 | third-party Agent exploration and delegation | external Agent + Skill | Mohist Runtime / Web UI |
 | Mohist Agent conversation from any client | Agent API + AgentSession | provider adapter local state |
 | skill install | CLI | Server |
@@ -195,18 +199,23 @@ may be Slack, an IDE, a terminal, or Web, but that does not decide which Agent o
 
 There are two distinct paths:
 
-1. A Mohist Agent is launched through Web, CLI, an Agent Connection, an event, or a mention. Every client
-   calls the same Agent API. Mohist owns the Agent definition, AgentJob, AgentSession, SessionInput,
-   AgentTurn, durable transcript, activity, result, and evidence; the external surface owns only provider
-   identity, presentation, delivery recovery, and conversation mapping.
+1. A Mohist Agent is launched through Web, CLI, an Agent Connection, an event, or a mention. Every path
+   reaches the same Agent API; provider adapters first enter through the Server Connection boundary.
+   Mohist owns the Agent definition, AgentJob, AgentSession, SessionInput,
+   AgentTurn, durable transcript, activity, result, and evidence. Server infrastructure owns durable
+   provider conversation mapping and delivery state; the external surface owns only presentation and
+   transient protocol translation.
 2. A third-party external Agent keeps its own conversation in its host and uses Mohist Skills + `mo` to
    issue domain commands. That external conversation does not become an AgentSession merely because it
    caused Mohist work. If it explicitly launches a Mohist Agent, the launched work follows path 1.
 
 Slack Bot therefore is not a Runtime or another Agent. One `mohist-slack` service operates the Slack
-Connections for one Server. It uses Agent API and never reads Mohist storage, shells out to `mo`, parses
-Runner logs, or stores a shadow copy of Agent instructions/config/skills. Detailed contracts:
-[`agent-api.md`](agent-api.md) and [`slack-agent-connection.md`](slack-agent-connection.md).
+Connections for one Server. It exists as a separate process because Slack's first-class client lives in
+Node, not because it is a separate state boundary: it is stateless, enters through the Connection boundary
+and reaches Agent API, and never reads Mohist storage, shells out to `mo`, parses Runner logs, persists
+provider inbox, thread mappings or pending deliveries, or stores a shadow copy of Agent
+instructions/config/skills. Detailed contracts: [`agent-api.md`](agent-api.md) and
+[`slack-agent-connection.md`](slack-agent-connection.md).
 
 External skills read projects, call `mo` CLI, and may write ordinary files. They never touch the Mohist
 database. Runner may adapt OpenCode or another runtime for Workflow TaskRun and AgentJob work.
@@ -215,12 +224,14 @@ Agent/Session ownership invariants: [`agent-execution.md`](agent-execution.md).
 ## Constraints
 
 - CLI never merges into Server.
-- Official Agent clients use Agent API; provider adapters do not bypass it through CLI, database, grain,
-  Runner, or Runtime protocols.
-- Provider credentials and delivery/thread state stay outside Agent/Session domains; Agent Connection
-  owns only the external binding, access policy and lifecycle.
+- Official Agent clients use Agent API; provider adapters enter through the Server Connection boundary,
+  which invokes Agent API and cannot bypass it through CLI, database, grain, Runner, or Runtime protocols.
+- Provider credentials, durable ingress, conversation mappings and delivery state live in Server
+  infrastructure, outside Agent/Session domains; Agent Connection owns only the external binding, access
+  policy and lifecycle.
 - All shell/agent/git/OpenSpec execution goes to Runner.
-- Single control-plane daemon today. `mohist-slack` is a separate managed adapter process, not another
-  state authority or a distributed control-plane node.
+- Single state authority. `mohist-slack` is a stateless managed adapter process; anything that must
+  survive a restart lives in Server.
+- Single control-plane daemon today. Actor model for state, not distribution.
 - Durable dispatcher notifies. Never executes tasks or calls runner.
 - OpenSpec is not architecture authority.

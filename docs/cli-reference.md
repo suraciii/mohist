@@ -211,15 +211,15 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 
 `agent connection` 管理一个 Mohist Agent 与外部交互身份的绑定。第一版 provider 是 Slack：
 
-- `mo agent connection create <agent> --provider slack --experience <standard|agent>` 只创建
-  可恢复 Connection，输出 Slack identity preview、预填创建地址与 Connection ID；不要求
-  `mohist-slack` 在线，也不读取凭据。
+- `mo agent connection create <agent> --provider slack` 只创建可恢复 Connection，输出
+  Slack identity preview、预填创建地址与 Connection ID；不要求 `mohist-slack` 在线，
+  也不读取凭据。
 - `mo agent connection configure <connection-id>` 使用隐藏输入提交 Slack 凭据，不接受 token
   literal flag。非交互环境增加 `--credentials-file <path>`；缺少时立即失败，不等待输入。
   接入服务离线时保存后返回 Waiting for Slack service。
 - `mo agent connection claim-owner <connection-id>` 只在 identity verification 完成后生成并
   显示一次 setup claim、有效期和 Slack DM 步骤；再次运行立即使旧 claim 失效。
-- `mo agent connection view <connection-id>` 始终返回 setup progress、capabilities 和唯一
+- `mo agent connection view <connection-id>` 始终返回 setup progress、status 和唯一
   next action；命令可以退出，安装与认领不依赖原进程存活。
 - `mo agent connection list <agent>` 读取该 Agent 的所有接入；
   `view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete <connection-id>` 管理一个

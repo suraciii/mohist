@@ -107,8 +107,10 @@ and AgentJob dispatch contracts.
 - Agent is a leaf (only one-way coupling to Session for association and cleanup).
 - Agent context owns Agent Connection as a separate resource. Connection references one Agent but does
   not copy or modify its execution definition; adding Slack does not add provider fields to Mohist Agent.
-- Agent Connection is the authority for external binding, lifecycle and access policy. Slack delivery and
-  thread mappings belong to the adapter and cannot become a second authority for Agent, Job or Session.
+- Agent Connection is the authority for external binding, lifecycle and access policy. Durable provider
+  ingress, Slack conversation mappings and pending deliveries are integration records owned by Server
+  infrastructure, not Agent Connection or Session facts. The adapter holds only transient protocol state
+  and cannot become a second authority for Agent, Job or Session.
 - SessionInput and AgentTurn are AgentSession-owned child records. They express ordered input and one
   continuous Runtime processing lifecycle, not new top-level work or a replacement for AgentJob result.
 - Session is horizontal leaf. Model evolves independently. No reverse dependencies.

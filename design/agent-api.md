@@ -109,7 +109,7 @@ AgentJob 改成失败。
 - 输入一旦被确认接受，就不会因进程重启、队列拥塞或新消息到来而消失；
 - 客户端可以从已知位置恢复观察，不依赖一直在线的长连接；
 - 排队和背压是可见状态，不伪装成执行失败；
-- 终态和 transcript 由 Mohist 持久保存，adapter 的本地投递状态不能覆盖它们；
+- 终态和 transcript 由 Mohist 持久保存，provider 的投递状态不能覆盖它们；
 - 外部平台只能得到至少一次投递时，Connection 负责去重，Agent API 不假设平台只发一次。
 
 这里承诺的是“同一意图只产生一次 Mohist 领域效果”，不是网络上的 exactly-once。请求结果
@@ -125,9 +125,9 @@ Agent API 区分两类调用者：
 - Mohist 操作者通过 Web 或 CLI 直接使用 Agent；
 - Agent Connection 代表经过外部平台验证的成员调用一个固定 Agent。
 
-外部成员身份不是 Mohist 管理员身份。只有受信任的 Connection 服务可以提交外部来源，
-Server 仍要根据对应 Connection 核对 workspace、成员与访问策略。Connection 服务有调用和
-观察所需权限，但不能借此编辑 Agent、改变执行配置或管理其它 Project。
+外部成员身份不是 Mohist 管理员身份。Provider adapter 先进入受信任的 Server Connection
+boundary，由它根据对应 Connection 核对 workspace、成员与访问策略，再调用 Agent API。
+这条边界有调用和观察所需权限，但不能借此编辑 Agent、改变执行配置或管理其它 Project。
 
 第一版的 Connection 凭据是 Mohist 自有服务身份，不是通用第三方 API key。公开 API、外部
 开发者应用和多租户授权需要单独设计，不能从 Slack adapter 的权限模型顺手扩展出来。
@@ -163,12 +163,15 @@ Server 仍要根据对应 Connection 核对 workspace、成员与访问策略。
 
 ## 从 Buzz 借鉴的取舍
 
-Buzz 的实现证明聊天入口需要明确的调用者访问策略和有边界的本地队列。Mohist 采用这两个
-方向，但保持自己的领域边界：
+Buzz 的实现证明聊天入口需要明确的调用者访问策略和有界队列。Mohist 采用这两个方向，但
+保持自己的状态边界：
 
 - 访问策略属于 Agent Connection，不进入 Agent 执行配置；
-- adapter 可以暂存尚未被 Mohist 接受的平台事件，但不能丢弃已经成为 SessionInput 的内容；
-- provider 会话和投递状态不是 AgentJob、AgentSession 或执行结果的裁判。
+- adapter 不持久缓存平台事件；Server provider inbox 确定接管或拒绝，结果未知时依赖 provider
+  以同一身份重投；
+- Server 中的输入队列和 provider 出站 outbox 都有边界，但不能丢弃已经成为 SessionInput 的内容；
+- provider conversation mapping 和投递状态属于 Server infrastructure，不是 AgentJob、
+  AgentSession 或执行结果的裁判。
 
 ## 非目标
 
