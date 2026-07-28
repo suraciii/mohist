@@ -47,6 +47,7 @@ public class WorkflowSessionTerminalConvergenceSpecs
             processPid = 1234
         });
 
+        var persistence = _fixture.Persistence.Checkpoint(sessionId);
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
             runtimeSessionId = sessionId,
@@ -80,11 +81,11 @@ public class WorkflowSessionTerminalConvergenceSpecs
         });
 
         // No fake time-advance between posts; the input fence + a
-        // single FlushForTestAsync inside WaitForTranscriptPartsAsync
+        // single persistence observation inside WaitForTranscriptPartsAsync
         // surface both turns. Each turn contributes 3 (text+tool+close)
         // and 2 (text+close) parts — total 5.
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 5, _fixture.Grains, timeout: TimeSpan.FromSeconds(8));
+        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 5, persistence);
 
         await using (var db = await dbFactory.CreateDbContextAsync())
         {

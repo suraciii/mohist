@@ -63,7 +63,7 @@ public abstract class AgentSessionRecoveryApiTestSupport
         await db.SaveChangesAsync();
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.DeactivateForTestAsync();
+        await TestLifecycle.Deactivate(grain);
         _ = await grain.GetAsync();
     }
 

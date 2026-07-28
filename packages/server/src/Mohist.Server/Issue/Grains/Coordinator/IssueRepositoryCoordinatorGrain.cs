@@ -66,12 +66,6 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
         }
     }
 
-    public Task DeactivateForTestAsync()
-    {
-        DeactivateOnIdle();
-        return Task.CompletedTask;
-    }
-
     public async Task<IssueRepositoryBindingResult> CreateIssueAsync(
         RepositoryCommandPayload.Create payload, string commandId, long? expectedRevision)
     {

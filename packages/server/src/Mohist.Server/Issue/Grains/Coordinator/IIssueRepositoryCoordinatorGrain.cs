@@ -50,7 +50,6 @@ public interface IIssueRepositoryCoordinatorGrain : IGrainWithStringKey
     /// the persisted fence survives activation loss and replays on
     /// the next activation.
     /// </summary>
-    Task DeactivateForTestAsync();
 }
 
 public enum IssueRepositoryBindingResultCode

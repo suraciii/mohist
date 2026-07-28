@@ -21,6 +21,7 @@ using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Logging;
 using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -50,6 +51,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IServiceProvider Services => _factory.Services;
     public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
+    public AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => VirtualRunnerRoot;
@@ -116,6 +118,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly int _siloPort;
     private readonly int _gatewayPort;
     private readonly bool _otelEnabled;
+    public AgentSessionPersistenceTestProbe Persistence { get; }
     // Keeper for the in-memory OtelDb override; disposed with the factory.
     private SqliteConnection? _otelKeeper;
 
@@ -160,6 +163,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _siloPort = siloPort ?? EndpointOptions.DEFAULT_SILO_PORT;
         _gatewayPort = gatewayPort ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
         _otelEnabled = otelEnabled;
+        Persistence = new AgentSessionPersistenceTestProbe(
+            () => _timeProvider.Advance(TimeSpan.FromSeconds(1)));
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -173,6 +178,12 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:Otel:Enabled", _otelEnabled ? "true" : "false");
         builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.UseSetting("Mohist:Silo:GatewayPort", _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<IAgentSessionPersistenceObserver>();
+            services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
+        });
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
@@ -235,6 +246,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IAgentJobDispatchObserver>();
             services.AddSingleton<AgentJobDispatchProbe>();
             services.AddSingleton<IAgentJobDispatchObserver>(provider => provider.GetRequiredService<AgentJobDispatchProbe>());
+            services.RemoveAll<IAgentSessionPersistenceObserver>();
+            services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
             services.RemoveAll<IHubContext<RunnerHub>>();
             services.AddSingleton<RecordingRunnerHubContext>();
             services.AddSingleton<IHubContext<RunnerHub>>(provider => provider.GetRequiredService<RecordingRunnerHubContext>());

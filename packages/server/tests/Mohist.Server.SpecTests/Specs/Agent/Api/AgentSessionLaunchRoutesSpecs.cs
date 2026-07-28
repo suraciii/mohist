@@ -93,13 +93,14 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
             var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-launch-read"));
+            var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
             await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
             {
                 new AgentSessionRuntimeEventInput(
                     Type: RuntimeEventTypes.SessionInput,
                     PayloadJson: "{\"text\":\"open product transcript\",\"kind\":\"task\"}"),
             }, "runtime-launch-read"));
-            await grain.FlushForTestAsync();
+            await persistence.WaitAsync();
 
             using var metadata = await _fixture.Client.GetAsync(
                 $"/api/projects/{projectId}/agent-sessions/{sessionId}");

@@ -30,6 +30,11 @@ internal static class InboxProjectionTestSupport
 {
     public static readonly DateTimeOffset FixedEventTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
 
+    public static WorkflowRunStore CreateRunStore(
+        IDbContextFactory<MohistDbContext> factory,
+        IEventStore eventStore) =>
+        new(factory, eventStore, new NullEventDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, TestServices.BackgroundTasks);
+
     public static InboxProjectionHandler CreateHandler(TestSqliteDatabase database) =>
         CreateHandler(database, new NoopEventPublisher());
 
@@ -290,8 +295,8 @@ internal static class InboxProjectionTestSupport
                     factory,
                     new NoopEventStore(),
                     new NullDispatchGrainFactory(),
-                    NullLogger<WorkflowRunStore>.Instance));
-                services.AddScoped<IIssueStore>(sp => new IssueStore(factory, new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<IssueStore>.Instance));
+                    NullLogger<WorkflowRunStore>.Instance, new Mohist.Server.Infrastructure.BackgroundTaskLauncher()));
+                services.AddScoped<IIssueStore>(sp => new IssueStore(factory, new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<IssueStore>.Instance, new Mohist.Server.Infrastructure.BackgroundTaskLauncher()));
                 services.AddScoped<IStateStore<DomainIssue>>(sp => sp.GetRequiredService<IIssueStore>());
                 configureServices?.Invoke(services);
                 return services.BuildServiceProvider();

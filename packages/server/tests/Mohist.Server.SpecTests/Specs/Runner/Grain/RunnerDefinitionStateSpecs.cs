@@ -19,7 +19,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
 
     private async Task DeactivateRunnerAsync(string runnerId)
     {
-        await Grains.GetGrain<IRunnerGrain>(runnerId).DeactivateForTestAsync();
+        await TestLifecycle.Deactivate(Grains.GetGrain<IRunnerGrain>(runnerId));
         var management = Grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);
 

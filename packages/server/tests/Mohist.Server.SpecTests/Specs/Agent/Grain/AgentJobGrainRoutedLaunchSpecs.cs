@@ -275,7 +275,6 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
         var session = Grains.GetGrain<IAgentSessionGrain>(plan.SessionId);
-        await session.FlushForTestAsync();
 
         // Verify the Session was actually opened from the canonical plan.
         var info = await session.GetAsync();
@@ -425,7 +424,6 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
 
         // Confirm first delivery produced its single activity fact.
         var session = Grains.GetGrain<IAgentSessionGrain>(preflight.SessionId);
-        await session.FlushForTestAsync();
         var firstParts = (await ListSessionClosedPartsAsync(preflight.SessionId))
             .Where(p => p.Type == TranscriptPartTypes.SessionActivity)
             .ToList();
@@ -456,7 +454,6 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
 
         // No duplicate activity fact is recorded for the redelivered
         // session id and no Runner assignment is created.
-        await session.FlushForTestAsync();
         var allParts = (await ListSessionClosedPartsAsync(preflight.SessionId))
             .Where(p => p.Type == TranscriptPartTypes.SessionActivity)
             .ToList();

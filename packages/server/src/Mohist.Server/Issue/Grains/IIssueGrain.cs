@@ -55,7 +55,6 @@ public interface IIssueGrain : IGrainWithStringKey
     /// </summary>
     Task RecomputeCompositeStatusAsync();
     Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null);
-    Task DeactivateForTestAsync();
 
     Task<bool> AssignEpicAsync(int epicNumber);
     Task<bool> RemoveEpicAsync(int expectedEpicNumber);

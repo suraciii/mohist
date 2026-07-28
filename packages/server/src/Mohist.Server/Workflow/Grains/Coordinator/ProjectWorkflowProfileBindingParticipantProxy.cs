@@ -20,12 +20,12 @@ public sealed class ProjectWorkflowProfileBindingParticipantProxy : Grain, IProj
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _timeProvider;
-    private readonly IWorkflowProfileProvider? _profileProvider;
+    private readonly IWorkflowProfileProvider _profileProvider;
 
     public ProjectWorkflowProfileBindingParticipantProxy(
         IDbContextFactory<MohistDbContext> dbFactory,
-        TimeProvider? timeProvider = null,
-        IWorkflowProfileProvider? profileProvider = null)
+        IWorkflowProfileProvider profileProvider,
+        TimeProvider? timeProvider = null)
     {
         _dbFactory = dbFactory;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -43,12 +43,9 @@ public sealed class ProjectWorkflowProfileBindingParticipantProxy : Grain, IProj
         // coordinator's earlier probe is not this transaction's validation,
         // and a stale/direct replay must not accept a Profile deleted between
         // the probe and the write.
-        if (_profileProvider is not null)
-        {
-            var exists = await _profileProvider.GetAsync(payload.ProjectId, payload.ProfileId);
-            if (exists is null)
-                return ProjectWorkflowProfileBindingOutcome.ProfileUnknown;
-        }
+        var exists = await _profileProvider.GetAsync(payload.ProjectId, payload.ProfileId);
+        if (exists is null)
+            return ProjectWorkflowProfileBindingOutcome.ProfileUnknown;
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.ProjectWorkflowProfiles

@@ -233,7 +233,8 @@ public class SystemUpdateRecoveryTests
             configuration,
             new AvailableManagedAssetCatalog(),
             NullLogger<SystemUpdateService>.Instance,
-            time);
+            time,
+            new Mohist.Server.Infrastructure.BackgroundTaskLauncher());
     }
 
     private static SystemUpdateJobState BuildJob(

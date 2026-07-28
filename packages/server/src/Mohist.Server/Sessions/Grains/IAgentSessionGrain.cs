@@ -41,19 +41,6 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task EnsureRuntimeSessionPresentAsync();
     Task RunnerDisconnectedAsync();
 
-    /// <summary>
-    /// Test-only hook: deactivates the grain so the next request
-    /// re-hydrates state from the persistent store. Production code
-    /// should rely on Orleans' normal collection cycle (the default
-    /// 15-minute quiet window) instead of forcing deactivation.
-    /// </summary>
-    Task DeactivateForTestAsync();
-
-    /// <summary>
-    /// Test-only hook: flushes pending session state and transcript data
-    /// without waiting for the grain timer tick.
-    /// </summary>
-    Task FlushForTestAsync();
 }
 
 [GenerateSerializer]

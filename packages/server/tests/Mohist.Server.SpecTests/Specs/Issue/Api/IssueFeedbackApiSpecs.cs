@@ -404,7 +404,7 @@ public class IssueFeedbackApiSpecs
             Status: ApprovalFeedbackStatus.Open,
             CreatedAt: TestTime.UtcNow.AddMinutes(-1)));
         await SaveWorkflowRunAsync(wrId, run);
-        await _grains.GetGrain<IIssueGrain>(issueKey).DeactivateForTestAsync();
+        await TestLifecycle.Deactivate(_grains.GetGrain<IIssueGrain>(issueKey));
 
         var status = await _client.GetDataAsync<FeedbackApiIssueWorkflowStatusDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");
@@ -444,7 +444,7 @@ public class IssueFeedbackApiSpecs
             ResolvedAt: TestTime.UtcNow.AddMinutes(-1),
             ResolutionSummary: "Done"));
         await SaveWorkflowRunAsync(wrId, run);
-        await _grains.GetGrain<IIssueGrain>(issueKey).DeactivateForTestAsync();
+        await TestLifecycle.Deactivate(_grains.GetGrain<IIssueGrain>(issueKey));
 
         var status = await _client.GetDataAsync<FeedbackApiIssueWorkflowStatusDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");
@@ -468,7 +468,7 @@ public class IssueFeedbackApiSpecs
     public async Task StageState_WithoutFeedback_OmitsOrEmptyFeedbackArray()
     {
         var (project, issueNumber, issueKey, _) = await SeedAwaitingApprovalIssueAsync();
-        await _grains.GetGrain<IIssueGrain>(issueKey).DeactivateForTestAsync();
+        await TestLifecycle.Deactivate(_grains.GetGrain<IIssueGrain>(issueKey));
 
         var status = await _client.GetDataAsync<FeedbackApiIssueWorkflowStatusDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");

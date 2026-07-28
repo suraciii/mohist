@@ -626,12 +626,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         return Task.FromResult(MaxWorkflowSlots);
     }
 
-    public Task DeactivateForTestAsync()
-    {
-        DeactivateOnIdle();
-        return Task.CompletedTask;
-    }
-
     public async Task UpdateAsync(int slots)
     {
         if (slots <= 0)

@@ -10,10 +10,10 @@ public sealed class BackgroundHermesIssueNotificationDispatcher : IHermesIssueNo
 
     public BackgroundHermesIssueNotificationDispatcher(
         ILogger<BackgroundHermesIssueNotificationDispatcher> log,
-        IBackgroundTaskLauncher? backgroundTasks = null)
+        IBackgroundTaskLauncher backgroundTasks)
     {
         _log = log;
-        _backgroundTasks = backgroundTasks ?? new BackgroundTaskLauncher();
+        _backgroundTasks = backgroundTasks;
     }
 
     public void Dispatch(Func<CancellationToken, Task> work)

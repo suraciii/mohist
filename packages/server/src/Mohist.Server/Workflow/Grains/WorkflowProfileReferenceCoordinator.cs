@@ -48,7 +48,6 @@ public interface IWorkflowProfileReferenceCoordinatorGrain : IGrainWithStringKey
         string commandId,
         long? expectedRevision);
 
-    Task DeactivateForTestAsync();
 }
 
 public enum WorkflowProfileReferenceResultCode

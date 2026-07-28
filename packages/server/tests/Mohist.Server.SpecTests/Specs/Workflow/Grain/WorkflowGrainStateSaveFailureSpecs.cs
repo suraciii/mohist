@@ -117,21 +117,25 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
     private static WorkflowGrain CreateGrain(
         IServiceProvider services,
         IWorkflowRunStore store,
-        string workflowRunId) =>
-        new(
+        string workflowRunId)
+    {
+        var identity = GrainTestContext.Create(workflowRunId);
+        return new WorkflowGrain(
+            identity.Context,
+            identity.Runtime,
             store,
             services.GetRequiredService<WorkflowProfileManager>(),
             services.GetRequiredService<WorkflowRunProfileManager>(),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance)
         {
-            GrainKeyForTest = workflowRunId,
             BindProfileForTest = static (_, profileId) => Task.FromResult(
                 new WorkflowProfileReferenceResult(
                     WorkflowProfileReferenceResultCode.Applied,
                     profileId,
                     1)),
         };
+    }
 
     private async Task SeedWorkflowTemplateAsync(string projectId)
     {

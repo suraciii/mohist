@@ -32,7 +32,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private bool _issueReloadRequired;
     private readonly IIssueStore _issueStore;
     private readonly IssueWorkflowProfileRegistry _profiles;
-    private readonly IWorkflowProfileProvider? _profileProvider;
+    private readonly IWorkflowProfileProvider _profileProvider;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventStore _eventStore;
@@ -48,7 +48,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<IssueGrain> _log;
 
-    public IssueGrain(
+    internal IssueGrain(
+        Orleans.Runtime.IGrainContext context,
+        Orleans.Runtime.IGrainRuntime runtime,
         IIssueStore issueStore,
         IssueWorkflowProfileRegistry profiles,
         WorkflowQuerier workflowQuerier,
@@ -65,7 +67,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IEnvironmentVariableProvider environment,
         TimeProvider timeProvider,
         ILogger<IssueGrain> log,
-        IWorkflowProfileProvider? profileProvider = null)
+        IWorkflowProfileProvider profileProvider)
+        : base(context, runtime)
     {
         _issueStore = issueStore;
         _profiles = profiles;
@@ -86,9 +89,45 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _log = log;
     }
 
-    private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
+    public IssueGrain(
+        IIssueStore issueStore,
+        IssueWorkflowProfileRegistry profiles,
+        WorkflowQuerier workflowQuerier,
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IEventStore eventStore,
+        IGrainFactory grainFactory,
+        IBackgroundTaskLauncher backgroundTasks,
+        IssueRepositoryResolver repositoryResolver,
+        WorkflowProfileManager workflowProfileManager,
+        ProjectWorkflowProfileManager projectProfileManager,
+        IssueWorkflowProfileManager issueProfileManager,
+        AttachmentService attachmentService,
+        IConfiguration configuration,
+        IEnvironmentVariableProvider environment,
+        TimeProvider timeProvider,
+        ILogger<IssueGrain> log,
+        IWorkflowProfileProvider profileProvider)
+    {
+        _issueStore = issueStore;
+        _profiles = profiles;
+        _profileProvider = profileProvider;
+        _workflowQuerier = workflowQuerier;
+        _dbFactory = dbFactory;
+        _eventStore = eventStore;
+        _grainFactory = grainFactory;
+        _backgroundTasks = backgroundTasks;
+        _repositoryResolver = repositoryResolver;
+        _workflowProfileManager = workflowProfileManager;
+        _projectProfileManager = projectProfileManager;
+        _issueProfileManager = issueProfileManager;
+        _attachmentService = attachmentService;
+        _configuration = configuration;
+        _environment = environment;
+        _timeProvider = timeProvider;
+        _log = log;
+    }
 
-    internal string GrainKeyForTest { get; set; } = string.Empty;
+    private string GrainKey => this.GetPrimaryKeyString();
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
@@ -98,12 +137,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {
-        return Task.CompletedTask;
-    }
-
-    public Task DeactivateForTestAsync()
-    {
-        DeactivateOnIdle();
         return Task.CompletedTask;
     }
 
@@ -1096,9 +1129,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     }
 
     private Task<bool> ProfileExistsAsync(string projectId, string profileId) =>
-        _profileProvider is not null
-            ? _profileProvider.ContainsAsync(projectId, profileId)
-            : Task.FromResult(_profiles.Exists(profileId));
+        _profileProvider.ContainsAsync(projectId, profileId);
 
     public async Task<IssueWorkflowStatus?> GetWorkflowStatusAsync()
     {

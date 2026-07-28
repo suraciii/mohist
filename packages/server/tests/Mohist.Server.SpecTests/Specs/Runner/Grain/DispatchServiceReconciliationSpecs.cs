@@ -58,7 +58,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         var task = Assert.Single(persisted.CurrentStage().Tasks);
         Assert.Equal(first, task.DispatchSnapshot);
 
-        await workflow.DeactivateForTestAsync();
+        await TestLifecycle.Deactivate(workflow);
         var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
         Assert.Equal(first, redelivery);
     }

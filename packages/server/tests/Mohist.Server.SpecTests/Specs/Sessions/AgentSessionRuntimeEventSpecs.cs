@@ -34,6 +34,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsSessionEvents_ConcurrentChunks_BuffersUntilFlush()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("sequence");
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
         await Task.WhenAll(
             PostEventEntriesAsync(session, "first"),
@@ -49,7 +50,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, persistence);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var parts = await LoadTranscriptPartsAsync(db, session.Id);
@@ -65,6 +66,8 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var before = await eventStore.ListAgentSessionEventsAsync(session.Id);
         var lastExistingId = before.Count == 0 ? 0 : before.Max(e => e.Id);
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
@@ -75,7 +78,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
             }
         });
 
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).FlushForTestAsync();
+        await persistence.WaitAsync();
 
         var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
         var appended = stored.Where(e => e.Id > lastExistingId).ToArray();
@@ -185,6 +188,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsUsageUpdate_TerminalSession_PersistsEventButDoesNotMutateCounters()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-terminal");
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
@@ -215,7 +219,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, persistence);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -234,6 +238,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsResolvedModelEvent_UpdatesResolvedModel()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model");
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
@@ -249,7 +254,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -260,6 +265,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsResolvedModelEvent_WithoutResolvedModelField_DoesNotSetModel()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model-divergent");
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
@@ -275,7 +281,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -286,6 +292,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsTerminalEvent_WithFailureCategory_PersistsCategory()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("failure-category");
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
@@ -301,7 +308,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -313,6 +320,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     public async Task RunnerAppendsToolCallEvents_CountsCallsAndErrors()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("tool-calls");
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
@@ -343,7 +351,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, persistence);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);

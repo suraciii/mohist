@@ -44,7 +44,8 @@ public class EventDispatcherIdentitySpecs
                 BaseBackoff = TimeSpan.FromSeconds(1),
                 MaxBackoff = TimeSpan.FromSeconds(30),
             }),
-            NullLogger<EventDispatcherService>.Instance);
+            NullLogger<EventDispatcherService>.Instance,
+            NullEventPushQueue.Instance);
     }
 
     [Fact]

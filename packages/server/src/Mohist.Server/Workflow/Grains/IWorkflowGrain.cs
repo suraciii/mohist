@@ -40,7 +40,6 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId);
     Task<WorkflowFeedbackRecord?> GetFeedbackAsync(string feedbackId);
     Task<IReadOnlyList<WorkflowFeedbackRecord>> ListFeedbackAsync();
-    Task DeactivateForTestAsync();
 }
 
 [GenerateSerializer]

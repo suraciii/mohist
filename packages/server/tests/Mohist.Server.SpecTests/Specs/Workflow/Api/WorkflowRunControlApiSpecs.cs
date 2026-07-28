@@ -729,7 +729,7 @@ public partial class WorkflowRunControlApiSpecs
 
     private async Task DeactivateWorkflowAsync(string workflowRunId)
     {
-        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).DeactivateForTestAsync();
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).Deactivate();
         var management = _grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);
         await TestWait.ForAsync(
@@ -784,6 +784,6 @@ public partial class WorkflowRunControlApiSpecs
         }
         row.State = JsonSerializer.Serialize(state, JSON.Options);
         await db.SaveChangesAsync();
-        await wfGrain.DeactivateForTestAsync();
+        await wfGrain.Deactivate();
     }
 }

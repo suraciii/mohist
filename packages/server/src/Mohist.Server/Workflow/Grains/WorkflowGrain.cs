@@ -34,9 +34,28 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly WorkflowStageInitializer _stageInitializer;
     private readonly WorkflowWorkLifecycle _workLifecycle;
 
-    private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
+    internal WorkflowGrain(
+        Orleans.Runtime.IGrainContext context,
+        Orleans.Runtime.IGrainRuntime runtime,
+        IWorkflowRunStore runStore,
+        WorkflowProfileManager profileManager,
+        WorkflowRunProfileManager runProfileManager,
+        TimeProvider timeProvider,
+        ILogger<WorkflowGrain> log)
+        : base(context, runtime)
+    {
+        _runStore = runStore;
+        _profileManager = profileManager;
+        _runProfileManager = runProfileManager;
+        _timeProvider = timeProvider;
+        _log = log;
+        _readModel = new WorkflowReadModel(this);
+        _stageLockCoordinator = new WorkflowStageLockCoordinator(this);
+        _stageInitializer = new WorkflowStageInitializer(this);
+        _workLifecycle = new WorkflowWorkLifecycle(this);
+    }
 
-    internal string GrainKeyForTest { get; set; } = string.Empty;
+    private string GrainKey => this.GetPrimaryKeyString();
 
     internal Func<string, string, Task<WorkflowProfileReferenceResult>>? BindProfileForTest { get; set; }
 
@@ -104,11 +123,21 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task StartAsync(WorkflowStartInput? input = null)
     {
         RejectIfRunReloadRequired();
-        await EnsureCreatedRunAsync(input);
-        var events = _run!.Start(Now());
+        var created = _run is null;
+        try
+        {
+            await EnsureCreatedRunAsync(input);
+            var events = _run!.Start(Now());
 
-        _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run!.CurrentStageId);
-        await CommitAsync(events);
+            _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run!.CurrentStageId);
+            await CommitAsync(events);
+        }
+        catch
+        {
+            if (created)
+                await RemoveUncommittedRunAsync();
+            throw;
+        }
     }
 
     public async Task EnsureStartedAsync(WorkflowIssueContext context)
@@ -121,9 +150,17 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             return;
         }
 
-        await EnsureCreatedRunAsync(context);
-        var events = _run!.Start(Now());
-        await CommitAsync(events);
+        try
+        {
+            await EnsureCreatedRunAsync(context);
+            var events = _run!.Start(Now());
+            await CommitAsync(events);
+        }
+        catch
+        {
+            await RemoveUncommittedRunAsync();
+            throw;
+        }
     }
 
     /// <summary>
@@ -144,23 +181,31 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             await EnsureStartedAsync(context);
             return;
         }
-        if (_run is null)
+        var created = _run is null;
+        try
         {
-            await EnsureCreatedRunAsync(context);
-        }
+            if (created)
+                await EnsureCreatedRunAsync(context);
 
-        var metadata = _run!.Metadata;
-        var events = _run.EnsureStarted(snapshot.Repository, snapshot.Workspace, Now(), metadata);
-        if (events.Count > 0)
-        {
-            _log.LogInformation(
-                "Workflow {Id} ensured-started with repository snapshot, stage={Stage}",
-                GrainKey, _run.CurrentStageId);
-            await CommitAsync(events);
+            var metadata = _run!.Metadata;
+            var events = _run.EnsureStarted(snapshot.Repository, snapshot.Workspace, Now(), metadata);
+            if (events.Count > 0)
+            {
+                _log.LogInformation(
+                    "Workflow {Id} ensured-started with repository snapshot, stage={Stage}",
+                    GrainKey, _run.CurrentStageId);
+                await CommitAsync(events);
+            }
+            else
+            {
+                await SaveRunAsync();
+            }
         }
-        else
+        catch
         {
-            await SaveRunAsync();
+            if (created)
+                await RemoveUncommittedRunAsync();
+            throw;
         }
     }
 
@@ -493,12 +538,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         return new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count);
     }
 
-    public Task DeactivateForTestAsync()
-    {
-        DeactivateOnIdle();
-        return Task.CompletedTask;
-    }
-
     public Task<string?> GetRunStatusAsync()
     {
         RejectIfRunReloadRequired();
@@ -733,6 +772,25 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             MarkRunReloadRequired();
             DeactivateOnIdle();
             throw;
+        }
+    }
+
+    private async Task RemoveUncommittedRunAsync()
+    {
+        if (_run is null) return;
+
+        try
+        {
+            await _runStore.DeleteAsync(GrainKey);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Workflow {Id} cleanup after failed startup could not remove the persisted run", GrainKey);
+        }
+        finally
+        {
+            _run = null;
+            _runDirty = false;
         }
     }
 

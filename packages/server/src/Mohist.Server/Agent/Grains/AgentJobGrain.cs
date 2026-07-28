@@ -50,7 +50,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly TimeProvider _timeProvider;
     private readonly IPersistentState<AgentJobState> _state;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
-    private readonly IAgentJobStore? _jobStore;
+    private readonly IAgentJobStore _jobStore;
     private readonly IEventStore _eventStore;
     private IDisposable? _dispatchTimer;
     private IDisposable? _jobTimeoutTimer;
@@ -61,15 +61,15 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         TimeProvider timeProvider,
         [PersistentState("agent-job")] IPersistentState<AgentJobState> state,
         IEventStore eventStore,
-        IAgentJobDispatchObserver? dispatchObserver = null,
-        IAgentJobStore? jobStore = null)
+        IAgentJobDispatchObserver dispatchObserver,
+        IAgentJobStore jobStore)
     {
         _log = log;
         _options = options.Value;
         _timeProvider = timeProvider;
         _state = state;
         _eventStore = eventStore;
-        _dispatchObserver = dispatchObserver ?? NoopAgentJobDispatchObserver.Instance;
+        _dispatchObserver = dispatchObserver;
         _jobStore = jobStore;
         // The backoff schedule is captured at activation time from the current
         // snapshot of AgentJobOptions. Hot-reload of the configuration section
@@ -1288,9 +1288,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private async Task MirrorToJobStoreAsync()
     {
-        if (_jobStore is null)
-            return;
-
         try
         {
             var json = JsonSerializer.Serialize(State, Infrastructure.JSON.Options);

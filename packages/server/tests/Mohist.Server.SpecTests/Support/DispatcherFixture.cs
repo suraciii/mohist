@@ -683,7 +683,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
             opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
             opts.JobTimeout = TimeSpan.FromSeconds(10);
         });
-        siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
+        siloBuilder.Services.AddRequiredInfrastructure();
         siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
     }
 

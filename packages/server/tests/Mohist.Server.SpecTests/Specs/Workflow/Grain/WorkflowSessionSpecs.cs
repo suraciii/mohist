@@ -56,6 +56,8 @@ public class WorkflowSessionSpecs
             expectedRuntimeSessionId = (string?)null,
         });
         var fetched = await GetRawAsync<RunnerAgentSessionDto>(RunnerSessionPath("runner-1", projectId, workflowRunId, sessionName));
+        var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
+        var persistence = _fixture.Persistence.Checkpoint(sessionId);
 
         await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
         {
@@ -80,8 +82,7 @@ public class WorkflowSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
-        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 3, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 3, persistence);
 
         var detail = await _client.GetDataAsync<WorkflowSessionDetailDto>($"/api/workflow-runs/{workflowRunId}/sessions/{sessionName}");
         var sessions = await _client.GetDataAsync<WorkflowSessionDto[]>($"/api/workflow-runs/{workflowRunId}/sessions");
@@ -148,6 +149,7 @@ public class WorkflowSessionSpecs
             workDir = $"/workspaces/{project.Id}",
             processPid = 1234
         });
+        var persistence = _fixture.Persistence.Checkpoint(sessionId);
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
             runtimeSessionId = sessionId,
@@ -178,7 +180,7 @@ public class WorkflowSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 3, _fixture.Grains);
+        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 3, persistence);
 
         var metadata = await _client.GetDataAsync<IssueSessionMetadataTestDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}");
         Assert.Equal(sessionId, metadata.Id);

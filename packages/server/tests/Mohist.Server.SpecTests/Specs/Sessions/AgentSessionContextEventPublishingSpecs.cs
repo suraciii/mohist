@@ -140,6 +140,7 @@ public class AgentSessionContextEventPublishingSpecs
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-context"));
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         // Bring usage to 96%.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
@@ -158,9 +159,7 @@ public class AgentSessionContextEventPublishingSpecs
                 new AgentSessionRuntimeEventInput("turn.failed", """{"status":"failed","exitCode":1,"producedArtifacts":false}"""),
             }, RuntimeSessionId: "runtime-context"));
 
-        // Force a flush so the post-state-save event rows are
-        // committed before we read them.
-        await grain.FlushForTestAsync();
+        await persistence.WaitAsync();
 
         var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(sessionId);
@@ -178,6 +177,7 @@ public class AgentSessionContextEventPublishingSpecs
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-context"));
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         // Bring usage to 50% (green) — first snapshot.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
@@ -186,7 +186,7 @@ public class AgentSessionContextEventPublishingSpecs
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":500,"contextWindowSize":1000}"""),
             }, RuntimeSessionId: "runtime-context"));
 
-        await grain.FlushForTestAsync();
+        await persistence.WaitAsync();
 
         var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(sessionId);

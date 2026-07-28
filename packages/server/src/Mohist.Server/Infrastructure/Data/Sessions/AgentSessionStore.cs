@@ -39,13 +39,13 @@ public class AgentSessionStore : IAgentSessionStore
         IEventStore eventStore,
         IGrainFactory grainFactory,
         ILogger<AgentSessionStore> log,
-        IBackgroundTaskLauncher? backgroundTasks = null)
+        IBackgroundTaskLauncher backgroundTasks)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
         _grainFactory = grainFactory;
         _log = log;
-        _backgroundTasks = backgroundTasks ?? new BackgroundTaskLauncher();
+        _backgroundTasks = backgroundTasks;
     }
 
     public async Task<AgentSession?> LoadAsync(string key)

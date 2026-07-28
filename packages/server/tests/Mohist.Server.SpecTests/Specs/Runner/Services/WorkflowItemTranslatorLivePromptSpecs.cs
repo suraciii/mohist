@@ -31,7 +31,8 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
             new BuiltinPromptLoader(),
             new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-            new WorkflowRunProfileManager(factory));
+            new WorkflowRunProfileManager(factory),
+            new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
         var artifactService = new WorkflowArtifactBindService(
             factory,
             NullLogger<WorkflowArtifactBindService>.Instance,

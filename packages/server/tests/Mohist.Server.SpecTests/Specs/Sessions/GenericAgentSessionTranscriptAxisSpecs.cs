@@ -84,6 +84,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
 
             var polledWork = await PollOnceAsync(_runnerId, sessionId);
+            var persistence = _fixture.Persistence.Checkpoint(sessionId);
 
             var fakeRun = await RunFakeAcpAgentThroughRuntimeEventsEndpointAsync(
                 project.Id,
@@ -144,7 +145,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             Assert.Contains(RuntimeEventTypes.ToolCallCompleted, fakeRun.EventTypes);
             Assert.Contains(RuntimeEventTypes.UsageUpdated, fakeRun.EventTypes);
 
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 4, _fixture.Grains);
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 4, persistence);
 
             using var transcriptResponse = await _fixture.Client.GetAsync(
                 $"/api/projects/{project.Id}/agent-sessions/{sessionId}/transcript");
@@ -222,6 +223,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
 
             var polledWork = await PollOnceAsync(_runnerId, sessionId);
+            var firstPersistence = _fixture.Persistence.Checkpoint(sessionId);
             await RunFakeAcpAgentThroughRuntimeEventsEndpointAsync(
                 project.Id,
                 sessionId,
@@ -233,7 +235,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
                 });
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 2, _fixture.Grains);
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 2, firstPersistence);
 
             using var firstRead = await _fixture.Client.GetAsync(
                 $"/api/projects/{project.Id}/agent-sessions/{sessionId}/transcript");
@@ -255,6 +257,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             // a terminal `status`.
             Assert.Equal("idle", completedPayload.GetProperty("data").GetProperty("activity").GetString());
 
+            var followupPersistence = _fixture.Persistence.Checkpoint(sessionId);
             await _fixture.Client.PostOkAsync(
                 $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/runtime-events",
                 new
@@ -308,7 +311,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
                     }
                 });
 
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 5, _fixture.Grains);
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 5, followupPersistence);
 
             using var secondRead = await _fixture.Client.GetAsync(
                 $"/api/projects/{project.Id}/agent-sessions/{sessionId}/transcript");
@@ -347,6 +350,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
                 "transcript-filter-agent",
                 "transcript-filter-agent"))));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-first", WorkDir: $"/workspaces/{project.Id}"));
+        var firstPersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionInput, """{"text":"first runtime turn","kind":"task"}"""),
@@ -360,15 +364,16 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
         {
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, """{"activity":"idle"}"""),
         }, "runtime-first"));
-        await grain.FlushForTestAsync();
+        await firstPersistence.WaitAsync();
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         await grain.ResetAsync(new ResetAgentSessionCommand("runtime-first", "runtime-second"));
+        var secondPersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionInput, """{"text":"second runtime turn","kind":"followup"}"""),
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.MessageDelta, """{"text":"second runtime reply"}"""),
         }, "runtime-second"));
-        await grain.FlushForTestAsync();
+        await secondPersistence.WaitAsync();
 
         using var firstResponse = await _fixture.Client.GetAsync(
             $"/api/projects/{project.Id}/agent-sessions/{sessionId}/transcript?runtimeSessionId=runtime-first");
@@ -404,6 +409,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
                 "transcript-recovery-agent",
                 "transcript-recovery-agent"))));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-first", WorkDir: $"/workspaces/{project.Id}"));
+        var firstPersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionInput, """{"text":"first runtime turn","kind":"task"}"""),
@@ -416,15 +422,16 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
         {
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, """{"activity":"idle"}"""),
         }, "runtime-first"));
-        await grain.FlushForTestAsync();
+        await firstPersistence.WaitAsync();
 
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         await grain.ResetAsync(new ResetAgentSessionCommand("runtime-first", "runtime-second"));
+        var secondPersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(RuntimeEventTypes.Compaction, """{"strategy":"summary"}"""),
         }, "runtime-second"));
-        await grain.FlushForTestAsync();
+        await secondPersistence.WaitAsync();
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var turns = await db.AgentSessionTranscriptTurns
@@ -464,6 +471,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(sessionId, WorkDir: $"/workspaces/{project.Id}"));
+            var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
             await _fixture.Client.PostOkAsync(
                 $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/runtime-events",
@@ -478,7 +486,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
                 });
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains);
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, persistence);
 
             using var transcript = await _fixture.Client.GetAsync(
                 $"/api/projects/{project.Id}/agent-sessions/{sessionId}/transcript");

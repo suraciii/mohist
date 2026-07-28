@@ -9,6 +9,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
+using Orleans.Runtime;
 using Orleans.TestingHost;
 using Xunit;
 
@@ -27,6 +28,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public ControllableRunnerGrainAssignmentObserver RunnerAssignmentObserver { get; } = new();
     public ControllableRunnerGrainCloseoutObserver CloseoutObserver { get; } = new();
     public ControllableAgentSessionTranscriptPersistence SessionPersistence { get; } = new();
+    public AgentSessionPersistenceTestProbe Persistence { get; }
 
     private readonly InMemoryEventBus _sharedEventBus;
     private readonly RecordingEventStore _sharedEventStore = new();
@@ -34,6 +36,8 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
 
     public AgentJobGrainFixture()
     {
+        Persistence = new AgentSessionPersistenceTestProbe(
+            () => TimeProvider.Advance(TimeSpan.FromSeconds(1)));
         _sharedEventBus = new InMemoryEventBus(
             _sharedEventStore,
             TimeProvider,
@@ -49,7 +53,13 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
         builder.Options.InitialSilosCount = 1;
         builder.ConfigureSilo((_, siloBuilder) =>
         {
-            GrainTestConfig.ConfigureSilo(siloBuilder, connectionString, _sharedEventBus, _sharedEventStore, TimeProvider);
+            GrainTestConfig.ConfigureSilo(
+                siloBuilder,
+                connectionString,
+                _sharedEventBus,
+                _sharedEventStore,
+                TimeProvider,
+                Persistence);
             siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(DispatchObserver);
             siloBuilder.Services.AddSingleton<IRunnerGrainAssignmentObserver>(RunnerAssignmentObserver);
             siloBuilder.Services.AddSingleton<IRunnerGrainCloseoutObserver>(CloseoutObserver);
@@ -69,6 +79,37 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
         Cluster?.Dispose();
         _database?.Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    public async Task ClearActiveAgentJobsAsync()
+    {
+        var management = Grains.GetGrain<IManagementGrain>(0);
+        var activations = await management.GetDetailedGrainStatistics();
+        var jobKeys = activations
+            .Where(stat => stat.GrainType.Contains(nameof(AgentJobGrain), StringComparison.Ordinal))
+            .Select(stat => stat.GrainId.Key.ToString())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var jobKey in jobKeys)
+        {
+            var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
+            var snapshot = await job.GetRuntimeSnapshotAsync();
+            if (snapshot.Status is AgentJobStatus.Completed or AgentJobStatus.Failed)
+                continue;
+
+            if (snapshot.RunnerId is not null && snapshot.CurrentWorkId is not null)
+            {
+                var runner = Grains.GetGrain<IRunnerGrain>(snapshot.RunnerId);
+                await runner.ReportAgentJobResultAsync(
+                    jobKey,
+                    snapshot.CurrentWorkId,
+                    new WorkResult("completed"));
+            }
+
+            if (await job.GetStatusAsync() is not (AgentJobStatus.Completed or AgentJobStatus.Failed))
+                await job.FailAsync("test-cleanup", "test-cleanup-agent");
+        }
     }
 }
 

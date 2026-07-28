@@ -74,6 +74,7 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
             runtimeSessionId,
             WorkDir: $"/workspaces/{project.Id}"));
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
@@ -83,7 +84,7 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
                 RuntimeEventTypes.MessageDelta,
                 "{\"text\":\"preserved assistant text\"}"),
         }, runtimeSessionId));
-        await grain.FlushForTestAsync();
+        await persistence.WaitAsync();
 
         return (project, sessionId);
     }

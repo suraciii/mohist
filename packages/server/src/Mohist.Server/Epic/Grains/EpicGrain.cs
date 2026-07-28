@@ -25,6 +25,23 @@ public class EpicGrain : Grain, IEpicGrain
     private readonly IEventStore _eventStore;
     private readonly ILogger<EpicGrain> _log;
 
+    internal EpicGrain(
+        Orleans.Runtime.IGrainContext context,
+        Orleans.Runtime.IGrainRuntime runtime,
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IGrainFactory grains,
+        TimeProvider timeProvider,
+        IEventStore eventStore,
+        ILogger<EpicGrain> log)
+        : base(context, runtime)
+    {
+        _dbFactory = dbFactory;
+        _grains = grains;
+        _timeProvider = timeProvider;
+        _eventStore = eventStore;
+        _log = log;
+    }
+
     public EpicGrain(
         IDbContextFactory<MohistDbContext> dbFactory,
         IGrainFactory grains,
@@ -39,9 +56,7 @@ public class EpicGrain : Grain, IEpicGrain
         _log = log;
     }
 
-    internal string GrainKeyForTest { get; set; } = string.Empty;
-
-    private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
+    private string GrainKey => this.GetPrimaryKeyString();
 
     private DateTimeOffset Now() => _timeProvider.GetUtcNow();
 

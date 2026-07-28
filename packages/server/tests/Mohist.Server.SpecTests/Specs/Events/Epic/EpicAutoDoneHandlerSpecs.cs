@@ -255,7 +255,8 @@ public class EpicAutoDoneHandlerSpecs : EpicAutoDoneHandlerTestSupport
                 BaseBackoff = TimeSpan.FromSeconds(1),
                 MaxBackoff = TimeSpan.FromSeconds(1),
             }),
-            NullLogger<EventDispatcherService>.Instance);
+            NullLogger<EventDispatcherService>.Instance,
+            NullEventPushQueue.Instance);
 
         await events.AppendAsync(new CloudEvent(
             id: "evt_terminal_start_failure",

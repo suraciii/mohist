@@ -46,6 +46,7 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
         // persisted turns with their own prompts and parts, with a single
         // explicit flush at the end for observation.
         var grain = await OpenBoundGrainAsync();
+        var persistence = grain.PersistenceCheckpoint(Fixture.Persistence);
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
@@ -63,7 +64,7 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"second-answer\"}"),
             }, "runtime-1"));
 
-        await grain.FlushForTestAsync();
+        await persistence.WaitAsync();
 
         Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
         var firstFlush = Fixture.TranscriptStore.Flushes[0];
@@ -109,6 +110,7 @@ public class AgentSessionGrainInputBoundaryPersistFailureSpecs : AgentSessionGra
 
         // The next input will trigger the prior-data flush; that
         // flush must fail so the new input is rejected.
+        var persistence = grain.PersistenceCheckpoint(Fixture.Persistence);
         Fixture.TranscriptStore.FailNextSave(
             grain.GetPrimaryKeyString(),
             new InvalidOperationException("transcript store down"));
@@ -132,7 +134,7 @@ public class AgentSessionGrainInputBoundaryPersistFailureSpecs : AgentSessionGra
         // Retry persistence deterministically (no scheduler waits, no
         // fake time): the next flush must surface the first turn
         // unchanged, with no second-input parts anywhere.
-        await grain.FlushForTestAsync();
+        await persistence.WaitAsync();
 
         Assert.Single(Fixture.TranscriptStore.Flushes);
         var retryFlush = Fixture.TranscriptStore.Flushes[0];

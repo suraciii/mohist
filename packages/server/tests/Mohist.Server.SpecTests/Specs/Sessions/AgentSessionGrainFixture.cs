@@ -25,6 +25,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public FakeAgentSessionStore StateStore { get; } = new();
     public FakeAgentSessionTranscriptStore TranscriptStore { get; } = new();
     public RecordingTranscriptEventPublisher TranscriptPublisher { get; } = new();
+    public AgentSessionPersistenceTestProbe Persistence { get; }
     public TestLogger<AgentSessionGrain> Logger { get; } = new();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
@@ -40,6 +41,11 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     }
 
     private TestSqliteDatabase _database = null!;
+    public AgentSessionGrainFixture()
+    {
+        Persistence = new AgentSessionPersistenceTestProbe(
+            () => TimeProvider.Advance(TimeSpan.FromSeconds(1)));
+    }
 
     public ValueTask InitializeAsync()
     {
@@ -57,6 +63,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<IAgentSessionStore>(StateStore);
             siloBuilder.Services.AddSingleton<IAgentSessionTranscriptStore>(TranscriptStore);
             siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(TranscriptPublisher);
+            siloBuilder.Services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
              siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
              siloBuilder.Services.AddSingleton<RunnerConnectionTracker>();
              siloBuilder.Services.AddSingleton<IAgentSessionConnectionRegistry>(sp =>
@@ -119,6 +126,8 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             Events.Clear();
             _commitThenThrowNextKey = null;
         }
+
+        public bool Contains(string key) => _states.ContainsKey(key);
 
         public Task<AgentSession?> LoadAsync(string key) =>
             Task.FromResult(_states.TryGetValue(key, out var state) ? Clone(state) : null);

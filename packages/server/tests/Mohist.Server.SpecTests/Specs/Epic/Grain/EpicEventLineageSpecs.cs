@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.SpecTests.Support;
 using Xunit;
 using static Mohist.Server.SpecTests.Specs.Epic.Grain.EpicEventPublishTestSupport;
 
@@ -120,10 +121,9 @@ public class EpicEventLineageSpecs
             await SeedEpicAsync(database);
             await SeedIssueAsync(database);
             var grains = new RecordingGrainFactory();
-            var grain = new EpicGrain(database.Factory, grains, new FakeTimeProvider(FixedTime), eventStore, NullLogger<EpicGrain>.Instance)
-            {
-                GrainKeyForTest = $"{ProjectId}:{EpicNumber}",
-            };
+            var identity = GrainTestContext.Create($"{ProjectId}:{EpicNumber}");
+            var grain = new EpicGrain(identity.Context, identity.Runtime, database.Factory, grains,
+                new FakeTimeProvider(FixedTime), eventStore, NullLogger<EpicGrain>.Instance);
 
             await grain.LinkIssueAsync(1, ProjectId);
             await grain.UnlinkIssueAsync(1, ProjectId);
@@ -152,10 +152,10 @@ public class EpicEventLineageSpecs
         {
             await SeedEpicAsync(database);
             await SeedIssueAsync(database);
-            var grain = new EpicGrain(database.Factory, new ThrowingAffiliationGrainFactory(), new FakeTimeProvider(FixedTime), eventStore, NullLogger<EpicGrain>.Instance)
-            {
-                GrainKeyForTest = $"{ProjectId}:{EpicNumber}",
-            };
+            var identity = GrainTestContext.Create($"{ProjectId}:{EpicNumber}");
+            var grain = new EpicGrain(identity.Context, identity.Runtime, database.Factory,
+                new ThrowingAffiliationGrainFactory(), new FakeTimeProvider(FixedTime), eventStore,
+                NullLogger<EpicGrain>.Instance);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() => grain.LinkIssueAsync(1, ProjectId));
 
