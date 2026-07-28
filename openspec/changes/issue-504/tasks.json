@@ -22,7 +22,7 @@
       "type": "MIGRATE",
       "output": "Typed WorkflowRun lineage implementation, EF migration and snapshot, updated conventions state, and passing Server/Web verification.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "The model, JSON migration, and SQLite computed projections are one atomic feature slice. Do not deploy a partial implementation or a mixed-version Server fleet."
     }
   ]

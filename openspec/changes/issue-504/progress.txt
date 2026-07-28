@@ -11,3 +11,4 @@
 - The migration rebuilds `WorkflowRuns`, migrates both lower-camel and Pascal-case legacy metadata paths, preserves indexes and the profile-binding FK, and has an inverse JSON/projection path in `Down`.
 - Existing focused and profile-binding tests that constructed annotation-backed runs were updated to construct typed metadata; the generated-column blocker fixture now seeds typed JSON projections directly.
 - Full `npm test` and Web `typecheck` pass after updating the remaining workflow/session/API fixtures to the typed state representation.
+- Verification diagnosis: the implementation and all focused checks pass; the only stale completion marker was `tasks.json` still set to `passes: false`. `npm run verify` now completes successfully, and build/test commands leave no Git-visible changes.
