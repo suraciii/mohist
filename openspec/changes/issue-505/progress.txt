@@ -1,0 +1,11 @@
+## Codebase Patterns
+
+- Quality metrics and stage durations share the effective project profile stage-order concept. `ResolveProjectStageOrderAsync` now uses `IWorkflowProfileProvider`, so persisted custom project profiles are resolved in addition to builtins.
+- Quality windows should emit only entered stages. Definition stages are emitted in Definition order; observed stages absent from that Definition retain accumulator insertion order after them.
+- The quality spec file is already guarded by the architecture test file-size ratchet. New scenarios belong in a separate focused spec file rather than expanding `IssueMetricsQualitySpecs.cs`.
+
+## T-001
+
+- Removed the hardcoded quality stage list and threaded resolved stage order through `BuildWindow`.
+- Updated no-phantom and empty-window expectations; added custom Definition and builtin parity scenarios in `IssueMetricsQualityStageOrderSpecs`.
+- Focused metric specs pass. `npm test` reaches the full suite but currently fails on the unrelated flaky `GenericAgentSessionCancelApiSpecs.Cancel_AfterReset_IgnoresTerminalActivityFromPredecessorRuntime` session-idle assertion; the metric and architecture checks pass.
