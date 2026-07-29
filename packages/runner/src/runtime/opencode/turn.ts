@@ -14,10 +14,9 @@
  *      change is the caller's responsibility to enforce via a new
  *      binding).
  *   3. Per-turn model/variant application — passed on the prompt
- *      body via `body.model = { providerID, modelID }`. Variant is
- *      carried alongside model as a runtime-side parameter; the
- *      runtime owns the carrier (it never enters the cache key or
- *      rotates the physical Session).
+ *      body via `body.model = { providerID, modelID }` and
+ *      `body.variant`. Neither enters the cache key or rotates the
+ *      physical Session.
  *   4. Awaiting `client.session.prompt()` for completion — this is
  *      the sole completion authority; idle events and SSE silence
  *      do not complete the turn, and `client.v2.session.wait()` is
@@ -85,8 +84,6 @@ export interface TurnExecutionDeps {
    */
   readonly onEvent?: (event: RuntimeGlobalEvent) => void
 }
-
-const SYSTEM_VARIANT_PREFIX = "[mohist variant:"
 
 /**
  * Wrap-up warning text. Task-agnostic, runtime-owned; injected via
@@ -644,11 +641,10 @@ function buildPromptBody(
   variant: string | null,
 ) {
   const parts = [{ type: "text" as const, text: prompt }]
-  const system = variant ? `${SYSTEM_VARIANT_PREFIX}${variant}]` : undefined
   return {
     parts,
     ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),
-    ...(system ? { system } : {}),
+    ...(variant ? { variant } : {}),
   }
 }
 
