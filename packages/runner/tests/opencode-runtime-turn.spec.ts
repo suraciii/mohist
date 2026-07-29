@@ -29,11 +29,12 @@ describe("OpenCodeRuntime.runTurn — happy path + turn fact", () => {
     expect(client.sessionCreate).toHaveBeenCalledTimes(1)
     expect(client.sessionPrompt).toHaveBeenCalledTimes(1)
     expect(client.sessionAbort).not.toHaveBeenCalled()
-    const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as { sessionID: string; directory: string; model?: unknown; parts: unknown[]; system?: string }
+    const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as { sessionID: string; directory: string; model?: unknown; parts: unknown[]; system?: string; variant?: string }
     expect(promptArg.sessionID).toMatch(/^ses_/)
     expect(promptArg.directory).toBe("/tmp/projA")
     expect(promptArg.model).toEqual({ providerID: "openai", modelID: "gpt-5" })
-    expect(promptArg.system).toBe("[mohist variant:high]")
+    expect(promptArg.variant).toBe("high")
+    expect(promptArg.system).toBeUndefined()
     expect(promptArg.parts).toEqual([{ type: "text", text: "do the work" }])
   })
 
@@ -83,7 +84,7 @@ describe("OpenCodeRuntime.runTurn — model/variant non-rotation", () => {
     expect(secondPrompt.system).toBeUndefined()
   })
 
-  it("Variant change reuses the same physical Session id and updates only the system marker", async () => {
+  it("Variant change reuses the same physical Session id and updates the prompt variant", async () => {
     const { deps, client } = buildRuntime()
     const runtime = new OpenCodeRuntime(deps)
     await runtime.start()
@@ -105,8 +106,9 @@ describe("OpenCodeRuntime.runTurn — model/variant non-rotation", () => {
     if (!second.ok) return
     expect(second.value.facts.runtimeSessionId).toBe(sessionId)
     expect(client.sessionCreate).toHaveBeenCalledTimes(1)
-    const secondPrompt = client.sessionPrompt.mock.calls[1]?.[0] as { system?: string }
-    expect(secondPrompt.system).toBe("[mohist variant:low]")
+    const secondPrompt = client.sessionPrompt.mock.calls[1]?.[0] as { system?: string; variant?: string }
+    expect(secondPrompt.variant).toBe("low")
+    expect(secondPrompt.system).toBeUndefined()
   })
 })
 
