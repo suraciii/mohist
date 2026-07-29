@@ -567,10 +567,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {
-        if (GetPendingFollowups(session).Count > 0
-            || session.Status.Activity != AgentSessionActivity.Idle)
+        var pending = GetPendingFollowups(session);
+        if (pending.Count > 0 || session.Status.Activity != AgentSessionActivity.Idle)
             throw new InvalidOperationException(
-                $"AgentSession {session.Id} is currently active; Compact and Reset require an idle session.");
+                $"AgentSession {session.Id} is currently active; Compact and Reset require an idle session. "
+                + $"Activity={session.Status.Activity}, PendingFollowups={pending.Count}.");
     }
 
     private IReadOnlyList<RuntimeEventEnvelope> BuildContextResetTranscriptEntries(

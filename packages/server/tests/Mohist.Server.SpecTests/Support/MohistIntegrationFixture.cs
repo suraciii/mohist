@@ -54,6 +54,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
     public AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => VirtualRunnerRoot;
 

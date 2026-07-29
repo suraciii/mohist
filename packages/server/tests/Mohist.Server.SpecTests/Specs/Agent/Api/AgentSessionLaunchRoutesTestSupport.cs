@@ -13,6 +13,7 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using Xunit;
+using Xunit.Sdk;
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
 public abstract class AgentSessionLaunchRoutesTestSupport
@@ -37,57 +38,78 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             $"Agent job to reach {expected}",
             advance);
 
+    /// <summary>
+    /// A job whose first dispatch attempt found no runner waits on a backoff
+    /// timer that a frozen fake clock never releases, so polling alone can
+    /// never observe it; each miss releases one retry. The happy path matches
+    /// on the first poll and leaves the clock untouched. The registry
+    /// snapshot on timeout distinguishes a job that was never dispatched from
+    /// one that landed on a different runner.
+    /// </summary>
     protected async Task<PollSnapshot> PollDispatchForSessionAsync(string runnerId, string expectedSessionId)
     {
-        var attempts = 50;
-        for (var i = 0; i < attempts; i++)
+        try
         {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            var dispatches = await poll.ReadDispatchElementsAsync();
-            PollSnapshot? match = null;
-            var others = new List<JsonElement>();
-            foreach (var data in dispatches)
+            return (await TestWait.ForAsync(
+                () => PollDispatchOnceAsync(runnerId, expectedSessionId),
+                found => found is not null,
+                TimeSpan.FromSeconds(1),
+                TimeSpan.FromMilliseconds(100),
+                $"a polled dispatch on runner '{runnerId}' carrying AgentSessionId='{expectedSessionId}'",
+                _fixture.ReleaseDispatchBackoffAsync))!;
+        }
+        catch (XunitException failure)
+        {
+            throw new XunitException(
+                $"{failure.Message}\nRunner registry at timeout:\n{await _fixture.DescribeRunnerRegistryAsync()}");
+        }
+    }
+
+    private async Task<PollSnapshot?> PollDispatchOnceAsync(string runnerId, string expectedSessionId)
+    {
+        using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+        var dispatches = await poll.ReadDispatchElementsAsync();
+        PollSnapshot? match = null;
+        var others = new List<JsonElement>();
+        foreach (var data in dispatches)
+        {
+            var polledSessionId = data.TryGetProperty("agentSessionId", out var sessionIdElement)
+                && sessionIdElement.ValueKind != JsonValueKind.Null
+                ? sessionIdElement.GetString()
+                : null;
+            if (match is null && polledSessionId == expectedSessionId)
             {
-                var polledSessionId = data.TryGetProperty("agentSessionId", out var sessionIdElement)
-                    && sessionIdElement.ValueKind != JsonValueKind.Null
-                    ? sessionIdElement.GetString()
+                var workId = data.GetProperty("workId").GetString() ?? string.Empty;
+                var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement)
+                    && agentJobIdElement.ValueKind != JsonValueKind.Null
+                    ? agentJobIdElement.GetString()
                     : null;
-                if (match is null && polledSessionId == expectedSessionId)
-                {
-                    var workId = data.GetProperty("workId").GetString() ?? string.Empty;
-                    var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement)
-                        && agentJobIdElement.ValueKind != JsonValueKind.Null
-                        ? agentJobIdElement.GetString()
-                        : null;
-                    var projectId = data.TryGetProperty("projectId", out var projectIdElement)
-                        && projectIdElement.ValueKind != JsonValueKind.Null
-                        ? projectIdElement.GetString()
-                        : null;
-                    var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement)
-                        && ownerKindElement.ValueKind != JsonValueKind.Null
-                        ? ownerKindElement.GetString()
-                        : null;
-                    match = new PollSnapshot(
-                        WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
-                        WorkId: workId,
-                        AgentJobId: agentJobId,
-                        ProjectId: projectId,
-                        AgentSessionId: polledSessionId,
-                        OwnerKind: ownerKind);
-                }
-                else
-                {
-                    others.Add(data);
-                }
+                var projectId = data.TryGetProperty("projectId", out var projectIdElement)
+                    && projectIdElement.ValueKind != JsonValueKind.Null
+                    ? projectIdElement.GetString()
+                    : null;
+                var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement)
+                    && ownerKindElement.ValueKind != JsonValueKind.Null
+                    ? ownerKindElement.GetString()
+                    : null;
+                match = new PollSnapshot(
+                    WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
+                    WorkId: workId,
+                    AgentJobId: agentJobId,
+                    ProjectId: projectId,
+                    AgentSessionId: polledSessionId,
+                    OwnerKind: ownerKind);
             }
-
-            foreach (var other in others)
-                await DrainDispatchElementAsync(runnerId, other);
-
-            if (match is not null) return match;
+            else
+            {
+                others.Add(data);
+            }
         }
 
-        throw new InvalidOperationException($"No polled dispatch carrying AgentSessionId='{expectedSessionId}' after {attempts} attempts");
+        foreach (var other in others)
+            await DrainDispatchElementAsync(runnerId, other);
+
+        return match;
     }
 
     protected async Task DrainDispatchAsync(string runnerId)
@@ -365,22 +387,23 @@ public abstract class AgentSessionLaunchRoutesTestSupport
     /// given generic session id. The launch endpoint mints a fresh
     /// <c>agent-job-launch-{guid}</c> key per launch, so this probes the
     /// runner registry to find the active work item and recovers the key.
-    /// Polls until the runner picks up the dispatch (the grain's
-    /// <see cref="AgentJobGrain.TryDispatchAsync"/> runs asynchronously
-    /// after <c>SubmitAsync</c> returns, so the work may not be visible
-    /// on the runner's active list the instant the 201 is observed).
+    /// A job that found no runner on its first attempt owns no work item
+    /// until a backoff retry lands, and the frozen fake clock releases those
+    /// only on demand. The registry is shared, so the session id must be
+    /// matched or a concurrent job's grain is returned.
     /// </summary>
     protected async Task<IAgentJobGrain?> FindAgentJobGrainAsync(string sessionId)
     {
         return await TestWait.ForAsync(
-            ProbeAgentJobGrainAsync,
+            () => ProbeAgentJobGrainAsync(sessionId),
             job => job is not null,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(50),
-            $"agent job grain for session '{sessionId}'");
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromMilliseconds(100),
+            $"agent job grain for session '{sessionId}'",
+            _fixture.ReleaseDispatchBackoffAsync);
     }
 
-    protected async Task<IAgentJobGrain?> ProbeAgentJobGrainAsync()
+    protected async Task<IAgentJobGrain?> ProbeAgentJobGrainAsync(string sessionId)
     {
         var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var runners = await registry.ListRunnerIdsAsync();
@@ -394,8 +417,11 @@ public abstract class AgentSessionLaunchRoutesTestSupport
                 {
                     var job = _fixture.Grains.GetGrain<IAgentJobGrain>(work.OwnerId);
                     var snapshot = await job.GetRuntimeSnapshotAsync();
-                    if (snapshot.CurrentWorkId == work.WorkId)
+                    if (snapshot.CurrentWorkId == work.WorkId
+                        && string.Equals(snapshot.AgentSessionId, sessionId, StringComparison.Ordinal))
+                    {
                         return job;
+                    }
                 }
             }
         }

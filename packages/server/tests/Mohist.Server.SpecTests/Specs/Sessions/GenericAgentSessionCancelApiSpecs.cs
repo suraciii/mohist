@@ -206,7 +206,6 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         }));
         await persistence.WaitAsync();
         Assert.Equal("idle", (await grain.GetAsync())?.Status);
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         await grain.ResetAsync(new ResetAgentSessionCommand(sessionId, "runtime-replacement"));
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();

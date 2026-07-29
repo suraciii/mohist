@@ -13,6 +13,7 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using Xunit;
+using Xunit.Sdk;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifetime
@@ -169,52 +170,73 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
         return payloads.Select(payload => JsonSerializer.Deserialize<JsonElement>(payload)).ToArray();
     }
 
+    /// <summary>
+    /// A job whose first dispatch attempt found no runner waits on a backoff
+    /// timer that a frozen fake clock never releases, so polling alone can
+    /// never observe it; each miss releases one retry. The happy path matches
+    /// on the first poll and leaves the clock untouched. The registry
+    /// snapshot on timeout distinguishes a job that was never dispatched from
+    /// one that landed on a different runner.
+    /// </summary>
     protected async Task<PollResult> PollOnceAsync(string runnerId, string expectedSessionId)
     {
-        var attempts = 50;
-        for (var i = 0; i < attempts; i++)
+        try
         {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            var dispatches = await poll.ReadDispatchElementsAsync();
-            PollResult? match = null;
-            foreach (var data in dispatches)
-            {
-                var polledSessionId = data.TryGetProperty("agentSessionId", out var agentSessionIdElement)
-                    && agentSessionIdElement.ValueKind != JsonValueKind.Null
-                    ? agentSessionIdElement.GetString()
-                    : null;
-                if (match is null && polledSessionId == expectedSessionId)
-                {
-                    var workId = data.GetProperty("workId").GetString() ?? string.Empty;
-                    var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement) && agentJobIdElement.ValueKind != JsonValueKind.Null
-                        ? agentJobIdElement.GetString()
-                        : null;
-                    var projectId = data.TryGetProperty("projectId", out var projectIdElement) && projectIdElement.ValueKind != JsonValueKind.Null
-                        ? projectIdElement.GetString()
-                        : null;
-                    var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement) && ownerKindElement.ValueKind != JsonValueKind.Null
-                        ? ownerKindElement.GetString()
-                        : null;
-                    match = new PollResult(
-                        WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
-                        WorkId: workId,
-                        WorkType: data.GetProperty("workType").GetString() ?? string.Empty,
-                        Stage: data.GetProperty("stage").GetString() ?? string.Empty,
-                        AgentJobId: agentJobId,
-                        ProjectId: projectId,
-                        AgentSessionId: polledSessionId,
-                        OwnerKind: ownerKind);
-                }
-                else
-                {
-                    await DrainDispatchElementAsync(runnerId, data);
-                }
-            }
+            return (await TestWait.ForAsync(
+                () => PollDispatchOnceAsync(runnerId, expectedSessionId),
+                found => found is not null,
+                TimeSpan.FromSeconds(1),
+                TimeSpan.FromMilliseconds(100),
+                $"a polled dispatch on runner '{runnerId}' carrying AgentSessionId='{expectedSessionId}'",
+                _fixture.ReleaseDispatchBackoffAsync))!;
+        }
+        catch (XunitException failure)
+        {
+            throw new XunitException(
+                $"{failure.Message}\nRunner registry at timeout:\n{await _fixture.DescribeRunnerRegistryAsync()}");
+        }
+    }
 
-            if (match is not null) return match;
+    private async Task<PollResult?> PollDispatchOnceAsync(string runnerId, string expectedSessionId)
+    {
+        using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+        var dispatches = await poll.ReadDispatchElementsAsync();
+        PollResult? match = null;
+        foreach (var data in dispatches)
+        {
+            var polledSessionId = data.TryGetProperty("agentSessionId", out var agentSessionIdElement)
+                && agentSessionIdElement.ValueKind != JsonValueKind.Null
+                ? agentSessionIdElement.GetString()
+                : null;
+            if (match is null && polledSessionId == expectedSessionId)
+            {
+                var workId = data.GetProperty("workId").GetString() ?? string.Empty;
+                var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement) && agentJobIdElement.ValueKind != JsonValueKind.Null
+                    ? agentJobIdElement.GetString()
+                    : null;
+                var projectId = data.TryGetProperty("projectId", out var projectIdElement) && projectIdElement.ValueKind != JsonValueKind.Null
+                    ? projectIdElement.GetString()
+                    : null;
+                var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement) && ownerKindElement.ValueKind != JsonValueKind.Null
+                    ? ownerKindElement.GetString()
+                    : null;
+                match = new PollResult(
+                    WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
+                    WorkId: workId,
+                    WorkType: data.GetProperty("workType").GetString() ?? string.Empty,
+                    Stage: data.GetProperty("stage").GetString() ?? string.Empty,
+                    AgentJobId: agentJobId,
+                    ProjectId: projectId,
+                    AgentSessionId: polledSessionId,
+                    OwnerKind: ownerKind);
+            }
+            else
+            {
+                await DrainDispatchElementAsync(runnerId, data);
+            }
         }
 
-        throw new InvalidOperationException($"No polled dispatch carrying AgentSessionId='{expectedSessionId}' after {attempts} attempts");
+        return match;
     }
 
     protected async Task DrainRemainingDispatchAsync(string runnerId, string? expectedSessionId = null)
