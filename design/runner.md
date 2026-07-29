@@ -1,23 +1,25 @@
 # Runner 与调度
 
-Level-triggered reconciliation：调度器不保存记忆，每个决策都是对持久化状态的
-无状态查询，由下一次 poll 对账修正。
+调度无记忆：每个决策都是对持久化状态的无状态查询。runner 的自报只用于发现
+需要重投的工作；自报不是权威，权威永远从 store 当前内容重建。
 
 每个事实只有一个所有者：
 
 ```
-谁被派发了什么工作        → WorkflowRun / AgentJob（store 可查询）
+谁被派发了什么工作        → WorkflowRun / AgentJob（各自是自己的 dispatch ledger，store 可查询）
 此刻正在执行什么          → runner 进程内存（每次 poll 上报）
 runner 是否存活           → RunnerGrain.lastSeen
 ```
 
-没有第三份副本。dispatch 永远可以从持久化的 run 重建。
+没有第二份副本。任何组件都不暂存属于其他 owner 的 dispatch 或工作状态；需要时
+从 owner 的持久化状态重建。这是调度协作不需要 reconcile 的原因：不存在需要
+核对的第二份事实。
 
 不变量：
 
 ```
-workflow run 本身就是 dispatch ledger
-Running ⟹ 一个 poll 内完成对账：reported ∨ re-dispatched ∨ rejected as invalid ∨ closed out
+每个 WorkflowRun / AgentJob 本身就是自己的 dispatch ledger
+Running ⟹ 一个 poll 内完成修正：reported ∨ re-dispatched ∨ rejected as invalid ∨ closed out
 |assigned 给 runner 的 Running works| ≤ slots（claim 时检查）
 ```
 
@@ -28,7 +30,6 @@ Running ⟹ 一个 poll 内完成对账：reported ∨ re-dispatched ∨ rejecte
 | 生命周期 | 触发 | 变化 | 失效时机 |
 |---|---|---|---|
 | persistent | 控制平面 | 少量单字段 | 从不 |
-| event-increment | agent-job push/report | add/remove | runner offline |
 | snapshot-replace | register / 成功 poll / unregister | 整体覆盖 | 下一次成功 poll |
 
 ```
@@ -37,7 +38,6 @@ Runner
   slots                          persistent；控制平面拥有
   lastSeen                       snapshot；register 建立，成功 poll 续期
   info: RunnerInfo|null          register 填充；heartbeat-repair 刷新；unregister 清空
-  agentJobWorks: [RunnerWork]    event-increment；agent job 的 push ledger（没有 run 可重渲染）
 
 RunnerInfo
   state: online|offline          register 建立；成功 poll 的新鲜度维持
@@ -45,27 +45,25 @@ RunnerInfo
   capabilities, coderModels, coderModelVariants
 ```
 
-不设 workflow work ledger。workflow 工作的真相在 run 里
-（store：`WHERE Status=Running AND AssignedRunnerId=R`）。slot 不变量
+Runner 不持有任何 work 记录。两类工作的真相都在各自 owner 的 store 里
+（workflow：run 的行模型；agent-job：AgentJob 的调度投影），都可直接查询
+`Pending/Running WHERE AssignedRunnerId=R`。slot 不变量
 （`|running| ≤ slots`）在 claim 时对 store 检查，不在此维护：
 
 | 判定 | 结果 |
 |---|---|
 | 守护 Runner 自身不变量？ | 否 |
-| 无法从其他 aggregate 推导？ | 可推导：`store.Where(Running, AssignedRunnerId=R)` |
-| 行为签名需要它？ | 没有行为以 workflow work 为参数 |
+| 无法从其他 aggregate 推导？ | 可推导：两类 owner 的 store 查询 |
+| 行为签名需要它？ | 没有行为以 work 记录为参数 |
 
 ### 行为
 
 ```
 Register(info)                  state=online, lastSeen=now, 填充 info, 写 registry
-Unregister()                    state=offline, 清空 info 与 agentJobWorks,
+Unregister()                    state=offline, 清空 info；
                                 closeout → 向 owner 报告 FAILED("runner-lost")
 TouchPresence()                 成功 poll：lastSeen=now；恢复 registry 的 online 状态
 HeartbeatRepair(info)           只刷新 info；绝不刷新 presence
-AssignAgentJob(work)            agentJobWorks.add
-DequeueAssignedAgentJob()       下一个 pending → Running
-ReportAgentJobResult(id,w,r)    agentJobWorks.remove → AgentJobGrain
 Update(slots)                   write-through
 ```
 
@@ -75,22 +73,27 @@ Update(slots)                   write-through
 
 `GetRuntimeStateAsync()` → `RunnerRuntimeState`（status + lastSeen + activeWorks）。
 
-activeWorks 合并自：
+activeWorks 合并自两类 owner 的 store 直读：
 
-- workflow：store 查询 `Running assigned to me`，每个 run 的当前 task/checks；
-- agent-job：本聚合的 `agentJobWorks`（Pending/Running）。
+- workflow：`Running assigned to me`，每个 run 的当前 task/checks；
+- agent-job：AgentJob 调度投影的 `Pending/Running assigned to me`。
 
 ## 调度协议：claim / pull / report
 
 ```
-WorkflowGrain / WorkflowRun          ★ 唯一 dispatch ledger
+WorkflowGrain / WorkflowRun          ★ workflow 工作的 dispatch ledger
   拥有 Assignment 与工作生命周期（Pending/Running/terminal）
   ClaimNext：原子 Pending→Running + stage lock
   消费 report；幂等（终态工作再报 → Stale）
   无 timer，无 runner 概念
 
-AgentJobGrain
-  拥有工作状态 + DispatchSnapshot（没有 run 可供重渲染）
+AgentJobGrain / AgentJob             ★ agent-job 工作的 dispatch ledger
+  拥有工作状态与唯一的 DispatchSnapshot
+  admission：eligibility 预检选 runner，单事务写入
+    AssignedRunnerId + ReadySince + DispatchSnapshot；不调用其他组件
+  ClaimNext：原子 Pending→Running；幂等
+  消费 report；幂等（终态工作再报 → Stale）
+  reminder 只做一件事：ReadySince 过老仍 Pending → Failed(RunnerUnavailable)
 
 RunnerGrain
   presence、slots、closeout（见上节）
@@ -101,7 +104,7 @@ DispatchService（无状态，不是 grain）
   全部来自持久化状态；无 cursor、无 cache、无 ledger
 
 runner 进程（物理）
-  一个进程级关键对账循环，拥有 polling + report retry
+  一个进程级关键循环，拥有 polling + report retry
   并发执行工作；progress-aware timeout
   每次 poll 上报完整状态：inFlight + awaitingAck
   到期 report 按固定间隔重试直至被 ack
@@ -111,12 +114,11 @@ runner 进程（物理）
 
 | 内容 | 方式 |
 |---|---|
-| workflow 工作 | pull-only；DispatchService 按 poll 计算；report 直达 owner grain |
-| agent-job 工作 | push；AssignAgentJob 放入，poll 时 dequeue |
+| 所有工作（workflow 与 agent-job） | pull-only；DispatchService 按 poll 计算；report 直达 owner grain |
 | presence | poll 即 heartbeat（TouchPresence） |
 | info | register/unregister/heartbeat-repair；绝不随 poll |
 
-### Poll 对账
+### Poll 计算
 
 ```
 runner 进程                     DispatchService                      store/grains
@@ -124,29 +126,29 @@ runner 进程                     DispatchService                      store/gra
     |------------------------------>|                                    |
     |                               | ⓪ BeginPoll：捕获 slots + gate     |
     |                               | ① TouchPresence（poll=heartbeat）  |
-    |                               | ② desired ← Running WHERE assigned=me
-     |                               | ③ redelivery = desired − reported  |
-     |                               |    每项从持久化 run 重建 dispatch   |
-     |                               | ④ spare = slots − |desired|        |
-     |                               |    while spare > 0:                |
-     |                               |      assigned 给我的 Ready runs    |
-     |                               |      ORDER BY ReadySince ASC       |
-     |                               |      ClaimNextAsync ---------------->| Pending→Running
-     |                               |        ok → 构造 dispatch, spare--  |   + stage lock
-     |                               |        null → 下一个候选           |
-     |                               |    仍有 spare：可 claim 的 Pending |
-     |                               |      → AssignWorker → ClaimNext    |
-     | { dispatches[] }              |                                    |
-     |<------------------------------|                                    |
-     |                               | EndPoll：释放 gate                 |
-     | inFlight.add(dispatches)      |                                    |
-     | 并发执行                       |                                    |
+    |                               | ② desired ← 两类 owner 的           |
+    |                               |    Running assigned=me              |
+    |                               | ③ redelivery = desired − reported   |
+    |                               |    每项从 owner 的持久状态重建       |
+    |                               | ④ spare = slots − |active works|    |
+    |                               |    while spare > 0:                 |
+    |                               |      Pending assigned=me，再         |
+    |                               |      可 claim 的 Pending            |
+    |                               |      各自 ORDER BY ReadySince ASC   |
+    |                               |      ClaimNext ------------------->| Pending→Running
+    |                               |        ok → 构造 dispatch, spare--  |   (+ stage lock)
+    |                               |        null → 下一个候选            |
+    | { dispatches[] }              |                                    |
+    |<------------------------------|                                    |
+    |                               | EndPoll：释放 gate                 |
+    | inFlight.add(dispatches)      |                                    |
+    | 并发执行                       |                                    |
 ```
 
-顺序：redelivery 优先（先还欠账）→ assigned 的 Ready runs → claim 新工作。
-先保住手上的，再扩张。
+顺序：redelivery 优先（先还欠账）→ assigned 给本 runner 的 Pending → 可 claim
+的 Pending。先保住手上的，再扩张。
 
-`reported − desired`（run 已越过该工作停止）：不采取动作。进程执行到完成，
+`reported − desired`（owner 已越过该工作停止）：不采取动作。进程执行到完成，
 report 得到 `Stale` 应答 = ack，结果丢弃。
 
 免竞态：进程在收到 dispatch 与下一次 poll 之间同步把工作加进 inFlight。
@@ -154,8 +156,8 @@ report 得到 `Stale` 应答 = ack，结果丢弃。
 
 ### Claim
 
-`ClaimNextAsync`：取下一个 pending 工作，获取 stage lock，以 runner 身份标记
-Running，持久化。一次原子写。无 offer 阶段，无 runner 侧预注册。
+`ClaimNextAsync`：取下一个 pending 工作（workflow 带 stage lock），以 runner
+身份标记 Running，持久化。一次原子写。无 offer 阶段，无 runner 侧预注册。
 
 ```
 PENDING --ClaimNext--> RUNNING --report(success|fail)--> COMPLETED|FAILED
@@ -166,7 +168,7 @@ claim 成功但 dispatch 丢失 → 工作处于 Running 且未上报 → 下一
 
 dispatch 构造失败分两类。外部依赖或可变配置导致的普通失败保留 Running，由下一次
 poll 重试；持久 WorkItem 的 `uses` 命中退役 Action 时，translator 返回明确的不可重试
-拒绝，DispatchService 用 `workerId + workId` 命令 WorkflowRun 将该工作记为 Failed。该命令
+拒绝，DispatchService 用 `workerId + workId` 命令 owner 将该工作记为 Failed。该命令
 必须核对当前 active work，不能用“失败当前任务”误伤已经推进后的新工作。Action 输入契约
 （未知键、缺 required、类型错）由 Runner 在渲染后 manifest 校验阶段判定，按
 [`actions.md`](workflow/actions.md) 与 [`task-dispatch.md`](workflow/task-dispatch.md)
@@ -174,23 +176,30 @@ poll 重试；持久 WorkItem 的 `uses` 命中退役 Action 时，translator �
 
 ### 公平性
 
-工作（重新）进入 Ready 时打 `ReadySince` 时间戳。按 `ORDER BY ReadySince ASC`
-服务 = 零调度器状态的 round-robin：
+工作（重新）进入 Ready 时打 `ReadySince` 时间戳。同一候选层级内 workflow 与
+agent-job 按 `ORDER BY ReadySince ASC` 混排服务 = 零调度器状态的 round-robin：
 
 ```
-工作完成 → run 推进 → 下一个工作 pending → ReadySince := now
-刚被服务的 run 排到队尾；等最久的在队头
+工作完成 → owner 推进 → 下一个工作 pending → ReadySince := now
+刚被服务的排到队尾；等最久的在队头
 ```
 
-可插拔策略点：默认纯 FIFO，可扩展为 `Priority DESC, ReadySince ASC`。
+可插拔策略点：默认纯 FIFO。交互触发的 agent-job 如需优先于后台 workflow，
+扩展为 `Priority DESC, ReadySince ASC`——优先级必须是显式策略，不做隐式偏袒。
 
 ### 容量
 
-`slots` 约束一个 runner 拥有的所有并发执行工作。`BeginPoll` 防止 poll 重叠，
-但其容量快照只是参考。每次新的 workflow claim 都在 runner lifecycle gate 下
-重新检查 runner 的实时注册与容量。容量下调只约束后续 claim，不取消已在执行的
-工作；排在 claim 之前的 unregister 拒绝该 claim，排在 claim 之后的 unregister
-将其 closeout。poll 被接纳期间 Agent admission 被拒绝。进程不执行任何容量约束。
+`slots` 约束一个 runner 拥有的所有并发执行工作（workflow 与 agent-job 合计）。
+容量裁定只有一处：每次新的 claim 都在 runner lifecycle gate 下复查 runner 的
+实时注册与容量。`BeginPoll` 防止 poll 重叠，但其容量快照只是参考。容量下调只
+约束后续 claim，不取消已在执行的工作；排在 claim 之前的 unregister 拒绝该
+claim，排在 claim 之后的 unregister 将其 closeout。进程不执行任何容量约束。
+
+AgentJob admission 的容量检查是预检：选 runner 时以 eligibility 过滤实时容量
+已满者，全部已满则同步拒绝——调用方立即看到背压。预检通过不承诺容量；终审
+在 claim。预检到终审之间容量可能被其他工作占用，此时 job 留在 Pending，由
+下一次 poll 再审。容量的同步承诺本来就无法兑现（任何裁定与真正执行之间都
+存在窗口），两段式把承诺收窄到能兑现的范围。
 
 ### Report
 
@@ -210,20 +219,20 @@ RunnerGrain closeout。
 
 | 情形 | 负责者 | 处理 |
 |---|---|---|
-| poll 传输不可用 | runner 进程 | 有界尝试 → 在同一对账循环内重试 |
-| 对账循环意外退出 | runner 进程 | 终止进程 → 服务 supervisor 重启 |
+| poll 传输不可用 | runner 进程 | 有界尝试 → 在同一循环内重试 |
+| 循环意外退出 | runner 进程 | 终止进程 → 服务 supervisor 重启 |
 | 工作卡死/失控 | runner 进程 | progress-aware timeout → kill，报告 FAILED |
-| runner 消失 | RunnerGrain | poll 新鲜度过期 → offline → closeout：为 Running works 合成 FAILED("runner-lost") |
-| 工作超时 | 无 | 上报中的 in-flight 工作视为存活；只有进程判断快慢 |
+| runner 消失 | RunnerGrain | poll 新鲜度过期 → offline → closeout：对两类 owner 查询 `Running assigned=me`，逐个向 owner 报告 FAILED("runner-lost") |
+| 工作超时 | 无 server 侧计时 | 上报中的 in-flight 工作视为存活；只有进程判断快慢。owner 自有计时（AgentJob 的执行超时与 dispatch 超时）由各自 reminder 裁定，与调度无关 |
 
 Register 建立初始 presence，并持久记录最后一次注册档案。HTTP heartbeat 只是
 info 刷新通道，绝不能刷新 presence。activation 丢失后，第一次成功 poll 用该
 持久档案恢复 presence 与 registry，不需要额外 heartbeat。显式 unregister 清除
 持久档案。registry 只在 state/info 变化时写入，绝不随 poll 写。
 
-`runner-lost` 是失败原因，不是 WorkflowRun 状态。owner 把受影响工作记为失败，
-WorkflowRun 进入既有 `Failed` 状态，Issue 投影为 `blocked`。没有 `Interrupted`
-WorkflowRun 状态。
+`runner-lost` 是失败原因，不是 owner 状态。owner 把受影响工作记为失败：
+WorkflowRun 进入既有 `Failed` 状态，Issue 投影为 `blocked`；AgentJob 对称地
+进入既有 `Failed` 状态。没有 `Interrupted` 状态。
 
 ### 失败处理
 
@@ -240,11 +249,12 @@ WorkflowRun 状态。
 | 工作卡死 | 进程 timeout → FAILED |
 | runner 丢失 | closeout 报告 FAILED("runner-lost")；owner 进入 Failed |
 | closeout 后 runner 回归 | report 得到 Stale 应答；工作不再是 desired，自然排空 |
-| 工作执行中 run 被停止 | 不取消；report 得到 Stale 应答 |
+| 工作执行中 run/job 被停止 | 不取消；report 得到 Stale 应答 |
+| agent-job 长期无可用 runner | owner 的 ReadySince 超时 → FAILED(RunnerUnavailable) |
 
 ## 进程契约
 
-runner 进程只有一个进程级关键对账循环，拥有 poll 节奏与未 ack report 的有界
+runner 进程只有一个进程级关键循环，拥有 poll 节奏与未 ack report 的有界
 重试。传输失败不结束循环；循环意外退出则进程退出，交给服务 supervisor 重启。
 辅助的 heartbeat 或 SignalR 循环绝不能让一个不 poll 的 runner 进程活着。
 
@@ -253,7 +263,7 @@ reported set（`inFlight ∪ awaitingAck`）属于进程生命周期，必须在
 重投风暴。report 重试是由同一循环调度的有界操作，不是独立生命周期的循环。
 
 随 runner 一起丢失的工作以 `FAILED("runner-lost")` 报告给其 owner，由 owner
-决定 WorkflowRun 迁移；Runner 没有 `Interrupted` workflow 状态。
+决定后续；没有 `Interrupted` 状态。
 
 ## 落盘状态
 
@@ -271,3 +281,21 @@ runner 在 `<runnerRoot>/.mohist/runner-state/` 下持久化四类状态，全�
 幂等日志 fail-closed 是因为丢了就可能重复执行；注册表 fail-open 是因为它能
 从磁盘重建。四类状态都是 runner 私有：server 从不直接读写，跨进程一致性靠
 事件投递与 poll 对账，不靠共享文件。
+
+## 决策记录：单一 ledger，无 reconcile
+
+agent-job 工作曾经经 push 通道投递：AgentJobGrain 把 DispatchSnapshot 跨 grain
+推给 Runner 聚合暂存，Runner 侧持久化第二份 work 记录，再靠周期性的
+reconcile 核对暂存与 owner 之间的漂移。该形态违反本文开头的不变量（没有
+第二份副本）：reconcile 不是设计，而是冗余副本的维持成本——连同它带来的
+跨 grain 回调环、assignment 与 poll 的互斥竞态、activation 时的 ledger
+hydrate，全都是同一笔赎金。
+
+统一为：AgentJob 与 WorkflowRun 一样是自己的 dispatch ledger。调度所需字段
+（Status、AssignedRunnerId、ReadySince、DispatchSnapshot）以可查询投影
+持久化，DispatchService 对两类 owner 做同一组 desired 计算，claim 由 owner
+原子完成。Runner 聚合回归 presence / slots / closeout，不持有任何 work
+记录；assign 回调与 runnable 反查构成的跨 grain 环随之消失；容量裁定收敛到
+claim 一处。原 push 通道的 Runner 侧暂存、reconcile 循环与 dispatch 重试
+状态机（DispatchAttempts / retry bound / acceptance fence）整体删除；agent-job
+长期无可用 runner 的失败语义由 owner 自己的 ReadySince 超时承接。
