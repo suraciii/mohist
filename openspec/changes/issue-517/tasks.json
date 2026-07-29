@@ -1,0 +1,140 @@
+{
+  "project": "mohist-local",
+  "description": "Make an already-installed Slack Connection operable without deleting and recreating it: credential rotation with synchronous verification, owner transfer via atomic claim swap, enable/disable lifecycle control, delete-boundary confirmation, and a unified diagnostic face — consumed by CLI and Web.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Credential rotation with synchronous verification",
+      "spec": "specs/connection-credential-rotation/spec.md#Credential rotation is a synchronous verified operation",
+      "description": "Add a dedicated `POST /{connectionId}/rotate-credentials` route and a new `SlackSetupVerifier.VerifyRotationAsync(projectId, connectionId, appToken, botToken)` that runs the full Slack verification (auth.test → bots.info → scopes) using the supplied tokens directly — without reading from or writing to the secret store. The route checks the resolved workspace/App/Bot against the existing binding, stores only on success, and rejects with `credential_binding_mismatch` or `credential_verification_failed` otherwise. Also add a guard to the existing `configure` route: if identity is already bound (SetupProgress is ClaimOwner or Complete), return `409 use_rotate_credentials` pointing the operator to rotate-credentials, preventing the silent-overwrite regression.",
+      "acceptanceCriteria": [
+        "rotate-credentials submits new tokens, verifies them synchronously against a fake ISlackApiClient, and stores them via ISecretStore only when the resolved workspace/App/Bot match the existing binding exactly.",
+        "New tokens resolving to a different workspace, App, or Bot are rejected with credential_binding_mismatch; the previously stored credentials remain unchanged and no partial rotation is persisted.",
+        "Invalid tokens, scope failures, or Slack-rejected tokens are rejected with credential_verification_failed and the concrete reason; previously stored credentials remain in force.",
+        "A successful rotation does not reset OwnerSlackUserId, SetupProgress, or any accepted AgentJob/AgentSession/SessionInput; only credentials and a cleared credential-related HealthReason change.",
+        "configure on an already-bound connection returns 409 use_rotate_credentials and does not regress SetupProgress; configure on an unbound connection behaves as before.",
+        "Server tests use a fake ISlackApiClient with no real network and verify rotation success, binding-mismatch rejection, invalid-token rejection, and Owner/work preservation; npm test passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SlackSetupVerifier.VerifyRotationAsync + rotate-credentials route + configure guard.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D1. Verify-before-store is strictly safer than store-then-verify-then-rollback: no window of invalid tokens in the store, no rollback path. VerifyRotationAsync reuses the same Slack calls and scope list as VerifyAsync but parameterizes the token source and skips BindSlackIdentityAsync (identity is already bound; rotation must not rebind)."
+    },
+    {
+      "id": "T-002",
+      "title": "Owner transfer via claim-code Kind and atomic swap",
+      "spec": "specs/connection-owner-transfer/spec.md#Owner transfer generates a fresh single-use claim for an already-owned Connection",
+      "description": "Extend `SlackOwnerClaimCodeRow` with a `Kind` column (initial | transfer, default initial) via an additive EF migration. Extend `SlackOwnerClaimService.GenerateAsync` with a `kind` parameter: `transfer` requires an existing Owner + Complete setup (opposite of initial), generates a code with Kind=transfer, and supersedes prior unused transfer codes. In `HandleInboundDmAsync`, when a transfer-kind code matches, call a new `TryTransferAsync` that runs the same `IsEligibleMember` check and atomically swaps the owner via `ExecuteUpdateAsync` with `WHERE OwnerSlackUserId == currentOwner` (no no-owner window). Add the `POST /{connectionId}/transfer-owner` route.",
+      "acceptanceCriteria": [
+        "transfer-owner on a Connection with an existing Owner generates a fresh short-lived single-use code; the old Owner remains the effective Owner until the new code is redeemed.",
+        "Redeeming a transfer code by an eligible regular workspace member atomically swaps the Owner; the old Owner loses privileges in the same operation, with no window of zero or two Owners.",
+        "A guest, bot, deactivated member, or member of another workspace cannot complete a transfer; the old Owner remains unchanged.",
+        "Regenerating a transfer code immediately invalidates the prior transfer code.",
+        "An expired transfer code is rejected; the user is told to generate a new one.",
+        "The initial claim path (claim-owner) is unchanged and still uses the WHERE OwnerSlackUserId == null guard.",
+        "The Kind column migration is additive with default initial; existing rows apply cleanly.",
+        "Server tests use a fake ISlackApiClient and injectable TimeProvider for code expiry, with no real network; npm test passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SlackOwnerClaimCodeRow.Kind column + migration + GenerateAsync kind parameter + TryTransferAsync atomic swap + transfer-owner route.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D2. The conditional WHERE OwnerSlackUserId == currentOwner makes the swap atomic without a no-owner window. Reuses the entire claim-code mechanism (hashing, expiry, supersession) — only the Kind discriminator and the swap guard are new."
+    },
+    {
+      "id": "T-003",
+      "title": "Enable/Disable lifecycle control and delete-boundary wording",
+      "spec": "specs/connection-lifecycle-control/spec.md#Enable and Disable are user-driven Desired state toggles",
+      "description": "Add `POST /{connectionId}/disable` and `POST /{connectionId}/enable` routes that toggle DesiredState via the existing `AgentConnectionStore.UpdateAsync`. Add a DesiredState guard to the ingress route: immediately after loading the connection and before any claim/owner/dispatch logic, if DesiredState is Disabled, return `{ kind: \"rejected\", reason: \"This Connection is disabled.\" }` with HTTP 200 (distinct from backpressure 409). Both routes are idempotent. Also update the delete response and CLI delete output to state that Mohist-side records were removed and the Slack App remains installed on the workspace until a workspace admin manually removes it.",
+      "acceptanceCriteria": [
+        "disable sets DesiredState to Disabled; enable sets it to Enabled; both are idempotent and neither touches credentials, Owner, SetupProgress, health, or accepted work.",
+        "A Disabled Connection rejects inbound Slack DM ingress with a disabled rejection at HTTP 200 before any claim/owner/dispatch logic; no AgentJob, AgentSession, SessionInput, or inbox entry is created.",
+        "The adapter discovery list (ListForAdapterAsync) already excludes Disabled connections; no adapter change is needed.",
+        "Disable while an accepted AgentJob is running preserves the running Job, Session, Inputs, and Turns; only new Slack input is blocked.",
+        "Enable does not replay or reprocess messages that arrived during the disabled period.",
+        "A Disabled connection with otherwise healthy Slack is reported as Disabled with Healthy health, not Degraded; a Degraded connection with Enabled DesiredState is reported as Degraded, not Disabled.",
+        "Delete output states that the Slack App remains installed on the workspace; the cascade preserves Agent/Job/Session/Input/Turn/attachments as before.",
+        "Server tests verify ingress rejection, accepted-work preservation, no-replay, Disable≠Degraded independence, and delete wording; npm test passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "disable/enable routes + ingress DesiredState guard + delete response wording.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D4 + D5. The DesiredState field and the ListForAdapterAsync Enabled filter already exist; the only missing pieces are the toggle routes, the ingress guard, and the honest delete wording. Disable-rejection at HTTP 200 (not 409) matches the existing non-owner DM rejection pattern — the adapter acks Slack, no retry storm."
+    },
+    {
+      "id": "T-004",
+      "title": "Unified diagnostic with identity drift and owner availability probe",
+      "spec": "specs/connection-diagnostics/spec.md#A unified diagnostic surfaces one most-important state, reason, and next action",
+      "description": "Add `VerifiedBotName` (nullable) to AgentConnection and AgentConnectionRow via an additive EF migration; capture it from BotsInfoAsync in both SlackSetupVerifier.VerifyAsync and VerifyRotationAsync on every successful verification. Add `ConnectionDiagnostic.Compute(connection, inputs)` — a pure function returning PrimaryState/Reason/NextAction/Facts using the documented 8-row precedence table (setup-incomplete > credentials-invalid > service-offline > owner-unavailable > agent-needs-setup > disabled > identity-drift > healthy). Add `GET /{connectionId}/diagnostic` that loads the connection, lazily probes owner availability via ISlackApiClient.UsersInfoAsync + IsEligibleMember (degrading to 'unknown' if Slack unreachable), derives Agent readiness, checks heartbeat freshness, and returns the diagnostic result. Identity drift compares VerifiedBotName vs BotName vs Agent.Name.",
+      "acceptanceCriteria": [
+        "ConnectionDiagnostic.Compute is a pure function testable with injected inputs (no Slack, no DB, no time); all 8 precedence rows produce the correct PrimaryState/Reason/NextAction.",
+        "The diagnostic distinguishes setup-incomplete, credentials-invalid, service-offline, owner-unavailable, agent-needs-setup, disabled, identity-drift, and healthy with different next actions; no two distinct conditions produce an indistinguishable diagnostic.",
+        "The diagnostic does not collapse facts into a single Connected value; Facts exposes all independent dimensions as supporting detail.",
+        "Owner availability is probed lazily via users.info + IsEligibleMember on the /diagnostic route only; a departed/deactivated/guest Owner reports unavailable with a transfer next action; if Slack is unreachable, it reports 'owner availability unknown' without failing the diagnostic.",
+        "Identity drift is detected: VerifiedBotName ≠ BotName (presentation drift) and BotName ≠ Agent.Name (agent-name drift) are surfaced with concrete values; Mohist does not modify the Slack side or overwrite recorded values.",
+        "VerifiedBotName is captured on every successful VerifyAsync and VerifyRotationAsync; connections not yet verified report 'not yet verified' for drift rather than a false positive.",
+        "The /diagnostic route returns the full ConnectionDiagnosticResult; the existing view route continues to return the raw connection object.",
+        "Server tests cover the pure function (all precedence rows), owner-availability probe via fake ISlackApiClient, identity drift detection, and VerifiedBotName capture; npm test passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentConnectionRow.VerifiedBotName column + migration + VerifiedBotName capture in verify paths + ConnectionDiagnostic.Compute pure function + /diagnostic route with lazy owner probe.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Implements design D6 + D7 + D3. Depends on T-001 because VerifyRotationAsync (created in T-001) must also capture VerifiedBotName. The pure function is independently testable; the /diagnostic route composes it with lazy probes. Owner availability is ephemeral (not persisted) to avoid stale facts. Avatar drift is deferred (Slack bots.info returns icon URLs not stable hashes — Open Questions)."
+    },
+    {
+      "id": "T-005",
+      "title": "CLI connection operations and diagnostic rendering",
+      "spec": "specs/connection-credential-rotation/spec.md#The CLI exposes credential rotation",
+      "description": "Add four subcommands to AgentConnectionCommands: `rotate-credentials <id> [--credentials-file]` (reuses ReadCredentialsAsync/IsProtectedFile, POSTs to /rotate-credentials), `transfer-owner <id>` (POSTs to /transfer-owner, prints code + expiry), `disable <id>` and `enable <id>` (POST to respective routes). Update `view <id>` to call the /diagnostic endpoint and render primary state, reason, next action, then supporting facts. Update `list` to render a compact per-row primary-state column from stored facts only (no live probes). Update CliAgentConnectionCommandSpecs to assert the four commands now exist and remove the prior absence assertion.",
+      "acceptanceCriteria": [
+        "rotate-credentials, transfer-owner, enable, and disable subcommands are present in the mo agent connection group.",
+        "rotate-credentials reads credentials via hidden input or --credentials-file (reusing the existing protected-file validation), refuses command-line token arguments, and never echoes tokens.",
+        "transfer-owner prints the one-time transfer code and its expiry.",
+        "disable/enable toggle DesiredState and report the change.",
+        "view renders the diagnostic summary (primary state, reason, next action) from the /diagnostic endpoint, with supporting facts as detail.",
+        "list renders a compact per-row primary-state column derived from stored facts only.",
+        "CliAgentConnectionCommandSpecs no longer asserts the four commands are absent; it asserts they are present and target the correct endpoints.",
+        "CLI tests cover each new command's endpoint targeting and the credential-input validation paths; npm test passes."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Four new CLI subcommands (rotate-credentials, transfer-owner, disable, enable) + view/list diagnostic rendering + spec test update.",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Implements design D8. The credential-reading helper (ReadCredentialsAsync/IsProtectedFile) is reused unchanged from configure, keeping one protected-input path. The spec test's explicit absence assertion (CliAgentConnectionCommandSpecs.cs:18-21) is the single gating test change."
+    },
+    {
+      "id": "T-006",
+      "title": "Web diagnostic view as the first Connection surface",
+      "spec": "specs/connection-diagnostics/spec.md#The Web presents the diagnostic summary",
+      "description": "Introduce the first Web surface for AgentConnection: a read-only diagnostic view that calls GET /{connectionId}/diagnostic and renders a summary card (primary state, reason, next action) with expandable fact detail (setup progress, desired state, health, owner availability, identity drift, agent readiness). Establish the TanStack Query data-fetching hook and API client function for connections. No create/edit/disable/enable UI in this issue — those remain CLI-only.",
+      "acceptanceCriteria": [
+        "A Web route renders a Connection diagnostic summary card showing the primary state, reason, and single next action as the primary view, with supporting facts available as expandable detail.",
+        "The Web calls GET /{connectionId}/diagnostic and renders all six diagnostic dimensions (setup, service, credentials, owner, identity drift, agent readiness).",
+        "Identity drift is shown honestly with the concrete differing values; no auto-rewrite action is offered.",
+        "An unavailable Owner is shown with a transfer-ownership next action.",
+        "The TanStack Query hook and API client function for connections are established and reusable by future Web Connection features.",
+        "Web typecheck (npm run typecheck -w packages/web) and tests (npm run test:run -w packages/web) pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web Connection diagnostic route + summary card component + fact detail + TanStack Query hook + API client function.",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Implements design D9. This is the first Web code touching AgentConnection, so it also establishes the data-fetching pattern for future Connection features. Starting with read-only diagnostic avoids coupling this issue to a full Connection management UI (create/edit forms, in-browser credential upload)."
+    }
+  ]
+}
