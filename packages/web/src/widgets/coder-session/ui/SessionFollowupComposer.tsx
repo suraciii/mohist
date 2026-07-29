@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
+import type { FollowupStatus } from '../../../entities/coder-session'
 
 export interface SessionFollowupComposerProps {
   onSend: (text: string) => Promise<void> | void
@@ -12,6 +13,7 @@ export interface SessionFollowupComposerProps {
   hasQueuedFollowup?: boolean
   state?: 'interactive' | 'queued' | 'unavailable' | 'closed'
   endedAt?: string | null
+  followupStatus?: FollowupStatus | null
 }
 
 type ButtonState = 'idle' | 'sending' | 'sent'
@@ -25,6 +27,7 @@ export function SessionFollowupComposer({
   placeholder = 'Send a followup message to the agent...',
   hasQueuedFollowup = false,
   state,
+  followupStatus = null,
 }: SessionFollowupComposerProps) {
   const [text, setText] = useState('')
   const [inlineError, setInlineError] = useState<string | null>(null)
@@ -42,7 +45,13 @@ export function SessionFollowupComposer({
         ? 'queued'
         : 'interactive'
   )
-  const isQueued = resolvedState === 'queued'
+  const observedTurnStatus = followupStatus?.turnStatus?.toLowerCase()
+  const observedInputAcceptance = followupStatus?.inputAcceptance?.toLowerCase()
+  const isObservedAccepted = followupStatus?.outcome === 'accepted'
+    && (observedInputAcceptance == null || observedInputAcceptance === 'accepted')
+  const isObservedQueued = isObservedAccepted && observedTurnStatus === 'queued'
+  const isObservedExecuting = isObservedAccepted && observedTurnStatus === 'executing'
+  const isQueued = isObservedQueued || (resolvedState === 'queued' && !isObservedExecuting)
 
   const canSend =
     !disabled &&
@@ -120,8 +129,14 @@ export function SessionFollowupComposer({
     ? 'sending'
     : (sentFlash && !hasQueuedFollowup ? 'sent' : 'idle')
 
-  const statusLabel = isQueued
-    ? 'Queued — waiting for agent...'
+  const statusLabel = followupStatus?.outcome === 'rejected'
+    ? 'Rejected'
+    : followupStatus?.outcome === 'unknown'
+      ? 'Outcome unknown — retry with the same key'
+      : isObservedExecuting
+        ? 'Executing'
+        : isQueued
+          ? followupStatus ? 'Accepted — pending' : 'Queued — waiting for agent...'
     : buttonState === 'sending'
       ? 'Sending...'
       : buttonState === 'sent'
@@ -167,6 +182,10 @@ export function SessionFollowupComposer({
           data-tone={
             isQueued
               ? 'queued'
+              : isObservedExecuting
+                ? 'executing'
+                : followupStatus?.outcome === 'rejected' || followupStatus?.outcome === 'unknown'
+                  ? 'outcome'
               : buttonState === 'sent'
                 ? 'success'
                 : 'neutral'
@@ -174,7 +193,9 @@ export function SessionFollowupComposer({
           className={cn(
             isQueued
               ? 'text-warning'
-              : buttonState === 'sent'
+              : isObservedExecuting
+                ? 'text-info'
+                : buttonState === 'sent'
                 ? 'text-success'
                 : 'text-transparent',
           )}

@@ -43,3 +43,10 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - The `Idempotency-Key` header continues through both route entry points into the grain accept command, and API coverage verifies same-key identity replay.
 - Generic and unified session summaries expose status/identity-only input and turn observations. Input text and turn results remain absent from the observation DTO.
 - Added API coverage for accepted queued follow-ups, rejected routes, same-key replay, and observation status; direct xUnit verification passed for all affected follow-up/history classes. A full-assembly run still has one unrelated pre-existing cancel/reset timing failure.
+
+## T-003 implementation
+- Web follow-up API clients always send an `Idempotency-Key`; callers generate one per submission and retain it when the response is `unknown`, so retrying the preserved composer input reuses the same key.
+- Follow-up status is projected from observation input acceptance and turn status. The composer distinguishes `Accepted — pending` for accepted queued turns from `Executing`, with executing observation taking precedence over local queued delivery state.
+- Follow-up text remains owned by the transcript; observation data is used only for identity and status, avoiding a second message rendering path.
+- Unknown follow-up results remain retryable and keep the input text in the composer; confirmed outcomes retire the retry key.
+- Verification: `npm run typecheck -w packages/web`, `npm run test:run -w packages/web` (5158 passed, 1 skipped), and `npm run check:fsd -w packages/web` passed.

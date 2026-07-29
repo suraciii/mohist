@@ -7,16 +7,17 @@ export interface FollowupMutationInput {
   issueNumber: number
   sessionName: string
   text: string
+  idempotencyKey?: string
 }
 
 export function useFollowupMutation(): UseMutationResult<SessionFollowupResult, ApiError, FollowupMutationInput> {
   const { projectId } = useProject()
   return useMutation<SessionFollowupResult, ApiError, FollowupMutationInput>({
-    mutationFn: ({ issueNumber, sessionName, text }) => {
+    mutationFn: ({ issueNumber, sessionName, text, idempotencyKey }) => {
       if (!projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
-      return postFollowup(issueNumber, sessionName, text, projectId)
+      return postFollowup(issueNumber, sessionName, text, projectId, idempotencyKey)
     },
   })
 }

@@ -358,3 +358,38 @@ describe('SessionFollowupComposer — queued-state persistent indicator', () => 
     expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
   })
 })
+
+describe('SessionFollowupComposer — observed follow-up status', () => {
+  it('shows accepted-pending when the accepted input has a queued turn', () => {
+    renderComposer({
+      followupStatus: {
+        outcome: 'accepted',
+        inputAcceptance: 'accepted',
+        turnStatus: 'queued',
+        inputId: 'input-1',
+        turnId: 'turn-1',
+      },
+    })
+
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent('Accepted — pending')
+    expect(screen.getByTestId('session-followup-status')).toHaveAttribute('data-tone', 'queued')
+    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+  })
+
+  it('shows executing instead of pending when the observed turn is executing', () => {
+    renderComposer({
+      hasQueuedFollowup: true,
+      followupStatus: {
+        outcome: 'accepted',
+        inputAcceptance: 'accepted',
+        turnStatus: 'executing',
+        inputId: 'input-1',
+        turnId: 'turn-1',
+      },
+    })
+
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent('Executing')
+    expect(screen.getByTestId('session-followup-status')).toHaveAttribute('data-tone', 'executing')
+    expect(screen.getByTestId('session-followup-status')).not.toHaveTextContent(/pending/i)
+  })
+})

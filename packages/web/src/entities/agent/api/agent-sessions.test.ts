@@ -130,25 +130,27 @@ describe('launchAgentSession (client fn)', () => {
 
 describe('postGenericFollowup (client fn)', () => {
   it('POSTs to the followup endpoint with text', async () => {
-    const captured: { url: string; method: string; body: unknown }[] = []
+    const captured: { url: string; method: string; body: unknown; key: string }[] = []
     server.use(
       http.post('*/api/projects/:projectId/agent-sessions/:sessionId/followup', async ({ request }) => {
         captured.push({
           url: new URL(request.url).pathname,
           method: request.method,
           body: await request.json(),
+          key: request.headers.get('Idempotency-Key') ?? '',
         })
-        return HttpResponse.json({ success: true, data: { status: 'sent' } })
+        return HttpResponse.json({ success: true, data: { status: 'accepted' } })
       }),
     )
 
-    await postGenericFollowup('proj-1', 'sess-abc', { text: 'Continue' })
+    await postGenericFollowup('proj-1', 'sess-abc', { text: 'Continue' }, 'followup-key')
 
     expect(captured).toEqual([
       {
         url: '/api/projects/proj-1/agent-sessions/sess-abc/followup',
         method: 'POST',
         body: { text: 'Continue' },
+        key: 'followup-key',
       },
     ])
   })

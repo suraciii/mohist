@@ -5,9 +5,13 @@ import type {
   AgentSessionActivity,
   AgentSessionTranscriptResponse,
   AgentSessionUsage,
+  AgentTurnObservation,
+  SessionFollowupResult,
+  SessionInputObservation,
 } from '../../coder-session/@x/agent-session'
 import { useProject } from '../../project/@x/project-context'
 import { projectApiPath, request } from '../../../shared/api/client'
+import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 
 /* ── DTO types (matching #129/#130 server contracts) ────── */
 
@@ -48,6 +52,8 @@ export interface GenericAgentSessionSummaryDto {
   usage: AgentSessionUsage
   recoveryAvailable: boolean
   currentTurnId?: string | null
+  inputs?: SessionInputObservation[] | null
+  turns?: AgentTurnObservation[] | null
 }
 
 export interface AgentSessionLaunchResponse {
@@ -178,12 +184,14 @@ export function launchObservationQueryOptions(projectId: string | null | undefin
   }
 }
 
-export function postGenericFollowup(projectId: string, sessionId: string, input: GenericFollowupInput) {
-  return request<GenericFollowupResult>(
+export function postGenericFollowup(projectId: string, sessionId: string, input: GenericFollowupInput, idempotencyKey?: string) {
+  const requestKey = idempotencyKey ?? createIdempotencyKey()
+  return request<SessionFollowupResult>(
     projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/followup`),
     {
       method: 'POST',
       body: JSON.stringify(input),
+      headers: { 'Idempotency-Key': requestKey },
     },
   )
 }
@@ -277,9 +285,9 @@ export function useLaunchAgentSession() {
 
 export function genericFollowupMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
   return {
-    mutationFn: ({ sessionId, text }: { sessionId: string; text: string }) =>
-      postGenericFollowup(projectId!, sessionId, { text }),
-    onSuccess: (_data: GenericFollowupResult, variables: { sessionId: string; text: string; agentRef?: string }) => {
+    mutationFn: ({ sessionId, text, idempotencyKey }: { sessionId: string; text: string; idempotencyKey?: string }) =>
+      postGenericFollowup(projectId!, sessionId, { text }, idempotencyKey),
+    onSuccess: (_data: SessionFollowupResult, variables: { sessionId: string; text: string; agentRef?: string }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agent-session', projectId, variables.sessionId] })
