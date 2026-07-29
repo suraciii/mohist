@@ -837,7 +837,7 @@ public static partial class AgentSessionExtensions
                     var turn = (session.Status.Turns ?? [])
                         .FirstOrDefault(candidate => candidate.InputIds.Contains(input.Id, StringComparer.Ordinal));
                     var lease = (session.Status.PendingFollowups ?? [])
-                        .FirstOrDefault(candidate => string.Equals(candidate.InputId, input.Id, StringComparison.Ordinal));
+                        .FirstOrDefault(candidate => string.Equals(candidate.TurnId, turn?.Id, StringComparison.Ordinal));
                     return new AgentSessionFollowupInputLookup(input, turn, lease?.OperationId);
                 }
             }
@@ -978,15 +978,19 @@ public static partial class AgentSessionExtensions
                 }
 
                 var turnStillQueued = existingTurn.Status == AgentTurnStatus.Queued;
+                var existingLease = leases.FirstOrDefault(candidate =>
+                    string.Equals(candidate.TurnId, existingTurn.Id, StringComparison.Ordinal));
                 return new AgentSessionFollowupAcceptResult(
                     InputId: existing.Id,
                     TurnId: existingTurn.Id,
-                    OperationId: operationId,
+                    OperationId: existingLease?.OperationId ?? operationId,
                     AlreadyAccepted: true,
-                    ShouldRedeliver: turnStillQueued);
+                    ShouldRedeliver: turnStillQueued,
+                    InputAcceptance: existing.Acceptance,
+                    TurnStatus: existingTurn.Status);
             }
 
-            var candidateTurn = ChooseFollowupTurnForAssignment(turns);
+            var candidateTurn = ChooseFollowupTurnForAssignment(turns, leases);
 
             var newInput = new AgentSessionInputRecord(
                 Id: inputId,
@@ -1035,15 +1039,23 @@ public static partial class AgentSessionExtensions
             }
             inputs.Add(newInput);
 
-            var lease = new AgentSessionFollowupLease(
-                OperationId: operationId,
-                RuntimeSessionId: session.Status.AgentRuntimeSessionId ?? string.Empty,
-                Accepted: true,
-                AcceptedAt: now,
-                StartedAt: now,
-                InputId: inputId,
-                TurnId: updatedTurn.Id);
-            leases.Add(lease);
+            var turnOperationId = operationId;
+            if (createdNewTurn)
+            {
+                leases.Add(new AgentSessionFollowupLease(
+                    OperationId: operationId,
+                    RuntimeSessionId: session.Status.AgentRuntimeSessionId ?? string.Empty,
+                    Accepted: true,
+                    AcceptedAt: now,
+                    StartedAt: now,
+                    InputId: inputId,
+                    TurnId: updatedTurn.Id));
+            }
+            else
+            {
+                turnOperationId = leases.First(candidate =>
+                    string.Equals(candidate.TurnId, updatedTurn.Id, StringComparison.Ordinal)).OperationId;
+            }
 
             session.Status = session.Status with
             {
@@ -1058,9 +1070,11 @@ public static partial class AgentSessionExtensions
             return new AgentSessionFollowupAcceptResult(
                 InputId: inputId,
                 TurnId: updatedTurn.Id,
-                OperationId: operationId,
+                OperationId: turnOperationId,
                 AlreadyAccepted: false,
-                ShouldRedeliver: true);
+                ShouldRedeliver: true,
+                InputAcceptance: newInput.Acceptance,
+                TurnStatus: updatedTurn.Status);
         }
 
         /// <summary>
@@ -1071,7 +1085,9 @@ public static partial class AgentSessionExtensions
         /// queued turn. An executing turn does NOT match — inputs
         /// accepted during execution start a new turn.
         /// </summary>
-        private static AgentTurnRecord? ChooseFollowupTurnForAssignment(IReadOnlyList<AgentTurnRecord> turns)
+        private static AgentTurnRecord? ChooseFollowupTurnForAssignment(
+            IReadOnlyList<AgentTurnRecord> turns,
+            IReadOnlyList<AgentSessionFollowupLease> leases)
         {
             for (var i = turns.Count - 1; i >= 0; i--)
             {
@@ -1079,6 +1095,9 @@ public static partial class AgentSessionExtensions
                 if (!string.IsNullOrEmpty(candidate.JobId))
                     continue;
                 if (candidate.Status != AgentTurnStatus.Queued)
+                    continue;
+                if (leases.Any(lease => string.Equals(lease.TurnId, candidate.Id, StringComparison.Ordinal)
+                    && lease.Dispatching))
                     continue;
                 return candidate;
             }

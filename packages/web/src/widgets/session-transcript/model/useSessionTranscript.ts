@@ -391,6 +391,7 @@ export function useSessionTranscript({
           setIsThinking(true)
         }
         markNewContentRef.current(!isFollowup)
+        invalidateSessionQueries()
       }),
     )
 

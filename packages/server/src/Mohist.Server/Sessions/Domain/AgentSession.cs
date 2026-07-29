@@ -419,7 +419,8 @@ public sealed record AgentSessionFollowupLease(
     /// </summary>
     [property: Id(6)] string? ConcurrencyAgentId = null,
     [property: Id(7)] string? InputId = null,
-    [property: Id(8)] string? TurnId = null);
+    [property: Id(8)] string? TurnId = null,
+    [property: Id(9)] bool Dispatching = false);
 
 /// <summary>
 /// Result of a single <see cref="AgentSessionExtensions.AcceptFollowup"/>
@@ -439,7 +440,15 @@ public sealed record AgentSessionFollowupAcceptResult(
     [property: Id(1)] string TurnId,
     [property: Id(2)] string OperationId,
     [property: Id(3)] bool AlreadyAccepted,
-    [property: Id(4)] bool ShouldRedeliver);
+    [property: Id(4)] bool ShouldRedeliver,
+    [property: Id(5)] AgentSessionInputAcceptance InputAcceptance = AgentSessionInputAcceptance.Accepted,
+    [property: Id(6)] AgentTurnStatus TurnStatus = AgentTurnStatus.Queued);
+
+[GenerateSerializer]
+public sealed record AgentSessionFollowupDispatch(
+    [property: Id(0)] string TurnId,
+    [property: Id(1)] string OperationId,
+    [property: Id(2)] IReadOnlyList<string> InputTexts);
 
 /// <summary>
 /// Lookup result of <see cref="AgentSessionExtensions.FindFollowupInputByIdempotencyKey"/>.

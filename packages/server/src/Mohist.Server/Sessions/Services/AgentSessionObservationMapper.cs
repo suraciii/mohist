@@ -9,27 +9,31 @@ internal static class AgentSessionObservationMapper
             input.Id,
             input.Sequence,
             input.Source,
-            input.Acceptance switch
-            {
-                AgentSessionInputAcceptance.Accepted => "accepted",
-                AgentSessionInputAcceptance.Pending => "pending",
-                AgentSessionInputAcceptance.Rejected => "rejected",
-                _ => "unknown",
-            })).ToArray();
+            InputAcceptance(input.Acceptance))).ToArray();
 
     public static IReadOnlyList<AgentTurnObservationDto>? Turns(AgentSessionStatusSnapshot status) =>
         status.Turns?.Select(turn => new AgentTurnObservationDto(
             turn.Id,
             turn.Sequence,
             turn.InputIds,
-            turn.Status switch
-            {
-                AgentTurnStatus.Queued => "queued",
-                AgentTurnStatus.Executing => "executing",
-                AgentTurnStatus.Completed => "completed",
-                AgentTurnStatus.Failed => "failed",
-                AgentTurnStatus.Unknown => "unknown",
-                AgentTurnStatus.Cancelled => "cancelled",
-                _ => "unknown",
-            })).ToArray();
+            TurnStatus(turn.Status))).ToArray();
+
+    public static string InputAcceptance(AgentSessionInputAcceptance acceptance) => acceptance switch
+    {
+        AgentSessionInputAcceptance.Accepted => "accepted",
+        AgentSessionInputAcceptance.Pending => "pending",
+        AgentSessionInputAcceptance.Rejected => "rejected",
+        _ => "unknown",
+    };
+
+    public static string TurnStatus(AgentTurnStatus status) => status switch
+    {
+        AgentTurnStatus.Queued => "queued",
+        AgentTurnStatus.Executing => "executing",
+        AgentTurnStatus.Completed => "completed",
+        AgentTurnStatus.Failed => "failed",
+        AgentTurnStatus.Unknown => "unknown",
+        AgentTurnStatus.Cancelled => "cancelled",
+        _ => "unknown",
+    };
 }

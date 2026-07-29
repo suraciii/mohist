@@ -95,8 +95,7 @@ public static partial class IssueRoutes
             FollowupRequest body,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
-            IHubContext<RunnerHub> runnerHub,
-            RunnerConnectionTracker connections) =>
+            AgentSessionFollowupDispatcher dispatcher) =>
         {
             var project = GetRequiredProject(ctx);
             var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ctx.RequestAborted);
@@ -123,8 +122,7 @@ public static partial class IssueRoutes
                 idempotencyKey,
                 sessions,
                 grains,
-                runnerHub,
-                connections,
+                dispatcher,
                 ctx.RequestAborted);
         });
 

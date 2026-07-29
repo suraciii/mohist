@@ -558,7 +558,14 @@ public class CliSessionCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { status = "accepted", inputId = "input-1", turnId = "turn-1" },
+                data = new
+                {
+                    status = "accepted",
+                    inputId = "input-1",
+                    turnId = "turn-1",
+                    inputAcceptance = "accepted",
+                    turnStatus = "queued",
+                },
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(

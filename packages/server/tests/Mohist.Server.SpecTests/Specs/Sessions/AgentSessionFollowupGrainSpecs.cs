@@ -105,6 +105,15 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
         Assert.NotNull(state);
         var turn = Assert.Single(state!.Status.Turns!);
         Assert.Equal(2, turn.InputIds.Count);
+
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+        Assert.NotNull(dispatch);
+        Assert.Equal(first.TurnId, dispatch!.TurnId);
+        Assert.Equal(["concurrent a", "concurrent b"], dispatch.InputTexts);
+        Assert.Null(await grain.BeginNextFollowupDispatchAsync());
+
+        await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+        Assert.NotNull(await grain.BeginNextFollowupDispatchAsync());
         Assert.Equal(first.InputId, turn.InputIds[0]);
         Assert.Equal(second.InputId, turn.InputIds[1]);
         Assert.Equal(AgentTurnStatus.Queued, turn.Status);

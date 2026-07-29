@@ -292,10 +292,10 @@ describe('SessionFollowupComposer — unavailable banner copy (activity unknown)
 })
 
 describe('SessionFollowupComposer — queued-state persistent indicator', () => {
-  it('disables the input and shows the queued indicator when hasQueuedFollowup is true', () => {
+  it('keeps the input enabled and shows the queued indicator when hasQueuedFollowup is true', () => {
     renderComposer({ hasQueuedFollowup: true })
 
-    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-input')).not.toBeDisabled()
     expect(screen.getByTestId('session-followup-send')).toBeDisabled()
     expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
     expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
@@ -309,7 +309,7 @@ describe('SessionFollowupComposer — queued-state persistent indicator', () => 
     expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
   })
 
-  it('keeps the queued indicator visible after isSending flips back to false while hasQueuedFollowup stays true', () => {
+  it('keeps the queued indicator visible and accepts another input after its own send settles', () => {
     const { rerender } = render(
       <SessionFollowupComposer onSend={onSendMock} isSending hasQueuedFollowup />,
     )
@@ -322,7 +322,7 @@ describe('SessionFollowupComposer — queued-state persistent indicator', () => 
     )
 
     expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
-    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-input')).not.toBeDisabled()
     expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
   })
 
@@ -373,7 +373,7 @@ describe('SessionFollowupComposer — observed follow-up status', () => {
 
     expect(screen.getByTestId('session-followup-status')).toHaveTextContent('Accepted — pending')
     expect(screen.getByTestId('session-followup-status')).toHaveAttribute('data-tone', 'queued')
-    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-input')).not.toBeDisabled()
   })
 
   it('shows executing instead of pending when the observed turn is executing', () => {

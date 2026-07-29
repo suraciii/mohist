@@ -346,6 +346,7 @@ public static class RunnerRoutes
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/runtime-events", async (
             string projectId, string workflowRunId, string sessionName,
             AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
+            AgentSessionFollowupDispatcher followups,
             CancellationToken ct) =>
         {
             var sessionId = await sessions.ResolveByLabelsAsync(WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
@@ -356,7 +357,9 @@ public static class RunnerRoutes
             var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            return Results.Ok(await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId)));
+            var events = await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
+            await followups.DispatchNextAsync(projectId, sessionId, ct);
+            return Results.Ok(events);
         });
 
         group.MapGet("/agent-sessions/reconcile", async (
@@ -417,7 +420,8 @@ public static class RunnerRoutes
             var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            return Results.Ok(await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId)));
+            var events = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
+            return Results.Ok(events);
         });
 
         // Generic (non-workflow) AgentSession routes — used by the runner
@@ -537,6 +541,7 @@ public static class RunnerRoutes
             string projectId, string sessionId,
             AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
             AgentSessionQuery sessionQuery,
+            AgentSessionFollowupDispatcher followups,
             CancellationToken ct) =>
         {
             var grain = sessions.GetGrain(sessionId);
@@ -550,7 +555,9 @@ public static class RunnerRoutes
             var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            return Results.Ok(await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId)));
+            var events = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
+            await followups.DispatchNextAsync(projectId, sessionId, ct);
+            return Results.Ok(events);
         });
 
         return app;

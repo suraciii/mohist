@@ -55,7 +55,6 @@ export function SessionFollowupComposer({
 
   const canSend =
     !disabled &&
-    resolvedState === 'interactive' &&
     trimmed.length > 0 &&
     !isSending
 
@@ -161,7 +160,7 @@ export function SessionFollowupComposer({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           rows={2}
-          disabled={disabled || isSending || isQueued}
+          disabled={disabled || isSending}
           aria-label="Followup message"
           className="h-10 min-h-10 resize-none md:h-auto md:min-h-12"
         />

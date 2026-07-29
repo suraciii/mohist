@@ -66,8 +66,7 @@ public static class AgentSessionFollowupRoutes
             GenericFollowupRequest body,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
-            IHubContext<RunnerHub> runnerHub,
-            RunnerConnectionTracker connections,
+            AgentSessionFollowupDispatcher dispatcher,
             CancellationToken ct) =>
         {
             var text = body?.Text;
@@ -76,7 +75,7 @@ public static class AgentSessionFollowupRoutes
 
             var project = context.GetResolvedProject();
             var idempotencyKey = AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(context) ?? string.Empty;
-            return await ExecuteFollowupAsync(project.Id, sessionId, text, idempotencyKey, sessions, grains, runnerHub, connections, ct);
+            return await ExecuteFollowupAsync(project.Id, sessionId, text, idempotencyKey, sessions, grains, dispatcher, ct);
         });
 
         return app;
@@ -89,8 +88,7 @@ public static class AgentSessionFollowupRoutes
         string idempotencyKey,
         AgentSessionQuerier sessions,
         IGrainFactory grains,
-        IHubContext<RunnerHub> runnerHub,
-        RunnerConnectionTracker connections,
+        AgentSessionFollowupDispatcher dispatcher,
         CancellationToken ct)
     {
         var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
@@ -150,105 +148,15 @@ public static class AgentSessionFollowupRoutes
                 new { sessionId = ex.SessionId, agentId = ex.AgentId });
         }
 
-        // accepted: persistence is the contract; runner offline does not
-        // revert acceptance (the input stays accepted and the turn stays
-        // queued; a same-key retry will re-attempt dispatch while queued).
-        if (accept.AlreadyAccepted && !accept.ShouldRedeliver)
-        {
-            return ApiResults.Ok(new AgentSessionFollowupResult(
-                target.SessionId,
-                InputId: accept.InputId,
-                TurnId: accept.TurnId,
-                Status: "accepted"));
-        }
-
-        if (string.IsNullOrWhiteSpace(target.RunnerId))
-        {
-            return ApiResults.Ok(new AgentSessionFollowupResult(
-                target.SessionId,
-                InputId: accept.InputId,
-                TurnId: accept.TurnId,
-                Status: "accepted"));
-        }
-
-        var connectionId = connections.GetConnectionId(target.RunnerId);
-        if (string.IsNullOrWhiteSpace(connectionId)
-            || string.IsNullOrWhiteSpace(target.Runtime)
-            || string.IsNullOrWhiteSpace(target.RuntimeSessionId))
-        {
-            return ApiResults.Ok(new AgentSessionFollowupResult(
-                target.SessionId,
-                InputId: accept.InputId,
-                TurnId: accept.TurnId,
-                Status: "accepted"));
-        }
-
-        object binding = new
-        {
-            runtime = target.Runtime,
-            runtimeSessionId = target.RuntimeSessionId,
-            runnerId = target.RunnerId,
-            workDir = target.WorkDir,
-        };
-        object wireTarget = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
-            ? new
-            {
-                kind = "workflow",
-                projectId,
-                workflowRunId = target.WorkflowRunId,
-                sessionName = target.SessionName,
-                binding,
-            }
-            : new
-            {
-                kind = "generic",
-                projectId,
-                sessionId = target.SessionId,
-                definition = target.Definition,
-                binding,
-            };
-        object payload = new { target = wireTarget, text, operationId = accept.OperationId };
-
-        RunnerFollowupDeliveryResult? delivery;
-        try
-        {
-            delivery = await runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerFollowupDeliveryResult?>(
-                "ReceiveFollowup",
-                payload,
-                ct);
-        }
-        catch
-        {
-            return ApiResults.Ok(new AgentSessionFollowupResult(
-                target.SessionId,
-                InputId: accept.InputId,
-                TurnId: accept.TurnId,
-                Status: "accepted"));
-        }
-
-        if (delivery?.Accepted == true)
-        {
-            return ApiResults.Ok(new AgentSessionFollowupResult(
-                target.SessionId,
-                InputId: accept.InputId,
-                TurnId: accept.TurnId,
-                Status: "accepted"));
-        }
-
-        if (string.Equals(delivery?.Error, "missing", StringComparison.Ordinal))
-        {
-            return ApiResults.Ok(new AgentSessionFollowupResult(
-                target.SessionId,
-                InputId: accept.InputId,
-                TurnId: accept.TurnId,
-                Status: "accepted"));
-        }
+        await dispatcher.DispatchNextAsync(projectId, target.SessionId, ct);
 
         return ApiResults.Ok(new AgentSessionFollowupResult(
             target.SessionId,
             InputId: accept.InputId,
             TurnId: accept.TurnId,
-            Status: "accepted"));
+            Status: "accepted",
+            InputAcceptance: AgentSessionObservationMapper.InputAcceptance(accept.InputAcceptance),
+            TurnStatus: AgentSessionObservationMapper.TurnStatus(accept.TurnStatus)));
     }
 
     private static IResult Rejected(string sessionId, string code, string error) =>
@@ -273,6 +181,8 @@ public sealed record AgentSessionFollowupResult(
     string? TurnId = null,
     string Status = "accepted",
     string? Error = null,
-    string? Code = null);
+    string? Code = null,
+    string? InputAcceptance = null,
+    string? TurnStatus = null);
 
 public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);
