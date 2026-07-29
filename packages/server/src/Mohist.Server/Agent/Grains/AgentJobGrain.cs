@@ -1349,7 +1349,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(State.Input?.InitialTurnId))
             return;
 
-        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkInitialTurnExecutingAsync(Key);
+        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkTurnExecutingAsync(State.Input!.InitialTurnId!);
     }
 
     private async Task MarkInitialTurnTerminalAsync(
@@ -1364,8 +1364,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(State.Input?.InitialTurnId))
             return;
 
-        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkInitialTurnTerminalAsync(
-            Key,
+        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkTurnTerminalAsync(
+            State.Input!.InitialTurnId!,
             status == AgentJobStatus.Completed ? AgentTurnStatus.Completed : AgentTurnStatus.Failed,
             new AgentTurnResult(message, output, failureReason, failureCategory, exitCode));
     }

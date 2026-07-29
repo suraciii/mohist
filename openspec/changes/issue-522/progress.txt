@@ -1,0 +1,11 @@
+## Codebase Patterns
+
+- AgentSession child records are persisted in the grain state snapshot; Orleans serialization requires arrays for single-item InputIds values rather than collection-expression read-only lists.
+- Follow-up reservations distinguish joining an active turn from starting an idle turn. Only idle-start follow-ups mint and persist a new input/turn pair before Runner dispatch.
+- Explicit Runner rejection cleans up the pre-dispatch queued follow-up record so existing retry behavior remains intact; uncertain dispatch failures retain the record.
+
+## T-001
+
+- Added durable follow-up AgentTurnRecord/Input linkage, idempotent redispatch handling, turn-id-keyed executing/terminal/cancel transitions, resolver classification, and non-launch lifecycle driving from existing runtime events.
+- Follow-up input and terminal activity facts carry the server-minted turn id. Launch turns remain Job-owned for terminal result authority.
+- AgentJob launch terminal/executing wrappers delegate through InitialTurnId; the existing dispatch fence remains queued until its established lifecycle point.

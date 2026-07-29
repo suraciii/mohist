@@ -426,13 +426,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (pending.Any(lease => !lease.Accepted))
             throw new FollowupOperationInProgressException(session.Id);
 
+        var startsIdleTurn = session.Status.Activity == AgentSessionActivity.Idle;
         var lease = new AgentSessionFollowupLease(
             Guid.NewGuid().ToString("N"),
             session.Status.AgentRuntimeSessionId!,
             StartedAt: Now());
         SetPendingFollowups(session, pending.Append(lease).ToArray());
         await CommitAsync(session, []);
-        return new AgentSessionFollowupReservation(lease.OperationId, StartsIdleTurn: true);
+        return new AgentSessionFollowupReservation(lease.OperationId, startsIdleTurn);
     }
 
     public async Task ConfirmFollowupAsync(string operationId)
@@ -1504,14 +1505,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var payload = JSON.DeserializeElement(runtimeEvent.PayloadJson);
         return runtimeEvent.Type switch
         {
-            RuntimeEventTypes.SessionInput => session.SetActivity(
-                session.Status.Activity == AgentSessionActivity.Unknown
-                    ? AgentSessionActivity.Unknown
-                    : AgentSessionActivity.Active,
-                now),
-            RuntimeEventTypes.SessionActivity => session.SetActivity(
-                ParseActivity(payload),
-                now),
+            RuntimeEventTypes.SessionInput => DriveNonLaunchTurnLifecycle(session, runtimeEvent, now),
+            RuntimeEventTypes.SessionActivity => DriveTerminalActivityLifecycle(session, runtimeEvent, payload, now),
             RuntimeEventTypes.SessionLiveness => session.RecordActivity(now),
             RuntimeEventTypes.UsageUpdated => session.ApplyUsage(
                 AgentSessionJsonHelper.GetLongProp(payload, "inputTokens"),
@@ -1530,6 +1525,151 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 now),
             _ => []
         };
+    }
+
+    /// <summary>
+    /// Issue-522 T-001 D8: when the Session grain observes a
+    /// <c>session.input</c> runtime event for the current Turn, the
+    /// non-launch Turn (no <see cref="AgentTurnRecord.JobId"/>) moves
+    /// Queued to Executing. The launch Turn is untouched: issue-512
+    /// removed its Runner <c>session.input</c>, so the promotion path
+    /// never fires for it. Activity is bumped to Active exactly as
+    /// before.
+    /// </summary>
+    private static IReadOnlyList<AgentSessionEvent> DriveNonLaunchTurnLifecycle(
+        AgentSession session,
+        AgentSessionRuntimeEventInput runtimeEvent,
+        DateTime now)
+    {
+        var events = new List<AgentSessionEvent>(session.SetActivity(
+            session.Status.Activity == AgentSessionActivity.Unknown
+                ? AgentSessionActivity.Unknown
+                : AgentSessionActivity.Active,
+            now));
+        if (TryResolveTurnId(runtimeEvent.PayloadJson, out var payloadTurnId))
+        {
+            var turn = session.Status.Turns is { Count: > 0 } turns
+                ? turns.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Id, payloadTurnId, StringComparison.Ordinal))
+                : null;
+            if (turn is not null && string.IsNullOrWhiteSpace(turn.JobId))
+                events.AddRange(session.MarkTurnExecuting(turn.Id, now));
+            else if (turn is null)
+                events.AddRange(MarkCurrentNonLaunchTurnExecuting(session, now));
+        }
+        else
+        {
+            events.AddRange(MarkCurrentNonLaunchTurnExecuting(session, now));
+        }
+        return events;
+    }
+
+    /// <summary>
+    /// Issue-522 T-001 D8: when the Session grain observes a terminal
+    /// <c>session.activity</c> runtime event (idle/unknown from the
+    /// followup-handler or the cancel-handler), the non-launch Turn
+    /// moves Executing to terminal — Completed for an idle event with
+    /// status <c>completed</c>, Failed for an idle event with status
+    /// <c>failed</c>, and Unknown for an unknown activity. Launch Turns
+    /// are untouched: their terminal verdict is owned by the AgentJob
+    /// grain's authoritative <see cref="AgentJobGrain.AppendTerminalCloseAsync"/>
+    /// path.
+    /// </summary>
+    private static IReadOnlyList<AgentSessionEvent> DriveTerminalActivityLifecycle(
+        AgentSession session,
+        AgentSessionRuntimeEventInput runtimeEvent,
+        JsonElement payload,
+        DateTime now)
+    {
+        var events = new List<AgentSessionEvent>(session.SetActivity(
+            ParseActivity(payload),
+            now));
+        var status = AgentSessionJsonHelper.GetStringProp(payload, "status");
+        var activity = ParseActivity(payload);
+        if (activity == AgentSessionActivity.Active)
+            return events;
+        var terminal = MapTerminalActivityToTurnStatus(activity, status);
+        if (terminal is null)
+            return events;
+        if (TryResolveTurnId(runtimeEvent.PayloadJson, out var payloadTurnId))
+        {
+            var turn = session.Status.Turns is { Count: > 0 } turns
+                ? turns.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Id, payloadTurnId, StringComparison.Ordinal))
+                : null;
+            if (turn is not null && string.IsNullOrWhiteSpace(turn.JobId))
+                events.AddRange(session.MarkTurnTerminal(turn.Id, terminal.Value, null, now));
+            else if (turn is null)
+                events.AddRange(MarkCurrentNonLaunchTurnTerminal(session, terminal.Value, now));
+        }
+        else
+        {
+            events.AddRange(MarkCurrentNonLaunchTurnTerminal(session, terminal.Value, now));
+        }
+        return events;
+    }
+
+    private static AgentTurnStatus? MapTerminalActivityToTurnStatus(AgentSessionActivity activity, string? status)
+    {
+        if (activity == AgentSessionActivity.Unknown)
+            return AgentTurnStatus.Unknown;
+        if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+            return AgentTurnStatus.Failed;
+        return AgentTurnStatus.Completed;
+    }
+
+    private static IReadOnlyList<AgentSessionEvent> MarkCurrentNonLaunchTurnExecuting(
+        AgentSession session,
+        DateTime now)
+    {
+        var current = FindCurrentNonLaunchTurn(session);
+        return current is null ? [] : session.MarkTurnExecuting(current.Id, now);
+    }
+
+    private static IReadOnlyList<AgentSessionEvent> MarkCurrentNonLaunchTurnTerminal(
+        AgentSession session,
+        AgentTurnStatus terminal,
+        DateTime now)
+    {
+        var current = FindCurrentNonLaunchTurn(session);
+        return current is null ? [] : session.MarkTurnTerminal(current.Id, terminal, null, now);
+    }
+
+    private static AgentTurnRecord? FindCurrentNonLaunchTurn(AgentSession session)
+    {
+        var turns = session.Status.Turns ?? [];
+        for (var index = turns.Count - 1; index >= 0; index--)
+        {
+            var turn = turns[index];
+            if (!string.IsNullOrWhiteSpace(turn.JobId))
+                continue;
+            if (turn.Status is AgentTurnStatus.Completed
+                or AgentTurnStatus.Failed
+                or AgentTurnStatus.Cancelled
+                or AgentTurnStatus.Unknown)
+                continue;
+            return turn;
+        }
+        return null;
+    }
+
+    private static bool TryResolveTurnId(string payloadJson, out string turnId)
+    {
+        try
+        {
+            var payload = JSON.DeserializeElement(payloadJson);
+            var id = AgentSessionJsonHelper.GetStringProp(payload, "turnId");
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                turnId = id;
+                return true;
+            }
+        }
+        catch
+        {
+        }
+        turnId = string.Empty;
+        return false;
     }
 
     private static AgentSessionActivity ParseActivity(JsonElement payload) =>
@@ -1654,6 +1794,102 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await CommitAsync(session, events);
     }
 
+    public async Task RecordFollowupTurnAsync(RecordFollowupTurnCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (string.IsNullOrWhiteSpace(command.InputId))
+            throw new ArgumentException("Input id is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.TurnId))
+            throw new ArgumentException("Turn id is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.Prompt))
+            throw new ArgumentException("Prompt is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.Source))
+            throw new ArgumentException("Source is required.", nameof(command));
+
+        var session = await GetRequiredAsync();
+        var events = session.RecordFollowupTurn(
+            inputId: command.InputId,
+            turnId: command.TurnId,
+            prompt: command.Prompt,
+            source: command.Source,
+            now: Now());
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
+    public async Task AbandonFollowupTurnAsync(string inputId, string turnId)
+    {
+        if (string.IsNullOrWhiteSpace(inputId) || string.IsNullOrWhiteSpace(turnId))
+            return;
+        var session = await GetRequiredAsync();
+        var events = session.AbandonFollowupTurn(inputId, turnId, Now());
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
+    public async Task MarkTurnExecutingAsync(string turnId)
+    {
+        if (string.IsNullOrWhiteSpace(turnId))
+            return;
+        var session = await GetRequiredAsync();
+        var events = session.MarkTurnExecuting(turnId, Now());
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
+    public async Task MarkTurnTerminalAsync(string turnId, AgentTurnStatus status, AgentTurnResult? result)
+    {
+        if (string.IsNullOrWhiteSpace(turnId))
+            return;
+        var session = await GetRequiredAsync();
+        var events = session.MarkTurnTerminal(turnId, status, result, Now());
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
+    public async Task CancelTurnAsync(string turnId)
+    {
+        if (string.IsNullOrWhiteSpace(turnId))
+            return;
+        var session = await GetRequiredAsync();
+        var events = session.CancelTurn(turnId, Now());
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
+    public async Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId)
+    {
+        if (string.IsNullOrWhiteSpace(turnId))
+            return null;
+        var session = await GetRequiredAsync();
+        return session.ResolveTurnControl(turnId);
+    }
+
     public async Task<AgentInitialLaunchSnapshot?> GetInitialLaunchAsync()
     {
         var session = await GetRequiredAsync();
@@ -1666,5 +1902,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             SessionId: SessionId,
             Input: inputs.Count > 0 ? inputs[0] : null,
             Turn: turn is null ? null : turn with { InputIds = turn.InputIds.ToArray() });
+    }
+
+    public async Task<IReadOnlyList<AgentTurnRecord>> ListTurnsAsync()
+    {
+        var session = await GetRequiredAsync();
+        return session.Status.Turns ?? (IReadOnlyList<AgentTurnRecord>)[];
     }
 }

@@ -401,3 +401,48 @@ public sealed record AgentTurnResult(
     [property: Id(2)] string? FailureReason = null,
     [property: Id(3)] string? FailureCategory = null,
     [property: Id(4)] int? ExitCode = null);
+
+/// <summary>
+/// Shared read-only projection of a single
+/// <see cref="AgentTurnRecord"/> for cancel/stop targeting. Returned
+/// by the Session grain's turn-control resolver so later cancel and
+/// stop operations can classify a Turn without re-reading the full
+/// AgentSession status snapshot. A null result means the id does not
+/// resolve (turn-not-found).
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentTurnControlState(
+    [property: Id(0)] string TurnId,
+    [property: Id(1)] AgentTurnStatus Status,
+    [property: Id(2)] AgentTurnControlClassification Classification,
+    [property: Id(3)] bool IsLaunchTurn);
+
+[GenerateSerializer]
+public enum AgentTurnControlClassification
+{
+    /// <summary>
+    /// No Turn matches the supplied id. The caller treats this as
+    /// turn-not-found and reports the stale entry back to the user
+    /// without touching any Turn.
+    /// </summary>
+    TurnNotFound,
+    /// <summary>
+    /// The Turn is queued (not yet executing). Cancel applies; stop
+    /// is rejected and the caller is directed to cancel.
+    /// </summary>
+    Queued,
+    /// <summary>
+    /// The Turn is executing. Stop applies; cancel is rejected and
+    /// the caller is directed to stop.
+    /// </summary>
+    Executing,
+    /// <summary>
+    /// The Turn already ended
+    /// (<see cref="AgentTurnStatus.Completed"/>,
+    /// <see cref="AgentTurnStatus.Failed"/>,
+    /// <see cref="AgentTurnStatus.Cancelled"/>, or
+    /// <see cref="AgentTurnStatus.Unknown"/>). Both cancel and stop
+    /// report turn-already-ended.
+    /// </summary>
+    Terminal,
+}

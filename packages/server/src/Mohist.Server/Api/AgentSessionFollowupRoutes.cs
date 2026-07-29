@@ -141,6 +141,37 @@ public static class AgentSessionFollowupRoutes
             return ApiResults.Conflict(missing.Message, "runtime_session_missing", new { sessionId = missing.SessionId });
         }
 
+        // Issue-522 T-001 D1: persist the accepted SessionInput and a
+        // durable AgentTurnRecord (Queued, no JobId) on the Session grain
+        // BEFORE invoking the Runner. The Turn identity is committed
+        // ahead of dispatch so cancel can target it; the Runner does
+        // not create a duplicate session.input record (it continues to
+        // emit the existing session.input / terminal session.activity
+        // facts that drive the new Turn-id-keyed lifecycle path).
+        string? inputId = null;
+        string? turnId = null;
+        if (reservation.StartsIdleTurn)
+        {
+            inputId = Guid.NewGuid().ToString("N");
+            turnId = Guid.NewGuid().ToString("N");
+            var source = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
+                ? "workflow-followup"
+                : "generic-followup";
+            try
+            {
+                await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+                    InputId: inputId,
+                    TurnId: turnId,
+                    Prompt: text,
+                    Source: source));
+            }
+            catch (InvalidOperationException ex)
+            {
+                await AbandonReservationAsync(grain, reservation);
+                return ApiResults.Conflict(ex.Message, "followup_turn_conflict", new { sessionId = target.SessionId });
+            }
+        }
+
         object binding = new
         {
             runtime = target.Runtime,
@@ -165,7 +196,14 @@ public static class AgentSessionFollowupRoutes
                 definition = target.Definition,
                 binding,
             };
-        object payload = new { target = wireTarget, text, operationId = reservation.OperationId };
+        object payload = new
+        {
+            target = wireTarget,
+            text,
+            operationId = reservation.OperationId,
+            inputId,
+            turnId,
+        };
 
         RunnerFollowupDeliveryResult? delivery;
         try
@@ -191,12 +229,16 @@ public static class AgentSessionFollowupRoutes
         await AbandonReservationAsync(grain, reservation);
         if (string.Equals(delivery?.Error, "missing", StringComparison.Ordinal))
         {
+            if (inputId is not null && turnId is not null)
+                await grain.AbandonFollowupTurnAsync(inputId, turnId);
             return ApiResults.Conflict(
                 $"Runtime session missing for AgentSession {target.SessionId}.",
                 "runtime_session_missing",
                 new { sessionId = target.SessionId });
         }
 
+        if (inputId is not null && turnId is not null)
+            await grain.AbandonFollowupTurnAsync(inputId, turnId);
         return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
     }
 

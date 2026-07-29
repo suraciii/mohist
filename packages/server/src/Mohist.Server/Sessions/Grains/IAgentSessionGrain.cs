@@ -38,6 +38,62 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionFollowupReservation> BeginFollowupAsync();
     Task ConfirmFollowupAsync(string operationId);
     Task AbandonFollowupAsync(string operationId);
+
+    /// <summary>
+    /// Issue-522 T-001: persist a follow-up <see cref="AgentSessionInputRecord"/>
+    /// and a durable <see cref="AgentTurnRecord"/> in Queued status
+    /// before the follow-up is dispatched to the Runner. Called by
+    /// the follow-up routes after <see cref="BeginFollowupAsync"/>
+    /// reserves an idle-turn lease but before the runner SignalR
+    /// invocation, so the durable Turn identity is committed ahead
+    /// of any Runner dispatch. Idempotent for a replay carrying the
+    /// same ids; mismatched content raises a conflict.
+    /// </summary>
+    Task RecordFollowupTurnAsync(RecordFollowupTurnCommand command);
+    Task AbandonFollowupTurnAsync(string inputId, string turnId);
+
+    /// <summary>
+    /// Issue-522 T-001: Turn-id-keyed Executing transition. Promotes
+    /// a Queued or Unknown Turn to <see cref="AgentTurnStatus.Executing"/>
+    /// and converges Session activity to Active. No-op on a Turn that
+    /// is already past Queued. Used by the Session grain's
+    /// <c>session.input</c> runtime-event handler for non-launch
+    /// Turns and by the AgentJob launch path for launch Turns.
+    /// </summary>
+    Task MarkTurnExecutingAsync(string turnId);
+
+    /// <summary>
+    /// Issue-522 T-001: Turn-id-keyed terminal transition. Applies
+    /// <see cref="AgentTurnStatus.Completed"/>, <see cref="AgentTurnStatus.Failed"/>,
+    /// <see cref="AgentTurnStatus.Unknown"/>, or <see cref="AgentTurnStatus.Cancelled"/>
+    /// to the matching Turn. No-op on an already-terminal Turn.
+    /// Converges Session activity the same way the existing
+    /// <c>MarkInitialTurnTerminal</c> path does (idle on
+    /// Completed/Failed/Cancelled, Unknown on Unknown). Used by the
+    /// Activity-driven non-launch lifecycle path and by the AgentJob
+    /// launch path for launch Turns.
+    /// </summary>
+    Task MarkTurnTerminalAsync(string turnId, AgentTurnStatus status, AgentTurnResult? result);
+
+    /// <summary>
+    /// Issue-522 T-001: Server-only deterministic cancel of a
+    /// non-launch AgentTurn. Flips a Queued Turn to
+    /// <see cref="AgentTurnStatus.Cancelled"/> without contacting the
+    /// Runner or Runtime. No-op on an already-terminal or Executing
+    /// Turn — a running Turn is stoppable through the stop path.
+    /// Converges Session activity to Idle so a subsequently accepted
+    /// input can start its own Turn.
+    /// </summary>
+    Task CancelTurnAsync(string turnId);
+
+    /// <summary>
+    /// Issue-522 T-001: shared Turn-control resolver. Returns the
+    /// target Turn's current status and classification (queued,
+    /// executing, terminal, or turn-not-found) without mutating
+    /// state. A null result means the id does not resolve.
+    /// </summary>
+    Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId);
+
     Task<AgentSessionInfo?> GetAsync();
     Task EnsureRuntimeSessionPresentAsync();
     Task RunnerDisconnectedAsync();
@@ -73,6 +129,16 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     /// shape into the canonical Job+Session+Input+Turn snapshot.
     /// </summary>
     Task<AgentInitialLaunchSnapshot?> GetInitialLaunchAsync();
+
+    /// <summary>
+    /// Issue-522 T-001: read the full ordered child Turn list of the
+    /// session (launch Turn + every recorded follow-up Turn). Returns
+    /// an empty list when the session has no Turn children. The
+    /// composite observation read (issue-512 T-002) still projects
+    /// only the launch Turn; this read is for cancel/stop targeting
+    /// and for diagnostics that need the follow-up Turn history.
+    /// </summary>
+    Task<IReadOnlyList<AgentTurnRecord>> ListTurnsAsync();
 
 }
 
@@ -267,3 +333,18 @@ public sealed record AgentInitialLaunchSnapshot(
     [property: Id(0)] string SessionId,
     [property: Id(1)] AgentSessionInputRecord? Input,
     [property: Id(2)] AgentTurnRecord? Turn);
+
+/// <summary>
+/// Command body for <see cref="IAgentSessionGrain.RecordFollowupTurnAsync"/>.
+/// The follow-up route mints a stable <see cref="InputId"/> and
+/// <see cref="TurnId"/> and passes them to the Session grain so the
+/// durable Turn identity is committed ahead of any Runner dispatch.
+/// <see cref="Source"/> identifies the follow-up origin (e.g.
+/// <c>generic-followup</c>, <c>workflow-followup</c>).
+/// </summary>
+[GenerateSerializer]
+public sealed record RecordFollowupTurnCommand(
+    [property: Id(0)] string InputId,
+    [property: Id(1)] string TurnId,
+    [property: Id(2)] string Prompt,
+    [property: Id(3)] string Source);

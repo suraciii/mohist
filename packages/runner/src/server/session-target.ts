@@ -93,6 +93,25 @@ export interface ReceiveFollowupPayload {
   target?: ReceiveFollowupSessionTarget
   text: string
   operationId?: string
+  /**
+   * Issue-522 T-001: stable SessionInput id minted by the Server
+   * and recorded on the AgentSession grain before the Runner is
+   * invoked. When present the Runner uses it as the canonical id on
+   * the durable `session.input` record so the Server does not have
+   * to mint a duplicate. Absent on legacy callers that did not yet
+   * support the durable Turn identity; the Runner falls back to its
+   * own random id and the Server's existing acceptance path.
+   */
+  inputId?: string
+  /**
+   * Issue-522 T-001: stable AgentTurn id minted by the Server and
+   * recorded on the AgentSession grain before the Runner is
+   * invoked. The Runner does not currently use this id (it has no
+   * Turn-id-keyed state); it is carried on the wire so later stop /
+   * cancel plumbing can target the same Turn. Absent on legacy
+   * callers.
+   */
+  turnId?: string
 }
 
 // Payload delivered by the server-side `ReceiveWorkflowRunStatus` SignalR
