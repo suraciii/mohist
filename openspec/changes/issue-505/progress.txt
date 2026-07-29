@@ -9,3 +9,8 @@
 - Removed the hardcoded quality stage list and threaded resolved stage order through `BuildWindow`.
 - Updated no-phantom and empty-window expectations; added custom Definition and builtin parity scenarios in `IssueMetricsQualityStageOrderSpecs`.
 - Focused metric specs pass. `npm test` reaches the full suite but currently fails on the unrelated flaky `GenericAgentSessionCancelApiSpecs.Cancel_AfterReset_IgnoresTerminalActivityFromPredecessorRuntime` session-idle assertion; the metric and architecture checks pass.
+
+## T-002
+
+- `ToWorkDispatchResponseAsync` now resolves parent issue context for every workflow-owned task with a valid issue, independent of stage and action name.
+- Mapper coverage now verifies non-plan and non-opencode workflow tasks attach context, while checks, agent jobs, detached work, and parentless issues remain without context.
