@@ -199,7 +199,15 @@ public sealed record CompleteCompactAgentSessionCommand(
 [GenerateSerializer]
 public sealed record AgentSessionFollowupReservation(
     [property: Id(0)] string? OperationId,
-    [property: Id(1)] bool StartsIdleTurn = false);
+    [property: Id(1)] bool StartsIdleTurn = false,
+    /// <summary>
+    /// True when the follow-up that would start a new execution on an
+    /// idle session is backed by an acquired per-agent concurrency
+    /// permit (issue-520 T-002). False when the follow-up joined an
+    /// already-active session (per-session serial, no permit) or when
+    /// the session is not bound to a tracked Agent identity.
+    /// </summary>
+    [property: Id(2)] bool ConcurrencyPermitHeld = false);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

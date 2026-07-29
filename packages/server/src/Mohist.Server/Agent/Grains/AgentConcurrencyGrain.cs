@@ -45,12 +45,24 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             throw new ArgumentException("Job id is required.", nameof(jobId));
 
         var limit = await ReadLimitAsync(projectId, agentId);
+
+        // Issue-520 T-001 D3 / T-002: a null MaxConcurrentRuns means
+        // there is no per-agent bound (agent-concurrency spec, "Unset
+        // limit imposes no per-agent bound"). The gate returns Granted
+        // immediately and does not track the token — both because no
+        // bound applies and because there is no Release that needs to
+        // be matched. The caller (AgentJobGrain, AgentSessionGrain) still
+        // records its own "permit held" view so the standard
+        // acquire/release contract is symmetric.
+        if (limit is null)
+            return AgentConcurrencyAcquireResult.Granted;
+
         if (_state.State.ActiveTokens.Contains(token, StringComparer.Ordinal))
             return AgentConcurrencyAcquireResult.Granted;
         if (_state.State.Waiters.Any(waiter => string.Equals(waiter.Token, token, StringComparison.Ordinal)))
             return AgentConcurrencyAcquireResult.Waiting;
 
-        if (limit is null || _state.State.ActiveTokens.Count < limit.Value)
+        if (_state.State.ActiveTokens.Count < limit.Value)
         {
             _state.State.ActiveTokens.Add(token);
             await _state.WriteStateAsync();
@@ -64,6 +76,12 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
 
     public async Task ReleaseAsync(string projectId, string agentId, string token)
     {
+        var limit = await ReadLimitAsync(projectId, agentId);
+        // Same null-limit shortcut as AcquireAsync: nothing was tracked,
+        // nothing to release, nothing to grant.
+        if (limit is null)
+            return;
+
         _state.State.ActiveTokens.RemoveAll(value => string.Equals(value, token, StringComparison.Ordinal));
         _state.State.Waiters.RemoveAll(waiter => string.Equals(waiter.Token, token, StringComparison.Ordinal));
         await GrantWaitersAsync(projectId, agentId);

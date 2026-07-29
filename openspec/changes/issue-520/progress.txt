@@ -10,3 +10,10 @@
 - Added AgentConcurrencyGrain with persisted active permit tokens and FIFO waiters, live MaxConcurrentRuns reads, release grants, reminder activation/reconciliation hooks, and AgentJob notification API.
 - AgentJobGrain acquires before runner assignment, releases on assignment failure and terminal transition, and no longer fails pending jobs after DispatchRetryBound.
 - Focused spec execution could not complete within the test runner timeout; build succeeds with `dotnet build Mohist.sln -p:SkipWebBuild=true`.
+
+## T-002
+
+- Follow-up reservations on idle AgentSessions now acquire the shared per-agent gate before persistence and runner delivery; busy-session follow-ups remain per-session serial and do not acquire a new permit.
+- Follow-up permits are stored on the pending lease and released when the matching idle `session.activity` clears the lease, or when the reservation is abandoned/expired. A failed persistence or runner delivery also abandons and releases the permit.
+- At the gate limit, follow-up acquisition throws `FollowupConcurrencyLimitException`; the API returns HTTP 409 with code `concurrency_limit`, leaves no input persisted, and remains distinct from HTTP 503 `runner_unavailable`.
+- The focused follow-up spec fixture builds successfully, but the current Orleans 10 in-process test host cannot resolve server grain implementations (`Could not find an implementation for interface ...`), matching the existing session-grain spec baseline. Solution build and unit/architecture tests remain usable.
