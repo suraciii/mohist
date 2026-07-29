@@ -80,8 +80,6 @@ if 事件类型 ∈ {approval-requested, run.failed}:
 与 issue 读模型投影、分发侧 muted 压制与 watching 启动（内置提示词，以
 `watch:` 合成规则 id 复用路由启动管线）。
 
-幂等现状与上文「启动」有一个待裁定的差距：耐久启动键按
-`(projectId, eventId, ruleId)`（watch 使用 `watch:` 合成规则 id），同一事件里
-同一 Agent 的规则命中与关注命中在**单次分发内**合并为一次启动；跨分发重投
-按同一组键幂等。把 `(event, agent)` 从分发内合并提升为耐久启动身份（替代
-规则键）是待裁定的设计点。
+实装差距：启动管线的耐久键当前仍按 `(projectId, eventId, ruleId)`（watch 用
+`watch:` 合成规则 id），(event, agent) 合并只在单次分发内生效；归一到
+agentId 键由 issue #532 收敛。
