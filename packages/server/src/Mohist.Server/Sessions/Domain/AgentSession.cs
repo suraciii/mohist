@@ -415,7 +415,8 @@ public sealed record AgentTurnControlState(
     [property: Id(0)] string TurnId,
     [property: Id(1)] AgentTurnStatus Status,
     [property: Id(2)] AgentTurnControlClassification Classification,
-    [property: Id(3)] bool IsLaunchTurn);
+    [property: Id(3)] bool IsLaunchTurn,
+    [property: Id(4)] string? JobId = null);
 
 [GenerateSerializer]
 public enum AgentTurnControlClassification

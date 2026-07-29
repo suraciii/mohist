@@ -204,13 +204,13 @@ public static class AgentJobController
         while (true)
         {
             var terminal = await grain.GetTerminalResultAsync();
-            if (terminal.Status is AgentJobStatus.Completed or AgentJobStatus.Failed)
+            if (terminal.Status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
                 return terminal;
 
             if (timeProvider.GetUtcNow() + step >= deadline)
             {
                 terminal = await grain.GetTerminalResultAsync();
-                if (terminal.Status is AgentJobStatus.Completed or AgentJobStatus.Failed)
+                if (terminal.Status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
                     return terminal;
                 throw new TimeoutException("Agent job did not reach a terminal state in time.");
             }
@@ -237,6 +237,7 @@ public static class AgentJobController
     {
         AgentJobStatus.Completed => "completed",
         AgentJobStatus.Failed => "failed",
+        AgentJobStatus.Cancelled => "cancelled",
         AgentJobStatus.Running => "running",
         AgentJobStatus.Pending => "pending",
         AgentJobStatus.Unknown => "unknown",

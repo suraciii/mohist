@@ -9,3 +9,11 @@
 - Added durable follow-up AgentTurnRecord/Input linkage, idempotent redispatch handling, turn-id-keyed executing/terminal/cancel transitions, resolver classification, and non-launch lifecycle driving from existing runtime events.
 - Follow-up input and terminal activity facts carry the server-minted turn id. Launch turns remain Job-owned for terminal result authority.
 - AgentJob launch terminal/executing wrappers delegate through InitialTurnId; the existing dispatch fence remains queued until its established lifecycle point.
+
+## T-002
+
+- Added `AgentJobStatus.Cancelled` as a terminal Job verdict and mapped it to the owning launch Turn without creating a failure result.
+- `AgentJob.CancelAsync` decides Pending versus Running inside the Job grain, so cancellation wins before dispatch or is rejected once execution has started.
+- The session-scoped cancel route resolves a Turn first, returns stale/Executing states without Runner contact, delegates launch Turns to the owning Job, and cancels later Turns directly on the Session.
+- Cancelled Job observations and read projections use `cancelled`; `Unknown` remains non-terminal.
+- Focused AgentJob cancellation and T-001 lifecycle tests pass; the API cancellation class still hangs after host startup and needs a follow-up investigation before claiming the full spec suite passes.

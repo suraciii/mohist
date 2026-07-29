@@ -718,7 +718,8 @@ public static partial class AgentSessionExtensions
                 TurnId: match.Id,
                 Status: match.Status,
                 Classification: ClassifyTurn(match.Status),
-                IsLaunchTurn: !string.IsNullOrWhiteSpace(match.JobId));
+                IsLaunchTurn: !string.IsNullOrWhiteSpace(match.JobId),
+                JobId: match.JobId);
         }
 
         private static AgentTurnControlClassification ClassifyTurn(AgentTurnStatus status) =>

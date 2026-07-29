@@ -41,8 +41,14 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         }
     }
 
-    protected Task<HttpResponseMessage> PostGenericCancelAsync(string projectId, string sessionId) =>
-        _client.PostAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}/cancel", content: null);
+    protected async Task<HttpResponseMessage> PostGenericCancelAsync(string projectId, string sessionId)
+    {
+        var turns = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync();
+        var turnId = turns.FirstOrDefault()?.Id ?? $"missing-turn-{Guid.NewGuid():N}";
+        return await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agent-sessions/{sessionId}/cancel",
+            new { turnId });
+    }
 
     protected async Task<(ProjectRef Project, string SessionId)> CreateCanonicalSessionForCancelAsync(string sourceKind, string runtime = "opencode")
     {
@@ -74,12 +80,19 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
             runtimeSessionId,
             WorkDir: $"/workspaces/{project.Id}"));
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        var inputId = $"input-{Guid.NewGuid():N}";
+        await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            inputId,
+            turnId,
+            "before cancel",
+            "user"));
         var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
         {
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionInput,
-                $"{{\"role\":\"user\",\"text\":\"before cancel\",\"kind\":\"task\",\"runtimeSessionId\":\"{runtimeSessionId}\"}}"),
+                $"{{\"role\":\"user\",\"text\":\"before cancel\",\"kind\":\"task\",\"runtimeSessionId\":\"{runtimeSessionId}\",\"turnId\":\"{turnId}\"}}"),
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.MessageDelta,
                 "{\"text\":\"preserved assistant text\"}"),
@@ -87,6 +100,37 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         await persistence.WaitAsync();
 
         return (project, sessionId);
+    }
+
+    protected async Task<(ProjectRef Project, string SessionId, string TurnId)> CreateQueuedSessionForCancelAsync()
+    {
+        var project = await CreateProjectAsync("queued");
+        var sessionId = $"queued-cancel-{Guid.NewGuid():N}";
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: string.Empty,
+            AgentRuntime: "opencode",
+            WorkDir: $"/workspaces/{project.Id}",
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                project.Id,
+                "queued-agent",
+                "queued-agent"))));
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
+        await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            $"input-{Guid.NewGuid():N}",
+            turnId,
+            "queued input",
+            "user"));
+        await persistence.WaitAsync();
+        return (project, sessionId, turnId);
+    }
+
+    protected async Task<(ProjectRef Project, string SessionId, string TurnId)> CreateExecutingSessionForCancelAsync()
+    {
+        var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch");
+        var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
+        return (project, sessionId, turn.Id);
     }
 
     protected async Task<SessionEvidence> ReadSessionEvidenceAsync(string sessionId)

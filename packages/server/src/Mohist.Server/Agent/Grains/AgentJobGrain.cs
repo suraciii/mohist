@@ -161,7 +161,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private string Key => this.GetPrimaryKeyString();
     private AgentJobState State => _state.State;
-    private bool IsTerminal => State.Status is AgentJobStatus.Completed or AgentJobStatus.Failed;
+    private bool IsTerminal => State.Status is AgentJobStatus.Completed
+        or AgentJobStatus.Failed
+        or AgentJobStatus.Cancelled;
 
     /// <summary>
     /// Job is in a state where no further dispatch attempts are
@@ -184,6 +186,30 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         or AgentJobStatus.Unknown;
 
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(State.Status);
+
+    public async Task<AgentJobCancelResult> CancelAsync()
+    {
+        if (State.Status == AgentJobStatus.Pending)
+        {
+            await EnterTerminalStateAsync(
+                AgentJobStatus.Cancelled,
+                null,
+                null,
+                null,
+                null,
+                "cancelled",
+                null,
+                null,
+                null);
+            return new AgentJobCancelResult(AgentJobCancelDisposition.Cancelled, State.Status);
+        }
+
+        return new AgentJobCancelResult(
+            State.Status == AgentJobStatus.Running
+                ? AgentJobCancelDisposition.Executing
+                : AgentJobCancelDisposition.AlreadyEnded,
+            State.Status);
+    }
 
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult(State.WorkId);
 
@@ -1366,7 +1392,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkTurnTerminalAsync(
             State.Input!.InitialTurnId!,
-            status == AgentJobStatus.Completed ? AgentTurnStatus.Completed : AgentTurnStatus.Failed,
+            status switch
+            {
+                AgentJobStatus.Completed => AgentTurnStatus.Completed,
+                AgentJobStatus.Cancelled => AgentTurnStatus.Cancelled,
+                _ => AgentTurnStatus.Failed,
+            },
             new AgentTurnResult(message, output, failureReason, failureCategory, exitCode));
     }
 
@@ -1447,7 +1478,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (State.PendingSessionClose is { } existing)
             return existing;
 
-        var statusText = terminalStatus == AgentJobStatus.Completed ? "completed" : "failed";
+        var statusText = terminalStatus switch
+        {
+            AgentJobStatus.Completed => "completed",
+            AgentJobStatus.Cancelled => "cancelled",
+            _ => "failed",
+        };
         return new PendingSessionClose(
             DeliveryId: AgentJobSessionDeliveryIds.TerminalDeliveryId(Key),
             Status: statusText,

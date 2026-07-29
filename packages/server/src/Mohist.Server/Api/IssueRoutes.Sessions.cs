@@ -123,10 +123,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             string name,
+            AgentSessionCancelRequest? request,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
-            IHubContext<RunnerHub> runnerHub,
-            RunnerConnectionTracker connections,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
@@ -136,10 +135,9 @@ public static partial class IssueRoutes
             return await AgentSessionCancelRoutes.ExecuteCancelAsync(
                 project.Id,
                 sessionId,
+                request,
                 sessions,
                 grains,
-                runnerHub,
-                connections,
                 ct);
         });
     }
