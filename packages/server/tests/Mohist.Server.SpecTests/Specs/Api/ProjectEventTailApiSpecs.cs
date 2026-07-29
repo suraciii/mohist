@@ -360,8 +360,6 @@ public class ProjectEventTailApiSpecs
         private Task? _reader;
         private Task? _handler;
         private Pipe? _pipe;
-        private int _statusCode;
-        private string? _contentType;
         private int _disposed;
 
         public TailSession(InMemoryEventTailSource source, string projectId, string? match)
@@ -452,8 +450,6 @@ public class ProjectEventTailApiSpecs
             _reader = reader;
             _handler = handler;
             _pipe = pipe;
-            _statusCode = httpContext.Response.StatusCode;
-            _contentType = httpContext.Response.ContentType;
         }
 
         public async Task<List<ParsedEnvelope>> WaitForLinesAsync(int expected)
