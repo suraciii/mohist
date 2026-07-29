@@ -32,9 +32,8 @@ public class AgentQuerier : IScopedService
 
     /// <summary>
     /// Resolves an Agent by name within a project, case-insensitively.
-    /// Mention resolution (<c>@SuperVisor</c> → Agent named <c>supervisor</c>,
-    /// issue-490 spec <i>Mention matching is case-insensitive</i>) and the
-    /// Agent-name uniqueness check both go through this path, so both treat
+    /// Mention resolution (<c>@SuperVisor</c> → Agent named <c>supervisor</c>)
+    /// and the Agent-name uniqueness check both go through this path, so both treat
     /// name equality as ordinal-ignorecase. Matches the client-side filter
     /// shape already used by <see cref="GetByIdAsync"/>: the rows are pulled
     /// by project, deserialized, and filtered in memory, so the comparison

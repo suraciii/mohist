@@ -60,7 +60,7 @@ public interface IAgentLauncher
         CancellationToken ct = default);
 
     /// <summary>
-    /// Idempotent manual launch (issue-512 T-001). The route forwards
+    /// Idempotent manual launch. The route forwards
     /// the caller-supplied <paramref name="idempotencyKey"/> to the
     /// <see cref="Grains.AgentLaunchCoordinatorGrain"/> keyed by
     /// <c>(ProjectId, IdempotencyKey)</c>. The coordinator persists
@@ -104,7 +104,7 @@ public interface IAgentLauncher
         CancellationToken ct = default);
 
     /// <summary>
-    /// Mention-launch path (issue-490 T-002, design D1/D3/D6). Reuses the
+    /// Mention-launch path. Reuses the
     /// shared manual-style launch pipeline — workspace-optional, so a
     /// mention fires regardless of workflow-run state — but anchors the
     /// session id and AgentJob grain key on the comment identity

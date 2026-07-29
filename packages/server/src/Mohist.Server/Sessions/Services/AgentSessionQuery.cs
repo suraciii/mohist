@@ -96,7 +96,7 @@ public class AgentSessionQuery : IScopedService
     /// projections for the joined branch, so historical Sessions with
     /// <c>activity = idle</c>, missing source ids, or non-running Workflow
     /// Runs are not selected and their <c>State</c> JSON is not
-    /// deserialized (issue-467).
+    /// deserialized.
     /// </summary>
     public virtual async Task<IReadOnlyList<AgentSessionRecord>> ListStatusCandidatesAsync(
         string projectId,
@@ -136,7 +136,7 @@ public class AgentSessionQuery : IScopedService
     /// existing request-work interceptors as the sole source for database
     /// and downstream counts. The seam exists so deterministic tests can
     /// observe how many rows the new status candidate query materialized
-    /// without expanding the public API (issue-467 acceptance criteria).
+    /// without expanding the public API.
     /// </summary>
     internal Action<int>? OnRowsMaterializedCallback { get; set; }
 

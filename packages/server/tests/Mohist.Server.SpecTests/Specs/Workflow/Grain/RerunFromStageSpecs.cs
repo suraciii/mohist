@@ -118,17 +118,17 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
         var (buildChecks, r4) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r4, buildChecks, "build-ok");
 
-        var runProfile = new WorkflowRunProfileManager(new PooledDbContextFactory<MohistDbContext>(
+        var runVariablesStore = new WorkflowRunVariablesStore(new PooledDbContextFactory<MohistDbContext>(
             new DbContextOptionsBuilder<MohistDbContext>()
                 .UseSqlite(_fixture.ConnectionString)
                 .Options));
-        await runProfile.PatchVariablesAsync(_workflowId!, new VariableBundle(
+        await runVariablesStore.PatchVariablesAsync(_workflowId!, new VariableBundle(
             Vars: JsonDocument.Parse("{\"answer\":42}").RootElement.Clone()));
 
         var workflowGrain = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
         await workflowGrain.RerunFromStageAsync("build");
 
-        var preserved = await runProfile.GetVariablesAsync(_workflowId!);
+        var preserved = await runVariablesStore.GetVariablesAsync(_workflowId!);
         Assert.NotNull(preserved.Vars);
         Assert.Equal(42, preserved.Vars.Value.GetProperty("answer").GetInt32());
 

@@ -146,7 +146,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
     }
 
     /// <summary>
-    /// Envelope-only self-response guard (issue-491 design D3). Returns
+    /// Envelope-only self-response guard. Returns
     /// <c>true</c> only when the rule carries a non-empty
     /// <c>AgentId</c> AND that id equals the envelope's <c>agentid</c>
     /// lineage. Empty <c>AgentId</c> rules and rules pointing at a
@@ -160,7 +160,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
     }
 
     /// <summary>
-    /// Watch-launch pass (issue-489 design D5/D7/D8). Fires only on the
+    /// Watch-launch pass. Fires only on the
     /// fixed event set (<c>stage.approval-requested</c>,
     /// <c>run.failed</c>) and only when the event carries an issue. Each
     /// watching Agent reuses the routed-launch path with a built-in
@@ -231,7 +231,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
     }
 
     /// <summary>
-    /// Built-in watch response prompt (issue-489 design D8). Conveys the
+    /// Built-in watch response prompt. Conveys the
     /// triggering event as a fact and instructs the Agent to act on its
     /// own identity instructions. No per-watch ResponsePrompt.
     /// </summary>
@@ -276,7 +276,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
     /// <summary>
     /// Record a watch-driven routed-launch preflight failure as a failed
     /// AgentJob + AgentSession without dispatching a Runner. Mirrors the
-    /// routing-rule preflight failure helper (issue-489 design D5).
+    /// routing-rule preflight failure helper.
     /// </summary>
     private async Task RecordWatchPreflightFailureAsync(
         IServiceProvider services,

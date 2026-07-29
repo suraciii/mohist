@@ -7,7 +7,7 @@ namespace Mohist.Server.Agent.Grains;
 
 /// <summary>
 /// Pure helper that builds the CloudEvent envelope for AgentJob terminal
-/// failures (issue-491 design D2). Every executable AgentJob emits
+/// failures. Every executable AgentJob emits
 /// <c>com.mohist.agent.job.failed</c>. Lineage is stamped from the durable
 /// launch context (<see cref="AgentJobInput"/> +
 /// <see cref="RoutedAgentLaunchPlan"/>) so the failure event never re-reads

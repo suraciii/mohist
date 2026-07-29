@@ -22,7 +22,7 @@ namespace Mohist.Server.AgentOps.Services;
 /// task-progress / preview-card projection into a single
 /// <see cref="ActivityDto"/>. The per-card <c>eventSummary</c> is read
 /// straight from each <see cref="AgentSessionRecord"/>'s persisted
-/// <see cref="AgentSession.ActivitySummary"/> (issue-468) so the activity
+/// <see cref="AgentSession.ActivitySummary"/> so the activity
 /// polling path no longer replays transcript history to build summaries.
 /// Depends one-way on the shared
 /// <see cref="ActiveSessionReconciler.ReconcileAsync"/> reduction and the
@@ -191,7 +191,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     /// feeds stay in lockstep; <c>eventSummary</c> is the persisted
     /// <see cref="AgentSession.ActivitySummary"/> delivered by the
     /// Session write path, so this assembler never replays transcript
-    /// history to build summaries (issue-468).
+    /// history to build summaries.
     /// </summary>
     private ActivityCardDto ToActivityCard(
         AgentSessionRecord record,

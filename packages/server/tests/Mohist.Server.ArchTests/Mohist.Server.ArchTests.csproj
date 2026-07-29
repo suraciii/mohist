@@ -40,6 +40,9 @@
     <EmbeddedResource Include="spec-file-size-baseline.json">
       <LogicalName>SpecFileSizeBaseline.json</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="comment-reference-baseline.json">
+      <LogicalName>CommentReferenceBaseline.json</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="..\..\src\Mohist.Server\Mohist.Server.csproj">
       <LogicalName>ProductionProjects/Mohist.Server.csproj</LogicalName>
     </EmbeddedResource>

@@ -19,7 +19,6 @@ internal interface IWorkflowGrainContext
     void CacheAssignedWorkerId(string? workerId);
     Task SaveAsync();
     Task SaveAsyncWithEvents(IReadOnlyList<WorkflowEvent> events);
-    Task DispatchEvent(WorkflowEvent e);
     Task ReleaseCurrentStageLocks(string reason);
 
     string GetProjectId();

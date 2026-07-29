@@ -308,7 +308,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
     }
 
     /// <summary>
-    /// Mention-launch path (issue-490 T-002, design D1/D3/D6). Reuses the
+    /// Mention-launch path. Reuses the
     /// manual-style <see cref="LaunchAsync"/> pipeline (workspace-optional,
     /// no preflight gate) but derives the session id + AgentJob key from
     /// the comment identity via

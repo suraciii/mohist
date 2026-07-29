@@ -25,7 +25,7 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
             new FilePromptLoader(),
             new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-            new WorkflowRunProfileManager(dbContextFactory),
+            new WorkflowRunVariablesStore(dbContextFactory),
             new WorkflowProfileProvider(dbContextFactory, NullActionCatalogSource.Instance));
     }
 
@@ -38,7 +38,7 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
             new FilePromptLoader(),
             new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-            new WorkflowRunProfileManager(new TestDbContextFactory(Database.Options)),
+            new WorkflowRunVariablesStore(new TestDbContextFactory(Database.Options)),
             new WorkflowProfileProvider(new TestDbContextFactory(Database.Options), NullActionCatalogSource.Instance));
 
     public void Dispose() => Database.Dispose();

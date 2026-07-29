@@ -40,8 +40,8 @@ public class AgentSessionRow
     /// Stored projected copy of <c>State.status.activity</c>. Sourced from
     /// the persisted Session JSON so direct-session activity can be selected
     /// at the database boundary without deserializing the full state for
-    /// every historical row on each <c>/api/agent/status</c> poll
-    /// (issue-467). Lowercased to match the existing <see cref="Status"/>
+    /// every historical row on each <c>/api/agent/status</c> poll.
+    /// Lowercased to match the existing <see cref="Status"/>
     /// convention; values are <c>"active"</c>, <c>"idle"</c>, or
     /// <c>"unknown"</c>.
     /// </summary>

@@ -67,7 +67,7 @@ public sealed class AgentSessionResolver : IScopedService
     /// Stable AgentSession id anchored on a comment mention
     /// (<paramref name="projectId"/>, <paramref name="commentId"/>,
     /// <paramref name="agentId"/>). Used by the mention launch path
-    /// (issue-490 T-002, design D3) so the comment (not the delivering
+    /// so the comment (not the delivering
     /// event's GUID) is the durable anchor — reprocessing the same
     /// comment reuses the session grain and the AgentJob grain,
     /// different comments launch independently.

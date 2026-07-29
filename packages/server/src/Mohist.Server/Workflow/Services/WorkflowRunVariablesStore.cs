@@ -8,7 +8,7 @@ using Mohist.Server.Workflow.Domain;
 
 namespace Mohist.Server.Workflow.Services;
 
-public class WorkflowRunProfileManager : IScopedService
+public class WorkflowRunVariablesStore : IScopedService
 {
     /// <summary>
     /// Top-level key seeded as a WorkflowRun initialization default. The
@@ -21,7 +21,7 @@ public class WorkflowRunProfileManager : IScopedService
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 
-    public WorkflowRunProfileManager(IDbContextFactory<MohistDbContext> dbFactory)
+    public WorkflowRunVariablesStore(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
     }

@@ -1482,10 +1482,10 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         await _attachmentService.ValidateCommentBindAsync(_issue.ProjectId, comment.Id, attachmentIds);
 
         // Comment row + comment-added CloudEvent share one transaction so the
-        // event is observable only after the row is durable (issue-490 T-001,
-        // design D2 — direct CloudEvent, EpicGrain-style emit pattern, NOT an
-        // IssueEvent union variant). The dispatcher poke fires only after the
-        // commit succeeds; the reminder tick recovers if the poke is lost.
+        // event is observable only after the row is durable. The dispatch
+        // pattern emits a direct CloudEvent in the EpicGrain style rather than
+        // an IssueEvent union variant. The dispatcher poke fires only after
+        // the commit succeeds; the reminder tick recovers if the poke is lost.
         var envelope = IssueCommentAddedEventFactory.Build(
             _issue,
             new IssueCommentAdded(comment.Id, normalizedAuthor, body),

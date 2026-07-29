@@ -47,8 +47,8 @@ public class ProjectEventTailApiSpecs
     {
         var project = await CreateProjectAsync("tail-all");
 
-        using var session = new TailSession(Source, project.Id, match: null);
-        session.Open();
+        await using var session = new TailSession(Source, project.Id, match: null);
+        await session.OpenAsync();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
         Publish(project.Id, "com.mohist.issue.completed", new Dictionary<string, string> { ["issue"] = "1" });
@@ -69,11 +69,11 @@ public class ProjectEventTailApiSpecs
     {
         var project = await CreateProjectAsync("tail-match");
 
-        using var session = new TailSession(
+        await using var session = new TailSession(
             Source,
             project.Id,
             match: "event.type == \"com.mohist.issue.completed\"");
-        session.Open();
+        await session.OpenAsync();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
         Publish(project.Id, "com.mohist.issue.completed", new Dictionary<string, string> { ["issue"] = "1" });
@@ -93,8 +93,8 @@ public class ProjectEventTailApiSpecs
         var projectP = await CreateProjectAsync("tail-isolation-p");
         var projectQ = await CreateProjectAsync("tail-isolation-q");
 
-        using var session = new TailSession(Source, projectP.Id, match: null);
-        session.Open();
+        await using var session = new TailSession(Source, projectP.Id, match: null);
+        await session.OpenAsync();
 
         Publish(projectQ.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
         Publish(projectP.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
@@ -111,8 +111,8 @@ public class ProjectEventTailApiSpecs
     {
         var project = await CreateProjectAsync("tail-unprojected");
 
-        using var session = new TailSession(Source, project.Id, match: null);
-        session.Open();
+        await using var session = new TailSession(Source, project.Id, match: null);
+        await session.OpenAsync();
 
         Source.Publish(new CloudEvent(
             id: Guid.NewGuid().ToString(),
@@ -135,11 +135,11 @@ public class ProjectEventTailApiSpecs
     {
         var project = await CreateProjectAsync("tail-payload-isolation");
 
-        using var session = new TailSession(
+        await using var session = new TailSession(
             Source,
             project.Id,
             match: "event.type == \"com.mohist.issue.completed\"");
-        session.Open();
+        await session.OpenAsync();
 
         var payloadOnlyWouldMatch = JsonSerializer.SerializeToElement(new
         {
@@ -195,8 +195,8 @@ public class ProjectEventTailApiSpecs
     {
         var project = await CreateProjectAsync("tail-shape");
 
-        using var session = new TailSession(Source, project.Id, match: null);
-        session.Open();
+        await using var session = new TailSession(Source, project.Id, match: null);
+        await session.OpenAsync();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
         Publish(project.Id, "com.mohist.issue.completed", new Dictionary<string, string> { ["issue"] = "1" });
@@ -217,8 +217,8 @@ public class ProjectEventTailApiSpecs
     {
         var project = await CreateProjectAsync("tail-line-shape");
 
-        using var session = new TailSession(Source, project.Id, match: null);
-        session.Open();
+        await using var session = new TailSession(Source, project.Id, match: null);
+        await session.OpenAsync();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string>
         {
@@ -250,8 +250,8 @@ public class ProjectEventTailApiSpecs
 
         Assert.Equal(0, Source.ActiveSubscriptionCount);
 
-        var session = new TailSession(Source, project.Id, match: null);
-        session.Open();
+        await using var session = new TailSession(Source, project.Id, match: null);
+        await session.OpenAsync();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
         await session.WaitForLinesAsync(expected: 1);
@@ -270,8 +270,8 @@ public class ProjectEventTailApiSpecs
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "2" });
 
-        using var session = new TailSession(Source, project.Id, match: null);
-        session.Open();
+        await using var session = new TailSession(Source, project.Id, match: null);
+        await session.OpenAsync();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "3" });
 
@@ -350,7 +350,7 @@ public class ProjectEventTailApiSpecs
     /// resolved on <c>HttpContext.Items</c> lets the test own its own
     /// pipe without going through the buffered HTTP pipeline.
     /// </remarks>
-    private sealed class TailSession : IDisposable
+    private sealed class TailSession : IAsyncDisposable
     {
         private readonly InMemoryEventTailSource _source;
         private readonly string _projectId;
@@ -374,7 +374,7 @@ public class ProjectEventTailApiSpecs
         public int StatusCode => _statusCode;
         public string? ContentType => _contentType;
 
-        public void Open()
+        public async Task OpenAsync()
         {
             if (_cts is not null)
                 throw new InvalidOperationException("Session already opened");
@@ -419,7 +419,7 @@ public class ProjectEventTailApiSpecs
                 }
             });
 
-            opened.Task.GetAwaiter().GetResult();
+            await opened.Task.ConfigureAwait(false);
 
             var reader = Task.Run(async () =>
             {
@@ -474,7 +474,11 @@ public class ProjectEventTailApiSpecs
             if (_disposed != 0 || _cts is null)
                 return;
             _cts.Cancel();
-            _handler?.GetAwaiter().GetResult();
+            if (_handler is not null)
+            {
+                try { await _handler.ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+            }
             if (_reader is not null)
             {
                 try { await _reader.ConfigureAwait(false); }
@@ -482,20 +486,22 @@ public class ProjectEventTailApiSpecs
             }
         }
 
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return;
             if (_cts is null)
                 return;
-            try
+            _cts.Cancel();
+            if (_handler is not null)
             {
-                _cts.Cancel();
-                _handler?.GetAwaiter().GetResult();
-                _reader?.GetAwaiter().GetResult();
+                try { await _handler.ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
             }
-            catch (OperationCanceledException)
+            if (_reader is not null)
             {
+                try { await _reader.ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
             }
             _cts.Dispose();
         }

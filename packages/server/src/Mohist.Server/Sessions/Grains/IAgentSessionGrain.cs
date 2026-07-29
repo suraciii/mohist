@@ -43,8 +43,8 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task RunnerDisconnectedAsync();
 
     /// <summary>
-    /// Idempotently record the initial input and turn for a launch
-    /// (issue-512 T-001). The session is opened from the supplied
+    /// Idempotently record the initial input and turn for a launch. The
+    /// session is opened from the supplied
     /// metadata when absent; the first <see cref="AgentSessionInputRecord"/>
     /// is recorded as accepted and the first <see cref="AgentTurnRecord"/>
     /// as queued, both linked to the AgentJob id. Re-issuing with the
@@ -69,7 +69,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     /// <summary>
     /// Read the initial input and turn records for the session. Returns
     /// <c>null</c> when the session has not yet been launched. The
-    /// composite observation read (issue-512 T-002) projects this
+    /// composite observation read projects this
     /// shape into the canonical Job+Session+Input+Turn snapshot.
     /// </summary>
     Task<AgentInitialLaunchSnapshot?> GetInitialLaunchAsync();
