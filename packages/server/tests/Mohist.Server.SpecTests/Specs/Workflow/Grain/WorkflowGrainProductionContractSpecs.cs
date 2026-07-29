@@ -80,7 +80,6 @@ public sealed class WorkflowGrainProductionContractSpecs
             identity.Runtime,
             store,
             profileManager,
-            scope.ServiceProvider.GetRequiredService<WorkflowRunVariablesStore>(),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
         await grain.OnActivateAsync(CancellationToken.None);

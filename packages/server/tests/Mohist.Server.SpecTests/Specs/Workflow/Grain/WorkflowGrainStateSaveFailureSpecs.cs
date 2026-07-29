@@ -45,15 +45,15 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         await grain.EnsureStartedAsync(context with { EpicNumber = 2 });
 
         var run = await store.LoadAsync(workflowRunId);
-        var defaults = await scope.ServiceProvider
-            .GetRequiredService<WorkflowRunVariablesStore>()
-            .GetDefaultVariablesAsync(workflowRunId);
+        var variables = await scope.ServiceProvider
+            .GetRequiredService<WorkflowProfileManager>()
+            .ResolveEffectiveVariablesAsync(workflowRunId, null);
         Assert.NotNull(run);
         Assert.Equal(WorkflowRunStatus.Pending, run!.Status);
         Assert.Equal(projectId, run.Metadata.ProjectId);
         Assert.Equal(1, run.Metadata.IssueNumber);
         Assert.Equal(2, run.Metadata.EpicNumber);
-        Assert.Equal(string.Empty, defaults.DefaultVars!.Value.GetProperty("archive").GetString());
+        Assert.False(variables.TryGetProperty("archive", out _));
         Assert.Single(await events.ListAsync(workflowRunId), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStarted);
     }
@@ -181,7 +181,6 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             identity.Runtime,
             store,
             services.GetRequiredService<WorkflowProfileManager>(),
-            services.GetRequiredService<WorkflowRunVariablesStore>(),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
     }

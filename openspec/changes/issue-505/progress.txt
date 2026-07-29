@@ -3,6 +3,9 @@
 - Quality metrics and stage durations share the effective project profile stage-order concept. `ResolveProjectStageOrderAsync` now uses `IWorkflowProfileProvider`, so persisted custom project profiles are resolved in addition to builtins.
 - Quality windows should emit only entered stages. Definition stages are emitted in Definition order; observed stages absent from that Definition retain accumulator insertion order after them.
 - The quality spec file is already guarded by the architecture test file-size ratchet. New scenarios belong in a separate focused spec file rather than expanding `IssueMetricsQualitySpecs.cs`.
+- EF Core migration history must keep the dropped column in prior migration snapshots; only the current `MohistDbContextModelSnapshot` and the row/config map need to forget it. The Drop migration only needs to DropColumn and AddColumn (default `"{}"`) on its Down.
+- `WorkflowRunVariablesStore` exposes both read and write paths. Removing the defaults layer leaves just `Get/Set/Patch` on the explicit `Variables` column; the ETag concurrency and tracked-row read-modify-write shape stay intact.
+- `WorkflowGrain` exposes two constructors (Orleans + test-friendly). Both must drop the `WorkflowRunVariablesStore` parameter and the two `EnsureArchiveDefaultAsync(GrainKey)` start-up calls.
 
 ## T-001
 
@@ -14,3 +17,11 @@
 
 - `ToWorkDispatchResponseAsync` now resolves parent issue context for every workflow-owned task with a valid issue, independent of stage and action name.
 - Mapper coverage now verifies non-plan and non-opencode workflow tasks attach context, while checks, agent jobs, detached work, and parentless issues remain without context.
+
+## T-003
+
+- `VariableBundle` now contains only `Vars` and `Stages`; resolution merges Project, Issue, and Run layers directly.
+- Run variable writes no longer read or mutate an initialization-default column, and WorkflowRun startup no longer seeds `archive`.
+- Added `DropWorkflowRunProfileDefaults` migration and removed the column from the current EF model snapshot and row mapping. Historical migration snapshots retain the old column as required by EF history.
+- Replaced default-layer tests with three-scope and fresh-run archive-absence coverage. Runner archive coverage now explicitly verifies the absent-hint dated move.
+- Runner typecheck/spec and server build, unit tests, and full spec test assembly pass. `dotnet ef` is unavailable in this environment, so pending-model validation was limited to the checked-in model snapshot and successful build.

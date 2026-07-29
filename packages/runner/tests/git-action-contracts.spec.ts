@@ -52,7 +52,7 @@ describe("local Git Action manifests", () => {
 })
 
 describe("validateActionInput null handling", () => {
-  it("treats an explicit null on an optional field as absent (profile vars seeded to null render through)", () => {
+  it("treats an explicit null on an optional field as absent", () => {
     const resolved = createDefaultRegistry().resolve("mohist/archive-change")
     if (resolved.kind !== "definition") throw new Error("Missing mohist/archive-change")
 

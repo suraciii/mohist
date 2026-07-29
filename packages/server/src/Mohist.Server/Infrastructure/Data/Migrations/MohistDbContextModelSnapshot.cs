@@ -2193,12 +2193,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("DefaultVariables")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
-                        .HasDefaultValue("{}");
-
                     b.Property<long>("ETag")
                         .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
