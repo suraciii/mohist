@@ -1,6 +1,7 @@
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Security;
+using System.Text.Json;
 
 namespace Mohist.Server.Api;
 
@@ -33,11 +34,10 @@ public static class DeadLetterRoutes
                 return ApiResults.BadRequest($"limit must be between 1 and {MaxLimit}");
 
             var rows = await store.QueryAsync(handler, resolvedLimit, ct);
-            return ApiResults.Ok(rows.Select(row => new
-            {
-                id = row.DeadLetterId,
-                origin = row.Origin,
-                sourceId = row.Id,
+            return ApiResults.Ok(rows.Select(row => new DeadLetterListItemResponse(
+                row.DeadLetterId,
+                row.Origin,
+                row.Id,
                 row.Source,
                 row.EventId,
                 row.Type,
@@ -45,14 +45,13 @@ public static class DeadLetterRoutes
                 row.Subject,
                 row.DataContentType,
                 row.Data,
-                extensions = row.ExtensionsJson,
-                handler = row.FailingHandler,
-                error = OperatorDiagnostic.Summarize(row.ErrorMessage),
-                attempts = row.AttemptCount,
+                row.ExtensionsJson,
+                row.FailingHandler,
+                OperatorDiagnostic.Summarize(row.ErrorMessage),
+                row.AttemptCount,
                 row.DeadLetteredAt,
-                status = row.Status.ToString(),
-                row.RedeliveryAttemptedAt,
-            }));
+                row.Status.ToString(),
+                row.RedeliveryAttemptedAt)));
         });
 
         group.MapPost("/{deadLetterId:long}/redeliver", async (
@@ -71,13 +70,11 @@ public static class DeadLetterRoutes
             if (!result.Found)
                 return ApiResults.NotFound($"Dead-letter {deadLetterId} not found");
 
-            var response = new
-            {
-                id = deadLetterId,
-                delivered = result.Delivered,
-                attempts = result.Attempts,
-                error = OperatorDiagnostic.Summarize(result.Error),
-            };
+            var response = new DeadLetterRedeliveryResponse(
+                deadLetterId,
+                result.Delivered,
+                result.Attempts,
+                OperatorDiagnostic.Summarize(result.Error));
             return result.Delivered
                 ? ApiResults.Ok(response)
                 : ApiResults.Conflict(
@@ -107,3 +104,28 @@ public static class DeadLetterRoutes
         string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
         || (System.Net.IPAddress.TryParse(host, out var address) && System.Net.IPAddress.IsLoopback(address));
 }
+
+public sealed record DeadLetterListItemResponse(
+    long Id,
+    string Origin,
+    long SourceId,
+    string Source,
+    string EventId,
+    string Type,
+    DateTimeOffset Time,
+    string? Subject,
+    string DataContentType,
+    JsonElement Data,
+    string Extensions,
+    string Handler,
+    string? Error,
+    int Attempts,
+    DateTimeOffset DeadLetteredAt,
+    string Status,
+    DateTimeOffset? RedeliveryAttemptedAt);
+
+public sealed record DeadLetterRedeliveryResponse(
+    long Id,
+    bool Delivered,
+    int Attempts,
+    string? Error);

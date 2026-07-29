@@ -289,13 +289,17 @@ public static partial class IssueRoutes
                 }
             }
 
-            return ApiResults.Ok(new
-            {
-                archived = completed.Count,
-                skipped = skipped.Count,
-                skippedNumbers = skipped.Select(s => s.Number).ToList(),
-                message = $"Archived {completed.Count} completed issues, skipped {skipped.Count}"
-            });
+            return ApiResults.Ok(new IssueArchiveCompletedResponse(
+                completed.Count,
+                skipped.Count,
+                skipped.Select(s => s.Number).ToList(),
+                $"Archived {completed.Count} completed issues, skipped {skipped.Count}"));
         });
     }
 }
+
+public sealed record IssueArchiveCompletedResponse(
+    int Archived,
+    int Skipped,
+    IReadOnlyList<int> SkippedNumbers,
+    string Message);
