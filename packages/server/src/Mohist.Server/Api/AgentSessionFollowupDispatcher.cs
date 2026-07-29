@@ -1,11 +1,11 @@
 using Microsoft.AspNetCore.SignalR;
-using Mohist.Server.Api;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 
-namespace Mohist.Server.Sessions.Services;
+namespace Mohist.Server.Api;
 
 public sealed class AgentSessionFollowupDispatcher : IScopedService
 {
