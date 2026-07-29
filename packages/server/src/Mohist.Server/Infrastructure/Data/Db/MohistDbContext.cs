@@ -81,6 +81,7 @@ public class MohistDbContext : DbContext
     public DbSet<ConnectionSecretRow> ConnectionSecrets { get; set; } = null!;
     public DbSet<SlackProviderInboxRow> SlackProviderInboxRows { get; set; } = null!;
     public DbSet<SlackOutboxRow> SlackOutboxRows { get; set; } = null!;
+    public DbSet<SlackOwnerClaimCodeRow> SlackOwnerClaimCodes { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -476,6 +477,23 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentConnections_ProjectId_AgentId");
             entity.HasIndex(e => e.Id)
                 .HasDatabaseName("IX_AgentConnections_Id");
+        });
+
+        modelBuilder.Entity<SlackOwnerClaimCodeRow>(entity =>
+        {
+            entity.ToTable("SlackOwnerClaimCodes");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.CodeHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ExpiresAt).IsRequired();
+            entity.Property(e => e.SupersededBy).HasMaxLength(256);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.CodeHash })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackOwnerClaimCodes_ProjectId_ConnectionId_CodeHash");
+            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.UsedAt, e.SupersededBy });
         });
 
         modelBuilder.Entity<IssueEventRow>(entity =>

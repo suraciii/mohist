@@ -105,7 +105,7 @@
       "type": "WRITE",
       "output": "Hashed single-use claim code generation/validation + users.info membership check + Owner establishment + owner-only DM gating.",
       "dependsOn": ["T-003"],
-      "passes": false,
+      "passes": true,
       "notes": "Implements design D7. The code is a single-use ownership bearer, not a credential. Membership is validated Server-side via users.info (D3), never by display name/message text and never delegated to the adapter."
     },
     {

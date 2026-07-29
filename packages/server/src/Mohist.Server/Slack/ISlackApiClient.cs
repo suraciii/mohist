@@ -47,7 +47,7 @@ public sealed record SlackAuthTestResponse(bool Ok, string? Error, string? TeamI
 public sealed record SlackBotInfoResponse(bool Ok, string? Error, SlackBotInfo? Bot);
 public sealed record SlackBotInfo(string? Id, string? Name, string? AppId, IReadOnlyList<string>? Scopes);
 public sealed record SlackUserInfoResponse(bool Ok, string? Error, SlackUserInfo? User);
-public sealed record SlackUserInfo(string? Id, string? TeamId, bool IsBot, bool Deleted, bool IsRestricted, bool IsUltraRestricted, bool IsGuest);
+public sealed record SlackUserInfo(string? Id, string? TeamId, bool IsBot, bool Deleted, bool IsRestricted, bool IsUltraRestricted, bool IsGuest, IReadOnlyList<string>? TeamIds = null);
 public sealed record SlackConversationInfoResponse(bool Ok, string? Error, SlackConversationInfo? Channel);
 public sealed record SlackConversationInfo(string? Id, string? Name, string? Creator, bool IsIm, bool IsMember);
 public sealed record SlackUsersListResponse(bool Ok, string? Error, IReadOnlyList<SlackUserInfo>? Members, SlackResponseMetadata? ResponseMetadata);

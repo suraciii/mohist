@@ -445,6 +445,44 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasFilter("\"DeletedAt\" IS NULL");
 
                     b.ToTable("AgentConnections", (string)null);
+                 });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
+                    b.Property<DateTimeOffset>("ExpiresAt").HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SupersededBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+                    b.Property<DateTimeOffset?>("UsedAt").HasColumnType("TEXT");
+                    b.HasKey("Id");
+                    b.HasIndex("ProjectId", "ConnectionId", "CodeHash")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackOwnerClaimCodes_ProjectId_ConnectionId_CodeHash");
+                    b.HasIndex("ProjectId", "ConnectionId", "UsedAt", "SupersededBy")
+                        .HasDatabaseName("IX_SlackOwnerClaimCodes_ProjectId_ConnectionId_UsedAt_SupersededBy");
+                    b.ToTable("SlackOwnerClaimCodes", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.AgentJobs.AgentJobRow", b =>

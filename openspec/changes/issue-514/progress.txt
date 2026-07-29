@@ -143,3 +143,17 @@ All tests pass:
 - Slack provider migration and reliability specs: 20 passed.
 - Server build and ArchTests: build passed; ArchTests 35 passed.
 - UnitTests 1575, CLI 1443, Workflow Definition 175 passed during `npm test`. A full Spec run still has an unrelated pre-existing session reset timing failure (`GenericAgentSessionCancelApiSpecs.Cancel_AfterReset_IgnoresTerminalActivityFromPredecessorRuntime`); the Slack namespace remains green.
+
+# Issue 514 / T-005 — Owner claim flow
+
+## Codebase Patterns
+
+- Claim state is provider infrastructure in `SlackOwnerClaimCodes`, separate from `AgentConnection`; only `CodeHash`, `ExpiresAt`, `UsedAt`, and `SupersededBy` are persisted. The plaintext code is returned only from `GenerateAsync`.
+- `SlackOwnerClaimService` uses `TimeProvider` for the ten-minute default window and SHA-256 over a normalized UTF-8 code. Regeneration marks all pending prior rows superseded before inserting the new row.
+- Inbound classification checks a matching claim code before Setup progress and owner gates. Claim attempts call `ISlackApiClient.UsersInfoAsync` with the Bot token from `ISecretStore`; regular-member checks reject bots, deleted users, guests, restricted users, wrong workspaces, and `TeamIds` containing another workspace.
+- Owner establishment is a conditional database update (`OwnerSlackUserId IS NULL`) followed by marking the code used, so a claimed Connection cannot be reassigned. Non-owner and invalid claim paths return explicit rejection decisions and do not write provider inbox rows or Agent resources.
+
+## Verification
+
+- `SlackOwnerClaimSpecs` passes 9/9 using migrated in-memory SQLite, `RecordingSlackApiClient`, fake secrets, and `FakeTimeProvider`.
+- Server build passed after adding the claim migration and model snapshot. Full `npm test` passed: Workflow Definition 175, CLI 1443, Server Unit 1575, Server Arch 35, Server Spec 3385, Web 5153 (1 skipped), Runner 1443.
