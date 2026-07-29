@@ -136,5 +136,5 @@ Runner ──[RunnerDisconnected]──→ Session (fails affected sessions)
 
 WorkflowRun: Pause, Resume, Approve, Reject, Retry, Rerun
 Issue: MarkDone, Archive, Unarchive, Reopen, Close
-Runner: Register, Unregister, Heartbeat
+Runner: Register, Unregister, HeartbeatRepair
 ```

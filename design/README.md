@@ -100,7 +100,7 @@
 - [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
 - [observability.md](observability.md) — 观测信号分工、资源预算、降级规则和高频路径成本约束。
 - [eventbus.md](eventbus.md) — 事件总线：CloudEvent 订阅契约 + 单分发器可靠 at-least-once 通知。
-- [event-protocol.md](event-protocol.md) — 事件协议（**WIP**）：三轴信封模型、业务谱系 stamping 矩阵、匹配表达式（CEL 子集）与 conformance。
+- [event-protocol.md](event-protocol.md) — 事件协议：三轴信封模型、业务谱系 stamping 矩阵、匹配表达式（CEL 子集）与 conformance。
 
 ## Agent 与执行
 
@@ -108,10 +108,10 @@
 - [agent-api.md](agent-api.md) — Web、CLI 与外部接入共用的 Agent 调用边界：统一能力、状态、身份和可靠性决策。
 - [slack-agent-connection.md](slack-agent-connection.md) — Slack Agent Connection 的组件边界：adapter 为什么独立且无状态、Session 边界取舍、可靠性契约与实施顺序；产品行为见 `docs/agent-connections.md`。
 - [event-routing.md](event-routing.md) — Agent 事件路由：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
-- [agent-supervision.md](agent-supervision.md) — Agent 监管预设（**WIP**）：一条命令安装监管 Agent 与审批/失败两条路由规则；升级靠通知全开 + `[supervisor]` comment 纪律，不引入 escalate 命令与系统级频控。
-- [agent-mentions.md](agent-mentions.md) — 评论提及（**WIP**）：在 issue comment 里 `@` Agent 名直接启动它；第三条触发路径，零配置，mention 即路由决策。
-- [event-response.md](event-response.md) — Agent 事件响应（**WIP**）：响应契约（至多一次、基于当前状态、无串行化、失败可见、防自响应）与可归属（comment author、审批 decidedBy）。
-- [issue-watch.md](issue-watch.md) — Issue 关注（**WIP**）：issue 级 autopilot 开关；watching/muted 声明、固定事件集、与路由表的分工。
+- [agent-supervision.md](agent-supervision.md) — Agent 监管预设：一条命令安装监管 Agent 与审批/失败两条路由规则；升级靠通知全开 + `[supervisor]` comment 纪律，不引入 escalate 命令与系统级频控。
+- [agent-mentions.md](agent-mentions.md) — 评论提及：在 issue comment 里 `@` Agent 名直接启动它；第三条触发路径，零配置，mention 即路由决策。
+- [event-response.md](event-response.md) — Agent 事件响应：响应契约（至多一次、基于当前状态、无串行化、失败可见、防自响应）与可归属（comment author、审批 decidedBy）。
+- [issue-watch.md](issue-watch.md) — Issue 关注：issue 级 autopilot 开关；watching/muted 声明、固定事件集、与路由表的分工。
 
 ## Runtime 集成
 
@@ -135,7 +135,7 @@
 - [issue-breakdown.md](issue-breakdown.md) — 复合 Issue / 子 Issue 设计（**已定稿，待实装**）：父子模型、状态汇总、复合推进、与 Epic 的隔离约束；多仓库资源见 `docs/repositories.md`。
 - [issue-templates.md](issue-templates.md) — 三类 issue 模板（Feature / Bug / Refactor）的 body 结构与设计依据。
 - [prompt-management.md](prompt-management.md) — Project-scoped Prompt（**WIP**）、builtin fallback 和 Workflow key reference。
-- [runner.md](runner.md) — Runner 与调度：聚合信息结构、poll presence、level-triggered 对账（claim / dispatch / supervision）。
+- [runner.md](runner.md) — Runner 与调度：每个 owner 是自己的 dispatch ledger（无第二份副本、无 reconcile）、pull-only claim / poll / report、presence 与 runner-lost closeout。
 - [task-log.md](task-log.md) — task 执行日志的采集管道、上报通道与存储归属。
 - [issue-list-read.md](issue-list-read.md) — Issue 列表低带宽读取与请求隔离：列表摘要模型、事件失效与冷传输。
 - [web-ui.md](web-ui.md) — Web UI 设计边界。

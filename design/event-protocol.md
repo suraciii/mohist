@@ -1,5 +1,5 @@
 ---
-status: wip
+status: converged
 ---
 
 # 事件协议（Event Protocol）
@@ -133,8 +133,8 @@ event.type == "com.mohist.issue.completed" && has(event.epic)
 - **系统消费者**：编译期注册的 `[Subscription]` handler；
 - **用户消费者**：Agent 路由表（见 `event-routing.md`）。
 
-两者共用同一 matcher 语义。**对称性即验收标准**：若某事件系统 handler 能路由到
-而用户表达式订不到，即协议破损。
+两类消费面的匹配机制分工见 `eventbus.md`。**对称性即验收标准**：若某事件
+系统 handler 能路由到而用户表达式订不到，即协议破损。
 
 ## Conformance
 
@@ -146,14 +146,9 @@ event.type == "com.mohist.issue.completed" && has(event.epic)
   producer 或新增可发射事件忘印谱系时测试即红，不需要 `CatalogOnlyTypes` 例外名单；
 - 表达式求值器有独立 conformance 测试集（语法、缺失属性、正则超时、确定性）。
 
-## 实装差距
+## Status
 
-当前代码与本协议的差距由 issue #412 推进：
-
-- Issue / Epic 仍同时维护随机 id 与 number，事件仍使用 `issueid`、`epicid`、
-  `issueno`、`epicno` 等旧属性；
-- Epic 关联关系尚未收敛到 Issue.`EpicNumber?`，WorkflowRun 也尚未使用精简的 Issue
-  上下文；
-- 订阅过滤为三个固定字段（Type 通配 + Source/Subject 精确），表达式未实装；
-  `[Subscription]` 当前的 Type glob 语法见 [`eventbus.md`](eventbus.md) 的实装差距小节。
-- 生产路径 conformance 测试尚未覆盖全部事件族。
+已实装：三轴信封与事件 catalog、业务谱系 stamping（各生产者 Lineage +
+ProducerConformance 覆盖事件生产路径）、CEL 子集求值器与用户侧路由求值、
+`stage` 属性提升。Issue / Epic 双身份与 `issueid` / `epicid` / `issueno` /
+`epicno` 旧属性已随 issue #412 移除。

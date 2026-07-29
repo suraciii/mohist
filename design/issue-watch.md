@@ -1,5 +1,5 @@
 ---
-status: wip
+status: converged
 ---
 
 # Issue 关注（Watch）
@@ -76,5 +76,12 @@ if 事件类型 ∈ {approval-requested, run.failed}:
 
 ## Status
 
-全部未实装。实施 issue 待创建。依赖路由启动管线（workspace 解析、幂等键、
-触发标签均复用）；读取投影进 `mo issue view` 与 Web issue 详情。
+已实装：WatchEntry 持久化（Agent context）、`mo issue watch add/remove/list`
+与 issue 读模型投影、分发侧 muted 压制与 watching 启动（内置提示词，以
+`watch:` 合成规则 id 复用路由启动管线）。
+
+幂等现状与上文「启动」有一个待裁定的差距：耐久启动键按
+`(projectId, eventId, ruleId)`（watch 使用 `watch:` 合成规则 id），同一事件里
+同一 Agent 的规则命中与关注命中在**单次分发内**合并为一次启动；跨分发重投
+按同一组键幂等。把 `(event, agent)` 从分发内合并提升为耐久启动身份（替代
+规则键）是待裁定的设计点。

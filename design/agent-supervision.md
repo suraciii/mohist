@@ -1,5 +1,5 @@
 ---
-status: wip
+status: converged
 ---
 
 # Agent 监管预设（Supervisor Preset）
@@ -198,11 +198,10 @@ exists, skipped: routing rule supervisor-failure
 
 ## Status
 
-`mo agent install supervisor` 已实装，按名称幂等创建预设 Agent 与两条表尾路由规则。`mo issue watch` 关注与静音、「Agent 响应失败」通知、审批决议的操作者记录仍未实装。
-
-已实装、本文依赖的底座：路由表求值与路由启动（`RoutingDispatchHandler` 经
-`IAgentLauncher.LaunchRoutedAsync` 启动 AgentJob）、审批与失败事件、inbox 与
-Hermes 通知、`mo` 命令面对 Agent 可用。
+已实装：`mo agent install supervisor`（按名称幂等创建预设 Agent 与两条表尾
+路由规则）、`mo issue watch` 关注与静音、「Agent 响应失败」通知
+（`agent.job.failed` 进 inbox 与 Hermes）、审批决议的操作者记录
+（`--author` → `decidedBy`）。
 
 已知边界：Agent 的 `Skills` 字段只持久化、不参与执行；Agent 对 `mohist` skill
 的发现依赖执行工作区里的 stub 文件，因此安装只做检查与提示，不能替用户
