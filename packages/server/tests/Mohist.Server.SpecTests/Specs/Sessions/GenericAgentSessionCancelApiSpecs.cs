@@ -176,7 +176,8 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var runtimeSessionId = (await session.GetAsync())!.AgentSessionId;
+        var runtimeSessionId = (await session.GetAsync())!.AgentSessionId
+            ?? throw new InvalidOperationException("Agent session runtime identity was not created.");
         await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,

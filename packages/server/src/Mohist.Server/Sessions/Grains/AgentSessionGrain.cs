@@ -1547,8 +1547,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 ? turns.FirstOrDefault(candidate =>
                     string.Equals(candidate.Id, payloadTurnId, StringComparison.Ordinal))
                 : null;
+            var current = FindCurrentNonLaunchTurn(session);
             if (turn is null
-                || !IsCurrentNonLaunchTurn(session, turn))
+                || !string.IsNullOrWhiteSpace(turn.JobId)
+                || current is null
+                || !string.Equals(current.Id, turn.Id, StringComparison.Ordinal))
             {
                 return [];
             }
