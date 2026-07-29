@@ -2,8 +2,10 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
@@ -117,8 +119,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     [Fact]
     public async Task Stop_UnconfirmedReplySurfacesUnknownAndInterruptFlag()
     {
-        var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch", "pi");
-        var turnId = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync()).Id;
+        var (project, sessionId, turnId, jobId) = await CreateExecutingLaunchSessionForStopAsync();
         var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
@@ -131,6 +132,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         Assert.Equal("unknown", data.GetProperty("state").GetString());
         Assert.True(data.GetProperty("interruptUnconfirmed").GetBoolean());
         Assert.Single(hub.Invocations);
+        Assert.Equal(AgentJobStatus.Unknown, await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).GetStatusAsync());
+        var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
+        Assert.Equal(AgentTurnStatus.Unknown, turn.Status);
+        Assert.Equal("unknown", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync())!.Status);
     }
 
     [Fact]

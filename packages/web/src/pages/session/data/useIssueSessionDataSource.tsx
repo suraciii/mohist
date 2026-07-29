@@ -249,7 +249,7 @@ export function useIssueSessionDataSource(
   const sendFollowup = useCallback(async (text: string) => {
     await followup.mutateAsync({ issueNumber, sessionName: recoverySessionName, text })
   }, [followup, issueNumber, recoverySessionName])
-  const currentTurnId = turns.at(-1)?.id
+  const currentTurnId = metadata?.currentTurnId
   const cancelSession = useCallback((operation: 'cancel' | 'stop' = 'stop', options?: SessionCancelOptions) => {
     cancelMutation.mutate(
       { issueNumber, sessionName: recoverySessionName, turnId: currentTurnId ?? '', operation },

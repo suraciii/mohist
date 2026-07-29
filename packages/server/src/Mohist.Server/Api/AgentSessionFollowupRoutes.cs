@@ -223,7 +223,7 @@ public static class AgentSessionFollowupRoutes
         {
             if (reservation.OperationId is not null)
                 await grain.ConfirmFollowupAsync(reservation.OperationId);
-            return ApiResults.Ok(new AgentSessionFollowupResult(target.SessionId));
+            return ApiResults.Ok(new AgentSessionFollowupResult(target.SessionId, InputId: inputId, TurnId: turnId));
         }
 
         await AbandonReservationAsync(grain, reservation);
@@ -254,6 +254,10 @@ public static class AgentSessionFollowupRoutes
 /// </summary>
 public sealed record GenericFollowupRequest(string? Text = null);
 
-public sealed record AgentSessionFollowupResult(string SessionId, string Status = "sent");
+public sealed record AgentSessionFollowupResult(
+    string SessionId,
+    string Status = "sent",
+    string? InputId = null,
+    string? TurnId = null);
 
 public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);

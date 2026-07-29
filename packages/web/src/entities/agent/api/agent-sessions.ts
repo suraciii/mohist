@@ -47,6 +47,7 @@ export interface GenericAgentSessionSummaryDto {
   contextRefs: AgentSessionListContextRefsDto | null
   usage: AgentSessionUsage
   recoveryAvailable: boolean
+  currentTurnId?: string | null
 }
 
 export interface AgentSessionLaunchResponse {
@@ -112,6 +113,12 @@ export interface GenericFollowupInput {
   text: string
 }
 
+export interface GenericFollowupResult {
+  status: string
+  inputId?: string | null
+  turnId?: string | null
+}
+
 export type TurnControlState = 'cancelled' | 'stop-requested' | 'stopped' | 'unknown'
 export interface TurnControlResult {
   state?: string
@@ -172,7 +179,7 @@ export function launchObservationQueryOptions(projectId: string | null | undefin
 }
 
 export function postGenericFollowup(projectId: string, sessionId: string, input: GenericFollowupInput) {
-  return request<{ status: string }>(
+  return request<GenericFollowupResult>(
     projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/followup`),
     {
       method: 'POST',
@@ -272,7 +279,7 @@ export function genericFollowupMutationOptions(projectId: string | null | undefi
   return {
     mutationFn: ({ sessionId, text }: { sessionId: string; text: string }) =>
       postGenericFollowup(projectId!, sessionId, { text }),
-    onSuccess: (_data: { status: string }, variables: { sessionId: string; text: string; agentRef?: string }) => {
+    onSuccess: (_data: GenericFollowupResult, variables: { sessionId: string; text: string; agentRef?: string }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agent-session', projectId, variables.sessionId] })

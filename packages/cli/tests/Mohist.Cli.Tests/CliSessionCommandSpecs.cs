@@ -557,7 +557,7 @@ public class CliSessionCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { status = "sent" },
+                data = new { status = "sent", inputId = "input-123", turnId = "turn-123" },
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -570,6 +570,8 @@ public class CliSessionCommandSpecs
         var body = JsonNode.Parse(request.Body!)!.AsObject();
         Assert.Equal("add a logout route", body["text"]?.GetValue<string>());
         Assert.Contains("delivery: sent", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("input:    input-123", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("turn:     turn-123", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -594,6 +596,26 @@ public class CliSessionCommandSpecs
         Assert.DoesNotContain("/jobs/", path, StringComparison.Ordinal);
         Assert.DoesNotContain("/dispatch", path, StringComparison.Ordinal);
         Assert.DoesNotContain("/runs", path, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionFollowup_ReturnedTurnIdCanTargetSubsequentStop()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+            Task.FromResult(request.RequestUri!.AbsolutePath.EndsWith("/followup", StringComparison.Ordinal)
+                ? RecordingHttpHandler.Json(new { success = true, data = new { status = "sent", inputId = "input-followup", turnId = "turn-followup" } })
+                : RecordingHttpHandler.Json(new { success = true, data = new { state = "stop-requested" } })));
+
+        var followupExit = await MohistCliCommands.RunAsync(
+            http, ["session", "followup", StableSessionId, "--text", "continue"], output, error, fileSystem, executor);
+        var stopExit = await MohistCliCommands.RunAsync(
+            http, ["session", "stop", StableSessionId, "--turn-id", "turn-followup"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, followupExit);
+        Assert.Equal(0, stopExit);
+        Assert.Contains("turn:     turn-followup", output.ToString(), StringComparison.Ordinal);
+        var stopBody = JsonNode.Parse(handler.Requests[1].Body!)!.AsObject();
+        Assert.Equal("turn-followup", stopBody["turnId"]?.GetValue<string>());
     }
 
     [Fact]

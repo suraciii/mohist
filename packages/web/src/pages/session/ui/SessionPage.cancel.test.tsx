@@ -181,6 +181,7 @@ function baseRunningMetadata(overrides: Partial<AgentSessionMetadata> = {}): Age
     completedAt: null,
     lastActivityAt: '2026-06-15T10:00:30.000Z',
     lastDataAt: '2026-06-15T10:00:30.000Z',
+    currentTurnId: 'durable-turn-3',
     changedFiles: [],
     metadata: { partCount: 2, toolCount: 1 },
     usage: {
@@ -257,7 +258,7 @@ describe('SessionPage workflow cancel control', () => {
     await user.click(document.querySelector('[data-testid="session-cancel-alert-confirm"]')!)
 
     expect(cancelMutate).toHaveBeenCalledWith(
-      { issueNumber: 123, sessionName: 'session-1', turnId: 'turn-2', operation: 'cancel' },
+      { issueNumber: 123, sessionName: 'session-1', turnId: 'durable-turn-3', operation: 'cancel' },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
 
@@ -270,7 +271,7 @@ describe('SessionPage workflow cancel control', () => {
     })
   })
 
-  it('targets the current Turn when requesting a stop and exposes the unknown verification entry', async () => {
+  it('targets the durable current Turn rather than the transcript display ID when stopping', async () => {
     const user = userEvent.setup()
     const { container } = await renderIssueSessionPage()
 
@@ -278,7 +279,7 @@ describe('SessionPage workflow cancel control', () => {
     await user.click(document.querySelector('[data-testid="session-cancel-alert-confirm"]')!)
 
     expect(cancelMutate).toHaveBeenCalledWith(
-      { issueNumber: 123, sessionName: 'session-1', turnId: 'turn-2', operation: 'stop' },
+      { issueNumber: 123, sessionName: 'session-1', turnId: 'durable-turn-3', operation: 'stop' },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
 

@@ -145,7 +145,7 @@ export function useGenericSessionDataSource(
     await genericFollowup.mutateAsync({ sessionId, text })
   }, [genericFollowup, sessionId])
 
-  const currentTurnId = turns.at(-1)?.id
+  const currentTurnId = summary?.currentTurnId
   const cancelSession = useCallback((operation: 'cancel' | 'stop' = 'stop', options?: SessionCancelOptions) => {
     cancelGeneric.mutate(
       { sessionId, turnId: currentTurnId ?? '', operation, agentRef: summary?.agentId },

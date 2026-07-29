@@ -128,6 +128,7 @@ async function handleCancel(
       deps.agentSessionRuntimeEventOutbox ?? null,
       sessionTarget,
       binding.runtimeSessionId,
+      payload.turnId,
       { ...facts, stopConfirmed: confirmed },
     )
     return facts.stopConfirmed === false
@@ -145,6 +146,7 @@ function recordCancelActivity(
   outbox: AgentSessionRuntimeEventOutbox | null,
   sessionTarget: SessionTarget,
   runtimeSessionId: string,
+  turnId: string | undefined,
   facts: { readonly cancelled: boolean; readonly stopConfirmed: boolean },
 ): void {
   if (!outbox) return
@@ -162,6 +164,7 @@ function recordCancelActivity(
         activity,
         status: facts.stopConfirmed ? "completed" : "failed",
         source: "cancel",
+        ...(turnId ? { turnId } : {}),
         stopConfirmed: facts.stopConfirmed,
         runtimeSessionId,
         completedAt,

@@ -1541,26 +1541,28 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         AgentSessionRuntimeEventInput runtimeEvent,
         DateTime now)
     {
-        var events = new List<AgentSessionEvent>(session.SetActivity(
-            session.Status.Activity == AgentSessionActivity.Unknown
-                ? AgentSessionActivity.Unknown
-                : AgentSessionActivity.Active,
-            now));
         if (TryResolveTurnId(runtimeEvent.PayloadJson, out var payloadTurnId))
         {
             var turn = session.Status.Turns is { Count: > 0 } turns
                 ? turns.FirstOrDefault(candidate =>
                     string.Equals(candidate.Id, payloadTurnId, StringComparison.Ordinal))
                 : null;
-            if (turn is not null && string.IsNullOrWhiteSpace(turn.JobId))
-                events.AddRange(session.MarkTurnExecuting(turn.Id, now));
-            else if (turn is null)
-                events.AddRange(MarkCurrentNonLaunchTurnExecuting(session, now));
+            var current = FindCurrentNonLaunchTurn(session);
+            if (turn is null
+                || !string.IsNullOrWhiteSpace(turn.JobId)
+                || current is null
+                || !string.Equals(current.Id, turn.Id, StringComparison.Ordinal))
+            {
+                return [];
+            }
+            return session.MarkTurnExecuting(turn.Id, now);
         }
-        else
-        {
-            events.AddRange(MarkCurrentNonLaunchTurnExecuting(session, now));
-        }
+        var events = new List<AgentSessionEvent>(session.SetActivity(
+            session.Status.Activity == AgentSessionActivity.Unknown
+                ? AgentSessionActivity.Unknown
+                : AgentSessionActivity.Active,
+            now));
+        events.AddRange(MarkCurrentNonLaunchTurnExecuting(session, now));
         return events;
     }
 
@@ -1581,31 +1583,31 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         JsonElement payload,
         DateTime now)
     {
-        var events = new List<AgentSessionEvent>(session.SetActivity(
-            ParseActivity(payload),
-            now));
         var status = AgentSessionJsonHelper.GetStringProp(payload, "status");
         var activity = ParseActivity(payload);
         if (activity == AgentSessionActivity.Active)
-            return events;
+            return session.SetActivity(activity, now);
         var terminal = MapTerminalActivityToTurnStatus(activity, status);
         if (terminal is null)
-            return events;
+            return session.SetActivity(activity, now);
         if (TryResolveTurnId(runtimeEvent.PayloadJson, out var payloadTurnId))
         {
             var turn = session.Status.Turns is { Count: > 0 } turns
                 ? turns.FirstOrDefault(candidate =>
                     string.Equals(candidate.Id, payloadTurnId, StringComparison.Ordinal))
                 : null;
-            if (turn is not null && string.IsNullOrWhiteSpace(turn.JobId))
-                events.AddRange(session.MarkTurnTerminal(turn.Id, terminal.Value, null, now));
-            else if (turn is null)
-                events.AddRange(MarkCurrentNonLaunchTurnTerminal(session, terminal.Value, now));
+            var current = FindCurrentNonLaunchTurn(session);
+            if (turn is null
+                || !string.IsNullOrWhiteSpace(turn.JobId)
+                || current is null
+                || !string.Equals(current.Id, turn.Id, StringComparison.Ordinal))
+            {
+                return [];
+            }
+            return session.MarkTurnTerminal(turn.Id, terminal.Value, null, now);
         }
-        else
-        {
-            events.AddRange(MarkCurrentNonLaunchTurnTerminal(session, terminal.Value, now));
-        }
+        var events = new List<AgentSessionEvent>(session.SetActivity(activity, now));
+        events.AddRange(MarkCurrentNonLaunchTurnTerminal(session, terminal.Value, now));
         return events;
     }
 

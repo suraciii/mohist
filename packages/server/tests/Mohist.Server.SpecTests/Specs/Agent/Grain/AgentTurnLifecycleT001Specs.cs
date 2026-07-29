@@ -386,6 +386,37 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task TerminalSessionActivity_ForEarlierTurnDoesNotChangeCurrentTurnOrActivity()
+    {
+        var sessionId = $"session-522-stale-activity-{Guid.NewGuid():N}";
+        var projectId = $"project-522-{Guid.NewGuid():N}";
+        var session = await OpenIdleSessionAsync(sessionId, projectId);
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "input-a", "turn-a", "first follow up", "generic-followup"));
+        await session.MarkTurnExecutingAsync("turn-a");
+        await session.MarkTurnTerminalAsync("turn-a", AgentTurnStatus.Completed, null);
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "input-b", "turn-b", "second follow up", "generic-followup"));
+        await session.MarkTurnExecutingAsync("turn-b");
+
+        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[]
+            {
+                new AgentSessionRuntimeEventInput(
+                    RuntimeEventTypes.SessionActivity,
+                    "{\"activity\":\"unknown\",\"status\":\"failed\",\"turnId\":\"turn-a\",\"source\":\"cancel\"}")
+            },
+            "runtime-1"));
+
+        var turns = await session.ListTurnsAsync();
+        Assert.Equal(AgentTurnStatus.Completed, Assert.Single(turns, turn => turn.Id == "turn-a").Status);
+        Assert.Equal(AgentTurnStatus.Executing, Assert.Single(turns, turn => turn.Id == "turn-b").Status);
+        Assert.Equal("active", (await session.GetAsync())!.Status);
+    }
+
+    [Fact]
     public async Task SessionInputEvent_OnAlreadyTerminalTurn_IsNoOp()
     {
         var sessionId = $"session-522-noopterminal-{Guid.NewGuid():N}";

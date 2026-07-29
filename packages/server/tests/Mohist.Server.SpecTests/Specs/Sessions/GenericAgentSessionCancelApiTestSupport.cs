@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
@@ -133,6 +134,35 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch");
         var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
         return (project, sessionId, turn.Id);
+    }
+
+    protected async Task<(ProjectRef Project, string SessionId, string TurnId, string JobId)> CreateExecutingLaunchSessionForStopAsync()
+    {
+        var project = await CreateProjectAsync("launch-stop");
+        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
+            .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+        _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(_runnerId, $"{_runnerId}-conn");
+
+        var sessionId = $"launch-stop-{Guid.NewGuid():N}";
+        var jobId = $"job-{Guid.NewGuid():N}";
+        var inputId = $"input-{Guid.NewGuid():N}";
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        var workDir = $"/workspaces/{project.Id}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            _runnerId,
+            "pi",
+            workDir,
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "launch-stop-agent", "launch-stop-agent"))));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand($"runtime-{Guid.NewGuid():N}", workDir));
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            inputId, turnId, "stop this launch", "agent-launch", jobId));
+
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+        await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
+            sessionId, inputId, turnId, "stop this launch", WorkspacePath: workDir, ProjectId: project.Id, Runtime: "pi", AgentId: "launch-stop-agent"));
+        await grain.MarkInitialTurnExecutingAsync(jobId);
+        return (project, sessionId, turnId, jobId);
     }
 
     protected async Task<SessionEvidence> ReadSessionEvidenceAsync(string sessionId)

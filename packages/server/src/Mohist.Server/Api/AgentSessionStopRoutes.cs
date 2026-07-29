@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
@@ -124,6 +125,12 @@ public static class AgentSessionStopRoutes
 
         if (reply is null)
             return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+
+        if (control.IsLaunchTurn
+            && string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            await grains.GetGrain<IAgentJobGrain>(control.JobId!).MarkUnknownAsync("stop-unconfirmed");
+        }
 
         return ApiResults.Ok(new
         {
