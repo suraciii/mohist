@@ -186,3 +186,31 @@ All tests pass:
   intermittently timed out while polling a dispatch. Slack-focused specs and
   the connection-origin unit tests remain green; this failure is outside the
   T-006 route and coordinator changes.
+
+# Issue 514 / T-007 — CLI connection command group
+
+## Codebase Patterns
+
+- Connection management routes live beside the adapter boundary at
+  `/api/projects/{projectRef}/slack-connections`; adapter routes remain under
+  the same resource with operator-token authentication. CLI configure posts
+  only to the management configure route and receives no token in its response.
+- CLI credential files are parsed as strict UTF-8 JSON with exactly
+  `appToken` and `botToken`. Real files reject reparse points and any group or
+  other Unix permission bits; virtual test files are handled through the
+  existing `IFileSystem` abstraction.
+- Interactive credential entry uses `ICliTerminal.ReadHiddenAsync`; redirected
+  test input still uses the injected reader, while a real interactive console
+  reads keys with echo suppressed. Direct token option names are rejected
+  before System.CommandLine parses them so their values cannot appear in parse
+  errors.
+- `claim-owner` delegates code generation to `SlackOwnerClaimService`, so
+  regeneration invalidation and one-time persistence remain server-owned.
+
+## Verification
+
+- `dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passed.
+- `CliAgentConnectionCommandSpecs` passed 8/8 via the xUnit v3 direct runner.
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` passed.
+- Slack-focused Server unit tests passed 1578/1578.
+- Full `npm test` passed: Workflow Definition 175, CLI 1451, Server Unit 1578, Server Spec 3385, Server Arch 35, Web 5153 (1 skipped), Runner 1443.

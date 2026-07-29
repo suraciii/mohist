@@ -15,6 +15,11 @@ public sealed class FakeFileSystem : IFileSystem
     }
 
     public IReadOnlyDictionary<string, string> Files => _files;
+    public bool TreatFilesAsSymbolicLinks { get; set; }
+    public bool TreatFilesAsWorldReadable { get; set; }
+
+    public bool IsSymbolicLink(string path) => TreatFilesAsSymbolicLinks;
+    public bool IsUserOnlyFile(string path) => !TreatFilesAsWorldReadable;
 
     public void AddFile(string path, string content)
     {

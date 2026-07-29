@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack;
+using Mohist.Server.Agent.Domain;
 
 namespace Mohist.Server.Api;
 
@@ -12,6 +13,96 @@ public static class SlackConnectionRoutes
 {
     public static WebApplication MapSlackConnectionRoutes(this WebApplication app)
     {
+        var management = app.MapGroup("/api/projects/{projectRef}/slack-connections")
+            .AddEndpointFilter<ProjectResolutionEndpointFilter>();
+
+        management.MapPost("/", async (HttpContext context, SlackConnectionCreateBody body, AgentConnectionStore connections, CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            if (body is null || string.IsNullOrWhiteSpace(body.AgentId) || string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
+                || string.IsNullOrWhiteSpace(body.AppId) || string.IsNullOrWhiteSpace(body.BotUserId))
+                return ApiResults.BadRequest("agentId, workspaceTeamId, appId, and botUserId are required.");
+
+            var connection = new AgentConnection
+            {
+                Id = $"connection_{Guid.NewGuid():N}",
+                ProjectId = projectId,
+                AgentId = body.AgentId.Trim(),
+                ProviderKind = ConnectionProviderKind.Slack,
+                WorkspaceTeamId = body.WorkspaceTeamId.Trim(),
+                AppId = body.AppId.Trim(),
+                BotUserId = body.BotUserId.Trim(),
+                BotName = body.BotName?.Trim() ?? string.Empty,
+                AvatarHash = body.AvatarHash,
+            };
+            try
+            {
+                var created = await connections.CreateAsync(connection, ct);
+                return Results.Json(new ApiResponse<object>(true, new { connection = created, slackAppCreationReference = "https://api.slack.com/apps?new_app=1" }), statusCode: 201);
+            }
+            catch (AgentConnectionDuplicateException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "connection_duplicate");
+            }
+            catch (AgentConnectionValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, ex.Code);
+            }
+        });
+
+        management.MapGet("/", async (HttpContext context, AgentConnectionStore connections, CancellationToken ct) =>
+            ApiResults.Ok(await connections.ListAsync(context.GetResolvedProject().Id, ct: ct)));
+
+        management.MapGet("/{connectionId}", async (HttpContext context, string connectionId, AgentConnectionStore connections, CancellationToken ct) =>
+        {
+            var connection = await connections.GetAsync(context.GetResolvedProject().Id, connectionId, ct);
+            return connection is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(connection);
+        });
+
+        management.MapPatch("/{connectionId}", async (HttpContext context, string connectionId, SlackConnectionEditBody body, AgentConnectionStore connections, CancellationToken ct) =>
+        {
+            var fields = new HashSet<string>(StringComparer.Ordinal);
+            if (body.BotName is not null) fields.Add("botName");
+            if (body.AvatarHash is not null) fields.Add("avatarHash");
+            if (fields.Count == 0) return ApiResults.BadRequest("At least one editable field is required.");
+            var updated = await connections.UpdateAsync(context.GetResolvedProject().Id, connectionId, fields, body.BotName, body.AvatarHash, ct: ct);
+            return updated is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(updated);
+        });
+
+        management.MapDelete("/{connectionId}", async (HttpContext context, string connectionId, AgentConnectionStore connections, CancellationToken ct) =>
+        {
+            var deleted = await connections.DeleteAsync(context.GetResolvedProject().Id, connectionId, ct);
+            return deleted is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(deleted);
+        });
+
+        management.MapPost("/{connectionId}/configure", async (HttpContext context, string connectionId, SlackCredentialsBody body, AgentConnectionStore connections, ISecretStore secrets, CancellationToken ct) =>
+        {
+            if (body is null || string.IsNullOrWhiteSpace(body.AppToken) || string.IsNullOrWhiteSpace(body.BotToken))
+                return ApiResults.BadRequest("appToken and botToken are required.");
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
+            await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), Encoding.UTF8.GetBytes(body.AppToken), ct);
+            await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes(body.BotToken), ct);
+            var updated = await connections.UpdateAsync(projectId, connectionId,
+                new HashSet<string>(StringComparer.Ordinal) { "setupProgress" },
+                setupProgress: SetupProgressKind.WaitingForSlackService, ct: ct);
+            return ApiResults.Ok(updated);
+        });
+
+        management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
+        {
+            try
+            {
+                var code = await claims.GenerateAsync(context.GetResolvedProject().Id, connectionId, ct: ct);
+                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "claim_unavailable");
+            }
+        });
+
         var group = app.MapGroup("/api/projects/{projectRef}/slack-connections/{connectionId}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
@@ -201,6 +292,28 @@ public static class SlackConnectionRoutes
             result = result.Replace($"<@{botUserId}>", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
         return result;
     }
+}
+
+public sealed class SlackConnectionCreateBody
+{
+    public string AgentId { get; init; } = string.Empty;
+    public string WorkspaceTeamId { get; init; } = string.Empty;
+    public string AppId { get; init; } = string.Empty;
+    public string BotUserId { get; init; } = string.Empty;
+    public string? BotName { get; init; }
+    public string? AvatarHash { get; init; }
+}
+
+public sealed class SlackConnectionEditBody
+{
+    public string? BotName { get; init; }
+    public string? AvatarHash { get; init; }
+}
+
+public sealed class SlackCredentialsBody
+{
+    public string AppToken { get; init; } = string.Empty;
+    public string BotToken { get; init; } = string.Empty;
 }
 
 public sealed class SlackIngressBody
