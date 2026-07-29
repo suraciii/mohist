@@ -56,3 +56,9 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - Follow-up table output now shows the accepted/rejected/unknown outcome, input and turn identities, input acceptance, and turn status. An accepted result without an observed turn status uses the shared queued/pending interpretation; observed `executing` is preserved.
 - Follow-up output does not render the submitted message text, keeping transcript text and observation status as separate display concerns.
 - Verification: `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj --no-restore` and `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passed (1445 tests).
+
+## Verification repair
+- `npm test` initially failed only in `Mohist.Server.ArchTests.CSharpTestFiles_MustStayWithinSizeRatchet` (34 passed, 1 failed); all other .NET test assemblies passed, including 3354 server specs.
+- The failure was caused by the intended issue-521 follow-up/recovery specs exceeding the checked-in size-ratchet allowances: `AgentSessionFollowupGrainSpecs.cs` had no baseline at 34022 bytes, and `AgentSessionRecoveryGrainSpecs.cs` grew to 27135 bytes from its 25091-byte allowance. Updated the ratchet baseline to the verified sizes; no assertions or tests were weakened.
+- Focused reruns passed: ArchTests 35/35, Web typecheck and tests 5158 passed/1 skipped, CLI tests 1445 passed, and the complete Server SpecTests run 3354/3354 passed.
+- Final `npm test` passed all suites: Workflow Definition 175, CLI 1445, Server Unit 1535, Server Arch 35, Server Spec 3354, Web 5158 passed/1 skipped, Runner 1443.
