@@ -237,7 +237,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task SubmitAsync_GenericSession_NoEligibleRunner_ClosesSessionAsFailed()
+    public async Task SubmitAsync_GenericSession_NoEligibleRunner_StaysPendingAndKeepsSessionOpen()
     {
         await ClearGlobalRunnerRegistryAsync();
 
@@ -269,34 +269,13 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
         await job.CheckTimeoutsAsync();
 
+        // Issue-520 D4: a job with no eligible runner now stays Pending —
+        // the dispatch retry bound no longer drives the job into terminal
+        // Failed(runner-unavailable). The session keeps its open state
+        // and the agent may still receive a runner later.
         var terminal = await job.GetTerminalResultAsync();
-        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
-        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
-        var closedPayload = await WaitForAsync(
-            async () =>
-            {
-                await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
-                var turnIds = await db.AgentSessionTranscriptTurns
-                    .Where(t => t.SessionId == sessionId)
-                    .Select(t => t.Id)
-                    .ToListAsync();
-                if (turnIds.Count == 0) return null;
-                return await db.AgentSessionTranscriptParts
-                    .Where(p => turnIds.Contains(p.TurnId) && p.Type == TranscriptPartTypes.SessionActivity)
-                    .Select(p => p.PayloadJson)
-                    .FirstOrDefaultAsync();
-            },
-            payload => !string.IsNullOrWhiteSpace(payload),
-            TimeSpan.FromSeconds(2),
-            TimeSpan.FromMilliseconds(50),
-            "generic session terminal activity transcript event")!;
-        using var payload = JsonDocument.Parse(closedPayload!);
-        // Issue 484: terminal delivery now writes a session.activity
-        // (activity=idle) part. The work result status remains on the
-        // payload; the failureCategory is the AgentJob's own verdict
-        // (asserted above via terminal.FailureReason) and is no longer
-        // mirrored onto the session transcript.
-        Assert.Equal("failed", payload.RootElement.GetProperty("status").GetString());
+        Assert.Equal(AgentJobStatus.Pending, terminal.Status);
+        Assert.NotEqual(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
     }
 
     [Fact]

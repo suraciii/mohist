@@ -5,6 +5,17 @@
 - Agent definitions are read through AgentQuerier, which returns MaxConcurrentRuns live from the Agent store.
 - Full npm test currently reaches all .NET projects successfully, but workspace JavaScript checks fail because node_modules tooling (`tsx`, `tsc`) is not installed.
 
+## fix-ci
+
+- Root cause of the failing verify: AgentConcurrencyGrain (T-001) requires AgentQuerier (an IScopedService). Production wires this via `AddMohistConventionalServices` (Scrutor assembly scan), but the shared `GrainTestConfig.ConfigureSilo` did not run that scan. On the first AgentJob dispatch, the cross-grain call to `gate.AcquireAsync(...)` threw `InnerException: Unable to resolve service for type 'Mohist.Server.Agent.Services.AgentQuerier' while attempting to activate 'Mohist.Server.Agent.Grains.AgentConcurrencyGrain'. TryDispatchAsync caught it and fell through to backoff — the test then polled forever for a dispatch that never happened.
+- Reproduction (single test, deterministic, 5/5 runs fail): `Mohist.Server.SpecTests.Specs.Runner.Grain.RunnerWorkLedgerSpecs.AgentJobWork_HasItsOnlyHomeInRunnerWorks`. Without the call, the test passes.
+- Fix: register the three IScopedService dependencies needed by AgentConcurrencyGrain on the shared silo (`AgentQuerier`, `AgentJobQuerier`, `AgentReadinessService`). The T-002 follow-up fixture already did this locally for its own cluster; pulling it into the shared config makes every fixture (`AgentJobGrain`, `WorkflowGrain`, `Backlog`) activate AgentConcurrencyGrain with the production DI contract.
+- Two pre-existing test failures (leftover by T-001 which removed the runner-unavailable terminal code path without updating the assertions) updated to the new D4 contract (job stays Pending, no session close, no RunnerUnavailable):
+  - `AgentJobGrainSpecs.SubmitAsync_GenericSession_NoEligibleRunner_ClosesSessionAsFailed` → `..._StaysPendingAndKeepsSessionOpen`
+  - `AgentJobTerminalDeliverySpecs.DispatchExhaustion_PersistsCloseWithRunnerUnavailableCategory` → `..._StaysPendingWithoutTerminalFailure`
+- Verification: full `Mohist.Server.SpecTests` run (3330 tests) passes in ~63s with `-p:SkipWebBuild=true`. 5 consecutive focused runs on `RunnerWorkLedgerSpecs` all pass. Build clean.
+- The T-002 fixture file (`AgentSessionFollowupConcurrencyFixture`) still imports `Mohist.Server.Agent.Services.AgentQuerier` which is now properly registered; its previously-known inability to activate server grains remains a separate follow-up not in scope of issue-520.
+
 ## T-001
 
 - Added AgentConcurrencyGrain with persisted active permit tokens and FIFO waiters, live MaxConcurrentRuns reads, release grants, reminder activation/reconciliation hooks, and AgentJob notification API.
