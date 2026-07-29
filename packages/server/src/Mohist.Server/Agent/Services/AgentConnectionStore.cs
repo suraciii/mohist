@@ -47,7 +47,11 @@ public sealed class AgentConnectionStore : IScopedService
         if (!includeDeleted)
             query = query.Where(c => c.DeletedAt == null);
         var rows = await query.OrderBy(c => c.Id).ToListAsync(ct);
-        return rows.Select(ToDomain).ToList();
+        var agents = await _agentQuerier.ListAsync(projectId, all: true);
+        var readinessByAgentId = agents.ToDictionary(
+            agent => agent.Id,
+            agent => AgentReadinessDeriver.Derive(agent.AgentConfig));
+        return rows.Select(row => ToDomain(row, readinessByAgentId.GetValueOrDefault(row.AgentId))).ToList();
     }
 
     public async Task<AgentConnection?> GetAsync(string projectId, string id, CancellationToken ct = default)
@@ -57,7 +61,9 @@ public sealed class AgentConnectionStore : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.AgentConnections.AsNoTracking()
             .FirstOrDefaultAsync(c => c.ProjectId == projectId && c.Id == id, ct);
-        return row is null ? null : ToDomain(row);
+        if (row is null) return null;
+        var agent = await _agentQuerier.GetByIdAsync(projectId, row.AgentId);
+        return ToDomain(row, agent is null ? null : AgentReadinessDeriver.Derive(agent.AgentConfig));
     }
 
     public async Task<AgentConnection> CreateAsync(AgentConnection connection, CancellationToken ct = default)
@@ -163,7 +169,7 @@ public sealed class AgentConnectionStore : IScopedService
             throw new AgentConnectionValidationException($"Agent '{agentId}' is archived.", "agent_archived");
     }
 
-    private static AgentConnection ToDomain(AgentConnectionRow row) => new()
+    private static AgentConnection ToDomain(AgentConnectionRow row, string? derivedReadiness = null) => new()
     {
         Id = row.Id,
         ProjectId = row.ProjectId,
@@ -178,7 +184,7 @@ public sealed class AgentConnectionStore : IScopedService
         DesiredState = row.DesiredState,
         ConnectionHealth = row.ConnectionHealth,
         HealthReason = row.HealthReason,
-        AgentReadiness = row.AgentReadiness,
+        AgentReadiness = derivedReadiness ?? row.AgentReadiness,
         OwnerSlackUserId = row.OwnerSlackUserId,
         LastHeartbeatAt = row.LastHeartbeatAt,
         CreatedAt = row.CreatedAt,

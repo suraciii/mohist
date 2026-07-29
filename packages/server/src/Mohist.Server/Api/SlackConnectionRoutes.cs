@@ -169,6 +169,15 @@ public static class SlackConnectionRoutes
             if (agent is null)
                 return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
 
+            var dispatchDecision = AgentConnectionDispatchDecision.For(
+                AgentReadinessDeriver.Derive(agent.AgentConfig));
+            if (!dispatchDecision.Accepted)
+            {
+                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId,
+                    dispatchDecision.Reason!, null, ct);
+                return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
+            }
+
             SlackProviderInboxAcceptResult accepted;
             try
             {
@@ -183,8 +192,11 @@ public static class SlackConnectionRoutes
             var launch = await launcher.LaunchConnectionAsync(agent, prompt, new ConnectionLaunchOrigin(
                 connectionId, body.TeamId, body.SenderSlackUserId, body.ConversationId, body.MessageTs), ct);
             await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+            var acknowledgement = accepted.AlreadyExisted
+                ? "This task was already accepted; execution is being resumed."
+                : dispatchDecision.Reason ?? "Task accepted and queued for execution.";
             await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId,
-                accepted.AlreadyExisted ? "This task was already accepted; execution is being resumed." : "Task accepted and queued for execution.",
+                acknowledgement,
                 launch.JobKey,
                 ct);
             return ApiResults.Ok(new

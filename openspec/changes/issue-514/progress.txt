@@ -214,3 +214,26 @@ All tests pass:
 - `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` passed.
 - Slack-focused Server unit tests passed 1578/1578.
 - Full `npm test` passed: Workflow Definition 175, CLI 1451, Server Unit 1578, Server Spec 3385, Server Arch 35, Web 5153 (1 skipped), Runner 1443.
+
+# Issue 514 / T-008 — Minimal Agent Readiness derivation
+
+## Codebase Patterns
+
+- `AgentReadinessDeriver` is a pure Server-side read/decision helper. A null or
+  incomplete AgentConfig is `NeedsSetup`, a config with non-empty model and
+  runtime is `Ready`, and structurally indeterminate config remains `Unknown`.
+- `AgentConnectionStore.GetAsync` and `ListAsync` derive the displayed
+  readiness from the bound Agent while leaving the four persisted Connection
+  facts independent. This keeps a healthy Connection visibly distinct from an
+  Agent that needs setup and avoids copying execution configuration into the
+  Connection.
+- Slack ingress evaluates readiness after owner/setup classification and Agent
+  resolution but before provider-inbox acceptance. NeedsSetup produces an
+  actionable rejection and no accepted work; Unknown and Ready proceed through
+  the existing idempotent launcher path. Unknown acknowledgements explicitly
+  say they await Runner verification.
+
+## Verification
+
+- Server build passed with `-p:SkipWebBuild=true`.
+- Server UnitTests passed (1584); Server SpecTests passed (3386).

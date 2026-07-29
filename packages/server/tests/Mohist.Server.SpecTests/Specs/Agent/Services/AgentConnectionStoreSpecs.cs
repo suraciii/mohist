@@ -156,6 +156,23 @@ public sealed class AgentConnectionStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReadSurfaceDerivesReadinessIndependentlyFromConnectionHealth()
+    {
+        await SeedAgentAsync("proj-readiness", "agent-readiness", AgentStatus.Active);
+        var created = await _store.CreateAsync(NewConnection("proj-readiness", "agent-readiness", "team-1"));
+        await _store.UpdateAsync(
+            "proj-readiness", created.Id, new HashSet<string> { "setupProgress", "connectionHealth" },
+            setupProgress: SetupProgressKind.Complete,
+            connectionHealth: ConnectionHealthKind.Healthy);
+
+        var displayed = await _store.GetAsync("proj-readiness", created.Id);
+
+        Assert.NotNull(displayed);
+        Assert.Equal(ConnectionHealthKind.Healthy, displayed.ConnectionHealth);
+        Assert.Equal(AgentReadinessKind.NeedsSetup, displayed.AgentReadiness);
+    }
+
+    [Fact]
     public async Task GetReturnsSingleConnection()
     {
         await SeedAgentAsync("proj-8", "agent-8", AgentStatus.Active);
