@@ -22,17 +22,20 @@ public sealed class AgentConnectionStore : IScopedService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly AgentQuerier _agentQuerier;
     private readonly ISecretStore _secretStore;
+    private readonly IEnumerable<IAgentConnectionProviderCleanup> _providerCleanups;
     private readonly TimeProvider _timeProvider;
 
     public AgentConnectionStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         AgentQuerier agentQuerier,
         ISecretStore secretStore,
+        IEnumerable<IAgentConnectionProviderCleanup> providerCleanups,
         TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
         _agentQuerier = agentQuerier;
         _secretStore = secretStore;
+        _providerCleanups = providerCleanups;
         _timeProvider = timeProvider;
     }
 
@@ -131,7 +134,7 @@ public sealed class AgentConnectionStore : IScopedService
         var row = await db.AgentConnections.FirstOrDefaultAsync(c => c.ProjectId == projectId && c.Id == id, ct);
         if (row is null) return null;
 
-        await DeleteCredentialsAsync(projectId, id, ct);
+        await DeleteProviderRecordsAsync(projectId, id, ct);
         if (row.DeletedAt is not null) return ToDomain(row);
 
         var now = _timeProvider.GetUtcNow();
@@ -141,10 +144,14 @@ public sealed class AgentConnectionStore : IScopedService
         return ToDomain(row);
     }
 
-    private async Task DeleteCredentialsAsync(string projectId, string connectionId, CancellationToken ct)
+    private async Task DeleteProviderRecordsAsync(string projectId, string connectionId, CancellationToken ct)
     {
         await _secretStore.DeleteAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), ct);
         await _secretStore.DeleteAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), ct);
+        foreach (var cleanup in _providerCleanups)
+        {
+            await cleanup.DeleteForConnectionAsync(projectId, connectionId, ct);
+        }
     }
 
     private async Task ValidateActiveAgentAsync(string projectId, string agentId, CancellationToken ct)

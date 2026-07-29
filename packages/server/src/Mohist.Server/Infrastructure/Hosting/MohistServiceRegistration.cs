@@ -40,6 +40,7 @@ using Mohist.Server.Logging;
 using Mohist.Server.Notifications;
 using Mohist.Server.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Infrastructure.Slack;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -124,6 +125,7 @@ public static class MohistServiceRegistration
         services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
         services.AddSingleton<HermesIssueNotificationRenderer>();
         services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
+        services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
          services.AddHttpClient<ISlackApiClient, SlackApiClient>(client =>
          {
              client.BaseAddress = new Uri(configuration["Mohist:SlackApiUrl"] ?? "https://slack.com/api/");
@@ -177,6 +179,17 @@ public static class MohistServiceRegistration
         services.AddSingleton<ISecretKeyFileOperations>(PhysicalSecretKeyFileOperations.Instance);
         services.AddSingleton<ISecretKeyFile, PhysicalSecretKeyFile>();
         services.AddSingleton<ISecretStore, AesGcmSecretStore>();
+        // issue #514 / T-004 — Slack provider reliability layer. The
+        // inbox + outbox stores are scoped (they own transactions);
+        // the dispatcher service is singleton (it gates the dispatch
+        // loop with a SemaphoreSlim) and is hosted by the cluster
+        // singleton grain. The activation service is the host-side
+        // poke that puts the grain on the bus on start.
+        services.Configure<SlackProviderOptions>(configuration.GetSection(SlackProviderOptions.SectionName));
+        services.AddScoped<ISlackConnectionHealthBackpressurer>(sp =>
+            sp.GetRequiredService<SlackConnectionHealthBackpressurer>());
+        services.AddScoped<SlackOutboxDispatcherService>();
+        services.AddHostedService<SlackOutboxDispatcherActivationService>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.AddScoped<Mohist.Server.Workflow.Services.IWorkflowProfileProvider, Mohist.Server.Workflow.Services.WorkflowProfileProvider>();

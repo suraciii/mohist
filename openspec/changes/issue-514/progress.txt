@@ -126,3 +126,20 @@ All tests pass:
 ## Verification
 
 - dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true passed.
+
+# Issue 514 / T-004 — Provider inbox and outbound outbox
+
+## Codebase Patterns
+
+- Provider rows are Server infrastructure tables keyed by `ConnectionId`; the inbox uses a unique `(ConnectionId, SlackMessageIdentity)` index and only pending rows count toward ingress capacity.
+- `SlackOutboxStore` owns the durable outbox state machine. Replaceable progress merges only while the existing row is pending; terminal result, explicit failure, and user-action rows remain independent rows.
+- Backpressure updates Connection health through a separate DbContext-based `SlackConnectionHealthBackpressurer`, avoiding a DI cycle between `AgentConnectionStore` provider cleanup and the outbox store.
+- Orleans grain interfaces ending in `Grain` must live in a `*.Grains` namespace. The Slack dispatcher uses fixed key `__slack_outbox_dispatcher_global__` and reminder name `slack-outbox-dispatcher`.
+- SQLite in this repository cannot translate `DateTimeOffset` comparisons/orderings for these queries. Store scans use stable row-id ordering and apply time-window checks after materialization; all time values remain supplied by `TimeProvider`.
+- The migration snapshot must preserve CLR numeric types (`AttemptCount` is `int`); a generated/manual mismatch causes EF pending-model failures.
+
+## Verification
+
+- Slack provider migration and reliability specs: 20 passed.
+- Server build and ArchTests: build passed; ArchTests 35 passed.
+- UnitTests 1575, CLI 1443, Workflow Definition 175 passed during `npm test`. A full Spec run still has an unrelated pre-existing session reset timing failure (`GenericAgentSessionCancelApiSpecs.Cancel_AfterReset_IgnoresTerminalActivityFromPredecessorRuntime`); the Slack namespace remains green.

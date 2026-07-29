@@ -54,6 +54,163 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackOutboxRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ClaimedByAdapterId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ClaimedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DeadLetteredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DeliveredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DeliveryUncertainAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DispatchRef")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DmConversationId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkspaceTeamId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectionId", "DispatchRef", "Kind", "State")
+                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_DispatchRef_Kind_State");
+
+                    b.HasIndex("ConnectionId", "State", "ClaimedAt")
+                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_ClaimedAt");
+
+                    b.HasIndex("ConnectionId", "State", "DeliveryUncertainAt")
+                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_DeliveryUncertainAt");
+
+                    b.HasIndex("ConnectionId", "State", "NextAttemptAt")
+                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_NextAttemptAt");
+
+                    b.HasIndex("ProjectId", "ConnectionId", "State")
+                        .HasDatabaseName("IX_SlackOutboxRows_ProjectId_ConnectionId_State");
+
+                    b.ToTable("SlackOutboxRows", (string)null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SlackOutboxRows_Kind", "\"Kind\" IN ('replaceable_progress', 'terminal_result', 'explicit_failure', 'user_action')");
+                            t.HasCheckConstraint("CK_SlackOutboxRows_State", "\"State\" IN ('pending', 'claimed', 'delivered', 'delivery_uncertain', 'dead_lettered')");
+                        });
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackProviderInboxRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("AcceptedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DmConversationId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlackMessageIdentity")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlackUserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkspaceTeamId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "ConnectionId", "DispatchedAt")
+                        .HasDatabaseName("IX_SlackProviderInboxRows_ProjectId_ConnectionId_DispatchedAt");
+
+                    b.HasIndex("ConnectionId", "SlackMessageIdentity")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackProviderInboxRows_ConnectionId_SlackMessageIdentity");
+
+                    b.ToTable("SlackProviderInboxRows", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.AgentRow", b =>
                 {
                     b.Property<string>("Id")

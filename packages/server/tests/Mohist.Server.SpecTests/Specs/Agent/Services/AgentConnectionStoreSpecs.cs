@@ -1,11 +1,13 @@
 using System.Text.Json;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -30,7 +32,12 @@ public sealed class AgentConnectionStoreSpecs : IAsyncLifetime
         _factory = new TestDbContextFactory(_database.Options);
         var querier = new AgentQuerier(_factory);
         _secretStore = new FakeSecretStore();
-        _store = new AgentConnectionStore(_factory, querier, _secretStore, _timeProvider);
+        _store = new AgentConnectionStore(
+            _factory,
+            querier,
+            _secretStore,
+            Array.Empty<IAgentConnectionProviderCleanup>(),
+            _timeProvider);
         return ValueTask.CompletedTask;
     }
 
