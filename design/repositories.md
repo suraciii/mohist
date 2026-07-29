@@ -168,10 +168,16 @@ Repository 仍存在，也不校验 remote；Repository 内容不参与“这个
 
 - `WorkflowRun` 持有 `WorkflowRepositoryContext` 与 `WorkspaceIdentity`；
 - `IssueWorkStarted`、dispatch overlay、workspace API 在多层复制 Repository snapshot；
-- Runner marker、registry 与 query 重复保存 Project、Issue、Repository、branch、fingerprint
-  和版本；
-- Project Repository 的 `GitUrl` / `BaseBranch` 更新没有使用未完成 Issue blocker；
-- workspace path 使用 run hash，marker 需要完整身份字段。
+- workspace 查询 wire 仍携带完整身份（Project、Issue、Repository、path、branch），而非
+  以 `WorkflowRunId` 寻址、由 Runner 自行推导；
+- Runner registry entry 仍保存可从 `WorkflowRunId` 推导的 `issueNumber`、`workspacePath`
+  与 `runBranch`；marker 多存一个 `runBranch`。
 
-落地时先建立 Repository 占用锁定，再一次性切换 Server/Runner workspace 协议，最后删除
-旧模型与测试。协议切换不能拆成两个独立部署。
+已落地：Repository 占用锁定（`GitUrl` / `BaseBranch` 更新与删除均先查未完成 Issue
+blocker）；workspace path 与 run branch 由 `WorkflowRunId` 直接推导；marker 不再保存完整
+身份；fingerprint 与算法版本不再持久化（Runner 侧的 `git-remote-identity` 模块已成为
+死代码，随差距收敛一并删除）。
+
+剩余落地顺序：先删 `WorkflowRun` 的 Repository snapshot 与多层复制，再把 workspace 查询
+切换为 `WorkflowRunId` 寻址，最后精简 registry 与 marker。Server 与 Runner 的协议切换
+仍须同一版本部署，不能拆成两个独立部署。
