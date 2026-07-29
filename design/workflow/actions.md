@@ -312,16 +312,8 @@ checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自�
 
 ## Status
 
-正文是目标 spec;当前实现差距如下,待拆 issue 推进。
-
-1. **无 manifest 与 defineAction**:registry 是硬编码 name→handler Map,输入靠各
-   Action 手写 `stringInput` 解析,无未知键/类型/required 校验,无 catalog 上报,
-   profile 保存时无法校验 `uses` 与输入。
-2. **Action 输入边界**:交付类 Action 已通过 manifest 和显式 `with` 输入声明
-   repository、branch、remote 与 PR identity;凭据仍是外部交付的授权边界。
-3. **engine 内按名特判**:executor 的 `PROMISE_PROJECTED_ACTIONS` 与
-   `REMOVED_ACTIONS` 名单,目标分别由 `agent-execution` 能力声明与 catalog tombstone
-   取代。
-4. **Action 越权访问**:`openspec-tasks` 直连 `serverConnection.addTasks`,
-   `ActionContext` 全量暴露 server 连接与 runtime 句柄;目标收敛为默认 host + 声明式
-   能力注入。
+已实装：manifest 与 `defineAction`、registry 与 catalog（含 tombstone）随 runner 注册
+上报 server、Profile 保存时 catalog 校验（响应携带 `actionValidation` 标记）、声明式
+能力注入（`agent-execution` / `add-tasks` / `write-vars`）、结构化 output 端到端与
+`setVars` 投影。按名特判名单（PROMISE_PROJECTED / REMOVED）已移除，`openspec-tasks`
+等越权访问已收敛为声明式 effects。

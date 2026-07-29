@@ -1,5 +1,5 @@
 ---
-status: wip
+status: implemented
 ---
 
 # Workflow Profile
@@ -142,14 +142,8 @@ Prompts 使用独立 API，不挂在 `/workflow-profiles/{*profileId}` 下。
 
 ## Status
 
-与当前实现的差距：
-
-- 当前实现把 system profile、project template 和 Project 的单例 workflow config 分成
-  三套概念；目标模型统一为 Project-scoped `WorkflowProfile` collection。
-- 当前 `ProjectWorkflowProfile`、`IssueWorkflowProfile` 和 `WorkflowRunProfile` 记录还
-  混合保存 Variables；目标模型将这些资源完全分开。
-- 当前 Issue 还可以保存 inline template；目标模型只允许选择 Project 中已有的 Profile。
-- 当前有活动 WorkflowRun 时，Issue 的 Profile 选择会被锁定；目标模型允许记录新选择，
-  但只对下一次新建的 WorkflowRun 生效。
-- 当前 WorkflowRun 按 Stage 实时读取 Definition；Profile collection 迁移必须保留该行为，
-  不得把 Definition body 复制进 WorkflowRun。
+已实装：Project-scoped WorkflowProfile collection（内置 `mohist/*` 与 Project 管理）、
+Project 默认 Profile 与 Issue 显式选择（含 `--inherit-workflow-profile` 清除）、删除时
+的引用保护、Issue 选择在活动 Run 期间可修改且只影响下一次 Run、Run 固定 Profile ID 并
+按 Stage 初始化实时读取 Definition（不保存 Definition snapshot）、Variables 与 Prompts
+独立资源。
