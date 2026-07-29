@@ -2,14 +2,14 @@
 
 ## Findings
 
-### High: Later Turns can remain Executing after an unconfirmed stop
+### High: A non-launch Turn made Unknown by stop can never reconcile on later Runtime evidence
 
-`AgentSessionStopRoutes.ExecuteStopAsync` converts an unconfirmed reply into a durable Unknown state only for a launch Turn by calling `IAgentJobGrain.MarkUnknownAsync` (`packages/server/src/Mohist.Server/Api/AgentSessionStopRoutes.cs:129-133`). For a non-launch Turn it returns the Runner's `unknown` reply without changing the Session. That transition is instead delegated entirely to the Runner's best-effort outbox: `recordCancelActivity` returns immediately when the outbox is unavailable (`packages/runner/src/server/cancel-handler.ts:145-153`) but the handler still returns `{ state: "unknown" }` (`:126-138`).
+The new synchronous unknown transition in `AgentSessionStopRoutes.ExecuteStopAsync` marks a follow-up Turn `Unknown` (`packages/server/src/Mohist.Server/Api/AgentSessionStopRoutes.cs:134-137`). A later authoritative `session.activity` fact with that same `turnId` then enters `DriveTerminalActivityLifecycle`, but its `FindCurrentNonLaunchTurn` lookup excludes `Unknown` Turns (`packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:1592-1606`, `:1639-1654`) and returns without applying the completed/failed observation. This is not an immutable-domain-state restriction: `MarkTurnTerminal` explicitly permits `Unknown → Completed|Failed` (`packages/server/src/Mohist.Server/Sessions/Domain/AgentSession.Transitions.cs:617-647`), but the runtime-fact path cannot reach it.
 
-Therefore, during durable snapshot recovery or an outbox failure, stopping a follow-up Turn with an unconfirmed Runtime result tells the caller `unknown` but leaves its persisted Turn `Executing` and Session activity `Active`. This violates the stop requirement that an unconfirmed stop leaves both target Turn and Session activity Unknown, and it can prevent the user from taking the intended recovery path. Make the Server synchronously record the target non-launch Turn/Session Unknown when it receives an `unknown` stop reply; retain the correlated Runner activity fact as idempotent convergence evidence. Add an API regression with no/unhealthy Runner outbox that asserts the persisted follow-up Turn and Session are Unknown.
+An unconfirmed Pi stop can therefore leave a follow-up Turn and its Session permanently Unknown even after the Runtime later reports completion or failure. That violates the stop spec's requirement that Unknown reconcile on authoritative Runtime evidence. Preserve the stale/current guard, but allow a terminal fact correlated to the same current Unknown non-launch Turn to call `MarkTurnTerminal`; add a lifecycle/API regression for `Executing → Unknown` from an unconfirmed stop followed by a correlated completed and failed Runtime activity fact.
 
 ## Verification
 
-The current branch's recorded validation shows full .NET, Runner, and Web suites passing. This review found the missing later-Turn unconfirmed-stop state transition by tracing the Server route and Runner's intentionally best-effort activity fact path.
+The current branch's recorded validation shows full .NET, Runner, and Web suites passing. This review traced the post-stop correlated Runtime activity path and found the missing Unknown reconciliation transition.
 
 <promise>FAIL</promise>
