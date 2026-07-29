@@ -17,3 +17,9 @@
 - Follow-up permits are stored on the pending lease and released when the matching idle `session.activity` clears the lease, or when the reservation is abandoned/expired. A failed persistence or runner delivery also abandons and releases the permit.
 - At the gate limit, follow-up acquisition throws `FollowupConcurrencyLimitException`; the API returns HTTP 409 with code `concurrency_limit`, leaves no input persisted, and remains distinct from HTTP 503 `runner_unavailable`.
 - The focused follow-up spec fixture builds successfully, but the current Orleans 10 in-process test host cannot resolve server grain implementations (`Could not find an implementation for interface ...`), matching the existing session-grain spec baseline. Solution build and unit/architecture tests remain usable.
+
+## T-003
+
+- Added read-side `AgentAvailabilityService`; it combines online runner capacity with the T-001 active concurrency count and returns `CanStartNow` or one of `no-online-runner`, `capacity-full`, and `concurrency-limit`.
+- Added concurrency waiter reads and a per-agent status endpoint at `/api/projects/{projectRef}/agents/{agentRef}/status`; pending AgentJobs are returned as `waiting` items with their server-derived reason.
+- Availability does not consume or mutate Readiness. Focused availability unit tests pass; server build passes with `-p:SkipWebBuild=true`. The repository Web build remains unavailable because `tsc` is not installed.

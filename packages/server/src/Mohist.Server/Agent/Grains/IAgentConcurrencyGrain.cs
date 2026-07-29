@@ -25,4 +25,5 @@ public interface IAgentConcurrencyGrain : IGrainWithStringKey, IRemindable
     Task ReconcileAsync(string projectId, string agentId, IReadOnlySet<string> activeTokens);
     Task<int> GetActiveCountAsync();
     Task<IReadOnlyList<string>> GetActiveTokensAsync();
+    Task<IReadOnlyList<AgentConcurrencyWaiter>> GetWaitersAsync();
 }

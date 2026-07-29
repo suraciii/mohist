@@ -100,6 +100,9 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
     public Task<IReadOnlyList<string>> GetActiveTokensAsync() =>
         Task.FromResult<IReadOnlyList<string>>(_state.State.ActiveTokens.ToArray());
 
+    public Task<IReadOnlyList<AgentConcurrencyWaiter>> GetWaitersAsync() =>
+        Task.FromResult<IReadOnlyList<AgentConcurrencyWaiter>>(_state.State.Waiters.ToArray());
+
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
         if (string.Equals(reminderName, ReconciliationReminderName, StringComparison.Ordinal))
