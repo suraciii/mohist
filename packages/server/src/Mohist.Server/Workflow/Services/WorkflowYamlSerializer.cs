@@ -30,7 +30,12 @@ public static class WorkflowYamlSerializer
         var approval = document.RootElement.TryGetProperty("approval", out var approvalElement)
             ? approvalElement.Deserialize<ApprovalConfig>(JsonOptions)
             : null;
-        return new WorkflowDefinition(stages, approval);
+        var recoveries = document.RootElement.TryGetProperty("recoveries", out var recoveriesElement)
+            ? recoveriesElement.EnumerateObject()
+                .Where(p => p.Value.ValueKind == JsonValueKind.Object)
+                .ToDictionary(p => p.Name, p => p.Value.Deserialize<RecoveryDefinition>(JsonOptions)!)
+            : null;
+        return new WorkflowDefinition(stages, approval, recoveries);
     }
 
     private static StageDefinition ParseJsonStage(JsonElement element)
@@ -91,6 +96,9 @@ public static class WorkflowYamlSerializer
         var approvalMap = ToApprovalMap(definition.Approval);
         if (approvalMap is not null) document["approval"] = approvalMap;
 
+        var recoveriesMap = ToRecoveriesMap(definition.Recoveries);
+        if (recoveriesMap is not null) document["recoveries"] = recoveriesMap;
+
         return CreateSerializer().Serialize(document);
     }
 
@@ -138,7 +146,12 @@ public static class WorkflowYamlSerializer
     private static void AddRecovery(Dictionary<string, object?> map, RecoveryDefinition? recovery)
     {
         if (recovery is null) return;
-        map["recovery"] = new Dictionary<string, object?>
+        map["recovery"] = ToRecoveryMap(recovery);
+    }
+
+    private static Dictionary<string, object?> ToRecoveryMap(RecoveryDefinition recovery)
+    {
+        return new Dictionary<string, object?>
         {
             ["budget"] = recovery.Budget,
             ["handlers"] = recovery.Handlers.Select(h =>
@@ -152,6 +165,14 @@ public static class WorkflowYamlSerializer
                 return (object?)handler;
             }).ToList(),
         };
+    }
+
+    private static Dictionary<string, object?>? ToRecoveriesMap(IReadOnlyDictionary<string, RecoveryDefinition>? recoveries)
+    {
+        if (recoveries is null || recoveries.Count == 0) return null;
+        return recoveries.ToDictionary(
+            kv => kv.Key,
+            kv => (object?)ToRecoveryMap(kv.Value));
     }
 
     private static void AddArtifacts(Dictionary<string, object?> map, TaskArtifactCapture? artifacts)

@@ -133,14 +133,9 @@ public class IssueMetricsQualitySpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Contains(result.Window.Stages, s => s.Stage == "plan" && s.EnteredCount == 1);
-        Assert.Contains(result.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 1);
-        var check = Assert.Single(result.Window.Stages, s => s.Stage == "check");
-        Assert.Equal(0, check.EnteredCount);
-        Assert.Null(check.ReworkRate);
-        var integrate = Assert.Single(result.Window.Stages, s => s.Stage == "integrate");
-        Assert.Equal(0, integrate.EnteredCount);
-        Assert.Null(integrate.ReworkRate);
+        Assert.Equal(["plan", "build"], result.Window.Stages.Select(s => s.Stage));
+        Assert.All(result.Window.Stages, stage => Assert.Equal(1, stage.EnteredCount));
+        Assert.All(result.Window.Stages, stage => Assert.Equal(0.0, stage.ReworkRate));
     }
 
     [Fact]
@@ -188,10 +183,7 @@ public class IssueMetricsQualitySpecs
 
         Assert.Equal(0, result.Window.SampleCount);
         Assert.Null(result.Window.FirstTimeRightRate);
-        Assert.Contains(result.Window.Stages, s => s.Stage == "plan" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(result.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(result.Window.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(result.Window.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Empty(result.Window.Stages);
     }
 
     [Fact]
@@ -412,6 +404,7 @@ public class IssueMetricsQualitySpecs
             scope.ServiceProvider.GetRequiredService<IssueWorkflowProfileRegistry>(),
             scope.ServiceProvider.GetRequiredService<EffectiveWorkflowProfileResolver>(),
             scope.ServiceProvider.GetRequiredService<ProjectWorkflowProfileManager>(),
+            scope.ServiceProvider.GetRequiredService<IWorkflowProfileProvider>(),
             loader,
             metricsLogger);
 

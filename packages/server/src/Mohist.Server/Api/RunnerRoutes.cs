@@ -565,8 +565,6 @@ public static class RunnerRoutes
         var issueNumber = work.Issue?.IssueNumber;
         if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal)
             && string.Equals(work.WorkType, WorkItemTypes.Task, StringComparison.Ordinal)
-            && string.Equals(work.Stage, "plan", StringComparison.Ordinal)
-            && string.Equals(work.Uses, "mohist/opencode", StringComparison.Ordinal)
             && !string.IsNullOrWhiteSpace(projectId)
             && issueNumber is > 0)
         {

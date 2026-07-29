@@ -927,7 +927,6 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.WorkflowRunId);
             entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
             entity.Property(e => e.Variables).IsRequired();
-            entity.Property(e => e.DefaultVariables).IsRequired().HasDefaultValue("{}");
             // Optimistic concurrency: SQLite has no native rowversion, so we
             // mirror WorkflowRunRow's manually-incremented long ETag. EF still
             // adds it to every UPDATE's WHERE and raises

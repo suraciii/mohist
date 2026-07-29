@@ -167,12 +167,6 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
   const sourceValidation = validateWorkspaceRelativePath(sourceRel)
   if (sourceValidation) return archiveFailure("config-error", sourceValidation, { kind: "archive-change" })
 
-  // Idempotency is driven by the workflow variable `vars.archive`, surfaced
-  // here as `archiveHint` (a workspace-relative destination path). The server
-  // persists it across workspace rebuilds, so rerun-from-stage / retry find
-  // the previously archived destination instead of falling back to a missing
-  // source. The variable is seeded to null by the profile, so a first-time
-  // archive sees an empty hint.
   const hintRel = readArchiveHint(inputs)
   const hintedDestination = hintRel ? validateHintDestination(host.workDir, archiveDir, hintRel) : null
   if (hintRel && !hintedDestination) {

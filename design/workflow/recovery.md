@@ -155,3 +155,48 @@ result.failed
 已实装（issue #465）：`retrySelf` 与人工 retry 都从原始 declaration 重建——
 `with` / `expect` 保留 Workflow 表达式，新 attempt 用自己的 context snapshot 重新
 展开；`recoveryRemaining` 作为独立执行状态从结构上进不了重建路径。
+
+## 一次性 task 注入与 Profile 驱动 recovery 是同一机制
+
+API 触发的 rebase 任务携带一份 `RecoveryDefinition`，交给引擎按本文档的语义执行——
+budget、handlers、`when` 匹配、`retrySelf`、剩余预算的人工 retry 行为。这与 Profile
+内 inline `task.recovery` 没有行为或语义差别，区别只在于触发点（API 路由 vs. runner
+executor）。同一个机制就够了：API 注入的 recovery 仍是 `RecoveryDefinition`、仍由
+runner 执行匹配与剩余预算递减、`addTasks` 仍走引擎插入路径。
+
+这就排斥为"一次性注入"另立一个表示（不同的 budget 语义、不同的 handler 匹配、不同的
+名空间）——它只会复制这里定义的全部字段而无任何新增需求。
+
+## `recoveries` 顶层键：命名 recovery 模板
+
+一次性注入按名字引用 Profile 中的 recovery 定义，避免把 recovery 内容硬编码进 API 路由。
+Workflow YAML 的顶层 `recoveries` 是命名 recovery 模板的家：
+
+```yaml
+recoveries:
+  rebase-conflicts:
+    budget: 2
+    handlers:
+      - when: error.code=conflict
+        tasks:
+          - id: recover:resolve-rebase-conflicts
+            title: Resolve rebase conflicts
+            uses: mohist/opencode
+            with:
+              session: check
+              prompt: ${{ prompts.resolve-rebase-conflicts }}
+              options: ${{ vars.agent }}
+        retrySelf: false
+```
+
+- 入口：WorkflowDefinition 的 `recoveries` 字段是 `IReadOnlyDictionary<string, RecoveryDefinition>?`。
+  解析走 `WorkflowDefinitionParser` 复用的 `BuildRecovery` 逻辑；序列化由 `WorkflowYamlSerializer`
+  完整 round-trip。
+- 引用：API 路由（rebase 等）通过 `WorkflowQuerier.GetRecoveryAsync(workflowRunId, "rebase-conflicts")`
+  从 run 绑定的 Profile 取出。`BuildRebaseRecovery()` 形式的 C# 拼装已删除。
+- 单一作者：recovery 的 `uses`、prompt 引用、budget、handler 顺序全在 workflow 内容里，
+  C# 路由只挑名字。这样 profile 升级一处，rebase 行为同步变化；再不会因为 C# 复制版本
+  漂移而走错 prompt 模板。
+- 命名约定：模板名小写、`-` 分隔（`rebase-conflicts`、`plan-conflicts` 等）。Builtin
+  YAML 各自声明需要的模板；cross-profile 共享留待第三个 profile 或第二个共享模板出现再
+  抽象成独立文件。

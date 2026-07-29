@@ -9,6 +9,21 @@ approval:
           prompt: ${{ prompts.apply-feedback }}
           options: ${{ vars.agent }}
 
+recoveries:
+  rebase-conflicts:
+    budget: 2
+    handlers:
+      - when: error.code=conflict
+        tasks:
+          - id: recover:resolve-rebase-conflicts
+            title: Resolve rebase conflicts
+            uses: mohist/opencode
+            with:
+              session: check
+              prompt: ${{ prompts.resolve-rebase-conflicts }}
+              options: ${{ vars.agent }}
+        retrySelf: false
+
 stages:
   - stage: plan
     requiresApproval: true

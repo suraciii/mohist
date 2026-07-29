@@ -26,7 +26,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private bool _runReloadRequired;
     private readonly IWorkflowRunStore _runStore;
     private readonly WorkflowProfileManager _profileManager;
-    private readonly WorkflowRunVariablesStore _runVariablesStore;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WorkflowGrain> _log;
     private readonly WorkflowReadModel _readModel;
@@ -39,14 +38,12 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         Orleans.Runtime.IGrainRuntime runtime,
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
-        WorkflowRunVariablesStore runVariablesStore,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
         : base(context, runtime)
     {
         _runStore = runStore;
         _profileManager = profileManager;
-        _runVariablesStore = runVariablesStore;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -60,13 +57,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
-        WorkflowRunVariablesStore runVariablesStore,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
         _profileManager = profileManager;
-        _runVariablesStore = runVariablesStore;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -238,7 +233,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
         if (!string.IsNullOrWhiteSpace(structure.Id))
             await PersistProfileBindingAsync(projectId!, structure.Id);
-        await _runVariablesStore.EnsureArchiveDefaultAsync(GrainKey);
         _run.Workspace = input?.Workspace;
     }
 
@@ -253,7 +247,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
         if (!string.IsNullOrWhiteSpace(structure.Id))
             await PersistProfileBindingAsync(context.ProjectId, structure.Id);
-        await _runVariablesStore.EnsureArchiveDefaultAsync(GrainKey);
         _run.Workspace = await _profileManager.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
     }
 
