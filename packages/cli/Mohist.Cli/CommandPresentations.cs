@@ -406,10 +406,10 @@ internal static class CommandPresentations
                     JsonFields: EpicCommands.EpicDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "add"), new CommandPresentation(
                     CommandCapability.Work, "Add an Issue to an Epic",
-                    JsonFields: EpicCommands.EpicDescriptor.Fields));
+                    JsonFields: EpicCommands.EpicMembershipDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "remove"), new CommandPresentation(
                     CommandCapability.Work, "Remove an Issue from an Epic",
-                    JsonFields: EpicCommands.EpicDescriptor.Fields));
+                    JsonFields: EpicCommands.EpicMembershipDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "start"), new CommandPresentation(
                     CommandCapability.Work, "Start autonomous progression on an Epic",
                     JsonFields: EpicCommands.EpicDescriptor.Fields));

@@ -173,6 +173,77 @@ public class CliEpicCommandSpecs
     }
 
     [Fact]
+    public async Task EpicLink_TableSuccess_RendersLinkedMembershipOutcome()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    results = new[]
+                    {
+                        new { identifier = "5", status = "linked", issueNumber = 5, owningEpicNumber = (int?)null, owningEpicTitle = (string?)null },
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "add", "8", "5"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Linked issue #5", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task EpicLink_ConflictOutcome_RendersOwningEpic()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    results = new[]
+                    {
+                        new { identifier = "5", status = "conflict", issueNumber = 5, owningEpicNumber = (int?)3, owningEpicTitle = (string?)"Existing epic" },
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "add", "8", "5"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Issue #5 is already linked to epic #3 (Existing epic)", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EpicLink_NotFoundOutcome_IsReadable()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    results = new[]
+                    {
+                        new { identifier = "99", status = "not-found", issueNumber = (int?)null, owningEpicNumber = (int?)null, owningEpicTitle = (string?)null },
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "add", "8", "99"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Issue '99' was not found", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EpicDone_TableConflict_SurfacesConflictCode()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
@@ -216,18 +287,67 @@ public class CliEpicCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { epicNumber = 8, issueNumber = 5 },
+                data = new
+                {
+                    results = new[]
+                    {
+                        new { identifier = "5", status = "unlinked", issueNumber = 5, owningEpicNumber = (int?)null, owningEpicTitle = (string?)null },
+                    },
+                },
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["epic", "remove", "8", "5"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("Unlinked issue #5 from epic #8", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Unlinked issue #5", output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("Linked issue", output.ToString(), StringComparison.Ordinal);
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Delete, request.Method);
         Assert.Equal($"/api/projects/{ActiveProjectId}/epics/8/issues/5", request.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task EpicLink_EmptyResults_ReturnsInvalidResponse()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { results = Array.Empty<object>() },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "add", "8", "5"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(output.ToString());
+        Assert.Contains("invalid-response", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EpicUnlink_MultipleResults_ReturnsInvalidResponse()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    results = new[]
+                    {
+                        new { identifier = "5", status = "unlinked", issueNumber = 5 },
+                        new { identifier = "6", status = "unlinked", issueNumber = 6 },
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "remove", "8", "5"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(output.ToString());
+        Assert.Contains("2 epic membership results", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

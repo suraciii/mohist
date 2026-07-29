@@ -186,7 +186,8 @@ internal sealed class MohistCliApi
         ResourceDescriptor descriptor,
         JsonSelection selection,
         Func<JsonNode?, Task<int>> humanRenderer,
-        JsonNode? successDataFallback = null)
+        JsonNode? successDataFallback = null,
+        Func<JsonNode?, JsonNode?>? normalizeData = null)
     {
         var response = await ResponseReader.ReadAsync(
                 method,
@@ -201,6 +202,8 @@ internal sealed class MohistCliApi
         try
         {
             var data = response.Data ?? successDataFallback;
+            if (normalizeData is not null)
+                data = normalizeData(data);
             if (selection.Kind == JsonSelectionKind.Selected)
             {
                 var projected = selection.Project(data, descriptor.Cardinality);

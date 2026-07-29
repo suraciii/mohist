@@ -266,14 +266,23 @@ public sealed class CliResourceOutputSpecs
             RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { number = 12, title = "Unlinked", status = "open" },
+                data = new
+                {
+                    results = new[]
+                    {
+                        new { identifier = "4", status = "unlinked", issueNumber = 4, owningEpicNumber = (int?)null, owningEpicTitle = (string?)null },
+                    },
+                },
             }));
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["epic", "remove", "12", "4", "--project", "proj_test", "--json", "number,title"], output, error, fs, executor);
+            http, ["epic", "remove", "12", "4", "--project", "proj_test", "--json", "identifier,status,issueNumber"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
-        Assert.Equal(["number", "title"], JsonNode.Parse(output.ToString())!.AsObject().Select(p => p.Key).ToArray());
+        var result = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal("4", result["identifier"]?.GetValue<string>());
+        Assert.Equal("unlinked", result["status"]?.GetValue<string>());
+        Assert.Equal(4, result["issueNumber"]?.GetValue<int>());
         Assert.Equal(HttpMethod.Delete, handler.Requests.Single().Method);
     }
 

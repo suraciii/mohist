@@ -8,9 +8,14 @@ internal static class EpicCommands
 {
     internal static readonly ResourceDescriptor EpicDescriptor =
         ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.EpicShow));
+    internal static readonly ResourceDescriptor EpicMembershipDescriptor =
+        ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.EpicLink));
 
     private static JsonSelection Selection(ParseResult ctx, Option<string?> json) =>
         JsonSelection.Parse(EpicDescriptor, ctx.GetResult(json) is not null, ctx.GetValue(json));
+
+    private static JsonSelection MembershipSelection(ParseResult ctx, Option<string?> json) =>
+        JsonSelection.Parse(EpicMembershipDescriptor, ctx.GetResult(json) is not null, ctx.GetValue(json));
 
     public static Command Build(MohistCliApi api)
     {
@@ -238,7 +243,7 @@ internal static class EpicCommands
         var epicArg = new Argument<int>("epic") { Description = "Epic number" };
         var issueArg = new Argument<int>("issue") { Description = "Issue number" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicMembershipDescriptor);
         cmd.Arguments.Add(epicArg);
         cmd.Arguments.Add(issueArg);
         cmd.Options.Add(projectOpt);
@@ -248,13 +253,13 @@ internal static class EpicCommands
             var epic = ctx.GetValue(epicArg);
             var issue = ctx.GetValue(issueArg);
             var project = ctx.GetValue(projectOpt);
-            var selection = Selection(ctx, jsonOpt);
+            var selection = MembershipSelection(ctx, jsonOpt);
             return AddAsync();
 
             async Task<int> AddAsync()
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
-                    return api.WriteJsonSelectionResult(EpicDescriptor, selection);
+                    return api.WriteJsonSelectionResult(EpicMembershipDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
@@ -262,9 +267,10 @@ internal static class EpicCommands
                     HttpMethod.Post,
                     ProjectEpicsPath(resolvedProjectId, $"/{epic}/issues"),
                     new { issueNumber = issue },
-                    EpicDescriptor,
+                    EpicMembershipDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.EpicLink));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.EpicLink),
+                    normalizeData: UnwrapMembershipResponse);
             }
         });
         return cmd;
@@ -276,7 +282,7 @@ internal static class EpicCommands
         var epicArg = new Argument<int>("epic") { Description = "Epic number" };
         var issueArg = new Argument<int>("issue") { Description = "Issue number" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
-        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicMembershipDescriptor);
         cmd.Arguments.Add(epicArg);
         cmd.Arguments.Add(issueArg);
         cmd.Options.Add(projectOpt);
@@ -286,13 +292,13 @@ internal static class EpicCommands
             var epic = ctx.GetValue(epicArg);
             var issue = ctx.GetValue(issueArg);
             var project = ctx.GetValue(projectOpt);
-            var selection = Selection(ctx, jsonOpt);
+            var selection = MembershipSelection(ctx, jsonOpt);
             return RemoveAsync();
 
             async Task<int> RemoveAsync()
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
-                    return api.WriteJsonSelectionResult(EpicDescriptor, selection);
+                    return api.WriteJsonSelectionResult(EpicMembershipDescriptor, selection);
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
 
                 if (resolveExit != 0) return resolveExit;
@@ -300,12 +306,22 @@ internal static class EpicCommands
                     HttpMethod.Delete,
                     ProjectEpicsPath(resolvedProjectId, $"/{epic}/issues/{issue}"),
                     null,
-                    EpicDescriptor,
+                    EpicMembershipDescriptor,
                     selection,
-                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.EpicUnlink));
+                    data => api.RenderTableAsync(data, MohistCliApi.TableShape.EpicUnlink),
+                    normalizeData: UnwrapMembershipResponse);
             }
         });
         return cmd;
+    }
+
+    private static JsonNode UnwrapMembershipResponse(JsonNode? data)
+    {
+        if (data is not JsonObject envelope || envelope["results"] is not JsonArray results)
+            throw new InvalidOperationException("The server returned an invalid epic membership response");
+        if (results.Count != 1 || results[0] is not JsonObject outcome)
+            throw new InvalidOperationException($"The server returned {results.Count} epic membership results for a single-issue operation");
+        return outcome;
     }
 
     private static Command BuildDone(MohistCliApi api)
