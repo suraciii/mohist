@@ -283,8 +283,10 @@ Runtime Session 缺失时的自动重建与重新绑定尚未完整落地；当�
 
 Max concurrent runs 尚未真正限制并发。
 
-Agent 当前没有头像与统一 Readiness 诊断；Web 的配置字段也尚未完全由 Runtime 能力目录
-驱动，部分缺口只能在启动失败后看到。
+Agent Connection 的 Readiness 已提供最小配置推导：AgentConfig 缺少 Model 或 Runtime
+时显示 Needs setup，同时保持 Connection health 独立；两者齐备时显示 Ready，尚未探测
+的 Agent 默认显示 Unknown。完整的 Runner/runtime 可执行性探测仍是后续工作，当前仍可能
+在真正启动后发现更多缺口。
 
 SessionInput 与 AgentTurn 尚未作为稳定的 Session 子记录完整落地；现有 launch/follow-up
 返回值、transcript 与 live update 还不能分别回答“哪条输入已受理”和“哪轮 Runtime 正在

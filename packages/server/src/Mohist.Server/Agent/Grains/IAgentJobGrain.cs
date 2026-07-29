@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 
@@ -106,7 +107,20 @@ public sealed record PrepareManualLaunchCommand(
     [property: Id(11)] string? Variant = null,
     [property: Id(12)] int? IssueNumber = null,
     [property: Id(13)] int? EpicNumber = null,
-    [property: Id(14)] string? WorkflowRunId = null);
+    [property: Id(14)] string? WorkflowRunId = null,
+    [property: Id(15)] ConnectionLaunchOrigin? ConnectionOrigin = null);
+
+[GenerateSerializer]
+public sealed record PendingTerminalDeliveryEvent(
+    [property: Id(0)] string EventId,
+    [property: Id(1)] ConnectionLaunchOrigin Origin,
+    [property: Id(2)] AgentJobStatus Status,
+    [property: Id(3)] string? Message,
+    [property: Id(5)] string? FailureReason,
+    [property: Id(6)] string? FailureCategory,
+    [property: Id(7)] int ArtifactCount,
+    [property: Id(8)] int? ExitCode,
+    [property: Id(9)] DateTimeOffset RecordedAt);
 
 [GenerateSerializer]
 public sealed record AgentJobReportResult(
@@ -189,6 +203,9 @@ public static class AgentJobSessionDeliveryIds
 
     public static string FailureEventId(string jobKey) =>
         $"agent-job:{jobKey}:failed";
+
+    public static string TerminalDeliveryEventId(string jobKey) =>
+        $"agent-job:{jobKey}:terminal-delivery";
 }
 
 public static class AgentJobFailureReasons

@@ -16,4 +16,9 @@ internal partial class SourceCodeUpdater
     {
         return await _operations.UpdateRunnerAsync(repoRoot, dryRun, _runnerRefreshVerifier, cancellationToken);
     }
+
+    public virtual async Task<int> UpdateSlackAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
+    {
+        return await _operations.UpdateSlackAsync(repoRoot, dryRun, cancellationToken);
+    }
 }

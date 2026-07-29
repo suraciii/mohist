@@ -180,6 +180,49 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentName: outcome.AgentName);
     }
 
+    public async Task<AgentLaunchResult> LaunchConnectionAsync(
+        AgentInfo agent,
+        string prompt,
+        ConnectionLaunchOrigin origin,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(origin);
+        var trimmedPrompt = prompt?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedPrompt))
+            throw new ArgumentException("Prompt must not be empty or whitespace.", nameof(prompt));
+
+        var context = new AgentLaunchContext(agent.ProjectId);
+        var key = $"slack:{origin.WorkspaceTeamId}:{origin.DmConversationId}:{origin.MessageTs}";
+        var resolvedRuntime = ResolveRuntime(agent.AgentConfig);
+        var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
+        var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
+            ? agent.AgentConfig.Value.GetRawText()
+            : null;
+        var coordinator = _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
+            AgentLaunchCoordinatorCodec.KeyFor(context.ProjectId, key));
+        var outcome = await coordinator.LaunchAsync(new AgentLaunchCoordinatorCommandEnvelope(
+            ProjectId: context.ProjectId,
+            IdempotencyKey: key,
+            AgentId: agent.Id,
+            AgentName: agent.Name,
+            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentConfigJson: agentConfigJson,
+            Model: resolvedModel,
+            Variant: resolvedVariant,
+            Runtime: resolvedRuntime,
+            Prompt: trimmedPrompt,
+            WorkspacePath: null,
+            IssueNumber: null,
+            EpicNumber: null,
+            Repository: null,
+            Title: null,
+            Request: new AgentLaunchCoordinatorRequest(trimmedPrompt, agent.Id, null, null, null, null, null, null),
+            ConnectionOrigin: origin));
+
+        return new AgentLaunchResult(outcome.SessionId, outcome.JobKey, outcome.InputId, outcome.TurnId, outcome.AgentId, outcome.AgentName);
+    }
+
     public async Task<AgentLaunchResult?> ResumeIdempotentAsync(
         string projectId,
         string idempotencyKey,

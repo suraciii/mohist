@@ -19,6 +19,8 @@ internal interface IFileSystem
     IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption);
     Stream OpenRead(string path);
     Stream OpenWrite(string path);
+    bool IsSymbolicLink(string path) => false;
+    bool IsUserOnlyFile(string path) => true;
 }
 
 internal sealed class RealFileSystem : IFileSystem
@@ -65,4 +67,15 @@ internal sealed class RealFileSystem : IFileSystem
     public Stream OpenRead(string path) => File.OpenRead(path);
 
     public Stream OpenWrite(string path) => File.Create(path);
+
+    public bool IsSymbolicLink(string path) => File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+
+    public bool IsUserOnlyFile(string path)
+    {
+        if (OperatingSystem.IsWindows()) return true;
+        var mode = File.GetUnixFileMode(path);
+        var groupOrOther = UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute
+            | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+        return (mode & groupOrOther) == 0;
+    }
 }

@@ -1,0 +1,343 @@
+# Issue 514 / T-001 — Encrypted credential secret store
+
+## Codebase patterns discovered
+
+- `OperatorCredential` (`Infrastructure/Security/OperatorCredential.cs`) is the
+  precedent for "single-instance secret-file discipline": env var override,
+  computed `~/.mohist/<name>` path, generated on first read, `0600`
+  enforced via `UnixFileMode`, `ReparsePoint` rejected, abstract
+  `IOperatorCredentialStore` so tests can drive the surface without
+  touching `System.IO` directly. Existing tests
+  (`tests/.../Security/OperatorCredentialTests.cs`) use exactly that hook.
+- `MohistDbContext` uses `IScopedService`/`ISingletonService` for
+  auto-registration via `AddMohistConventionalServices()`. Tests register
+  fakes by constructing the store directly with a
+  `TestDbContextFactory(...)`. Migrations live in
+  `Infrastructure/Data/Migrations/` with a hand-written
+  `<DateHHMMSS_Name>.cs`, `.Designer.cs`, and a manual edit of
+  `MohistDbContextModelSnapshot.cs` (the snapshot's `BuildModel` calls
+  `BuildModelCore` so a single migration only edits the `.cs` file +
+  inserts its own entity-block into the snapshot plus the matching
+  `Index`/constraint entries).
+- Test infrastructure:
+  - `MigratedSqliteTemplate.CopyTo(...)` clones a prebuilt migrated
+    schema into a fresh in-memory SQLite db (used for both
+    `CreateMigrated()` and `CreateDatabase(targetMigration)`).
+  - `BannedSymbols.Tests.txt` bans `System.IO.File/Directory/FileStream`
+    in tests — we must abstract file ops behind
+    `ISecretKeyStore`/`SecretKeyFile` interfaces just like
+    `OperatorCredential` does.
+  - `MockEnvironmentVariableProvider` lives in the
+    `EnvironmentAbstractions.TestHelpers` package
+    (already referenced by both test projects).
+- `IHermesWebhookClient` + `AddHttpClient<...>()` + `Recording...Fake`
+  is the established typed-HttpClient pattern; not needed for T-001
+  but referenced as a future guidance marker.
+- `ConfigRoutes.cs:99-104` defines
+  `IsSecretKey(key) → contains("token") OR contains("key") OR contains("secret")`.
+  The redaction policy for any field whose name matches the same pattern
+  is reused for token-name filtering and for any logging surface that
+  might print a `Dictionary<string,string>` blob.
+
+## T-001 design notes
+
+- `ISecretStore` lives in
+  `Infrastructure/Security/Secrets/ISecretStore.cs`. `SecretKey` is a
+  connection-scoped address: `(ProjectId, ConnectionId, Kind)`. `Kind`
+  is currently `{AppToken, BotToken}` — the seam extends later for
+  Runner creds, webhook secrets.
+- `ConnectionSecretRow` (EF row, table `ConnectionSecrets`,
+  composite PK on `(ProjectId, ConnectionId, Kind)`) holds a single
+  ciphertext blob (nonce || tag || ciphertext) plus
+  `UpdatedAt`. We do **not** store the master key id; the master key
+  is process-global per `MOHIST_SECRET_KEY_PATH`.
+- `ISecretKeyStore` parallels `IOperatorCredentialStore`:
+  - `EnsureKeyAsync(path, ct)` — returns 32 bytes, creating the file
+    with `0600` (non-Windows) if missing and writing it with
+    `WriteThrough`+`FlushToDisk`. Symlink at the path → invalid op.
+    Honors an `IEnvironmentVariableProvider` injected for tests.
+  - `LoadKeyAsync(path, ct)` — rejects symlinks and any file whose
+    mode grants others read/write/exec (best-effort on Windows).
+  - `Exists(path)` — pure probe.
+- `AesGcmSecretStore` (singleton): derives the master key once (caching
+  it in memory after first `Load`); uses `AesGcm.Encrypt`/
+  `Decrypt` with 12-byte nonce, 16-byte tag. The tag is appended to
+  the ciphertext by `AesGcm`; the blob layout is
+  `nonce (12) || ciphertext (N) || tag (16)` for simplicity and
+  compactness.
+- Redaction is layered on `ISecretStore.Redact<T>` — a small helper that
+  walks a `Dictionary<string,string>` and replaces any value whose key
+  matches the `IsSecretKey` predicate with `***`. The same predicate
+  lives next to `ISecretStore` so `AesGcmSecretStore.LogStored` etc.
+  can share it without a cross-namespace dependency.
+- DI: register `ISecretStore → AesGcmSecretStore` as
+  `Singleton` (cache the master key), `ISecretKeyStore →
+  PhysicalSecretKeyStore` as `Singleton`. Both wired in
+  `MohistServiceRegistration.ConfigureMohistServices`.
+- EF migration: `20260729000000_AddConnectionSecrets` creates the table
+  with the composite PK, no other index (only `Load`/`Delete` are
+  keyed — the inbox/outbox etc. are separate tables in later tasks).
+
+## Codebase patterns to reuse
+
+- Treat spec tests as primary; unit tests for pure file-discipline
+  behavior. Both call directly into `AesGcmSecretStore(...ctor)` with
+  fake args; no `WebApplicationFactory` needed.
+- `TimeProvider` always injectable; never use `DateTimeOffset.UtcNow`
+  in production code or `DateTimeOffset.UtcNow` (banned) in tests.
+- `IEnvironmentVariableProvider` injectable in production
+  (`SystemEnvironmentVariableProvider.Instance`) and faked in tests
+  via the already-referenced `MockEnvironmentVariableProvider`.
+
+## Verification
+
+All tests pass:
+
+- `Mohist.Server.UnitTests` (3336 passed) — includes `AesGcmSecretStoreTests` (round-trip, wrong-key, missing-key, delete, redact, validation), `PhysicalSecretKeyFileTests` (symlink rejection, 0600 mode, world-readable rejection, wrong-length rejection, path resolution), `SecretNameDetectorTests` (redaction predicate).
+- `Mohist.Server.SpecTests` (3336 passed) — includes `ConnectionSecretsMigrationSpecs` (Up creates table with correct columns/index/constraint, Down drops, migration applies on existing schema, DbSet exposed), `AesGcmSecretStoreSpecs` (round-trip both kinds, wrong-key failure, delete, per-connection isolation).
+- `Mohist.Cli.Tests`, `Mohist.Server.ArchTests`, `Mohist.Workflow.Definition.Tests`, web, runner — all pass (no regressions).
+
+# Issue 514 / T-002 — AgentConnection aggregate and lifecycle
+
+## Codebase Patterns
+
+- `AgentConnection` follows the `RoutingRule`/`WatchEntry` relational pattern: domain and EF row are separate, each queryable fact has its own column, and `AgentConnectionStore` is scoped rather than an Orleans grain.
+- Binding fields are accepted only at create time. `UpdateAsync` explicitly rejects `ProjectId`, `AgentId`, `ProviderKind`, `WorkspaceTeamId`, `AppId`, and `BotUserId` with `immutable_binding`; mutable lifecycle/access fields remain field-selected updates.
+- Active-Agent validation uses the existing `AgentQuerier`, preserving the Agent JSON row as the single execution-definition source. AgentConnection stores no execution snapshot.
+- The partial unique SQLite index on `(ProjectId, AgentId, WorkspaceTeamId)` with `DeletedAt IS NULL` permits replacement after soft deletion while preventing two active bindings.
+- Connection deletion is a soft delete for the aggregate and explicitly removes both credential slots through `ISecretStore`. Cleanup runs on repeated deletes too, so interrupted cleanup can be retried. Provider inbox/mapping/outbox records do not exist until T-004 and must extend this cleanup path when introduced.
+- Specs use `TestSqliteDatabase.CreateMigrated()`, `TestDbContextFactory`, `FakeTimeProvider`, and an in-memory `ISecretStore` fake. They cover immutable binding, archived-Agent rejection, uniqueness, distinct workspaces, independent facts in both directions, absence of execution-definition fields, credential cleanup, and Agent preservation.
+
+## Verification
+
+- Baseline and post-change `Mohist.Server.SpecTests` passed against migrated in-memory SQLite; post-change total: 3356 passed.
+- Full `npm test` passed: Workflow Definition 175, CLI 1443, Server Unit 1575, Server Arch 35, Server Spec 3356, Web 5153 (1 skipped), Runner 1443.
+
+
+# Issue 514 / T-003 — Slack API client and setup verification
+
+## Codebase Patterns
+
+- Slack identity calls use a typed HttpClient under Server.Slack, with bearer authentication and Slack Web API method paths relative to the configured Slack API base URL.
+- AgentConnectionStore.UpdateAsync is the persistence seam for independent SetupProgress, ConnectionHealth, HealthReason, and LastHeartbeatAt fields; Setup verification does not inspect or mutate AgentReadiness.
+- Secrets are loaded only through ISecretStore using the project/connection BotToken address; the verifier keeps the plaintext token local to the API call and does not log it.
+- SlackSetupVerifier treats token/auth, workspace, App/Bot mismatch, missing scopes, and DM access failures as FixSlackSetup with actionable reasons; successful verification advances to ClaimOwner. Adapter liveness is separately evaluated from LastHeartbeatAt using injectable TimeProvider.
+
+## Verification
+
+- dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true passed.
+
+# Issue 514 / T-004 — Provider inbox and outbound outbox
+
+## Codebase Patterns
+
+- Provider rows are Server infrastructure tables keyed by `ConnectionId`; the inbox uses a unique `(ConnectionId, SlackMessageIdentity)` index and only pending rows count toward ingress capacity.
+- `SlackOutboxStore` owns the durable outbox state machine. Replaceable progress merges only while the existing row is pending; terminal result, explicit failure, and user-action rows remain independent rows.
+- Backpressure updates Connection health through a separate DbContext-based `SlackConnectionHealthBackpressurer`, avoiding a DI cycle between `AgentConnectionStore` provider cleanup and the outbox store.
+- Orleans grain interfaces ending in `Grain` must live in a `*.Grains` namespace. The Slack dispatcher uses fixed key `__slack_outbox_dispatcher_global__` and reminder name `slack-outbox-dispatcher`.
+- SQLite in this repository cannot translate `DateTimeOffset` comparisons/orderings for these queries. Store scans use stable row-id ordering and apply time-window checks after materialization; all time values remain supplied by `TimeProvider`.
+- The migration snapshot must preserve CLR numeric types (`AttemptCount` is `int`); a generated/manual mismatch causes EF pending-model failures.
+
+## Verification
+
+- Slack provider migration and reliability specs: 20 passed.
+- Server build and ArchTests: build passed; ArchTests 35 passed.
+- UnitTests 1575, CLI 1443, Workflow Definition 175 passed during `npm test`. A full Spec run still has an unrelated pre-existing session reset timing failure (`GenericAgentSessionCancelApiSpecs.Cancel_AfterReset_IgnoresTerminalActivityFromPredecessorRuntime`); the Slack namespace remains green.
+
+# Issue 514 / T-005 — Owner claim flow
+
+## Codebase Patterns
+
+- Claim state is provider infrastructure in `SlackOwnerClaimCodes`, separate from `AgentConnection`; only `CodeHash`, `ExpiresAt`, `UsedAt`, and `SupersededBy` are persisted. The plaintext code is returned only from `GenerateAsync`.
+- `SlackOwnerClaimService` uses `TimeProvider` for the ten-minute default window and SHA-256 over a normalized UTF-8 code. Regeneration marks all pending prior rows superseded before inserting the new row.
+- Inbound classification checks a matching claim code before Setup progress and owner gates. Claim attempts call `ISlackApiClient.UsersInfoAsync` with the Bot token from `ISecretStore`; regular-member checks reject bots, deleted users, guests, restricted users, wrong workspaces, and `TeamIds` containing another workspace.
+- Owner establishment is a conditional database update (`OwnerSlackUserId IS NULL`) followed by marking the code used, so a claimed Connection cannot be reassigned. Non-owner and invalid claim paths return explicit rejection decisions and do not write provider inbox rows or Agent resources.
+
+## Verification
+
+- `SlackOwnerClaimSpecs` passes 9/9 using migrated in-memory SQLite, `RecordingSlackApiClient`, fake secrets, and `FakeTimeProvider`.
+- Server build passed after adding the claim migration and model snapshot. Full `npm test` passed: Workflow Definition 175, CLI 1443, Server Unit 1575, Server Arch 35, Server Spec 3385, Web 5153 (1 skipped), Runner 1443.
+
+# Issue 514 / T-006 — Connection dispatch through the Agent API
+
+## Codebase Patterns
+
+- Connection dispatch uses the existing `AgentLaunchCoordinatorGrain`; the Slack message identity is the raw idempotency key `slack:{team}:{conversation}:{messageTs}`, and `AgentLaunchCoordinatorCodec.KeyFor(projectId, key)` remains the grain identity.
+- `ConnectionLaunchOrigin` is carried as an optional field on the existing coordinator envelope and plan. The coordinator fingerprints it for replay conflicts, emits `agent-connection` as the source kind, and writes connection/slack audit labels alongside the existing manual labels.
+- The adapter boundary is a single classifying `/ingress` route. It authenticates with `OperatorCredential`, resolves the Connection before classification, checks claim codes before setup/owner gates, and only calls `SlackProviderInboxStore.AcceptAsync` for an owner task with a valid Agent.
+- Adapter-session returns secrets only after operator authentication and updates `LastHeartbeatAt` through `AgentConnectionStore`; delivery claim/ack delegates state transitions to `SlackOutboxStore`.
+
+## Verification
+
+- Server build passed with `-p:SkipWebBuild=true`.
+- SpecTests rebuilt successfully (3385 tests) and UnitTests rebuilt successfully (1577 tests); the new connection-origin tests pass.
+
+- Rechecked T-006 after workspace recovery: the adapter boundary is registered in
+  `MohistApiRegistration`, and all four routes authenticate before resolving or
+  mutating Connection/provider state. The classifying ingress delegates claim-code
+  precedence and setup/owner gates to `SlackOwnerClaimService`; only the owner-task
+  branch writes the provider inbox and invokes `LaunchConnectionAsync`.
+- Added a regression assertion that project, workspace, DM conversation, and
+  message timestamp each participate in the coordinator key. Server build,
+  1577 UnitTests, and 3385 SpecTests pass from the existing build outputs.
+- A fresh full `npm test` run passed Workflow Definition (175), CLI (1443),
+  Unit (1578), and Arch (35), but the existing general manual-launch spec
+  `AgentSessionLaunchJobIdentitySpecs.Launch_CreatesExactlyOneAgentJobAndOneAgentSessionAndIssuesOneDispatch`
+  intermittently timed out while polling a dispatch. Slack-focused specs and
+  the connection-origin unit tests remain green; this failure is outside the
+  T-006 route and coordinator changes.
+
+# Issue 514 / T-007 — CLI connection command group
+
+## Codebase Patterns
+
+- Connection management routes live beside the adapter boundary at
+  `/api/projects/{projectRef}/slack-connections`; adapter routes remain under
+  the same resource with operator-token authentication. CLI configure posts
+  only to the management configure route and receives no token in its response.
+- CLI credential files are parsed as strict UTF-8 JSON with exactly
+  `appToken` and `botToken`. Real files reject reparse points and any group or
+  other Unix permission bits; virtual test files are handled through the
+  existing `IFileSystem` abstraction.
+- Interactive credential entry uses `ICliTerminal.ReadHiddenAsync`; redirected
+  test input still uses the injected reader, while a real interactive console
+  reads keys with echo suppressed. Direct token option names are rejected
+  before System.CommandLine parses them so their values cannot appear in parse
+  errors.
+- `claim-owner` delegates code generation to `SlackOwnerClaimService`, so
+  regeneration invalidation and one-time persistence remain server-owned.
+
+## Verification
+
+- `dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passed.
+- `CliAgentConnectionCommandSpecs` passed 8/8 via the xUnit v3 direct runner.
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` passed.
+- Slack-focused Server unit tests passed 1578/1578.
+- Full `npm test` passed: Workflow Definition 175, CLI 1451, Server Unit 1578, Server Spec 3385, Server Arch 35, Web 5153 (1 skipped), Runner 1443.
+
+# Issue 514 / T-008 — Minimal Agent Readiness derivation
+
+## Codebase Patterns
+
+- `AgentReadinessDeriver` is a pure Server-side read/decision helper. A null or
+  incomplete AgentConfig is `NeedsSetup`, a config with non-empty model and
+  runtime is `Ready`, and structurally indeterminate config remains `Unknown`.
+- `AgentConnectionStore.GetAsync` and `ListAsync` derive the displayed
+  readiness from the bound Agent while leaving the four persisted Connection
+  facts independent. This keeps a healthy Connection visibly distinct from an
+  Agent that needs setup and avoids copying execution configuration into the
+  Connection.
+- Slack ingress evaluates readiness after owner/setup classification and Agent
+  resolution but before provider-inbox acceptance. NeedsSetup produces an
+  actionable rejection and no accepted work; Unknown and Ready proceed through
+  the existing idempotent launcher path. Unknown acknowledgements explicitly
+  say they await Runner verification.
+
+## Verification
+
+- Server build passed with `-p:SkipWebBuild=true`.
+- Server UnitTests passed (1584); Server SpecTests passed (3386).
+
+# Issue 514 / T-009 — mohist-slack adapter package
+
+## Codebase Patterns
+
+- The adapter-facing Server routes return the common `{ success, data }` envelope and authenticate with `X-Mohist-Operator-Token`; `HttpAdapterTransport` keeps that protocol in one small boundary client.
+- `/ingress` is the only inbound execution route. Socket Mode payloads are normalized from the nested `event` object and are sent without owner, claim, setup, or readiness classification in the adapter.
+- `adapter-session` is intentionally called per Connection. The adapter stores leased tokens only in the live `ConnectionRuntime`, creates one Socket Mode client and one Web API client per Connection, and has no filesystem or database dependency.
+- Outbox delivery is a pull loop over `deliveries/claim`; the Slack post result is translated to `delivered` or `uncertain` and reported through `deliveries/ack`. The local limiter only bounds transient ingress work.
+
+## Verification
+
+- `npm run typecheck -w packages/mohist-slack` passed.
+- `npm run typecheck:tests -w packages/mohist-slack` passed.
+- `npm run build -w packages/mohist-slack` passed and produced `dist/cli.js`.
+- `npm test -w packages/mohist-slack` passed (4 tests).
+- The official Socket Mode SDK emits its catch-all event as `slack_event`; the adapter listens there so it receives all event types rather than the lower-level wire `events_api` type.
+
+# Issue 514 / T-010 — CLI Slack service management
+
+## Codebase Patterns
+
+- `IServiceInstaller` is the single CLI service lifecycle seam. `SystemdServiceInstaller` maps targets to user units and `WindowsScheduledTaskInstaller` maps them to launcher scripts plus Scheduled Tasks or Startup fallback.
+- `mo install` passes `ServiceInstallOptions`; Slack uses `ServerUrl` and the existing `MOHIST_OPERATOR_TOKEN` environment source. The adapter package also requires `SLACK_CONNECTIONS`, which is configured separately by the Connection workflow.
+- `mo update slack` is a focused source update: build `packages/mohist-slack`, then restart only when its managed service is installed. Like runner update, an absent service is reported as skipped.
+
+## Verification
+
+- Baseline full test run: CLI 1451 passed; the run had one unrelated intermittent Server Spec failure while the other test projects passed.
+- Final CLI build passed and CLI tests passed 1460/1460.
+- Slack systemd install test verifies `mohist-slack.service`, `node packages/mohist-slack/dist/cli.js`, `Restart=on-failure`, `SERVER_URL`, and `MOHIST_OPERATOR_TOKEN`.
+
+# Issue 514 / Review fixes
+
+## Connection setup and adapter discovery
+
+- `mo agent connection create <agent> --provider slack` now creates an unbound, recoverable Connection. The first verified `auth.test` response binds its immutable workspace, App, and Bot identity; a later mismatch is rejected.
+- The adapter discovers configured Connections from an operator-authenticated Server endpoint, starts successfully with zero Connections, and refreshes added or removed Connections without `SLACK_CONNECTIONS` or a service restart.
+- A fresh adapter-session heartbeat invokes Slack setup verification. Verification uses the Bot identity returned by `auth.test`, rather than treating a Bot user ID as a DM conversation ID, and only enables owner claim after the workspace, App, Bot, and scopes are confirmed.
+
+## Dispatch delivery reliability
+
+- Slack-originated AgentJobs retain a durable terminal-delivery obligation. Completed, failed, and unconfirmed outcomes create idempotent outbox intents for the originating DM and retry from the Job recovery reminder.
+- Accepted acknowledgements have a stable Slack-message dispatch reference. Redelivery reuses the original outbox entry instead of producing another reply. Required acknowledgements and terminal messages remain durable when the normal outbox capacity is full, while the Connection enters Backpressured for new ingress.
+
+## Verification
+
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` passed.
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore` passed 3389/3390; the sole failure was the pre-existing intermittent `AgentLaunchObservationRoutesSpecs.Observation_DuringTerminalState_ReportsJobResultAndTurnResult` runner dispatch polling timeout.
+- Final `npm test` passed: Workflow Definition 175, CLI 1460, Server Unit 1584, Server Arch 35, Server Spec 3390, Web 5153 (1 skipped), Runner 1443, and mohist-slack 5.
+
+# Issue 514 review findings 1 and 2
+
+## Implementation
+
+- `mo agent connection create <agent> --provider slack` now creates a recoverable draft without Slack workspace, App, or Bot identifiers. The identifiers remain unset until the later verification flow establishes them; no caller-provided identity is accepted at create time.
+- The authenticated `GET /api/slack-connections/adapter` discovery endpoint returns only enabled Connections with both stored credentials. The adapter starts with an empty set, polls this Server-owned list, and adds or disconnects per-Connection Socket Mode runtimes as the list changes. `SLACK_CONNECTIONS` is no longer read.
+
+## Verification
+
+- `npm run typecheck -w packages/mohist-slack` passed.
+- `npm test -w packages/mohist-slack` passed (5 tests), including zero-connection startup and later add/remove reconciliation.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore --filter FullyQualifiedName~CliAgentConnectionCommandSpecs` passed (the Microsoft Testing Platform ignored the VSTest filter and ran 1460 tests).
+- Direct xUnit run of `AgentConnectionStoreSpecs` passed (22 tests), including configured-only discovery.
+- The full Server Spec command similarly ignored its filter and had one unrelated intermittent session dispatch polling failure; the targeted direct xUnit class passed.
+
+# Issue 514 review finding 1 - Slack setup verification contracts
+
+## Design
+
+- `auth.test` keeps Slack's bot identity (`bot_id`) separate from its bot-user identity (`user_id`). Setup verification uses the former as the `bots.info` argument, validates the returned Bot and App identities, and only then binds the immutable workspace, App, and bot-user fields to the Connection.
+- `apps.permissions.scopes.list`, rather than `bots.info`, is the source of granted OAuth scopes. Verification flattens the returned scope groups and rejects the setup with an actionable reason when a required scope is missing or Slack cannot provide the scope list.
+- `SlackSetupVerifierSpecs` drives realistic `auth.test`, `bots.info`, and `apps.permissions.scopes.list` response records through the persistence seam: a complete payload succeeds; a different bot ID and a missing `im:history` scope leave the Connection unbound.
+
+## Verification
+
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` passed.
+- `packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests -class Mohist.Server.SpecTests.Specs.Slack.SlackSetupVerifierSpecs -noColor` passed: 3 tests.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore` passed: 1584 tests.
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore --filter FullyQualifiedName~SlackSetupVerifierSpecs` ran the full suite because Microsoft Testing Platform ignored the VSTest filter: 3395 passed, 1 unrelated failure.
+
+# Issue 514 review findings 2 and 3 - terminal delivery event handoff
+
+## Design
+
+- `AgentJobGrain` persists and emits one idempotent terminal-delivery CloudEvent for a Slack-originated Job instead of writing the Slack outbox. The durable event contains the bound Connection origin, terminal status, bounded redacted result facts, and a stable event id; a recovery reminder retries event append after activation loss.
+- `SlackTerminalDeliveryHandler` is the Server infrastructure consumer. It renders a bounded Slack-safe conclusion, evidence, and next step from the authoritative event facts, then idempotently enqueues the final delivery with the Job's stable dispatch reference. Completed, failed, and unknown results remain distinct.
+- The delivery handler test covers all three result statuses, duplicate event handling, redaction, outbox kind selection, and the three-part user-visible summary.
+
+## Verification
+
+- `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true` passed.
+- `packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests.dll -class Mohist.Server.SpecTests.Specs.Slack.SlackTerminalDeliveryHandlerSpecs -noColor` passed: 3 tests.
+
+# Issue 514 review finding - raw tool output exclusion
+
+- Terminal-delivery state and CloudEvents no longer carry `AgentJobTerminalResult.Output`. The Slack handler ignores an `output` field even if it appears in a malformed or old event payload, and only renders the user-facing result message, failure facts, exit code, and artifact count.
+- `SlackTerminalDeliveryHandlerSpecs` includes raw command output in its inbound event JSON and asserts that it cannot appear in the persisted Slack delivery while the conclusion, evidence, and next step remain present.
+- `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true` and the focused terminal-delivery Specs passed. A subsequent full `npm test` reached unrelated pre-existing failures: the source-comment ArchTest baseline flags `MohistServiceRegistration.cs` and `PhysicalSecretKeyFile.cs`, while two AgentLaunchObservation specs timed out waiting for Runner dispatch. Server UnitTests passed (1602) before those failures.
+
+# Issue 514 CI repair
+
+- Removed task/design references from the new production comments so the source-comment ArchTest baseline remains closed.
+- GitHub run `30456332539` exceeded the 15-minute job limit after the ArchTest failure while the Spec process continued. The CI-equivalent local commands now pass: `dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore` and `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` (Workflow Definition 175, CLI 1460, Server Unit 1602, Server Arch 50, Server Spec 3398).

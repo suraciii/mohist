@@ -13,6 +13,7 @@ internal static class InstallCommands
 
         install.Subcommands.Add(BuildServerInstall(installer));
         install.Subcommands.Add(BuildRunnerInstall(installer));
+        install.Subcommands.Add(BuildSlackInstall(installer));
 
         return install;
     }
@@ -61,6 +62,23 @@ internal static class InstallCommands
             var runnerRoot = ctx.GetValue(runnerRootOpt);
             return installer.InstallRunnerAsync(new ServiceInstallOptions(dryRun, unitDir, repoRoot, null, serverUrl, runnerRoot));
         });
+        return cmd;
+    }
+
+    private static Command BuildSlackInstall(IServiceInstaller installer)
+    {
+        var cmd = new Command("slack", "Install the mohist-slack adapter as a managed background service");
+        var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
+        var serverUrlOpt = new Option<string?>("--server-url") { Description = "Server URL" };
+        var dryRunOpt = MohistCliCommands.DryRunOption();
+        var unitDirOpt = MohistCliCommands.UnitDirOption();
+        cmd.Options.Add(repoRootOpt);
+        cmd.Options.Add(serverUrlOpt);
+        cmd.Options.Add(unitDirOpt);
+        cmd.Options.Add(dryRunOpt);
+        cmd.SetAction(ctx => installer.InstallSlackAsync(new ServiceInstallOptions(
+            ctx.GetValue(dryRunOpt), ctx.GetValue(unitDirOpt), ctx.GetValue(repoRootOpt), null,
+            ctx.GetValue(serverUrlOpt), null)));
         return cmd;
     }
 }

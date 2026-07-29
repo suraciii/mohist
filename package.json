@@ -9,7 +9,8 @@
   },
   "workspaces": [
     "packages/web",
-    "packages/runner"
+    "packages/runner",
+    "packages/mohist-slack"
   ],
   "scripts": {
     "build": "dotnet build Mohist.sln -p:SkipWebBuild=true && npm run build --workspaces --if-present",

@@ -12,6 +12,7 @@ internal sealed class FakeServiceInstaller : IServiceInstaller
     public List<string> Calls { get; } = new();
     public List<ServiceInstallOptions> InstallServerCalls { get; } = new();
     public List<ServiceInstallOptions> InstallRunnerCalls { get; } = new();
+    public List<ServiceInstallOptions> InstallSlackCalls { get; } = new();
 
     public Task<int> InstallServerAsync(ServiceInstallOptions options)
     {
@@ -24,6 +25,13 @@ internal sealed class FakeServiceInstaller : IServiceInstaller
     {
         Calls.Add(nameof(InstallRunnerAsync));
         InstallRunnerCalls.Add(options);
+        return Task.FromResult(0);
+    }
+
+    public Task<int> InstallSlackAsync(ServiceInstallOptions options)
+    {
+        Calls.Add(nameof(InstallSlackAsync));
+        InstallSlackCalls.Add(options);
         return Task.FromResult(0);
     }
 
@@ -99,6 +107,14 @@ internal sealed class FakeServiceInstaller : IServiceInstaller
         return Task.FromResult(0);
     }
 
+    public Task<int> StartSlackAsync(ServiceCommandOptions options) { Calls.Add(nameof(StartSlackAsync)); return Task.FromResult(0); }
+    public Task<int> StopSlackAsync(ServiceCommandOptions options) { Calls.Add(nameof(StopSlackAsync)); return Task.FromResult(0); }
+    public Task<int> RestartSlackAsync(ServiceCommandOptions options) { Calls.Add(nameof(RestartSlackAsync)); return Task.FromResult(0); }
+    public Task<int> StatusSlackAsync(ServiceCommandOptions options) { Calls.Add(nameof(StatusSlackAsync)); return Task.FromResult(0); }
+    public Task<int> LogsSlackAsync(ServiceCommandOptions options) { Calls.Add(nameof(LogsSlackAsync)); return Task.FromResult(0); }
+    public Task<int> UninstallSlackAsync(ServiceCommandOptions options) { Calls.Add(nameof(UninstallSlackAsync)); return Task.FromResult(0); }
+
     public Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
     public Task<bool> IsRunnerInstalledAsync(string? unitDir = null) => Task.FromResult(false);
+    public Task<bool> IsSlackInstalledAsync(string? unitDir = null) => Task.FromResult(false);
 }
