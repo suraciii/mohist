@@ -49,3 +49,4 @@
 - Full validation passed serially: .NET solution (Workflow 175, CLI 1448, Server Unit 1535, Arch 35, Server Spec 3335); Runner typecheck and 1444 tests; Web typecheck, 5155 passing tests with one existing skip, and FSD boundary checks.
 - An unconfirmed stop reply now directly marks a non-launch target Turn and its Session Unknown on the Server. The Runner's correlated best-effort activity fact remains idempotent convergence evidence, so an unavailable outbox cannot leave the control-plane state Executing.
 - Correlated terminal Runtime activity can now reconcile the latest non-launch Turn from Unknown to Completed or Failed. The stale guard still rejects a fact for an earlier Turn after later work exists; stop API coverage exercises both terminal outcomes after an unconfirmed reply.
+- Focused validation passed: Server Spec project build with `SkipWebBuild=true`, plus all 10 `GenericAgentSessionCancelApiSpecs` cases.
