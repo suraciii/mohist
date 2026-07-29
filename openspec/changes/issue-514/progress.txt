@@ -336,3 +336,8 @@ All tests pass:
 - Terminal-delivery state and CloudEvents no longer carry `AgentJobTerminalResult.Output`. The Slack handler ignores an `output` field even if it appears in a malformed or old event payload, and only renders the user-facing result message, failure facts, exit code, and artifact count.
 - `SlackTerminalDeliveryHandlerSpecs` includes raw command output in its inbound event JSON and asserts that it cannot appear in the persisted Slack delivery while the conclusion, evidence, and next step remain present.
 - `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true` and the focused terminal-delivery Specs passed. A subsequent full `npm test` reached unrelated pre-existing failures: the source-comment ArchTest baseline flags `MohistServiceRegistration.cs` and `PhysicalSecretKeyFile.cs`, while two AgentLaunchObservation specs timed out waiting for Runner dispatch. Server UnitTests passed (1602) before those failures.
+
+# Issue 514 CI repair
+
+- Removed task/design references from the new production comments so the source-comment ArchTest baseline remains closed.
+- GitHub run `30456332539` exceeded the 15-minute job limit after the ArchTest failure while the Spec process continued. The CI-equivalent local commands now pass: `dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore` and `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` (Workflow Definition 175, CLI 1460, Server Unit 1602, Server Arch 50, Server Spec 3398).

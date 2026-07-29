@@ -3,19 +3,6 @@ using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Infrastructure.Security.Secrets;
 
-/// <summary>
-/// Production implementation of <see cref="ISecretKeyFile"/> backed by
-/// the real file system. Honours the master-key file discipline
-/// documented at design D2 (issue #514 / T-001): the file is auto-created
-/// at <c>~/.mohist/slack-master.key</c> or
-/// <c>MOHIST_SECRET_KEY_PATH</c>, permissions are pinned to
-/// <c>0600</c> on non-Windows, symlinks are refused, and a file that
-/// grants "other" read/write/execute bits is rejected on load to
-/// defend against a backup script that broadens permissions silently.
-/// All file-system calls go through <see cref="ISecretKeyFileOperations"/>
-/// so tests can drive the surface without touching the real file
-/// system.
-/// </summary>
 public sealed class PhysicalSecretKeyFile : ISecretKeyFile
 {
     public const string PathEnvironmentVariable = "MOHIST_SECRET_KEY_PATH";

@@ -171,21 +171,10 @@ public static class MohistServiceRegistration
         services.Configure<WorkflowArtifactStorageOptions>(configuration.GetSection(WorkflowArtifactStorageOptions.SectionName));
         services.AddSingleton<IAttachmentStorage, FileSystemAttachmentStorage>();
         services.Configure<AttachmentStorageOptions>(configuration.GetSection(AttachmentStorageOptions.SectionName));
-        // issue #514 / T-001 — first encrypted secret-store seam.
-        // Registered explicitly because the file-discipline abstractions
-        // are too constrained for the conventional scanner to wire
-        // correctly. `PhysicalSecretKeyFileOperations` is a static-singleton
-        // adapter over `System.IO`; tests inject a fake here.
         services.Configure<SecretStoreOptions>(configuration.GetSection(SecretStoreOptions.SectionName));
         services.AddSingleton<ISecretKeyFileOperations>(PhysicalSecretKeyFileOperations.Instance);
         services.AddSingleton<ISecretKeyFile, PhysicalSecretKeyFile>();
         services.AddSingleton<ISecretStore, AesGcmSecretStore>();
-        // issue #514 / T-004 — Slack provider reliability layer. The
-        // inbox + outbox stores are scoped (they own transactions);
-        // the dispatcher service is singleton (it gates the dispatch
-        // loop with a SemaphoreSlim) and is hosted by the cluster
-        // singleton grain. The activation service is the host-side
-        // poke that puts the grain on the bus on start.
         services.Configure<SlackProviderOptions>(configuration.GetSection(SlackProviderOptions.SectionName));
         services.AddScoped<ISlackConnectionHealthBackpressurer>(sp =>
             sp.GetRequiredService<SlackConnectionHealthBackpressurer>());
