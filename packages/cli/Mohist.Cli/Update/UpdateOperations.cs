@@ -127,6 +127,43 @@ internal sealed class UpdateOperations
         return outcome.ExitCode;
     }
 
+    public async Task<int> UpdateSlackAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
+    {
+        var root = ResolveRepoRoot(repoRoot);
+        _out.WriteLine($"Updating Slack adapter from source: {root}");
+        if (dryRun)
+        {
+            _out.WriteLine("Dry run: would execute:");
+            _out.WriteLine($"  cd {root} && npm run build -w packages/mohist-slack");
+            _out.WriteLine("  mo service restart slack (if installed)");
+            return 0;
+        }
+
+        if (!await _systemd.IsSlackInstalledAsync(_unitDir))
+        {
+            _out.WriteLine("Slack refresh skipped: slack service is not installed");
+            return 0;
+        }
+
+        var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync(
+            "npm", ["run", "build", "-w", "packages/mohist-slack"], root, cancellationToken);
+        if (build != 0)
+        {
+            WriteCommandFailureOutput(buildOut, buildErr);
+            _err.WriteLine("Build failed. Aborting update.");
+            return build;
+        }
+
+        var restart = await _systemd.RestartSlackAsync(new ServiceCommandOptions(false, null, 100, false));
+        if (restart != 0)
+        {
+            _err.WriteLine("Warning: Failed to restart Slack service. You may need to restart manually.");
+            return restart;
+        }
+        _out.WriteLine("Slack adapter updated and service restarted.");
+        return 0;
+    }
+
     public async Task<int> UpdateCliResolvedAsync(string root, string? cliPath, bool dryRun)
     {
         var home = _getUserHome?.Invoke();

@@ -43,7 +43,7 @@ OTLP 接收端只监听 `localhost:4318`，默认部署不会发布 `4318`。运
 # 安装为 systemd user service（自动写 unit、enable、启动、enable-linger）
 mo install server
 mo install runner
-# 只有使用 Slack Agent 接入时才需要（目标能力，当前尚未实装）
+# 只有使用 Slack Agent 接入时才需要
 mo install slack
 ```
 
@@ -55,6 +55,10 @@ mo install slack
 systemctl --user status mohist mohist-runner
 systemctl --user restart mohist             # 或：mo update server（推荐）
 journalctl --user -u mohist -f               # 实时日志
+
+# Slack 接入服务
+mo service status slack
+mo service logs slack -f
 ```
 
 > 重启受管理服务优先用 `mo update server` / `mo update runner`，不要手动 `dotnet run`：会触发 runner id 漂移，导致 workflow sticky assignment 失配。
@@ -68,7 +72,7 @@ journalctl --user -u mohist -f               # 实时日志
 ```bash
 mo install server
 mo install runner
-# 只有使用 Slack Agent 接入时才需要（目标能力，当前尚未实装）
+# 只有使用 Slack Agent 接入时才需要
 mo install slack
 ```
 
@@ -88,7 +92,7 @@ mo install slack
 ```bash
 sudo -u mohist mo install server --repo-root /opt/mohist
 sudo -u mohist mo install runner --repo-root /opt/mohist
-# 只有使用 Slack Agent 接入时才需要（目标能力，当前尚未实装）
+    # 只有使用 Slack Agent 接入时才需要
 sudo -u mohist mo install slack --repo-root /opt/mohist
 ```
 

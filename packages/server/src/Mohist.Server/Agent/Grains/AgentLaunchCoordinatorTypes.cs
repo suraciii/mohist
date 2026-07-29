@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Mohist.Server.Agent.Services;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -65,7 +66,8 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(19)] string? Title,
     [property: Id(20)] string? AgentRef,
     [property: Id(21)] bool Completed,
-    [property: Id(22)] AgentLaunchCoordinatorPending? Pending = null);
+    [property: Id(22)] AgentLaunchCoordinatorPending? Pending = null,
+    [property: Id(23)] ConnectionLaunchOrigin? ConnectionOrigin = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -151,6 +153,11 @@ public static class AgentLaunchCoordinatorCodec
     /// intent get the same fingerprint.
     /// </summary>
     public static string Fingerprint(AgentLaunchCoordinatorRequest request)
+        => Fingerprint(request, null);
+
+    public static string Fingerprint(
+        AgentLaunchCoordinatorRequest request,
+        ConnectionLaunchOrigin? connectionOrigin)
     {
         var canonical = string.Join('\u001f',
             request.Prompt?.Trim() ?? string.Empty,
@@ -160,7 +167,12 @@ public static class AgentLaunchCoordinatorCodec
             request.IssueNumber?.ToString() ?? string.Empty,
             request.EpicNumber?.ToString() ?? string.Empty,
             request.Repository?.Trim() ?? string.Empty,
-            request.Title?.Trim() ?? string.Empty);
+            request.Title?.Trim() ?? string.Empty,
+            connectionOrigin?.ConnectionId ?? string.Empty,
+            connectionOrigin?.WorkspaceTeamId ?? string.Empty,
+            connectionOrigin?.SlackUserId ?? string.Empty,
+            connectionOrigin?.DmConversationId ?? string.Empty,
+            connectionOrigin?.MessageTs ?? string.Empty);
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }

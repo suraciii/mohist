@@ -77,6 +77,12 @@ public interface IAgentLauncher
         AgentLaunchCoordinatorRequest request,
         CancellationToken ct = default);
 
+    Task<AgentLaunchResult> LaunchConnectionAsync(
+        AgentInfo agent,
+        string prompt,
+        ConnectionLaunchOrigin origin,
+        CancellationToken ct = default);
+
     Task<AgentLaunchResult?> ResumeIdempotentAsync(
         string projectId,
         string idempotencyKey,
@@ -185,3 +191,11 @@ public sealed record AgentLaunchContext(
     string? Repository = null,
     string? WorkspacePath = null,
     string? Title = null);
+
+[Orleans.GenerateSerializer]
+public sealed record ConnectionLaunchOrigin(
+    [property: Orleans.Id(0)] string ConnectionId,
+    [property: Orleans.Id(1)] string WorkspaceTeamId,
+    [property: Orleans.Id(2)] string SlackUserId,
+    [property: Orleans.Id(3)] string DmConversationId,
+    [property: Orleans.Id(4)] string MessageTs);

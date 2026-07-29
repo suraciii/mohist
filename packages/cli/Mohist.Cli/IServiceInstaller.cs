@@ -4,6 +4,7 @@ internal interface IServiceInstaller
 {
     Task<int> InstallServerAsync(ServiceInstallOptions options);
     Task<int> InstallRunnerAsync(ServiceInstallOptions options);
+    Task<int> InstallSlackAsync(ServiceInstallOptions options);
 
     Task<int> StartServerAsync(ServiceCommandOptions options);
     Task<int> StopServerAsync(ServiceCommandOptions options);
@@ -19,6 +20,13 @@ internal interface IServiceInstaller
     Task<int> LogsRunnerAsync(ServiceCommandOptions options);
     Task<int> UninstallRunnerAsync(ServiceCommandOptions options);
 
+    Task<int> StartSlackAsync(ServiceCommandOptions options);
+    Task<int> StopSlackAsync(ServiceCommandOptions options);
+    Task<int> RestartSlackAsync(ServiceCommandOptions options);
+    Task<int> StatusSlackAsync(ServiceCommandOptions options);
+    Task<int> LogsSlackAsync(ServiceCommandOptions options);
+    Task<int> UninstallSlackAsync(ServiceCommandOptions options);
+
     Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -31,4 +39,5 @@ internal interface IServiceInstaller
     /// platforms ignore this value. <c>null</c> selects the platform-default location.
     /// </param>
     Task<bool> IsRunnerInstalledAsync(string? unitDir = null);
+    Task<bool> IsSlackInstalledAsync(string? unitDir = null);
 }

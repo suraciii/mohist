@@ -174,6 +174,11 @@ internal static class MohistCliCommands
     internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null)
     {
         OutputOptionState.Explicit = false;
+        if (IsDirectSlackCredentialArgument(args))
+        {
+            await error.WriteLineAsync("Slack credentials must be supplied through hidden input or --credentials-file; command-line token arguments are refused.").ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.UsageFailure);
+        }
         environment ??= SystemEnvironmentVariableProvider.Instance;
         getUserHome ??= fileSystem is RealFileSystem
             ? null
@@ -256,6 +261,16 @@ internal static class MohistCliCommands
             await error.WriteLineAsync("Operation cancelled.").ConfigureAwait(false);
             return CliExitCode.For(CliExitOutcome.Cancelled);
         }
+    }
+
+    private static bool IsDirectSlackCredentialArgument(string[] args)
+    {
+        var configure = args.Length >= 3
+            && string.Equals(args[0], "agent", StringComparison.Ordinal)
+            && string.Equals(args[1], "connection", StringComparison.Ordinal)
+            && string.Equals(args[2], "configure", StringComparison.Ordinal);
+        return configure && args.Any(arg => string.Equals(arg, "--app-token", StringComparison.Ordinal)
+            || string.Equals(arg, "--bot-token", StringComparison.Ordinal));
     }
 
     private sealed class EnvironmentVariableAdapter : ICliEnvironment

@@ -7,6 +7,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
 {
     private const string ServerUnit = "mohist.service";
     private const string RunnerUnit = "mohist-runner.service";
+    private const string SlackUnit = "mohist-slack.service";
 
     private readonly TextWriter _out;
     private readonly TextWriter _err;
@@ -68,6 +69,20 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
         return await InstallAsync(unit, options);
     }
 
+    public async Task<int> InstallSlackAsync(ServiceInstallOptions options)
+    {
+        var repoRoot = ResolveRepoRoot(options.RepoRoot);
+        var environment = BuildServiceEnvironment(includeOperatorToken: true);
+        environment["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456";
+        var unit = new SystemdUnit(
+            Name: SlackUnit,
+            Description: "Mohist Slack adapter",
+            WorkingDirectory: repoRoot,
+            ExecStart: $"{ResolveExecutable("node")} packages/mohist-slack/dist/cli.js",
+            Environment: environment);
+        return await InstallAsync(unit, options);
+    }
+
     public Task<int> StartServerAsync(ServiceCommandOptions options) => StartAsync(ServerUnit, options);
     public Task<int> StopServerAsync(ServiceCommandOptions options) => StopAsync(ServerUnit, options);
     public Task<int> RestartServerAsync(ServiceCommandOptions options) => RestartAsync(ServerUnit, options);
@@ -81,6 +96,12 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     public Task<int> StatusRunnerAsync(ServiceCommandOptions options) => StatusAsync(RunnerUnit, options);
     public Task<int> LogsRunnerAsync(ServiceCommandOptions options) => LogsAsync(RunnerUnit, options);
     public Task<int> UninstallRunnerAsync(ServiceCommandOptions options) => UninstallAsync(RunnerUnit, options);
+    public Task<int> StartSlackAsync(ServiceCommandOptions options) => StartAsync(SlackUnit, options);
+    public Task<int> StopSlackAsync(ServiceCommandOptions options) => StopAsync(SlackUnit, options);
+    public Task<int> RestartSlackAsync(ServiceCommandOptions options) => RestartAsync(SlackUnit, options);
+    public Task<int> StatusSlackAsync(ServiceCommandOptions options) => StatusAsync(SlackUnit, options);
+    public Task<int> LogsSlackAsync(ServiceCommandOptions options) => LogsAsync(SlackUnit, options);
+    public Task<int> UninstallSlackAsync(ServiceCommandOptions options) => UninstallAsync(SlackUnit, options);
 
     public async Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default)
     {
@@ -93,6 +114,9 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     }
 
     public Task<bool> IsRunnerInstalledAsync(string? unitDir = null) => Task.FromResult(IsRunnerUnitInstalled(unitDir));
+
+    public Task<bool> IsSlackInstalledAsync(string? unitDir = null) => Task.FromResult(
+        _fileSystem.Exists(Path.Combine(ResolveUnitDir(unitDir), SlackUnit)));
 
     private bool IsRunnerUnitInstalled(string? unitDir)
     {
@@ -297,12 +321,18 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
 
     private static string NormalizePath(string value) => value.Replace('\\', '/');
 
-    private Dictionary<string, string> BuildServiceEnvironment()
+    private Dictionary<string, string> BuildServiceEnvironment(bool includeOperatorToken = false)
     {
         var environment = new Dictionary<string, string>
         {
             ["PATH"] = BuildServicePath(),
         };
+        if (includeOperatorToken)
+        {
+            var operatorToken = _environment.GetEnvironmentVariable(OperatorCredentialProvider.TokenEnvironmentVariable);
+            if (!string.IsNullOrWhiteSpace(operatorToken))
+                environment[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
+        }
         var dotnetRoot = ResolveDotnetRoot();
         if (!string.IsNullOrWhiteSpace(dotnetRoot))
         {

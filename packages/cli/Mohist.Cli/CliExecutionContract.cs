@@ -78,6 +78,7 @@ internal sealed class SystemCliEnvironment : ICliEnvironment
 internal interface ICliTerminal
 {
     bool IsInputInteractive { get; }
+    Task<string?> ReadHiddenAsync(TextReader input, CancellationToken cancellationToken = default);
 }
 
 internal sealed class CliTerminal : ICliTerminal
@@ -85,6 +86,30 @@ internal sealed class CliTerminal : ICliTerminal
     public CliTerminal(bool isInputInteractive) => IsInputInteractive = isInputInteractive;
 
     public bool IsInputInteractive { get; }
+
+    public async Task<string?> ReadHiddenAsync(TextReader input, CancellationToken cancellationToken = default)
+    {
+        if (input != Console.In || Console.IsInputRedirected || !IsInputInteractive)
+            return await input.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+
+        var value = new System.Text.StringBuilder();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var key = Console.ReadKey(intercept: true);
+            if (key.Key is ConsoleKey.Enter)
+            {
+                Console.WriteLine();
+                return value.ToString();
+            }
+            if (key.Key is ConsoleKey.Backspace)
+            {
+                if (value.Length > 0) value.Length--;
+                continue;
+            }
+            if (!char.IsControl(key.KeyChar)) value.Append(key.KeyChar);
+        }
+    }
 
     public static CliTerminal From(TextReader input) =>
         new(input == Console.In ? !Console.IsInputRedirected : input != TextReader.Null);

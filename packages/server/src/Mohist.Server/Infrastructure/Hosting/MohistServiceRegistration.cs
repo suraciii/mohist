@@ -38,6 +38,9 @@ using Mohist.Server.Otel;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Logging;
 using Mohist.Server.Notifications;
+using Mohist.Server.Slack;
+using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Infrastructure.Slack;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -87,6 +90,7 @@ public static class MohistServiceRegistration
         // concrete type — scoped, like IssueQuerier.
         services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
         services.AddScoped<AgentLaunchObservationAssembler>();
+        services.AddScoped<SlackSetupVerifier>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
         services.AddSingleton<IAgentJobWorkCoordinator>(sp => sp.GetRequiredService<AgentJobWorkCoordinator>());
         services.AddSingleton<Mohist.Server.Sessions.Services.IAgentSessionConnectionRegistry>(sp =>
@@ -123,6 +127,12 @@ public static class MohistServiceRegistration
         services.AddSingleton<HermesIssueNotificationRenderer>();
         services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
         services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
+         services.AddHttpClient<ISlackApiClient, SlackApiClient>(client =>
+         {
+             client.BaseAddress = new Uri(configuration["Mohist:SlackApiUrl"] ?? "https://slack.com/api/");
+             client.Timeout = TimeSpan.FromSeconds(10);
+         });
+
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddCloudEventPushHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
@@ -161,6 +171,15 @@ public static class MohistServiceRegistration
         services.Configure<WorkflowArtifactStorageOptions>(configuration.GetSection(WorkflowArtifactStorageOptions.SectionName));
         services.AddSingleton<IAttachmentStorage, FileSystemAttachmentStorage>();
         services.Configure<AttachmentStorageOptions>(configuration.GetSection(AttachmentStorageOptions.SectionName));
+        services.Configure<SecretStoreOptions>(configuration.GetSection(SecretStoreOptions.SectionName));
+        services.AddSingleton<ISecretKeyFileOperations>(PhysicalSecretKeyFileOperations.Instance);
+        services.AddSingleton<ISecretKeyFile, PhysicalSecretKeyFile>();
+        services.AddSingleton<ISecretStore, AesGcmSecretStore>();
+        services.Configure<SlackProviderOptions>(configuration.GetSection(SlackProviderOptions.SectionName));
+        services.AddScoped<ISlackConnectionHealthBackpressurer>(sp =>
+            sp.GetRequiredService<SlackConnectionHealthBackpressurer>());
+        services.AddScoped<SlackOutboxDispatcherService>();
+        services.AddHostedService<SlackOutboxDispatcherActivationService>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.AddScoped<Mohist.Server.Workflow.Services.IWorkflowProfileProvider, Mohist.Server.Workflow.Services.WorkflowProfileProvider>();

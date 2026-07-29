@@ -60,4 +60,13 @@ internal sealed class FakeSourceCodeUpdater : SourceCodeUpdater
         Calls.Add(nameof(UpdateRunnerAsync));
         return Task.FromResult(0);
     }
+
+    public override Task<int> UpdateSlackAsync(
+        string? repoRoot,
+        bool dryRun,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add(nameof(UpdateSlackAsync));
+        return Task.FromResult(0);
+    }
 }

@@ -13,6 +13,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     private readonly Func<ProcessStartInfo, Process?> _processLauncher;
     private readonly Func<string, ILogChangeObserver> _logChangeObserverFactory;
     private readonly Func<string, Task<bool>> _healthProbe;
+    private readonly IEnvironmentVariableProvider _environment;
     private readonly string _userProfilePath;
 
     internal CancellationToken TestFollowToken { get; set; }
@@ -32,7 +33,8 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         Func<ProcessStartInfo, Process?>? processLauncher = null,
         Func<string, ILogChangeObserver>? logChangeObserverFactory = null,
         Func<string, Task<bool>>? healthProbe = null,
-        string? userProfilePath = null)
+        string? userProfilePath = null,
+        IEnvironmentVariableProvider? environment = null)
     {
         _out = output;
         _err = error;
@@ -54,6 +56,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
             }
         });
         _userProfilePath = userProfilePath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        _environment = environment ?? SystemEnvironmentVariableProvider.Instance;
     }
 
     public async Task<int> InstallServerAsync(ServiceInstallOptions options)
@@ -141,6 +144,43 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         return 0;
     }
 
+    public async Task<int> InstallSlackAsync(ServiceInstallOptions options)
+    {
+        var repoRoot = ResolveRepoRoot(options.RepoRoot);
+        var launcherPath = SlackLauncherPath();
+        var taskName = SlackTaskName;
+        var startupPath = SlackStartupPath();
+        var metadataPath = SlackMetadataPath();
+        var serverUrl = options.ServerUrl ?? "http://127.0.0.1:3456";
+        var operatorToken = _environment.GetEnvironmentVariable(OperatorCredentialProvider.TokenEnvironmentVariable);
+        var spec = new SlackLauncherSpec(
+            SanitizeForCmdAssignment(repoRoot),
+            SanitizeForCmdAssignment(serverUrl),
+            operatorToken is null ? null : SanitizeForCmdAssignment(operatorToken));
+        var launcherBody = RenderSlackLauncher(spec);
+        if (options.DryRun)
+        {
+            PreviewInstall(launcherPath, launcherBody, taskName);
+            return 0;
+        }
+        RemoveStaleStartupFallbackIfBackendChanges(metadataPath, startupPath, "scheduled-task");
+        EnsureDirectory(launcherPath);
+        await _fileSystem.WriteAllTextAsync(launcherPath, launcherBody);
+        _out.WriteLine($"Wrote {launcherPath}");
+        var createArgs = BuildCreateTaskArgs(new TaskCreateSpec(taskName, QuoteForSchtasksTr(launcherPath)));
+        var (exitCode, _, stderr) = await _commandExecutor.ExecuteAsync("schtasks", createArgs);
+        if (exitCode != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
+            await InstallStartupFallbackAsync(startupPath, launcherPath, metadataPath, serverUrl: serverUrl);
+            _out.WriteLine("Installed with Startup-folder fallback (Scheduled Task creation was blocked).");
+            return 0;
+        }
+        await WriteMetadataAsync(metadataPath, "scheduled-task", serverUrl: serverUrl);
+        _out.WriteLine($"Registered Scheduled Task {taskName}");
+        return 0;
+    }
+
     public Task<int> StartServerAsync(ServiceCommandOptions options) =>
         StartAsync(ServerTaskName, ServerLauncherPath(), ServerStartupPath(), ServerMetadataPath(), "Server", isServer: true, options);
 
@@ -191,6 +231,27 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     public Task<int> UninstallRunnerAsync(ServiceCommandOptions options) =>
         UninstallAsync(RunnerTaskName, RunnerLauncherPath(), RunnerStartupPath(), RunnerMetadataPath(), "Runner", options);
 
+    public Task<int> StartSlackAsync(ServiceCommandOptions options) =>
+        StartAsync(SlackTaskName, SlackLauncherPath(), SlackStartupPath(), SlackMetadataPath(), "Slack", isServer: false, options);
+
+    public Task<int> StopSlackAsync(ServiceCommandOptions options) =>
+        StopAsync(SlackTaskName, SlackLauncherPath(), SlackStartupPath(), SlackMetadataPath(), "Slack", isServer: false, options);
+
+    public async Task<int> RestartSlackAsync(ServiceCommandOptions options)
+    {
+        var stop = await StopSlackAsync(options);
+        var start = await StartSlackAsync(options);
+        return stop != 0 ? stop : start;
+    }
+
+    public Task<int> StatusSlackAsync(ServiceCommandOptions options) =>
+        StatusAsync(SlackTaskName, SlackLauncherPath(), SlackStartupPath(), SlackMetadataPath(), "Slack", isServer: false, options);
+
+    public Task<int> LogsSlackAsync(ServiceCommandOptions options) => LogsAsync(SlackLogPath(), "Slack", options);
+
+    public Task<int> UninstallSlackAsync(ServiceCommandOptions options) =>
+        UninstallAsync(SlackTaskName, SlackLauncherPath(), SlackStartupPath(), SlackMetadataPath(), "Slack", options);
+
     public async Task<bool> IsRunnerInstalledAsync(string? unitDir = null)
     {
         _ = unitDir;
@@ -200,6 +261,12 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
             RunnerLauncherPath(),
             RunnerMetadataPath());
         return backend != BackendKind.None;
+    }
+
+    public async Task<bool> IsSlackInstalledAsync(string? unitDir = null)
+    {
+        _ = unitDir;
+        return await DetectBackendAsync(SlackTaskName, SlackStartupPath(), SlackLauncherPath(), SlackMetadataPath()) != BackendKind.None;
     }
 
     private async Task<int> StartAsync(
@@ -714,15 +781,20 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
 
     private const string ServerTaskName = "Mohist_Server";
     private const string RunnerTaskName = "Mohist_Runner";
+    private const string SlackTaskName = "Mohist_Slack";
 
     private string ServerLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-server.cmd");
     private string RunnerLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-runner.cmd");
+    private string SlackLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-slack.cmd");
     private string ServerStartupPath() => Path.Combine(StartupDirectory(), "Mohist_Server.cmd");
     private string RunnerStartupPath() => Path.Combine(StartupDirectory(), "Mohist_Runner.cmd");
+    private string SlackStartupPath() => Path.Combine(StartupDirectory(), "Mohist_Slack.cmd");
     private string ServerMetadataPath() => Path.Combine(ServiceDirectory(), "mohist-server.install.json");
     private string RunnerMetadataPath() => Path.Combine(ServiceDirectory(), "mohist-runner.install.json");
+    private string SlackMetadataPath() => Path.Combine(ServiceDirectory(), "mohist-slack.install.json");
     private string ServerLogPath() => Path.Combine(_userProfilePath, ".mohist", "server", "out.log");
     private string RunnerLogPath() => Path.Combine(_userProfilePath, ".mohist", "runner", "out.log");
+    private string SlackLogPath() => Path.Combine(_userProfilePath, ".mohist", "slack", "out.log");
 
     internal string RenderServerLauncher(ServerLauncherSpec spec)
     {
@@ -753,6 +825,20 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         if (!string.IsNullOrEmpty(spec.RunnerRoot))
             sb.AppendLine($"set \"RUNNER_ROOT={spec.RunnerRoot}\"");
         sb.AppendLine($"node packages\\runner\\dist\\cli.js >> \"{logFile}\" 2>&1");
+        return sb.ToString();
+    }
+
+    internal string RenderSlackLauncher(SlackLauncherSpec spec)
+    {
+        var logFile = @"%USERPROFILE%\.mohist\slack\out.log";
+        var repoRoot = QuoteForCmdBody(spec.RepoRoot);
+        var sb = new StringBuilder();
+        sb.AppendLine("@echo off");
+        sb.AppendLine($"cd /d {repoRoot}");
+        sb.AppendLine($"set \"SERVER_URL={spec.ServerUrl}\"");
+        if (!string.IsNullOrEmpty(spec.OperatorToken))
+            sb.AppendLine($"set \"{OperatorCredentialProvider.TokenEnvironmentVariable}={spec.OperatorToken}\"");
+        sb.AppendLine($"node packages\\mohist-slack\\dist\\cli.js >> \"{logFile}\" 2>&1");
         return sb.ToString();
     }
 
@@ -791,6 +877,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
 
     internal sealed record ServerLauncherSpec(string RepoRoot, string? ListenUrl);
     internal sealed record RunnerLauncherSpec(string RepoRoot, string? ServerUrl, string? RunnerRoot);
+    internal sealed record SlackLauncherSpec(string RepoRoot, string ServerUrl, string? OperatorToken = null);
     internal sealed record TaskCreateSpec(string TaskName, string TrPayload);
     internal sealed record InstallMetadata(string Backend, string? ListenUrl, string? ServerUrl);
 

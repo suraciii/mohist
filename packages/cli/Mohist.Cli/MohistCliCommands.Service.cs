@@ -8,11 +8,12 @@ internal enum ServiceTarget
 {
     Server,
     Runner,
+    Slack,
 }
 
 internal static class ServiceCommands
 {
-    private const string TargetDescription = "Target managed service: 'server' or 'runner'";
+    private const string TargetDescription = "Target managed service: 'server', 'runner', or 'slack'";
 
     private static readonly Dictionary<(string Verb, ServiceTarget Target), Func<IServiceInstaller, ServiceCommandOptions, Task<int>>> Dispatch = new()
     {
@@ -28,6 +29,12 @@ internal static class ServiceCommands
         [("status", ServiceTarget.Runner)] = (i, o) => i.StatusRunnerAsync(o),
         [("logs", ServiceTarget.Runner)] = (i, o) => i.LogsRunnerAsync(o),
         [("uninstall", ServiceTarget.Runner)] = (i, o) => i.UninstallRunnerAsync(o),
+        [("start", ServiceTarget.Slack)] = (i, o) => i.StartSlackAsync(o),
+        [("stop", ServiceTarget.Slack)] = (i, o) => i.StopSlackAsync(o),
+        [("restart", ServiceTarget.Slack)] = (i, o) => i.RestartSlackAsync(o),
+        [("status", ServiceTarget.Slack)] = (i, o) => i.StatusSlackAsync(o),
+        [("logs", ServiceTarget.Slack)] = (i, o) => i.LogsSlackAsync(o),
+        [("uninstall", ServiceTarget.Slack)] = (i, o) => i.UninstallSlackAsync(o),
     };
 
     public static Command Build(IServiceProvider provider)

@@ -209,6 +209,46 @@ public class CliInstallUpdateSingleEntryTests
     }
 
     [Fact]
+    public async Task VerbRootInstallSlack_InvokesInstallSlackAsync()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["install", "slack"], output, error, fs, executor, installer: installer);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(installer.InstallSlackCalls);
+    }
+
+    [Theory]
+    [InlineData("start", nameof(FakeServiceInstaller.StartSlackAsync))]
+    [InlineData("stop", nameof(FakeServiceInstaller.StopSlackAsync))]
+    [InlineData("restart", nameof(FakeServiceInstaller.RestartSlackAsync))]
+    [InlineData("status", nameof(FakeServiceInstaller.StatusSlackAsync))]
+    [InlineData("logs", nameof(FakeServiceInstaller.LogsSlackAsync))]
+    [InlineData("uninstall", nameof(FakeServiceInstaller.UninstallSlackAsync))]
+    public async Task ServiceSlackLifecycle_InvokesSlackInstaller(string verb, string expectedCall)
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["service", verb, "slack"], output, error, fs, executor, installer: installer);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(new[] { expectedCall }, installer.Calls);
+    }
+
+    [Fact]
+    public async Task VerbRootUpdateSlack_InvokesUpdateSlackAsync()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
+
+        var exitCode = await MohistCliCommands.RunAsync(http, ["update", "slack"], output, error, fs, executor, installer: installer, updater: updater);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(new[] { nameof(FakeSourceCodeUpdater.UpdateSlackAsync) }, updater.Calls);
+    }
+
+    [Fact]
     public async Task ServerHelp_DoesNotAdvertiseInstallOrUpdate()
     {
         var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
