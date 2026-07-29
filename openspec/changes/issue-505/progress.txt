@@ -6,6 +6,9 @@
 - EF Core migration history must keep the dropped column in prior migration snapshots; only the current `MohistDbContextModelSnapshot` and the row/config map need to forget it. The Drop migration only needs to DropColumn and AddColumn (default `"{}"`) on its Down.
 - `WorkflowRunVariablesStore` exposes both read and write paths. Removing the defaults layer leaves just `Get/Set/Patch` on the explicit `Variables` column; the ETag concurrency and tracked-row read-modify-write shape stay intact.
 - `WorkflowGrain` exposes two constructors (Orleans + test-friendly). Both must drop the `WorkflowRunVariablesStore` parameter and the two `EnsureArchiveDefaultAsync(GrainKey)` start-up calls.
+- `recoveries` is a top-level YAML key parsed into `WorkflowDefinition.Recoveries` (`IReadOnlyDictionary<string, RecoveryDefinition>`). Parser reuses `BuildRecovery`; the serializer emits a `recoveries:` block beside `stages`/`approval` and round-trips through `FromJson`/`ToJson`.
+- `WorkflowQuerier.GetRecoveryAsync(workflowRunId, name)` is the canonical rebase-route lookup surface; `WorkflowProfileManager.LoadTemplateAsync` already resolves the bound profile so the helper is a thin wrapper.
+- File-scoped tests can't use `System.IO.File` / `AppContext.BaseDirectory` (banned in `eng/BannedSymbols.Tests.txt`). Reflection-on-type is the only legal way to assert "method no longer exists" on helpers.
 
 ## T-001
 
@@ -25,3 +28,13 @@
 - Added `DropWorkflowRunProfileDefaults` migration and removed the column from the current EF model snapshot and row mapping. Historical migration snapshots retain the old column as required by EF history.
 - Replaced default-layer tests with three-scope and fresh-run archive-absence coverage. Runner archive coverage now explicitly verifies the absent-hint dated move.
 - Runner typecheck/spec and server build, unit tests, and full spec test assembly pass. `dotnet ef` is unavailable in this environment, so pending-model validation was limited to the checked-in model snapshot and successful build.
+
+## T-004
+
+- Added `recoveries` to `WorkflowDefinitionParser.TopLevelKeys` and a `BuildRecoveries` mapping that reuses the existing `BuildRecovery` shape; `WorkflowDefinition` now carries `IReadOnlyDictionary<string, RecoveryDefinition>? Recoveries`.
+- `WorkflowYamlSerializer` round-trips `recoveries` through both `FromJson`/`ToJson` (object body) and `FromYaml`/`ToYaml` (block body mapping). Round-trip coverage lives in `WorkflowYamlSerializer_RoundTripsRecoveriesSection` and `WorkflowYamlParser_ParsesTopLevelRecoveriesMap`.
+- Both builtin YAMLs (`mohist-local.workflow.yaml`, `mohist-github-pr.workflow.yaml`) declare a `rebase-conflicts` template with `budget: 2`, the `error.code=conflict` handler, and the `recover:resolve-rebase-conflicts` `mohist/opencode` task. The previous inline `recovery` blocks on the merge-ready / rebase / integrate:rebase tasks remain so the existing handler-driven flow is unchanged.
+- `IssueRoutes.Helpers.BuildRebaseRecovery()` is gone. The route resolves the same `RecoveryDefinition` from the bound profile via `WorkflowQuerier.GetRecoveryAsync(wrId, "rebase-conflicts")`; a missing template returns `409 missing_rebase_recovery` instead of inventing one.
+- `IssueRebaseRecoveryTests` now asserts the catalog's `recoveries` map reproduces the previous in-code shape (budget, handler `when`, retrySelf, `mohist/opencode` task with the named `prompts.resolve-rebase-conflicts` reference, `vars.agent`, `check` session) for both the local and github-pr profiles. A reflection test verifies `BuildRebaseRecovery` is no longer on `IssueRoutes`.
+- `design/workflow/recovery.md` now states that API-triggered one-shot task injection and Profile-driven recovery are the same mechanism (no parallel representation), and documents the `recoveries` top-level key as the home for named recovery templates.
+- `dotnet test Mohist.sln -p:SkipWebBuild=true` passes: 1557 unit tests, 3317 spec tests, 50 arch tests, 175 workflow definition tests, 1443 CLI tests. The runner archive-absent-hint spec and the rebase HTTP spec (`IssueWorkspaceRepositoryResolutionSpecs`) keep their existing coverage and still pass.

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Api;
+using Mohist.Server.Workflow.Services;
+using Mohist.Workflow.Definition;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Api;
@@ -26,21 +28,57 @@ public class IssueRebaseRecoveryTests
     }
 
     [Fact]
-    public void ManualRebaseRecovery_ReferencesNamedPromptAndAgent_NeverInlines()
+    public void ManualRebaseRecovery_AuthorsRecoveryDefinitionInWorkflowContent()
     {
-        var recovery = IssueRoutes.BuildRebaseRecovery();
+        var recovery = WorkflowProfileCatalog.Definition.Recoveries;
+        Assert.NotNull(recovery);
+        Assert.True(recovery!.TryGetValue("rebase-conflicts", out var template));
+        Assert.NotNull(template);
 
-        var task = Assert.Single(recovery.Handlers);
-        var resolve = Assert.Single(task.Tasks);
-        Assert.Equal("recover:resolve-rebase-conflicts", resolve.Id);
-        Assert.Equal("mohist/opencode", resolve.Uses);
+        Assert.Equal(2, template!.Budget);
+        var handler = Assert.Single(template.Handlers);
+        Assert.Equal("error.code=conflict", handler.When);
+        Assert.False(handler.RetrySelf);
+        var task = Assert.Single(handler.Tasks);
+        Assert.Equal("recover:resolve-rebase-conflicts", task.Id);
+        Assert.Equal("Resolve rebase conflicts", task.Title);
+        Assert.Equal("mohist/opencode", task.Uses);
 
-        // The manual rebase recovery must reuse the builtin prompt by named
+        // The rebase recovery must reuse the builtin prompt by named
         // reference (resolved by the runner at dispatch), not handroll an
         // inline prompt that drifts from the workflow-profile version.
-        Assert.NotNull(resolve.With);
-        Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", resolve.With!["prompt"]!.Value.GetString());
-        Assert.Equal("${{ vars.agent }}", resolve.With!["options"]!.Value.GetString());
-        Assert.Equal("check", resolve.With!["session"]!.Value.GetString());
+        Assert.NotNull(task.With);
+        Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", task.With!["prompt"]!.Value.GetString());
+        Assert.Equal("${{ vars.agent }}", task.With!["options"]!.Value.GetString());
+        Assert.Equal("check", task.With!["session"]!.Value.GetString());
+    }
+
+    [Fact]
+    public void GithubPrWorkflowDefinition_DeclaresRebaseConflictsRecoveryTemplate()
+    {
+        var recovery = WorkflowProfileCatalog.GithubPrWorkflowDefinition.Recoveries;
+        Assert.NotNull(recovery);
+        Assert.True(recovery!.TryGetValue("rebase-conflicts", out var template));
+        Assert.NotNull(template);
+
+        Assert.Equal(2, template!.Budget);
+        var handler = Assert.Single(template.Handlers);
+        Assert.Equal("error.code=conflict", handler.When);
+        Assert.False(handler.RetrySelf);
+        var task = Assert.Single(handler.Tasks);
+        Assert.Equal("recover:resolve-rebase-conflicts", task.Id);
+        Assert.Equal("mohist/opencode", task.Uses);
+        Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", task.With!["prompt"]!.Value.GetString());
+    }
+
+    [Fact]
+    public void IssueRoutesHelpers_DoesNotExposeBuildRebaseRecovery()
+    {
+        var helperType = typeof(IssueRoutes);
+        var method = helperType.GetMethod(
+            "BuildRebaseRecovery",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        Assert.Null(method);
     }
 }

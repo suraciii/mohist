@@ -75,6 +75,13 @@ public class WorkflowYamlSerializerTests
         Assert.True(handler.RetrySelf);
         var fixReviewFindings = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
+
+        // The top-level recoveries section names the rebase-conflicts
+        // template that the API rebase route resolves by name.
+        Assert.NotNull(reparsed.Recoveries);
+        Assert.True(reparsed.Recoveries!.TryGetValue("rebase-conflicts", out var template));
+        Assert.Equal(2, template!.Budget);
+        Assert.Equal("mohist/opencode", Assert.Single(template.Handlers).Tasks[0].Uses);
     }
 
     [Fact]
@@ -192,6 +199,65 @@ public class WorkflowYamlSerializerTests
 
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
         Assert.Null(reparsed.Approval);
+    }
+
+    [Fact]
+    public void WorkflowYamlSerializer_RoundTripsRecoveriesSection()
+    {
+        var definition = WorkflowYamlSerializer.FromYaml("""
+        recoveries:
+          rebase-conflicts:
+            budget: 2
+            handlers:
+              - when: error.code=conflict
+                tasks:
+                  - id: recover:resolve-rebase-conflicts
+                    title: Resolve rebase conflicts
+                    uses: mohist/opencode
+                    with:
+                      session: check
+                      prompt: ${{ prompts.resolve-rebase-conflicts }}
+                      options: ${{ vars.agent }}
+                retrySelf: false
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """);
+
+        var yaml = WorkflowYamlSerializer.ToYaml(definition);
+        Assert.Contains("recoveries:", yaml);
+        Assert.Contains("rebase-conflicts:", yaml);
+        Assert.Contains("error.code=conflict", yaml);
+        Assert.Contains("recover:resolve-rebase-conflicts", yaml);
+
+        var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
+        Assert.NotNull(reparsed.Recoveries);
+        Assert.True(reparsed.Recoveries!.TryGetValue("rebase-conflicts", out var recovery));
+        Assert.Equal(2, recovery!.Budget);
+        var handler = Assert.Single(recovery.Handlers);
+        Assert.Equal("error.code=conflict", handler.When);
+        Assert.False(handler.RetrySelf);
+        var task = Assert.Single(handler.Tasks);
+        Assert.Equal("recover:resolve-rebase-conflicts", task.Id);
+        Assert.Equal("mohist/opencode", task.Uses);
+    }
+
+    [Fact]
+    public void WorkflowYamlSerializer_OmitsRecoveriesSectionWhenAbsent()
+    {
+        var definition = WorkflowYamlSerializer.FromYaml("""
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """);
+
+        var yaml = WorkflowYamlSerializer.ToYaml(definition);
+        Assert.DoesNotContain("recoveries:", yaml);
+
+        var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
+        Assert.Null(reparsed.Recoveries);
     }
 
 }
