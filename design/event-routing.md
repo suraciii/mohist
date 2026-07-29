@@ -45,6 +45,9 @@ RoutingRule（项目级，有序表）
 3. 命中但不可执行（Agent 已 archived、渲染后 prompt 为空）→ 视同不命中，
    记结构化日志，继续下一条。
 4. 表达式运行期异常 → 视同不命中（见 event-protocol.md）。
+5. 同一事件里同一 Agent 至多启动一次：它已被前序规则或关注声明启动时，
+   后续命中它的规则不再启动，记结构化日志；响应提示词取自首个启动它的
+   规则。
 
 由此得到：
 
@@ -73,8 +76,10 @@ RoutingRule（项目级，有序表）
 
 ## 幂等与可见性
 
-- Launcher key = `hash(projectId, eventId, ruleId)`：同一事件×规则重复分发不会
-  重复起 job（沿用 AgentLauncher 幂等启动机制）。
+- Launcher key = `hash(projectId, eventId, agentId)`：同一事件里同一 Agent
+  至多启动一次，无论命中它的是哪条规则或关注声明；重复分发不会重复起
+  job（沿用 AgentLauncher 幂等启动机制）。命中规则只作触发归因（trigger
+  标签），不进幂等键。
 - 触发的 AgentSession 打标签：`mohist.io/trigger/event-id`、
   `mohist.io/trigger/rule-id`。事件 → 规则 → AgentJob 双向可查。
 - AgentJob 裁定响应完成；AgentSession 以 SessionInput、AgentTurn 和 transcript 提供对话与
@@ -123,3 +128,6 @@ mo event tail [--match <expr>]   # 用同一 matcher 过滤事件流
 写入时编译、`{{event.*}}` 渲染、envelope-only 自响应防护、`mo routing rule`
 命令面与 `mo routing test` 干跑、`mo event tail --match`；旧订阅模型及其
 命令面已删除（`DropAgentSubscriptions` 迁移）。
+
+实装差距：启动管线耐久键仍按 `(projectId, eventId, ruleId)`，(event, agent)
+合并只在单次分发内生效；归一到 agentId 键由 issue #532 收敛。
