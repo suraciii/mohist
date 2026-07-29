@@ -47,3 +47,4 @@
 - Focused validation passed: Runner cancel activity (9), Web control/source tests (12), CLI follow-up control contract (2), and Server turn/cancel/follow-up specs (50). Full package validation follows this checkpoint.
 - Moved the delayed terminal activity regression into its own spec file to preserve the existing test-file size ratchet. Generic-session page fixtures now include the read-model control Turn ID required by the new control contract.
 - Full validation passed serially: .NET solution (Workflow 175, CLI 1448, Server Unit 1535, Arch 35, Server Spec 3335); Runner typecheck and 1444 tests; Web typecheck, 5155 passing tests with one existing skip, and FSD boundary checks.
+- An unconfirmed stop reply now directly marks a non-launch target Turn and its Session Unknown on the Server. The Runner's correlated best-effort activity fact remains idempotent convergence evidence, so an unavailable outbox cannot leave the control-plane state Executing.

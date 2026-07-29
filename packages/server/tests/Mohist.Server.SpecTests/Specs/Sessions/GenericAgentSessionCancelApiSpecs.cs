@@ -139,6 +139,26 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
+    public async Task Stop_UnconfirmedReplyMarksFollowupTurnAndSessionUnknownWithoutRunnerActivity()
+    {
+        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("unknown", true));
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal("unknown", data.GetProperty("state").GetString());
+        Assert.True(data.GetProperty("interruptUnconfirmed").GetBoolean());
+        var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
+        Assert.Equal(AgentTurnStatus.Unknown, turn.Status);
+        Assert.Equal("unknown", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync())!.Status);
+    }
+
+    [Fact]
     public async Task Stop_TerminalTurnReturnsAlreadyEndedWithoutContactingRunner()
     {
         var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();

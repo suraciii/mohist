@@ -131,6 +131,10 @@ public static class AgentSessionStopRoutes
         {
             await grains.GetGrain<IAgentJobGrain>(control.JobId!).MarkUnknownAsync("stop-unconfirmed");
         }
+        else if (string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            await session.MarkTurnTerminalAsync(control.TurnId, AgentTurnStatus.Unknown, null);
+        }
 
         return ApiResults.Ok(new
         {
