@@ -237,3 +237,20 @@ All tests pass:
 
 - Server build passed with `-p:SkipWebBuild=true`.
 - Server UnitTests passed (1584); Server SpecTests passed (3386).
+
+# Issue 514 / T-009 — mohist-slack adapter package
+
+## Codebase Patterns
+
+- The adapter-facing Server routes return the common `{ success, data }` envelope and authenticate with `X-Mohist-Operator-Token`; `HttpAdapterTransport` keeps that protocol in one small boundary client.
+- `/ingress` is the only inbound execution route. Socket Mode payloads are normalized from the nested `event` object and are sent without owner, claim, setup, or readiness classification in the adapter.
+- `adapter-session` is intentionally called per Connection. The adapter stores leased tokens only in the live `ConnectionRuntime`, creates one Socket Mode client and one Web API client per Connection, and has no filesystem or database dependency.
+- Outbox delivery is a pull loop over `deliveries/claim`; the Slack post result is translated to `delivered` or `uncertain` and reported through `deliveries/ack`. The local limiter only bounds transient ingress work.
+
+## Verification
+
+- `npm run typecheck -w packages/mohist-slack` passed.
+- `npm run typecheck:tests -w packages/mohist-slack` passed.
+- `npm run build -w packages/mohist-slack` passed and produced `dist/cli.js`.
+- `npm test -w packages/mohist-slack` passed (4 tests).
+- The official Socket Mode SDK emits its catch-all event as `slack_event`; the adapter listens there so it receives all event types rather than the lower-level wire `events_api` type.

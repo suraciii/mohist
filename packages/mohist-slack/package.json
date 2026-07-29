@@ -1,0 +1,30 @@
+{
+  "name": "mohist-slack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "mohist-slack": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:run": "vitest run",
+    "test:ci": "npm run typecheck:tests && npm run test:run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit"
+  },
+  "dependencies": {
+    "@slack/socket-mode": "^3.0.0",
+    "@slack/web-api": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
