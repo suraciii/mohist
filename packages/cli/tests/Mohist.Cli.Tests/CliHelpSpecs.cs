@@ -219,7 +219,7 @@ public sealed class CliHelpSpecs
     }
 
     [Theory]
-    [InlineData(new[] { "workflow", "list", "--help" }, "displayName")]
+    [InlineData(new[] { "workflow", "list", "--help" }, "profileId")]
     [InlineData(new[] { "skill", "list", "--help" }, "description")]
     public async Task OutputSelectionHelp_ListsRuntimeJsonFields(string[] args, string expectedField)
     {
