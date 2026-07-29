@@ -6,21 +6,22 @@
       "id": "T-001",
       "title": "Make AgentJob its own dispatch ledger",
       "spec": "specs/work-dispatch-ledger/spec.md#Work-owners-maintain-the-dispatch-ledger",
-      "description": "Add durable AgentJob scheduling state and a queryable projection for assignment, readiness, running work, and immutable dispatch data. Migrate active AgentJob rows from persisted state, replace push retries with owner readiness timeout, and add atomic AgentJob claim and owner report validation.",
+      "description": "Make the indexed AgentJobs row the atomic AgentJob owner ledger for lifecycle JSON, assignment, readiness, running work, and immutable dispatch data. Migrate legacy AgentJob state deterministically, replace push retries with owner readiness timeout, and add atomic AgentJob claim and owner report validation.",
       "acceptanceCriteria": [
-        "An admitted AgentJob persists its runner assignment, ready time, work identity, and reconstructable dispatch without creating a Runner work record.",
-        "After grain activation or server restart, active AgentJob work is discoverable through the AgentJob projection and reconstructable from the AgentJob ledger.",
-        "A pending AgentJob past the configured readiness deadline fails as runner-unavailable without dispatch-attempt backoff or Runner acceptance state.",
-        "Server specs cover admission, activation recovery, atomic claim, stale report rejection, readiness timeout with fake time, and projection query cost independent of terminal history.",
+        "An admitted AgentJob persists lifecycle state, runner assignment, ready time, work identity, and reconstructable dispatch in one revision-checked database transaction without creating a Runner work record.",
+        "An interrupted AgentJob write leaves the next poll able to observe either the complete old ledger or complete new ledger, never running work without its queryable dispatch fields.",
+        "When all eligible runners are already full during admission, launch returns a terminal runner-unavailable AgentJob with no pending dispatch; only a later claim race can leave an admitted job pending for the readiness timeout.",
+        "Migration uses one injected migration timestamp for every valid legacy pending row, preserves valid running work without pending timeout, excludes terminal rows from active queries, and aborts without changes for malformed nonterminal rows.",
+        "Server specs cover admission outcomes, activation recovery, interrupted owner writes, atomic claim, stale report rejection, readiness timeout with fake time, deterministic migration states, and query cost independent of terminal history.",
         "The server test suite for the affected Agent and persistence modules passes."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "MIGRATE",
-      "output": "AgentJob scheduling state, indexed AgentJobs projection, data migration, and owner-led AgentJob grain behavior.",
+      "output": "Atomic AgentJobs owner ledger, deterministic data migration, and owner-led AgentJob grain behavior.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep the projection an AgentJob-owned read model; owner commands remain the authority for claims and reports."
+      "notes": "Replace the Orleans-state-plus-best-effort-mirror path; AgentJobs is the single durable AgentJob ledger and owner commands remain the authority for claims and reports."
     },
     {
       "id": "T-002",
@@ -28,7 +29,7 @@
       "spec": "specs/work-dispatch-ledger/spec.md#Polling-prioritizes-recovery-and-enforces-shared-capacity",
       "description": "Extend DispatchService and Runner poll admission to assemble redelivery and new claims from WorkflowRun and AgentJob ledgers in one recovery-first order. Integrate AgentJob claims with the existing Runner lifecycle gate so both owners share capacity and dispatch construction failures retain recoverable owner state.",
       "acceptanceCriteria": [
-        "A runner poll returns ready AgentJob work without push assignment, and redelivers missing running work from either owner before claiming pending work.",
+        "A runner poll returns ready AgentJob work without push assignment, and redelivers missing running work from either owner before claiming pending work, including immediately after an AgentJob ledger transition.",
         "Assigned pending work precedes unassigned work, and mixed WorkflowRun and AgentJob candidates are served by readiness time within each candidate layer.",
         "No poll can claim work beyond the runner's combined configured slots; a capacity race leaves the AgentJob pending for a later poll.",
         "A failed claim is skipped, ordinary dispatch rendering failures are retried by a later poll, and a retired action fails only the exact active owner work.",
