@@ -286,6 +286,7 @@ All tests pass:
 
 - `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` passed.
 - `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore` passed 3389/3390; the sole failure was the pre-existing intermittent `AgentLaunchObservationRoutesSpecs.Observation_DuringTerminalState_ReportsJobResultAndTurnResult` runner dispatch polling timeout.
+- Final `npm test` passed: Workflow Definition 175, CLI 1460, Server Unit 1584, Server Arch 35, Server Spec 3390, Web 5153 (1 skipped), Runner 1443, and mohist-slack 5.
 
 # Issue 514 review findings 1 and 2
 

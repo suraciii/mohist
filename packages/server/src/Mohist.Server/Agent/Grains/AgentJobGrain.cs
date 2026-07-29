@@ -53,7 +53,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IAgentJobDispatchObserver _dispatchObserver;
     private readonly IAgentJobStore _jobStore;
     private readonly IEventStore _eventStore;
-    private readonly SlackOutboxStore _slackOutbox;
+    private readonly SlackOutboxStore? _slackOutbox;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IGrainFactory _grains;
     private IDisposable? _dispatchTimer;
@@ -65,11 +65,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         TimeProvider timeProvider,
         [PersistentState("agent-job")] IPersistentState<AgentJobState> state,
         IEventStore eventStore,
-        SlackOutboxStore slackOutbox,
         IAgentJobDispatchObserver dispatchObserver,
         IAgentJobStore jobStore,
         IBackgroundTaskLauncher backgroundTasks,
-        IGrainFactory grains)
+        IGrainFactory grains,
+        SlackOutboxStore? slackOutbox = null)
     {
         _log = log;
         _options = options.Value;
@@ -1543,6 +1543,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private async Task DeliverTerminalToSlackAsync(PendingSlackTerminalDelivery pending)
     {
+        if (_slackOutbox is null)
+            return;
         var projectId = State.Input?.ProjectId;
         if (string.IsNullOrWhiteSpace(projectId))
             return;
