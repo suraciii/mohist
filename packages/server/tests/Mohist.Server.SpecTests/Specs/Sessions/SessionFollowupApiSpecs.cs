@@ -53,7 +53,7 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
     }
 
     [Fact]
-    public async Task FollowupEndpoint_ActiveSessionOnlineRunner_ReturnsSent()
+    public async Task FollowupEndpoint_ActiveSessionOnlineRunner_ReturnsAccepted()
     {
         var (project, issue, workflowRunId, session) = await CreateAndStartSessionAsync("followup-ok", sessionName: "plan", attachAndStart: true);
         var sessionState = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
@@ -73,7 +73,9 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
             using var doc = JsonDocument.Parse(body);
             var data = doc.RootElement.GetProperty("data");
             Assert.Equal(session.Id, data.GetProperty("sessionId").GetString());
-            Assert.Equal("sent", data.GetProperty("status").GetString());
+            Assert.Equal("accepted", data.GetProperty("status").GetString());
+            Assert.False(string.IsNullOrEmpty(data.GetProperty("inputId").GetString()));
+            Assert.False(string.IsNullOrEmpty(data.GetProperty("turnId").GetString()));
 
             var sent = Assert.Single(runnerHub.SentMessages);
             Assert.Equal("conn-followup-1", sent.ConnectionId);
@@ -190,15 +192,22 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
     }
 
     [Fact]
-    public async Task FollowupEndpoint_RunnerOffline_ReturnsServiceUnavailable()
+    public async Task FollowupEndpoint_RunnerOffline_ReturnsAcceptedAndQueued()
     {
+        // Per D4: acceptance is decoupled from runner delivery. The
+        // input persists and the turn stays queued; the runner-offline
+        // result no longer reverts acceptance. The same-key retry
+        // re-attempts dispatch while the turn is queued.
         var (project, issue, _, _) = await CreateAndStartSessionAsync("followup-offline", sessionName: "plan", attachAndStart: true);
 
         using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "ping" });
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("runner_offline", doc.RootElement.GetProperty("code").GetString());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("accepted", data.GetProperty("status").GetString());
+        Assert.False(string.IsNullOrEmpty(data.GetProperty("inputId").GetString()));
+        Assert.False(string.IsNullOrEmpty(data.GetProperty("turnId").GetString()));
     }
 
     [Fact]

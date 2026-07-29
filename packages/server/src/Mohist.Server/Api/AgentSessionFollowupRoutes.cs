@@ -75,7 +75,8 @@ public static class AgentSessionFollowupRoutes
                 return ApiResults.BadRequest("text is required", "followup_text_missing");
 
             var project = context.GetResolvedProject();
-            return await ExecuteFollowupAsync(project.Id, sessionId, text, sessions, grains, runnerHub, connections, ct);
+            var idempotencyKey = AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(context) ?? string.Empty;
+            return await ExecuteFollowupAsync(project.Id, sessionId, text, idempotencyKey, sessions, grains, runnerHub, connections, ct);
         });
 
         return app;
@@ -85,6 +86,7 @@ public static class AgentSessionFollowupRoutes
         string projectId,
         string sessionId,
         string text,
+        string idempotencyKey,
         AgentSessionQuerier sessions,
         IGrainFactory grains,
         IHubContext<RunnerHub> runnerHub,
@@ -96,10 +98,13 @@ public static class AgentSessionFollowupRoutes
             return ApiResults.NotFound($"Agent session {sessionId} not found");
 
         var grain = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
-        AgentSessionFollowupReservation reservation;
+        AgentSessionFollowupAcceptResult accept;
         try
         {
-            reservation = await grain.BeginFollowupAsync();
+            accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+                Text: text,
+                Source: "agent-session-followup",
+                IdempotencyKey: idempotencyKey));
         }
         catch (RuntimeSessionMissingException ex)
         {
@@ -114,6 +119,13 @@ public static class AgentSessionFollowupRoutes
                 ex.Message,
                 "recovery_in_progress",
                 new { sessionId = ex.SessionId, operation = ex.Operation });
+        }
+        catch (AgentSessionFollowupCapacityExceededException ex)
+        {
+            return ApiResults.Conflict(
+                ex.Message,
+                "capacity_exceeded",
+                new { sessionId = ex.SessionId, capacity = ex.Capacity });
         }
         catch (FollowupOperationInProgressException ex)
         {
@@ -135,49 +147,37 @@ public static class AgentSessionFollowupRoutes
                 new { sessionId = ex.SessionId, agentId = ex.AgentId });
         }
 
+        // accepted: persistence is the contract; runner offline does not
+        // revert acceptance (the input stays accepted and the turn stays
+        // queued; a same-key retry will re-attempt dispatch while queued).
+        if (accept.AlreadyAccepted && !accept.ShouldRedeliver)
+        {
+            return ApiResults.Ok(new AgentSessionFollowupResult(
+                target.SessionId,
+                InputId: accept.InputId,
+                TurnId: accept.TurnId,
+                Status: "accepted"));
+        }
+
         if (string.IsNullOrWhiteSpace(target.RunnerId))
         {
-            await AbandonReservationAsync(grain, reservation);
-            return ApiResults.Fail("Runner is offline", 503, "runner_offline", new { runnerId = target.RunnerId });
+            return ApiResults.Ok(new AgentSessionFollowupResult(
+                target.SessionId,
+                InputId: accept.InputId,
+                TurnId: accept.TurnId,
+                Status: "accepted"));
         }
 
         var connectionId = connections.GetConnectionId(target.RunnerId);
-        if (string.IsNullOrWhiteSpace(connectionId))
-        {
-            await AbandonReservationAsync(grain, reservation);
-            return ApiResults.Fail("Runner is offline", 503, "runner_offline", new { runnerId = target.RunnerId });
-        }
-
-        if (string.IsNullOrWhiteSpace(target.Runtime)
+        if (string.IsNullOrWhiteSpace(connectionId)
+            || string.IsNullOrWhiteSpace(target.Runtime)
             || string.IsNullOrWhiteSpace(target.RuntimeSessionId))
         {
-            await AbandonReservationAsync(grain, reservation);
-            var missing = new RuntimeSessionMissingException(target.SessionId, target.RuntimeSessionId, target.Runtime);
-            return ApiResults.Conflict(missing.Message, "runtime_session_missing", new { sessionId = missing.SessionId });
-        }
-
-        string? inputId = null;
-        string? turnId = null;
-        if (reservation.StartsIdleTurn)
-        {
-            inputId = Guid.NewGuid().ToString("N");
-            turnId = Guid.NewGuid().ToString("N");
-            var source = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
-                ? "workflow-followup"
-                : "generic-followup";
-            try
-            {
-                await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
-                    InputId: inputId,
-                    TurnId: turnId,
-                    Prompt: text,
-                    Source: source));
-            }
-            catch (InvalidOperationException ex)
-            {
-                await AbandonReservationAsync(grain, reservation);
-                return ApiResults.Conflict(ex.Message, "followup_turn_conflict", new { sessionId = target.SessionId });
-            }
+            return ApiResults.Ok(new AgentSessionFollowupResult(
+                target.SessionId,
+                InputId: accept.InputId,
+                TurnId: accept.TurnId,
+                Status: "accepted"));
         }
 
         object binding = new
@@ -204,14 +204,7 @@ public static class AgentSessionFollowupRoutes
                 definition = target.Definition,
                 binding,
             };
-        object payload = new
-        {
-            target = wireTarget,
-            text,
-            operationId = reservation.OperationId,
-            inputId,
-            turnId,
-        };
+        object payload = new { target = wireTarget, text, operationId = accept.OperationId };
 
         RunnerFollowupDeliveryResult? delivery;
         try
@@ -223,35 +216,36 @@ public static class AgentSessionFollowupRoutes
         }
         catch
         {
-            await AbandonReservationAsync(grain, reservation);
-            return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+            return ApiResults.Ok(new AgentSessionFollowupResult(
+                target.SessionId,
+                InputId: accept.InputId,
+                TurnId: accept.TurnId,
+                Status: "accepted"));
         }
 
         if (delivery?.Accepted == true)
         {
-            if (reservation.OperationId is not null)
-                await grain.ConfirmFollowupAsync(reservation.OperationId);
-            return ApiResults.Ok(new AgentSessionFollowupResult(target.SessionId, InputId: inputId, TurnId: turnId));
+            return ApiResults.Ok(new AgentSessionFollowupResult(
+                target.SessionId,
+                InputId: accept.InputId,
+                TurnId: accept.TurnId,
+                Status: "accepted"));
         }
 
-        await AbandonReservationAsync(grain, reservation);
         if (string.Equals(delivery?.Error, "missing", StringComparison.Ordinal))
         {
-            if (inputId is not null && turnId is not null)
-                await grain.AbandonFollowupTurnAsync(inputId, turnId);
             return ApiResults.Conflict(
                 $"Runtime session missing for AgentSession {target.SessionId}.",
                 "runtime_session_missing",
                 new { sessionId = target.SessionId });
         }
 
-        if (inputId is not null && turnId is not null)
-            await grain.AbandonFollowupTurnAsync(inputId, turnId);
-        return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+        return ApiResults.Ok(new AgentSessionFollowupResult(
+            target.SessionId,
+            InputId: accept.InputId,
+            TurnId: accept.TurnId,
+            Status: "accepted"));
     }
-
-    private static Task AbandonReservationAsync(IAgentSessionGrain grain, AgentSessionFollowupReservation reservation) =>
-        reservation.OperationId is null ? Task.CompletedTask : grain.AbandonFollowupAsync(reservation.OperationId);
 }
 
 /// <summary>
@@ -264,8 +258,8 @@ public sealed record GenericFollowupRequest(string? Text = null);
 
 public sealed record AgentSessionFollowupResult(
     string SessionId,
-    string Status = "sent",
     string? InputId = null,
-    string? TurnId = null);
+    string? TurnId = null,
+    string Status = "accepted");
 
 public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);

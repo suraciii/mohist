@@ -107,10 +107,12 @@ public static partial class IssueRoutes
             if (sessionId is null)
                 return ApiResults.NotFound($"Session {name} not found");
 
+            var idempotencyKey = AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(ctx) ?? string.Empty;
             return await AgentSessionFollowupRoutes.ExecuteFollowupAsync(
                 project.Id,
                 sessionId,
                 text,
+                idempotencyKey,
                 sessions,
                 grains,
                 runnerHub,

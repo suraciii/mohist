@@ -50,7 +50,9 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
             using var responseDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var responseData = responseDoc.RootElement.GetProperty("data");
             Assert.Equal(sessionId, responseData.GetProperty("sessionId").GetString());
-            Assert.Equal("sent", responseData.GetProperty("status").GetString());
+            Assert.Equal("accepted", responseData.GetProperty("status").GetString());
+            Assert.False(string.IsNullOrEmpty(responseData.GetProperty("inputId").GetString()));
+            Assert.False(string.IsNullOrEmpty(responseData.GetProperty("turnId").GetString()));
 
             var sent = Assert.Single(runnerHub.SentMessages);
             Assert.Equal("ReceiveFollowup", sent.Method);
@@ -192,27 +194,30 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
     }
 
     [Fact]
-    public async Task RejectedIdleFollowup_AbandonsReservationAndAllowsRecovery()
+    public async Task OfflineRunnerFollowup_AcceptsAndQueues_BlockingCompactUntilTerminal()
     {
-        var (project, sessionId, _) = await CreateIdleGenericSessionAsync("followup-recovery-abandon");
+        // Per the new accept semantics (D4): a runner-offline result
+        // no longer reverts acceptance. The input is persisted and the
+        // turn stays queued; Compact/Reset is blocked by the non-terminal
+        // follow-up turn until the session.activity idle event for the
+        // matching operationId marks it terminal.
+        var (project, sessionId, _) = await CreateIdleGenericSessionAsync("followup-offline-accept");
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
-        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        runnerHub.Clear();
-        runnerHub.SetInvocationResponse("ReceiveFollowup", new RunnerFollowupDeliveryResult(false, "missing"));
-        tracker.Register(_runnerId, "conn-followup-recovery-abandon");
+        tracker.Register(_runnerId, "conn-followup-offline-accept");
         try
         {
-            using var rejected = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "reject this turn" });
-            Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
-            Assert.Equal("runtime_session_missing", JsonDocument.Parse(await rejected.Content.ReadAsStringAsync()).RootElement.GetProperty("code").GetString());
+            using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ping while offline" });
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var data = doc.RootElement.GetProperty("data");
+            Assert.Equal("accepted", data.GetProperty("status").GetString());
+            Assert.False(string.IsNullOrEmpty(data.GetProperty("inputId").GetString()));
+            Assert.False(string.IsNullOrEmpty(data.GetProperty("turnId").GetString()));
 
-            runnerHub.SetInvocationResponse("SessionCommand", new SessionCommandResult(Ok: true));
+            // The non-terminal follow-up turn blocks Compact.
             using var compact = await _client.PostAsync($"/api/projects/{project.Id}/agent-sessions/{sessionId}/compact", content: null);
-
-            Assert.Equal(HttpStatusCode.OK, compact.StatusCode);
-            Assert.Contains(runnerHub.Invocations, invocation => invocation.Method == "SessionCommand");
+            Assert.Equal(HttpStatusCode.Conflict, compact.StatusCode);
         }
         finally
         {

@@ -30,7 +30,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     }
 
     [Fact]
-    public async Task GenericFollowupEndpoint_ActiveGenericSessionOnlineRunner_ReturnsSent()
+    public async Task GenericFollowupEndpoint_ActiveGenericSessionOnlineRunner_ReturnsAccepted()
     {
         var (project, agent, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-ok");
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId);
@@ -50,7 +50,9 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             using var doc = JsonDocument.Parse(body);
             var data = doc.RootElement.GetProperty("data");
             Assert.Equal(sessionId, data.GetProperty("sessionId").GetString());
-            Assert.Equal("sent", data.GetProperty("status").GetString());
+            Assert.Equal("accepted", data.GetProperty("status").GetString());
+            Assert.False(string.IsNullOrEmpty(data.GetProperty("inputId").GetString()));
+            Assert.False(string.IsNullOrEmpty(data.GetProperty("turnId").GetString()));
 
             var sent = Assert.Single(runnerHub.SentMessages);
             Assert.Equal("conn-gen-followup-1", sent.ConnectionId);
@@ -93,11 +95,9 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var data = doc.RootElement.GetProperty("data");
             Assert.Equal(sessionId, data.GetProperty("sessionId").GetString());
-            Assert.Equal("sent", data.GetProperty("status").GetString());
-            var inputId = data.GetProperty("inputId").GetString();
-            var turnId = data.GetProperty("turnId").GetString();
-            Assert.False(string.IsNullOrWhiteSpace(inputId));
-            Assert.False(string.IsNullOrWhiteSpace(turnId));
+            Assert.Equal("accepted", data.GetProperty("status").GetString());
+            Assert.False(string.IsNullOrEmpty(data.GetProperty("inputId").GetString()));
+            Assert.False(string.IsNullOrEmpty(data.GetProperty("turnId").GetString()));
 
             var sent = Assert.Single(runnerHub.SentMessages);
             Assert.Equal("ReceiveFollowup", sent.Method);
@@ -106,9 +106,6 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             var unchanged = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
             Assert.Equal(sessionId, unchanged?.Id);
             Assert.Equal(runtimeSessionId, unchanged?.AgentSessionId);
-            var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
-            Assert.Equal(turnId, turn.Id);
-            Assert.Equal(inputId, Assert.Single(turn.InputIds));
         }
         finally
         {
@@ -323,8 +320,12 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     }
 
     [Fact]
-    public async Task GenericFollowupEndpoint_ActiveSessionOfflineRunner_ReturnsServiceUnavailable()
+    public async Task GenericFollowupEndpoint_ActiveSessionOfflineRunner_ReturnsAcceptedAndQueued()
     {
+        // Per the new accept semantics (D4): acceptance is decoupled from
+        // runner delivery. The input is persisted and the turn is queued;
+        // runner-offline is no longer a 503 — the input is still accepted
+        // and a same-key retry will re-attempt delivery.
         var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-offline");
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -339,9 +340,11 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         // there's no SignalR connection tracked for this runner id.
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ping" });
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("runner_offline", doc.RootElement.GetProperty("code").GetString());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("accepted", data.GetProperty("status").GetString());
+        Assert.False(string.IsNullOrEmpty(data.GetProperty("inputId").GetString()));
     }
 
     [Fact]

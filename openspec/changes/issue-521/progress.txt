@@ -27,3 +27,12 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - tasks.json valid JSON; DAG valid (T-002→T-001, T-003/T-004→T-002).
 - All 3 specs format-compliant (4 requirements each; scenarios use ####).
 - Next: commit fixes; await next self-review to regenerate self-review.md.
+
+## T-001 implementation
+- Follow-up acceptance is implemented as a synchronous grain transition that persists accepted input/turn records and per-turn accepted leases.
+- Queued follow-ups join the queued turn; follow-ups received after execution starts create a separate queued turn. Runtime `session.input` and idle `session.activity` events progress the correlated follow-up turn.
+- Same-key retry is identity-preserving and re-dispatches only queued turns. Retry resolution now uses the original input's operationId even when multiple inputs share one queued turn.
+- Accepted leases are retained until terminal turn correlation rather than expiring at the delivery window, so long queued turns remain recoverable.
+- Added grain specs for original operationId retry correlation and long-queued lease durability.
+- Focused verification: `AgentSessionFollowupGrainSpecs` 31 passed; follow-up/recovery API classes 54 passed; server test assembly build passed.
+- Final server spec verification: 3353 passed, 0 failed.
