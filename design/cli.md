@@ -250,6 +250,29 @@ Project 解析顺序与交互行为的产品规则由 [`docs/cli-reference.md`](
 - 颜色遵循终端能力与 `NO_COLOR`；stderr 重定向后不保留控制字符。
 - 新增 renderer 的采纳门槛：三个以上独立、重复出现且外部工具不能清楚解决的用例。
 
+## Field contract
+
+Server 的 read model（API 响应 DTO）是每个资源字段的唯一权威。CLI 的字段目录
+（`ResourceOutputCatalog`）不是第二份事实，它是 DTO 的投影：目录必须覆盖 DTO 的
+全部 JSON 属性，减去一份显式豁免清单。
+
+- **覆盖是双向的**。目录缺少 DTO 已有的属性 = `--json` 把合法字段拒绝为
+  invalid，调用方被迫绕过 CLI 直调 API；目录列出 DTO 没有的属性 = 静默渲染
+  null 列。两者都是契约破损，都必须测试即红。
+- **豁免必须显式**。唯一豁免表按（资源, 字段）逐条登记理由；新 DTO 属性既不进
+  目录也不进豁免时测试变红——「改 DTO 时同步 CLI」由此从纪律变成机械门，
+  豁免是有意识的评审决定，不是遗漏的兜底。
+- **映射显式登记**。契约对照测试持有 TableShape → DTO 类型的映射表；新增资源
+  未登记映射即红，防止新 shape 静默逃出防护。
+- **机制**：测试反射 server 程序集的 DTO 类型，按 JSON 序列化名（命名策略与
+  `[JsonPropertyName]`）取属性集合，与 CLI 字段目录逐资源做集合比对；无运行时
+  端点、无共享程序集、无人工清单。
+
+已知漂移（随防护落地一并修复）：`RoutingRule(List)` 目录仍是旧订阅模型的
+`target` / `priority` / `enabled`（server DTO 不存在，静默渲染 null），而 DTO 的
+`match` / `agentId` / `position` / `responsePrompt` / `continue` / `status` /
+`projectId` 不可被 `--json` 选择。
+
 ## Errors and exit status
 
 错误格式、稳定错误码与退出码的用户可见契约由 [`docs/cli-reference.md`](../docs/cli-reference.md) 单点定义。实现侧补充：
@@ -291,6 +314,8 @@ CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、
 - help 文案检查禁止 API route、HTTP method、grain、handler、源码路径、历史 issue 和迁移 alias。
 - 每个资源只有一份字段目录：`list` / `view` / 返回该资源的 mutation 共享字段名与语义；目录覆盖
   read model 的全部用户可见字段，不存在兜底默认字段集。
+- 字段目录与 server read model DTO 的契约对照测试通过（见 Field contract）：目录 =
+  DTO JSON 属性集 − 显式豁免，反向同样强制。
 - 裸 `--json` 字段发现优先于其它参数校验，且不触发远程请求。
 - 短 flag 全在白名单内、全局字母唯一，且渲染进对应 leaf help。
 - help 的选项描述非空、无拼写错误；`USAGE` 标题与 `--json` 描述在所有叶子一致；互斥关系可见。
@@ -310,3 +335,5 @@ Project / Issue / Run Variables 命令切片已经交付：三个 scope 都使�
 
 WorkflowProfile 与 Variables 切片必须建立在既有 Definition / Variables 分离、attempt
 context snapshot 和权威校验链之上。
+
+Field contract 的契约对照测试与其驱动的漂移修复（含 RoutingRule 字段目录）未实装。
