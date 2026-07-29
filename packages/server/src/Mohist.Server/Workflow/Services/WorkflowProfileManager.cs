@@ -259,95 +259,18 @@ public class WorkflowProfileManager : IScopedService
 
     internal async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
     {
-        // Effective Variables are owned by Project, Issue, and WorkflowRun
-        // resources only. Initialization defaults seeded on the WorkflowRun
-        // (e.g. `archive`) resolve below explicit Project, Issue, and Run
-        // values; once an explicit write covers a default key the marker is
-        // cleared and the explicit value follows the standard precedence.
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
         var project = await LoadProjectLayerAsync(db, context);
         var issue = await LoadIssueLayerAsync(db, context);
         var run = await _runVariablesStore.GetVariablesAsync(runId);
-        var runDefaults = await _runVariablesStore.GetDefaultVariablesAsync(runId);
-
-        return MergeRunScopedVariables(runDefaults, project, issue, run);
+        return MergeRunScopedVariables(project, issue, run);
     }
 
     private static VariableBundle MergeRunScopedVariables(
-        VariableBundle runDefaults,
         VariableBundle project,
         VariableBundle issue,
-        VariableBundle run)
-    {
-        if (!runDefaults.HasDefaultContent)
-        {
-            return VariableBundle.MergeAll(project, issue, run);
-        }
-
-        return new VariableBundle(
-            Vars: MergeRunScopedVars(runDefaults, project, issue, run),
-            Stages: MergeRunScopedStages(runDefaults, project, issue, run),
-            DefaultVars: runDefaults.DefaultVars,
-            DefaultStages: runDefaults.DefaultStages);
-    }
-
-    private static JsonElement? MergeRunScopedVars(
-        VariableBundle runDefaults,
-        VariableBundle project,
-        VariableBundle issue,
-        VariableBundle run)
-    {
-        var defaultVars = runDefaults.DefaultVars;
-        var hasAny = (defaultVars.HasValue && defaultVars.Value.ValueKind == JsonValueKind.Object)
-            || (project.Vars.HasValue && project.Vars.Value.ValueKind == JsonValueKind.Object)
-            || (issue.Vars.HasValue && issue.Vars.Value.ValueKind == JsonValueKind.Object)
-            || (run.Vars.HasValue && run.Vars.Value.ValueKind == JsonValueKind.Object);
-
-        if (!hasAny)
-        {
-            return null;
-        }
-
-        var current = defaultVars.HasValue && defaultVars.Value.ValueKind == JsonValueKind.Object
-            ? defaultVars.Value
-            : JSON.DeserializeElement("{}");
-        current = VariableJsonMerge.ApplyPatch(current, project.Vars) ?? current;
-        current = VariableJsonMerge.ApplyPatch(current, issue.Vars) ?? current;
-        current = VariableJsonMerge.ApplyPatch(current, run.Vars) ?? current;
-        return current;
-    }
-
-    private static Dictionary<string, StageVariables>? MergeRunScopedStages(
-        VariableBundle runDefaults,
-        VariableBundle project,
-        VariableBundle issue,
-        VariableBundle run)
-    {
-        var combined = new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase);
-        AddStages(combined, runDefaults.DefaultStages);
-        AddStages(combined, project.Stages);
-        AddStages(combined, issue.Stages);
-        AddStages(combined, run.Stages);
-        return combined.Count == 0 ? null : combined;
-    }
-
-    private static void AddStages(Dictionary<string, StageVariables> target, Dictionary<string, StageVariables>? layer)
-    {
-        if (layer is null) return;
-        foreach (var (stage, stageVars) in layer)
-        {
-            if (target.TryGetValue(stage, out var existing))
-            {
-                target[stage] = new StageVariables(
-                    VariableJsonMerge.ApplyPatch(existing.Vars, stageVars.Vars));
-            }
-            else
-            {
-                target[stage] = stageVars.Copy();
-            }
-        }
-    }
+        VariableBundle run) => VariableBundle.MergeAll(project, issue, run);
 
     public async Task<JsonElement> ResolveEffectiveVariablesAsync(string runId, string? stage)
     {
@@ -358,11 +281,7 @@ public class WorkflowProfileManager : IScopedService
     internal async Task<VariableBundle> ResolveEffectiveVariableBundleAsync(string runId, string? stage)
     {
         var layered = await ResolveConfiguredVariablesAsync(runId);
-        return new VariableBundle(
-            layered.ResolveStageVars(stage),
-            layered.Stages,
-            layered.DefaultVars,
-            layered.DefaultStages);
+        return new VariableBundle(layered.ResolveStageVars(stage), layered.Stages);
     }
 
     public async Task<WorkspaceIdentity?> LoadIssueWorkspaceAsync(string projectId, int issueNumber)

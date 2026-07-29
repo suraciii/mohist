@@ -7,10 +7,8 @@ using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
-using YamlDotNet.Core;
 
 namespace Mohist.Server.Api;
 
@@ -97,32 +95,6 @@ public static partial class IssueRoutes
         };
 
         return JsonSerializer.SerializeToElement(with, JSON.Options);
-    }
-
-    internal static RecoveryDefinition BuildRebaseRecovery()
-    {
-        var with = new Dictionary<string, JsonElement?>
-        {
-            ["session"] = JsonSerializer.SerializeToElement("check"),
-            ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.resolve-rebase-conflicts }}"),
-            ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}"),
-        };
-        return new RecoveryDefinition(
-            Budget: 2,
-            Handlers:
-            [
-                new RecoveryHandlerDefinition(
-                    When: "error.code=conflict",
-                    Tasks:
-                    [
-                        new TaskDefinition(
-                            "recover:resolve-rebase-conflicts",
-                            "Resolve rebase conflicts",
-                            Uses: "mohist/opencode",
-                            With: with),
-                    ],
-                    RetrySelf: false),
-            ]);
     }
 
 }

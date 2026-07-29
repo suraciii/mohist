@@ -32,7 +32,6 @@ public class IssueMetricsQuerier : IScopedService
     internal const string WorkCompletedType = EventCatalog.ReverseDns.IssueCompleted;
     internal const string ClosedType = EventCatalog.ReverseDns.IssueCancelled;
 
-    private static readonly string[] QualityStageOrder = ["plan", "build", "check", "integrate"];
     private static readonly string[] QualityWorkflowEventTypes =
     [
         EventCatalog.ReverseDns.StageStarted,
@@ -55,6 +54,7 @@ public class IssueMetricsQuerier : IScopedService
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
+    private readonly IWorkflowProfileProvider _profileProvider;
     private readonly IssueReadModelLoader _loader;
     private readonly ILogger<IssueMetricsQuerier> _logger;
 
@@ -63,6 +63,7 @@ public class IssueMetricsQuerier : IScopedService
         IssueWorkflowProfileRegistry profiles,
         EffectiveWorkflowProfileResolver effectiveProfileResolver,
         ProjectWorkflowProfileManager projectProfileManager,
+        IWorkflowProfileProvider profileProvider,
         IssueReadModelLoader loader,
         ILogger<IssueMetricsQuerier> logger)
     {
@@ -70,6 +71,7 @@ public class IssueMetricsQuerier : IScopedService
         _profiles = profiles;
         _effectiveProfileResolver = effectiveProfileResolver;
         _projectProfileManager = projectProfileManager;
+        _profileProvider = profileProvider;
         _loader = loader;
         _logger = logger;
     }
@@ -483,6 +485,7 @@ public class IssueMetricsQuerier : IScopedService
             trendBuckets[i] = new QualityTrendAccumulator();
 
         var issues = await _loader.LoadProjectedAsync(db, projectId);
+        var stageOrder = await ResolveProjectStageOrderAsync(db, projectId);
 
         var projectIssueNumbers = issues.Select(i => i.Number).ToList();
         var sourcePrefix = IssueSourcePrefixFor(projectId);
@@ -583,7 +586,7 @@ public class IssueMetricsQuerier : IScopedService
         }
 
         return new QualityMetricsResult(
-            BuildWindow(windowFrom, windowTo, window),
+            BuildWindow(windowFrom, windowTo, window, stageOrder),
             BuildPreviousWindow(previous),
             BuildTrend(windowFrom, windowTo, trendBoundaries, trendBuckets));
     }
@@ -1274,17 +1277,18 @@ public class IssueMetricsQuerier : IScopedService
     private static QualityMetricsWindow BuildWindow(
         DateTimeOffset from,
         DateTimeOffset to,
-        QualityAccumulator accumulator)
+        QualityAccumulator accumulator,
+        IReadOnlyList<string> stageOrder)
     {
         double? firstTimeRightRate = accumulator.SampleCount == 0
             ? null
             : (double)accumulator.FirstTimeRightCount / accumulator.SampleCount;
 
         var observedStages = accumulator.EnteredByStage.Keys
-            .Where(stage => !QualityStageOrder.Contains(stage, StringComparer.Ordinal))
-            .OrderBy(stage => stage, StringComparer.Ordinal);
+            .Where(stage => !stageOrder.Contains(stage, StringComparer.Ordinal));
 
-        var stages = QualityStageOrder
+        var stages = stageOrder
+            .Where(accumulator.EnteredByStage.ContainsKey)
             .Concat(observedStages)
             .Select(stage =>
             {
@@ -1587,13 +1591,22 @@ public class IssueMetricsQuerier : IScopedService
 
     private async Task<IReadOnlyList<string>> ResolveProjectStageOrderAsync(MohistDbContext db, string projectId)
     {
+        var projectDefaultId = await _loader.LoadProjectDefaultTemplateAsync(db, projectId);
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
         var profileId = _effectiveProfileResolver.Resolve(
             issueSelection: null,
-            projectDefaultId: await _loader.LoadProjectDefaultTemplateAsync(db, projectId),
-            disabledIds: await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId));
+            projectDefaultId,
+            disabledIds);
+        if (!string.IsNullOrWhiteSpace(projectDefaultId)
+            && !disabledIds.Contains(projectDefaultId)
+            && await _profileProvider.ContainsAsync(projectId, projectDefaultId))
+        {
+            profileId = projectDefaultId;
+        }
+
         if (profileId is null) return new List<string>();
-        var profile = _profiles.Get(profileId);
-        return profile.Definition.Stages?
+        var definition = await _profileProvider.GetDefinitionAsync(projectId, profileId);
+        return definition?.Stages?
             .Select(s => s.Stage)
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .ToList()

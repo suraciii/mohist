@@ -24,7 +24,7 @@ describe("mohist/archive-change", () => {
     vi.useRealTimers()
   })
 
-  it("first archive: moves, commits, and writes the archive destination to vars", async () => {
+  it("absent hint: computes a dated destination, moves, commits, and writes the destination", async () => {
     const events: string[] = []
     const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
     setArchiveFileSystemForTest(fileSystem)
@@ -38,6 +38,8 @@ describe("mohist/archive-change", () => {
     expect(output.destinationRel).toBe(destinationRel)
     expect(output.changed).toBe(true)
     expect(events).toContain(`rename:openspec/changes/issue-127->${destinationRel}`)
+    expect(await fileSystem.hasFiles(join(workDir, destinationRel))).toBe(true)
+    expect(await fileSystem.hasFiles(changeDir)).toBe(false)
     expect(result.effects?.writeVars).toEqual({ archive: destinationRel })
   })
 

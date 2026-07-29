@@ -101,7 +101,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.RunList => ["id", "status", "stage", "currentStage", "issueNumber"],
             MohistCliApi.TableShape.WorkflowRunEvents => ["id", "eventId", "source", "type", "specVersion", "subject", "time", "dataContentType", "data", "extensions"],
             MohistCliApi.TableShape.WorkflowRunVariables => ["key", "value"],
-            MohistCliApi.TableShape.WorkflowVariables => ["vars", "stages", "defaultVars", "defaultStages", "hasExplicitContent", "hasDefaultContent"],
+            MohistCliApi.TableShape.WorkflowVariables => ["vars", "stages"],
             MohistCliApi.TableShape.WorkflowProfile => ["issueNumber", "projectId", "sourceTemplateId", "hasCustomTemplate", "yaml", "workflowRunId", "profileId", "updateMode", "variables", "updatedAt", "templateSource"],
             MohistCliApi.TableShape.WorkflowProfileList => ["projectId", "profileId", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource"],
             MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "projectId", "name", "position", "match", "agentId", "responsePrompt", "continue", "status", "createdAt", "updatedAt"],

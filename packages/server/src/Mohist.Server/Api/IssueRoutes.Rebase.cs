@@ -42,6 +42,17 @@ public static partial class IssueRoutes
             if (await workflow.HasIncompleteTaskWithUsesAsync("mohist/rebase"))
                 return ApiResults.Conflict("Rebase task is already pending", "rebase_already_pending");
 
+            // Recovery for the API-injected rebase task is named in the
+            // run's bound workflow profile; the C# route never authors
+            // it. Resolution must come from the bound profile so the
+            // task's `uses` and prompt reference track the workflow
+            // content rather than a C# copy.
+            var recovery = await workflowQuerier.GetRecoveryAsync(wrId, "rebase-conflicts");
+            if (recovery is null)
+                return ApiResults.Conflict(
+                    "Bound workflow profile has no 'rebase-conflicts' recovery template",
+                    "missing_rebase_recovery");
+
             // Omitted base uses the run snapshot; explicit base is
             // an operation-local override that must remain inside the
             // same verified repository.
@@ -55,7 +66,7 @@ public static partial class IssueRoutes
                 "mohist/rebase",
                 BuildRebaseTaskWith(baseBranch),
                 InvalidateChecks: true,
-                Recovery: BuildRebaseRecovery());
+                Recovery: recovery);
 
             var added = await workflow.AddTaskAsync(task);
             return ApiResults.Ok(new

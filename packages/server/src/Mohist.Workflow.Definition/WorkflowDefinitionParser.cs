@@ -69,7 +69,7 @@ public static class WorkflowDefinitionParser
 
     private static class YamlBuilder
     {
-        private static readonly string[] TopLevelKeys = { "approval", "stages" };
+        private static readonly string[] TopLevelKeys = { "approval", "stages", "recoveries" };
         private static readonly string[] StageKeys =
         {
             "stage",
@@ -114,8 +114,46 @@ public static class WorkflowDefinitionParser
 
             var stages = BuildStages(GetValue(rootMap, "stages"), errors, emittedPaths);
             var approval = BuildApproval(GetValue(rootMap, "approval"), errors, emittedPaths);
+            var recoveries = BuildRecoveries(GetValue(rootMap, "recoveries"), errors, emittedPaths);
 
-            return new WorkflowDefinition(stages, approval);
+            return new WorkflowDefinition(stages, approval, recoveries);
+        }
+
+        private static IReadOnlyDictionary<string, RecoveryDefinition>? BuildRecoveries(
+            YamlNode? node,
+            List<ValidationError> errors,
+            HashSet<string> emittedPaths)
+        {
+            if (node is null) return null;
+
+            if (node is not YamlMappingNode map)
+            {
+                AddError(errors, emittedPaths, "recoveries", "recoveries must be an object");
+                return null;
+            }
+
+            var result = new Dictionary<string, RecoveryDefinition>(StringComparer.Ordinal);
+            var seenNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in map.Children)
+            {
+                var name = ScalarKey(entry.Key);
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    AddError(errors, emittedPaths, "recoveries", "recoveries name must be a non-empty string");
+                    continue;
+                }
+                if (!seenNames.Add(name))
+                {
+                    AddError(errors, emittedPaths, $"recoveries.{name}", $"recovery template '{name}' is duplicated");
+                    continue;
+                }
+
+                var path = $"recoveries.{name}";
+                var recovery = BuildRecovery(entry.Value, path, errors, emittedPaths);
+                if (recovery is not null) result[name] = recovery;
+            }
+
+            return result.Count == 0 ? null : result;
         }
 
         private static ApprovalConfig? BuildApproval(YamlNode? node, List<ValidationError> errors, HashSet<string> emittedPaths)

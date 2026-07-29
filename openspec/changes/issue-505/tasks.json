@@ -1,0 +1,93 @@
+{
+  "project": "mohist-local",
+  "description": "Remove builtin-workflow knowledge from generic C# code: Definition-sourced metric stage order, unconditional parent-context attachment, three-layer variable model, and workflow-authored rebase recovery.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Source quality metric stage set and order from the Definition",
+      "spec": "specs/quality-stage-metrics/spec.md#quality-stage-set-derives-from-the-definition",
+      "description": "Delete the `QualityStageOrder` constant from `IssueMetricsQuerier`. Thread the Definition-sourced stage order (via `ResolveProjectStageOrderAsync`) into `BuildWindow`, filtering to only entered stages and preserving Definition order with non-Definition observed stages appended after. Update accumulator/window unit tests and add a spec test for custom-stage-name metrics.",
+      "acceptanceCriteria": [
+        "`QualityStageOrder` constant does not exist anywhere in the codebase.",
+        "Quality windows for custom profiles contain only stages from the bound Definition, in Definition order, with no entered=0 phantom rows for builtin stage names.",
+        "Quality windows for builtin profiles produce the identical stage list, entered counts, and rework rates as before this change.",
+        "Cross-profile windows list each distinct stage id once, with Definition-ordered stages first and remaining observed stages appended after.",
+        "Spec test covers a custom-stage Run appearing in Definition order without ghost rows, and builtin-profile metric parity.",
+        "`npm test` passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `IssueMetricsQuerier.cs` with Definition-sourced stage ordering and passing metric tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Mirror the stage-duration path's `ResolveProjectStageOrderAsync` + orderedStages pattern. The project default profile's Definition provides the primary ordering."
+    },
+    {
+      "id": "T-002",
+      "title": "Attach parent issue context unconditionally for workflow task dispatches",
+      "spec": "specs/dispatch-parent-context/spec.md#dispatch-response-assembly-must-not-match-concrete-stage-or-action-names",
+      "description": "Remove the `stage == \"plan\" && uses == \"mohist/opencode\"` guard from `ToWorkDispatchResponseAsync`. Attach parent issue context for all workflow-owned task dispatches (`OwnerKind == Workflow`, `WorkType == Task`) with a valid projectId and issueNumber. Update `RunnerPollParentContextMapperSpecs` to reflect unconditional attachment.",
+      "acceptanceCriteria": [
+        "`ToWorkDispatchResponseAsync` contains no comparison of `Stage` or `Uses` against the literals `plan` or `mohist/opencode`.",
+        "Parent issue context is attached for all workflow task dispatches carrying a valid issue, including tasks in non-plan stages and non-opencode actions.",
+        "Parent context remains null for issues without a parent, for checks dispatches, and for agent-job dispatches.",
+        "`RunnerPollParentContextMapperSpecs` updated to verify unconditional attachment for workflow tasks and null for non-workflow or non-task dispatches.",
+        "`npm test` passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `RunnerRoutes.cs` with unconditional parent-context attachment and passing dispatch mapper tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The `resolveParentIssueContext` callback returns null for parentless issues, so nothing is attached in that case. `WorkDispatch` shape is unchanged."
+    },
+    {
+      "id": "T-003",
+      "title": "Collapse variable model to three layers and remove the defaults machinery",
+      "spec": "specs/workflow-variables-defaults/spec.md#variables-resolve-across-exactly-three-scopes",
+      "description": "Remove `DefaultVars`/`DefaultStages` from `VariableBundle`, the `EnsureArchiveDefaultAsync` seed path, the clear-on-explicit-write protocol, and the `DefaultVariables` persistence column. Simplify `MergeRunScopedVariables` to `MergeAll(project, issue, run)`. Add an EF Core migration to drop the column. Add a runner spec test confirming archive absent-hint behavior.",
+      "acceptanceCriteria": [
+        "`VariableBundle` record has only `Vars` and `Stages` parameters; `DefaultVars`, `DefaultStages`, `HasDefaultContent`, `ClearDefaultsCoveredByExplicit`, and all stripping/intersection helpers do not exist.",
+        "No reference to `EnsureArchiveDefaultAsync`, `ArchiveDefaultKey`, `GetDefaultVariablesAsync`, `BuildArchiveDefaultElement`, `HasArchiveKey`, or `DefaultVariables` remains in server code.",
+        "`WorkflowGrain` startup does not call any archive-default seeding method.",
+        "EF Core migration drops the `DefaultVariables` column from `WorkflowRunProfiles`; `WorkflowRunProfileRow` has no `DefaultVariables` property and `MohistDbContext` has no `DefaultVariables` configuration.",
+        "Run startup produces effective variables with no `archive` key unless explicitly declared by a Project, Issue, or Run variable.",
+        "Runner `mohist/archive-change` spec test covers absent-hint behavior: the action computes a fresh dated destination and moves the change directory.",
+        "All former `DefaultVars`/`DefaultStages` unit and spec tests are updated or removed; no dead test code remains.",
+        "`npm test` passes (server); `npm run typecheck` and `npm run test:run` pass (runner)."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Slimmed `VariableBundle`, removed defaults machinery, dropped persistence column with migration, and passing server + runner tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "AGENTS.md states no version compat is needed; Orleans serializer ID shifts are acceptable. Old `Variables` JSON may contain stale `DefaultVars`/`DefaultStages` keys — System.Text.Json ignores unmapped members by default."
+    },
+    {
+      "id": "T-004",
+      "title": "Author rebase recovery in workflow content via top-level recoveries key",
+      "spec": "specs/rebase-recovery/spec.md#rebase-recovery-has-a-single-author-in-workflow-content",
+      "description": "Add a top-level `recoveries` key to the workflow YAML schema, parsed into `IReadOnlyDictionary<string, RecoveryDefinition>` on `WorkflowDefinition`. Declare a `rebase-conflicts` template in both builtin YAMLs. Rewrite the rebase route to source recovery from the profile definition. Delete `BuildRebaseRecovery()`. Update `design/workflow/recovery.md` with the one-mechanism decision and the `recoveries` key documentation.",
+      "acceptanceCriteria": [
+        "`WorkflowDefinitionParser` accepts and parses a top-level `recoveries` mapping; `WorkflowDefinition` carries a `Recoveries` dictionary.",
+        "`WorkflowYamlSerializer` round-trips the `recoveries` section.",
+        "Both builtin YAMLs declare a `rebase-conflicts` recovery template containing the `mohist/opencode` conflict-resolution task with `budget: 2` and the `error.code=conflict` handler.",
+        "`IssueRoutes.Helpers` no longer contains `BuildRebaseRecovery` or constructs any `RecoveryDefinition`, `RecoveryHandlerDefinition`, or `TaskDefinition`.",
+        "The rebase route resolves the run's bound profile and reads `definition.Recoveries[\"rebase-conflicts\"]` for the recovery definition.",
+        "`mo issue rebase` produces the same recovery task with the same budget, handler ordering, prompt reference, and `mohist/opencode` handler as before.",
+        "`design/workflow/recovery.md` documents that API-triggered one-shot injection and Profile-driven recovery are one mechanism, and that the `recoveries` top-level key is the home for named recovery templates.",
+        "`npm test` passes (server); `npm run typecheck` and `npm run test:run` pass (runner)."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Parser/model/serializer support for `recoveries`, updated builtin YAMLs, rewritten rebase route, updated `recovery.md`, and passing tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "`BuildRebaseTaskWith(baseBranch)` stays — it constructs runtime input with a dynamic baseBranch, not workflow-definition structure. The `recoveries` parser reuses the existing `BuildRecovery` logic."
+    }
+  ]
+}

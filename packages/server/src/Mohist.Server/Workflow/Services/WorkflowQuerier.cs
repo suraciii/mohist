@@ -143,6 +143,14 @@ public class WorkflowQuerier : IScopedService
         return definition is null ? null : WorkflowYamlSerializer.ToYaml(definition);
     }
 
+    public async Task<RecoveryDefinition?> GetRecoveryAsync(string workflowRunId, string name)
+    {
+        var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
+        if (definition?.Recoveries is null || !definition.Recoveries.TryGetValue(name, out var recovery))
+            return null;
+        return recovery;
+    }
+
     public async Task<bool> HasIncompleteTaskWithUsesAsync(string workflowRunId, string uses)
     {
         await using var db = await _db.CreateDbContextAsync();

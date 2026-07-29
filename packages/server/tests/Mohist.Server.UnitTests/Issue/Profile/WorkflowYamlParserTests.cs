@@ -452,6 +452,100 @@ public class WorkflowYamlParserTests
     }
 
     [Fact]
+    public void WorkflowYamlParser_RecoversiesSectionAbsent_ReturnsNullRecoveries()
+    {
+        var definition = WorkflowYamlSerializer.FromYaml("""
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """);
+
+        Assert.Null(definition.Recoveries);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_ParsesTopLevelRecoveriesMap()
+    {
+        var definition = WorkflowYamlSerializer.FromYaml("""
+        recoveries:
+          rebase-conflicts:
+            budget: 2
+            handlers:
+              - when: error.code=conflict
+                tasks:
+                  - id: recover:resolve-rebase-conflicts
+                    title: Resolve rebase conflicts
+                    uses: mohist/opencode
+                    with:
+                      session: check
+                      prompt: ${{ prompts.resolve-rebase-conflicts }}
+                      options: ${{ vars.agent }}
+                retrySelf: false
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """);
+
+        Assert.NotNull(definition.Recoveries);
+        Assert.True(definition.Recoveries!.TryGetValue("rebase-conflicts", out var recovery));
+        Assert.Equal(2, recovery!.Budget);
+        var handler = Assert.Single(recovery.Handlers);
+        Assert.Equal("error.code=conflict", handler.When);
+        Assert.False(handler.RetrySelf);
+        var task = Assert.Single(handler.Tasks);
+        Assert.Equal("recover:resolve-rebase-conflicts", task.Id);
+        Assert.Equal("mohist/opencode", task.Uses);
+        Assert.Equal("check", task.With!["session"]!.Value.GetString());
+        Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", task.With!["prompt"]!.Value.GetString());
+        Assert.Equal("${{ vars.agent }}", task.With!["options"]!.Value.GetString());
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_RejectsRecoveriesAsNonMapping()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""
+        recoveries:
+          - rebase-conflicts
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """));
+
+        Assert.Contains("recoveries", ex.Message);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_RejectsDuplicateRecoveryTemplateName()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""
+        recoveries:
+          rebase-conflicts:
+            budget: 1
+            handlers:
+              - tasks:
+                  - id: recover:resolve
+                    uses: mohist/opencode
+                retrySelf: true
+          rebase-conflicts:
+            budget: 2
+            handlers:
+              - tasks:
+                  - id: recover:resolve-2
+                    uses: mohist/opencode
+                retrySelf: true
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """));
+
+        Assert.Contains("rebase-conflicts", ex.Message);
+    }
+
+    [Fact]
     public void WorkflowYamlParser_ApprovalFeedbackTaskMissingId_Throws()
     {
         var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""

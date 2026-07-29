@@ -11,7 +11,7 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 public sealed class RunnerPollParentContextMapperSpecs
 {
     [Fact]
-    public async Task PlanOpencodeTaskMapsParentTitleAndBodyAtTheHttpBoundary()
+    public async Task WorkflowTaskMapsParentTitleAndBodyAtTheHttpBoundary()
     {
         var calls = 0;
         var response = await RunnerRoutes.ToWorkDispatchResponseAsync(
@@ -54,16 +54,23 @@ public sealed class RunnerPollParentContextMapperSpecs
     }
 
     [Theory]
-    [InlineData("build")]
-    [InlineData("check")]
-    [InlineData("integrate")]
-    public async Task NonPlanOpencodeTasksDoNotResolveParentContext(string stage)
+    [InlineData("build", "mohist/opencode")]
+    [InlineData("check", "mohist/other")]
+    [InlineData("integrate", "custom/action")]
+    public async Task WorkflowTasksResolveParentContextRegardlessOfStageOrAction(string stage, string uses)
     {
+        var calls = 0;
         var response = await RunnerRoutes.ToWorkDispatchResponseAsync(
-            Dispatch(stage: stage),
-            UnexpectedResolution);
+            Dispatch(stage: stage, uses: uses),
+            (projectId, issueNumber) =>
+            {
+                calls++;
+                Assert.Equal(("proj-child", 42), (projectId, issueNumber));
+                return Task.FromResult<ParentIssueContext?>(new("Parent title", "Parent body"));
+            });
 
-        Assert.Null(response.ParentIssueContext);
+        Assert.Equal(1, calls);
+        Assert.Equal(new ParentIssueContextResponse("Parent title", "Parent body"), response.ParentIssueContext);
     }
 
     [Fact]
@@ -72,7 +79,6 @@ public sealed class RunnerPollParentContextMapperSpecs
         var dispatches = new[]
         {
             Dispatch(workType: WorkItemTypes.Checks),
-            Dispatch(uses: "mohist/other"),
             Dispatch(ownerKind: WorkDispatchOwnerKinds.AgentJob),
             Dispatch(includeIssue: false),
         };

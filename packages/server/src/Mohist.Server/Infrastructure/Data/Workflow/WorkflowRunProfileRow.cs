@@ -16,15 +16,5 @@ public class WorkflowRunProfileRow
     /// </summary>
     public string Variables { get; set; } = "{}";
 
-    /// <summary>
-    /// Initialization-default VariableBundle JSON. Entries here resolve
-    /// below Project, Issue, explicit Run, and selected-stage overlays so
-    /// any explicit write wins. <c>vars.archive = ""</c> is seeded
-    /// here on WorkflowRun creation; the marker is
-    /// removed once the key is set by an explicit Run write (setVars, PUT,
-    /// or PATCH).
-    /// </summary>
-    public string DefaultVariables { get; set; } = "{}";
-
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

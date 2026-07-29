@@ -48,7 +48,8 @@ public sealed record StageDefinition(
 
 public sealed record WorkflowDefinition(
     IReadOnlyList<StageDefinition> Stages,
-    ApprovalConfig? Approval = null);
+    ApprovalConfig? Approval = null,
+    IReadOnlyDictionary<string, RecoveryDefinition>? Recoveries = null);
 
 public sealed record WorkflowProfile(
     string Id,
