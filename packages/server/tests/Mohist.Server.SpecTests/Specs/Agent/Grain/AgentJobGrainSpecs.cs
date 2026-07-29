@@ -501,22 +501,4 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }
 
-    [Fact]
-    public async Task SubmitAsync_NoEligibleRunner_IncrementsDispatchAttemptsAcrossRetries()
-    {
-        await ClearGlobalRunnerRegistryAsync();
-
-        var jobKey = $"agent-job-retry-attempts-{Guid.NewGuid():N}";
-        var job = JobGrain(jobKey);
-
-        await job.SubmitAsync(MakeInput("retry attempts", $"missing-project-{Guid.NewGuid():N}", "/tmp/agent-job-retry"));
-
-        _fixture.TimeProvider.Advance(TimeSpan.FromMilliseconds(75));
-        await job.CheckTimeoutsAsync();
-        var snapshot = await job.GetRuntimeSnapshotAsync();
-
-        Assert.Equal(AgentJobStatus.Pending, snapshot.Status);
-        Assert.True(snapshot.DispatchAttempts >= 2);
-    }
-
 }

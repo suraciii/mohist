@@ -1,0 +1,61 @@
+# Issue 531 T-001 Progress
+
+## Codebase Patterns
+
+- **AgentJobGrain** uses `[PersistentState<AgentJobState>]` for durability + best-effort
+  mirror to `AgentJobStore` (JSON only). This is the "Orleans-state-plus-best-effort-mirror"
+  path T-001 replaces.
+- **`AgentJobState`** is serialized as JSON in `AgentJobs.State`. Computed columns
+  `ProjectId`, `AgentId`, `Status`, `SubmittedAt`, `TerminalAt` are projected via
+  `json_extract(...)` STORED.
+- **AgentJob admission today** is a push: `AgentJobGrain.TryAssignToRunnerAsync`
+  → `RunnerGrain.AssignAgentJobAsync` → `RunnerWorks` row + Orleans `RunnerWorksState`.
+- **`AgentJobs` row** is read by `AgentJobQuerier` (Status filter, ordering by SubmittedAt).
+- **`RunnerWorks` table** has `Id`, `RunnerId`, `OwnerKind`, `OwnerId`, `WorkId`,
+  `TakenAt`, `Status`, `Reason` — index on `(RunnerId, Status)` and
+  `(RunnerId, OwnerKind, OwnerId, WorkId)`.
+- **Orleans grain non-reentrancy** is the default — no `[Reentrant]`. Per-grain
+  serialization is therefore free for the AgentJobGrain key.
+- **Time injection**: `TimeProvider` everywhere. Tests use `FakeTimeProvider`.
+- **In-memory event bus / EventStore**: `RecordingEventStore` in tests,
+  `InMemoryEventBus` provided.
+- **EF migration pattern**: each migration has a `*.cs` body and a matching
+  `*.Designer.cs` if the model changes. Pure data backfills can omit the
+  designer (see `20260629120000_BackfillIssueCompletedAt.cs`).
+- **Index naming**: `IX_<Table>_<Columns>` convention.
+- **Test infra**: `TestSqliteDatabase` clones a per-process migrated template;
+  `AgentJobGrainFixture` hosts an `InProcessTestCluster` with `FakeTimeProvider`.
+- **Push retry → owner timeout**: existing `AgentJobBackoffSchedule` carries
+  `TotalBound` (mapped to `DispatchRetryBound`). The design repurposes this
+  value: measured from `ReadySince` rather than dispatch attempts.
+
+## Decisions (this task)
+
+- **Atomic ledger row**: extend `AgentJobRow` with scheduling columns and an
+  optimistic-concurrency `Revision` (INTEGER, ETag). The grain reads/writes the
+  row through a new `AgentJobLedgerRecord` shape; every state transition is
+  one transaction against the row, guarded by `Revision`.
+- **No Runner work record on admission**: drop the `AssignAgentJobAsync` push
+  and `RunnerWorks` insert from the AgentJob admission path. `RunnerWorks`
+  remains in place for backward compatibility but the AgentJob grain no longer
+  creates rows there. T-003 will remove `RunnerWorks` entirely.
+- **Admission outcomes**:
+  - Eligible runner with capacity → `Pending` with `AssignedRunnerId`,
+    `ReadySince`, `DispatchJson` written.
+  - No eligible runner / every eligible runner full → terminal `Failed`,
+    `runner-unavailable`, **no** `DispatchJson` / `AssignedRunnerId`.
+  - The same `runner-unavailable` outcome can also be reached later via the
+    readiness timeout.
+- **Claim path**: `IAgentJobGrain.ClaimNextAsync(runnerId)` performs the
+  atomic Pending → Running transition, validates `AssignedRunnerId == runnerId`,
+  and returns the persisted dispatch. Revision-checked.
+- **Report path**: `ReportResultAsync` validates `RunnerId`/`WorkId` against
+  the row and either applies a terminal transition or returns stale.
+- **Orleans state removed**: `AgentJobGrain` no longer uses `[PersistentState]`.
+  State lives on the `AgentJobs` row and is hydrated into a private field on
+  activation. The recovery reminder continues to drive terminal-delivery and
+  preparation recovery; the readiness check piggybacks on the same reminder.
+- **Migration**: `20260729000000_AgentJobOwnerLedger` adds columns, backfills
+  from existing JSON, validates that every nonterminal row reconstructs, and
+  adds indexes. The migration aborts inside a transaction when validation
+  fails; no rows change.

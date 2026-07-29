@@ -199,6 +199,7 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "already-terminal"));
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_result.Status);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
+    public Task<ClaimResult?> ClaimNextAsync(string runnerId) => Task.FromResult<ClaimResult?>(null);
     public Task AssignRunnerAsync(string runnerId, string workId) => Task.CompletedTask;
     public Task SubmitAsync(AgentJobInput input) => Task.CompletedTask;
     public Task EnsureSubmittedAsync(AgentJobInput input) => Task.CompletedTask;
@@ -226,6 +227,7 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
     public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "not-running"));
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
+    public Task<ClaimResult?> ClaimNextAsync(string runnerId) => Task.FromResult<ClaimResult?>(null);
     public Task AssignRunnerAsync(string runnerId, string workId) => Task.CompletedTask;
     public Task SubmitAsync(AgentJobInput input)
     {

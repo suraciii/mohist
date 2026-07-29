@@ -262,8 +262,28 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("""json_extract("State", '$.submittedAt')""", stored: true);
             entity.Property(e => e.TerminalAt)
                 .HasComputedColumnSql("""json_extract("State", '$.terminalAt')""", stored: true);
+            entity.Property(e => e.Revision).IsRequired();
+            entity.Property(e => e.AssignedRunnerId).HasMaxLength(256);
+            entity.Property(e => e.WorkId).HasMaxLength(128);
+            entity.Property(e => e.WorkType).HasMaxLength(64);
+            entity.Property(e => e.Stage).HasMaxLength(128);
+            entity.Property(e => e.Title).HasMaxLength(512);
+            entity.Property(e => e.IssueProjectId).HasMaxLength(256);
+            entity.Property(e => e.AgentSessionId).HasMaxLength(512);
+            entity.Property(e => e.InitialInputId).HasMaxLength(128);
+            entity.Property(e => e.InitialTurnId).HasMaxLength(128);
             entity.HasIndex(e => new { e.AgentId, e.ProjectId, e.SubmittedAt })
                 .HasDatabaseName("IX_AgentJobs_AgentId_ProjectId_SubmittedAt");
+            // Poll-time queries: assigned running, assigned pending by
+            // readiness time, eligible unassigned pending by readiness.
+            // Three narrow indexes match the three DispatchService
+            // projections; each one is sized to a status-filtered scan.
+            entity.HasIndex(e => new { e.AssignedRunnerId, e.Status })
+                .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status");
+            entity.HasIndex(e => new { e.AssignedRunnerId, e.Status, e.ReadySince })
+                .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status_ReadySince");
+            entity.HasIndex(e => new { e.Status, e.ReadySince })
+                .HasDatabaseName("IX_AgentJobs_Status_ReadySince");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptPartRow>(entity =>

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
@@ -16,12 +17,13 @@ public class AgentJobStoreSpecs : IAsyncLifetime
     private readonly TestSqliteDatabase _database;
     private readonly AgentJobStore _store;
     private readonly AgentJobQuerier _querier;
+    private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 7, 29, 0, 0, 0, TimeSpan.Zero));
 
     public AgentJobStoreSpecs()
     {
         _database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(_database.Options);
-        _store = new AgentJobStore(factory, NullLogger<AgentJobStore>.Instance);
+        _store = new AgentJobStore(factory, NullLogger<AgentJobStore>.Instance, _time);
         _querier = new AgentJobQuerier(factory);
     }
 
@@ -258,6 +260,165 @@ public class AgentJobStoreSpecs : IAsyncLifetime
     {
         var item = await _querier.GetByKeyAsync($"missing-{Guid.NewGuid():N}");
         Assert.Null(item);
+    }
+
+    // --- Owner ledger (issue #531 T-001) ---
+    // The AgentJobs row is the single durable AgentJob ledger. These specs
+    // cover atomic insert/save, revision-fenced updates, the poll-time
+    // claim transition, and the four scheduling projections.
+
+    private static AgentJobLedgerRecord NewPendingRecord(
+        string key,
+        string? runnerId,
+        DateTimeOffset readySince,
+        string? projectId = null) =>
+        new(
+            JobKey: key,
+            StateJson: Serialize(MakeState(AgentJobStatus.Pending, projectId ?? "proj-1", "agent-1")),
+            Revision: 0,
+            AssignedRunnerId: runnerId,
+            WorkId: runnerId is null ? null : $"{key}-work",
+            ReadySince: readySince,
+            RunningSince: null,
+            DispatchJson: runnerId is null ? null : """{"workId":"placeholder"}""",
+            WorkType: "agent-job",
+            Stage: "agent",
+            Title: "Agent Job",
+            IssueProjectId: projectId,
+            IssueNumber: null,
+            AgentSessionId: null,
+            InitialInputId: null,
+            InitialTurnId: null);
+
+    [Fact]
+    public async Task InsertLedger_RequiresRevisionZero_AndAssignsFirstRevision()
+    {
+        var key = $"ledger-insert-{Guid.NewGuid():N}";
+        var record = NewPendingRecord(key, "runner-a", _time.GetUtcNow());
+
+        var inserted = await _store.InsertLedgerAsync(record);
+
+        Assert.Equal(1, inserted.Revision);
+        var loaded = await _store.LoadLedgerAsync(key);
+        Assert.NotNull(loaded);
+        Assert.Equal("runner-a", loaded!.AssignedRunnerId);
+        Assert.Equal($"{key}-work", loaded.WorkId);
+        Assert.Equal(AgentJobStatus.Pending, JsonSerializer.Deserialize<AgentJobState>(loaded.StateJson, JSON.Options)!.Status);
+    }
+
+    [Fact]
+    public async Task InsertLedger_RejectsNonZeroRevision()
+    {
+        var key = $"ledger-badrev-{Guid.NewGuid():N}";
+        var record = NewPendingRecord(key, "runner-a", _time.GetUtcNow()) with { Revision = 3 };
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _store.InsertLedgerAsync(record));
+    }
+
+    [Fact]
+    public async Task SaveLedger_RejectsStaleRevision_AndAdvancesOnMatch()
+    {
+        var key = $"ledger-save-{Guid.NewGuid():N}";
+        var inserted = await _store.InsertLedgerAsync(NewPendingRecord(key, "runner-a", _time.GetUtcNow()));
+
+        var stale = inserted with { AssignedRunnerId = "runner-b", Revision = inserted.Revision - 1 };
+        await Assert.ThrowsAsync<AgentJobLedgerConflictException>(() => _store.SaveLedgerAsync(stale));
+
+        var fresh = inserted with { AssignedRunnerId = "runner-b", WorkId = $"{key}-work-2" };
+        var saved = await _store.SaveLedgerAsync(fresh);
+        Assert.Equal(inserted.Revision + 1, saved.Revision);
+        Assert.Equal("runner-b", saved.AssignedRunnerId);
+    }
+
+    [Fact]
+    public async Task SaveLedger_RejectsAssignmentWithoutDispatchSnapshot()
+    {
+        var key = $"ledger-reconstruct-{Guid.NewGuid():N}";
+        var inserted = await _store.InsertLedgerAsync(NewPendingRecord(key, "runner-a", _time.GetUtcNow()));
+
+        var noSnapshot = inserted with { DispatchJson = null };
+        await Assert.ThrowsAsync<AgentJobLedgerReconstructionException>(() => _store.SaveLedgerAsync(noSnapshot));
+    }
+
+    [Fact]
+    public async Task Claim_AtomicTransitionToRunning_PersistsWorkIdentityAndClearsReadySince()
+    {
+        var key = $"ledger-claim-{Guid.NewGuid():N}";
+        await _store.InsertLedgerAsync(NewPendingRecord(key, "runner-a", _time.GetUtcNow()));
+        var runningSince = _time.GetUtcNow();
+
+        var claimed = await _store.ClaimAsync(key, "runner-a", runningSince);
+
+        Assert.Equal(AgentJobStatus.Running, JsonSerializer.Deserialize<AgentJobState>(claimed.StateJson, JSON.Options)!.Status);
+        Assert.Equal("runner-a", claimed.AssignedRunnerId);
+        Assert.Equal($"{key}-work", claimed.WorkId);
+        Assert.Equal(runningSince, claimed.RunningSince);
+        Assert.Null(claimed.ReadySince);
+
+        var reloaded = await _store.LoadLedgerAsync(key);
+        Assert.Null(reloaded!.ReadySince);
+    }
+
+    [Fact]
+    public async Task Claim_RejectsWrongRunner_NonPending_AndMissingRow()
+    {
+        var key = $"ledger-claim-reject-{Guid.NewGuid():N}";
+        var inserted = await _store.InsertLedgerAsync(NewPendingRecord(key, "runner-a", _time.GetUtcNow()));
+
+        await Assert.ThrowsAsync<AgentJobLedgerConflictException>(
+            () => _store.ClaimAsync(key, "runner-other", _time.GetUtcNow()));
+        await Assert.ThrowsAsync<AgentJobLedgerConflictException>(
+            () => _store.ClaimAsync($"missing-{Guid.NewGuid():N}", "runner-a", _time.GetUtcNow()));
+
+        await _store.ClaimAsync(key, "runner-a", _time.GetUtcNow());
+        await Assert.ThrowsAsync<AgentJobLedgerConflictException>(
+            () => _store.ClaimAsync(key, "runner-a", _time.GetUtcNow()));
+    }
+
+    [Fact]
+    public async Task ListEligiblePending_ReturnsUnassignedByReadySinceAscending()
+    {
+        var early = $"ledger-elig-early-{Guid.NewGuid():N}";
+        var late = $"ledger-elig-late-{Guid.NewGuid():N}";
+        var assigned = $"ledger-elig-assigned-{Guid.NewGuid():N}";
+        await _store.InsertLedgerAsync(NewPendingRecord(early, null, _time.GetUtcNow()));
+        await _store.InsertLedgerAsync(NewPendingRecord(late, null, _time.GetUtcNow().AddMinutes(1)));
+        await _store.InsertLedgerAsync(NewPendingRecord(assigned, "runner-a", _time.GetUtcNow()));
+
+        var result = await _store.ListEligiblePendingAsync(projectId: null, limit: 10);
+
+        Assert.Equal(new[] { early, late }, result.Select(r => r.JobKey).ToArray());
+        Assert.All(result, r => Assert.Null(r.AssignedRunnerId));
+    }
+
+    [Fact]
+    public async Task ListRunningForRunner_AndAssignedPending_ProjectByRunner()
+    {
+        var pendingKey = $"ledger-ap-{Guid.NewGuid():N}";
+        var runningKey = $"ledger-run-{Guid.NewGuid():N}";
+        await _store.InsertLedgerAsync(NewPendingRecord(pendingKey, "runner-a", _time.GetUtcNow()));
+        await _store.InsertLedgerAsync(NewPendingRecord(runningKey, "runner-a", _time.GetUtcNow()));
+        await _store.ClaimAsync(runningKey, "runner-a", _time.GetUtcNow());
+
+        var pending = await _store.ListAssignedPendingForRunnerAsync("runner-a");
+        var running = await _store.ListRunningForRunnerAsync("runner-a");
+
+        Assert.Equal(new[] { pendingKey }, pending.Select(r => r.JobKey).ToArray());
+        Assert.Equal(new[] { runningKey }, running.Select(r => r.JobKey).ToArray());
+    }
+
+    [Fact]
+    public async Task ListPendingAtOrBeforeReadySince_ReturnsOnlyAgedPending()
+    {
+        var cutoff = _time.GetUtcNow().AddMinutes(5);
+        var aged = $"ledger-aged-{Guid.NewGuid():N}";
+        var fresh = $"ledger-fresh-{Guid.NewGuid():N}";
+        await _store.InsertLedgerAsync(NewPendingRecord(aged, "runner-a", _time.GetUtcNow()));
+        await _store.InsertLedgerAsync(NewPendingRecord(fresh, "runner-a", cutoff.AddMinutes(2)));
+
+        var result = await _store.ListPendingAtOrBeforeReadySinceAsync(cutoff, limit: 10);
+
+        Assert.Equal(new[] { aged }, result.Select(r => r.JobKey).ToArray());
     }
 
     private static string Serialize(AgentJobState state) =>
