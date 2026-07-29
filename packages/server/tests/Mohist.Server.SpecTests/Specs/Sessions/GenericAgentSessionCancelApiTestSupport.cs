@@ -55,6 +55,8 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         var project = await CreateProjectAsync($"preserves-{sourceKind}");
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
             .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        tracker.Register(_runnerId, $"{_runnerId}-conn");
 
         var sessionId = $"cancel-{Guid.NewGuid():N}";
         var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";

@@ -1817,6 +1817,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             await _stateStore.SaveAsync(SessionId, session);
             _session = session;
+            _stateDirty = true;
+            EnsurePersistenceTimer();
             return;
         }
         await CommitAsync(session, events);
