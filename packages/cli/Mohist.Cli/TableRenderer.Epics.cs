@@ -99,15 +99,37 @@ internal sealed partial class TableRenderer
     {
         if (data is null)
         {
-            _out.WriteLine("OK");
+            _out.WriteLine("Epic membership result was empty");
             return;
         }
 
-        var epicNumber = NumberOf(data, "epicNumber");
+        var status = StringOf(data, "status");
         var issueNumber = NumberOf(data, "issueNumber");
-        if (!string.IsNullOrEmpty(epicNumber) && !string.IsNullOrEmpty(issueNumber))
-            _out.WriteLine($"{verb} issue #{issueNumber} {(verb == "Linked" ? "to" : "from")} epic #{epicNumber}");
-        else
-            _out.WriteLine("OK");
+        var identifier = StringOf(data, "identifier");
+        var issue = !string.IsNullOrEmpty(issueNumber)
+            ? $"#{issueNumber}"
+            : string.IsNullOrEmpty(identifier) ? "unknown" : $"'{identifier}'";
+
+        var message = status switch
+        {
+            "linked" => $"Linked issue {issue}",
+            "already-linked" => $"Issue {issue} is already linked",
+            "unlinked" => $"Unlinked issue {issue}",
+            "was-not-a-member" => $"Issue {issue} was not linked",
+            "conflict" => ConflictMessage(issue, data),
+            "not-found" => $"Issue {issue} was not found",
+            _ => $"{verb} issue {issue}: {status}",
+        };
+        _out.WriteLine(message);
+    }
+
+    private static string ConflictMessage(string issue, JsonNode data)
+    {
+        var owningEpicNumber = NumberOf(data, "owningEpicNumber");
+        var owningEpicTitle = StringOf(data, "owningEpicTitle");
+        var owner = string.IsNullOrEmpty(owningEpicNumber) ? "another epic" : $"epic #{owningEpicNumber}";
+        return string.IsNullOrEmpty(owningEpicTitle)
+            ? $"Issue {issue} is already linked to {owner}"
+            : $"Issue {issue} is already linked to {owner} ({owningEpicTitle})";
     }
 }
