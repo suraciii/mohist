@@ -112,7 +112,6 @@ public static class AgentJobLineage
             messageTs = payload.Origin.MessageTs,
             status = payload.Status.ToString().ToLowerInvariant(),
             message = SafeSummaryFact(payload.Message),
-            output = SafeSummaryFact(payload.Output),
             failureReason = SafeSummaryFact(payload.FailureReason),
             failureCategory = SafeSummaryFact(payload.FailureCategory),
             artifactCount = payload.ArtifactCount,

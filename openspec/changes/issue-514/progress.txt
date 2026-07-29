@@ -330,3 +330,9 @@ All tests pass:
 
 - `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true` passed.
 - `packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests.dll -class Mohist.Server.SpecTests.Specs.Slack.SlackTerminalDeliveryHandlerSpecs -noColor` passed: 3 tests.
+
+# Issue 514 review finding - raw tool output exclusion
+
+- Terminal-delivery state and CloudEvents no longer carry `AgentJobTerminalResult.Output`. The Slack handler ignores an `output` field even if it appears in a malformed or old event payload, and only renders the user-facing result message, failure facts, exit code, and artifact count.
+- `SlackTerminalDeliveryHandlerSpecs` includes raw command output in its inbound event JSON and asserts that it cannot appear in the persisted Slack delivery while the conclusion, evidence, and next step remain present.
+- `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true` and the focused terminal-delivery Specs passed. A subsequent full `npm test` reached unrelated pre-existing failures: the source-comment ArchTest baseline flags `MohistServiceRegistration.cs` and `PhysicalSecretKeyFile.cs`, while two AgentLaunchObservation specs timed out waiting for Runner dispatch. Server UnitTests passed (1602) before those failures.

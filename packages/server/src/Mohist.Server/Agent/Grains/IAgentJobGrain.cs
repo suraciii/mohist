@@ -116,7 +116,6 @@ public sealed record PendingTerminalDeliveryEvent(
     [property: Id(1)] ConnectionLaunchOrigin Origin,
     [property: Id(2)] AgentJobStatus Status,
     [property: Id(3)] string? Message,
-    [property: Id(4)] string? Output,
     [property: Id(5)] string? FailureReason,
     [property: Id(6)] string? FailureCategory,
     [property: Id(7)] int ArtifactCount,

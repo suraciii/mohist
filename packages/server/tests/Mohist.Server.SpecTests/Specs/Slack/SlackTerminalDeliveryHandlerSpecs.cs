@@ -35,9 +35,20 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         var handler = new SlackTerminalDeliveryHandler(
             provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<SlackTerminalDeliveryHandler>.Instance);
-        var delivery = new SlackTerminalDelivery(
-            "job-1", "conn-1", "team-1", "D1", status,
-            "completed with token=xoxb-secret", "output evidence", "failure details", "runtime-failed", 2, 1);
+        var delivery = new
+        {
+            jobKey = "job-1",
+            connectionId = "conn-1",
+            workspaceTeamId = "team-1",
+            dmConversationId = "D1",
+            status,
+            message = "completed with token=xoxb-secret",
+            output = "raw tool output: internal command log",
+            failureReason = "failure details",
+            failureCategory = "runtime-failed",
+            artifactCount = 2,
+            exitCode = 1,
+        };
         var evt = new CloudEvent(
             "delivery-1",
             new Uri("/mohist/agent-job/job-1", UriKind.Relative),
@@ -59,6 +70,7 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         Assert.Contains("Evidence: ", text);
         Assert.True(text.Contains($"Next step: {expectedNextStep}", StringComparison.Ordinal), text);
         Assert.DoesNotContain("xoxb-secret", text);
+        Assert.DoesNotContain("raw tool output", text);
     }
 
     private sealed class NoopHealthBackpressurer : ISlackConnectionHealthBackpressurer

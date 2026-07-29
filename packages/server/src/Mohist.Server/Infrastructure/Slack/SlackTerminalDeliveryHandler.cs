@@ -75,7 +75,6 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
         var facts = new List<string>();
         AddFact(facts, delivery.FailureReason);
         AddFact(facts, delivery.Message);
-        AddFact(facts, delivery.Output);
         AddFact(facts, delivery.FailureCategory is null ? null : $"category: {delivery.FailureCategory}");
         if (delivery.ExitCode is not null)
             facts.Add($"exit code: {delivery.ExitCode}");
@@ -105,7 +104,6 @@ public sealed record SlackTerminalDelivery(
     string DmConversationId,
     string Status,
     string? Message,
-    string? Output,
     string? FailureReason,
     string? FailureCategory,
     int ArtifactCount,
