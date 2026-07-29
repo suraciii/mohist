@@ -29,5 +29,5 @@ public sealed class AgentJobState
     /// reminder-driven recovery can re-derive the same args verbatim.
     /// </summary>
     [Id(18)] public PrepareManualLaunchCommand? ManualPlan { get; set; }
-    [Id(19)] public PendingSlackTerminalDelivery? PendingSlackTerminalDelivery { get; set; }
+    [Id(19)] public PendingTerminalDeliveryEvent? PendingTerminalDeliveryEvent { get; set; }
 }

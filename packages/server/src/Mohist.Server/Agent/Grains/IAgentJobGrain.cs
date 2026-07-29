@@ -111,11 +111,17 @@ public sealed record PrepareManualLaunchCommand(
     [property: Id(15)] ConnectionLaunchOrigin? ConnectionOrigin = null);
 
 [GenerateSerializer]
-public sealed record PendingSlackTerminalDelivery(
-    [property: Id(0)] ConnectionLaunchOrigin Origin,
-    [property: Id(1)] string Kind,
-    [property: Id(2)] string DispatchRef,
-    [property: Id(3)] string Text);
+public sealed record PendingTerminalDeliveryEvent(
+    [property: Id(0)] string EventId,
+    [property: Id(1)] ConnectionLaunchOrigin Origin,
+    [property: Id(2)] AgentJobStatus Status,
+    [property: Id(3)] string? Message,
+    [property: Id(4)] string? Output,
+    [property: Id(5)] string? FailureReason,
+    [property: Id(6)] string? FailureCategory,
+    [property: Id(7)] int ArtifactCount,
+    [property: Id(8)] int? ExitCode,
+    [property: Id(9)] DateTimeOffset RecordedAt);
 
 [GenerateSerializer]
 public sealed record AgentJobReportResult(
@@ -198,6 +204,9 @@ public static class AgentJobSessionDeliveryIds
 
     public static string FailureEventId(string jobKey) =>
         $"agent-job:{jobKey}:failed";
+
+    public static string TerminalDeliveryEventId(string jobKey) =>
+        $"agent-job:{jobKey}:terminal-delivery";
 }
 
 public static class AgentJobFailureReasons

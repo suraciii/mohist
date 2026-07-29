@@ -317,3 +317,16 @@ All tests pass:
 - `packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests -class Mohist.Server.SpecTests.Specs.Slack.SlackSetupVerifierSpecs -noColor` passed: 3 tests.
 - `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore` passed: 1584 tests.
 - `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore --filter FullyQualifiedName~SlackSetupVerifierSpecs` ran the full suite because Microsoft Testing Platform ignored the VSTest filter: 3395 passed, 1 unrelated failure.
+
+# Issue 514 review findings 2 and 3 - terminal delivery event handoff
+
+## Design
+
+- `AgentJobGrain` persists and emits one idempotent terminal-delivery CloudEvent for a Slack-originated Job instead of writing the Slack outbox. The durable event contains the bound Connection origin, terminal status, bounded redacted result facts, and a stable event id; a recovery reminder retries event append after activation loss.
+- `SlackTerminalDeliveryHandler` is the Server infrastructure consumer. It renders a bounded Slack-safe conclusion, evidence, and next step from the authoritative event facts, then idempotently enqueues the final delivery with the Job's stable dispatch reference. Completed, failed, and unknown results remain distinct.
+- The delivery handler test covers all three result statuses, duplicate event handling, redaction, outbox kind selection, and the three-part user-visible summary.
+
+## Verification
+
+- `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true` passed.
+- `packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests.dll -class Mohist.Server.SpecTests.Specs.Slack.SlackTerminalDeliveryHandlerSpecs -noColor` passed: 3 tests.

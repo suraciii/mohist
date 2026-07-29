@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
@@ -27,6 +28,12 @@ namespace Mohist.Server.Agent.Grains;
 /// </summary>
 public static class AgentJobLineage
 {
+    private const int SummaryFactMaxLength = 480;
+    private static readonly Regex SecretAssignment = new(
+        "(?i)(?:\\\"(?:token|secret|api[_-]?key|password)[^\\\"]*\\\"\\s*:\\s*\\\"|(?:token|secret|api[_-]?key|password)\\s*[:=]\\s*)(?:[^\\\"\\s,}]+|[^\\\"]*\\\")",
+        RegexOptions.Compiled);
+    private static readonly Regex SlackToken = new("xox[baprs]-[A-Za-z0-9-]+", RegexOptions.Compiled);
+
     public sealed record FailurePayload(
         string JobKey,
         AgentJobStatus Status,
@@ -88,5 +95,47 @@ public static class AgentJobLineage
             data: data,
             subject: jobKey,
             extensions: extensions);
+    }
+
+    public static CloudEvent BuildTerminalDeliveryEnvelope(
+        string jobKey,
+        PendingTerminalDeliveryEvent payload,
+        IReadOnlyDictionary<string, string> extensions)
+    {
+        var data = JsonSerializer.SerializeToElement(new
+        {
+            jobKey,
+            connectionId = payload.Origin.ConnectionId,
+            workspaceTeamId = payload.Origin.WorkspaceTeamId,
+            slackUserId = payload.Origin.SlackUserId,
+            dmConversationId = payload.Origin.DmConversationId,
+            messageTs = payload.Origin.MessageTs,
+            status = payload.Status.ToString().ToLowerInvariant(),
+            message = SafeSummaryFact(payload.Message),
+            output = SafeSummaryFact(payload.Output),
+            failureReason = SafeSummaryFact(payload.FailureReason),
+            failureCategory = SafeSummaryFact(payload.FailureCategory),
+            artifactCount = payload.ArtifactCount,
+            exitCode = payload.ExitCode,
+        }, JSON.Options);
+        return new CloudEvent(
+            id: payload.EventId,
+            source: new Uri(AgentJobEventPersistence.AgentJobSource(jobKey), UriKind.Relative),
+            type: EventCatalog.ReverseDns.AgentJobTerminalDelivery,
+            time: payload.RecordedAt,
+            data: data,
+            subject: jobKey,
+            extensions: extensions);
+    }
+
+    private static string? SafeSummaryFact(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var normalized = string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        normalized = SecretAssignment.Replace(normalized, "***");
+        normalized = SlackToken.Replace(normalized, "***");
+        return normalized.Length <= SummaryFactMaxLength ? normalized : normalized[..SummaryFactMaxLength];
     }
 }
