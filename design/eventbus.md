@@ -26,11 +26,18 @@ status: converged
 
 `ICloudEventHandler` + `[Subscription]` + DI。机制稳定，不变。
 
-订阅的匹配语言是 [`event-protocol.md`](event-protocol.md) 定义的 CEL 子集 matcher：一条布尔表达式匹配整个事件信封（`type`、`source` 与全部 context 扩展属性同权）。系统消费者（`[Subscription]` handler）与用户消费者（Agent 路由表）共用同一 matcher 语义，收敛随统一事件路由 epic 推进。
+两类消费者匹配同一信封，匹配机制按消费面分工：
 
-### 实装差距
+- **系统消费者**（`[Subscription]` handler）用编译期注册的 type glob——这是
+  表达式能力的子集（等价于 `event.type == ...` 与前缀匹配）。系统 handler
+  是代码不是配置，不需要运行期表达式。
+- **用户消费者**（Agent 路由表）用 [`event-protocol.md`](event-protocol.md)
+  定义的 CEL 子集 matcher，匹配整个事件信封（`type`、`source` 与全部
+  context 扩展属性同权）。
 
-当前 `[Subscription]` 仍是对 type 的 glob 匹配，表达式 matcher 未实装：
+对称性要求不变：系统 handler 能路由到的事件，用户表达式同样订得到。
+
+`[Subscription]` 的 type 匹配规则：
 
 | 模式 | 匹配 |
 |---|---|

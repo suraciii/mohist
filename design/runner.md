@@ -280,7 +280,7 @@ runner 在 `<runnerRoot>/.mohist/runner-state/` 下持久化四类状态，全�
 
 幂等日志 fail-closed 是因为丢了就可能重复执行；注册表 fail-open 是因为它能
 从磁盘重建。四类状态都是 runner 私有：server 从不直接读写，跨进程一致性靠
-事件投递与 poll 对账，不靠共享文件。
+事件投递与 poll 重算，不靠共享文件。
 
 ## 决策记录：单一 ledger，无 reconcile
 

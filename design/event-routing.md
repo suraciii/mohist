@@ -1,5 +1,5 @@
 ---
-status: wip
+status: converged
 ---
 
 # Agent 事件路由（Routing Table）
@@ -9,8 +9,8 @@ Mohist Agent 通过项目级**事件路由表**自动响应系统事件，取代
 [`agent-execution.md`](agent-execution.md)）；信封协议与匹配表达式语法见
 [`event-protocol.md`](event-protocol.md)。
 
-本设计取代早期「订阅 + 优先级仲裁」模型（AgentSubscription + Arbitrate），
-迁移见文末。
+本设计已取代早期「订阅 + 优先级仲裁」模型（AgentSubscription + Arbitrate）；
+旧模型迁移见文末。
 
 ## 边界
 
@@ -74,7 +74,7 @@ RoutingRule（项目级，有序表）
 ## 幂等与可见性
 
 - Launcher key = `hash(projectId, eventId, ruleId)`：同一事件×规则重复分发不会
-  重复起 job（沿用现有 AgentLauncher 机制，subscriptionId 换 ruleId）。
+  重复起 job（沿用 AgentLauncher 幂等启动机制）。
 - 触发的 AgentSession 打标签：`mohist.io/trigger/event-id`、
   `mohist.io/trigger/rule-id`。事件 → 规则 → AgentJob 双向可查。
 - AgentJob 裁定响应完成；AgentSession 以 SessionInput、AgentTurn 和 transcript 提供对话与
@@ -83,10 +83,10 @@ RoutingRule（项目级，有序表）
 ## 与系统 handler 的关系
 
 路由表是用户态消费面；`[Subscription]` handler 是系统态消费面。两者消费同一
-信封协议、共用同一 matcher 语义，经同一个分发器投递。Agent 无特殊通道：响应
-动作走 `mo workflow approve` / `mo issue comment` 等正规命令面。
+信封协议，经同一个分发器投递。Agent 无特殊通道：响应动作走
+`mo workflow approve` / `mo issue comment` 等正规命令面。
 
-## 命令面（草案）
+## 命令面
 
 ```
 mo routing rule create --name <n> --match <expr> --agent <agent> \
@@ -101,9 +101,9 @@ mo event tail [--match <expr>]   # 用同一 matcher 过滤事件流
 
 ## 迁移
 
-不做数据自动迁移：旧模型（`AgentSubscription` + `Arbitrate`）与
-`mo agent subscription` 命令面直接删除，不留兼容层（项目积极开发期，无版本
-兼容义务）。现存订阅由操作者手动重配为路由规则（Filter 三字段可机械对应
+迁移不做数据自动转换：旧模型（`AgentSubscription` + `Arbitrate`）与
+`mo agent subscription` 命令面已直接删除，不留兼容层（项目积极开发期，无
+版本兼容义务）。旧订阅由操作者按规则手工重配（Filter 三字段可机械对应
 表达式：`event.type == "..." && event.source == "..."`，Priority 降序对应
 表内顺序）。
 
@@ -117,8 +117,9 @@ mo event tail [--match <expr>]   # 用同一 matcher 过滤事件流
 - 触发频控 / 冷却期——监管型 Agent 的循环风险（失败→rerun→失败→再触发）
   短期由响应提示词自限（如 comment 计数），系统级频控留待真实需求出现。
 
-## 实装差距
+## Status
 
-已实装：AgentSubscription 三字段过滤 + Priority 仲裁 + AgentLauncher 幂等启动 +
-trigger 标签 + `mo agent subscription` 命令面。本文的路由表（有序规则、表达式、
-Continue、写入时编译、`{{event.*}}` 渲染、干跑工具）未实装，由事件路由 epic 推进。
+已实装：项目级有序路由表（`Position` / `Continue`）、CEL 子集表达式匹配与
+写入时编译、`{{event.*}}` 渲染、envelope-only 自响应防护、`mo routing rule`
+命令面与 `mo routing test` 干跑、`mo event tail --match`；旧订阅模型及其
+命令面已删除（`DropAgentSubscriptions` 迁移）。
