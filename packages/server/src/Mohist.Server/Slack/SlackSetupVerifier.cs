@@ -33,12 +33,12 @@ public sealed class SlackSetupVerifier
         var tokenText = System.Text.Encoding.UTF8.GetString(token);
         SlackAuthTestResponse auth;
         SlackBotInfoResponse bot;
-        SlackConversationInfoResponse conversation;
         try
         {
             auth = await _slack.AuthTestAsync(tokenText, ct);
-            bot = await _slack.BotsInfoAsync(connection.BotUserId, tokenText, ct);
-            conversation = await _slack.ConversationsInfoAsync(connection.BotUserId, tokenText, ct);
+            if (!auth.Ok || string.IsNullOrWhiteSpace(auth.TeamId) || string.IsNullOrWhiteSpace(auth.AppId) || string.IsNullOrWhiteSpace(auth.UserId))
+                return await FailAsync(projectId, connection, $"Slack rejected the Bot token: {auth.Error ?? "invalid_auth"}. Generate a new token.", ct);
+            bot = await _slack.BotsInfoAsync(auth.UserId, tokenText, ct);
         }
         catch (HttpRequestException)
         {
@@ -47,16 +47,21 @@ public sealed class SlackSetupVerifier
 
         var scopes = bot.Bot?.Scopes ?? [];
         var missing = RequiredScopes.Where(scope => !scopes.Contains(scope, StringComparer.Ordinal)).ToArray();
-        var reason = !auth.Ok ? $"Slack rejected the Bot token: {auth.Error ?? "invalid_auth"}. Generate a new token." :
-            !bot.Ok || bot.Bot is null ? $"Slack could not resolve the configured Bot: {bot.Error ?? "bots.info failed"}. Check the App and Bot installation." :
-            !string.Equals(auth.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal) ? "The Bot token belongs to a different workspace. Install the App in the bound workspace." :
-            !string.Equals(auth.AppId, connection.AppId, StringComparison.Ordinal) || !string.Equals(bot.Bot.AppId, connection.AppId, StringComparison.Ordinal) ? "The App and Bot belong to different Slack installs. Reinstall the matching App and Bot." :
-            missing.Length > 0 ? $"Slack is missing required scopes: {string.Join(", ", missing)}. Add the scopes and reinstall the App." :
-            !conversation.Ok ? $"Slack could not verify DM access: {conversation.Error ?? "conversations.info failed"}. Enable DM history and retry." : null;
+        var reason = !bot.Ok || bot.Bot is null ? $"Slack could not resolve the configured Bot: {bot.Error ?? "bots.info failed"}. Check the App and Bot installation." :
+            !string.Equals(bot.Bot.AppId, auth.AppId, StringComparison.Ordinal) ? "The App and Bot belong to different Slack installs. Reinstall the matching App and Bot." :
+            missing.Length > 0 ? $"Slack is missing required scopes: {string.Join(", ", missing)}. Add the scopes and reinstall the App." : null;
 
         if (reason is not null)
             return await FailAsync(projectId, connection, reason, ct);
 
+        try
+        {
+            await _connections.BindSlackIdentityAsync(projectId, connectionId, auth.TeamId, auth.AppId, auth.UserId, auth.User, ct);
+        }
+        catch (AgentConnectionValidationException ex)
+        {
+            return await FailAsync(projectId, connection, ex.Message, ct);
+        }
         await _connections.UpdateAsync(projectId, connectionId, new HashSet<string>(StringComparer.Ordinal) { "setupProgress", "connectionHealth", "healthReason" }, setupProgress: SetupProgressKind.ClaimOwner, connectionHealth: ConnectionHealthKind.Healthy, healthReason: null, ct: ct);
         return new(true, SetupProgressKind.ClaimOwner, null, RequiredScopes);
     }

@@ -325,6 +325,27 @@ public sealed class AgentConnectionStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UnboundConnectionCanBindSlackIdentityOnlyOnce()
+    {
+        await SeedAgentAsync("proj-17b", "agent-17b", AgentStatus.Active);
+        var created = await _store.CreateAsync(new AgentConnection
+        {
+            Id = "conn-unbound",
+            ProjectId = "proj-17b",
+            AgentId = "agent-17b",
+            ProviderKind = ConnectionProviderKind.Slack,
+        });
+
+        var bound = await _store.BindSlackIdentityAsync("proj-17b", created.Id, "team-17b", "app-17b", "bot-17b", "Mohist");
+        var exception = await Assert.ThrowsAsync<AgentConnectionValidationException>(
+            () => _store.BindSlackIdentityAsync("proj-17b", created.Id, "team-other", "app-other", "bot-other", "Other"));
+
+        Assert.NotNull(bound);
+        Assert.Equal("team-17b", bound.WorkspaceTeamId);
+        Assert.Equal("immutable_binding", exception.Code);
+    }
+
+    [Fact]
     public async Task ReadyAgentWithUnreachableSlackReadsAsSuch()
     {
         await SeedAgentAsync("proj-18", "agent-18", AgentStatus.Active);

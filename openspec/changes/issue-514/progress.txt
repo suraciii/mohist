@@ -269,6 +269,24 @@ All tests pass:
 - Final CLI build passed and CLI tests passed 1460/1460.
 - Slack systemd install test verifies `mohist-slack.service`, `node packages/mohist-slack/dist/cli.js`, `Restart=on-failure`, `SERVER_URL`, and `MOHIST_OPERATOR_TOKEN`.
 
+# Issue 514 / Review fixes
+
+## Connection setup and adapter discovery
+
+- `mo agent connection create <agent> --provider slack` now creates an unbound, recoverable Connection. The first verified `auth.test` response binds its immutable workspace, App, and Bot identity; a later mismatch is rejected.
+- The adapter discovers configured Connections from an operator-authenticated Server endpoint, starts successfully with zero Connections, and refreshes added or removed Connections without `SLACK_CONNECTIONS` or a service restart.
+- A fresh adapter-session heartbeat invokes Slack setup verification. Verification uses the Bot identity returned by `auth.test`, rather than treating a Bot user ID as a DM conversation ID, and only enables owner claim after the workspace, App, Bot, and scopes are confirmed.
+
+## Dispatch delivery reliability
+
+- Slack-originated AgentJobs retain a durable terminal-delivery obligation. Completed, failed, and unconfirmed outcomes create idempotent outbox intents for the originating DM and retry from the Job recovery reminder.
+- Accepted acknowledgements have a stable Slack-message dispatch reference. Redelivery reuses the original outbox entry instead of producing another reply. Required acknowledgements and terminal messages remain durable when the normal outbox capacity is full, while the Connection enters Backpressured for new ingress.
+
+## Verification
+
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` passed.
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore` passed 3389/3390; the sole failure was the pre-existing intermittent `AgentLaunchObservationRoutesSpecs.Observation_DuringTerminalState_ReportsJobResultAndTurnResult` runner dispatch polling timeout.
+
 # Issue 514 review findings 1 and 2
 
 ## Implementation

@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Otel;
@@ -235,6 +236,8 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();
+        siloBuilder.Services.AddScoped<SlackOutboxStore>();
+        siloBuilder.Services.AddScoped<ISlackConnectionHealthBackpressurer, NoopSlackConnectionHealthBackpressurer>();
         siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
         siloBuilder.Services.AddScoped<RunnerWorkStore>();
@@ -301,5 +304,10 @@ public static class GrainTestConfig
     private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher
     {
         public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private sealed class NoopSlackConnectionHealthBackpressurer : ISlackConnectionHealthBackpressurer
+    {
+        public Task FlipBackpressuredAsync(string projectId, string connectionId, string reason, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

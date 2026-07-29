@@ -85,6 +85,36 @@ public sealed class SlackProviderReliabilityStoreSpecs
     }
 
     [Fact]
+    public async Task Outbox_RequiredAcknowledgementIsIdempotentAcrossStoreRecreation()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var health = new RecordingHealthBackpressurer();
+        var firstStore = NewOutbox(database, health, capacity: 1);
+
+        var first = await firstStore.EnqueueRequiredAsync(OutboxDraft(SlackOutboxKinds.UserAction, "accepted"));
+        var restartedStore = NewOutbox(database, health, capacity: 1);
+        var redelivery = await restartedStore.EnqueueRequiredAsync(OutboxDraft(SlackOutboxKinds.UserAction, "accepted"));
+
+        Assert.Equal(first.Id, redelivery.Id);
+        Assert.True(redelivery.MergedIntoExisting);
+        Assert.Single((await restartedStore.ListAsync("proj_a", "conn_1")).Entries);
+    }
+
+    [Fact]
+    public async Task Outbox_RequiredAcknowledgementPersistsWhenCapacityIsAlreadyFull()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var health = new RecordingHealthBackpressurer();
+        var store = NewOutbox(database, health, capacity: 1);
+
+        await store.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "prior"));
+        await store.EnqueueRequiredAsync(OutboxDraft(SlackOutboxKinds.UserAction, "accepted"));
+
+        Assert.Equal(2, (await store.ListAsync("proj_a", "conn_1")).Entries.Count);
+        Assert.Equal(SlackProviderBackpressureReasons.OutboxOverflow, Assert.Single(health.Reasons));
+    }
+
+    [Fact]
     public async Task Outbox_ClaimDoesNotClaimBeforeRetryTimeAndUncertaintyIsTerminal()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();

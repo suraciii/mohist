@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 
@@ -106,7 +107,15 @@ public sealed record PrepareManualLaunchCommand(
     [property: Id(11)] string? Variant = null,
     [property: Id(12)] int? IssueNumber = null,
     [property: Id(13)] int? EpicNumber = null,
-    [property: Id(14)] string? WorkflowRunId = null);
+    [property: Id(14)] string? WorkflowRunId = null,
+    [property: Id(15)] ConnectionLaunchOrigin? ConnectionOrigin = null);
+
+[GenerateSerializer]
+public sealed record PendingSlackTerminalDelivery(
+    [property: Id(0)] ConnectionLaunchOrigin Origin,
+    [property: Id(1)] string Kind,
+    [property: Id(2)] string DispatchRef,
+    [property: Id(3)] string Text);
 
 [GenerateSerializer]
 public sealed record AgentJobReportResult(

@@ -157,6 +157,47 @@ public sealed class AgentConnectionStore : IScopedService
         return ToDomain(row);
     }
 
+    public async Task<AgentConnection?> BindSlackIdentityAsync(
+        string projectId,
+        string id,
+        string workspaceTeamId,
+        string appId,
+        string botUserId,
+        string? botName,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceTeamId)
+            || string.IsNullOrWhiteSpace(appId)
+            || string.IsNullOrWhiteSpace(botUserId))
+            throw new AgentConnectionValidationException("Slack workspace, App, and Bot identity are required.", "invalid_slack_identity");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.AgentConnections.FirstOrDefaultAsync(c => c.ProjectId == projectId && c.Id == id, ct);
+        if (row is null) return null;
+
+        if (HasBoundIdentity(row)
+            && (!string.Equals(row.WorkspaceTeamId, workspaceTeamId, StringComparison.Ordinal)
+                || !string.Equals(row.AppId, appId, StringComparison.Ordinal)
+                || !string.Equals(row.BotUserId, botUserId, StringComparison.Ordinal)))
+            throw new AgentConnectionValidationException("Slack identity is already bound and cannot be changed.", "immutable_binding");
+
+        var duplicate = await db.AgentConnections.AnyAsync(c => c.ProjectId == projectId
+            && c.Id != id
+            && c.AgentId == row.AgentId
+            && c.WorkspaceTeamId == workspaceTeamId
+            && c.DeletedAt == null, ct);
+        if (duplicate)
+            throw new AgentConnectionDuplicateException(projectId, row.AgentId, workspaceTeamId);
+
+        row.WorkspaceTeamId = workspaceTeamId;
+        row.AppId = appId;
+        row.BotUserId = botUserId;
+        row.BotName = botName?.Trim() ?? row.BotName;
+        row.UpdatedAt = _timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return ToDomain(row);
+    }
+
     public async Task<AgentConnection?> DeleteAsync(string projectId, string id, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -191,6 +232,11 @@ public sealed class AgentConnectionStore : IScopedService
         if (!string.Equals(agent.Status, AgentStatus.Active, StringComparison.Ordinal))
             throw new AgentConnectionValidationException($"Agent '{agentId}' is archived.", "agent_archived");
     }
+
+    private static bool HasBoundIdentity(AgentConnectionRow row) =>
+        !string.IsNullOrWhiteSpace(row.WorkspaceTeamId)
+        || !string.IsNullOrWhiteSpace(row.AppId)
+        || !string.IsNullOrWhiteSpace(row.BotUserId);
 
     private static AgentConnection ToDomain(AgentConnectionRow row, string? derivedReadiness = null) => new()
     {

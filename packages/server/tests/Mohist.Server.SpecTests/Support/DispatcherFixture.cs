@@ -15,6 +15,7 @@ using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Runner.Grains;
@@ -637,6 +638,9 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Issue.IIssueStore, Mohist.Server.Infrastructure.Data.Issue.IssueStore>();
         siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Sessions.IAgentSessionStore, Mohist.Server.Infrastructure.Data.Sessions.AgentSessionStore>();
         siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();
+        siloBuilder.Services.AddScoped<SlackOutboxStore>();
+        siloBuilder.Services.AddScoped<ISlackConnectionHealthBackpressurer, DispatcherSlackHealthBackpressurer>();
+        siloBuilder.Services.Configure<SlackProviderOptions>(_ => { });
         siloBuilder.Services.AddScoped<RunnerWorkStore>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
         siloBuilder.Services.AddScoped<WorkflowRunVariablesStore>();
@@ -704,6 +708,12 @@ public sealed class DispatcherFixture : IAsyncLifetime
         _specificDeliverySignals.TryGetValue(eventId, out var signal)
             ? signal
             : _specificDeliverySignals[eventId] = new(TaskCreationOptions.RunContinuationsAsynchronously);
+}
+
+internal sealed class DispatcherSlackHealthBackpressurer : ISlackConnectionHealthBackpressurer
+{
+    public Task FlipBackpressuredAsync(string projectId, string connectionId, string reason, CancellationToken ct = default) =>
+        Task.CompletedTask;
 }
 
 /// <summary>

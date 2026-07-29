@@ -201,14 +201,14 @@ public static class SlackConnectionRoutes
 
             var launch = await launcher.LaunchConnectionAsync(agent, prompt, new ConnectionLaunchOrigin(
                 connectionId, body.TeamId, body.SenderSlackUserId, body.ConversationId, body.MessageTs), ct);
-            await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
             var acknowledgement = accepted.AlreadyExisted
                 ? "This task was already accepted; execution is being resumed."
                 : dispatchDecision.Reason ?? "Task accepted and queued for execution.";
-            await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId,
+            await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
                 acknowledgement,
-                launch.JobKey,
+                $"slack-ack:{identity.AsKey()}",
                 ct);
+            await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
             return ApiResults.Ok(new
             {
                 kind = accepted.AlreadyExisted ? "queued" : "accepted",
@@ -225,6 +225,7 @@ public static class SlackConnectionRoutes
             AdapterSessionBody body,
             AgentConnectionStore connections,
             ISecretStore secrets,
+            SlackSetupVerifier verifier,
             OperatorCredential credential,
             TimeProvider time,
             CancellationToken ct) =>
@@ -243,6 +244,7 @@ public static class SlackConnectionRoutes
                 return ApiResults.Conflict("Configure both Slack credentials before starting the adapter.", "credentials_required");
             await connections.UpdateAsync(projectId, connectionId, new HashSet<string>(StringComparer.Ordinal) { "lastHeartbeatAt" },
                 lastHeartbeatAt: time.GetUtcNow(), ct: ct);
+            await verifier.VerifyAsync(projectId, connectionId, ct);
             return ApiResults.Ok(new
             {
                 adapterId = body.AdapterId,
@@ -299,6 +301,23 @@ public static class SlackConnectionRoutes
         string? dispatchRef,
         CancellationToken ct) =>
         await outbox.EnqueueAsync(new SlackOutboxDraft(
+            projectId,
+            connection.Id,
+            connection.WorkspaceTeamId,
+            conversationId,
+            SlackOutboxKinds.UserAction,
+            dispatchRef,
+            JsonSerializer.Serialize(new { text })), ct);
+
+    private static async Task EnqueueRequiredReplyAsync(
+        SlackOutboxStore outbox,
+        string projectId,
+        Agent.Domain.AgentConnection connection,
+        string conversationId,
+        string text,
+        string dispatchRef,
+        CancellationToken ct) =>
+        await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
             projectId,
             connection.Id,
             connection.WorkspaceTeamId,

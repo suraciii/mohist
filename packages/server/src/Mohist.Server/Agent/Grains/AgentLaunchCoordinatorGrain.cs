@@ -246,7 +246,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             Variant: plan.Variant,
             IssueNumber: plan.IssueNumber,
             EpicNumber: plan.EpicNumber,
-            WorkflowRunId: null));
+            WorkflowRunId: null,
+            ConnectionOrigin: plan.ConnectionOrigin));
         await _participantProbe.OnPrepareJobAsync(plan.JobKey, commandId);
 
         _state.State.Plan = plan with

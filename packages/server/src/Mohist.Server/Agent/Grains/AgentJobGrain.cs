@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -52,6 +53,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IAgentJobDispatchObserver _dispatchObserver;
     private readonly IAgentJobStore _jobStore;
     private readonly IEventStore _eventStore;
+    private readonly SlackOutboxStore _slackOutbox;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IGrainFactory _grains;
     private IDisposable? _dispatchTimer;
@@ -63,6 +65,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         TimeProvider timeProvider,
         [PersistentState("agent-job")] IPersistentState<AgentJobState> state,
         IEventStore eventStore,
+        SlackOutboxStore slackOutbox,
         IAgentJobDispatchObserver dispatchObserver,
         IAgentJobStore jobStore,
         IBackgroundTaskLauncher backgroundTasks,
@@ -73,6 +76,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _timeProvider = timeProvider;
         _state = state;
         _eventStore = eventStore;
+        _slackOutbox = slackOutbox;
         _dispatchObserver = dispatchObserver;
         _jobStore = jobStore;
         _backgroundTasks = backgroundTasks;
@@ -104,13 +108,15 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             // If a reminder was lost across silos, re-register it so the
             // background loop keeps retrying until both obligations are
             // durable.
-            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null)
+            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null || State.PendingSlackTerminalDelivery is not null)
             {
                 await EnsureRecoveryReminderAsync();
                 if (State.PendingSessionClose is not null)
                     await DeliverTerminalToSessionAsync(State.PendingSessionClose);
                 if (State.PendingFailureEvent is not null)
                     await EmitFailureEventAsync(State.PendingFailureEvent);
+                if (State.PendingSlackTerminalDelivery is not null)
+                    await DeliverTerminalToSlackAsync(State.PendingSlackTerminalDelivery);
             }
             return;
         }
@@ -791,6 +797,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await SaveAsync();
 
         await PropagateUnknownToInitialTurnAsync(reason);
+        StageSlackTerminalDelivery("Task outcome is unconfirmed. Mohist will continue reconciling it.", SlackOutboxKinds.ExplicitFailure);
+        await SaveAsync();
+        if (State.PendingSlackTerminalDelivery is not null)
+            await DeliverTerminalToSlackAsync(State.PendingSlackTerminalDelivery);
 
         _log.LogInformation(
             "AgentJob {Id} unknown: previous={Previous}, reason={Reason}",
@@ -1267,13 +1277,15 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             // re-attached on the same path so a freshly reactivated grain
             // finishes both durable writes before returning.
             State.PendingSessionClose ??= pending;
-            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null)
+            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null || State.PendingSlackTerminalDelivery is not null)
                 await EnsureRecoveryReminderAsync();
             await SaveAsync();
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingFailureEvent is not null)
                 await EmitFailureEventAsync(State.PendingFailureEvent);
+            if (State.PendingSlackTerminalDelivery is not null)
+                await DeliverTerminalToSlackAsync(State.PendingSlackTerminalDelivery);
             return;
         }
 
@@ -1289,6 +1301,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             failureReason,
             terminalExitCode ?? exitCode);
         State.PendingSessionClose = pending;
+        StageSlackTerminalDelivery(
+            terminalStatus == AgentJobStatus.Completed ? "Task completed." : "Task failed. Review the job in Mohist.",
+            terminalStatus == AgentJobStatus.Completed ? SlackOutboxKinds.TerminalResult : SlackOutboxKinds.ExplicitFailure);
 
         if (terminalStatus == AgentJobStatus.Failed)
         {
@@ -1324,6 +1339,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await MarkInitialTurnTerminalAsync(terminalStatus, message, output, failureReason, failureCategory, terminalExitCode ?? exitCode);
         if (State.PendingFailureEvent is not null)
             await EmitFailureEventAsync(State.PendingFailureEvent);
+        if (State.PendingSlackTerminalDelivery is not null)
+            await DeliverTerminalToSlackAsync(State.PendingSlackTerminalDelivery);
     }
 
     private async Task MarkInitialTurnExecutingAsync()
@@ -1492,7 +1509,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     {
         State.PendingSessionClose = null;
         await SaveAsync();
-        if (State.PendingFailureEvent is not null)
+        if (State.PendingFailureEvent is not null || State.PendingSlackTerminalDelivery is not null)
             return;
         try
         {
@@ -1508,6 +1525,44 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             _log.LogDebug(ex,
                 "AgentJob {Id} could not unregister recovery reminder; orphan tick will self-clean",
                 Key);
+        }
+    }
+
+    private void StageSlackTerminalDelivery(string text, string kind)
+    {
+        var origin = State.ManualPlan?.ConnectionOrigin;
+        if (origin is null || State.PendingSlackTerminalDelivery is not null)
+            return;
+
+        State.PendingSlackTerminalDelivery = new PendingSlackTerminalDelivery(
+            origin,
+            kind,
+            $"agent-job:{Key}:{kind}",
+            text);
+    }
+
+    private async Task DeliverTerminalToSlackAsync(PendingSlackTerminalDelivery pending)
+    {
+        var projectId = State.Input?.ProjectId;
+        if (string.IsNullOrWhiteSpace(projectId))
+            return;
+
+        try
+        {
+            await _slackOutbox.EnqueueRequiredAsync(new SlackOutboxDraft(
+                projectId,
+                pending.Origin.ConnectionId,
+                pending.Origin.WorkspaceTeamId,
+                pending.Origin.DmConversationId,
+                pending.Kind,
+                pending.DispatchRef,
+                JsonSerializer.Serialize(new { text = pending.Text })));
+            State.PendingSlackTerminalDelivery = null;
+            await SaveAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "AgentJob {Id} terminal Slack delivery intent is retained for retry", Key);
         }
     }
 
@@ -1532,7 +1587,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingFailureEvent is not null)
                 await EmitFailureEventAsync(State.PendingFailureEvent);
-            if (State.PendingSessionClose is null && State.PendingFailureEvent is null)
+            if (State.PendingSlackTerminalDelivery is not null)
+                await DeliverTerminalToSlackAsync(State.PendingSlackTerminalDelivery);
+            if (State.PendingSessionClose is null && State.PendingFailureEvent is null && State.PendingSlackTerminalDelivery is null)
             {
                 await UnregisterSelfAsync(reminderName);
                 return;

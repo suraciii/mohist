@@ -118,6 +118,57 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         return new SlackOutboxEnqueueResult(row.Id, MergedIntoExisting: false);
     }
 
+    public async Task<SlackOutboxEnqueueResult> EnqueueRequiredAsync(SlackOutboxDraft draft, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ValidateDraft(draft);
+        if (!SlackOutboxKinds.IsTerminal(draft.Kind) || string.IsNullOrWhiteSpace(draft.DispatchRef))
+            throw new ArgumentException("Required deliveries need a terminal kind and dispatch reference.", nameof(draft));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var existing = await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == draft.ConnectionId
+                && row.Kind == draft.Kind
+                && row.DispatchRef == draft.DispatchRef)
+            .Select(row => new { row.Id })
+            .FirstOrDefaultAsync(ct);
+        if (existing is not null)
+        {
+            await transaction.CommitAsync(ct);
+            return new SlackOutboxEnqueueResult(existing.Id, MergedIntoExisting: true);
+        }
+
+        var pendingRows = await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == draft.ConnectionId && row.State == SlackOutboxStates.Pending)
+            .CountAsync(ct);
+        var backpressured = pendingRows >= _options.Value.OutboxCapacityPerConnection;
+        var now = _timeProvider.GetUtcNow();
+        var row = new SlackOutboxRow
+        {
+            Id = $"slkout_{Guid.NewGuid():N}",
+            ProjectId = draft.ProjectId,
+            ConnectionId = draft.ConnectionId,
+            WorkspaceTeamId = draft.WorkspaceTeamId,
+            DmConversationId = draft.DmConversationId,
+            Kind = draft.Kind,
+            State = SlackOutboxStates.Pending,
+            DispatchRef = draft.DispatchRef,
+            PayloadJson = draft.PayloadJson,
+            NextAttemptAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        db.SlackOutboxRows.Add(row);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        if (backpressured)
+            await _healthBackpressurer.FlipBackpressuredAsync(
+                draft.ProjectId, draft.ConnectionId, SlackProviderBackpressureReasons.OutboxOverflow, ct);
+        return new SlackOutboxEnqueueResult(row.Id, MergedIntoExisting: false);
+    }
+
     private async Task<SlackOutboxEnqueueResult?> TryMergeReplaceableAsync(
         MohistDbContext db,
         SlackOutboxDraft draft,
