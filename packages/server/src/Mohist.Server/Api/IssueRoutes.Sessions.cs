@@ -140,6 +140,33 @@ public static partial class IssueRoutes
                 grains,
                 ct);
         });
+
+        group.MapPost("/{number:int}/sessions/{name}/stop", async (
+            HttpContext ctx,
+            string projectRef,
+            int number,
+            string name,
+            AgentSessionCancelRequest? request,
+            AgentSessionQuerier sessions,
+            IGrainFactory grains,
+            IHubContext<RunnerHub> runnerHub,
+            RunnerConnectionTracker connections,
+            CancellationToken ct) =>
+        {
+            var project = GetRequiredProject(ctx);
+            var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
+            if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
+
+            return await AgentSessionStopRoutes.ExecuteStopAsync(
+                project.Id,
+                sessionId,
+                request,
+                sessions,
+                grains,
+                runnerHub,
+                connections,
+                ct);
+        });
     }
 }
 

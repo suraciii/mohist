@@ -123,15 +123,18 @@ async function handleCancel(
     if (!facts || !facts.cancelled) {
       return { state: "not-cancellable" }
     }
+    const confirmed = handle.kind === "opencode" || facts.stopConfirmed === true
     recordCancelActivity(
       deps.agentSessionRuntimeEventOutbox ?? null,
       sessionTarget,
       binding.runtimeSessionId,
-      facts,
+      { ...facts, stopConfirmed: confirmed },
     )
     return facts.stopConfirmed === false
-      ? { state: "cancelled", interruptUnconfirmed: true }
-      : { state: "cancelled" }
+      ? { state: "unknown", interruptUnconfirmed: true }
+      : confirmed
+        ? { state: "stopped" }
+        : { state: "stop-requested" }
   } catch (error) {
     console.error("cancel runtime.cancel threw:", error instanceof Error ? error.message : String(error))
     return { state: "not-cancellable" }

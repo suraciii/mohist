@@ -128,7 +128,7 @@ export interface ReceiveWorkflowRunStatusPayload {
  * Payload delivered by the server-side `CancelAgentSession` SignalR
  * invocation. Distinct from
  * `ReceiveFollowup` because cancel needs a reply path (the runner
- * returns `{ state: "cancelled" | "not-cancellable" | <terminal-state> }`)
+ * returns `{ state: "stopped" | "unknown" | "stop-requested" | <terminal-state> }`)
  * while followup is strictly fire-and-forget. The `target` shape is the
  * same `SessionTarget` discriminator; today only
  * generic (non-workflow) sessions are reachable through this method
@@ -137,20 +137,21 @@ export interface ReceiveWorkflowRunStatusPayload {
  */
 export interface CancelAgentSessionPayload {
   target: ReceiveFollowupSessionTarget
+  turnId?: string
 }
 
 /**
  * Reply shape returned by the runner for the `CancelAgentSession`
  * invocation. The server mirrors this value into the HTTP response so
  * the API can never fake success. Recognised values:
- * `cancelled`, `not-cancellable`, and the terminal-state names
- * (`completed` / `failed` / `stopped`).
+ * `stopped`, `unknown`, `stop-requested`, `not-cancellable`, and terminal
+ * state names.
  *
  * `interruptUnconfirmed` is the honest
  * stop-confirmation flag the API needs to surface when a runtime
  * (currently Pi) could not confirm the turn actually stopped. OpenCode
  * replies never set the flag — the OpenCode abort is authoritative —
- * so confirmed-cancel HTTP responses stay byte-identical to today.
+ * so confirmed-stop replies report `stopped`.
  */
 export interface CancelAgentSessionReply {
   state: string

@@ -115,7 +115,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
     const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-    expect(reply).toEqual({ state: "cancelled" })
+    expect(reply).toEqual({ state: "stopped" })
     expect(recording.producedFactCalls).toHaveLength(1)
     expect(recording.beforeExecutionCalls).toHaveLength(0)
     expect(recording.producedFactCalls[0]).toMatchObject({
@@ -148,7 +148,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
     const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-    expect(reply).toEqual({ state: "cancelled" })
+    expect(reply).toEqual({ state: "stopped" })
     const fact = recording.producedFactCalls[0]
     expect(fact.runtimeSessionId).toBe("runtime-1")
     expect(fact.event.type).toBe("session.activity")
@@ -177,7 +177,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
     const reply = (await emitCancel(builder, piPayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-    expect(reply).toEqual({ state: "cancelled", interruptUnconfirmed: true })
+    expect(reply).toEqual({ state: "unknown", interruptUnconfirmed: true })
     expect(recording.producedFactCalls).toHaveLength(1)
     expect(recording.producedFactCalls[0]).toMatchObject({
       producerFamily: "generic-followup",
@@ -293,7 +293,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
     const reply = (await emitCancel(builder, supersededPayload)) as { state: string; interruptUnconfirmed?: boolean }
 
-    expect(reply).toEqual({ state: "cancelled" })
+    expect(reply).toEqual({ state: "stopped" })
     expect(recording.producedFactCalls).toHaveLength(1)
     expect(recording.producedFactCalls[0].runtimeSessionId).toBe("runtime-old")
     expect(recording.producedFactCalls[0].event.payload).toMatchObject({
@@ -314,7 +314,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
     const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-    expect(reply).toEqual({ state: "cancelled" })
+    expect(reply).toEqual({ state: "stopped" })
     expect(recording.producedFactCalls).toHaveLength(0)
   })
 
@@ -343,7 +343,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
       const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-      expect(reply).toEqual({ state: "cancelled" })
+      expect(reply).toEqual({ state: "stopped" })
       await new Promise<void>((resolve) => setImmediate(resolve))
       expect(errorSpy).toHaveBeenCalledWith(
         "failed to persist cancel activity:",

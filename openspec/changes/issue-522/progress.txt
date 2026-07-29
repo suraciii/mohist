@@ -17,3 +17,9 @@
 - The session-scoped cancel route resolves a Turn first, returns stale/Executing states without Runner contact, delegates launch Turns to the owning Job, and cancels later Turns directly on the Session.
 - Cancelled Job observations and read projections use `cancelled`; `Unknown` remains non-terminal.
 - Focused AgentJob cancellation and T-001 lifecycle tests pass; the API cancellation class still hangs after host startup and needs a follow-up investigation before claiming the full spec suite passes.
+
+## T-003
+
+- Added `POST /api/projects/{projectRef}/agent-sessions/{sessionId}/stop` and the issue-scoped stop alias. The Session grain resolver gates the request to Executing Turns, directs Queued Turns to cancel, and returns terminal stale status without contacting the Runner.
+- Stop reuses `CancelAgentSession` with a Server-minted `turnId` in the payload and mirrors the Runner reply. Runner replies now use `stopped`, `unknown` with `interruptUnconfirmed`, or `stop-requested`; binding-guarded idle/unknown activity outbox behavior remains unchanged and available during snapshot recovery.
+- Runner typecheck and full suite pass (123 files, 1444 tests). Server production and spec projects compile; the focused API spec host still exceeds five minutes during startup, consistent with the T-002 recorded integration fixture hang.

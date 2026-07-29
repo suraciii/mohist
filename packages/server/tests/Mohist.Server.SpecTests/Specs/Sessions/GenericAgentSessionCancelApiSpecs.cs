@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Api;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -75,6 +76,81 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         Assert.Empty(hub.Invocations);
     }
 
+    [Fact]
+    public async Task Stop_ExecutingTurnSendsTurnTargetAndReturnsStopped()
+    {
+        var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch");
+        var turnId = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync()).Id;
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal("stopped", data.GetProperty("state").GetString());
+        var invocation = Assert.Single(hub.Invocations);
+        Assert.Equal("CancelAgentSession", invocation.Method);
+        var payload = JsonSerializer.SerializeToElement(invocation.Arguments.Single());
+        Assert.Equal(turnId, payload.GetProperty("turnId").GetString());
+    }
+
+    [Fact]
+    public async Task Stop_QueuedTurnDirectsCallerToCancelWithoutContactingRunner()
+    {
+        var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal("queued", data.GetProperty("state").GetString());
+        Assert.Equal("cancel", data.GetProperty("action").GetString());
+        Assert.Empty(hub.Invocations);
+    }
+
+    [Fact]
+    public async Task Stop_UnconfirmedReplySurfacesUnknownAndInterruptFlag()
+    {
+        var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch", "pi");
+        var turnId = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync()).Id;
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("unknown", true));
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal("unknown", data.GetProperty("state").GetString());
+        Assert.True(data.GetProperty("interruptUnconfirmed").GetBoolean());
+        Assert.Single(hub.Invocations);
+    }
+
+    [Fact]
+    public async Task Stop_TerminalTurnReturnsAlreadyEndedWithoutContactingRunner()
+    {
+        var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
+        using var cancel = await PostCancelAsync(project.Id, sessionId, turnId);
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal("turn-already-ended", data.GetProperty("state").GetString());
+        Assert.Equal("cancelled", data.GetProperty("turnStatus").GetString());
+        Assert.Empty(hub.Invocations);
+    }
+
     private async Task<JsonElement> ReadDataAsync(HttpResponseMessage response)
     {
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -84,5 +160,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     private Task<HttpResponseMessage> PostCancelAsync(string projectId, string sessionId, string turnId) =>
         _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/agent-sessions/{sessionId}/cancel",
+            new { turnId });
+
+    private Task<HttpResponseMessage> PostStopAsync(string projectId, string sessionId, string turnId) =>
+        _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agent-sessions/{sessionId}/stop",
             new { turnId });
 }
