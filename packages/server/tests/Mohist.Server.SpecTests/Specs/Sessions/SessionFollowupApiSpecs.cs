@@ -133,9 +133,9 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
 
         using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "" });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
     }
 
     [Fact]
@@ -145,9 +145,9 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
 
         using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "   \t  " });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
     }
 
     [Fact]
@@ -157,9 +157,9 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
 
         using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
     }
 
     [Fact]
@@ -169,7 +169,9 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
 
         using var response = await PostFollowupAsync(project.Id, issue.Number, "does-not-exist", new { text = "ping" });
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var notFoundDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("rejected", notFoundDoc.RootElement.GetProperty("data").GetProperty("status").GetString());
     }
 
     [Fact]
@@ -182,12 +184,12 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
 
         using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "ping" });
 
-            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
-            Assert.Equal(session.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
-            Assert.Contains(session.Id, doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
-            Assert.Contains("Reset", doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+            var data = doc.RootElement.GetProperty("data");
+            Assert.Equal("rejected", data.GetProperty("status").GetString());
+            Assert.Equal("runtime_session_missing", data.GetProperty("code").GetString());
+            Assert.Equal(session.Id, data.GetProperty("sessionId").GetString());
             Assert.Empty(runnerHub.SentMessages);
     }
 

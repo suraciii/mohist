@@ -36,3 +36,10 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - Added grain specs for original operationId retry correlation and long-queued lease durability.
 - Focused verification: `AgentSessionFollowupGrainSpecs` 31 passed; follow-up/recovery API classes 54 passed; server test assembly build passed.
 - Final server spec verification: 3353 passed, 0 failed.
+
+## T-002 implementation
+- Both canonical and issue-scoped follow-up routes now return the shared `accepted`/`rejected`/`unknown` result envelope.
+- Confirmed rejection is represented in the response data without creating an input; persistence uncertainty is represented as `unknown`; runner delivery failure does not undo an accepted input.
+- The `Idempotency-Key` header continues through both route entry points into the grain accept command, and API coverage verifies same-key identity replay.
+- Generic and unified session summaries expose status/identity-only input and turn observations. Input text and turn results remain absent from the observation DTO.
+- Added API coverage for accepted queued follow-ups, rejected routes, same-key replay, and observation status; direct xUnit verification passed for all affected follow-up/history classes. A full-assembly run still has one unrelated pre-existing cancel/reset timing failure.

@@ -72,7 +72,7 @@ public static class AgentSessionFollowupRoutes
         {
             var text = body?.Text;
             if (string.IsNullOrWhiteSpace(text))
-                return ApiResults.BadRequest("text is required", "followup_text_missing");
+                return Rejected(sessionId, "followup_text_missing", "text is required");
 
             var project = context.GetResolvedProject();
             var idempotencyKey = AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(context) ?? string.Empty;
@@ -95,7 +95,7 @@ public static class AgentSessionFollowupRoutes
     {
         var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
         if (target is null)
-            return ApiResults.NotFound($"Agent session {sessionId} not found");
+            return Rejected(sessionId, "not_found", $"Agent session {sessionId} not found");
 
         var grain = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
         AgentSessionFollowupAcceptResult accept;
@@ -108,24 +108,27 @@ public static class AgentSessionFollowupRoutes
         }
         catch (RuntimeSessionMissingException ex)
         {
-            return ApiResults.Conflict(
-                ex.Message,
-                "runtime_session_missing",
-                new { sessionId = ex.SessionId });
+            return Rejected(ex.SessionId, "runtime_session_missing", ex.Message);
         }
         catch (RecoveryOperationInProgressException ex)
         {
-            return ApiResults.Conflict(
-                ex.Message,
-                "recovery_in_progress",
-                new { sessionId = ex.SessionId, operation = ex.Operation });
+            return Rejected(ex.SessionId, "recovery_in_progress", ex.Message);
         }
         catch (AgentSessionFollowupCapacityExceededException ex)
         {
-            return ApiResults.Conflict(
-                ex.Message,
-                "capacity_exceeded",
-                new { sessionId = ex.SessionId, capacity = ex.Capacity });
+            return Rejected(ex.SessionId, "capacity_exceeded", ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Rejected(target.SessionId, "followup_rejected", ex.Message);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            return ApiResults.Ok(new AgentSessionFollowupResult(
+                target.SessionId,
+                Status: "unknown",
+                Error: ex.Message,
+                Code: "followup_acceptance_unknown"));
         }
         catch (FollowupOperationInProgressException ex)
         {
@@ -234,10 +237,11 @@ public static class AgentSessionFollowupRoutes
 
         if (string.Equals(delivery?.Error, "missing", StringComparison.Ordinal))
         {
-            return ApiResults.Conflict(
-                $"Runtime session missing for AgentSession {target.SessionId}.",
-                "runtime_session_missing",
-                new { sessionId = target.SessionId });
+            return ApiResults.Ok(new AgentSessionFollowupResult(
+                target.SessionId,
+                InputId: accept.InputId,
+                TurnId: accept.TurnId,
+                Status: "accepted"));
         }
 
         return ApiResults.Ok(new AgentSessionFollowupResult(
@@ -246,6 +250,13 @@ public static class AgentSessionFollowupRoutes
             TurnId: accept.TurnId,
             Status: "accepted"));
     }
+
+    private static IResult Rejected(string sessionId, string code, string error) =>
+        ApiResults.Ok(new AgentSessionFollowupResult(
+            sessionId,
+            Status: "rejected",
+            Error: error,
+            Code: code));
 }
 
 /// <summary>
@@ -257,9 +268,11 @@ public static class AgentSessionFollowupRoutes
 public sealed record GenericFollowupRequest(string? Text = null);
 
 public sealed record AgentSessionFollowupResult(
-    string SessionId,
+    string? SessionId,
     string? InputId = null,
     string? TurnId = null,
-    string Status = "accepted");
+    string Status = "accepted",
+    string? Error = null,
+    string? Code = null);
 
 public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);

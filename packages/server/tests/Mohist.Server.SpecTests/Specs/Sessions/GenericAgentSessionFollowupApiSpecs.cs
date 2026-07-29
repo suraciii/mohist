@@ -127,10 +127,11 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         {
             using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "resume after restart" });
 
-            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            Assert.Equal("runtime_session_missing", body.RootElement.GetProperty("code").GetString());
-            Assert.Equal(sessionId, body.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+            var data = body.RootElement.GetProperty("data");
+            Assert.Equal("accepted", data.GetProperty("status").GetString());
+            Assert.False(string.IsNullOrEmpty(data.GetProperty("inputId").GetString()));
         }
         finally
         {
@@ -221,9 +222,9 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "" });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
     }
 
     [Fact]
@@ -233,9 +234,9 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "   \t  " });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
     }
 
     [Fact]
@@ -245,9 +246,9 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
     }
 
     [Fact]
@@ -257,9 +258,9 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
 
         using var response = await PostGenericFollowupAsync(project.Id, Guid.NewGuid().ToString("N"), new { text = "ping" });
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("not_found", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
     }
 
     [Fact]
@@ -269,10 +270,12 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ping" });
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
-        Assert.Equal(sessionId, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("rejected", data.GetProperty("status").GetString());
+        Assert.Equal("runtime_session_missing", data.GetProperty("code").GetString());
+        Assert.Equal(sessionId, data.GetProperty("sessionId").GetString());
     }
 
     [Fact]
@@ -348,6 +351,31 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     }
 
     [Fact]
+    public async Task GenericFollowupEndpoint_SameIdempotencyKeyReturnsOriginalIdentityAndObservation()
+    {
+        var (project, sessionId, _) = await CreateIdleGenericSessionAsync("gen-followup-idempotent");
+        const string key = "followup-call-1";
+
+        using var first = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "same input" }, key);
+        using var second = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "same input" }, key);
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        var firstData = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        var secondData = (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("accepted", firstData.GetProperty("status").GetString());
+        Assert.Equal(firstData.GetProperty("inputId").GetString(), secondData.GetProperty("inputId").GetString());
+        Assert.Equal(firstData.GetProperty("turnId").GetString(), secondData.GetProperty("turnId").GetString());
+
+        using var summary = await _client.GetAsync($"/api/projects/{project.Id}/agent-sessions/{sessionId}");
+        var summaryData = (await summary.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Single(summaryData.GetProperty("inputs").EnumerateArray());
+        Assert.Equal("accepted", summaryData.GetProperty("inputs")[0].GetProperty("acceptance").GetString());
+        Assert.Equal("queued", summaryData.GetProperty("turns")[0].GetProperty("status").GetString());
+        Assert.False(summaryData.GetProperty("inputs")[0].TryGetProperty("text", out _));
+    }
+
+    [Fact]
     public async Task GenericFollowupEndpoint_SessionInOtherProject_ReturnsNotFound()
     {
         // The route group resolves a project from the URL; passing the
@@ -357,7 +385,9 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
 
         using var response = await PostGenericFollowupAsync(projectB.Id, sessionIdInA, new { text = "cross-project" });
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var crossProjectDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("rejected", crossProjectDoc.RootElement.GetProperty("data").GetProperty("status").GetString());
     }
 
     [Fact]

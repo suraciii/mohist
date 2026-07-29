@@ -131,7 +131,9 @@ public class IssueWorkflowSessionHistorySpecs
         using var reset = await _fixture.Client.PostAsync($"{basePath}/reset", content: null);
         using var cancel = await _fixture.Client.PostAsync($"{basePath}/cancel", content: null);
 
-        Assert.Equal(HttpStatusCode.NotFound, followup.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, followup.StatusCode);
+        using var followupBody = JsonDocument.Parse(await followup.Content.ReadAsStringAsync());
+        Assert.Equal("rejected", followupBody.RootElement.GetProperty("data").GetProperty("status").GetString());
         Assert.Equal(HttpStatusCode.NotFound, compact.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, reset.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, cancel.StatusCode);

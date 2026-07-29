@@ -46,8 +46,24 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
         }
     }
 
-    protected Task<HttpResponseMessage> PostGenericFollowupAsync(string projectId, string sessionId, object body) =>
-        _client.PostAsJsonAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}/followup", body);
+    protected Task<HttpResponseMessage> PostGenericFollowupAsync(
+        string projectId,
+        string sessionId,
+        object body,
+        string? idempotencyKey = null)
+    {
+        if (idempotencyKey is null)
+            return _client.PostAsJsonAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}/followup", body);
+
+        var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/agent-sessions/{sessionId}/followup")
+        {
+            Content = JsonContent.Create(body),
+        };
+        request.Headers.Add("Idempotency-Key", idempotencyKey);
+        return _client.SendAsync(request);
+    }
 
     protected static async Task<string[]> GetActiveWorkSnapshotAsync(IRunnerGrain runner) =>
         (await runner.GetRuntimeStateAsync()).ActiveWorks
