@@ -40,7 +40,7 @@
       "type": "WRITE",
       "output": "AgentConnection domain + AgentConnectionRow + AgentConnectionStore + AgentQuerier + DbContext mapping + unique index + create/list/view/edit/delete + EF migration.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Implements design D1. Follows the RoutingRule/WatchEntry column-per-field pattern (MohistDbContext.cs:399-440), not the Agent JSON-blob pattern, because binding and the four facts must be individually indexed/queryable and (Agent,workspace) uniqueness needs real columns. Credentials/inbox/outbox are separate Server-infrastructure aggregates keyed by ConnectionId (T-001, T-004)."
     },
     {

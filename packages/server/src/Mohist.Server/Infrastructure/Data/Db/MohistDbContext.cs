@@ -52,6 +52,7 @@ public class MohistDbContext : DbContext
     public DbSet<AgentRow> Agents { get; set; } = null!;
     public DbSet<RoutingRuleRow> RoutingRules { get; set; } = null!;
     public DbSet<WatchEntryRow> WatchEntries { get; set; } = null!;
+    public DbSet<AgentConnectionRow> AgentConnections { get; set; } = null!;
     public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
     public DbSet<EpicEventRow> EpicEvents { get; set; } = null!;
     public DbSet<AgentSessionEventRow> AgentSessionEvents { get; set; } = null!;
@@ -439,6 +440,39 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_WatchEntries_ProjectId_IssueNumber");
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.State })
                 .HasDatabaseName("IX_WatchEntries_ProjectId_IssueNumber_State");
+        });
+
+        modelBuilder.Entity<AgentConnectionRow>(entity =>
+        {
+            entity.ToTable("AgentConnections");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AgentId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ProviderKind).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AppId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.BotUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.BotName).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.AvatarHash).HasMaxLength(512);
+            entity.Property(e => e.SetupProgress).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.DesiredState).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.ConnectionHealth).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.HealthReason).HasMaxLength(1024);
+            entity.Property(e => e.AgentReadiness).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.OwnerSlackUserId).HasMaxLength(256);
+            entity.Property(e => e.LastHeartbeatAt);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.Property(e => e.DeletedAt);
+            entity.HasIndex(e => new { e.ProjectId, e.AgentId, e.WorkspaceTeamId })
+                .IsUnique()
+                .HasFilter("\"DeletedAt\" IS NULL")
+                .HasDatabaseName("UX_AgentConnections_ProjectId_AgentId_WorkspaceTeamId");
+            entity.HasIndex(e => new { e.ProjectId, e.AgentId })
+                .HasDatabaseName("IX_AgentConnections_ProjectId_AgentId");
+            entity.HasIndex(e => e.Id)
+                .HasDatabaseName("IX_AgentConnections_Id");
         });
 
         modelBuilder.Entity<IssueEventRow>(entity =>

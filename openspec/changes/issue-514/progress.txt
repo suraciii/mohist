@@ -97,3 +97,19 @@ All tests pass:
 - `Mohist.Server.SpecTests` (3336 passed) — includes `ConnectionSecretsMigrationSpecs` (Up creates table with correct columns/index/constraint, Down drops, migration applies on existing schema, DbSet exposed), `AesGcmSecretStoreSpecs` (round-trip both kinds, wrong-key failure, delete, per-connection isolation).
 - `Mohist.Cli.Tests`, `Mohist.Server.ArchTests`, `Mohist.Workflow.Definition.Tests`, web, runner — all pass (no regressions).
 
+# Issue 514 / T-002 — AgentConnection aggregate and lifecycle
+
+## Codebase Patterns
+
+- `AgentConnection` follows the `RoutingRule`/`WatchEntry` relational pattern: domain and EF row are separate, each queryable fact has its own column, and `AgentConnectionStore` is scoped rather than an Orleans grain.
+- Binding fields are accepted only at create time. `UpdateAsync` explicitly rejects `ProjectId`, `AgentId`, `ProviderKind`, `WorkspaceTeamId`, `AppId`, and `BotUserId` with `immutable_binding`; mutable lifecycle/access fields remain field-selected updates.
+- Active-Agent validation uses the existing `AgentQuerier`, preserving the Agent JSON row as the single execution-definition source. AgentConnection stores no execution snapshot.
+- The partial unique SQLite index on `(ProjectId, AgentId, WorkspaceTeamId)` with `DeletedAt IS NULL` permits replacement after soft deletion while preventing two active bindings.
+- Connection deletion is a soft delete for the aggregate and explicitly removes both credential slots through `ISecretStore`. Cleanup runs on repeated deletes too, so interrupted cleanup can be retried. Provider inbox/mapping/outbox records do not exist until T-004 and must extend this cleanup path when introduced.
+- Specs use `TestSqliteDatabase.CreateMigrated()`, `TestDbContextFactory`, `FakeTimeProvider`, and an in-memory `ISecretStore` fake. They cover immutable binding, archived-Agent rejection, uniqueness, distinct workspaces, independent facts in both directions, absence of execution-definition fields, credential cleanup, and Agent preservation.
+
+## Verification
+
+- Baseline and post-change `Mohist.Server.SpecTests` passed against migrated in-memory SQLite; post-change total: 3356 passed.
+- Full `npm test` passed: Workflow Definition 175, CLI 1443, Server Unit 1575, Server Arch 35, Server Spec 3356, Web 5153 (1 skipped), Runner 1443.
+
