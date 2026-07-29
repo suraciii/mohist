@@ -4,7 +4,7 @@
 
 ## What Changes
 
-- 新增凭据轮换：用户可重新提交 App/Bot token 并立即同步重新验证；新凭据解析出的 workspace/App/Bot 与原绑定不一致时被拒绝，现有绑定保持不变，轮换不借机改绑。`configure` 对已验证 Connection 执行轮换语义（同步验证 + 绑定一致性校验），不再是无校验的静默覆盖。
+- 新增凭据轮换：用户可重新提交 App/Bot token 并立即同步重新验证；新凭据解析出的 workspace/App/Bot 与原绑定不一致时被拒绝，现有绑定保持不变，轮换不借机改绑。`configure` 对已绑定身份的 Connection 增加守卫，拒绝并引导使用 `rotate-credentials`，不再是无校验的静默覆盖。
 - 新增 Owner 转移：操作者对已有 Owner 的 Connection 发起转移，生成新的短时单次认领码；新 Owner 在 Bot 私聊认领成功前旧 Owner 保持有效（原子交换）；离职、停用或 guest 身份的成员不会自动转给同名成员；转移认领复用既有 workspace 正式成员校验。
 - 暴露 Disable/Enable：新增路由与 CLI 命令切换 `DesiredState`；Disable 后立即停止接受 Slack 输入和发送新回复（ingress 与 adapter discovery 双向拦截），但已接受执行仍由 Mohist 保存；Enable 后不回放禁用期间的消息或过期进度。Disable 是用户选择，Degraded 是外部能力异常，两者不互相顶替。
 - 明确 Delete 边界：删除清理 Connection 专属凭据、接收进度（inbox）、会话映射与待发记录（outbox），不删除 Agent 与已接受的 Job/Session/Input/Turn/附件，诊断面不假装已从 Slack 卸载 App。（现有 `DeleteAsync` 已做级联清理，本 issue 确认其保留边界并补齐诊断措辞。）

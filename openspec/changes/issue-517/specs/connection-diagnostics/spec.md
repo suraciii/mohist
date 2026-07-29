@@ -52,15 +52,15 @@ The diagnostic SHALL probe whether the bound Owner is currently a regular, non-d
 
 ### Requirement: Identity drift is detected and shown honestly without auto-rewrite
 
-The diagnostic SHALL detect when the Slack-side App or Bot name or avatar differs from the name or avatar recorded on the Connection, and when the Bot presentation name differs from the bound Agent's name. Drift SHALL be surfaced honestly as a diagnostic fact. Mohist SHALL NOT automatically modify the Slack App name, avatar, or Bot profile, and SHALL NOT silently overwrite the Connection's recorded identity to match.
+The diagnostic SHALL detect when the Slack-side App or Bot name or icon differs from the name or icon recorded on the Connection at the last verification, and when the Bot presentation name differs from the bound Agent's name. Drift SHALL be surfaced honestly as a diagnostic fact with the concrete differing values shown. Mohist SHALL NOT automatically modify the Slack App name, icon, or Bot profile, and SHALL NOT silently overwrite the Connection's recorded identity to match.
 
 #### Scenario: Name drift surfaced
 - **WHEN** the Slack-side Bot display name differs from the Connection's recorded BotName or the bound Agent's name
 - **THEN** the diagnostic surfaces the identity-drift state showing the difference, and does not modify the Slack side or silently overwrite the Connection record
 
 #### Scenario: Avatar drift surfaced
-- **WHEN** the Slack-side Bot avatar hash differs from the Connection's recorded AvatarHash
-- **THEN** the diagnostic surfaces the avatar drift and does not modify the Slack side
+- **WHEN** the Slack-side Bot icon URL captured at the latest verification differs from the icon URL recorded at the previous verification
+- **THEN** the diagnostic surfaces the avatar drift showing both icon URLs, and does not modify the Slack side
 
 ### Requirement: The Web presents the diagnostic summary
 

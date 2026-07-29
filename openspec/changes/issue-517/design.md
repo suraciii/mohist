@@ -39,13 +39,13 @@ Current state (sourced from the #514 implementation):
 
 Add `POST /api/projects/{projectRef}/slack-connections/{connectionId}/rotate-credentials` (body: `SlackCredentialsBody`, same shape as configure). The route:
 
-1. Loads the current connection and requires `SetupProgress ∈ {ClaimOwner, Complete}` (identity must be bound — rotation is for verified connections; unverified connections use `configure`).
+1. Loads the current connection and requires that identity is bound (i.e. `WorkspaceTeamId`, `AppId`, and `BotUserId` are populated — the same `HasBoundIdentity` check the store uses in `BindSlackIdentityAsync`, `AgentConnectionStore.cs:236`). Rotation is for connections whose identity was established by a prior successful verification, regardless of current `SetupProgress` (a connection that regressed to `FixSlackSetup` after credential expiry still has a bound identity and should rotate, not re-configure).
 2. Calls a new `SlackSetupVerifier.VerifyRotationAsync(projectId, connectionId, newAppToken, newBotToken, ct)` that runs the full Slack verification (auth.test → bots.info → scopes) **using the supplied tokens directly** — it does NOT read from or write to the secret store. It returns a `RotationCheckResult { Ok, Reason, ResolvedTeamId, ResolvedAppId, ResolvedBotUserId }`.
 3. The route checks `ResolvedTeamId/AppId/BotUserId` against the connection's bound `WorkspaceTeamId/AppId/BotUserId`. If any differ → `400 credential_binding_mismatch`, do not store.
 4. If scope check fails or Slack rejects the tokens → `400 credential_verification_failed` with the concrete reason, do not store.
 5. On success → store both tokens via `ISecretStore.StoreAsync`, clear `HealthReason` if it was credential-related, return the updated connection.
 
-`configure` (`SlackConnectionRoutes.cs:88`) stays unchanged for initial setup but gains a guard: if `SetupProgress` indicates identity is already bound (`ClaimOwner` or `Complete`), it returns `409 use_rotate_credentials` pointing the operator to `rotate-credentials`. This prevents the silent-overwrite regression where calling `configure` on a verified connection resets `SetupProgress → WaitingForSlackService`.
+`configure` (`SlackConnectionRoutes.cs:88`) stays unchanged for initial setup but gains a guard: if identity is already bound (the same `HasBoundIdentity` check), it returns `409 use_rotate_credentials` pointing the operator to `rotate-credentials`. This prevents the silent-overwrite regression where calling `configure` on a connection with a bound identity resets `SetupProgress → WaitingForSlackService` and defers verification to the next heartbeat. Checking bound-identity state (rather than specific `SetupProgress` values) closes the edge case where a once-verified connection regressed to `FixSlackSetup` after credential expiry — such a connection still has a bound identity and should rotate, not re-configure.
 
 **Rationale:** verify-before-store is strictly safer than store-then-verify-then-rollback: there is no window where invalid tokens are in the store, and no rollback path to get wrong. A dedicated route keeps the initial-setup and rotation semantics cleanly separated (different preconditions, different verification timing). `VerifyRotationAsync` reuses the same Slack calls and scope list as `VerifyAsync` but parameterizes the token source and skips the `BindSlackIdentityAsync` call (identity is already bound; rotation must not rebind).
 
@@ -104,13 +104,15 @@ Add `Agent/Services/ConnectionDiagnostic.cs` — a pure function `Compute(AgentC
 | Priority | Condition | Primary state | Next action |
 |---|---|---|---|
 | 1 | `SetupProgress != Complete` | Setup incomplete | Advance the current setup step |
-| 2 | `ConnectionHealth == Unhealthy` | Credentials invalid | Rotate credentials |
-| 3 | adapter offline (stale heartbeat) | Service offline | Start mohist-slack |
+| 2 | `ConnectionHealth == Unhealthy` AND `HealthReason` indicates credential/scope/App-Bot failure | Credentials invalid | Rotate credentials |
+| 3 | adapter offline (stale heartbeat) OR `ConnectionHealth == Unhealthy` with a service-unreachable reason (e.g. "Slack could not be reached") | Service offline | Start mohist-slack / check Slack connectivity |
 | 4 | Owner unavailable (D3 probe) | Owner unavailable | Transfer ownership |
 | 5 | `AgentReadiness == NeedsSetup` | Agent needs setup | Configure Agent runtime/model |
 | 6 | `DesiredState == Disabled` | Disabled | Enable the Connection |
 | 7 | Identity drift detected (D7) | Identity drift | Review the name/avatar difference |
 | 8 | none of the above | Healthy | No action needed |
+
+Priority 2 and 3 both cover `ConnectionHealth == Unhealthy` but split on the `HealthReason` content: `SlackSetupVerifier.FailAsync` produces reasons like "Slack rejected the Bot token" (credential), "Slack is missing required scopes" (credential), and "Slack could not be reached" (service). The diagnostic inspects the reason string to classify each case, so a service-unreachable failure does not produce a misleading "Rotate credentials" next action.
 
 The function does not collapse facts into a `Connected` value; `Facts` exposes all independent dimensions so the UI can show supporting detail. Degraded (backpressure) health surfaces as a supporting fact, not as the primary state (it is a reliability-issue concern, not this issue's).
 
@@ -120,18 +122,23 @@ Add `GET /api/projects/{projectRef}/slack-connections/{connectionId}/diagnostic`
 
 **Alternatives:** (a) Fold the diagnostic into `view` (always compute on GET) — rejected: `view` is also used by scripts and the adapter-adjacent tooling that expect the raw object; a separate endpoint lets the diagnostic evolve without breaking the raw contract. (b) Store a computed `PrimaryState` column — rejected: it is a pure derivation of other facts plus a live probe; storing it creates a stale-value problem and a second source of truth.
 
-### D7. Identity drift detected from a verification-time snapshot plus Agent-name comparison
+### D7. Identity drift detected from verification-time snapshots (name and icon)
 
-Add `VerifiedBotName` (nullable string) to `AgentConnection` and `AgentConnectionRow`. `SlackSetupVerifier.VerifyAsync` and `VerifyRotationAsync` set `VerifiedBotName` from the `BotsInfoAsync` response (`bot.Bot.Name`) on every successful verification. The diagnostic detects two drift kinds:
+Add `VerifiedBotName` and `VerifiedBotIconUrl` (both nullable strings) to `AgentConnection` and `AgentConnectionRow`. Extend `SlackBotInfo` (`ISlackApiClient.cs:61`) with an `IconUrl` field populated from the `icons` object in the `bots.info` response (pick the highest-resolution image URL available). `SlackSetupVerifier.VerifyAsync` and `VerifyRotationAsync` capture both `VerifiedBotName` (from `bot.Bot.Name`) and `VerifiedBotIconUrl` (from `bot.Bot.IconUrl`) on every successful verification.
 
-- **Presentation drift:** `VerifiedBotName` (what Slack actually shows) ≠ `BotName` (what the operator configured on the Connection).
+The diagnostic detects three drift kinds:
+
+- **Presentation name drift:** `VerifiedBotName` (what Slack actually shows) ≠ `BotName` (what the operator configured on the Connection).
 - **Agent-name drift:** `BotName` (the Bot's configured display name) ≠ `Agent.Name` (the bound Agent's name).
+- **Avatar drift:** the `VerifiedBotIconUrl` captured at the latest verification differs from the `VerifiedBotIconUrl` stored from the previous verification — meaning the Slack-side Bot icon changed between verifications.
 
-Both are surfaced as diagnostic facts with the concrete values shown. Mohist does NOT modify the Slack side or overwrite `BotName`/`VerifiedBotName` to mask the difference. Avatar drift is deferred: Slack's `bots.info` returns icon URLs, not a stable hash, so a meaningful comparison requires fetching and hashing the image — out of scope for this issue (Open Questions).
+All three are surfaced as diagnostic facts with the concrete values shown. Mohist does NOT modify the Slack side or overwrite `BotName`/`VerifiedBotName`/`VerifiedBotIconUrl` to mask the difference.
 
-**Rationale:** capturing the Slack-side name at verification time (which already calls `bots.info`) is zero-cost — no extra API call. The snapshot is refreshed on every heartbeat-triggered verification, so it tracks Slack-side renames without a dedicated polling loop. `VerifiedBotName` is an observation (what Slack reports), not a Mohist-owned setting, so it sits alongside `BotName` (what the operator chose) without conflating them.
+Avatar drift compares icon URL to icon URL (Slack-side current vs Slack-side last-verified), not URL to hash — `AvatarHash` on the Connection is an operator-provided presentation field with no guaranteed relationship to Slack's icon URL format, so it is not a reliable comparison target. The icon-URL-to-icon-URL comparison detects real avatar changes on the Slack side without fetching or hashing image bytes.
 
-**Alternatives:** (a) Live `bots.info` probe at diagnostic time — rejected: adds latency and an API call to every diagnostic view for data that changes rarely. (b) Have the adapter report the observed name on heartbeat — rejected: identity observation is Server authority; the adapter is a protocol translator.
+**Rationale:** capturing the Slack-side name and icon at verification time (which already calls `bots.info`) is zero-cost — no extra API call. The snapshots are refreshed on every heartbeat-triggered verification, so they track Slack-side renames and icon changes without a dedicated polling loop. `VerifiedBotName` and `VerifiedBotIconUrl` are observations (what Slack reports), not Mohist-owned settings, so they sit alongside `BotName` (what the operator chose) without conflating them.
+
+**Alternatives:** (a) Live `bots.info` probe at diagnostic time — rejected: adds latency and an API call to every diagnostic view for data that changes rarely. (b) Have the adapter report the observed name/icon on heartbeat — rejected: identity observation is Server authority; the adapter is a protocol translator. (c) Fetch and hash the icon image for a content-based comparison — rejected: adds an HTTP fetch + image processing per verification for marginal benefit; URL comparison detects the same changes at zero cost.
 
 ### D8. CLI gains rotate-credentials, transfer-owner, enable, disable; view/list consume diagnostic
 
@@ -155,10 +162,10 @@ Introduce a Web route and component for the Connection diagnostic: a summary car
 - **[Verify-before-store means a rotation call holds new tokens in request memory (D1)]** -> tokens are request-scoped and never logged (the existing `*token` redaction guard covers them); on failure they are discarded with no persistence.
 - **[Owner availability probe hits Slack on every single-view diagnostic (D3)]** -> one `users.info` call per view is within Slack rate limits; if Slack is unreachable, the diagnostic degrades gracefully to "owner availability unknown" rather than failing the whole diagnostic.
 - **[Transfer claim code Kind column requires a migration (D2)]** -> additive column with a default of `initial`; existing rows migrate cleanly; no data rewrite.
-- **[VerifiedBotName column requires a migration (D7)]** -> additive nullable column; existing connections have `null` until next verification; diagnostic reports "not yet verified" for drift rather than a false positive.
+- **[VerifiedBotName and VerifiedBotIconUrl columns require a migration (D7)]** -> additive nullable columns; existing connections have `null` until next verification; diagnostic reports "not yet verified" for drift rather than a false positive.
 - **[Diagnostic precedence is a product judgment call (D6)]** -> the precedence table is documented and testable; if field evidence shows a different priority (e.g., disabled should rank above owner-unavailable), it is a one-place change in the pure function.
 - **[Disable does not cancel in-flight adapter deliveries already claimed (D4)]** -> a delivery claimed by the adapter before disable may still be sent; this is acceptable (it was accepted before disable) and matches "accepted work is preserved." The adapter will not claim new deliveries after discovery refresh excludes the connection.
-- **[Avatar drift deferred (D7)]** -> name drift is the higher-signal case; avatar comparison is tracked in Open Questions.
+- **[Avatar drift uses icon URL comparison, not image hashing (D7)]** -> Slack's `bots.info` returns icon URLs not stable hashes; URL-to-URL comparison detects real avatar changes at zero cost (no image fetch/hashing) but misses cases where the URL stays the same while the image content changes (rare for Slack-hosted avatars).
 
 ## Migration Plan
 
@@ -170,14 +177,12 @@ Introduce a Web route and component for the Connection diagnostic: a summary car
 6. **Server — delete wording (D5):** response/message update.
 7. **CLI (D8):** four new subcommands; `view`/`list` diagnostic rendering; spec test update.
 8. **Web (D9):** diagnostic route + component + API client hook.
-9. **Tests + docs:** fake `ISlackApiClient` (rotation verify, transfer membership, owner-availability probe, bots.info name capture); fake adapter↔Server transport; injectable `TimeProvider` (heartbeat freshness, claim-code expiry); pure-function diagnostic tests (all precedence rows); update `docs/agent-connections.md` and `design/slack-agent-connection.md` 实装差距 sections.
+9. **Tests + docs:** fake `ISlackApiClient` (rotation verify, transfer membership, owner-availability probe, bots.info name + icon capture); fake adapter↔Server transport; injectable `TimeProvider` (heartbeat freshness, claim-code expiry); pure-function diagnostic tests (all precedence rows); update `docs/agent-connections.md` and `design/slack-agent-connection.md` 实装差距 sections.
 
-**Rollback.** All changes are additive (new columns with defaults, new routes, new CLI commands, new Web route). Revert drops the new routes/commands; the `Kind=initial` and `VerifiedBotName=null` columns are harmless orphans. No existing data is rewritten; no Agent, Job, Session, or accepted Input loses addressability.
+**Rollback.** All changes are additive (new columns with defaults, new routes, new CLI commands, new Web route). Revert drops the new routes/commands; the `Kind=initial` and `VerifiedBotName=null`/`VerifiedBotIconUrl=null` columns are harmless orphans. No existing data is rewritten; no Agent, Job, Session, or accepted Input loses addressability.
 
 ## Open Questions
 
-- **Avatar drift (D7):** Slack `bots.info` returns icon URLs, not a stable hash. Decide whether to fetch+hash the image for comparison (adds an HTTP call + image processing) or defer avatar drift to a follow-up and ship name-only drift in this issue.
 - **Diagnostic on `list`:** confirm that `list` should remain probe-free (stored-facts-only primary-state column) vs. a `--diagnose` flag that triggers per-row live probes for small connection counts.
-- **`configure` guard strictness (D1):** confirm that refusing `configure` on already-bound connections (redirecting to `rotate-credentials`) is acceptable, or whether `configure` should silently delegate to rotation semantics for backward compatibility with any existing scripts.
 - **Transfer claim lifetime:** initial claims default to 10 minutes; confirm the same lifetime for transfer claims or choose a longer window (transfers may involve coordination between operator and new owner).
 - **Web scope (D9):** confirm that read-only diagnostic is the right Web scope for this issue, or whether minimal enable/disable buttons should accompany the diagnostic card.
