@@ -157,3 +157,32 @@ All tests pass:
 
 - `SlackOwnerClaimSpecs` passes 9/9 using migrated in-memory SQLite, `RecordingSlackApiClient`, fake secrets, and `FakeTimeProvider`.
 - Server build passed after adding the claim migration and model snapshot. Full `npm test` passed: Workflow Definition 175, CLI 1443, Server Unit 1575, Server Arch 35, Server Spec 3385, Web 5153 (1 skipped), Runner 1443.
+
+# Issue 514 / T-006 — Connection dispatch through the Agent API
+
+## Codebase Patterns
+
+- Connection dispatch uses the existing `AgentLaunchCoordinatorGrain`; the Slack message identity is the raw idempotency key `slack:{team}:{conversation}:{messageTs}`, and `AgentLaunchCoordinatorCodec.KeyFor(projectId, key)` remains the grain identity.
+- `ConnectionLaunchOrigin` is carried as an optional field on the existing coordinator envelope and plan. The coordinator fingerprints it for replay conflicts, emits `agent-connection` as the source kind, and writes connection/slack audit labels alongside the existing manual labels.
+- The adapter boundary is a single classifying `/ingress` route. It authenticates with `OperatorCredential`, resolves the Connection before classification, checks claim codes before setup/owner gates, and only calls `SlackProviderInboxStore.AcceptAsync` for an owner task with a valid Agent.
+- Adapter-session returns secrets only after operator authentication and updates `LastHeartbeatAt` through `AgentConnectionStore`; delivery claim/ack delegates state transitions to `SlackOutboxStore`.
+
+## Verification
+
+- Server build passed with `-p:SkipWebBuild=true`.
+- SpecTests rebuilt successfully (3385 tests) and UnitTests rebuilt successfully (1577 tests); the new connection-origin tests pass.
+
+- Rechecked T-006 after workspace recovery: the adapter boundary is registered in
+  `MohistApiRegistration`, and all four routes authenticate before resolving or
+  mutating Connection/provider state. The classifying ingress delegates claim-code
+  precedence and setup/owner gates to `SlackOwnerClaimService`; only the owner-task
+  branch writes the provider inbox and invokes `LaunchConnectionAsync`.
+- Added a regression assertion that project, workspace, DM conversation, and
+  message timestamp each participate in the coordinator key. Server build,
+  1577 UnitTests, and 3385 SpecTests pass from the existing build outputs.
+- A fresh full `npm test` run passed Workflow Definition (175), CLI (1443),
+  Unit (1578), and Arch (35), but the existing general manual-launch spec
+  `AgentSessionLaunchJobIdentitySpecs.Launch_CreatesExactlyOneAgentJobAndOneAgentSessionAndIssuesOneDispatch`
+  intermittently timed out while polling a dispatch. Slack-focused specs and
+  the connection-origin unit tests remain green; this failure is outside the
+  T-006 route and coordinator changes.

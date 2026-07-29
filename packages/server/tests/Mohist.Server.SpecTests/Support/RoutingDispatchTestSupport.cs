@@ -481,6 +481,13 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher does not exercise the manual launch path.");
 
+    public Task<AgentLaunchResult> LaunchConnectionAsync(
+        AgentInfo agent,
+        string prompt,
+        ConnectionLaunchOrigin origin,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("RecordingAgentLauncher does not exercise the connection launch path.");
+
     public Task<AgentLaunchResult?> ResumeIdempotentAsync(
         string projectId,
         string idempotencyKey,

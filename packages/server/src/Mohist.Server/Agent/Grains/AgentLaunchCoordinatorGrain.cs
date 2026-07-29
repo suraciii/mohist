@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -79,7 +80,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         if (string.IsNullOrWhiteSpace(command.Prompt))
             throw new ArgumentException("Prompt is required.", nameof(command));
 
-        var fingerprint = AgentLaunchCoordinatorCodec.Fingerprint(command.Request);
+        var fingerprint = AgentLaunchCoordinatorCodec.Fingerprint(command.Request, command.ConnectionOrigin);
 
         var existing = _state.State.Plan;
         if (existing is not null)
@@ -125,7 +126,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 Repository: command.Repository,
                 Title: command.Title,
                 AgentRef: command.Request.AgentRef,
-                Completed: false);
+                Completed: false,
+                ConnectionOrigin: command.ConnectionOrigin);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -154,7 +156,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         if (existing is null)
             return null;
 
-        var fingerprint = AgentLaunchCoordinatorCodec.Fingerprint(request);
+        var fingerprint = AgentLaunchCoordinatorCodec.Fingerprint(request, existing!.ConnectionOrigin);
         if (!string.Equals(existing.RequestFingerprint, fingerprint, StringComparison.Ordinal))
             throw new LaunchIdempotencyConflictException(existing.IdempotencyKey, existing.RequestFingerprint);
 
@@ -296,7 +298,9 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = plan.ProjectId,
-            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+            [AgentSessionQueryMetadataKeys.SourceKind] = plan.ConnectionOrigin is null
+                ? "agent-launch"
+                : "agent-connection",
             [GenericAgentSessionMetadata.AgentId] = plan.AgentId,
             [GenericAgentSessionMetadata.AgentName] = plan.AgentName,
         };
@@ -308,13 +312,19 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             labels[GenericAgentSessionMetadata.WorkspacePath] = plan.WorkspacePath!;
         if (!string.IsNullOrWhiteSpace(plan.Repository))
             labels[GenericAgentSessionMetadata.Repository] = plan.Repository!;
+        if (plan.ConnectionOrigin is { } origin)
+        {
+            labels[AgentSessionQueryMetadataKeys.ConnectionId] = origin.ConnectionId;
+            labels[AgentSessionQueryMetadataKeys.SlackUserId] = origin.SlackUserId;
+            labels[AgentSessionQueryMetadataKeys.SlackConversationId] = origin.DmConversationId;
+        }
 
         var metadata = new AgentSessionMetadata(labels, null);
         await sessionGrain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
             InputId: plan.InputId,
             TurnId: plan.TurnId,
             Prompt: plan.Prompt,
-            Source: "agent-launch",
+            Source: plan.ConnectionOrigin is null ? "agent-launch" : "agent-connection",
             JobId: plan.JobKey,
             Metadata: metadata,
             Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
@@ -425,4 +435,5 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(12)] int? EpicNumber,
     [property: Id(13)] string? Repository,
     [property: Id(14)] string? Title,
-    [property: Id(15)] AgentLaunchCoordinatorRequest Request = null!);
+    [property: Id(15)] AgentLaunchCoordinatorRequest Request = null!,
+    [property: Id(16)] ConnectionLaunchOrigin? ConnectionOrigin = null);

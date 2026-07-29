@@ -40,6 +40,7 @@ public static class MohistApiRegistration
         app.MapAgentJobRoutes();
         app.MapAgentJobReadRoutes();
         app.MapAgentSessionLaunchRoutes();
+        app.MapSlackConnectionRoutes();
         app.MapAgentLaunchObservationRoutes();
         app.MapRoutingRulesRoutes();
         app.MapRoutingTestRoutes();
