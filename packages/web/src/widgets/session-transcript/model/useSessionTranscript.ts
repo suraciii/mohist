@@ -220,8 +220,6 @@ export function useSessionTranscript({
   }, [isRunning, turns])
 
   useEffect(() => {
-    if (!isRunning) return
-
     mountedRef.current = true
     const unsubs: Array<() => void> = []
     const isCurrentSessionEvent = (detail: {
@@ -581,7 +579,7 @@ export function useSessionTranscript({
       }
       for (const unsub of unsubs) unsub()
     }
-  }, [sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch, invalidateSessionQueries])
+  }, [sessionId, runtimeSessionId, runtime, issueNumber, queryClient, invalidateAndRefetch, invalidateSessionQueries])
 
   return {
     turns,

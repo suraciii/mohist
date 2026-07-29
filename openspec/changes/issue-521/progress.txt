@@ -69,3 +69,8 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - F2: queued/executing is display state only in the Web composer; it no longer blocks additional follow-ups. Matching `session.input` events now invalidate the session observation query so turn execution state refreshes.
 - F3: accepted follow-up responses carry authoritative input acceptance and turn status. CLI renders only supplied status, without inventing a queued fallback.
 - The Dispatcher is an API-layer SignalR adapter so Session remains a leaf domain. Verification passed: Web typecheck and test suite (5158 passed, 1 skipped); Web FSD check; CLI tests (1445 passed); Server ArchTests (35 passed); Server SpecTests (3354 passed). A temporary grain claim test held a fixture activation and was removed.
+
+## Review fix pass 2 (in progress)
+- F1/F2: dispatch claim now atomically advances the selected follow-up turn to executing. A rejected SignalR delivery releases the claim and restores queued, allowing the same idempotency key to retry; once delivery is accepted, later inputs are assigned to a subsequent turn rather than omitted from an immutable dispatch payload.
+- F3: issue-session follow-up acceptance invalidates metadata/transcript observations, and transcript event subscriptions remain active for idle sessions so the following session.input event refreshes executing status.
+- Focused verification passed: Web typecheck, FSD boundary check, and follow-up transcript/data-source tests (29). Server SpecTests rerun was interrupted before producing a result and must be repeated before final verification.

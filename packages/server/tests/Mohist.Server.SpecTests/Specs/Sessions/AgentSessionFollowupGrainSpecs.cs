@@ -308,11 +308,9 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
             Source: "agent-session-followup",
             IdempotencyKey: "exec-identity-key"));
 
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-            new[] { new AgentSessionRuntimeEventInput(
-                RuntimeEventTypes.SessionInput,
-                $$"""{"text":"identity only","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}"}""") },
-            "runtime-identity-executing"));
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+        Assert.NotNull(dispatch);
+        Assert.Equal(first.OperationId, dispatch!.OperationId);
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "identity only",
@@ -323,6 +321,13 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
         Assert.False(second.ShouldRedeliver);
         Assert.Equal(first.InputId, second.InputId);
         Assert.Equal(first.TurnId, second.TurnId);
+
+        await grain.ReleaseFollowupDispatchAsync(first.OperationId);
+        var retry = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "identity only",
+            Source: "agent-session-followup",
+            IdempotencyKey: "exec-identity-key"));
+        Assert.True(retry.ShouldRedeliver);
     }
 
     [Fact]
@@ -639,11 +644,9 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
             Source: "agent-session-followup",
             IdempotencyKey: "cone-key-1"));
 
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-            new[] { new AgentSessionRuntimeEventInput(
-                RuntimeEventTypes.SessionInput,
-                $$"""{"text":"first exec","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}"}""") },
-            "runtime-concurrent-executing"));
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+        Assert.NotNull(dispatch);
+        Assert.Equal(first.OperationId, dispatch!.OperationId);
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "second exec",
