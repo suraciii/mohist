@@ -113,3 +113,16 @@ All tests pass:
 - Baseline and post-change `Mohist.Server.SpecTests` passed against migrated in-memory SQLite; post-change total: 3356 passed.
 - Full `npm test` passed: Workflow Definition 175, CLI 1443, Server Unit 1575, Server Arch 35, Server Spec 3356, Web 5153 (1 skipped), Runner 1443.
 
+
+# Issue 514 / T-003 — Slack API client and setup verification
+
+## Codebase Patterns
+
+- Slack identity calls use a typed HttpClient under Server.Slack, with bearer authentication and Slack Web API method paths relative to the configured Slack API base URL.
+- AgentConnectionStore.UpdateAsync is the persistence seam for independent SetupProgress, ConnectionHealth, HealthReason, and LastHeartbeatAt fields; Setup verification does not inspect or mutate AgentReadiness.
+- Secrets are loaded only through ISecretStore using the project/connection BotToken address; the verifier keeps the plaintext token local to the API call and does not log it.
+- SlackSetupVerifier treats token/auth, workspace, App/Bot mismatch, missing scopes, and DM access failures as FixSlackSetup with actionable reasons; successful verification advances to ClaimOwner. Adapter liveness is separately evaluated from LastHeartbeatAt using injectable TimeProvider.
+
+## Verification
+
+- dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true passed.

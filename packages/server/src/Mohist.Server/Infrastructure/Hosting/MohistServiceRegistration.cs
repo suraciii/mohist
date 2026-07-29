@@ -38,6 +38,7 @@ using Mohist.Server.Otel;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Logging;
 using Mohist.Server.Notifications;
+using Mohist.Server.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 
 namespace Mohist.Server.Infrastructure.Hosting;
@@ -123,7 +124,12 @@ public static class MohistServiceRegistration
         services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
         services.AddSingleton<HermesIssueNotificationRenderer>();
         services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
-        services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
+         services.AddHttpClient<ISlackApiClient, SlackApiClient>(client =>
+         {
+             client.BaseAddress = new Uri(configuration["Mohist:SlackApiUrl"] ?? "https://slack.com/api/");
+             client.Timeout = TimeSpan.FromSeconds(10);
+         });
+
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddCloudEventPushHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
