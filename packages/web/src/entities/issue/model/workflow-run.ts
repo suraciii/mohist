@@ -1,5 +1,10 @@
 import type { WorkItemOrigin, StageApprovalState, WorkflowTaskCause, WorkflowFailureDetails } from './stage-state'
 
+/**
+ * Tracks server `WorkflowRunStatus` (packages/server .../WorkflowRun.cs).
+ * Each value MUST be the wire token emitted by `WorkflowStatusMapper.WireStatus(WorkflowRunStatus)`.
+ * Source of truth is the server enum — extend this union when that enum gains a value.
+ */
 export type WorkflowRunStatus =
   | 'created'
   | 'pending'
@@ -13,7 +18,22 @@ export type WorkflowRunStatus =
 
 export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
 export type WorkflowCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
-export type WorkflowStageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped'
+
+/**
+ * Tracks server `StageRunStatus` (packages/server .../StageRun.cs).
+ * Each value MUST be the wire token emitted by `WorkflowStatusMapper.WireStatus(StageRunStatus)`.
+ * `passed` and `skipped` are client-only projections that no server enum value emits.
+ * Source of truth is the server enum — extend this union when that enum gains a value
+ * (server already emits `completed`; do not remove it).
+ */
+export type WorkflowStageRunStatus =
+  | 'pending'
+  | 'running'
+  | 'awaiting-approval'
+  | 'completed'
+  | 'passed'
+  | 'failed'
+  | 'skipped'
 
 export interface WorkflowTaskResetCause {
   type: 'workflow-policy'

@@ -4,6 +4,13 @@ import type { BaseDriftInfo } from './drift'
 
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
 export type StageCheckStatus = 'pending' | 'running' | 'completed' | 'passed' | 'failed' | 'error'
+
+/**
+ * Tracks server `StageRunStatus` (packages/server .../StageRun.cs).
+ * Each value MUST be the wire token emitted by `WorkflowStatusMapper.WireStatus(StageRunStatus)`.
+ * `passed` and `skipped` are client-only projections that no server enum value emits.
+ * Source of truth is the server enum — extend this union when that enum gains a value.
+ */
 export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'completed' | 'passed' | 'failed' | 'skipped'
 
 export interface StageTaskCause {

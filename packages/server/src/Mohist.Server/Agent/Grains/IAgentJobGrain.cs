@@ -52,8 +52,8 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     Task FailAsync(string reason, string? agentId = null);
 
     /// <summary>
-    /// Idempotent manual-launch preparation entry point (issue-512
-    /// T-001). The coordinator passes the resolved launch snapshot
+    /// Idempotent manual-launch preparation entry point. The coordinator
+    /// passes the resolved launch snapshot
     /// (prompt, agent id, runtime, agent session id, generated input
     /// and turn ids) the first time it converges; the grain stores
     /// the snapshot as <c>ManualPlan</c> and returns the canonical
@@ -74,7 +74,7 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
 
     /// <summary>
     /// Move a non-terminal AgentJob to <see cref="AgentJobStatus.Unknown"/>
-    /// (issue-512 T-002). Used when a Runner disconnect, a status
+    /// Used when a Runner disconnect, a status
     /// timeout, or any inconclusive delivery leaves the original
     /// first execution unverifiable. The grain preserves the durable
     /// Job/work/input/turn identities; an authoritative running or
@@ -125,8 +125,8 @@ public sealed record AgentJobRuntimeSnapshot(
     [property: Id(7)] string? ProjectId = null,
     [property: Id(8)] AgentExecutionDefinition? ExecutionDefinition = null,
     /// <summary>
-    /// Linked AgentSession id captured at launch time (issue-512
-    /// T-002). Surface so the composite observation assembler can
+    /// Linked AgentSession id captured at launch time. Surface so the
+    /// composite observation assembler can
     /// resolve the Session without re-reading the AgentJob input
     /// snapshot. Null for legacy jobs that pre-date the manual
     /// coordinator path.
@@ -212,7 +212,7 @@ public enum AgentJobStatus
     Completed,
     Failed,
     /// <summary>
-    /// Nonterminal, non-dispatchable state (issue-512 T-002). The
+    /// Nonterminal, non-dispatchable state. The
     /// AgentJob grain could not confirm whether the original work
     /// accepted or completed the prompt; the durable identities (job,
     /// work, input, turn) are preserved for reconciliation but the
@@ -327,8 +327,8 @@ public sealed record AgentJobInput(
     [property: Id(2)] string? WorkspacePath = null,
     [property: Id(3)] string? ProjectId = null,
     /// <summary>
-    /// Resolved execution backend snapshot captured at launch time
-    /// (issue-452 design D2). Resolved launches pin the runtime (defaulting to
+    /// Resolved execution backend snapshot captured at launch time.
+    /// Resolved launches pin the runtime (defaulting to
     /// <c>AgentConfigSchema.OpenCodeRuntime</c>) so the runner
     /// executor can pick the right runtime and recovery reuses the
     /// snapshotted value rather than re-reading mutable Agent config.
@@ -410,7 +410,7 @@ public sealed record AgentJobInput(
     /// AgentJob dispatched. The runner uses this to correlate its
     /// own reports with the durable input identity and to skip
     /// emitting a duplicate <c>session.input</c> record for an
-    /// AgentJob launch (<see cref="Issue512"/> T-001). Append-only
+    /// AgentJob launch. Append-only
     /// Orleans field id (next free after WorkflowRunId).
     /// </summary>
     [property: Id(14)] string? InitialInputId = null,

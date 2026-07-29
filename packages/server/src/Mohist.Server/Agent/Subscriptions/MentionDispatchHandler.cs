@@ -9,7 +9,7 @@ namespace Mohist.Server.Agent.Subscriptions;
 
 /// <summary>
 /// System handler that turns an <c>@&lt;agent&gt;</c> mention in an issue
-/// comment into a one-shot Agent launch (issue-490). Subscribes to
+/// comment into a one-shot Agent launch. Subscribes to
 /// <see cref="EventCatalog.ReverseDns.IssueCommentAdded"/>, scans the comment
 /// body for mention tokens, resolves each to an active Agent in the comment's
 /// project by name (case-insensitive), and launches each resolved Agent once
@@ -178,8 +178,8 @@ public sealed class MentionDispatchHandler : ICloudEventHandler
     /// <summary>
     /// Builds a case-insensitive name → Agent index over the project's active
     /// Agents. Two active Agents cannot share a name (enforced at Agent-create
-    /// time via <c>EnsureNameAvailableAsync</c>, which is also case-insensitive
-    /// after issue-490), so the index is unambiguous.
+    /// time via <c>EnsureNameAvailableAsync</c>, which is also case-insensitive),
+    /// so the index is unambiguous.
     /// </summary>
     internal static Dictionary<string, AgentInfo> BuildActiveAgentNameIndex(
         IReadOnlyList<AgentInfo> activeAgents,

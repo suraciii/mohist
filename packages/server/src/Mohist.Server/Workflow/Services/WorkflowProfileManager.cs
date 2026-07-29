@@ -31,7 +31,7 @@ public class WorkflowProfileManager : IScopedService
     private readonly IPromptLoader _promptLoader;
     private readonly PromptTemplateEngine _engine;
     private readonly ConfigService _configService;
-    private readonly WorkflowRunProfileManager _runProfileManager;
+    private readonly WorkflowRunVariablesStore _runVariablesStore;
     private readonly IWorkflowProfileProvider _profileProvider;
 
     public WorkflowProfileManager(
@@ -39,14 +39,14 @@ public class WorkflowProfileManager : IScopedService
         IPromptLoader promptLoader,
         PromptTemplateEngine engine,
         ConfigService configService,
-        WorkflowRunProfileManager runProfileManager,
+        WorkflowRunVariablesStore runVariablesStore,
         IWorkflowProfileProvider profileProvider)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
         _engine = engine;
         _configService = configService;
-        _runProfileManager = runProfileManager;
+        _runVariablesStore = runVariablesStore;
         _profileProvider = profileProvider;
     }
 
@@ -68,7 +68,9 @@ public class WorkflowProfileManager : IScopedService
         {
             var definition = await _profileProvider.GetDefinitionAsync(context.ProjectId!, boundProfileId!);
             if (definition is null)
-                throw new InvalidOperationException($"Workflow '{runId}' has no current definition for bound Profile '{boundProfileId}'");
+                throw new WorkflowDefinitionResolutionException(
+                    WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+                    $"Workflow '{runId}' has no current definition for bound Profile '{boundProfileId}'");
             return ResolvedTemplate.FromProfile(new WorkflowProfile(
                 boundProfileId!, boundProfileId!, string.Empty, definition));
         }
@@ -150,7 +152,8 @@ public class WorkflowProfileManager : IScopedService
             ?? throw new InvalidOperationException(
                 $"Workflow '{runId}' has no effective workflow template");
         var stage = definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
-            ?? throw new InvalidOperationException(
+            ?? throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
                 $"Workflow '{runId}' has no definition for stage '{stageId}'");
         return stage;
     }
@@ -254,7 +257,7 @@ public class WorkflowProfileManager : IScopedService
         string? ProjectDefaultId,
         string? EffectiveProfileId);
 
-    private async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
+    internal async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
     {
         // Effective Variables are owned by Project, Issue, and WorkflowRun
         // resources only. Initialization defaults seeded on the WorkflowRun
@@ -265,8 +268,8 @@ public class WorkflowProfileManager : IScopedService
         var context = await ResolveRunContextAsync(db, runId);
         var project = await LoadProjectLayerAsync(db, context);
         var issue = await LoadIssueLayerAsync(db, context);
-        var run = await _runProfileManager.GetVariablesAsync(runId);
-        var runDefaults = await _runProfileManager.GetDefaultVariablesAsync(runId);
+        var run = await _runVariablesStore.GetVariablesAsync(runId);
+        var runDefaults = await _runVariablesStore.GetDefaultVariablesAsync(runId);
 
         return MergeRunScopedVariables(runDefaults, project, issue, run);
     }
@@ -346,12 +349,6 @@ public class WorkflowProfileManager : IScopedService
         }
     }
 
-    internal async Task<VariableBundle> ResolveLayeredVariablesAsync(string runId)
-    {
-        var independent = await ResolveConfiguredVariablesAsync(runId);
-        return independent;
-    }
-
     public async Task<JsonElement> ResolveEffectiveVariablesAsync(string runId, string? stage)
     {
         var resolved = await ResolveEffectiveVariableBundleAsync(runId, stage);
@@ -360,7 +357,7 @@ public class WorkflowProfileManager : IScopedService
 
     internal async Task<VariableBundle> ResolveEffectiveVariableBundleAsync(string runId, string? stage)
     {
-        var layered = await ResolveLayeredVariablesAsync(runId);
+        var layered = await ResolveConfiguredVariablesAsync(runId);
         return new VariableBundle(
             layered.ResolveStageVars(stage),
             layered.Stages,
@@ -437,7 +434,9 @@ public class WorkflowProfileManager : IScopedService
             return await LoadTemplateAsync(runId, projectId);
         var definition = await _profileProvider.GetDefinitionAsync(projectId!, profileId);
         if (definition is null)
-            throw new InvalidOperationException($"Workflow '{runId}' has no current definition for bound Profile '{profileId}'");
+            throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+                $"Workflow '{runId}' has no current definition for bound Profile '{profileId}'");
         return ResolvedTemplate.FromProfile(new WorkflowProfile(profileId, profileId, string.Empty, definition));
     }
 

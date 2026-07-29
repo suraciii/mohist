@@ -242,7 +242,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
         siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
         siloBuilder.Services.AddSingleton(WorkflowGrainTestHelpers.CreateEmptyConfigService());
-        siloBuilder.Services.AddScoped<WorkflowRunProfileManager>();
+        siloBuilder.Services.AddScoped<WorkflowRunVariablesStore>();
         siloBuilder.Services.AddScoped<WorkflowProfileManager>();
         siloBuilder.Services.AddScoped<WorkflowItemTranslator>();
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.DispatchService>();

@@ -136,7 +136,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
-        // Issue-512 T-002: Unknown is intentionally non-dispatchable.
+        // Unknown is intentionally non-dispatchable.
         // A freshly reactivated Unknown job must NOT auto-replay;
         // reconciliation waits for an authoritative running or
         // terminal report from the original Runner.
@@ -653,7 +653,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     }
 
     /// <summary>
-    /// Manual-launch preparation (issue-512 T-001). Persists the
+    /// Manual-launch preparation. Persists the
     /// canonical <see cref="PrepareManualLaunchCommand"/> as the
     /// grain's durable plan, then builds the matching
     /// <see cref="AgentJobInput"/> snapshot. The grain refuses to
@@ -1122,9 +1122,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.IsNullOrWhiteSpace(input.Runtime))
             with["runtime"] = JSON.SerializeToElement(input.Runtime);
         // Carry the captured ordered Skill names verbatim so the runner
-        // resolves SKILL.md bodies from its configured Skill roots
-        // (T-001 design D3). An empty/absent list means no Skills input
-        // — neither resolution nor a Skills envelope is emitted.
+        // resolves SKILL.md bodies from its configured Skill roots.
+        // An empty/absent list means no Skills input — neither resolution
+        // nor a Skills envelope is emitted.
         if (input.Skills is { Count: > 0 })
             with["skills"] = JSON.SerializeToElement(input.Skills);
         var withJson = JSON.Serialize(with);
@@ -1205,7 +1205,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (IsTerminal || State.RunnerId is null)
             return;
 
-        // Issue-512 T-002: a report timeout is inconclusive
+        // A report timeout is inconclusive
         // delivery, not authoritative failure. The job transitions to
         // Unknown so the durable identities (job/work/input/turn) are
         // preserved for reconciliation; an authoritative terminal
@@ -1512,9 +1512,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     }
 
     /// Durable reminder tick driving three recovery loops:
-    /// terminal-delivery retry (issue-449 design decision 2),
-    /// prepared-launch advancement (design decisions 1-3), and the
-    /// failure-event emission retry (issue-491 design D1). A single
+    /// terminal-delivery retry, prepared-launch advancement, and the
+    /// failure-event emission retry. A single
     /// reminder name covers all three so the grain keeps a durable
     /// wake-up until either Runner acceptance is persisted (preparation)
     /// or the Session-close acknowledgement clears the pending payload
@@ -1553,7 +1552,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
-        // Issue-512 T-002: Unknown is a reconcilable, non-terminal
+        // Unknown is a reconcilable, non-terminal
         // state. The reminder must stay registered so a later
         // authoritative running or terminal report from the original
         // Runner can update the same Job, and so a Runner reconnect

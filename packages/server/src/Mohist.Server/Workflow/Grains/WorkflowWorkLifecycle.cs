@@ -124,8 +124,6 @@ internal sealed class WorkflowWorkLifecycle
         var now = _owner.Now();
         var events = run.StartTask(workId, workerId, now);
         await _owner.SaveAsyncWithEvents(events);
-        foreach (var e in events)
-            await _owner.DispatchEvent(e);
 
         _owner.CacheAssignedWorkerId(workerId);
         return workId;

@@ -9,7 +9,7 @@ namespace Mohist.Server.Otel;
 /// probe reports combined <c>otel.db</c> + WAL + SHM usage strictly
 /// above 100% of <see cref="OtelOptions.StorageBudgetBytes"/> — so
 /// online eviction always gets the first chance to reclaim before
-/// the rebuild kicks in (T-002 ceiling was 90%) — the recovery path
+/// the rebuild kicks in — the recovery path
 /// rebuilds an empty observation database in place. Rebuild work is
 /// bounded by file-length reads, a connection-pool clear, and four
 /// file deletions; it does not scan or iterate any Trace or Span

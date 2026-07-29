@@ -639,7 +639,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();
         siloBuilder.Services.AddScoped<RunnerWorkStore>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
-        siloBuilder.Services.AddScoped<WorkflowRunProfileManager>();
+        siloBuilder.Services.AddScoped<WorkflowRunVariablesStore>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
         siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
         siloBuilder.Services.AddSingleton(WorkflowGrainTestHelpers.CreateEmptyConfigService());

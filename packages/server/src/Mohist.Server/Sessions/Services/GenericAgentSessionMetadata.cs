@@ -84,7 +84,7 @@ public static class GenericAgentSessionMetadata
     public const string TriggerRuleId = "mohist.io/trigger/rule-id";
 
     /// <summary>
-    /// Comment identity for a mention-driven launch (issue-490 T-002).
+    /// Comment identity for a mention-driven launch.
     /// Recorded by <see cref="Mohist.Server.Agent.Services.IAgentLauncher.LaunchMentionAsync"/>
     /// alongside <see cref="TriggerEventId"/> (the
     /// <c>com.mohist.issue.comment-added</c> event id) so the launch is

@@ -3,8 +3,8 @@ using System.Text.RegularExpressions;
 namespace Mohist.Server.Agent.Subscriptions;
 
 /// <summary>
-/// Parses <c>@&lt;token&gt;</c> mention tokens out of an issue comment body
-/// (issue-490 design D4, spec <i>Token parsing</i>). A token is
+/// Parses <c>@&lt;token&gt;</c> mention tokens out of an issue comment body.
+/// A token is
 /// <c>@</c> immediately followed by one or more name characters
 /// (<c>[A-Za-z0-9_.-]</c>); the character before the <c>@</c> (when present)
 /// must be whitespace or punctuation, so an <c>@</c> embedded in the middle

@@ -288,8 +288,8 @@ public sealed record GenericAgentSessionSummaryContextRefsDto(
 /// <see cref="UnifiedSessionSummaryDto.Id"/>, regardless of whether the session
 /// originated from an Agent launch (<c>source = agent-launch</c>) or a Workflow
 /// run (<c>source = workflow</c>). Surfaced by the project-scoped
-/// <c>GET /api/projects/{projectRef}/sessions/{sessionId}</c> route
-/// (issue-479 T-004 / design D4), which resolves the row by id without the
+/// <c>GET /api/projects/{projectRef}/sessions/{sessionId}</c> route,
+/// which resolves the row by id without the
 /// <c>source-kind == agent-launch</c> gate that the generic-session route
 /// applies.
 /// </summary>
@@ -330,8 +330,8 @@ public sealed record UnifiedSessionSummaryDto(
 
 /// <summary>
 /// Lightweight unified read shape for an AgentSession in the source-filtered
-/// list (<c>GET /api/projects/{projectRef}/sessions</c>, issue-479 T-004 /
-/// design D4). Carries the common list fields and populates source-specific
+/// list (<c>GET /api/projects/{projectRef}/sessions</c>).
+/// Carries the common list fields and populates source-specific
 /// identity only for the resolved source, mirroring
 /// <see cref="UnifiedSessionSummaryDto"/>'s absent-when-empty contract.
 /// </summary>

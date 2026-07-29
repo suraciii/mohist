@@ -9,7 +9,7 @@ using Mohist.Server.Project.Services;
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// Product read surface for <see cref="IAgentJobGrain"/> (issue-479 T-002).
+/// Product read surface for <see cref="IAgentJobGrain"/>.
 /// <c>list</c> reads the relational <c>AgentJobs</c> mirror (the queryable
 /// index, written through by the grain); <c>view</c> reads the grain directly
 /// so the detail is always authoritative — including for jobs in-flight or
@@ -101,7 +101,7 @@ public static class AgentJobReadRoutes
 
         var status = await grain.GetStatusAsync();
         var isTerminal = status is AgentJobStatus.Completed or AgentJobStatus.Failed;
-        // Issue-512 T-002: Unknown is nonterminal; surface it without
+        // Unknown is nonterminal; surface it without
         // the terminal-result fields. Callers consume it as a
         // nonterminal, non-dispatchable state — neither successful
         // nor failed — and act on it via the launch-observation read.

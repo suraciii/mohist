@@ -187,7 +187,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.LabelTriggerRuleId)
                 .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.TriggerRuleId), stored: false);
 
-            // issue-467 T-001: virtual projection of status.activity, lowered
+            // Virtual projection of status.activity, lowered
             // to match the existing Status column convention. Powers the
             // history-bounded direct-session candidate selection in
             // AgentSessionQuery.ListStatusCandidatesAsync; the matching
@@ -218,7 +218,7 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.LabelProjectId, e.LabelAgentLaunchEpicNumber, e.CreatedAt })
                 .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelAgentLaunchEpicNumber_CreatedAt");
 
-            // issue-467 T-001: direct status candidate index. Composite on
+            // Direct status candidate index. Composite on
             // (LabelProjectId, LabelSourceKind, Activity, CreatedAt) so the
             // direct-session branch of AgentSessionQuery.ListStatusCandidatesAsync
             // resolves through a single index scan ordered by CreatedAt

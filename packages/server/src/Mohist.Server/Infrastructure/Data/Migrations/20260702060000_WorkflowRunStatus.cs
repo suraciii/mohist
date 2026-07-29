@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     /// <summary>
-    /// Issue-318 T-004: materializes the new <c>WorkflowRunStatus</c> state
+    /// Materializes the new <c>WorkflowRunStatus</c> state
     /// machine on the durable schema. Two parts:
     ///
     /// <list type="number">
@@ -16,9 +16,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
     ///       that the two scheduling queries (<c>FindAssignableAsync</c> and
     ///       <c>FindAssignedToAsync</c>) plus the new
     ///       <c>CountRunningAssignedToAsync</c> count query rely on. The
-    ///       DbContext model already declared both at the end of T-002
-    ///       (D3); this migration is what EF needs to materialize them on
-    ///       disk at deploy time.
+///       DbContext model already declared both; this migration is what EF needs to materialize them on
+///       disk at deploy time.
     ///       <para>
     ///         SQLite cannot <c>ALTER TABLE ADD COLUMN ... STORED</c>
     ///         directly. We use the established two-step pattern from

@@ -116,9 +116,12 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
 
         await SeedProjectTemplateAsync("missing_proj", runId, "missing-template", templateJson);
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsAsync<WorkflowDefinitionResolutionException>(
             () => Manager.LoadStageSpecsAsync(runId, "no-such-stage"));
 
+        Assert.Equal(
+            WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
+            ex.Reason);
         Assert.Contains("no-such-stage", ex.Message);
     }
 

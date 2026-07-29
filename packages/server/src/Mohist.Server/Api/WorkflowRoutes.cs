@@ -92,27 +92,27 @@ public static partial class WorkflowRoutes
 
         app.MapGet("/api/workflow-runs/{workflowRunId}/workflow-profile", async (
             string workflowRunId,
-            WorkflowRunProfileManager runProfileManager) =>
+            WorkflowRunVariablesStore runVariablesStore) =>
         {
-            var variables = await runProfileManager.GetVariablesAsync(workflowRunId);
+            var variables = await runVariablesStore.GetVariablesAsync(workflowRunId);
             return ApiResults.Ok(new { workflowRunId, variables });
         });
 
         app.MapGet("/api/workflow-runs/{workflowRunId}/variables", async (
             string workflowRunId,
-            WorkflowRunProfileManager runProfileManager) =>
+            WorkflowRunVariablesStore runVariablesStore) =>
         {
-            return ApiResults.Ok(await runProfileManager.GetVariablesAsync(workflowRunId));
+            return ApiResults.Ok(await runVariablesStore.GetVariablesAsync(workflowRunId));
         });
 
         app.MapPut("/api/workflow-runs/{workflowRunId}/variables", async (
             string workflowRunId,
             VariableBundle bundle,
-            WorkflowRunProfileManager runProfileManager) =>
+            WorkflowRunVariablesStore runVariablesStore) =>
         {
             try
             {
-                return ApiResults.Ok(await runProfileManager.SetVariablesAsync(workflowRunId, bundle));
+                return ApiResults.Ok(await runVariablesStore.SetVariablesAsync(workflowRunId, bundle));
             }
             catch (ArgumentException ex)
             {
@@ -123,11 +123,11 @@ public static partial class WorkflowRoutes
         app.MapPatch("/api/workflow-runs/{workflowRunId}/variables", async (
             string workflowRunId,
             VariableBundle patch,
-            WorkflowRunProfileManager runProfileManager) =>
+            WorkflowRunVariablesStore runVariablesStore) =>
         {
             try
             {
-                return ApiResults.Ok(await runProfileManager.PatchVariablesAsync(workflowRunId, patch));
+                return ApiResults.Ok(await runVariablesStore.PatchVariablesAsync(workflowRunId, patch));
             }
             catch (ArgumentException ex)
             {

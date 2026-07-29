@@ -863,20 +863,62 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public void Backoff_DoublesAndCapsAtConfiguredMaximum()
+    public async Task DispatchAsync_BackoffSchedule_DoublesAndCapsAtMaxViaFakeTimeProvider()
     {
+        // Drives the dispatch loop and observes retry cadence through the
+        // recorded handler invocation timestamps rather than the (now
+        // private) Backoff helper directly. Each timestamp is the moment
+        // a failing attempt fired; the delta between consecutive
+        // timestamps is the backoff computed for that attempt. With
+        // baseBackoff=2s and maxBackoff=5s the expected schedule is
+        // Backoff(1)=2s, Backoff(2)=4s, Backoff(3)=5s (clamped from 8s),
+        // Backoff(4)=5s (clamped from 16s).
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore();
+        var attemptTimes = new List<DateTimeOffset>();
+        var sub = new Subscription(
+            IssueCompleted,
+            new FlakyRecorder(() =>
+            {
+                attemptTimes.Add(time.GetUtcNow());
+                throw new InvalidOperationException("permanent");
+            }),
+            DispatchDynamic);
         var dispatcher = BuildDispatcher(
-            new FakeEventStore(),
-            new FakeDeadLetterStore(),
-            [],
-            new FakeTimeProvider(StartTime),
+            events,
+            dlq,
+            [sub],
+            time,
+            handlerMaxAttempts: 5,
             baseBackoff: TimeSpan.FromSeconds(2),
             maxBackoff: TimeSpan.FromSeconds(5));
+        events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_backoff"));
 
-        Assert.Equal(TimeSpan.FromSeconds(2), dispatcher.Backoff(1));
-        Assert.Equal(TimeSpan.FromSeconds(4), dispatcher.Backoff(2));
-        Assert.Equal(TimeSpan.FromSeconds(5), dispatcher.Backoff(3));
-        Assert.Equal(TimeSpan.FromSeconds(5), dispatcher.Backoff(30));
+        // Attempt 1 at StartTime. Then advance by each expected backoff
+        // and re-dispatch; the handler fires once per advance, recording
+        // the timestamp it ran at.
+        await dispatcher.DispatchAsync(CancellationToken.None);
+        var expectedDeltas = new[]
+        {
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromSeconds(4),
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(5),
+        };
+        foreach (var delta in expectedDeltas)
+        {
+            time.Advance(delta);
+            await dispatcher.DispatchAsync(CancellationToken.None);
+        }
+
+        // Attempt 5 hit MaxAttempts=5 and dead-lettered; a follow-up
+        // tick must NOT re-invoke the handler.
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(expectedDeltas, attemptTimes.Zip(attemptTimes.Skip(1), (a, b) => b - a).ToArray());
+        Assert.Equal(5, attemptTimes.Count);
+        Assert.Single(dlq.Written);
     }
 
     [Fact]

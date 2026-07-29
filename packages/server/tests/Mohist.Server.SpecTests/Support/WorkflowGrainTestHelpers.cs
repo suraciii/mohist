@@ -120,7 +120,7 @@ public static class WorkflowGrainTestHelpers
                 promptLoader,
                 new PromptTemplateEngine(),
                 CreateEmptyConfigService(),
-                new WorkflowRunProfileManager(factory),
+                new WorkflowRunVariablesStore(factory),
                 new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance)),
             new WorkflowArtifactQuerier(factory));
     }
