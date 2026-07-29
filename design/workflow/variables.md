@@ -1,5 +1,5 @@
 ---
-status: wip
+status: implemented
 ---
 
 # Workflow Variables
@@ -242,22 +242,13 @@ Variables 的 `medium`，随后 Issue 的同名值再将其覆盖为 `xhigh`。
 
 ## Status
 
-仍需确定是否需要把 attempt 快照单独持久化以支持审计，还是 attempt 不可变快照只随
+已实装：Project / Issue / Run 三个 Variables resource 与统一 PUT / PATCH 语义（`null`
+只作删除指令、不持久化）、写入边界 shape 校验（非 object 根拒绝）、dispatch 仅携带
+原始声明与 attempt 不可变快照、Runner 执行入口统一渲染、task `setVars` 经 Run
+Variables PATCH 投影。
+
+开放问题：是否需要把 attempt 快照单独持久化以支持审计，还是 attempt 不可变快照只随
 dispatch 流转就足够。
-
-与当前实现的差距：
-
-- 当前 Profile YAML 仍可包含 embedded variables，配置中还有 global variables；目标模型
-  只从 Project、Issue 和 Run Variables 解析。
-- 当前 merge 可以用持久化 `null` 屏蔽前一个 scope 的值；目标模型暂不提供这一额外状态，
-  `null` 只用于清除当前 scope 的声明并恢复继承。
-- 当前没有在所有写入边界统一拒绝非 object 根；目标 validator 必须在写入前拒绝。
-- 当前 Server 在 dispatch 前展开 `with` / `expect`，目标改为 dispatch 仅携带原始声明
-  与 attempt 不可变快照，模板求值统一在 Runner 调用 Action 前的执行入口执行。
-
-本 WIP spec 固定目标语义，不把当前 `VariableBundle`、API DTO 或数据库 JSON 当作领域
-对象。实现可以使用 resolver 或 provider 隐藏读取与合并；这些是内部实现细节，不进入
-领域模型。
 
 ## `WorkflowRunProfile` row/table name: historical misnomer
 

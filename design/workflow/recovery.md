@@ -152,6 +152,6 @@ result.failed
 
 ## Status
 
-当前 recovery self retry 从本次 rendered input 构造 `addTasks`，会把 `${{ vars.* }}` 等引用
-固化为旧值；之后的人工 retry 继续复制该值。issue #465 负责改为复制原始 declaration，
-并以 model-a → model-b 场景验证新 attempt 使用最新 context。
+已实装（issue #465）：`retrySelf` 与人工 retry 都从原始 declaration 重建——
+`with` / `expect` 保留 Workflow 表达式，新 attempt 用自己的 context snapshot 重新
+展开；`recoveryRemaining` 作为独立执行状态从结构上进不了重建路径。
