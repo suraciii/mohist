@@ -36,6 +36,7 @@ internal static class UpdateCommands
         update.Subcommands.Add(BuildCliUpdate(updater));
         update.Subcommands.Add(BuildServerUpdate(updater));
         update.Subcommands.Add(BuildRunnerUpdate(updater));
+        update.Subcommands.Add(BuildSlackUpdate(updater));
 
         return update;
     }
@@ -88,6 +89,18 @@ internal static class UpdateCommands
             var repoRoot = ctx.GetValue(repoRootOpt);
             return await updater.UpdateRunnerAsync(repoRoot, dryRun, token);
         });
+        return cmd;
+    }
+
+    private static Command BuildSlackUpdate(SourceCodeUpdater updater)
+    {
+        var cmd = new Command("slack", "Update the mohist-slack adapter from source");
+        var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
+        var dryRunOpt = MohistCliCommands.DryRunOption();
+        cmd.Options.Add(repoRootOpt);
+        cmd.Options.Add(dryRunOpt);
+        cmd.SetAction(async (ctx, token) => await updater.UpdateSlackAsync(
+            ctx.GetValue(repoRootOpt), ctx.GetValue(dryRunOpt), token));
         return cmd;
     }
 }

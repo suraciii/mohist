@@ -59,6 +59,31 @@ public class InstallSpecs
     }
 
     [Fact]
+    public async Task InstallSlack_CreatesSystemdUnitWithAdapterAndOperatorEnvironment()
+    {
+        var files = new FakeFileSystem();
+        var environment = new MockEnvironmentVariableProvider();
+        environment[OperatorCredentialProvider.TokenEnvironmentVariable] = "operator-token-for-test";
+        var installer = new SystemdServiceInstaller(
+            TextWriter.Null, TextWriter.Null, files, new FakeCommandExecutor(), environment);
+
+        var exitCode = await installer.InstallSlackAsync(new ServiceInstallOptions(
+            DryRun: true,
+            UnitDir: "/units",
+            RepoRoot: "/repo",
+            ListenUrl: null,
+            ServerUrl: "http://127.0.0.1:4567",
+            RunnerRoot: null));
+
+        Assert.Equal(0, exitCode);
+        var unitContent = files.Read("/units/mohist-slack.service");
+        Assert.Contains("ExecStart=node packages/mohist-slack/dist/cli.js", unitContent);
+        Assert.Contains("Restart=on-failure", unitContent);
+        Assert.Contains("Environment=\"SERVER_URL=http://127.0.0.1:4567\"", unitContent);
+        Assert.Contains("Environment=\"MOHIST_OPERATOR_TOKEN=operator-token-for-test\"", unitContent);
+    }
+
+    [Fact]
     public async Task InstallRunner_IncludesUserLocalDotnetRoot()
     {
         var files = new FakeFileSystem();

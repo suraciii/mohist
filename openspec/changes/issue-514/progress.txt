@@ -254,3 +254,17 @@ All tests pass:
 - `npm run build -w packages/mohist-slack` passed and produced `dist/cli.js`.
 - `npm test -w packages/mohist-slack` passed (4 tests).
 - The official Socket Mode SDK emits its catch-all event as `slack_event`; the adapter listens there so it receives all event types rather than the lower-level wire `events_api` type.
+
+# Issue 514 / T-010 — CLI Slack service management
+
+## Codebase Patterns
+
+- `IServiceInstaller` is the single CLI service lifecycle seam. `SystemdServiceInstaller` maps targets to user units and `WindowsScheduledTaskInstaller` maps them to launcher scripts plus Scheduled Tasks or Startup fallback.
+- `mo install` passes `ServiceInstallOptions`; Slack uses `ServerUrl` and the existing `MOHIST_OPERATOR_TOKEN` environment source. The adapter package also requires `SLACK_CONNECTIONS`, which is configured separately by the Connection workflow.
+- `mo update slack` is a focused source update: build `packages/mohist-slack`, then restart only when its managed service is installed. Like runner update, an absent service is reported as skipped.
+
+## Verification
+
+- Baseline full test run: CLI 1451 passed; the run had one unrelated intermittent Server Spec failure while the other test projects passed.
+- Final CLI build passed and CLI tests passed 1460/1460.
+- Slack systemd install test verifies `mohist-slack.service`, `node packages/mohist-slack/dist/cli.js`, `Restart=on-failure`, `SERVER_URL`, and `MOHIST_OPERATOR_TOKEN`.
