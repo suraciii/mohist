@@ -7,6 +7,7 @@ using Mohist.Server.Api;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -156,6 +157,35 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
         Assert.Equal(AgentTurnStatus.Unknown, turn.Status);
         Assert.Equal("unknown", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync())!.Status);
+    }
+
+    [Theory]
+    [InlineData("completed", AgentTurnStatus.Completed)]
+    [InlineData("failed", AgentTurnStatus.Failed)]
+    public async Task Stop_UnconfirmedFollowupTurnReconcilesOnCorrelatedTerminalRuntimeActivity(
+        string runtimeStatus,
+        AgentTurnStatus expectedTurnStatus)
+    {
+        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("unknown", true));
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var runtimeSessionId = (await session.GetAsync())!.AgentSessionId;
+        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                $"{{\"activity\":\"idle\",\"status\":\"{runtimeStatus}\",\"turnId\":\"{turnId}\"}}") },
+            runtimeSessionId));
+
+        var turn = Assert.Single(await session.ListTurnsAsync());
+        Assert.Equal(expectedTurnStatus, turn.Status);
+        Assert.Equal("idle", (await session.GetAsync())!.Status);
     }
 
     [Fact]

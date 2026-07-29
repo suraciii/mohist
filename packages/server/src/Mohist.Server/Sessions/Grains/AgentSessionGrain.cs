@@ -1547,11 +1547,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 ? turns.FirstOrDefault(candidate =>
                     string.Equals(candidate.Id, payloadTurnId, StringComparison.Ordinal))
                 : null;
-            var current = FindCurrentNonLaunchTurn(session);
             if (turn is null
-                || !string.IsNullOrWhiteSpace(turn.JobId)
-                || current is null
-                || !string.Equals(current.Id, turn.Id, StringComparison.Ordinal))
+                || !IsCurrentNonLaunchTurn(session, turn))
             {
                 return [];
             }
@@ -1596,11 +1593,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 ? turns.FirstOrDefault(candidate =>
                     string.Equals(candidate.Id, payloadTurnId, StringComparison.Ordinal))
                 : null;
-            var current = FindCurrentNonLaunchTurn(session);
             if (turn is null
                 || !string.IsNullOrWhiteSpace(turn.JobId)
-                || current is null
-                || !string.Equals(current.Id, turn.Id, StringComparison.Ordinal))
+                || !IsCurrentNonLaunchTurn(session, turn))
             {
                 return [];
             }
@@ -1653,6 +1648,21 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return turn;
         }
         return null;
+    }
+
+    private static bool IsCurrentNonLaunchTurn(AgentSession session, AgentTurnRecord turn)
+    {
+        if (turn.Status is AgentTurnStatus.Completed
+            or AgentTurnStatus.Failed
+            or AgentTurnStatus.Cancelled)
+        {
+            return false;
+        }
+
+        var turns = session.Status.Turns ?? [];
+        var latestNonLaunch = turns.LastOrDefault(candidate => string.IsNullOrWhiteSpace(candidate.JobId));
+        return latestNonLaunch is not null
+            && string.Equals(latestNonLaunch.Id, turn.Id, StringComparison.Ordinal);
     }
 
     private static bool TryResolveTurnId(string payloadJson, out string turnId)
