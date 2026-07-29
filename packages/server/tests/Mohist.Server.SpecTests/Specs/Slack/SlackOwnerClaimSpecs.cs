@@ -163,8 +163,9 @@ public sealed class SlackOwnerClaimSpecs : IAsyncLifetime
     private sealed class RecordingSlackApiClient : ISlackApiClient
     {
         public SlackUserInfoResponse UsersInfo { get; set; } = new(true, null, new("U1", "team-1", false, false, false, false, false));
-        public Task<SlackAuthTestResponse> AuthTestAsync(string botToken, CancellationToken ct = default) => Task.FromResult(new SlackAuthTestResponse(true, null, "team-1", "Workspace", "bot-1", "Mohist", "app-1"));
-        public Task<SlackBotInfoResponse> BotsInfoAsync(string botUserId, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackBotInfoResponse(true, null, null));
+        public Task<SlackAuthTestResponse> AuthTestAsync(string botToken, CancellationToken ct = default) => Task.FromResult(new SlackAuthTestResponse(true, null, "team-1", "Workspace", "bot-user-1", "Mohist", "bot-1", "app-1"));
+        public Task<SlackBotInfoResponse> BotsInfoAsync(string botId, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackBotInfoResponse(true, null, null));
+        public Task<SlackPermissionsScopesListResponse> PermissionsScopesListAsync(string botToken, CancellationToken ct = default) => Task.FromResult(new SlackPermissionsScopesListResponse(true, null, null));
         public Task<SlackUserInfoResponse> UsersInfoAsync(string userId, string botToken, CancellationToken ct = default) => Task.FromResult(UsersInfo);
         public Task<SlackConversationInfoResponse> ConversationsInfoAsync(string conversationId, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackConversationInfoResponse(true, null, null));
         public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackUsersListResponse(true, null, [], null));

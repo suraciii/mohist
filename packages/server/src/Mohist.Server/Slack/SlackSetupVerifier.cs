@@ -33,22 +33,25 @@ public sealed class SlackSetupVerifier
         var tokenText = System.Text.Encoding.UTF8.GetString(token);
         SlackAuthTestResponse auth;
         SlackBotInfoResponse bot;
+        SlackPermissionsScopesListResponse grantedScopes;
         try
         {
             auth = await _slack.AuthTestAsync(tokenText, ct);
-            if (!auth.Ok || string.IsNullOrWhiteSpace(auth.TeamId) || string.IsNullOrWhiteSpace(auth.AppId) || string.IsNullOrWhiteSpace(auth.UserId))
+            if (!auth.Ok || string.IsNullOrWhiteSpace(auth.TeamId) || string.IsNullOrWhiteSpace(auth.AppId) || string.IsNullOrWhiteSpace(auth.UserId) || string.IsNullOrWhiteSpace(auth.BotId))
                 return await FailAsync(projectId, connection, $"Slack rejected the Bot token: {auth.Error ?? "invalid_auth"}. Generate a new token.", ct);
-            bot = await _slack.BotsInfoAsync(auth.UserId, tokenText, ct);
+            bot = await _slack.BotsInfoAsync(auth.BotId, tokenText, ct);
+            grantedScopes = await _slack.PermissionsScopesListAsync(tokenText, ct);
         }
         catch (HttpRequestException)
         {
             return await FailAsync(projectId, connection, "Slack could not be reached. Start mohist-slack and retry verification.", ct);
         }
 
-        var scopes = bot.Bot?.Scopes ?? [];
+        var scopes = grantedScopes.Scopes?.Values.SelectMany(scopes => scopes) ?? [];
         var missing = RequiredScopes.Where(scope => !scopes.Contains(scope, StringComparer.Ordinal)).ToArray();
         var reason = !bot.Ok || bot.Bot is null ? $"Slack could not resolve the configured Bot: {bot.Error ?? "bots.info failed"}. Check the App and Bot installation." :
-            !string.Equals(bot.Bot.AppId, auth.AppId, StringComparison.Ordinal) ? "The App and Bot belong to different Slack installs. Reinstall the matching App and Bot." :
+            !string.Equals(bot.Bot.Id, auth.BotId, StringComparison.Ordinal) || !string.Equals(bot.Bot.AppId, auth.AppId, StringComparison.Ordinal) ? "The App and Bot belong to different Slack installs. Reinstall the matching App and Bot." :
+            !grantedScopes.Ok || grantedScopes.Scopes is null ? $"Slack could not list the App's granted scopes: {grantedScopes.Error ?? "apps.permissions.scopes.list failed"}. Reinstall the App and retry verification." :
             missing.Length > 0 ? $"Slack is missing required scopes: {string.Join(", ", missing)}. Add the scopes and reinstall the App." : null;
 
         if (reason is not null)
