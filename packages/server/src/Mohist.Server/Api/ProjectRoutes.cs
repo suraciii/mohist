@@ -211,7 +211,7 @@ public static class ProjectRoutes
             return result.Code switch
             {
                 WorkflowProfileReferenceResultCode.Applied or WorkflowProfileReferenceResultCode.AlreadyApplied =>
-                    ApiResults.Ok(new { projectId = project.Id, profileId = request.ProfileId }),
+                    ApiResults.Ok(new ProjectWorkflowProfileResponse(project.Id, request.ProfileId)),
                 WorkflowProfileReferenceResultCode.ProfileUnknown =>
                     ApiResults.NotFound(result.Message ?? $"WorkflowProfile '{request.ProfileId}' was not found"),
                 _ => ApiResults.Conflict(result.Message ?? "WorkflowProfile selection rejected", "workflow_profile_selection_rejected"),
@@ -580,6 +580,8 @@ public static class ProjectRoutes
         return false;
     }
 }
+
+public sealed record ProjectWorkflowProfileResponse(string ProjectId, string ProfileId);
 
 public sealed record PromptUpsertRequest(string? Body);
 
