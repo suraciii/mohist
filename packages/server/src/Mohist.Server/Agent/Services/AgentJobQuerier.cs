@@ -3,6 +3,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Agent.Services;
 
@@ -53,6 +54,34 @@ public class AgentJobQuerier : IScopedService
         return row is null ? null : ToItem(row);
     }
 
+    public async Task<AgentExecutionHistory?> GetLatestExecutionAsync(
+        string projectId,
+        string agentId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var states = await db.AgentJobs.AsNoTracking()
+            .Where(r => r.ProjectId == projectId && r.AgentId == agentId && r.TerminalAt != null)
+            .OrderByDescending(r => r.TerminalAt)
+            .ThenByDescending(r => r.JobKey)
+            .Take(20)
+            .Select(r => r.State)
+            .ToListAsync(ct);
+
+        foreach (var stateJson in states)
+        {
+            var state = JSON.Deserialize<AgentJobState>(stateJson);
+            if (state?.Input is null || state.Status is not (AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Unknown))
+                continue;
+            return new AgentExecutionHistory(
+                state.Status,
+                state.PendingSessionClose?.FailureCategory ?? state.PendingFailureEvent?.FailureCategory,
+                state.Input,
+                state.TerminalAt);
+        }
+        return null;
+    }
+
     private static AgentJobListItem ToItem(AgentJobRow row) => new(
         row.JobKey,
         row.AgentId,
@@ -67,3 +96,9 @@ public sealed record AgentJobListItem(
     string? Status,
     string? SubmittedAt,
     string? TerminalAt);
+
+public sealed record AgentExecutionHistory(
+    AgentJobStatus Status,
+    string? FailureCategory,
+    AgentJobInput Input,
+    DateTimeOffset? TerminalAt);

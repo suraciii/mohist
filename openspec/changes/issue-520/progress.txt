@@ -23,3 +23,10 @@
 - Added read-side `AgentAvailabilityService`; it combines online runner capacity with the T-001 active concurrency count and returns `CanStartNow` or one of `no-online-runner`, `capacity-full`, and `concurrency-limit`.
 - Added concurrency waiter reads and a per-agent status endpoint at `/api/projects/{projectRef}/agents/{agentRef}/status`; pending AgentJobs are returned as `waiting` items with their server-derived reason.
 - Availability does not consume or mutate Readiness. Focused availability unit tests pass; server build passes with `-p:SkipWebBuild=true`. The repository Web build remains unavailable because `tsc` is not installed.
+
+## T-004
+
+- Added read-side `AgentReadinessService`. It derives `Ready`, `Needs setup`, or `Unknown` from current structural definition checks and the latest matching AgentJob execution history; readiness is not stored on the Agent aggregate.
+- Structural gaps cover malformed model references, variant-without-model, missing instructions, and invalid legacy runtimes. Runner-classified credential/model/runtime failures are converted into actionable setup gaps; successful matching execution is positive evidence.
+- Agent detail reads now include readiness. `AgentLauncher` checks readiness before opening a session or creating/submitting a job across manual, routed, mention, and subscription launch paths. Manual HTTP launch returns `409 agent_needs_setup` with gaps and the single setup entry.
+- Focused readiness unit tests, the full server unit suite (1547 tests), server build, SpecTests build, and the focused no-session/no-job launch spec pass with `-p:SkipWebBuild=true`; Web build remains unavailable because `tsc` is not installed.
