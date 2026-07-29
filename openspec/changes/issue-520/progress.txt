@@ -30,3 +30,13 @@
 - Structural gaps cover malformed model references, variant-without-model, missing instructions, and invalid legacy runtimes. Runner-classified credential/model/runtime failures are converted into actionable setup gaps; successful matching execution is positive evidence.
 - Agent detail reads now include readiness. `AgentLauncher` checks readiness before opening a session or creating/submitting a job across manual, routed, mention, and subscription launch paths. Manual HTTP launch returns `409 agent_needs_setup` with gaps and the single setup entry.
 - Focused readiness unit tests, the full server unit suite (1547 tests), server build, SpecTests build, and the focused no-session/no-job launch spec pass with `-p:SkipWebBuild=true`; Web build remains unavailable because `tsc` is not installed.
+
+## T-005
+
+- Web `AgentInfo` now carries the Server-provided `readiness` field (conclusion, gaps, setup) so the client renders the Server's verdict verbatim — no client-side readiness synthesis.
+- New Web hook `useAgentDetailStatus` consumes `/api/projects/{projectRef}/agents/{agentRef}/status` (added in T-003) and exposes per-agent Availability + waiting-work list. `AgentDetailPage` renders two server-driven cards: a `ReadinessCard` (Ready / Needs setup / Unknown) and an `AvailabilityCard` (Can start now / Waiting — reason, active runs, runner slots, waiting-work list with per-item reasons).
+- `AgentDetailPage` and `AgentSessionComposerPage` block the New Session launch action when Readiness is Needs setup (gap list and setup entry shown inline). Unknown remains launchable with an explicit "will wait for validation" hint.
+- Server 409 `agent_needs_setup` on launch is now surfaced in Web (`error-needs-setup` banner reads the gap list from `error.data.gaps`) and CLI (`mo agent launch` prints the gap list, the action hint, and the setup entry). `mo agent launch` no longer relies on raw envelope rendering for the 409 path.
+- `mo agent view` now does two requests: the agent (which now includes readiness) and the per-agent status endpoint, then renders a Readiness section, the Availability conclusion, and the waiting-work list. Clients no longer derive any second readiness/availability verdict.
+- Server `AgentQuerier.GetByNameAsync` and `ListAsync` now hydrate readiness on every read (matching `GetByIdAsync`) so list/get-by-name paths also expose the Server's Readiness verdict.
+- New CLI tests cover `mo agent view` readiness gap + setup rendering, availability + waiting-work rendering, and `mo agent launch` 409 needs-setup gap output. Existing CLI agent suite (1446 tests) and the full web suite (5164 tests) continue to pass with `-p:SkipWebBuild=true`.
