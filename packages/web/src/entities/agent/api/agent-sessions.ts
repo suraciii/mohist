@@ -112,6 +112,12 @@ export interface GenericFollowupInput {
   text: string
 }
 
+export type TurnControlState = 'cancelled' | 'stop-requested' | 'stopped' | 'unknown'
+export interface TurnControlResult {
+  state?: string
+  interruptUnconfirmed?: boolean | null
+}
+
 /* ── Pure client functions ──────────────────────────────── */
 
 export function getAgentSessions(projectId: string, agentRef: string, params?: { status?: string; limit?: number }) {
@@ -175,13 +181,22 @@ export function postGenericFollowup(projectId: string, sessionId: string, input:
   )
 }
 
-export function cancelGenericSession(projectId: string, sessionId: string) {
-  return request<{ state?: string }>(
-    projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/cancel`),
+export function controlGenericSession(projectId: string, sessionId: string, turnId: string, operation: 'cancel' | 'stop') {
+  return request<TurnControlResult>(
+    projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/${operation}`),
     {
       method: 'POST',
+      body: JSON.stringify({ turnId }),
     },
   )
+}
+
+export function cancelGenericSession(projectId: string, sessionId: string, turnId: string) {
+  return controlGenericSession(projectId, sessionId, turnId, 'cancel')
+}
+
+export function stopGenericSession(projectId: string, sessionId: string, turnId: string) {
+  return controlGenericSession(projectId, sessionId, turnId, 'stop')
 }
 
 /* ── Query hooks ────────────────────────────────────────── */
@@ -230,8 +245,6 @@ export function useGenericSessionTranscript(sessionId: string, runtimeSessionId?
 /* ── Mutation hooks ─────────────────────────────────────── */
 
 type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
-
-const CANCEL_TERMINAL_STATES = new Set(['completed', 'failed', 'stopped', 'cancelled'])
 
 export function launchAgentSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
   return {
@@ -283,9 +296,9 @@ export function useGenericFollowup() {
 
 export function cancelGenericSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
   return {
-    mutationFn: ({ sessionId }: { sessionId: string }) =>
-      cancelGenericSession(projectId!, sessionId),
-    onSuccess: (data: { state?: string }, variables: { sessionId: string; agentRef?: string }) => {
+    mutationFn: ({ sessionId, turnId, operation }: { sessionId: string; turnId: string; operation: 'cancel' | 'stop'; agentRef?: string }) =>
+      controlGenericSession(projectId!, sessionId, turnId, operation),
+    onSuccess: (data: TurnControlResult, variables: { sessionId: string; turnId: string; agentRef?: string; operation: 'cancel' | 'stop' }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agent-session', projectId, variables.sessionId] })
@@ -293,11 +306,11 @@ export function cancelGenericSessionMutationOptions(projectId: string | null | u
         queryClient.invalidateQueries({ queryKey: ['agents', projectId, variables.agentRef, 'sessions'] })
       }
       const state = data?.state
-      if (state && CANCEL_TERMINAL_STATES.has(state)) {
-        toast.success('Session cancelled')
+      if (state && ['cancelled', 'stop-requested', 'stopped', 'unknown'].includes(state)) {
+        toast.success(state)
         return
       }
-      toast.warning('Session could not be cancelled')
+      toast.warning(`Turn ${variables.operation} was not applied`)
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
@@ -305,8 +318,16 @@ export function cancelGenericSessionMutationOptions(projectId: string | null | u
   }
 }
 
+export const genericTurnControlMutationOptions = cancelGenericSessionMutationOptions
+
 export function useCancelGenericSession() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   return useMutation(cancelGenericSessionMutationOptions(projectId, queryClient))
+}
+
+export function useGenericTurnControl() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation(genericTurnControlMutationOptions(projectId, queryClient))
 }

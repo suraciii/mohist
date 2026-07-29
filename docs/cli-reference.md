@@ -223,7 +223,9 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 - `mo session list --agent <agent>` 查看该 Agent 发起的 Session。
 - `mo session list --issue <number>` 查看该 Issue 的 Workflow 产生的 Session。
 - `mo session list --run <run-id>` 查看该 Run 的 Session。
-- 后续读取、follow-up、compact、reset 和 cancel 都使用稳定的 Session ID。follow-up 返回新的
+- 后续读取、follow-up、compact、reset、cancel 和 stop 都使用稳定的 Session ID；cancel 与 stop
+  还必须通过 `--turn-id` 指定目标 Turn。cancel 确定性取消排队中的 Turn，stop 请求 Runtime
+  停止执行中的 Turn。follow-up 返回新的
   Input ID；已经归入当前 Turn 或新 Turn 时同时返回 Turn ID，否则稍后从 Session 读取归属。
 
 `agent connection` 管理一个 Mohist Agent 与外部交互身份的绑定。第一版 provider 是 Slack：
@@ -249,7 +251,9 @@ Connection 只拥有外部身份、权限和连接状态；Agent 配置仍由 `a
 语义见[把 Mohist Agent 接入 Slack](agent-connections.md)。
 
 来源只是筛选和便捷查找条件，不创造 `mo issue session` 与 `mo agent session` 两套重复能力。
-`session cancel` 请求中断当前 Runtime 执行；它不表示取消或重写 AgentJob 生命周期。
+`session cancel` 确定性取消一个排队中的 Turn；它不接触 Runtime。`session stop` 请求 Runtime
+停止一个执行中的 Turn，结果可能是 `stop-requested`、`stopped` 或 `unknown`。未知结果应在
+Session view 中核对；两条命令都只作用于 `--turn-id` 指定的 Turn。
 
 ## Activity、Event 与本机 Service
 

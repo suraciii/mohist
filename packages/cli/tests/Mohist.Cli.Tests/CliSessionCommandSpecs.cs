@@ -744,12 +744,13 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId], output, error, fileSystem, executor);
+            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal($"/api/projects/{ActiveProjectId}/agent-sessions/{StableSessionId}/cancel", request.RequestUri?.PathAndQuery);
+        Assert.Contains("\"turnId\": \"turn-123\"", request.Body, StringComparison.Ordinal);
         Assert.Contains("state: cancelled", output.ToString(), StringComparison.Ordinal);
     }
 
@@ -767,7 +768,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId], output, error, fileSystem, executor);
+            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var path = handler.Requests.Single().RequestUri?.PathAndQuery ?? string.Empty;
@@ -787,7 +788,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId], output, error, fileSystem, executor);
+            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("state: not-cancellable", output.ToString(), StringComparison.Ordinal);
@@ -805,7 +806,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId], output, error, fileSystem, executor);
+            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("state: completed", output.ToString(), StringComparison.Ordinal);
@@ -822,7 +823,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId, "--json", "state"], output, error, fileSystem, executor);
+            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123", "--json", "state"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("\"state\": \"cancelled\"", output.ToString(), StringComparison.Ordinal);
@@ -836,7 +837,7 @@ public class CliSessionCommandSpecs
                 "Agent session nope not found", "session_not_found", HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", "nope"], output, error, fileSystem, executor);
+            http, ["session", "cancel", "nope", "--turn-id", "turn-123"], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("not found", error.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -854,7 +855,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId, "--project", "proj_other"], output, error, fileSystem, executor);
+            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123", "--project", "proj_other"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal($"/api/projects/proj_other/agent-sessions/{StableSessionId}/cancel", handler.Requests[0].RequestUri?.PathAndQuery);
@@ -867,10 +868,30 @@ public class CliSessionCommandSpecs
             throw new HttpRequestException("offline"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId], output, error, fileSystem, executor);
+            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123"], output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains(MohistCliApi.ServerUnavailableMessage, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("cancel", "cancelled")]
+    [InlineData("stop", "stop-requested")]
+    [InlineData("stop", "stopped")]
+    [InlineData("stop", "unknown")]
+    public async Task SessionTurnControl_ForwardsTurnIdAndRendersSharedState(string operation, string state)
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { state } })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["session", operation, StableSessionId, "--turn-id", "turn-shared"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/agent-sessions/{StableSessionId}/{operation}", handler.Requests.Single().RequestUri?.PathAndQuery);
+        Assert.Contains("\"turnId\": \"turn-shared\"", handler.Requests.Single().Body, StringComparison.Ordinal);
+        Assert.Contains($"state: {state}", output.ToString(), StringComparison.Ordinal);
+        if (state == "unknown") Assert.Contains("verification: Session view", output.ToString(), StringComparison.Ordinal);
     }
 
     // ----- recovery (compact/reset) -----

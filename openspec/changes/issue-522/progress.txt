@@ -23,3 +23,9 @@
 - Added `POST /api/projects/{projectRef}/agent-sessions/{sessionId}/stop` and the issue-scoped stop alias. The Session grain resolver gates the request to Executing Turns, directs Queued Turns to cancel, and returns terminal stale status without contacting the Runner.
 - Stop reuses `CancelAgentSession` with a Server-minted `turnId` in the payload and mirrors the Runner reply. Runner replies now use `stopped`, `unknown` with `interruptUnconfirmed`, or `stop-requested`; binding-guarded idle/unknown activity outbox behavior remains unchanged and available during snapshot recovery.
 - Runner typecheck and full suite pass (123 files, 1444 tests). Server production and spec projects compile; the focused API spec host still exceeds five minutes during startup, consistent with the T-002 recorded integration fixture hang.
+
+## T-004
+
+- CLI `session cancel` and `session stop` are distinct commands and require `--turn-id`; both post the target Turn and render the Server `state` vocabulary without deriving results from Session activity.
+- The existing Web session action area is now the single Turn control surface. It targets the latest transcript Turn, exposes Cancel and Stop, renders the returned state, and uses `Verification: Session view` for `unknown`.
+- Issue-bound and generic Web clients send `{ turnId }` to their corresponding cancel/stop endpoints. Web typecheck, 389-file Web suite, FSD checks, and the full .NET suite except the long-running Server Spec host pass; the Spec host still does not finish startup within ten minutes.

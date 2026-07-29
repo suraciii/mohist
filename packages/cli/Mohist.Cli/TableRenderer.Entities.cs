@@ -162,6 +162,8 @@ internal sealed partial class TableRenderer
         var state = StringOf(data, "state");
         var stateText = string.IsNullOrEmpty(state) ? "(no state returned)" : state;
         _out.WriteLine($"state: {stateText}");
+        if (string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
+            _out.WriteLine("verification: Session view");
     }
 
     private void RenderAgentSessionList(JsonNode? data)
@@ -464,6 +466,8 @@ internal sealed partial class TableRenderer
         var state = StringOf(data, "state");
         var stateText = string.IsNullOrEmpty(state) ? "(no state returned)" : state;
         _out.WriteLine($"state: {stateText}");
+        if (string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
+            _out.WriteLine("verification: Session view");
     }
 
     private static string FormatSessionOwner(JsonObject obj)

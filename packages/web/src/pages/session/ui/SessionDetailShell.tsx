@@ -407,7 +407,6 @@ export function SessionDetailShell({
       statusKind={statusKind}
       turnCount={displayTurnCount}
       siblingNav={siblingNav}
-      isRunning={isRunning}
       cancel={cancel}
       headerRef={headerRef}
     />
@@ -554,7 +553,6 @@ function SessionHeader({
   statusKind,
   turnCount,
   siblingNav,
-  isRunning,
   cancel,
   headerRef,
 }: {
@@ -567,13 +565,13 @@ function SessionHeader({
   statusKind: StatusKind
   turnCount: number
   siblingNav?: React.ReactNode
-  isRunning: boolean
   cancel: SessionDataSourceResult['cancel']
   headerRef: RefObject<HTMLDivElement | null>
 }) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
+  const [controlOperation, setControlOperation] = useState<'cancel' | 'stop'>('stop')
   const [cancelState, setCancelState] = useState<string | null>(null)
-  const showCancelControl = cancel != null && isRunning
+  const showCancelControl = cancel != null
 
   const changedFiles = meta?.changedFiles
   const fileSummary = changedFiles && changedFiles.length > 0
@@ -705,13 +703,24 @@ function SessionHeader({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setCancelDialogOpen(true)}
+            onClick={() => { setControlOperation('cancel'); setCancelDialogOpen(true) }}
             data-testid="session-cancel-trigger"
-            aria-label="Cancel session"
+            aria-label="Cancel Turn"
             type="button"
           >
             <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            Cancel session
+            Cancel Turn
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { setControlOperation('stop'); setCancelDialogOpen(true) }}
+            data-testid="session-stop-trigger"
+            aria-label="Stop Turn"
+            type="button"
+          >
+            <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            Stop Turn
           </Button>
         </div>
       )}
@@ -723,14 +732,16 @@ function SessionHeader({
             if (cancel.isPending) return
             setCancelDialogOpen(open)
           }}
-          title="Cancel this session?"
-          description="The agent will be asked to stop. The session may still take a moment to wind down."
-          confirmLabel="Cancel session"
+          title={controlOperation === 'cancel' ? 'Cancel this Turn?' : 'Stop this Turn?'}
+          description={controlOperation === 'cancel'
+            ? 'This deterministically cancels a queued Turn.'
+            : 'This requests that the Runtime stop an executing Turn; the result may be unknown.'}
+          confirmLabel={controlOperation === 'cancel' ? 'Cancel Turn' : 'Stop Turn'}
           cancelLabel="Keep running"
           tone="destructive"
           loading={cancel.isPending}
           onConfirm={() => {
-            cancel.mutate({
+            cancel.mutate(controlOperation, {
               onSuccess: (result) => {
                 setCancelState(result.state)
                 setCancelDialogOpen(false)
@@ -742,7 +753,8 @@ function SessionHeader({
       )}
       {cancelState && (
         <div className="px-4 pt-2 text-xs text-muted-foreground" role="status" data-testid="session-cancel-result">
-          Cancellation result: {cancelState}
+          Turn result: {cancelState}
+          {cancelState === 'unknown' && <span> Verification: Session view</span>}
         </div>
       )}
 
