@@ -15,6 +15,10 @@ export class HttpAdapterTransport implements AdapterTransport {
     this.baseUrl = options.serverUrl.replace(/\/$/, "")
   }
 
+  discoverConnections(signal: AbortSignal) {
+    return this.get<SlackConnectionRef[]>("/api/slack-connections/adapter", signal)
+  }
+
   lease(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal) {
     return this.post<AdapterSession>(ref, "adapter-session", { adapterId }, signal)
   }
@@ -41,6 +45,18 @@ export class HttpAdapterTransport implements AdapterTransport {
       body: JSON.stringify(body),
       signal,
     })
+    return await this.read<T>(response)
+  }
+
+  private async get<T>(path: string, signal: AbortSignal): Promise<T> {
+    const response = await this.request(`${this.baseUrl}${path}`, {
+      headers: { "x-mohist-operator-token": this.options.operatorToken },
+      signal,
+    })
+    return await this.read<T>(response)
+  }
+
+  private async read<T>(response: Response): Promise<T> {
     const text = await response.text()
     let payload: unknown = null
     if (text) payload = JSON.parse(text) as unknown

@@ -268,3 +268,18 @@ All tests pass:
 - Baseline full test run: CLI 1451 passed; the run had one unrelated intermittent Server Spec failure while the other test projects passed.
 - Final CLI build passed and CLI tests passed 1460/1460.
 - Slack systemd install test verifies `mohist-slack.service`, `node packages/mohist-slack/dist/cli.js`, `Restart=on-failure`, `SERVER_URL`, and `MOHIST_OPERATOR_TOKEN`.
+
+# Issue 514 review findings 1 and 2
+
+## Implementation
+
+- `mo agent connection create <agent> --provider slack` now creates a recoverable draft without Slack workspace, App, or Bot identifiers. The identifiers remain unset until the later verification flow establishes them; no caller-provided identity is accepted at create time.
+- The authenticated `GET /api/slack-connections/adapter` discovery endpoint returns only enabled Connections with both stored credentials. The adapter starts with an empty set, polls this Server-owned list, and adds or disconnects per-Connection Socket Mode runtimes as the list changes. `SLACK_CONNECTIONS` is no longer read.
+
+## Verification
+
+- `npm run typecheck -w packages/mohist-slack` passed.
+- `npm test -w packages/mohist-slack` passed (5 tests), including zero-connection startup and later add/remove reconciliation.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore --filter FullyQualifiedName~CliAgentConnectionCommandSpecs` passed (the Microsoft Testing Platform ignored the VSTest filter and ran 1460 tests).
+- Direct xUnit run of `AgentConnectionStoreSpecs` passed (22 tests), including configured-only discovery.
+- The full Server Spec command similarly ignored its filter and had one unrelated intermittent session dispatch polling failure; the targeted direct xUnit class passed.

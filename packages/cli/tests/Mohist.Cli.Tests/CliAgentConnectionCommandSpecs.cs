@@ -37,7 +37,7 @@ public sealed class CliAgentConnectionCommandSpecs
         });
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "create", "writer", "--provider", "slack", "--workspace-team-id", "T1", "--app-id", "A1", "--bot-user-id", "U1"],
+            ["agent", "connection", "create", "writer", "--provider", "slack"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -45,6 +45,9 @@ public sealed class CliAgentConnectionCommandSpecs
         Assert.Contains("https://api.slack.com/apps?new_app=1", output.ToString(), StringComparison.Ordinal);
         Assert.Equal("/api/projects/proj_abc/slack-connections", handler.Requests[1].RequestUri?.PathAndQuery);
         Assert.Contains("agent_1", handler.Requests[1].Body!, StringComparison.Ordinal);
+        Assert.DoesNotContain("workspaceTeamId", handler.Requests[1].Body!, StringComparison.Ordinal);
+        Assert.DoesNotContain("appId", handler.Requests[1].Body!, StringComparison.Ordinal);
+        Assert.DoesNotContain("botUserId", handler.Requests[1].Body!, StringComparison.Ordinal);
     }
 
     [Fact]

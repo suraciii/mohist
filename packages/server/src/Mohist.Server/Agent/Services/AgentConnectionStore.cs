@@ -66,6 +66,29 @@ public sealed class AgentConnectionStore : IScopedService
         return ToDomain(row, agent is null ? null : AgentReadinessDeriver.Derive(agent.AgentConfig));
     }
 
+    public async Task<IReadOnlyList<SlackAdapterConnection>> ListForAdapterAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var candidates = await db.AgentConnections.AsNoTracking()
+            .Where(connection => connection.DeletedAt == null && connection.DesiredState == DesiredStateKind.Enabled)
+            .OrderBy(connection => connection.ProjectId)
+            .ThenBy(connection => connection.Id)
+            .Select(connection => new SlackAdapterConnection(connection.ProjectId, connection.Id))
+            .ToListAsync(ct);
+
+        var configured = new List<SlackAdapterConnection>();
+        foreach (var candidate in candidates)
+        {
+            var appToken = await _secretStore.LoadAsync(
+                new SecretStoreAddress(candidate.ProjectId, candidate.ConnectionId, SecretKind.AppToken), ct);
+            var botToken = await _secretStore.LoadAsync(
+                new SecretStoreAddress(candidate.ProjectId, candidate.ConnectionId, SecretKind.BotToken), ct);
+            if (appToken is { Length: > 0 } && botToken is { Length: > 0 })
+                configured.Add(candidate);
+        }
+        return configured;
+    }
+
     public async Task<AgentConnection> CreateAsync(AgentConnection connection, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -228,3 +251,5 @@ public sealed class AgentConnectionDuplicateException(string projectId, string a
     public string AgentId { get; } = agentId;
     public string WorkspaceTeamId { get; } = workspaceTeamId;
 }
+
+public sealed record SlackAdapterConnection(string ProjectId, string ConnectionId);

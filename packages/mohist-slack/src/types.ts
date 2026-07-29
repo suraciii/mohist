@@ -37,6 +37,7 @@ export interface DeliveryAck {
 }
 
 export interface AdapterTransport {
+  discoverConnections(signal: AbortSignal): Promise<readonly SlackConnectionRef[]>
   lease(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<AdapterSession>
   ingress(ref: SlackConnectionRef, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult>
   claimDelivery(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<Delivery | null>

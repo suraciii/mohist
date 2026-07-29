@@ -5,6 +5,7 @@ import type { AdapterSession, AdapterTransport, Delivery, IngressResult, SlackCo
 class FakeSocket implements SocketClient {
   private handler?: (event: SocketEvent) => Promise<void>
   started = false
+  disconnected = false
 
   on(_event: "slack_event", handler: (event: SocketEvent) => Promise<void>) {
     this.handler = handler
@@ -19,6 +20,10 @@ class FakeSocket implements SocketClient {
     await this.handler?.({ body, ack: () => { acknowledged = true } })
     return acknowledged
   }
+
+  async disconnect() {
+    this.disconnected = true
+  }
 }
 
 class FakeTransport implements AdapterTransport {
@@ -26,7 +31,12 @@ class FakeTransport implements AdapterTransport {
   readonly envelopes: SlackEnvelope[] = []
   readonly acks: Array<{ ref: SlackConnectionRef; id: string; outcome: string }> = []
   readonly deliveries: Delivery[] = [{ id: "delivery-1", dmConversationId: "D1", payloadJson: JSON.stringify({ text: "accepted" }) }]
+  connections: SlackConnectionRef[] = []
   private readonly sessionByConnection = new Map<string, AdapterSession>()
+
+  async discoverConnections(): Promise<readonly SlackConnectionRef[]> {
+    return this.connections
+  }
 
   async lease(ref: SlackConnectionRef): Promise<AdapterSession> {
     this.leases.push(ref)
@@ -75,13 +85,13 @@ describe("mohist-slack adapter", () => {
     })
   })
 
-  it("leases each connection, forwards every event to ingress, and drains replies", async () => {
+  it("discovers connections, forwards every event to ingress, and drains replies", async () => {
     const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }, { projectId: "p1", connectionId: "c2" }]
     const sockets = new Map<string, FakeSocket>()
     const webs = new Map<string, FakeWeb>()
     const adapter = new SlackAdapter({
       adapterId: "adapter-1",
-      connections: [{ projectId: "p1", connectionId: "c1" }, { projectId: "p1", connectionId: "c2" }],
       transport,
       socketFactory: (_token, ref) => {
         const socket = new FakeSocket()
@@ -109,6 +119,36 @@ describe("mohist-slack adapter", () => {
     controller.abort()
   })
 
+  it("starts with zero connections and reconciles later additions and removals", async () => {
+    const transport = new FakeTransport()
+    const sockets = new Map<string, FakeSocket>()
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-1",
+      transport,
+      socketFactory: (_token, ref) => {
+        const socket = new FakeSocket()
+        sockets.set(ref.connectionId, socket)
+        return socket
+      },
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await expect(adapter.start(controller.signal)).resolves.toBeUndefined()
+    expect(transport.leases).toEqual([])
+
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    await adapter.refreshConnections(controller.signal)
+    expect(sockets.get("c")?.started).toBe(true)
+
+    transport.connections = []
+    await adapter.refreshConnections(controller.signal)
+    expect(sockets.get("c")?.disconnected).toBe(true)
+    controller.abort()
+  })
+
   it("limits concurrent ingress without using a durable queue", async () => {
     const socket = new FakeSocket()
     let active = 0
@@ -116,6 +156,7 @@ describe("mohist-slack adapter", () => {
     let releaseFirst!: () => void
     const first = new Promise<void>((resolve) => { releaseFirst = resolve })
     const transport: AdapterTransport = {
+      discoverConnections: async () => [{ projectId: "p", connectionId: "c" }],
       lease: async () => ({ adapterId: "a", appToken: "app", botToken: "bot" }),
       ingress: async () => {
         active += 1
@@ -129,7 +170,6 @@ describe("mohist-slack adapter", () => {
     }
     const adapter = new SlackAdapter({
       adapterId: "a",
-      connections: [{ projectId: "p", connectionId: "c" }],
       transport,
       socketFactory: () => socket,
       webFactory: () => new FakeWeb(),

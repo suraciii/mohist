@@ -2,10 +2,10 @@ import type { AdapterTransport, SlackConnectionRef, SlackEnvelope, SlackWebClien
 
 export interface SlackAdapterOptions {
   readonly adapterId: string
-  readonly connections: readonly SlackConnectionRef[]
   readonly transport: AdapterTransport
   readonly socketFactory: SocketClientFactory
   readonly webFactory: WebClientFactory
+  readonly discoveryIntervalMs?: number
   readonly heartbeatIntervalMs?: number
   readonly deliveryPollIntervalMs?: number
   readonly maxInFlight?: number
@@ -21,30 +21,59 @@ interface ConnectionRuntime {
 }
 
 export class SlackAdapter {
-  private readonly runtimes: ConnectionRuntime[]
+  private readonly runtimes = new Map<string, ConnectionRuntime>()
   private readonly maxInFlight: number
+  private discoveryTimer?: ReturnType<typeof setInterval>
   private inFlight = 0
   private stopped = false
 
   constructor(private readonly options: SlackAdapterOptions) {
-    if (options.connections.length === 0) throw new Error("At least one Slack Connection is required")
     this.maxInFlight = Math.max(1, Math.floor(options.maxInFlight ?? 8))
-    this.runtimes = options.connections.map((ref) => ({ ref, draining: false }))
   }
 
   async start(signal: AbortSignal): Promise<void> {
     signal.addEventListener("abort", () => this.stop(), { once: true })
-    await Promise.all(this.runtimes.map((runtime) => this.connect(runtime, signal)))
+    await this.refreshConnections(signal)
+    const discoveryMs = Math.max(1_000, this.options.discoveryIntervalMs ?? 15_000)
+    this.discoveryTimer = setInterval(() => void this.refreshConnections(signal).catch(() => undefined), discoveryMs)
   }
 
   stop() {
     if (this.stopped) return
     this.stopped = true
-    for (const runtime of this.runtimes) {
-      if (runtime.heartbeatTimer) clearInterval(runtime.heartbeatTimer)
-      if (runtime.deliveryTimer) clearInterval(runtime.deliveryTimer)
-      void runtime.socket?.disconnect?.()
+    if (this.discoveryTimer) clearInterval(this.discoveryTimer)
+    for (const runtime of this.runtimes.values()) this.disconnect(runtime)
+    this.runtimes.clear()
+  }
+
+  async refreshConnections(signal: AbortSignal): Promise<void> {
+    if (this.stopped || signal.aborted) return
+    const connections = await this.options.transport.discoverConnections(signal)
+    const currentKeys = new Set(connections.map(connectionKey))
+    for (const [key, runtime] of this.runtimes) {
+      if (!currentKeys.has(key)) {
+        this.disconnect(runtime)
+        this.runtimes.delete(key)
+      }
     }
+    await Promise.all(connections.map(async (ref) => {
+      const key = connectionKey(ref)
+      if (this.runtimes.has(key)) return
+      const runtime: ConnectionRuntime = { ref, draining: false }
+      this.runtimes.set(key, runtime)
+      try {
+        await this.connect(runtime, signal)
+      } catch {
+        this.runtimes.delete(key)
+        this.disconnect(runtime)
+      }
+    }))
+  }
+
+  private disconnect(runtime: ConnectionRuntime) {
+    if (runtime.heartbeatTimer) clearInterval(runtime.heartbeatTimer)
+    if (runtime.deliveryTimer) clearInterval(runtime.deliveryTimer)
+    void runtime.socket?.disconnect?.()
   }
 
   private async connect(runtime: ConnectionRuntime, signal: AbortSignal) {
@@ -114,6 +143,10 @@ export class SlackAdapter {
     }
     this.inFlight += 1
   }
+}
+
+function connectionKey(ref: SlackConnectionRef) {
+  return `${ref.projectId}:${ref.connectionId}`
 }
 
 export function normalizeSocketEvent(body: unknown): SlackEnvelope {

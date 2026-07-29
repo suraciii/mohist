@@ -33,16 +33,10 @@ internal static class AgentConnectionCommands
         var command = new Command("create", "Create a Slack Connection");
         var agent = new Argument<string>("agent") { Description = "Agent name or id" };
         var provider = new Option<string>("--provider") { DefaultValueFactory = _ => "slack" };
-        var workspace = new Option<string>("--workspace-team-id") { Description = "Slack workspace Team ID" };
-        var app = new Option<string>("--app-id") { Description = "Slack App ID" };
-        var bot = new Option<string>("--bot-user-id") { Description = "Slack Bot user ID" };
         var botName = new Option<string?>("--bot-name");
         var project = MohistCliCommands.ProjectRefOption();
         command.Arguments.Add(agent);
         command.Options.Add(provider);
-        command.Options.Add(workspace);
-        command.Options.Add(app);
-        command.Options.Add(bot);
         command.Options.Add(botName);
         command.Options.Add(project);
         command.SetAction(async ctx =>
@@ -53,17 +47,9 @@ internal static class AgentConnectionCommands
             if (exit != 0 || projectId is null) return exit;
             var agentId = await ResolveAgentIdAsync(api, projectId, ctx.GetValue(agent));
             if (agentId is null) return 1;
-            var workspaceId = ctx.GetValue(workspace);
-            var appId = ctx.GetValue(app);
-            var botId = ctx.GetValue(bot);
-            if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(botId))
-                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--workspace-team-id, --app-id, and --bot-user-id are required.");
             var result = await api.PostAndReadAsync(Path(projectId), new
             {
                 agentId,
-                workspaceTeamId = workspaceId,
-                appId,
-                botUserId = botId,
                 botName = ctx.GetValue(botName),
             });
             return result.ExitCode;

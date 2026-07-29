@@ -207,6 +207,21 @@ public sealed class AgentConnectionStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AdapterDiscoveryReturnsOnlyEnabledConnectionsWithBothCredentials()
+    {
+        await SeedAgentAsync("proj-adapter", "agent-configured", AgentStatus.Active);
+        await SeedAgentAsync("proj-adapter", "agent-draft", AgentStatus.Active);
+        var configured = await _store.CreateAsync(NewConnection("proj-adapter", "agent-configured", "team-a"));
+        await _store.CreateAsync(NewConnection("proj-adapter", "agent-draft", "team-b"));
+        await _secretStore.StoreAsync(new SecretStoreAddress("proj-adapter", configured.Id, SecretKind.AppToken), [1]);
+        await _secretStore.StoreAsync(new SecretStoreAddress("proj-adapter", configured.Id, SecretKind.BotToken), [2]);
+
+        var connections = await _store.ListForAdapterAsync();
+
+        Assert.Equal([new SlackAdapterConnection("proj-adapter", configured.Id)], connections);
+    }
+
+    [Fact]
     public async Task ListRespectsIncludeDeleted()
     {
         await SeedAgentAsync("proj-11", "agent-11", AgentStatus.Active);

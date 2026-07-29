@@ -19,9 +19,8 @@ public static class SlackConnectionRoutes
         management.MapPost("/", async (HttpContext context, SlackConnectionCreateBody body, AgentConnectionStore connections, CancellationToken ct) =>
         {
             var projectId = context.GetResolvedProject().Id;
-            if (body is null || string.IsNullOrWhiteSpace(body.AgentId) || string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
-                || string.IsNullOrWhiteSpace(body.AppId) || string.IsNullOrWhiteSpace(body.BotUserId))
-                return ApiResults.BadRequest("agentId, workspaceTeamId, appId, and botUserId are required.");
+            if (body is null || string.IsNullOrWhiteSpace(body.AgentId))
+                return ApiResults.BadRequest("agentId is required.");
 
             var connection = new AgentConnection
             {
@@ -29,9 +28,9 @@ public static class SlackConnectionRoutes
                 ProjectId = projectId,
                 AgentId = body.AgentId.Trim(),
                 ProviderKind = ConnectionProviderKind.Slack,
-                WorkspaceTeamId = body.WorkspaceTeamId.Trim(),
-                AppId = body.AppId.Trim(),
-                BotUserId = body.BotUserId.Trim(),
+                WorkspaceTeamId = string.Empty,
+                AppId = string.Empty,
+                BotUserId = string.Empty,
                 BotName = body.BotName?.Trim() ?? string.Empty,
                 AvatarHash = body.AvatarHash,
             };
@@ -52,6 +51,17 @@ public static class SlackConnectionRoutes
 
         management.MapGet("/", async (HttpContext context, AgentConnectionStore connections, CancellationToken ct) =>
             ApiResults.Ok(await connections.ListAsync(context.GetResolvedProject().Id, ct: ct)));
+
+        app.MapGet("/api/slack-connections/adapter", async (
+            HttpContext http,
+            AgentConnectionStore connections,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            if (!credential.Authorizes(http.Request.Headers))
+                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            return ApiResults.Ok(await connections.ListForAdapterAsync(ct));
+        });
 
         management.MapGet("/{connectionId}", async (HttpContext context, string connectionId, AgentConnectionStore connections, CancellationToken ct) =>
         {
