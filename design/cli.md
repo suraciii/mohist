@@ -2,7 +2,7 @@
 
 `mo` 是 Mohist 面向人和 Agent 的操作语言。它把领域意图编码成稳定命令，把执行所需的最小准确上下文放在当前层级。
 
-本文定义命令语言、上下文分层和实现约束。目标命令面与用户可见语义在 [`docs/cli-reference.md`](../docs/cli-reference.md)。
+本文定义命令语言的领域归属、设计依据与实现约束。命令语言的用户可见规则——语法、动词、flag、输入通道、输出与错误契约——唯一权威是 [`docs/cli-reference.md`](../docs/cli-reference.md)；本文不重复这些规则，只保留它们的构造依据、实现机制与验证方式。
 
 ## Goals
 
@@ -87,37 +87,11 @@ scope 下的关系（`project workflow`、`project repo`）。AgentSession 有�
 
 ## Command language
 
-规范语法只有两种：
+命令形状、动词词表、flag 词汇与输入通道的用户可见规则由 [`docs/cli-reference.md`](../docs/cli-reference.md) 单点定义。本节只保留构造命令时的设计判定：
 
-```text
-resource-command = mo <area> [<subarea>] <action> [target] [flags]
-task-command     = mo <task> [target] [flags]
-```
-
-resource command 表达资源及其状态变化。subarea 最多一层，用于 area 拥有的对象，或离开 area 就失去明确含义的窄目录，例如 `issue comment`、`issue template`、`routing rule`。task command 只用于 `help`、`install`、`update`、`info` 这类无需人为包装成资源的直接任务。这是一门受约束的命令 DSL，而不是要求所有句子满足同一种语法外观。设计顺序是：先确定领域意图和唯一入口，再选择最短的惯用命令词。
-
-### Naming
-
+- 设计顺序是：先确定领域意图和唯一入口，再选择最短的惯用命令词。这是一门受约束的命令 DSL，而不是要求所有句子满足同一种语法外观。
 - area 使用短、稳定、通常为单数的英文词：`repo`、`run`、`skill`，不为了对应类型名写成 `repository`、`workflow-run`、`skills`。
-- 资源读取统一为 `list` / `view`，资源修改统一为 `create` / `edit` / `delete`。
-- `add` / `remove` 只表达集合或关系变化；`archive` / `restore` 只表达可恢复的软删除。
-- `get` / `set` / `unset` 只用于明确的键值行为；资源不需要为了对称同时提供三者。
-- 状态变化使用领域动词。`retry`、`rerun`、`pause`、`stop` 的语义不能由 CRUD 词替代。
 - 同一 action 在所有 area 保持同一动作类别。不同语义不能只因实现复用而使用同一个词。
-- 命名对称不是新增命令的理由。没有独立产品行为的 action 不进入命令树。
-- flag 使用完整、稳定的 kebab-case 名称，且全命令面唯一：同一个词不表达两种含义。集合规模只有 `--limit`；资源引用 flag 唯一（仓库一律 `--repo`，不并列 `--repository`）。
-- 短 flag 是白名单：只保留全局字母唯一、行业惯例明确的 `-l/-p/-b/-m/-y/-f/-n/-v`，必须渲染进 leaf help；白名单之外不新增。
-
-### One capability, one path
-
-- 规范命令不提供内建同义词或迁移 alias。
-- 同一资源的寻址方式是 target 或 selector flag 的变体，不复制 action。
-- 动作变体使用 flag，例如 `run rerun --from-stage`，不增加 `rerun-from-stage`。
-- Project 名称与 ID 都由 `--project` 解析，不增加 `--project-id`。
-- 互斥输入只有一个表达通道：长文本统一使用对应的 `--<name>-file -` 读取 stdin，不增加 `--stdin` 布尔开关。
-- 文件与 stdin 只有 `--<name>-file <path>|-` 和完整文档 `--file <path>|-` 两条通道；不接受 `@<file>` 写法。
-- 互斥关系由参数定义声明，并渲染进 leaf help；不依赖 prose 提示。
-- Project 的默认引用（默认仓库、默认 Workflow Profile）由 `project` area 承载：`project repo set-default`、`project workflow set-default`；被引用的资源 area 不复制该动作。
 - 只有共享同一语义、校验和结果的变体才能合并为 flag。行为不同就保留不同 action。
 
 ### Reference baseline
@@ -141,6 +115,7 @@ resource command 表达资源及其状态变化。subarea 最多一层，用于 
 | 增加根级 `slack`，或按 provider 增加一组命令 | 首个 provider 看似直接，但会让 Agent 绑定、权限与生命周期散落到平台名下 | 不采用；使用 `agent connection`，`--provider slack` 只选择 provider-specific setup |
 | 用 `--agent-config <json>` 作为 Agent 的长期配置面 | 实现短，但把 schema、互斥和错误推给用户及 Agent | 不采用；公开 CLI 使用 `--runtime`、`--model`、`--variant`、`--skills`、`--avatar-file` 等类型化 flags |
 | 增加存储 / DB 审计命令（表体积、freelist、行数统计） | 能覆盖 server 内部审计场景，但那是开发行为不是产品操作；架构禁令约束的是领域操作，不为一次性审计扩大命令面 | 不采用；`otel` 是遥测入口，server 内部审计直接读库是开发者的合理路径 |
+| `mo otel query` 直读本机追踪存储 | Server 不可用时仍可查询，但绕过 API 与查询安全网、耦合存储 schema、没有查询预算与大小上限，且 CLI 指向远程 Server 时静默读到本机数据 | 不采用；`query` 经 Server 查询能力执行，Server 故障时直接读库是开发者路径 |
 | `run view` 只提供 `--json` | 少一个 source view，但「这次 Run 实际用了哪份 Definition」无法回答 | 不采用；`run view --yaml` 读取 Run 绑定的 Definition 快照，与 `workflow view --yaml` 同属资源内容视图 |
 | `set-default` 挂在被默认资源的 area（`repo set-default`、`workflow set-default`） | 路径更短，但默认引用是 Project 的状态，两处惯例不如一处规则可推导 | 不采用；统一为 `project repo set-default`、`project workflow set-default` |
 
@@ -260,80 +235,27 @@ Skill frontmatter description 只负责触发判断。正文中的命令示例�
 
 ## Input and scope
 
-### Project resolution
+Project 解析顺序与交互行为的产品规则由 [`docs/cli-reference.md`](../docs/cli-reference.md) 单点定义。实现侧只补充三条：
 
-所有 Project-scoped 命令复用一个 inherited `--project <name-or-id>` option 和同一 resolver：
-
-```text
-explicit --project
-  else project resolved from cwd
-  else configured current project
-  else actionable error
-```
-
-解析结果必须唯一。名称、ID 和当前项目只是同一 ProjectRef 的输入形式，不能形成不同 handler 路径。
-
-### Interactivity
-
-- TTY 只影响提问、颜色和人类排版，不改变命令语义。
-- 非 TTY 永不 prompt；输入不足立即返回 usage error。
-- `MOHIST_PROMPT_DISABLED=1` 强制使用非交互行为。
+- 所有 Project-scoped 命令复用一个 inherited `--project <name-or-id>` option 和同一 resolver。解析结果必须唯一；名称、ID 和当前项目只是同一 ProjectRef 的输入形式，不能形成不同 handler 路径。
 - body 与 body-file、target 与 selector 等互斥输入在本地拒绝，不能静默选一个覆盖另一个。
-- `--<name>-file -` 和文档输入的 `--file -` 是 stdin 的唯一长文本入口。
-- 不可恢复动作的非交互调用要求显式 `--yes`；TTY confirmation 也必须在 stderr。
 - help、list、view 和本地校验绝不触发 setup prompt。
 
 ## Output contract
 
-命令先产生语义结果，再选择 renderer。TTY 判断和输出格式不能改变请求、资源选择或状态变化。
+命令先产生语义结果，再选择 renderer。TTY 判断和输出格式不能改变请求、资源选择或状态变化。输出形状的用户可见规则——人类视图、`--json` 字段选择、裸 `--json` 字段发现、NDJSON 流与 source view——由 [`docs/cli-reference.md`](../docs/cli-reference.md) 单点定义。实现侧补充：
 
-### Human output
-
-- 默认 list 使用紧凑 table，view 使用稳定标签的 summary，mutation 使用一行 outcome。
-- table 只保留扫描和下一步判断需要的列。
-- 人类排版不是脚本契约；非 TTY 不自动切换成另一种语义输出。
-- 颜色遵循终端能力与 `NO_COLOR`，stderr 重定向后不保留控制字符。
-
-### JSON output
-
-- 返回资源的命令接受 `--json <field,...>`。
-- field 在执行远程操作前本地校验；未知 field 返回合法字段和 usage error。
-- 不带 field 的 `--json` 打印合法字段并成功退出，不执行远程操作。
-- 单资源输出 object，集合输出 array，空集合输出 `[]`，不存在的单资源是错误而不是 `null`。
-- 输出不增加通用 envelope，不混入提示、进度或 ANSI 控制字符。
-- mutation 若返回资源，使用与对应 view 相同的字段名称和语义。
-- `null`、缺失字段和空集合的含义由资源投影固定，不能因 renderer 改变。
-
-不提供通用 `-o` / `--output`。初始设计也不内置通用 YAML、`--jq` 或 template renderer。字段选择已经解决 Agent 的主要上下文成本；新增 renderer 必须有三个以上独立、重复出现且外部工具不能清楚解决的用例。
-
-领域资源本身是文本工件时，可以有资源专属 source view。例如 `workflow view --yaml` 返回 Workflow Definition 的原始 YAML；这是资源内容，不是所有命令共享的 renderer。source view 与 `--json` 互斥，只写原文到 stdout，诊断仍写 stderr。
-
-### Streams
-
-- 无界事件与日志一律使用 NDJSON，每行是完整 object。
-- 建立 stream 前的失败只写 stderr，不先写半个 JSON object。
-- Ctrl-C 取消订阅并退出 `130`；正常服务端结束按命令语义决定 `0` 或 `1`。
-- progress 永不写入 stdout。
+- `--json` 的 field 在执行远程操作前本地校验；未知 field 返回合法字段清单和用法错误，不发起远程请求。
+- 默认 table 只保留扫描和下一步判断需要的列。
+- 颜色遵循终端能力与 `NO_COLOR`；stderr 重定向后不保留控制字符。
+- 新增 renderer 的采纳门槛：三个以上独立、重复出现且外部工具不能清楚解决的用例。
 
 ## Errors and exit status
 
-错误格式是两层文本：
-
-```text
-error: <specific cause> [stable_code]
-hint: <one executable recovery, only when certain>
-```
+错误格式、稳定错误码与退出码的用户可见契约由 [`docs/cli-reference.md`](../docs/cli-reference.md) 单点定义。实现侧补充：
 
 - stable code 使用小写 snake_case，表示调用方可据此分类的产品错误，不表示内部异常类型。
-- parse、文件、互斥参数和 JSON field 错误在本地返回，不发远程请求。
-- 未知 area 或 action 返回用法错误 `2`，只展示最近一级的相关 usage；不能回退到根帮助并
-  成功退出。
-- domain error 保留对象身份、当前状态、要求状态和拒绝原因。
-- transport error 区分“确定未提交”与“提交结果未知”。CLI 不自动重发状态修改；只有确认安全时才给出 retry hint。
-- 没有确定恢复动作时省略 hint，不能用 “try again later” 掩盖未知原因。
-- 默认不输出 stack trace、request body、credential 或内部地址。
-
-退出码只有：`0` 成功、`1` 操作失败、`2` 用法错误、`130` 中断。所有非零路径都必须在 stderr 有一条具体诊断；成功路径不得把 warning 混入 JSON stdout。
+- transport error 区分「确定未提交」与「提交结果未知」。CLI 不自动重发状态修改；只有确认安全时才给出 retry hint。
 
 ## Reliability checks
 
@@ -355,6 +277,7 @@ CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、
   当前事实和下一步，Owner 通过明确认领建立。命令面不复制 Agent 配置，也不暴露 token。
 - `runner` / `server` 命令不得调用本机 service manager，`service` 命令不得依赖 Project 或
   把本机进程状态表示成 Runner resource 状态。
+- `otel` 查询动作经 Server 查询能力执行；CLI 不直接打开追踪存储文件，不解析本地存储路径。
 - Activity list、Event tail 和 dead-letter recovery 分别锁定持久读模型、实时流和投递恢复
   的不同结果；不得用 source/mode flag 合并。
 - 目标命令树不存在顶层 `runtime` 或泛化 `config`。
