@@ -50,3 +50,4 @@
 - An unconfirmed stop reply now directly marks a non-launch target Turn and its Session Unknown on the Server. The Runner's correlated best-effort activity fact remains idempotent convergence evidence, so an unavailable outbox cannot leave the control-plane state Executing.
 - Correlated terminal Runtime activity can now reconcile the latest non-launch Turn from Unknown to Completed or Failed. The stale guard still rejects a fact for an earlier Turn after later work exists; stop API coverage exercises both terminal outcomes after an unconfirmed reply.
 - Focused validation passed: Server Spec project build with `SkipWebBuild=true`, plus all 10 `GenericAgentSessionCancelApiSpecs` cases.
+- Full validation passed with `DOTNET_ROOT` configured: .NET definition 175, CLI 1448, Server Unit 1535, Server Arch 35, and Server Spec 3338; Web CI 5155 passed with one existing skip; Runner CI 1444 passed.
