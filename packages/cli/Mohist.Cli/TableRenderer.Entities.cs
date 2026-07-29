@@ -250,6 +250,7 @@ internal sealed partial class TableRenderer
             return;
         }
 
+<<<<<<< HEAD
         var status = StringOf(data, "status");
         var statusText = string.IsNullOrEmpty(status) ? "(no status returned)" : status;
         _out.WriteLine($"delivery: {statusText}");
@@ -259,6 +260,9 @@ internal sealed partial class TableRenderer
         var turnId = StringOf(data, "turnId");
         if (!string.IsNullOrEmpty(turnId))
             _out.WriteLine($"turn:     {turnId}");
+=======
+        RenderFollowupResult(data);
+>>>>>>> 81c875d0a (T-004 implement CLI follow-up idempotency and status)
     }
 
     private void RenderAgentSessionCancel(JsonNode? data)
@@ -560,15 +564,33 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var status = StringOf(data, "status");
-        var statusText = string.IsNullOrEmpty(status) ? "(no status returned)" : status;
-        _out.WriteLine($"delivery: {statusText}");
+        RenderFollowupResult(data);
+    }
+
+    private void RenderFollowupResult(JsonNode data)
+    {
+        var outcome = StringOf(data, "status");
+        _out.WriteLine($"status:           {(string.IsNullOrEmpty(outcome) ? "(no status returned)" : outcome)}");
+
         var inputId = StringOf(data, "inputId");
         if (!string.IsNullOrEmpty(inputId))
-            _out.WriteLine($"input:    {inputId}");
+            _out.WriteLine($"input id:         {inputId}");
+
         var turnId = StringOf(data, "turnId");
         if (!string.IsNullOrEmpty(turnId))
-            _out.WriteLine($"turn:     {turnId}");
+            _out.WriteLine($"turn id:          {turnId}");
+
+        var inputAcceptance = StringOf(data, "inputAcceptance");
+        if (string.IsNullOrEmpty(inputAcceptance) && outcome == "accepted")
+            inputAcceptance = "accepted";
+        if (!string.IsNullOrEmpty(inputAcceptance))
+            _out.WriteLine($"input acceptance:  {inputAcceptance}");
+
+        var turnStatus = StringOf(data, "turnStatus");
+        if (string.IsNullOrEmpty(turnStatus) && outcome == "accepted")
+            turnStatus = "queued";
+        if (!string.IsNullOrEmpty(turnStatus))
+            _out.WriteLine($"turn status:       {turnStatus}");
     }
 
     private void RenderSessionCancel(JsonNode? data)

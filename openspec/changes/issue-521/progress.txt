@@ -50,3 +50,9 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - Follow-up text remains owned by the transcript; observation data is used only for identity and status, avoiding a second message rendering path.
 - Unknown follow-up results remain retryable and keep the input text in the composer; confirmed outcomes retire the retry key.
 - Verification: `npm run typecheck -w packages/web`, `npm run test:run -w packages/web` (5158 passed, 1 skipped), and `npm run check:fsd -w packages/web` passed.
+
+## T-004 implementation
+- `mo session followup` now accepts `--idempotency-key`, generates and prints a key when omitted, and reuses that key for its one network retry.
+- Follow-up table output now shows the accepted/rejected/unknown outcome, input and turn identities, input acceptance, and turn status. An accepted result without an observed turn status uses the shared queued/pending interpretation; observed `executing` is preserved.
+- Follow-up output does not render the submitted message text, keeping transcript text and observation status as separate display concerns.
+- Verification: `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj --no-restore` and `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passed (1445 tests).

@@ -230,12 +230,14 @@ internal static class SessionCommands
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
         var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file)" };
         var textFileOpt = new Option<string?>("--text-file") { Description = "Read followup text from a UTF-8 file path, or - for stdin (mutually exclusive with --text)" };
+        var idempotencyKeyOpt = new Option<string?>("--idempotency-key") { Description = "Reuse this key to safely retry a follow-up after response loss" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionFollowup)));
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(textOpt);
         cmd.Options.Add(textFileOpt);
+        cmd.Options.Add(idempotencyKeyOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
@@ -243,6 +245,7 @@ internal static class SessionCommands
             var sessionId = ctx.GetValue(sessionIdArg);
             var text = ctx.GetValue(textOpt);
             var textFile = ctx.GetValue(textFileOpt);
+            var suppliedIdempotencyKey = ctx.GetValue(idempotencyKeyOpt);
             var project = ctx.GetValue(projectOpt);
             var output = ctx.GetValue(outputOpt);
             return FollowupAsync();
@@ -263,12 +266,19 @@ internal static class SessionCommands
                 if (resolveExit != 0) return resolveExit;
 
                 var textValue = ((BodyInputResolver.Result.Success)resolvedText).Body;
+                var idempotencyKey = string.IsNullOrWhiteSpace(suppliedIdempotencyKey)
+                    ? Guid.NewGuid().ToString("N")
+                    : suppliedIdempotencyKey;
+                if (string.IsNullOrWhiteSpace(suppliedIdempotencyKey))
+                    api.Output.WriteLine($"Idempotency-Key: {idempotencyKey}");
                 return await api.PrintPostWithOutputAsync(
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/followup"),
                     new { text = textValue },
                     mode,
                     nameof(MohistCliApi.TableShape.SessionFollowup),
-                    rawJson: true);
+                    rawJson: true,
+                    headers: new Dictionary<string, string> { ["Idempotency-Key"] = idempotencyKey! },
+                    retries: 1);
             }
         });
         return cmd;
