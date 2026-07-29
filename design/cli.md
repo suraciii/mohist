@@ -254,7 +254,7 @@ Project 解析顺序与交互行为的产品规则由 [`docs/cli-reference.md`](
 
 Server 的 read model（API 响应 DTO）是每个资源字段的唯一权威。CLI 的字段目录
 （`ResourceOutputCatalog`）不是第二份事实，它是 DTO 的投影：目录必须覆盖 DTO 的
-全部 JSON 属性，减去一份显式豁免清单。
+全部 JSON 属性；与 DTO 的偏差只允许显式登记的两种（见下）。
 
 - **覆盖是双向的**。目录缺少 DTO 已有的属性 = `--json` 把合法字段拒绝为
   invalid，调用方被迫绕过 CLI 直调 API；目录列出 DTO 没有的属性 = 静默渲染
@@ -269,11 +269,6 @@ Server 的 read model（API 响应 DTO）是每个资源字段的唯一权威。
 - **机制**：测试反射 server 程序集的 DTO 类型，按 JSON 序列化名（命名策略与
   `[JsonPropertyName]`）取属性集合，与 CLI 字段目录逐资源做集合比对；无运行时
   端点、无共享程序集、无人工清单。
-
-已知漂移（随防护落地一并修复）：`RoutingRule(List)` 目录仍是旧订阅模型的
-`target` / `priority` / `enabled`（server DTO 不存在，静默渲染 null），而 DTO 的
-`match` / `agentId` / `position` / `responsePrompt` / `continue` / `status` /
-`projectId` 不可被 `--json` 选择。
 
 ## Errors and exit status
 
@@ -337,5 +332,3 @@ Project / Issue / Run Variables 命令切片已经交付：三个 scope 都使�
 
 WorkflowProfile 与 Variables 切片必须建立在既有 Definition / Variables 分离、attempt
 context snapshot 和权威校验链之上。
-
-Field contract 的契约对照测试与其驱动的漂移修复（含 RoutingRule 字段目录）未实装。
