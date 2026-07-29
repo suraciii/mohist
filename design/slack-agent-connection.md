@@ -151,15 +151,19 @@ Slack 到 adapter 是 at-least-once 的外部传输，不能宣称端到端 exac
 
 ## 实装差距与顺序
 
-当前仓库没有 Slack Connection 或 `mohist-slack` 服务。Web 与 CLI 已有 Agent 直接使用的基础路径，
-但 Agent API 的跨入口契约也尚未完整。
-
 实施顺序遵循依赖关系和可独立验证的产品价值：
 
 1. 完成 Agent 从 Web / CLI 独立启动、继续、观察和停止的统一语义。
 2. 建立 AgentConnection、无状态 adapter 与可恢复 Setup，但不同时追求所有 Slack 表面。
 3. 先交付 Owner-only DM 垂直路径，证明真实 Agent 可从 Slack 使用。
 4. 再加入频道、thread、多 Agent 路由、访问策略、附件和故障恢复。
+
+当前进度：第 2、3 步已落地——AgentConnection 领域对象（Setup progress、Desired state、
+Connection health、Agent Readiness 四类事实分离）、无状态 `mohist-slack` adapter、可恢复
+Setup、Server 持有的 provider inbox / conversation mapping / outbound outbox、Owner-only
+DM 垂直路径均已实装，真实 Agent 已可从 Slack 私聊使用。第 1 步的跨入口契约仍未完整（见
+[`agent-api.md`](agent-api.md)）。第 4 步尚未开始：当前仅 Owner 可调用、无访问策略；无
+频道与 thread 路由、多 Agent 归属判定；无附件边界。
 
 Slack 原生 Agent 体验是后续阶段：它换的是 Slack 侧的入口和呈现，不改变 Agent 能力、执行结果或
 本文的任何边界。它会引入不可回退的 App 类型选择，因此要等 Standard Bot 路径被真实使用验证之后

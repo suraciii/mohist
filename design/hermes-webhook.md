@@ -16,8 +16,7 @@ Mohist 通过出站 webhook 把 issue 工作流的关键事件推给 Hermes，�
 | `workflow_failed` | `workflow.run.failed` |
 | `issue_completed` | `issue.completed` |
 | `issue_started` | `issue.work-started` |
-
-第五个时刻「Agent 响应失败」尚未实装，wire 形状随 Agent 事件响应落地。
+| `agent_response_failed` | `agent.job.failed` |
 
 ## Mohist 配置
 
