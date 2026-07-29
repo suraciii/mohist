@@ -1,5 +1,5 @@
 ### Requirement: Work owners maintain the dispatch ledger
-Each WorkflowRun and AgentJob SHALL durably own its own dispatch lifecycle, runner assignment, readiness time, and reconstructable dispatch data. No Runner-owned state or persistence record SHALL duplicate a work item's dispatch or lifecycle state.
+Each WorkflowRun and AgentJob SHALL durably own its own dispatch lifecycle, runner assignment, readiness time, and reconstructable dispatch data. AgentJob SHALL atomically persist its authoritative lifecycle state and all poll-queryable scheduling fields in its owner ledger. No Runner-owned state or persistence record SHALL duplicate a work item's dispatch or lifecycle state.
 
 #### Scenario: AgentJob becomes ready for execution
 - **WHEN** an AgentJob is admitted to an eligible runner
@@ -8,6 +8,10 @@ Each WorkflowRun and AgentJob SHALL durably own its own dispatch lifecycle, runn
 #### Scenario: Server restarts with assigned work
 - **WHEN** a server or Runner activation is recreated while a WorkflowRun or AgentJob has assigned work
 - **THEN** the next poll SHALL reconstruct the work exclusively from its owner's durable ledger
+
+#### Scenario: AgentJob owner transition is interrupted
+- **WHEN** an AgentJob lifecycle transition is interrupted during persistence
+- **THEN** a poll SHALL observe either the complete pre-transition ledger or the complete post-transition ledger and SHALL never omit a running work because its scheduling fields differ from its lifecycle state
 
 ### Requirement: All work is delivered by polling
 Workflow and AgentJob work SHALL be delivered only in responses to a runner poll. The dispatch service SHALL derive each response from durable owner state and the runner's reported in-flight and awaiting-acknowledgement work keys.
@@ -34,6 +38,10 @@ The dispatch service SHALL serve running work absent from the reported set befor
 #### Scenario: Admission capacity changes before claim
 - **WHEN** an AgentJob passed runner eligibility checks but the selected runner has no capacity when it next polls
 - **THEN** the AgentJob SHALL remain pending and SHALL be reconsidered by a later poll without losing its dispatch data
+
+#### Scenario: Admission finds no capacity
+- **WHEN** every eligible runner is at capacity during AgentJob admission
+- **THEN** the launch SHALL return an AgentJob failed with `runner-unavailable` and SHALL not create pending dispatch work
 
 ### Requirement: Owner claims are atomic and recoverable
 Each owner SHALL atomically transition a claimed pending work item to running with the claiming runner identity. A successful claim followed by dispatch construction or delivery failure SHALL leave the work running so a later poll can reconstruct and redeliver it. A deterministic invalid dispatch SHALL be rejected against the exact active work identity and SHALL transition only that work to failed.
@@ -69,8 +77,23 @@ The Runner SHALL own registration information, poll-backed presence, configured 
 - **THEN** the Runner SHALL report `runner-lost` failure for every running work assigned to it, and each owner SHALL record its affected work as failed
 
 ### Requirement: AgentJob availability timeout is owner-controlled
-An AgentJob that remains pending beyond its configured availability deadline SHALL fail with the unavailable-runner result from its own ledger. This timeout SHALL not depend on Runner-side dispatch retries, acceptance state, or work storage.
+An admitted AgentJob that remains pending after a poll-time capacity or claim race beyond its configured availability deadline SHALL fail with the unavailable-runner result from its own ledger. This timeout SHALL not depend on Runner-side dispatch retries, acceptance state, or work storage.
 
-#### Scenario: No runner can claim an AgentJob
-- **WHEN** an AgentJob remains pending past its availability deadline without being claimed
+#### Scenario: Admitted AgentJob cannot claim
+- **WHEN** an admitted AgentJob remains pending past its availability deadline without being claimed
 - **THEN** the AgentJob SHALL transition to failed with the unavailable-runner reason and SHALL no longer be returned by polls
+
+### Requirement: Legacy AgentJob dispatch migration is deterministic
+The AgentJob dispatch migration SHALL use one injected migration timestamp for every migrated row. It SHALL preserve valid running work without applying a readiness timeout, initialize valid pending work with that timestamp as `ReadySince`, preserve its assigned runner when present, exclude terminal work from active scheduling queries, and fail atomically without changing data when any legacy nonterminal row cannot be reconstructed.
+
+#### Scenario: Pending AgentJob is migrated
+- **WHEN** migration reads a valid legacy pending AgentJob
+- **THEN** it SHALL preserve the pending lifecycle and assignment, set `ReadySince` to the migration timestamp, and make the complete ledger queryable for polling
+
+#### Scenario: Running AgentJob is migrated
+- **WHEN** migration reads a valid legacy running AgentJob
+- **THEN** it SHALL preserve its runner, work identity, and reconstructable dispatch as running work without evaluating the pending availability timeout
+
+#### Scenario: Legacy ledger is malformed
+- **WHEN** migration encounters a nonterminal legacy AgentJob without the state required to reconstruct its dispatch ledger
+- **THEN** migration SHALL fail before committing any migrated AgentJob row

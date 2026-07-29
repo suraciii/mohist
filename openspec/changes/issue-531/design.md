@@ -8,7 +8,7 @@ The `work-dispatch-ledger` spec requires each owner to be the sole durable sourc
 
 **Goals:**
 
-- Store AgentJob assignment, ready time, lifecycle, and dispatch snapshot in the AgentJob's durable state and a queryable AgentJob projection.
+- Store AgentJob assignment, ready time, lifecycle, and dispatch snapshot atomically in one queryable AgentJob ledger.
 - Have `DispatchService` derive redelivery, assigned pending work, and new claims for both work owners from their ledgers on every poll.
 - Keep the runner lifecycle gate as the single serialization point for concurrent polls, capacity checks, unregister, and closeout.
 - Remove Runner-owned AgentJob dispatch persistence, push assignment, reconciliation, and report relaying.
@@ -23,17 +23,17 @@ The `work-dispatch-ledger` spec requires each owner to be the sole durable sourc
 
 ## Decisions
 
-### AgentJob owns a queryable dispatch projection
+### AgentJob uses one atomic owner ledger
 
-Extend `AgentJobState` with the fields required to reconstruct exactly one current dispatch: stable work id, assigned runner id, ready time, running time, and the AgentJob dispatch snapshot. Persist the same scheduling fields in the `AgentJobs` read projection with indexes for `Pending/Running` work by project, assigned runner, and readiness time. `AgentJobGrain.SaveAsync` updates this projection whenever its authoritative state changes; the projection is an owner read model, not another owner of the work.
+Extend `AgentJobState` with the fields required to reconstruct exactly one current dispatch: stable work id, assigned runner id, ready time, running time, and the AgentJob dispatch snapshot. Make the `AgentJobs` row the AgentJob grain's durable ledger: it holds the serialized owner state and indexed scheduling fields for `Pending/Running` work by project, assigned runner, and readiness time. `AgentJobGrain` reads and writes this row through `AgentJobStore` with optimistic revision checking; one database transaction updates the state JSON and every scheduling column.
 
-The projection is queried to select candidates and build runner status/task-log views. Every selection is revalidated by the owning grain's claim or report command, so a stale read can only skip or lose a poll opportunity, never create a second execution or corrupt lifecycle state.
+Poll, closeout, runtime-status, and task-log queries read the indexed fields from this same owner ledger. A completed owner transition is therefore visible to the next poll as a complete pre- or post-transition record, never as state without its scheduling fields. Claim and report commands still revalidate owner identity and revision to reject stale candidates, but query lag is not a permitted delivery-recovery mechanism.
 
-Alternative considered: retain `RunnerWorks` as the common query table. Rejected because it remains a second owner-facing work ledger and requires reconciliation after every owner transition. Alternative considered: enumerate AgentJob grains on every poll. Rejected because it cannot meet bounded query cost or ordering requirements.
+Alternative considered: retain separate Orleans grain state and a best-effort relational mirror. Rejected because an interrupted mirror write can hide running work from the poll that must redeliver it. Alternative considered: retain `RunnerWorks` as the common query table. Rejected because it remains a second owner-facing work ledger and requires reconciliation after every owner transition. Alternative considered: enumerate AgentJob grains on every poll. Rejected because it cannot meet bounded query cost or ordering requirements.
 
 ### AgentJob admission records readiness but does not dispatch
 
-After AgentJob launch preparation, admission selects an eligible runner as a capacity precheck and writes `AssignedRunnerId`, `ReadySince`, and the immutable dispatch snapshot in the AgentJob ledger. It does not call `IRunnerGrain` and does not transition the job to running. If every eligible runner is already at capacity, admission returns synchronous backpressure; an admitted job that remains pending because claim cannot complete is governed by its owner-controlled availability deadline.
+After AgentJob launch preparation, admission selects an eligible runner as a capacity precheck and writes `AssignedRunnerId`, `ReadySince`, and the immutable dispatch snapshot in the AgentJob ledger. It does not call `IRunnerGrain` and does not transition the job to running. If every eligible runner is already at capacity, the launch returns an AgentJob already failed with `runner-unavailable`; it creates no pending dispatch. Only an admitted job that later loses a poll-time capacity or claim race remains pending and is governed by its owner-controlled availability deadline.
 
 `IAgentJobGrain.ClaimNextAsync(runnerId)` will atomically validate the assignment or eligibility, transition the pending job to running, and return the persisted dispatch. Its terminal report command continues to validate the same runner and work identity.
 
@@ -61,13 +61,13 @@ Alternative considered: leave the Runner table as an audit record only. Rejected
 
 ### Availability timeout is based on owner readiness
 
-Replace AgentJob dispatch-attempt backoff, acceptance fences, and retry-bound failure with an owner reminder that evaluates `ReadySince`. A pending job whose ready duration exceeds the configured availability timeout becomes terminal with `runner-unavailable`; a running job keeps the existing execution timeout behavior. The reminder is not a dispatch loop.
+Replace AgentJob dispatch-attempt backoff, acceptance fences, and retry-bound failure with an owner reminder that evaluates `ReadySince`. An admitted pending job whose claim has not completed before the configured availability timeout becomes terminal with `runner-unavailable`; a running job keeps the existing execution timeout behavior. The reminder is not a dispatch loop.
 
 Alternative considered: retain retry attempts as a second timeout input. Rejected because polling frequency and transient Runner grain failures would affect the business outcome without representing a work-state fact.
 
 ## Risks / Trade-offs
 
-- [AgentJob projection lags grain state] -> All claims and reports revalidate in `AgentJobGrain`; the projection is refreshed on every state save and stale rows are treated as candidates, not authority.
+- [A concurrent AgentJob ledger update conflicts] -> Use the row revision as the owner write fence; reload and retry only the idempotent owner command, while a poll skips a rejected candidate.
 - [Mixed-owner ordering requires multiple queries] -> Add narrow indexed queries for assigned running, assigned pending, and eligible pending work; assert query count does not grow with terminal history.
 - [A release occurs while AgentJobs are active] -> Backfill scheduling projection fields from the persisted AgentJob state before enabling the new poll path; owner state contains the stable work and runner identities needed for reconstruction.
 - [Runner-loss semantics change from unknown to failed] -> Update AgentJob, session close, failure event, and report replay specs together so a late report is stale rather than a recovery trigger.
@@ -76,8 +76,8 @@ Alternative considered: retain retry attempts as a second timeout input. Rejecte
 
 ## Migration Plan
 
-1. Add AgentJob projection columns and indexes, then backfill each active AgentJob's assignment, work id, readiness, and status from its persisted state JSON. Keep `RunnerWorks` unchanged during this schema-only deployment.
-2. Deploy the owner-led AgentJob state transitions, projection queries, direct report route, and unified `DispatchService` polling. Verify active work, redelivery, capacity, task-log authorization, runner-loss, and availability-timeout specs with fake time and in-memory stores.
+1. Add the `AgentJobs` ledger columns, revision, and indexes. In one transaction per migration run, read legacy state JSON and use one injected migration timestamp: valid pending rows retain their assignment and receive that timestamp as `ReadySince`; valid running rows retain runner/work/dispatch and do not receive a pending timeout; terminal rows have no active scheduling projection. Abort the migration without committing any row when a nonterminal record is incomplete or cannot rebuild a dispatch.
+2. Switch `AgentJobGrain` persistence from the Orleans-state-plus-mirror path to the atomic `AgentJobs` owner ledger, then deploy owner-led state transitions, direct report route, and unified `DispatchService` polling. Verify active work, redelivery, capacity, task-log authorization, runner-loss, availability timeout, and interrupted owner writes with fake time and in-memory stores.
 3. Remove Runner AgentJob assignment/reconciliation interfaces, Runner work state hydration, `RunnerWorkStore` consumers, and legacy tests that assert Runner-held AgentJob work. Replace them with owner-led dispatch and active-work tests.
 4. After the new path has no `RunnerWorks` reads or writes, drop the `RunnerWorks` schema and its migration-only backfill support.
 
