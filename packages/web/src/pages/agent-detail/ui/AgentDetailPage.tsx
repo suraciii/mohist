@@ -115,6 +115,8 @@ function describeWaitingReason(reason: string | null | undefined): string {
       return 'Runner slots are full'
     case 'concurrency-limit':
       return 'Agent is at its concurrency limit'
+    case 'dispatch-pending':
+      return 'Waiting for dispatch'
     default:
       return 'Waiting'
   }

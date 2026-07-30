@@ -217,6 +217,7 @@ internal sealed partial class TableRenderer
         "no-online-runner" => "no online runner",
         "capacity-full" => "runner slots are full",
         "concurrency-limit" => "agent is at its concurrency limit",
+        "dispatch-pending" => "waiting for dispatch",
         null or "" => "waiting",
         _ => reason,
     };

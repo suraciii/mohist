@@ -66,7 +66,7 @@ public sealed class AgentAvailabilityServiceTests
     }
 
     [Fact]
-    public void Waiting_work_keeps_its_last_server_decided_reason_when_capacity_recovers()
+    public void Waiting_work_reports_dispatch_pending_when_capacity_recovers()
     {
         var pending = new[]
         {
@@ -84,6 +84,6 @@ public sealed class AgentAvailabilityServiceTests
             new HashSet<string>(StringComparer.Ordinal),
             availabilityReason: null);
 
-        Assert.Equal(AgentAvailabilityWaitReasons.CapacityFull, Assert.Single(waiting).WaitingReason);
+        Assert.Equal(AgentAvailabilityWaitReasons.DispatchPending, Assert.Single(waiting).WaitingReason);
     }
 }

@@ -37,6 +37,31 @@ public sealed class AgentConcurrencyReconciliationSpecs
         await RemindAsync(gate, _fixture.TimeProvider.GetUtcNow());
 
         Assert.Equal(0, await gate.GetActiveCountAsync());
+
+        Assert.Equal(
+            AgentConcurrencyAcquireResult.Granted,
+            await gate.AcquireAsync(projectId, agentId, token, jobId, AgentConcurrencyPermitOwnerKind.Job));
+        Assert.Equal(1, await gate.GetActiveCountAsync());
+    }
+
+    [Fact]
+    public async Task Releasing_after_limit_becomes_unbounded_removes_the_permit_and_wakes_waiters()
+    {
+        var projectId = $"unbounded-project-{Guid.NewGuid():N}";
+        var agentId = $"unbounded-agent-{Guid.NewGuid():N}";
+        await _fixture.SeedAgentAsync(projectId, agentId, maxConcurrentRuns: 1);
+        var gate = _fixture.Grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
+
+        Assert.Equal(AgentConcurrencyAcquireResult.Granted,
+            await gate.AcquireAsync(projectId, agentId, "running", "job-running", AgentConcurrencyPermitOwnerKind.Job));
+        Assert.Equal(AgentConcurrencyAcquireResult.Waiting,
+            await gate.AcquireAsync(projectId, agentId, "waiting", "job-waiting", AgentConcurrencyPermitOwnerKind.Job));
+
+        await _fixture.SeedAgentAsync(projectId, agentId, maxConcurrentRuns: null);
+        await gate.ReleaseAsync(projectId, agentId, "running");
+
+        Assert.Equal(0, await gate.GetActiveCountAsync());
+        Assert.Empty(await gate.GetWaitersAsync());
     }
 
     private static Task RemindAsync(IAgentConcurrencyGrain gate, DateTimeOffset now) =>

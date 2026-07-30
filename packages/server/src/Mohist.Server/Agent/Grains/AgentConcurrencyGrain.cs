@@ -60,7 +60,14 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
         var limit = await ReadLimitAsync(projectId, agentId);
 
         if (limit is null)
+        {
+            var waiters = DrainWaiters();
+            if (waiters.Count > 0)
+                await _state.WriteStateAsync();
+            foreach (var jobId in waiters)
+                _ = NotifyWaiterAsync(jobId);
             return AgentConcurrencyAcquireResult.Granted;
+        }
 
         if (_state.State.ActivePermits.Any(permit => string.Equals(permit.Token, token, StringComparison.Ordinal)))
             return AgentConcurrencyAcquireResult.Granted;
@@ -86,20 +93,26 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
     public async Task ReleaseAsync(string projectId, string agentId, string token)
     {
         var limit = await ReadLimitAsync(projectId, agentId);
-        if (limit is null)
-            return;
-
         _state.State.ActivePermits.RemoveAll(permit => string.Equals(permit.Token, token, StringComparison.Ordinal));
         _state.State.Waiters.RemoveAll(waiter => string.Equals(waiter.Token, token, StringComparison.Ordinal));
-        await GrantWaitersAsync(projectId, agentId);
+        var waiters = limit is null
+            ? DrainWaiters()
+            : await GrantWaitersAsync(projectId, agentId);
         await _state.WriteStateAsync();
+        foreach (var jobId in waiters)
+            _ = NotifyWaiterAsync(jobId);
     }
 
     public async Task ReconcileAsync(string projectId, string agentId, IReadOnlySet<string> activeTokens)
     {
         _state.State.ActivePermits.RemoveAll(permit => !activeTokens.Contains(permit.Token));
-        await GrantWaitersAsync(projectId, agentId);
+        var limit = await ReadLimitAsync(projectId, agentId);
+        var waiters = limit is null
+            ? DrainWaiters()
+            : await GrantWaitersAsync(projectId, agentId, limit.Value);
         await _state.WriteStateAsync();
+        foreach (var jobId in waiters)
+            _ = NotifyWaiterAsync(jobId);
     }
 
     public Task<int> GetActiveCountAsync() => Task.FromResult(_state.State.ActivePermits.Count);
@@ -116,11 +129,18 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             await ReconcileFromAuthoritativeStateAsync();
     }
 
-    private async Task GrantWaitersAsync(string projectId, string agentId)
+    private async Task<IReadOnlyList<string>> GrantWaitersAsync(
+        string projectId,
+        string agentId,
+        int? knownLimit = null)
     {
-        var limit = await ReadLimitAsync(projectId, agentId);
+        var limit = knownLimit ?? await ReadLimitAsync(projectId, agentId);
+        if (limit is null)
+            return DrainWaiters();
+
+        var jobsToNotify = new List<string>();
         while (_state.State.Waiters.Count > 0
-            && (limit is null || _state.State.ActivePermits.Count < limit.Value))
+            && _state.State.ActivePermits.Count < limit.Value)
         {
             var waiter = _state.State.Waiters[0];
             _state.State.Waiters.RemoveAt(0);
@@ -128,8 +148,19 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
                 continue;
             _state.State.ActivePermits.Add(new AgentConcurrencyPermit(waiter.Token, waiter.OwnerId, waiter.OwnerKind));
             if (waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
-                _ = NotifyWaiterAsync(waiter.OwnerId);
+                jobsToNotify.Add(waiter.OwnerId);
         }
+        return jobsToNotify;
+    }
+
+    private IReadOnlyList<string> DrainWaiters()
+    {
+        var jobsToNotify = _state.State.Waiters
+            .Where(waiter => waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
+            .Select(waiter => waiter.OwnerId)
+            .ToArray();
+        _state.State.Waiters.Clear();
+        return jobsToNotify;
     }
 
     private async Task NotifyWaiterAsync(string jobId)

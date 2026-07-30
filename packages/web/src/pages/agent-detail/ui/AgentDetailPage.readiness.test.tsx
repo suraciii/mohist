@@ -127,6 +127,7 @@ describe('AgentDetailPage readiness and availability', () => {
       waitingWork: [
         { jobId: 'job-1', status: 'waiting', waitingReason: 'capacity-full', submittedAt: '2026-07-29T00:00:00.000Z' },
         { jobId: 'job-2', status: 'waiting', waitingReason: 'concurrency-limit', submittedAt: '2026-07-29T00:00:00.000Z' },
+        { jobId: 'job-3', status: 'waiting', waitingReason: 'dispatch-pending', submittedAt: '2026-07-29T00:00:00.000Z' },
       ],
     }
     renderPage()
@@ -136,6 +137,7 @@ describe('AgentDetailPage readiness and availability', () => {
     expect(card).toHaveAttribute('data-waiting-reason', 'capacity-full')
     expect(screen.getByTestId('agent-detail-waiting-work-job-1')).toHaveAttribute('data-waiting-reason', 'capacity-full')
     expect(screen.getByTestId('agent-detail-waiting-work-job-2')).toHaveAttribute('data-waiting-reason', 'concurrency-limit')
+    expect(screen.getByTestId('agent-detail-waiting-work-job-3')).toHaveTextContent('Waiting for dispatch')
   })
 
   it('does not derive a capacity verdict from raw runner slots', () => {

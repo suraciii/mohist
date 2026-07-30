@@ -446,12 +446,29 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             ConcurrencyAgentId: concurrency?.AgentId);
 
         SetPendingFollowups(session, pending.Append(lease).ToArray());
+        var leasePersisted = false;
         try
         {
             await CommitAsync(session, []);
+            leasePersisted = true;
+            if (concurrency is not null && !await ConfirmFollowupConcurrencyPermitAsync(session, concurrency))
+                throw new FollowupConcurrencyLimitException(session.Id, concurrency.AgentId);
         }
         catch
         {
+            if (leasePersisted)
+            {
+                SetPendingFollowups(session, GetPendingFollowups(session)
+                    .Where(candidate => !string.Equals(candidate.OperationId, lease.OperationId, StringComparison.Ordinal))
+                    .ToArray());
+                try
+                {
+                    await CommitAsync(session, []);
+                }
+                catch
+                {
+                }
+            }
             await ReleaseFollowupConcurrencyPermitAsync(
                 session,
                 concurrency?.Token,
@@ -507,16 +524,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 ?? throw new InvalidOperationException("Session command requires a persisted operation id."),
             ProjectId: session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId));
 
-    /// <summary>
-    /// Acquire a per-agent concurrency permit for a follow-up that
-    /// would start a new execution on an idle AgentSession
-    /// (issue-520 T-002 / design D5, D6). Returns <c>null</c> when the
-    /// gate does not apply: a follow-up joining an already-active
-    /// session (per-session serial, no new permit) or a session not
-    /// bound to a tracked Agent identity (e.g., workflow sessions).
-    /// Throws <see cref="FollowupConcurrencyLimitException"/> when the
-    /// gate is at its limit; the lease is not persisted.
-    /// </summary>
     private async Task<FollowupConcurrencyPermit?> AcquireFollowupConcurrencyPermitAsync(
         AgentSession session,
         string operationId)
@@ -539,16 +546,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             AgentConcurrencyPermitOwnerKind.Followup);
         if (result == AgentConcurrencyAcquireResult.Waiting)
         {
-            // v1 deliberately rejects rather than queues a follow-up at
-            // the limit (design D5). The grain joined the FIFO queue
-            // when it returned Waiting; release the queue position
-            // before throwing so the caller's retry observes a clean
-            // gate. The permit was never granted, so this is a queue
-            // discard rather than a permit release; the gate's own
-            // GrantWaitersAsync logic would have advanced the head of
-            // the queue anyway, but discarding here keeps the caller
-            // free to retry with the same idempotent identity without
-            // waiting for the next grant tick.
             try
             {
                 await gate.ReleaseAsync(projectId, agentId, token);
@@ -562,14 +559,21 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return new FollowupConcurrencyPermit(projectId, agentId, token);
     }
 
-    /// <summary>
-    /// Best-effort release of a per-agent follow-up concurrency
-    /// permit. Logs and swallows any failure because the
-    /// AgentConcurrencyGrain's orphan-reconciliation reminder
-    /// (issue-520 T-001 D3) reclaims dangling permits; the lease was
-    /// either persisted or discarded at the caller, so a missing
-    /// release does not block any further dispatch.
-    /// </summary>
+    private async Task<bool> ConfirmFollowupConcurrencyPermitAsync(
+        AgentSession session,
+        FollowupConcurrencyPermit permit)
+    {
+        var result = await _grains
+            .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(permit.ProjectId, permit.AgentId))
+            .AcquireAsync(
+                permit.ProjectId,
+                permit.AgentId,
+                permit.Token,
+                session.Id,
+                AgentConcurrencyPermitOwnerKind.Followup);
+        return result == AgentConcurrencyAcquireResult.Granted;
+    }
+
     private async Task ReleaseFollowupConcurrencyPermitAsync(
         AgentSession session,
         string? token,

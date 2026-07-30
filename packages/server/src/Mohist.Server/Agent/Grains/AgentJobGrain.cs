@@ -1047,9 +1047,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     {
         if (State.Input is null)
             return false;
-        if (State.ConcurrencyPermitHeld)
-            return true;
-
         var projectId = State.Input.ProjectId;
         var agentId = State.Input.AgentId;
         if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
@@ -1065,6 +1062,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             AgentConcurrencyPermitOwnerKind.Job);
         if (result == AgentConcurrencyAcquireResult.Waiting)
         {
+            State.ConcurrencyPermitHeld = false;
             State.WaitingReason = AgentAvailabilityWaitReasons.ConcurrencyLimit;
             await SaveAsync();
             return false;
@@ -1072,7 +1070,20 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         State.ConcurrencyPermitHeld = true;
         await SaveAsync();
-        return true;
+
+        var confirmation = await gate.AcquireAsync(
+            projectId,
+            agentId,
+            token,
+            Key,
+            AgentConcurrencyPermitOwnerKind.Job);
+        if (confirmation == AgentConcurrencyAcquireResult.Granted)
+            return true;
+
+        State.ConcurrencyPermitHeld = false;
+        State.WaitingReason = AgentAvailabilityWaitReasons.ConcurrencyLimit;
+        await SaveAsync();
+        return false;
     }
 
     public async Task ConcurrencyPermitGrantedAsync()

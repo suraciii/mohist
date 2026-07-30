@@ -10,6 +10,7 @@ public static class AgentAvailabilityWaitReasons
     public const string NoOnlineRunner = "no-online-runner";
     public const string CapacityFull = "capacity-full";
     public const string ConcurrencyLimit = "concurrency-limit";
+    public const string DispatchPending = "dispatch-pending";
 }
 
 public sealed record AgentAvailabilityResult(
@@ -129,9 +130,7 @@ public sealed class AgentAvailabilityService : IScopedService
                 "waiting",
                 concurrencyJobs.Contains(job.JobKey)
                     ? AgentAvailabilityWaitReasons.ConcurrencyLimit
-                    : job.WaitingReason
-                        ?? availabilityReason
-                        ?? AgentAvailabilityWaitReasons.NoOnlineRunner,
+                    : availabilityReason ?? AgentAvailabilityWaitReasons.DispatchPending,
                 job.SubmittedAt))
             .ToList();
 
