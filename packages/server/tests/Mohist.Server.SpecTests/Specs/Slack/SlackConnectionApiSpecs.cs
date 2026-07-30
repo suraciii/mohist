@@ -44,6 +44,24 @@ public sealed class SlackConnectionApiSpecs
     }
 
     [Fact]
+    public async Task RotateCredentials_replaces_both_secrets_only_after_the_bound_tokens_verify()
+    {
+        var connection = await CreateConnectionAsync();
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            Path(connection, "/rotate-credentials"),
+            new { appToken = "xapp-new", botToken = "xoxb-new" });
+
+        response.EnsureSuccessStatusCode();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+        var app = await secrets.LoadAsync(new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.AppToken));
+        var bot = await secrets.LoadAsync(new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken));
+        Assert.Equal("xapp-new", Encoding.UTF8.GetString(app!));
+        Assert.Equal("xoxb-new", Encoding.UTF8.GetString(bot!));
+    }
+
+    [Fact]
     public async Task Disabled_connection_rejects_ingress_and_withholds_pending_delivery()
     {
         var connection = await CreateConnectionAsync();
@@ -104,6 +122,35 @@ public sealed class SlackConnectionApiSpecs
 
         Assert.Equal(HttpStatusCode.Conflict, renewal.StatusCode);
         await AssertErrorCodeAsync(renewal, "connection_disabled");
+    }
+
+    [Fact]
+    public async Task Enable_restores_the_desired_state()
+    {
+        var connection = await CreateConnectionAsync();
+        using var disable = await _fixture.Client.PostAsync(Path(connection, "/disable"), null);
+        disable.EnsureSuccessStatusCode();
+
+        using var enable = await _fixture.Client.PostAsync(Path(connection, "/enable"), null);
+        enable.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await enable.Content.ReadAsStringAsync());
+        Assert.Equal("enabled", document.RootElement.GetProperty("data").GetProperty("desiredState").GetString());
+    }
+
+    [Fact]
+    public async Task Delete_reports_that_the_Slack_App_remains_installed()
+    {
+        var connection = await CreateConnectionAsync();
+
+        using var response = await _fixture.Client.DeleteAsync(Path(connection, string.Empty));
+
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Contains("Slack App remains installed", document.RootElement.GetProperty("data").GetProperty("slackAppRemovalNote").GetString(), StringComparison.Ordinal);
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+        Assert.Null(await secrets.LoadAsync(new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.AppToken)));
+        Assert.Null(await secrets.LoadAsync(new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken)));
     }
 
     [Fact]
