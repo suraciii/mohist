@@ -1157,8 +1157,11 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 
         var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
 
-        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.LocalId);
-        var projection = defaultProfile.ProjectWorkflowState(_issue, wfStatus);
+        var projection = MohistDefaultWorkflowProjection.ProjectWorkflowState(
+            _issue.Number,
+            _issue.Title,
+            _issue.Status,
+            wfStatus);
 
         return new IssueWorkflowStatus(
             _issue.Number,

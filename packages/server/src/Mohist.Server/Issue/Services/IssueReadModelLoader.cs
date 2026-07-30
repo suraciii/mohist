@@ -26,18 +26,15 @@ namespace Mohist.Server.Issue.Services;
 /// </summary>
 public class IssueReadModelLoader : IScopedService
 {
-    private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly ILogger<IssueReadModelLoader> _logger;
 
     public IssueReadModelLoader(
-        IssueWorkflowProfileRegistry profiles,
         EffectiveWorkflowProfileResolver effectiveProfileResolver,
         ProjectWorkflowProfileManager projectProfileManager,
         ILogger<IssueReadModelLoader> logger)
     {
-        _profiles = profiles;
         _effectiveProfileResolver = effectiveProfileResolver;
         _projectProfileManager = projectProfileManager;
         _logger = logger;
@@ -307,7 +304,11 @@ public class IssueReadModelLoader : IScopedService
 
             if (string.IsNullOrWhiteSpace(issue.WorkflowProfileId)) continue;
 
-            var projection = _profiles.Get(issue.WorkflowProfileId).ProjectWorkflowState(issue, status);
+            var projection = MohistDefaultWorkflowProjection.ProjectWorkflowState(
+                issue.Number,
+                issue.Title,
+                issue.Status,
+                status);
 
             issue.Status = projection.IssueStatus;
             issue.Health = projection.Health;

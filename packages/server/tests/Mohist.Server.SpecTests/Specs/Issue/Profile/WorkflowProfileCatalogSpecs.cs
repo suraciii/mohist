@@ -9,10 +9,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 public class WorkflowProfileCatalogSpecs
 {
     private static IssueWorkflowProfileRegistry BuildRegistry() =>
-        new(new ProjectPromptStore(
-            new FakeDbContextFactory(),
-            new FakePromptLoader(),
-            new PromptTemplateEngine()));
+        new();
 
     private static ProjectWorkflowProfileManager BuildManager() =>
         new(new FakeDbContextFactory(), NullActionCatalogSource.Instance);

@@ -1,25 +1,25 @@
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Issue.Services;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
 public class IssueWorkflowProfileRegistry : IScopedService
 {
-    private readonly Dictionary<string, IIssueWorkflowProfile> _profiles;
+    private readonly Dictionary<string, WorkflowProfile> _profiles;
 
-    public IssueWorkflowProfileRegistry(ProjectPromptStore promptStore)
+    public IssueWorkflowProfileRegistry()
     {
-        var defaults = new MohistLocalIssueWorkflowProfile(promptStore);
-        var githubPr = new MohistGithubPrIssueWorkflowProfile(promptStore);
-        _profiles = new Dictionary<string, IIssueWorkflowProfile>(IssueWorkflowProfiles.IdComparer)
+        var defaults = new MohistLocalIssueWorkflowProfile().Profile;
+        var githubPr = new MohistGithubPrIssueWorkflowProfile().Profile;
+        _profiles = new Dictionary<string, WorkflowProfile>(IssueWorkflowProfiles.IdComparer)
         {
             [defaults.Id] = defaults,
             [githubPr.Id] = githubPr,
         };
     }
 
-    public IIssueWorkflowProfile Get(string? id)
+    public WorkflowProfile Get(string? id)
     {
         var profileId = string.IsNullOrWhiteSpace(id) ? IssueWorkflowProfiles.LocalId : id;
         if (_profiles.TryGetValue(profileId, out var profile)) return profile;
@@ -27,15 +27,15 @@ public class IssueWorkflowProfileRegistry : IScopedService
     }
 
     public IReadOnlyList<WorkflowProfileInfo> List() => _profiles.Values
-        .OrderByDescending(p => p.IsDefault)
+        .OrderByDescending(p => IsDefault(p.Id))
         .ThenBy(p => p.Id, StringComparer.OrdinalIgnoreCase)
-        .Select(p => new WorkflowProfileInfo(p.Id, p.DisplayName, p.Description, p.IsDefault))
+        .Select(p => new WorkflowProfileInfo(p.Id, p.Name, p.Description, IsDefault(p.Id)))
         .ToList();
 
     public IReadOnlyList<WorkflowProfileDescription> ListDescribed() => _profiles.Values
-        .OrderByDescending(p => p.IsDefault)
+        .OrderByDescending(p => IsDefault(p.Id))
         .ThenBy(p => p.Id, StringComparer.OrdinalIgnoreCase)
-        .Select(p => new WorkflowProfileDescription(p.Id, p.DisplayName, p.Description))
+        .Select(p => new WorkflowProfileDescription(p.Id, p.Name, p.Description))
         .ToList();
 
     public WorkflowProfileInfo Default => ToInfo(Get(IssueWorkflowProfiles.LocalId));
@@ -48,8 +48,11 @@ public class IssueWorkflowProfileRegistry : IScopedService
         return _profiles.TryGetValue(id, out var profile) ? profile.Id : null;
     }
 
-    private static WorkflowProfileInfo ToInfo(IIssueWorkflowProfile profile) =>
-        new(profile.Id, profile.DisplayName, profile.Description, profile.IsDefault);
+    private static WorkflowProfileInfo ToInfo(WorkflowProfile profile) =>
+        new(profile.Id, profile.Name, profile.Description, IsDefault(profile.Id));
+
+    private static bool IsDefault(string profileId) =>
+        IssueWorkflowProfiles.IdComparer.Equals(profileId, IssueWorkflowProfiles.LocalId);
 }
 
 public sealed record WorkflowProfileInfo(string Id, string DisplayName, string Description, bool IsDefault);

@@ -51,7 +51,6 @@ public class IssueMetricsQuerier : IScopedService
     ];
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IWorkflowProfileProvider _profileProvider;
@@ -60,7 +59,6 @@ public class IssueMetricsQuerier : IScopedService
 
     public IssueMetricsQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
-        IssueWorkflowProfileRegistry profiles,
         EffectiveWorkflowProfileResolver effectiveProfileResolver,
         ProjectWorkflowProfileManager projectProfileManager,
         IWorkflowProfileProvider profileProvider,
@@ -68,7 +66,6 @@ public class IssueMetricsQuerier : IScopedService
         ILogger<IssueMetricsQuerier> logger)
     {
         _dbFactory = dbFactory;
-        _profiles = profiles;
         _effectiveProfileResolver = effectiveProfileResolver;
         _projectProfileManager = projectProfileManager;
         _profileProvider = profileProvider;

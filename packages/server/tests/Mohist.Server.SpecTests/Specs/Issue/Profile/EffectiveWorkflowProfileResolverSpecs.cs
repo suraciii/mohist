@@ -18,10 +18,7 @@ public class EffectiveWorkflowProfileResolverSpecs
         new(BuildRegistry());
 
     private static IssueWorkflowProfileRegistry BuildRegistry() =>
-        new(new ProjectPromptStore(
-            new FakeDbContextFactory(),
-            new FakePromptLoader(),
-            new PromptTemplateEngine()));
+        new();
 
     // ===================== Pure core (existence-only) =====================
 
