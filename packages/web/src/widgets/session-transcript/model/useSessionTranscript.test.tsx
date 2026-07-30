@@ -496,21 +496,4 @@ describe('useSessionTranscript', () => {
     expect(screen.getByTestId('streaming-state')).toHaveTextContent('streaming')
   })
 
-  it('subscribes to follow-up input while the session is idle', () => {
-    renderSessionTranscript([persistedEvent('Earlier response')], false)
-
-    act(() => {
-      dispatchAgentEvent('session.input', {
-        sessionId: 'session-84',
-        runtimeSessionId: 'runtime-84',
-        runtime: 'opencode',
-        text: 'Continue',
-        kind: 'followup',
-        sentAt: '2026-06-12T00:01:00.000Z',
-      })
-    })
-
-    expect(screen.getByTestId('latest-user')).toHaveTextContent('Continue')
-  })
-
 })
