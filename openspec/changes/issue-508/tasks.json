@@ -1,0 +1,136 @@
+{
+  "project": "mohist-local",
+  "description": "Split the workflow Profile/Variables/Prompts service layer along the three-resource boundary documented in docs/workflow-profiles.md. Each resource gets its own component; legacy template CRUD retires once migration is the sole path; IIssueWorkflowProfile separates its descriptive face from workflow-state projection. Behavior-preserving refactor, landed stepwise.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Extract per-scope variable Stores (Project + Issue)",
+      "spec": "specs/workflow-variables/spec.md#per-scope-variable-persistence",
+      "description": "Move Project-scope and Issue-scope variable read/write out of ProjectWorkflowProfileManager and IssueWorkflowProfileManager into dedicated ProjectVariableStore and IssueVariableStore (IScopedService). Each Store keeps its existing write invariants: shape validation, ProjectVariablesFilter sanitization (Project scope), and agent.runtime rejection (Issue scope). Rewire the variable route handlers in ProjectRoutes, IssueRoutes.WorkflowProfile, IssueRoutes.Crud, and the variable usage in IssueGrain to inject the new Stores. The variable merge and legacy template code stay in place for now.",
+      "acceptanceCriteria": [
+        "ProjectVariableStore reads/writes ProjectWorkflowProfile.Variables by projectId; IssueVariableStore reads/writes IssueWorkflowProfile.Variables by projectId+issueNumber, both implementing IScopedService.",
+        "A Project variable write still sanitizes vars.agent and each stage vars.agent down to {model, variant} (legacy keys dropped) before persistence.",
+        "An Issue variable write carrying vars.agent.runtime is still rejected with an ArgumentException and nothing is persisted.",
+        "A variable read for a scope with no persisted row returns an empty VariableBundle.",
+        "Variable PATCH still deep-merges into the current scope value and returns the merged result.",
+        "ProjectRoutes /variables (GET/PUT/PATCH) and IssueRoutes /{number}/variables (GET/PUT/PATCH) return identical responses to before.",
+        "Server unit + spec + architecture tests are green; no route handler references ProjectWorkflowProfileManager or IssueWorkflowProfileManager for variable operations."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ProjectVariableStore and IssueVariableStore classes with moved variable CRUD + validation; route and grain consumers rewired; variable spec/unit tests moved to the new stores.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "WorkflowRunVariablesStore already exists for Run scope and is untouched. Variable merge logic stays in WorkflowProfileManager until T-002."
+    },
+    {
+      "id": "T-002",
+      "title": "Extract the cross-scope variable merge Resolver",
+      "spec": "specs/workflow-variables/spec.md#effective-variable-merge-precedence-across-scopes",
+      "description": "Move the Project→Issue→Run variable merge, stage resolution, and issue-workspace identity out of WorkflowProfileManager into a single WorkflowVariableResolver (IScopedService) that reads the three Stores. Rewire WorkflowGrain (LoadIssueWorkspaceAsync) and WorkflowQuerier (ResolveEffectiveVariablesAsync) to the resolver. After this, WorkflowProfileManager contains no variable logic.",
+      "acceptanceCriteria": [
+        "WorkflowVariableResolver resolves effective variables by merging Project → Issue → Run with later scopes winning on conflict (VariableBundle.MergeAll over the three Stores).",
+        "Stage-resolved vars overlay the workflow-wide effective vars for the requested stage; a stage with no vars uses the workflow-wide vars unchanged.",
+        "LoadIssueWorkspaceAsync is served by the resolver and returns the same WorkspaceIdentity for the same Issue variables.",
+        "WorkflowQuerier.ResolveEffectiveVariablesAsync returns identical variable JSON to before for a given runId and stage.",
+        "WorkflowProfileManager no longer references variable merge, ResolveEffectiveVariablesAsync, or LoadIssueWorkspaceAsync.",
+        "Server unit + spec + architecture tests are green."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowVariableResolver class; WorkflowGrain and WorkflowQuerier rewired; merge spec tests moved to the resolver.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The resolver reads through the Stores from T-001, not the DB directly."
+    },
+    {
+      "id": "T-003",
+      "title": "Extract the Prompts component and drop the dead override path",
+      "spec": "specs/workflow-prompts/spec.md#prompts-are-an-independent-resource",
+      "description": "Move prompt CRUD (system catalog, project body set/get/delete/list, preview) and run-scoped prompt resolution/render out of ProjectWorkflowProfileManager and WorkflowProfileManager into a ProjectPromptStore (IScopedService) and a WorkflowPromptResolver (IScopedService). Rewire the prompt route handlers in ProjectRoutes and the prompt merge in MohistIssueWorkflowProfileBase. Drop the uncalled ProjectPromptTemplates override methods (GetProjectPromptOverrideAsync/SetProjectPromptOverrideAsync/DeleteProjectPromptOverrideAsync) and ListSystemPromptsAsync, which have no route or source caller.",
+      "acceptanceCriteria": [
+        "ProjectPromptStore serves system catalog, project body override (source 'project'), new-key creation (source 'project-new'), deletion, list-merge, and preview — independent of any Profile CRUD class.",
+        "Effective prompt resolution prefers a Project body over the system body; absent project override falls back to system; unknown key resolves to nothing.",
+        "Prompt preview render returns identical rendered text, missing variables, depth, and errors for the same body and variables.",
+        "The prompt route handlers in ProjectRoutes (/workflow-profile/prompts GET/PUT/DELETE + preview) return identical responses.",
+        "No code constructs ProjectPromptTemplates rows and no source references the removed override methods; only tests that asserted them are deleted.",
+        "WorkflowProfileManager no longer references LoadPromptAsync, LoadPromptsAsync, or RenderPrompt.",
+        "Server unit + spec + architecture tests are green."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ProjectPromptStore and WorkflowPromptResolver classes; ProjectRoutes prompt endpoints and MohistIssueWorkflowProfileBase rewired; dead override path and ProjectPromptTemplates writes removed; prompt spec tests moved.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Prompt override is confirmed dead by grep (no route/source caller). Issue scope has no prompt override (Prompts are Project-only)."
+    },
+    {
+      "id": "T-004",
+      "title": "Reduce WorkflowProfileManager to the Definition Resolver",
+      "spec": "specs/workflow-profile-resolution/spec.md#definition-resolution-is-decoupled-from-variables-and-prompts",
+      "description": "With variable merge (T-002) and prompt code (T-003) extracted, rename and reshape WorkflowProfileManager into WorkflowDefinitionResolver: the effective/bound Profile cascade, stage specs, structure, startup structure, and approval config, all sourced via IWorkflowProfileProvider. Update the WorkflowGrainContractRules arch test that reads the embedded WorkflowProfileManager.cs so it references the new file and still asserts the three WorkflowDefinitionResolutionException throw sites. Rewire WorkflowGrain, IWorkflowGrainContext, and WorkflowQuerier to the resolver.",
+      "acceptanceCriteria": [
+        "WorkflowDefinitionResolver resolves the bound Profile first (failing with no-current-definition when missing), then the effective cascade (issue selection → project default → first enabled system profile).",
+        "LoadStageSpecsAsync re-runs the cascade on every call so Profile edits are visible to later stages.",
+        "LoadStartupStructureAsync and LoadApprovalConfigAsync return identical results to before for the same run context.",
+        "WorkflowDefinitionResolver contains no variable merge or prompt logic.",
+        "The arch test asserting >=3 WorkflowDefinitionResolutionException throws targets the renamed file and passes.",
+        "WorkflowGrain and WorkflowQuerier inject the resolver; the old WorkflowProfileManager type no longer exists.",
+        "Server unit + spec + architecture tests are green."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowDefinitionResolver class (renamed from WorkflowProfileManager); arch test updated; WorkflowGrain, IWorkflowGrainContext, WorkflowQuerier rewired.",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "All three WorkflowDefinitionResolutionException throw sites are definition-resolution failures and stay co-located, so the arch assertion survives the rename."
+    },
+    {
+      "id": "T-005",
+      "title": "Split IIssueWorkflowProfile into WorkflowProfile description + standalone projection",
+      "spec": "specs/issue-workflow-projection/spec.md#workflow-state-projection-is-an-independent-concern",
+      "description": "Remove ProjectWorkflowState(...) from IIssueWorkflowProfile and route its callers (IssueGrain, IssueReadModelLoader) to MohistDefaultWorkflowProjection directly. Source the Profile descriptive face (id/name/description/definition) from WorkflowProfile / IWorkflowProfileProvider rather than re-declaring Id/DisplayName/Description/IsDefault/Definition on the interface. Update IssueWorkflowProfileRegistry, MohistIssueWorkflowProfileBase, and the Issue/Epic queriers that reach the projection or description.",
+      "acceptanceCriteria": [
+        "IIssueWorkflowProfile (or its replacement) no longer carries a ProjectWorkflowState method; callers reach MohistDefaultWorkflowProjection directly.",
+        "The projected runtime status, attention, blocked reason, change dir, and completed flag are identical for the same issue status and workflow status view, independent of the selected Profile.",
+        "Profile description (id/name/description/definition) is sourced from WorkflowProfile, not re-declared on a projection interface.",
+        "IssueGrain, IssueReadModelLoader, IssueMetricsQuerier, EpicGrain, and EpicQuerier compile and produce identical read-model output.",
+        "A repo-wide grep for ProjectWorkflowState on a Profile interface returns nothing.",
+        "Server unit + spec + architecture tests are green."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "IIssueWorkflowProfile split; IssueGrain, IssueReadModelLoader, IssueMetricsQuerier, EpicGrain, EpicQuerier rewired; projection spec tests updated.",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "MohistDefaultWorkflowProjection already exists as a profile-independent static class; this task only changes how callers reach it."
+    },
+    {
+      "id": "T-006",
+      "title": "Retire legacy template CRUD and make WorkflowProfileProvider the sole authority",
+      "spec": "specs/workflow-profile-resolution/spec.md#sole-profile-collection-authority",
+      "description": "Switch the Definition resolver and IssueGrain default read off the legacy ProjectWorkflowTemplates table and IssueWorkflowProfile.Template inline column onto IWorkflowProfileProvider exclusively. Then delete the template CRUD methods (ListTemplatesAsync/GetTemplateAsync/CreateTemplateAsync/UpdateTemplateAsync/DeleteTemplateAsync/SetDefaultTemplateAsync/GetDefaultTemplateAsync and the system-template catalog helpers) and the LoadProjectTemplateAsync/LoadTemplateReferenceAsync legacy fallback paths. Remove IssueWorkflowProfileManager's custom-template-YAML handling so Issue selection is a pure Profile-id reference.",
+      "acceptanceCriteria": [
+        "No definition resolution reads the legacy ProjectWorkflowTemplates table or the IssueWorkflowProfile.Template column.",
+        "IssueGrain reads the project default via DefaultWorkflowProfileId through the provider, not GetDefaultTemplateAsync.",
+        "WorkflowProfileProvider is the only Profile membership/definition/CRUD authority; the template CRUD methods and legacy table read paths are deleted.",
+        "Issue template selection accepts only a Profile id reference (custom YAML inline template is no longer supported).",
+        "Existing Profile data migration path is unaffected; a project with migrated custom Profiles resolves definitions through the provider.",
+        "Server unit + spec + architecture tests are green; WorkflowProfileMigrationSpecs still pass unchanged.",
+        "A repo-wide grep for 'Profile' in Workflow/Services and Issue/Services refers only to Workflow Profile, not Variables or Prompts."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Legacy template CRUD and table read paths deleted; Definition resolver and IssueGrain read exclusively via IWorkflowProfileProvider; migration regression tests green.",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Gated on migration being the sole path: switch all readers to the provider first, then delete. No new EF migration is added (columns left read-only until a separate cleanup)."
+    }
+  ]
+}
