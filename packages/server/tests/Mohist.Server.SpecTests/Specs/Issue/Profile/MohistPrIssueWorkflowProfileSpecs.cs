@@ -621,68 +621,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
             reparsed.Stages.SelectMany(s => s.Tasks).Select(t => t.Id));
     }
 
-    [Fact]
-    public void ProjectWorkflowProfileManager_GetSystemTemplateInfo_GithubPr_ReturnsFriendlyDisplayName()
-    {
-        var info = ProjectWorkflowProfileManager.GetSystemTemplateInfo("mohist/github-pr");
-
-        Assert.NotNull(info);
-        Assert.Equal("Mohist GitHub PR", info!.Name);
-        Assert.False(info.IsDefault);
-        Assert.Contains("gh auth login", info.Description, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void ProjectWorkflowProfileManager_GetSystemTemplateDefinition_GithubPr_ReturnsGithubPrDefinition()
-    {
-        var def = ProjectWorkflowProfileManager.GetSystemTemplateDefinition("mohist/github-pr");
-
-        Assert.NotNull(def);
-        Assert.Same(GithubPrDefinition, def);
-    }
-
-    [Fact]
-    public void ProjectWorkflowProfileManager_GetSystemTemplateInfo_LegacyPrId_ReturnsNull()
-    {
-        Assert.Null(ProjectWorkflowProfileManager.GetSystemTemplateInfo("mohist/pr"));
-        Assert.Null(ProjectWorkflowProfileManager.GetSystemTemplateDefinition("mohist/pr"));
-    }
-
-    [Fact]
-    public async Task ProjectWorkflowProfileManager_SystemTemplates_ExposeGithubPrTemplate()
-    {
-        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), NullActionCatalogSource.Instance);
-
-        var templates = await manager.ListSystemTemplatesAsync();
-
-        var prTemplate = Assert.Single(templates, t => t.Id == "mohist/github-pr");
-        Assert.Equal("Mohist GitHub PR", prTemplate.Name);
-        Assert.False(prTemplate.IsDefault);
-        Assert.Contains("gh auth login", prTemplate.Description, StringComparison.OrdinalIgnoreCase);
-
-        Assert.DoesNotContain(templates, t => t.Id == "mohist/pr");
-    }
-
-    [Fact]
-    public async Task BothCatalogPaths_AgreeWithProfileInstanceForBothBuiltIns()
-    {
-        var registry = BuildRegistry();
-        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), NullActionCatalogSource.Instance);
-
-        var templates = await manager.ListSystemTemplatesAsync();
-        var described = registry.ListDescribed();
-
-        foreach (var profileId in new[] { IssueWorkflowProfiles.LocalId, IssueWorkflowProfiles.GithubPrId })
-        {
-            var profile = registry.Get(profileId);
-            var template = Assert.Single(templates, t => t.Id == profileId);
-            var describedEntry = Assert.Single(described, d => d.Id == profileId);
-
-            Assert.Equal(profile.Description, template.Description);
-            Assert.Equal(profile.Description, describedEntry.Description);
-        }
-    }
-
     private static void AssertAgentTask(TaskDefinition task, string session, string prompt) => Assert.Equal(("mohist/opencode", session, prompt, "${{ vars.agent }}"), (task.Uses, ReadStringWith(task, "session"), ReadStringWith(task, "prompt"), ReadStringWith(task, "options")));
 
     private static IEnumerable<Mohist.Workflow.Definition.TaskDefinition> CollectAllTasks(

@@ -185,11 +185,21 @@ public sealed class WorkflowGrainProductionContractSpecs
         public Task<bool> ContainsAsync(string projectId, string profileId, CancellationToken ct = default) =>
             Task.FromResult(true);
 
+        public Task<string?> GetDefaultProfileIdAsync(string projectId, CancellationToken ct = default) =>
+            Task.FromResult<string?>(null);
+
         public Task<IReadOnlyList<WorkflowProfileCollectionEntry>> ListAsync(string projectId, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
         public Task<WorkflowProfileCollectionEntry?> GetAsync(string projectId, string profileId, CancellationToken ct = default) =>
-            throw new NotSupportedException();
+            Task.FromResult<WorkflowProfileCollectionEntry?>(new WorkflowProfileCollectionEntry(
+                projectId,
+                profileId,
+                profileId,
+                string.Empty,
+                WorkflowProfileSourceProvenance.BuiltIn,
+                true,
+                null));
 
         public Task<string?> GetDefinitionSourceAsync(string projectId, string profileId, CancellationToken ct = default) =>
             throw new NotSupportedException();
@@ -213,7 +223,7 @@ public sealed class WorkflowGrainProductionContractSpecs
             throw new NotSupportedException();
 
         public Task<IReadOnlySet<string>> GetDisabledProfileIdsAsync(string projectId, CancellationToken ct = default) =>
-            throw new NotSupportedException();
+            Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(WorkflowProfileCatalog.IdComparer));
 
         public Task SetProfileEnabledAsync(string projectId, string profileId, bool enabled, CancellationToken ct = default) =>
             throw new NotSupportedException();

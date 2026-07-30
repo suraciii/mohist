@@ -16,10 +16,10 @@ namespace Mohist.Server.Workflow.Services;
 /// Workflow definition resolution entrypoint.
 ///
 /// Definition resolution precedence (highest first):
-///   1. Issue custom YAML (issue_workflow_profile.Template)
-///   2. Issue referenced template (issue_workflow_profile.SourceTemplateId)
-///   3. Issue's effective workflow profile (issue.WorkflowProfileId →
-///      project default template → first enabled system profile).
+///   1. WorkflowRun's bound Profile
+///   2. Issue's explicit Profile selection
+///   3. Project default Profile
+///   4. First enabled system Profile
 ///
 /// Variable and prompt resolution are separate responsibilities.
 /// </summary>
@@ -29,7 +29,6 @@ public class WorkflowDefinitionResolver : IScopedService
         "No enabled workflow profile is available. Enable a workflow first.";
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly ConfigService _configService;
     private readonly IWorkflowProfileProvider _profileProvider;
 
     public WorkflowDefinitionResolver(
@@ -38,7 +37,6 @@ public class WorkflowDefinitionResolver : IScopedService
         IWorkflowProfileProvider profileProvider)
     {
         _dbFactory = dbFactory;
-        _configService = configService;
         _profileProvider = profileProvider;
     }
 
@@ -58,58 +56,28 @@ public class WorkflowDefinitionResolver : IScopedService
         if (!string.IsNullOrWhiteSpace(boundProfileId)
             && !string.IsNullOrWhiteSpace(context.ProjectId))
         {
-            var definition = await _profileProvider.GetDefinitionAsync(context.ProjectId!, boundProfileId!);
-            if (definition is null)
+            var boundProfile = await LoadProfileAsync(context.ProjectId!, boundProfileId!);
+            if (boundProfile is null)
                 throw new WorkflowDefinitionResolutionException(
                     WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
                     $"Workflow '{runId}' has no current definition for bound Profile '{boundProfileId}'");
-            return ResolvedTemplate.FromProfile(new WorkflowProfile(
-                boundProfileId!, boundProfileId!, string.Empty, definition));
+            return boundProfile;
         }
 
-        var profileContext = await ResolveEffectiveProfileContextAsync(db, context);
-        if (!string.IsNullOrWhiteSpace(context.ProjectId)
-            && string.IsNullOrWhiteSpace(profileContext.EffectiveProfileId))
+        if (string.IsNullOrWhiteSpace(context.ProjectId))
+            return ResolvedTemplate.FromProfile(WorkflowProfileCatalog.Profile);
+
+        var issueSelection = await LoadIssueSelectionAsync(db, context);
+        var projectDefault = await _profileProvider.GetDefaultProfileIdAsync(context.ProjectId);
+        var disabledIds = context.RunExists
+            ? null
+            : await _profileProvider.GetDisabledProfileIdsAsync(context.ProjectId);
+
+        foreach (var profileId in CandidateProfileIds(issueSelection, projectDefault, disabledIds))
         {
-            throw new InvalidOperationException(NoEnabledWorkflowProfileMessage);
-        }
-
-        var issueProfile = await LoadIssueProfileAsync(db, context);
-
-        if (issueProfile is not null && !string.IsNullOrWhiteSpace(issueProfile.Template))
-        {
-            var issueProfileAsset = DeserializeForLoad(issueProfile.Template);
-            if (issueProfileAsset is not null)
-                return ResolvedTemplate.FromProfile(issueProfileAsset);
-        }
-
-        if (issueProfile is not null
-            && !string.IsNullOrWhiteSpace(issueProfile.SourceTemplateId)
-            && !string.IsNullOrWhiteSpace(context.ProjectId))
-        {
-            var template = await LoadTemplateReferenceAsync(db, context.ProjectId, issueProfile.SourceTemplateId);
-            if (template is not null)
-                return template;
-        }
-
-        if (string.IsNullOrWhiteSpace(profileContext.IssueSelection)
-            && !string.IsNullOrWhiteSpace(profileContext.ProjectDefaultId)
-            && (ProjectWorkflowProfileManager.GetSystemTemplateInfo(profileContext.ProjectDefaultId) is null
-                || string.Equals(profileContext.ProjectDefaultId, profileContext.EffectiveProfileId, StringComparison.Ordinal))
-            && !string.IsNullOrWhiteSpace(context.ProjectId))
-        {
-            var projectDefault = await LoadTemplateReferenceAsync(db, context.ProjectId, profileContext.ProjectDefaultId);
-            if (projectDefault is not null)
-                return projectDefault;
-        }
-
-        if (string.IsNullOrWhiteSpace(profileContext.EffectiveProfileId))
-            throw new InvalidOperationException(NoEnabledWorkflowProfileMessage);
-
-        var effectiveProfile = WorkflowProfileCatalog.GetProfile(profileContext.EffectiveProfileId);
-        if (effectiveProfile is not null)
-        {
-            return ResolvedTemplate.FromProfile(effectiveProfile);
+            var profile = await LoadProfileAsync(context.ProjectId, profileId);
+            if (profile is not null)
+                return profile;
         }
 
         throw new InvalidOperationException(NoEnabledWorkflowProfileMessage);
@@ -178,31 +146,13 @@ public class WorkflowDefinitionResolver : IScopedService
         string? projectId,
         int? issueNumber)
     {
-        if (string.IsNullOrWhiteSpace(projectId))
-        {
-            var legacy = await LoadStructureAsync(runId, projectId, issueNumber);
-            return legacy with { Id = string.Empty };
-        }
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var issueSelection = issueNumber is > 0
-            ? ReadWorkflowProfileId((await db.Issues.AsNoTracking()
-                .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Number == issueNumber))?.State)
-            : null;
-        var projectDefault = (await db.ProjectWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId))?.DefaultWorkflowProfileId;
-        var profileId = string.IsNullOrWhiteSpace(issueSelection) ? projectDefault : issueSelection;
-        if (string.IsNullOrWhiteSpace(profileId))
-            throw new InvalidOperationException(
-                $"Project '{projectId}' has no default Workflow Profile for Workflow '{runId}'");
-
-        var definition = await _profileProvider.GetDefinitionAsync(projectId, profileId);
-        if (definition is null)
-            throw new InvalidOperationException($"Profile '{profileId}' is not in the project collection");
+        var template = await LoadTemplateAsync(runId, projectId, issueNumber);
+        var definition = template.Structure
+            ?? throw new InvalidOperationException($"Workflow '{runId}' has no effective workflow Profile");
         if (definition.Stages.Count == 0)
-            throw new InvalidOperationException($"Workflow '{runId}' has no stages in Profile '{profileId}'");
+            throw new InvalidOperationException($"Workflow '{runId}' has no stages in Profile '{template.Id}'");
         return new WorkflowStructure(
-            profileId,
+            template.Id ?? throw new InvalidOperationException("Resolved Workflow Profile has no id"),
             definition.Stages.Select(s => new StageStructure(s.Stage, s.RequiresApproval)).ToList());
     }
 
@@ -217,37 +167,53 @@ public class WorkflowDefinitionResolver : IScopedService
         return template.Structure?.Approval;
     }
 
-    private async Task<EffectiveProfileContext> ResolveEffectiveProfileContextAsync(MohistDbContext db, RunContext context)
+    private static async Task<string?> LoadIssueSelectionAsync(MohistDbContext db, RunContext context)
     {
-        string? issueSelection = null;
         if (context.IssueNumber is > 0 && !string.IsNullOrWhiteSpace(context.ProjectId))
         {
             var row = await db.Issues.AsNoTracking()
                 .FirstOrDefaultAsync(r => r.ProjectId == context.ProjectId && r.Number == context.IssueNumber);
-            issueSelection = ReadWorkflowProfileId(row?.State);
+            return ReadWorkflowProfileId(row?.State);
         }
 
-        string? projectDefaultId = null;
-        IReadOnlyCollection<string>? disabledIds = null;
-        if (!string.IsNullOrWhiteSpace(context.ProjectId))
-        {
-            var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.ProjectId == context.ProjectId);
-            projectDefaultId = projectProfile?.DefaultTemplateId;
-            disabledIds = context.RunExists ? null : projectProfile?.DisabledWorkflowProfileIds;
-        }
-
-        var effectiveProfileId = WorkflowProfileCatalog.ResolveEffectiveProfileId(
-            issueSelection,
-            projectDefaultId,
-            disabledIds);
-        return new EffectiveProfileContext(issueSelection, projectDefaultId, effectiveProfileId);
+        return null;
     }
 
-    private sealed record EffectiveProfileContext(
-        string? IssueSelection,
-        string? ProjectDefaultId,
-        string? EffectiveProfileId);
+    private static IEnumerable<string> CandidateProfileIds(
+        string? issueSelection,
+        string? projectDefault,
+        IReadOnlySet<string>? disabledIds)
+    {
+        if (!string.IsNullOrWhiteSpace(issueSelection)
+            && !IsDisabledSystemProfile(issueSelection, disabledIds))
+        {
+            yield return issueSelection;
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectDefault)
+            && !string.Equals(projectDefault, issueSelection, StringComparison.Ordinal)
+            && !IsDisabledSystemProfile(projectDefault, disabledIds))
+        {
+            yield return projectDefault;
+        }
+
+        foreach (var systemProfileId in WorkflowProfileCatalog.SystemProfileIds)
+        {
+            if (string.Equals(systemProfileId, issueSelection, StringComparison.Ordinal)
+                || string.Equals(systemProfileId, projectDefault, StringComparison.Ordinal)
+                || IsDisabledSystemProfile(systemProfileId, disabledIds))
+            {
+                continue;
+            }
+
+            yield return systemProfileId;
+        }
+    }
+
+    private static bool IsDisabledSystemProfile(string profileId, IReadOnlySet<string>? disabledIds) =>
+        disabledIds is not null
+        && WorkflowProfileCatalog.IsSystemProfile(profileId)
+        && disabledIds.Contains(profileId);
 
     private static async Task<RunContext> ResolveRunContextAsync(MohistDbContext db, string runId)
     {
@@ -296,12 +262,12 @@ public class WorkflowDefinitionResolver : IScopedService
     {
         if (string.IsNullOrWhiteSpace(projectId))
             return await LoadTemplateAsync(runId, projectId);
-        var definition = await _profileProvider.GetDefinitionAsync(projectId!, profileId);
-        if (definition is null)
+        var profile = await LoadProfileAsync(projectId!, profileId);
+        if (profile is null)
             throw new WorkflowDefinitionResolutionException(
                 WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
                 $"Workflow '{runId}' has no current definition for bound Profile '{profileId}'");
-        return ResolvedTemplate.FromProfile(new WorkflowProfile(profileId, profileId, string.Empty, definition));
+        return profile;
     }
 
     private static string? ReadWorkflowProfileId(string? stateJson)
@@ -363,52 +329,20 @@ public class WorkflowDefinitionResolver : IScopedService
         }
     }
 
-    private static async Task<IssueWorkflowProfile?> LoadIssueProfileAsync(MohistDbContext db, RunContext context)
+    private async Task<ResolvedTemplate?> LoadProfileAsync(string projectId, string profileId)
     {
-        if (context.IssueNumber is > 0 && !string.IsNullOrWhiteSpace(context.ProjectId))
-        {
-            var byId = await db.IssueWorkflowProfiles.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.ProjectId == context.ProjectId && x.IssueNumber == context.IssueNumber);
-            if (byId is not null)
-                return byId;
-        }
+        var entry = await _profileProvider.GetAsync(projectId, profileId);
+        if (entry is null)
+            return null;
 
-        return null;
-    }
-
-    private static async Task<ResolvedTemplate?> LoadProjectTemplateAsync(
-        MohistDbContext db, string projectId, string templateId)
-    {
-        var row = await db.ProjectWorkflowTemplates.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
-        if (row is null) return null;
-
-        var profile = DeserializeForLoad(row.Template);
-        return profile is null ? null : ResolvedTemplate.FromProfile(profile);
-    }
-
-    private static WorkflowProfile DeserializeForLoad(string json)
-    {
-        try
-        {
-            return WorkflowProfilePersistence.Deserialize(json);
-        }
-        catch (WorkflowDefinitionValidationException exception)
-        {
-            throw new InvalidOperationException(
-                string.Join("; ", exception.Errors.Select(error => $"{error.Path}: {error.Message}")));
-        }
-    }
-
-    private static async Task<ResolvedTemplate?> LoadTemplateReferenceAsync(
-        MohistDbContext db, string projectId, string templateId)
-    {
-        var projectTemplate = await LoadProjectTemplateAsync(db, projectId, templateId);
-        if (projectTemplate is not null)
-            return projectTemplate;
-
-        var systemProfile = WorkflowProfileCatalog.GetProfile(templateId);
-        return systemProfile is null ? null : ResolvedTemplate.FromProfile(systemProfile);
+        var definition = await _profileProvider.GetDefinitionAsync(projectId, profileId);
+        return definition is null
+            ? null
+            : ResolvedTemplate.FromProfile(new WorkflowProfile(
+                entry.ProfileId,
+                entry.Name,
+                entry.Description,
+                definition));
     }
 
 

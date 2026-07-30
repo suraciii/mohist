@@ -395,13 +395,12 @@ public class IssueMetricsQualitySpecs
         var readModelLogger = new TestLogger<IssueReadModelLoader>();
         var loader = new IssueReadModelLoader(
             scope.ServiceProvider.GetRequiredService<EffectiveWorkflowProfileResolver>(),
-            scope.ServiceProvider.GetRequiredService<ProjectWorkflowProfileManager>(),
+            scope.ServiceProvider.GetRequiredService<IWorkflowProfileProvider>(),
             readModelLogger);
         var metricsLogger = new TestLogger<IssueMetricsQuerier>();
         var service = new IssueMetricsQuerier(
             scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             scope.ServiceProvider.GetRequiredService<EffectiveWorkflowProfileResolver>(),
-            scope.ServiceProvider.GetRequiredService<ProjectWorkflowProfileManager>(),
             scope.ServiceProvider.GetRequiredService<IWorkflowProfileProvider>(),
             loader,
             metricsLogger);

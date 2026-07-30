@@ -238,7 +238,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowDefinitionResolverTestFact
             issueTemplateJson: SerializeDefinition("custom-override", stageCount: 1),
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
-            issueWorkflowProfileId: "mohist/github-pr");
+            issueWorkflowProfileId: "custom-override");
 
         var result = await DefinitionResolver.LoadTemplateAsync(runId);
 

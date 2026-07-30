@@ -87,6 +87,12 @@ public interface IWorkflowProfileProvider
     Task<bool> ContainsAsync(string projectId, string profileId, CancellationToken ct = default);
 
     /// <summary>
+    /// Returns the Project's configured default Profile id. This is the
+    /// default binding used after an Issue has no explicit Profile selection.
+    /// </summary>
+    Task<string?> GetDefaultProfileIdAsync(string projectId, CancellationToken ct = default);
+
+    /// <summary>
     /// Returns the disabled Profile IDs for the Project. The set is
     /// authoritative for the effective-selection fallback used by runs
     /// that do not yet exist; older runs ignore this set so historical

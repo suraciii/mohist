@@ -81,3 +81,11 @@ The route handlers read variables from stores, and T-002 moves the remaining cro
 - T-006 lands in two commits: the first commit moves the system-Profile enable toggle (`GetDisabledWorkflowProfileIdsAsync` read + `SetProfileEnabledAsync` write) onto `IWorkflowProfileProvider` as `GetDisabledProfileIdsAsync` / `SetProfileEnabledAsync`. Built-in canonicalization, the empty-row / no-row write paths, the last-enabled guard, and the `DisabledWorkflowProfileIds` JSON column are preserved verbatim from the previous `ProjectWorkflowProfileManager` implementation.
 - The `StubFailingOnStageLoadProfileProvider` in `WorkflowGrainProductionContractSpecs.cs` must implement the new interface members (`GetDisabledProfileIdsAsync` / `SetProfileEnabledAsync`) so the build stays green between steps; both throw `NotSupportedException`, matching the existing pattern for members the contract test doesn't exercise.
 - The remaining six consumers (`IssueGrain`, `IssueQuerier`, `IssueReadModelLoader`, `IssueMetricsQuerier`), the legacy `ProjectWorkflowTemplates` / `IssueWorkflowProfile.Template` retirement, and the `ProjectWorkflowProfileManager` deletion follow in the next T-006 commit.
+
+## T-006 Completion Notes
+
+- `IWorkflowProfileProvider` now owns reads of the Project default Profile and disabled Profile set. `IssueGrain`, Issue read projections, metrics, and `WorkflowDefinitionResolver` use those APIs; the two legacy manager classes are deleted.
+- Definition resolution now considers only the bound Profile, Issue Profile id, Project `DefaultWorkflowProfileId`, and enabled built-ins. Legacy template rows and Issue inline YAML remain available exclusively to `WorkflowProfileDataMigrator` and are not read at runtime.
+- `WorkflowProfileCanonicalYamlRenderer` emits the Definition at the YAML root accepted by `WorkflowProfileYamlParser`, so `CanonicalLegacy` records created by migration resolve through `WorkflowProfileProvider`.
+- Resolver fixtures now seed `WorkflowProfileRecordRow` and exercise custom/default resolution, stage hot reload, and disabled fallback without legacy tables. `WorkflowProfileCollectionSpecs` adds provider enablement and default-binding coverage.
+- Verification: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true` passed (3347).

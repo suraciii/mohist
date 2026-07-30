@@ -27,16 +27,16 @@ namespace Mohist.Server.Issue.Services;
 public class IssueReadModelLoader : IScopedService
 {
     private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
-    private readonly ProjectWorkflowProfileManager _projectProfileManager;
+    private readonly IWorkflowProfileProvider _profileProvider;
     private readonly ILogger<IssueReadModelLoader> _logger;
 
     public IssueReadModelLoader(
         EffectiveWorkflowProfileResolver effectiveProfileResolver,
-        ProjectWorkflowProfileManager projectProfileManager,
+        IWorkflowProfileProvider profileProvider,
         ILogger<IssueReadModelLoader> logger)
     {
         _effectiveProfileResolver = effectiveProfileResolver;
-        _projectProfileManager = projectProfileManager;
+        _profileProvider = profileProvider;
         _logger = logger;
     }
 
@@ -86,12 +86,12 @@ public class IssueReadModelLoader : IScopedService
 
         if (rows.Count == 0) return [];
 
-        var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
-        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
+        var projectDefaultProfileId = await LoadProjectDefaultProfileAsync(db, projectId);
+        var disabledIds = await _profileProvider.GetDisabledProfileIdsAsync(projectId);
 
         return IssueRowMapper.ByNumber(rows, projectId)
             .Select(issue => ToReadModel(BuildInfo(issue, project, _effectiveProfileResolver.Resolve(
-                issue.WorkflowProfileId, projectDefaultTemplateId, disabledIds))))
+                issue.WorkflowProfileId, projectDefaultProfileId, disabledIds))))
             .ToList();
     }
 
@@ -286,12 +286,12 @@ public class IssueReadModelLoader : IScopedService
     /// only the default-template id (single-issue lookups, stage-order
     /// resolution) can avoid duplicating the SQL.
     /// </summary>
-    public async Task<string?> LoadProjectDefaultTemplateAsync(MohistDbContext db, string projectId)
+    public async Task<string?> LoadProjectDefaultProfileAsync(MohistDbContext db, string projectId)
     {
         if (string.IsNullOrWhiteSpace(projectId)) return null;
         var row = await db.ProjectWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        return row?.DefaultTemplateId;
+        return row?.DefaultWorkflowProfileId;
     }
 
     private void ApplyWorkflowProjections(

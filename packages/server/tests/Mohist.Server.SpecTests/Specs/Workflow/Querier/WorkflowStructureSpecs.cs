@@ -58,29 +58,12 @@ public class WorkflowStructureSpecs : WorkflowDefinitionResolverTestFactory
                 new TaskDefinition("draft", "Draft", "spec/task"),
             }, Array.Empty<CheckDefinition>(), requiresApproval: true));
 
-        // Seed only the project profile — no WorkflowRun row exists yet.
-        await using (var db = new MohistDbContext(Database.Options))
-        {
-            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
-            {
-                ProjectId = "explicit_proj",
-                DefaultTemplateId = "explicit-tmpl",
-                Variables = "{}",
-            });
-            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-            {
-                ProjectId = "explicit_proj",
-                TemplateId = "explicit-tmpl",
-                Template = templateJson,
-            });
-            db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
-            {
-                ProjectId = "explicit_proj",
-                IssueNumber = 1,
-                Variables = "{}",
-            });
-            await db.SaveChangesAsync();
-        }
+        await SeedWithoutRunAsync(
+            "explicit_proj",
+            1,
+            issueTemplateJson: null,
+            projectDefaultTemplateId: "explicit-tmpl",
+            projectTemplateJson: templateJson);
 
         // The run is not in the DB; only the explicit context will find the
         // project template.
@@ -120,7 +103,7 @@ public class WorkflowStructureSpecs : WorkflowDefinitionResolverTestFactory
     }
 
     [Fact]
-    public async Task LoadStartupStructureAsync_WhenProjectCollectionIsMissing_ThrowsBeforeRunBinding()
+    public async Task LoadStartupStructureAsync_WhenProjectCollectionIsMissing_FallsBackToFirstBuiltIn()
     {
         var runId = "wr_missing_profile_collection";
         var projectId = "proj-missing-profile-collection";
@@ -134,25 +117,23 @@ public class WorkflowStructureSpecs : WorkflowDefinitionResolverTestFactory
             await db.SaveChangesAsync();
         }
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateDefinitionResolver().LoadStartupStructureAsync(runId, projectId, 1));
+        var structure = await CreateDefinitionResolver().LoadStartupStructureAsync(runId, projectId, 1);
 
-        Assert.Contains(projectId, ex.Message, StringComparison.Ordinal);
+        Assert.Equal("mohist/local", structure.Id);
         await using var verifyDb = new MohistDbContext(Database.Options);
         Assert.False(await verifyDb.WorkflowRuns.AnyAsync(r => r.WorkflowRunId == runId));
     }
 
     [Fact]
-    public async Task LoadStartupStructureAsync_WhenProjectDefaultIsMissing_ThrowsBeforeRunBinding()
+    public async Task LoadStartupStructureAsync_WhenProjectDefaultIsMissing_FallsBackToFirstBuiltIn()
     {
         var runId = "wr_missing_profile_default";
         var projectId = "proj-missing-profile-default";
         await SeedWithoutRunAsync(projectId, 1, issueTemplateJson: null);
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateDefinitionResolver().LoadStartupStructureAsync(runId, projectId, 1));
+        var structure = await CreateDefinitionResolver().LoadStartupStructureAsync(runId, projectId, 1);
 
-        Assert.Contains("no default Workflow Profile", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("mohist/local", structure.Id);
         await using var verifyDb = new MohistDbContext(Database.Options);
         Assert.False(await verifyDb.WorkflowRuns.AnyAsync(r => r.WorkflowRunId == runId));
     }

@@ -41,7 +41,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly IssueRepositoryResolver _repositoryResolver;
     private readonly WorkflowDefinitionResolver _workflowDefinitionResolver;
     private readonly WorkflowPromptResolver _workflowPromptResolver;
-    private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueVariableStore _issueVariableStore;
     private readonly AttachmentService _attachmentService;
     private readonly IConfiguration _configuration;
@@ -62,7 +61,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IssueRepositoryResolver repositoryResolver,
         WorkflowDefinitionResolver workflowDefinitionResolver,
         WorkflowPromptResolver workflowPromptResolver,
-        ProjectWorkflowProfileManager projectProfileManager,
         IssueVariableStore issueVariableStore,
         AttachmentService attachmentService,
         IConfiguration configuration,
@@ -83,7 +81,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _repositoryResolver = repositoryResolver;
         _workflowDefinitionResolver = workflowDefinitionResolver;
         _workflowPromptResolver = workflowPromptResolver;
-        _projectProfileManager = projectProfileManager;
         _issueVariableStore = issueVariableStore;
         _attachmentService = attachmentService;
         _configuration = configuration;
@@ -103,7 +100,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IssueRepositoryResolver repositoryResolver,
         WorkflowDefinitionResolver workflowDefinitionResolver,
         WorkflowPromptResolver workflowPromptResolver,
-        ProjectWorkflowProfileManager projectProfileManager,
         IssueVariableStore issueVariableStore,
         AttachmentService attachmentService,
         IConfiguration configuration,
@@ -123,7 +119,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _repositoryResolver = repositoryResolver;
         _workflowDefinitionResolver = workflowDefinitionResolver;
         _workflowPromptResolver = workflowPromptResolver;
-        _projectProfileManager = projectProfileManager;
         _issueVariableStore = issueVariableStore;
         _attachmentService = attachmentService;
         _configuration = configuration;
@@ -320,11 +315,11 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // mohist/local profile, which meant a mohist/github-pr issue would
         // inherit default prompts even though the run used the GitHub PR
         // definition.
-        var projectDefaultTemplateId = await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id);
-        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectContext.Id);
+        var projectDefaultProfileId = await _profileProvider.GetDefaultProfileIdAsync(projectContext.Id);
+        var disabledIds = await _profileProvider.GetDisabledProfileIdsAsync(projectContext.Id);
         var effectiveProfileId = EffectiveWorkflowProfileResolver.ResolveCore(
             issue.WorkflowProfileId,
-            projectDefaultTemplateId,
+            projectDefaultProfileId,
             _profiles.Exists,
             disabledIds,
             _profiles.List().Select(p => p.Id).ToList());

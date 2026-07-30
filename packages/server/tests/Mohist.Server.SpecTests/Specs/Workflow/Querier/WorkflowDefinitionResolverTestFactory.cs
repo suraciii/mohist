@@ -86,21 +86,11 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
             ProjectId = projectId,
-            DefaultTemplateId = templateId,
+            DefaultWorkflowProfileId = templateId,
+            DefaultWorkflowProfileIdKey = templateId,
             Variables = "{}",
         });
-        db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-        {
-            ProjectId = projectId,
-            TemplateId = templateId,
-            Template = templateJson,
-        });
-        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
-        {
-            ProjectId = projectId,
-            IssueNumber = 1,
-            Variables = "{}",
-        });
+        db.WorkflowProfileRecords.Add(CreateProfileRecord(projectId, templateId, templateJson));
 
         await db.SaveChangesAsync();
     }
@@ -108,9 +98,9 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
     protected async Task UpdateProjectTemplateAsync(string projectId, string templateId, string templateJson)
     {
         await using var db = new MohistDbContext(Database.Options);
-        var existing = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
+        var existing = await db.WorkflowProfileRecords.FindAsync(projectId, templateId);
         Assert.NotNull(existing);
-        existing!.Template = templateJson;
+        existing!.DefinitionSource = ToDefinitionSource(templateId, templateJson);
         existing.UpdatedAt = TestTime.UtcNow;
         await db.SaveChangesAsync();
     }
@@ -124,27 +114,18 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
         string projectTemplateJson)
     {
         await using var db = new MohistDbContext(Database.Options);
-        SeedRunContext(db, projectId, issueNumber, runId);
+        var issueProfileId = WorkflowProfilePersistence.Deserialize(issueTemplateJson).Id;
+        SeedRunContext(db, projectId, issueNumber, runId, issueProfileId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
             ProjectId = projectId,
-            DefaultTemplateId = projectDefaultTemplateId,
+            DefaultWorkflowProfileId = projectDefaultTemplateId,
+            DefaultWorkflowProfileIdKey = projectDefaultTemplateId,
             Variables = "{}",
         });
-        db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-        {
-            ProjectId = projectId,
-            TemplateId = projectDefaultTemplateId,
-            Template = projectTemplateJson,
-        });
-        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
-        {
-            ProjectId = projectId,
-            IssueNumber = issueNumber,
-            Template = issueTemplateJson,
-            Variables = "{}",
-        });
+        db.WorkflowProfileRecords.Add(CreateProfileRecord(projectId, projectDefaultTemplateId, projectTemplateJson));
+        db.WorkflowProfileRecords.Add(CreateProfileRecord(projectId, issueProfileId, issueTemplateJson));
 
         await db.SaveChangesAsync();
     }
@@ -159,43 +140,30 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
         string[]? disabledWorkflowProfileIds = null)
     {
         await using var db = new MohistDbContext(Database.Options);
-        SeedRunContext(db, projectId, issueNumber, runId, issueWorkflowProfileId);
+        var resolvedIssueProfileId = issueWorkflowProfileId
+            ?? (issueTemplateJson is null ? issueSourceTemplateId : WorkflowProfilePersistence.Deserialize(issueTemplateJson).Id);
+        SeedRunContext(db, projectId, issueNumber, runId, resolvedIssueProfileId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
             ProjectId = projectId,
-            DefaultTemplateId = projectDefaultTemplateId,
+            DefaultWorkflowProfileId = projectDefaultTemplateId,
+            DefaultWorkflowProfileIdKey = WorkflowProfileCatalog.IsSystemProfile(projectDefaultTemplateId)
+                ? null
+                : projectDefaultTemplateId,
             Variables = "{}",
             DisabledWorkflowProfileIds = disabledWorkflowProfileIds?.ToList() ?? [],
         });
 
         if (projectDefaultTemplateId is not null && projectTemplateJson is not null)
-        {
-            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-            {
-                ProjectId = projectId,
-                TemplateId = projectDefaultTemplateId,
-                Template = projectTemplateJson,
-            });
-        }
+            db.WorkflowProfileRecords.Add(CreateProfileRecord(projectId, projectDefaultTemplateId, projectTemplateJson));
         if (issueSourceTemplateId is not null && projectTemplateJson is not null)
+            db.WorkflowProfileRecords.Add(CreateProfileRecord(projectId, issueSourceTemplateId, projectTemplateJson));
+        if (issueTemplateJson is not null)
         {
-            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-            {
-                ProjectId = projectId,
-                TemplateId = issueSourceTemplateId,
-                Template = projectTemplateJson,
-            });
+            var profile = WorkflowProfilePersistence.Deserialize(issueTemplateJson);
+            db.WorkflowProfileRecords.Add(CreateProfileRecord(projectId, profile.Id, issueTemplateJson));
         }
-
-        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
-        {
-            ProjectId = projectId,
-            IssueNumber = issueNumber,
-            SourceTemplateId = issueSourceTemplateId,
-            Template = issueTemplateJson,
-            Variables = "{}",
-        });
 
         await db.SaveChangesAsync();
     }
@@ -213,38 +181,23 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
             ProjectId = projectId,
-            DefaultTemplateId = projectDefaultTemplateId,
+            DefaultWorkflowProfileId = projectDefaultTemplateId,
+            DefaultWorkflowProfileIdKey = WorkflowProfileCatalog.IsSystemProfile(projectDefaultTemplateId)
+                ? null
+                : projectDefaultTemplateId,
             Variables = "{}",
             DisabledWorkflowProfileIds = disabledWorkflowProfileIds?.ToList() ?? [],
         });
 
         if (projectDefaultTemplateId is not null && projectTemplateJson is not null)
-        {
-            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-            {
-                ProjectId = projectId,
-                TemplateId = projectDefaultTemplateId,
-                Template = projectTemplateJson,
-            });
-        }
+            db.WorkflowProfileRecords.Add(CreateProfileRecord(projectId, projectDefaultTemplateId, projectTemplateJson));
         if (issueSourceTemplateId is not null && projectTemplateJson is not null)
+            db.WorkflowProfileRecords.Add(CreateProfileRecord(projectId, issueSourceTemplateId, projectTemplateJson));
+        if (issueTemplateJson is not null)
         {
-            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-            {
-                ProjectId = projectId,
-                TemplateId = issueSourceTemplateId,
-                Template = projectTemplateJson,
-            });
+            var profile = WorkflowProfilePersistence.Deserialize(issueTemplateJson);
+            db.WorkflowProfileRecords.Add(CreateProfileRecord(projectId, profile.Id, issueTemplateJson));
         }
-
-        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
-        {
-            ProjectId = projectId,
-            IssueNumber = issueNumber,
-            SourceTemplateId = issueSourceTemplateId,
-            Template = issueTemplateJson,
-            Variables = "{}",
-        });
 
         await db.SaveChangesAsync();
     }
@@ -253,7 +206,7 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
     {
         await using var db = new MohistDbContext(Database.Options);
         var row = await db.WorkflowRuns.FirstAsync(x => x.WorkflowRunId == runId);
-        var definition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(systemProfileId)
+        var definition = WorkflowProfileCatalog.GetDefinition(systemProfileId)
             ?? throw new InvalidOperationException($"Unknown system profile '{systemProfileId}'");
         var run = WorkflowRun.Create(
             runId,
@@ -385,4 +338,24 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
             }),
         });
     }
+
+    private static WorkflowProfileRecordRow CreateProfileRecord(string projectId, string profileId, string serializedProfile)
+    {
+        var profile = WorkflowProfilePersistence.Deserialize(serializedProfile);
+        return new WorkflowProfileRecordRow
+        {
+            ProjectId = projectId,
+            ProfileId = profileId,
+            Name = profile.Name,
+            Description = profile.Description,
+            DefinitionSource = ToDefinitionSource(profileId, serializedProfile),
+            SourceProvenance = nameof(WorkflowProfileSourceProvenance.CanonicalLegacy),
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
+        };
+    }
+
+    private static string ToDefinitionSource(string profileId, string serializedProfile) =>
+        WorkflowProfileCanonicalYamlRenderer.Render(
+            WorkflowProfilePersistence.Deserialize(serializedProfile) with { Id = profileId });
 }

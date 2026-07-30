@@ -176,6 +176,19 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
             .AnyAsync(r => r.ProjectId == projectId && r.ProfileId == profileId, ct);
     }
 
+    public async Task<string?> GetDefaultProfileIdAsync(
+        string projectId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("projectId is required", nameof(projectId));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.ProjectWorkflowProfiles.AsNoTracking()
+            .Where(x => x.ProjectId == projectId)
+            .Select(x => x.DefaultWorkflowProfileId)
+            .FirstOrDefaultAsync(ct);
+    }
+
     public async Task<IReadOnlySet<string>> GetDisabledProfileIdsAsync(
         string projectId, CancellationToken ct = default)
     {

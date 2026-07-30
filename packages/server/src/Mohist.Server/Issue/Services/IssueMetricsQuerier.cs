@@ -52,7 +52,6 @@ public class IssueMetricsQuerier : IScopedService
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
-    private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IWorkflowProfileProvider _profileProvider;
     private readonly IssueReadModelLoader _loader;
     private readonly ILogger<IssueMetricsQuerier> _logger;
@@ -60,14 +59,12 @@ public class IssueMetricsQuerier : IScopedService
     public IssueMetricsQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
         EffectiveWorkflowProfileResolver effectiveProfileResolver,
-        ProjectWorkflowProfileManager projectProfileManager,
         IWorkflowProfileProvider profileProvider,
         IssueReadModelLoader loader,
         ILogger<IssueMetricsQuerier> logger)
     {
         _dbFactory = dbFactory;
         _effectiveProfileResolver = effectiveProfileResolver;
-        _projectProfileManager = projectProfileManager;
         _profileProvider = profileProvider;
         _loader = loader;
         _logger = logger;
@@ -1588,8 +1585,8 @@ public class IssueMetricsQuerier : IScopedService
 
     private async Task<IReadOnlyList<string>> ResolveProjectStageOrderAsync(MohistDbContext db, string projectId)
     {
-        var projectDefaultId = await _loader.LoadProjectDefaultTemplateAsync(db, projectId);
-        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
+        var projectDefaultId = await _loader.LoadProjectDefaultProfileAsync(db, projectId);
+        var disabledIds = await _profileProvider.GetDisabledProfileIdsAsync(projectId);
         var profileId = _effectiveProfileResolver.Resolve(
             issueSelection: null,
             projectDefaultId,

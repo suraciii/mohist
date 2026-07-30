@@ -149,20 +149,6 @@ public sealed class IssueVariableStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TemplateWrites_PreserveVariables()
-    {
-        var bundle = new VariableBundle(JsonSerializer.SerializeToElement(new { keep = 1 }));
-        await _store.SetVariablesAsync(ProjectId, 8, bundle);
-        var profileManager = new IssueWorkflowProfileManager(_dbFactory, NullActionCatalogSource.Instance);
-
-        await profileManager.UpdateTemplateAsync(ProjectId, 8,
-            new IssueTemplateUpdateRequest(ProjectTemplateId: "some-template"));
-
-        var persisted = await _store.GetVariablesAsync(ProjectId, 8);
-        Assert.Equal(1, persisted.Vars!.Value.GetProperty("keep").GetInt32());
-    }
-
-    [Fact]
     public async Task SetVariables_ChineseValues_PersistAndRoundTripVerbatimFromSqlite()
     {
         var bundle = new VariableBundle(JsonSerializer.SerializeToElement(new

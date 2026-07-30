@@ -98,7 +98,7 @@ public abstract class IssueWorkflowCompletionHandlerTestSupport
             projects: null!,
             configService: null!,
             effectiveProfileResolver: null!,
-            projectProfileManager: null!,
+            profileProvider: null!,
             loader: null!);
 
     protected static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
