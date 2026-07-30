@@ -51,6 +51,14 @@ export function SessionFollowupComposer({
     && (observedInputAcceptance == null || observedInputAcceptance === 'accepted')
   const isObservedQueued = isObservedAccepted && observedTurnStatus === 'queued'
   const isObservedExecuting = isObservedAccepted && observedTurnStatus === 'executing'
+  const observedTerminalStatus = isObservedAccepted && (
+    observedTurnStatus === 'completed'
+    || observedTurnStatus === 'failed'
+    || observedTurnStatus === 'cancelled'
+    || observedTurnStatus === 'unknown'
+  )
+    ? observedTurnStatus
+    : null
   const isQueued = isObservedQueued || (resolvedState === 'queued' && !isObservedExecuting)
 
   const canSend =
@@ -134,6 +142,8 @@ export function SessionFollowupComposer({
       ? 'Outcome unknown — retry with the same key'
       : isObservedExecuting
         ? 'Executing'
+        : observedTerminalStatus
+          ? observedTerminalStatus[0].toUpperCase() + observedTerminalStatus.slice(1)
         : isQueued
           ? followupStatus ? 'Accepted — pending' : 'Queued — waiting for agent...'
     : buttonState === 'sending'
@@ -183,6 +193,10 @@ export function SessionFollowupComposer({
               ? 'queued'
               : isObservedExecuting
                 ? 'executing'
+                : observedTerminalStatus === 'completed'
+                  ? 'success'
+                  : observedTerminalStatus
+                    ? 'terminal'
                 : followupStatus?.outcome === 'rejected' || followupStatus?.outcome === 'unknown'
                   ? 'outcome'
               : buttonState === 'sent'
@@ -194,6 +208,12 @@ export function SessionFollowupComposer({
               ? 'text-warning'
               : isObservedExecuting
                 ? 'text-info'
+                : observedTerminalStatus === 'completed'
+                  ? 'text-success'
+                  : observedTerminalStatus === 'failed'
+                    ? 'text-destructive'
+                    : observedTerminalStatus
+                      ? 'text-warning'
                 : followupStatus?.outcome === 'rejected'
                   ? 'text-destructive'
                   : followupStatus?.outcome === 'unknown'

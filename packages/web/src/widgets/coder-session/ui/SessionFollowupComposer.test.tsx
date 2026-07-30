@@ -394,6 +394,29 @@ describe('SessionFollowupComposer — observed follow-up status', () => {
   })
 
   it.each([
+    ['completed', 'Completed', 'success', 'text-success'],
+    ['failed', 'Failed', 'terminal', 'text-destructive'],
+    ['cancelled', 'Cancelled', 'terminal', 'text-warning'],
+    ['unknown', 'Unknown', 'terminal', 'text-warning'],
+  ] as const)('shows the terminal %s turn status', (turnStatus, label, tone, color) => {
+    renderComposer({
+      followupStatus: {
+        outcome: 'accepted',
+        inputAcceptance: 'accepted',
+        turnStatus,
+        inputId: 'input-1',
+        turnId: 'turn-1',
+      },
+    })
+
+    const status = screen.getByTestId('session-followup-status')
+    expect(status).toHaveTextContent(label)
+    expect(status).toHaveAttribute('data-tone', tone)
+    expect(status).toHaveClass(color)
+    expect(status).not.toHaveClass('text-transparent')
+  })
+
+  it.each([
     ['rejected', 'Rejected', 'text-destructive'],
     ['unknown', 'Outcome unknown — retry with the same key', 'text-warning'],
   ] as const)('shows a visible %s outcome', (outcome, label, color) => {

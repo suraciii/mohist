@@ -735,6 +735,31 @@ public class CliSessionCommandSpecs
         Assert.Equal("unknown", JsonNode.Parse(output.ToString())!["status"]!.GetValue<string>());
         var key = handler.Requests.Single().Headers["Idempotency-Key"].Single();
         Assert.Contains($"Idempotency-Key: {key}", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains($"--idempotency-key {key}", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionFollowup_UnknownTableExplainsSameKeyReconciliation()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    status = "unknown",
+                    code = "followup_acceptance_unknown",
+                    error = "The server could not confirm acceptance.",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["session", "followup", StableSessionId, "--text", "Hi"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("code:             followup_acceptance_unknown", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("error:            The server could not confirm acceptance.", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("reconcile:        retry with the same idempotency key", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

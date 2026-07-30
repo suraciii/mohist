@@ -101,3 +101,8 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - Web follow-up status retains the response input acceptance and turn status until a later observation advances it, so a response reporting `executing` is not rendered as pending.
 - JSON-mode `mo session followup` keeps stdout valid JSON and writes an auto-generated retry key to stderr for later reconciliation.
 - Verification passed: Web typecheck, full Web suite (5165 passed, 1 skipped), Web FSD check, CLI tests (1469 passed), and Server SpecTests (3434 passed).
+
+## Review fix pass 7
+- Web now renders each accepted terminal follow-up turn state instead of replacing it with an invisible placeholder.
+- CLI table output now includes unknown-result details and a same-key reconciliation instruction; JSON output preserves stdout while emitting the generated-key retry instruction on stderr.
+- Verification passed: Web typecheck, focused composer tests (38 passed), full Web suite (5169 passed, 1 skipped), Web FSD check, and CLI tests (1470 passed).

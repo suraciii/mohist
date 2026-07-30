@@ -274,7 +274,10 @@ internal static class SessionCommands
                     if (mode == "table")
                         api.Output.WriteLine($"Idempotency-Key: {idempotencyKey}");
                     else
+                    {
                         api.Error.WriteLine($"Idempotency-Key: {idempotencyKey}");
+                        api.Error.WriteLine($"If the outcome is unknown, retry with --idempotency-key {idempotencyKey}.");
+                    }
                 }
                 return await api.PrintPostWithOutputAsync(
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/followup"),

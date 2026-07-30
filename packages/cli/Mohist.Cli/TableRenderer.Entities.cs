@@ -560,6 +560,14 @@ internal sealed partial class TableRenderer
         var outcome = StringOf(data, "status");
         _out.WriteLine($"status:           {(string.IsNullOrEmpty(outcome) ? "(no status returned)" : outcome)}");
 
+        var code = StringOf(data, "code");
+        if (!string.IsNullOrEmpty(code))
+            _out.WriteLine($"code:             {code}");
+
+        var error = StringOf(data, "error");
+        if (!string.IsNullOrEmpty(error))
+            _out.WriteLine($"error:            {error}");
+
         var inputId = StringOf(data, "inputId");
         if (!string.IsNullOrEmpty(inputId))
             _out.WriteLine($"input id:         {inputId}");
@@ -575,6 +583,9 @@ internal sealed partial class TableRenderer
         var turnStatus = StringOf(data, "turnStatus");
         if (!string.IsNullOrEmpty(turnStatus))
             _out.WriteLine($"turn status:       {turnStatus}");
+
+        if (string.Equals(outcome, "unknown", StringComparison.OrdinalIgnoreCase))
+            _out.WriteLine("reconcile:        retry with the same idempotency key");
     }
 
     private void RenderSessionCancel(JsonNode? data)
