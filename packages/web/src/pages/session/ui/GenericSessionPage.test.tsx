@@ -198,6 +198,20 @@ describe('GenericSessionPage', () => {
     })
   })
 
+  it('distinguishes execution-side unavailability and gives recovery guidance', async () => {
+    _summaryData = baseSummary({
+      activity: 'unknown',
+      failureCategory: 'runtime-unavailable',
+      failureReason: 'The selected runtime is rebuilding',
+    })
+    renderPage()
+
+    const errors = await screen.findByTestId('session-errors-region')
+    expect(errors).toHaveTextContent('Execution unavailable')
+    expect(errors).toHaveTextContent(/wait for the configured runtime/i)
+    expect(screen.getByTestId('session-errors-region-next-action')).toHaveTextContent(/retry the launch/i)
+  })
+
   describe('follow-up enable/disable', () => {
     it('enables followup composer for active sessions with turns', async () => {
       // Issue 484: sessions are never terminal. A running session has

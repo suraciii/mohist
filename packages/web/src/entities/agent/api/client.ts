@@ -68,6 +68,16 @@ export interface AgentAvailabilityResponse {
   observedAt: string
 }
 
+export interface AgentAvailabilitySummaryEntry {
+  agentId: string
+  canStartNow: boolean
+  waitingReason: string | null
+  activeRuns: number
+  maxConcurrentRuns: number | null
+  capacity: AgentAvailabilityCapacity
+  queuedCount: number
+}
+
 export interface AgentWaitingWorkItem {
   jobId: string
   status: string
@@ -113,6 +123,10 @@ export function listAgents(projectId: string, params?: { status?: string; all?: 
   if (params?.all) search.set('all', 'true')
   const qs = search.toString()
   return request<AgentInfo[]>(projectApiPath(projectId, `/agents${qs ? `?${qs}` : ''}`))
+}
+
+export function getAgentListAvailability(projectId: string) {
+  return request<AgentAvailabilitySummaryEntry[]>(projectApiPath(projectId, '/agents/availability'))
 }
 
 export function getAgent(projectId: string, id: string) {

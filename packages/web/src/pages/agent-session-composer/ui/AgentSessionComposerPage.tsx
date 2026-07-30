@@ -1,8 +1,19 @@
 import { useCallback, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon, InfoIcon } from 'lucide-react'
-import { useAgents, useLaunchAgentSession } from '../../../entities/agent'
-import type { AgentInfo, AgentReadinessResult, AgentSessionLaunchContext } from '../../../entities/agent'
+import {
+  getAgentAvailabilityFeedback,
+  getAgentLaunchErrorFeedback,
+  useAgentListAvailability,
+  useAgents,
+  useLaunchAgentSession,
+} from '../../../entities/agent'
+import type {
+  AgentAvailabilitySummaryEntry,
+  AgentInfo,
+  AgentReadinessResult,
+  AgentSessionLaunchContext,
+} from '../../../entities/agent'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { AttachmentComposer as DefaultAttachmentComposer } from '../../../shared/ui/attachment-composer'
@@ -158,6 +169,8 @@ export interface AgentSessionComposerPageComponents {
 export interface AgentSessionComposerData {
   agents: AgentInfo[] | undefined
   agentsLoading: boolean
+  availability: AgentAvailabilitySummaryEntry[] | undefined
+  availabilityLoading: boolean
   launchMutation: Pick<ReturnType<typeof useLaunchAgentSession>, 'mutate' | 'isPending' | 'error'>
 }
 
@@ -165,9 +178,12 @@ export type AgentSessionComposerDataHook = () => AgentSessionComposerData
 
 const useDefaultData: AgentSessionComposerDataHook = () => {
   const { data: agents, isLoading: agentsLoading } = useAgents()
+  const { data: availability, isLoading: availabilityLoading } = useAgentListAvailability()
   return {
     agents,
     agentsLoading,
+    availability,
+    availabilityLoading,
     launchMutation: useLaunchAgentSession(),
   }
 }
@@ -190,7 +206,7 @@ export function AgentSessionComposerPage({
   const { projectId } = useProject()
   const [searchParams] = useSearchParams()
 
-  const { agents, agentsLoading, launchMutation } = dataHook()
+  const { agents, agentsLoading, availability, availabilityLoading, launchMutation } = dataHook()
 
   const launchableAgents = useMemo(
     () => agents?.filter((a) => a.status !== 'archived') ?? [],
@@ -218,6 +234,10 @@ export function AgentSessionComposerPage({
   const selectedAgent = useMemo(
     () => agents?.find((a) => a.id === selectedAgentRef) ?? null,
     [agents, selectedAgentRef],
+  )
+  const selectedAvailability = useMemo(
+    () => availability?.find((entry) => entry.agentId === selectedAgentRef),
+    [availability, selectedAgentRef],
   )
   const isArchived = selectedAgent?.status === 'archived'
   const selectedReadiness: AgentReadinessResult | null | undefined = selectedAgent?.readiness
@@ -272,16 +292,38 @@ export function AgentSessionComposerPage({
   }, [canLaunch, selectedAgent, selectedAgentRef, contextRefs, prompt, launchMutation, navigate, toProjectPath])
 
   const launchError = launchMutation.error
-  const errorCode = launchError && 'code' in launchError ? (launchError as { code?: string }).code : null
-  const errorMessage = launchError?.message ?? ''
-  const isNoRunnerError = errorCode === 'NO_AVAILABLE_RUNNER' || errorMessage.toLowerCase().includes('no available runner')
-  const isExternalAgentUnavailable = errorCode === 'EXTERNAL_AGENT_UNAVAILABLE' || errorMessage.toLowerCase().includes('external agent unavailable') || errorMessage.toLowerCase().includes('external agent is unavailable')
-  const isNeedsSetupError = errorCode === 'agent_needs_setup' || isNeedsSetup
+  const launchFeedback = getAgentLaunchErrorFeedback(launchError, selectedReadiness)
+  const isNeedsSetupError = launchFeedback?.kind === 'needs-setup'
+  const launchErrorData = launchError && 'data' in launchError
+    ? (launchError as {
+      data?: {
+        gaps?: Array<{ code?: string; message?: string; action?: string }>
+        setup?: { label?: string; path?: string } | null
+      }
+    }).data
+    : undefined
   const gapsFromError = isNeedsSetupError
     ? (launchError && 'data' in launchError
-      ? (launchError as { data?: { gaps?: Array<{ message?: string; action?: string }> } }).data?.gaps
+      ? launchErrorData?.gaps
       : undefined) ?? selectedReadiness?.gaps
     : undefined
+  const setupFromError = isNeedsSetupError && launchErrorData?.setup?.label && launchErrorData.setup.path
+    ? launchErrorData.setup
+    : selectedReadiness?.setup
+
+  const availabilityFeedback = selectedAvailability && !selectedAvailability.canStartNow
+    ? getAgentAvailabilityFeedback(selectedAvailability.waitingReason)
+    : undefined
+  const availabilityFeedbackLoading = !selectedAvailability && availabilityLoading
+  const launchErrorTestId = launchFeedback?.kind === 'runner-offline'
+    ? 'error-no-runner'
+    : launchFeedback?.kind === 'execution-unavailable' && launchError && 'code' in launchError && (launchError as { code?: string }).code === 'EXTERNAL_AGENT_UNAVAILABLE'
+      ? 'error-external-agent'
+      : launchFeedback?.kind === 'needs-setup'
+        ? 'error-needs-setup'
+        : launchFeedback?.kind === 'back-pressure'
+          ? 'error-back-pressure'
+          : 'error-execution-unavailable'
 
   return (
     <div data-testid="agent-session-composer-page" className="flex-1 overflow-y-auto bg-background">
@@ -293,47 +335,47 @@ export function AgentSessionComposerPage({
           </p>
         </div>
 
-        {isNoRunnerError && (
+        {launchFeedback && (
           <div
-            data-testid="error-no-runner"
-            className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800"
+            data-testid={launchErrorTestId}
+            data-feedback-kind={launchFeedback.kind}
+            className={`flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-sm ${launchFeedback.kind === 'needs-setup' ? 'border-red-200 bg-red-50 text-red-800' : launchFeedback.kind === 'execution-unavailable' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
           >
-            <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-amber-500" />
-            <span>
-              No available runner for the selected agent type. Please ensure a runner is connected and try again.
-            </span>
-          </div>
-          )}
-
-        {isExternalAgentUnavailable && (
-          <div
-            data-testid="error-external-agent"
-            className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800"
-          >
-            <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-red-500" />
-            <span>
-              The external agent is currently unavailable. Please wait for it to recover and try again.
-            </span>
+            <div className="flex items-start gap-2">
+              <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
+              <span className="font-medium">{launchFeedback.title}</span>
+            </div>
+            <p className="ml-6 text-xs">{launchFeedback.message} {launchFeedback.nextAction}</p>
+            {isNeedsSetupError && gapsFromError && gapsFromError.length > 0 && (
+              <ul className="ml-6 list-disc space-y-0.5">
+                {gapsFromError.map((gap) => (
+                  <li key={`${gap.code ?? gap.message}-${gap.action}`} className="text-xs">
+                    <span className="font-medium">{gap.message}</span>
+                    {gap.action && <span> — {gap.action}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {isNeedsSetupError && setupFromError && (
+              <p className="ml-6 text-xs">
+                Fix in <a className="font-semibold underline" href={toProjectPath(setupFromError.path)}>{setupFromError.label}</a>.
+              </p>
+            )}
           </div>
         )}
 
-        {launchError && isNeedsSetupError && (gapsFromError?.length ?? 0) > 0 && (
+        {selectedAgent && !launchError && (selectedAvailability || availabilityFeedbackLoading) && (
           <div
-            data-testid="error-needs-setup"
-            className="flex flex-col gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800"
+            data-testid="agent-availability-feedback"
+            data-feedback-kind={availabilityFeedback?.kind ?? 'unknown'}
+            className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs ${availabilityFeedback ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-border bg-muted/30 text-muted-foreground'}`}
           >
-            <div className="flex items-start gap-2">
-              <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-red-500" />
-              <span className="font-medium">Launch blocked — the server reports this Agent needs setup.</span>
-            </div>
-            <ul className="ml-6 list-disc space-y-0.5">
-              {gapsFromError!.map((gap) => (
-                <li key={`${gap.message}-${gap.action}`} className="text-xs text-red-900">
-                  <span className="font-medium">{gap.message}</span>
-                  {gap.action && <span className="text-red-700/80"> — {gap.action}</span>}
-                </li>
-              ))}
-            </ul>
+            <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
+            {availabilityFeedback ? (
+              <span><strong>{availabilityFeedback.title}:</strong> {availabilityFeedback.message} {availabilityFeedback.nextAction}</span>
+            ) : (
+              <span>Availability is still loading. The server will re-check it when you launch.</span>
+            )}
           </div>
         )}
 

@@ -4,10 +4,17 @@ import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-q
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type {
+  AgentSessionLaunchContext,
+  AgentSessionLaunchResponse,
   AgentInfo,
   AgentSessionListItemDto,
   AgentStatusDetailResponse,
 } from '../../../entities/agent'
+import {
+  AgentSessionComposerPage,
+  type AgentSessionComposerDataHook,
+  type AgentSessionComposerPageComponents,
+} from '../../agent-session-composer'
 import {
   AgentDetailPage,
   type AgentDetailPageComponents,
@@ -45,6 +52,17 @@ const components: AgentDetailPageComponents = {
   ),
 }
 
+const composerComponents: AgentSessionComposerPageComponents = {
+  AttachmentComposer: ({ value, onChange, placeholder }) => (
+    <textarea
+      data-testid="journey-prompt"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+    />
+  ),
+}
+
 const dataHook: AgentDetailPageDataHook = () => {
   const archiveAgent = useMutation<AgentInfo, Error, string>({
     mutationFn: async (agentId) => {
@@ -69,6 +87,29 @@ const dataHook: AgentDetailPageDataHook = () => {
     unarchiveAgent,
     detailStatus: state.detailStatus,
     detailStatusLoading: state.detailStatusLoading,
+  }
+}
+
+const composerDataHook: AgentSessionComposerDataHook = () => {
+  const launchMutation = useMutation<
+    AgentSessionLaunchResponse,
+    Error,
+    { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null; idempotencyKey?: string }
+  >({
+    mutationFn: async ({ agentRef }) => ({
+      sessionId: 'session-from-detail',
+      agentId: agentRef,
+      agentName: state.agent?.name ?? 'Test Agent',
+      status: 'queued',
+      transcriptUrl: '',
+    }),
+  })
+  return {
+    agents: state.agent ? [state.agent] : [],
+    agentsLoading: false,
+    availability: [],
+    availabilityLoading: false,
+    launchMutation,
   }
 }
 
@@ -109,6 +150,33 @@ function renderPage() {
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
+  )
+}
+
+function renderJourneyPage() {
+  const queryClient = createQueryClient()
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
+        id: 'proj-1', name: 'Test',
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+        repositories: [],
+      }]}>
+        <MemoryRouter initialEntries={['/Test/agents/agent-1']}>
+          <Routes>
+            <Route
+              path="/:projectName/agents/:agentId"
+              element={<AgentDetailPage components={components} dataHook={dataHook} />}
+            />
+            <Route
+              path="/:projectName/agent-sessions/new"
+              element={<AgentSessionComposerPage components={composerComponents} dataHook={composerDataHook} />}
+            />
+            <Route path="/:projectName/agent-sessions/:sessionId" element={<div data-testid="created-session" />} />
+          </Routes>
+        </MemoryRouter>
+      </ProjectProvider>
+    </QueryClientProvider>
   )
 }
 
@@ -175,15 +243,40 @@ describe('AgentDetailPage', () => {
   })
 
   describe('profile summary', () => {
-    it('renders agent name, instructions, and config', async () => {
+    it('renders the active Agent definition identity, instructions, and config', async () => {
       mockAgent(makeAgent())
       renderPage()
       await screen.findByTestId('agent-detail-page')
       expect(screen.getByText('Test Agent')).toBeInTheDocument()
+      expect(screen.getByTestId('agent-detail-purpose')).toHaveTextContent('A test agent')
+      expect(screen.getByTestId('agent-detail-lifecycle')).toHaveTextContent('Active')
       expect(screen.getByTestId('agent-detail-instructions')).toHaveTextContent('You are a helpful assistant.')
       expect(screen.getByTestId('agent-detail-config')).toBeInTheDocument()
       expect(screen.getByText('gpt-4')).toBeInTheDocument()
       expect(screen.getByText('high')).toBeInTheDocument()
+    })
+
+    it('renders the archived Agent definition identity and lifecycle', async () => {
+      mockAgent(makeAgent({ description: 'Retained for audit', status: 'archived' }))
+      renderPage()
+
+      await screen.findByTestId('agent-detail-page')
+      expect(screen.getByTestId('agent-detail-purpose')).toHaveTextContent('Retained for audit')
+      expect(screen.getByTestId('agent-detail-lifecycle')).toHaveTextContent('Archived')
+    })
+
+    it('renders runtime, max concurrent runs, and edit timing in the definition summary', async () => {
+      mockAgent(makeAgent({
+        agentConfig: { runtime: 'pi', model: 'gpt-4', variant: 'high' },
+        maxConcurrentRuns: 3,
+      }))
+      renderPage()
+
+      await screen.findByTestId('agent-detail-page')
+      expect(screen.getByTestId('agent-detail-runtime')).toHaveTextContent('Pi')
+      expect(screen.getByTestId('agent-detail-max-concurrent-runs')).toHaveTextContent('3')
+      expect(screen.getByTestId('agent-detail-edit-timing')).toHaveTextContent(/Jobs created after saving/i)
+      expect(screen.getByTestId('agent-detail-edit-timing')).toHaveTextContent(/already in progress/i)
     })
 
     it('does not render an agent-type field (no "opencode" string anywhere on the surface)', async () => {
@@ -245,11 +338,6 @@ describe('AgentDetailPage', () => {
   })
 
   describe('session history grouping', () => {
-    // Issue 484: sessions are grouped by `activity`, not `status`.
-    // - Running section  <- activity === 'active'
-    // - Failed section   <- activity === 'unknown' (unconfirmed activity)
-    // - Ended section    <- activity === 'idle'    (finished, follow-up-able)
-    // Sessions never carry a terminal status anymore.
     it('renders sessions in running, failed, and ended sections', async () => {
       mockAgent(makeAgent())
       mockSessions([
@@ -278,6 +366,19 @@ describe('AgentDetailPage', () => {
       const newSessionBtn = await screen.findByTestId('agent-detail-new-session')
       expect(newSessionBtn).toBeInTheDocument()
       expect(newSessionBtn).not.toBeDisabled()
+    })
+
+    it('takes an active Agent from detail through the bound composer to its created Session', async () => {
+      mockAgent(makeAgent({ name: 'Detail Agent' }))
+      renderJourneyPage()
+
+      fireEvent.click(await screen.findByTestId('agent-detail-new-session'))
+      expect(await screen.findByTestId('agent-selector-trigger')).toHaveTextContent('Detail Agent')
+
+      fireEvent.change(screen.getByTestId('journey-prompt'), { target: { value: 'Check the launch path' } })
+      fireEvent.click(screen.getByTestId('launch-button'))
+
+      expect(await screen.findByTestId('created-session')).toBeInTheDocument()
     })
 
     it('disables new-session button for archived profiles', async () => {

@@ -216,6 +216,15 @@ describe('AgentProfileEditor', () => {
       expect(screen.getByTestId('editor-save')).toHaveTextContent('Save Changes')
     })
 
+    it('states that definition edits apply only to future Jobs', () => {
+      renderEditor({ agent: existingAgent })
+
+      const dialog = screen.getByTestId('agent-profile-editor')
+      expect(dialog).toHaveTextContent(/Jobs created after saving/i)
+      expect(dialog).toHaveTextContent(/already in progress/i)
+      expect(dialog).toHaveTextContent(/existing Sessions/i)
+    })
+
     it('calls updateAgent with edited values', async () => {
       renderEditor({ agent: existingAgent })
       await act(async () => {

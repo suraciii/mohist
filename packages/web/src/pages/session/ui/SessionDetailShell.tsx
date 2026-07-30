@@ -50,7 +50,15 @@ const FAILURE_CATEGORY_LABELS: Record<string, string> = {
 }
 
 function formatFailureCategory(category: string): string {
+  if (isExecutionUnavailableCategory(category)) return 'Execution unavailable'
   return FAILURE_CATEGORY_LABELS[category.toLowerCase()] ?? 'Execution failure'
+}
+
+function isExecutionUnavailableCategory(category: string | null | undefined): boolean {
+  const normalized = category?.toLowerCase() ?? ''
+  return normalized === 'runtime-unavailable'
+    || normalized === 'execution-unavailable'
+    || normalized === 'external-agent-unavailable'
 }
 
 export function SessionErrorsEvidence({
@@ -64,6 +72,7 @@ export function SessionErrorsEvidence({
   const hasFailureReason = failureReason != null && failureReason !== ''
   const hasToolErrors = toolErrorCount != null && toolErrorCount > 0
   const hasFailureEvidence = hasFailureCategory || hasFailureReason
+  const executionUnavailable = isExecutionUnavailableCategory(failureCategory)
   const [currentIndex, setCurrentIndex] = useState(0)
   if (!hasFailureEvidence && !hasToolErrors) return null
 
@@ -99,7 +108,7 @@ export function SessionErrorsEvidence({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <span className="inline-flex items-center gap-1 font-semibold">
           <AlertTriangleIcon className="h-3.5 w-3.5" aria-hidden="true" />
-          {hasFailureEvidence ? 'Execution failed' : 'Tool errors detected'}
+          {executionUnavailable ? 'Execution unavailable' : hasFailureEvidence ? 'Execution failed' : 'Tool errors detected'}
         </span>
         {hasFailureCategory && (
           <span
@@ -121,6 +130,11 @@ export function SessionErrorsEvidence({
         {failureReason && (
           <span className="text-danger truncate max-w-[300px]" title={failureReason} data-testid="session-errors-region-reason">
             {failureReason}
+          </span>
+        )}
+        {executionUnavailable && (
+          <span data-testid="session-errors-region-next-action" className="text-danger">
+            Wait for the configured runtime or provider to recover, then retry the launch from the Agent.
           </span>
         )}
         {failedTools.length > 1 && (

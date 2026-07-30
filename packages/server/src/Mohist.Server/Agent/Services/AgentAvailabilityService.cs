@@ -27,15 +27,24 @@ public sealed record AgentWaitingWork(
     string WaitingReason,
     string? SubmittedAt);
 
+public sealed record AgentAvailabilityListEntry(
+    string AgentId,
+    bool CanStartNow,
+    string? WaitingReason,
+    int ActiveRuns,
+    int? MaxConcurrentRuns,
+    RunnerCapacityView Capacity,
+    int QueuedCount);
+
 public sealed class AgentAvailabilityService : IScopedService
 {
-    private readonly RunnerStatusService _runnerStatus;
+    private readonly IRunnerStatusSource _runnerStatus;
     private readonly IGrainFactory _grains;
     private readonly AgentJobQuerier _jobs;
     private readonly TimeProvider _timeProvider;
 
     public AgentAvailabilityService(
-        RunnerStatusService runnerStatus,
+        IRunnerStatusSource runnerStatus,
         IGrainFactory grains,
         AgentJobQuerier jobs,
         TimeProvider timeProvider)
@@ -51,7 +60,7 @@ public sealed class AgentAvailabilityService : IScopedService
         AgentInfo agent,
         CancellationToken ct = default)
     {
-        var runners = await _runnerStatus.GetOnlineRunnersAsync(projectId);
+        var runners = await _runnerStatus.GetOnlineRunnersAsync(projectId, ct);
         var capacity = SumCapacity(runners);
         var activeRuns = await _grains
             .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
@@ -64,6 +73,55 @@ public sealed class AgentAvailabilityService : IScopedService
             _timeProvider.GetUtcNow(),
             runners.Count > 0);
         return result;
+    }
+
+    public async Task<IReadOnlyDictionary<string, AgentAvailabilityListEntry>> GetListSummaryAsync(
+        string projectId,
+        IReadOnlyCollection<AgentInfo> agents,
+        CancellationToken ct = default)
+    {
+        // Runner capacity is fetched exactly once per request — the list
+        // summary's core cost-control guarantee. Per-Agent active counts
+        // are cheap in-process grain calls; pending-job counts come from
+        // a single batched query grouped by Agent.
+        var runners = await _runnerStatus.GetOnlineRunnersAsync(projectId, ct);
+        var capacity = SumCapacity(runners);
+        var hasOnlineRunner = runners.Count > 0;
+        var pendingCounts = agents.Count == 0
+            ? new Dictionary<string, int>(StringComparer.Ordinal)
+            : await _jobs.CountPendingByAgentAsync(projectId, ct);
+
+        var observedAt = _timeProvider.GetUtcNow();
+        var entries = new Dictionary<string, AgentAvailabilityListEntry>(agents.Count, StringComparer.Ordinal);
+        foreach (var agent in agents)
+        {
+            var activeRuns = await _grains
+                .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
+                .GetActiveCountAsync();
+            var queuedCount = pendingCounts.TryGetValue(agent.Id, out var count) ? count : 0;
+            entries[agent.Id] = BuildListEntry(agent, capacity, activeRuns, queuedCount, hasOnlineRunner, observedAt);
+        }
+
+        return entries;
+    }
+
+    public static AgentAvailabilityListEntry BuildListEntry(
+        AgentInfo agent,
+        RunnerCapacityView capacity,
+        int activeRuns,
+        int queuedCount,
+        bool hasOnlineRunner,
+        DateTimeOffset observedAt)
+    {
+        var availability = Compute(capacity, activeRuns, agent.MaxConcurrentRuns, observedAt, hasOnlineRunner);
+        return new AgentAvailabilityListEntry(
+            agent.Id,
+            availability.CanStartNow,
+            availability.WaitingReason,
+            activeRuns,
+            agent.MaxConcurrentRuns,
+            capacity,
+            queuedCount);
     }
 
     public async Task<IReadOnlyList<AgentWaitingWork>> GetWaitingWorkAsync(

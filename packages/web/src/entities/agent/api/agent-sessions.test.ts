@@ -289,7 +289,7 @@ describe('genericSessionTranscriptQueryOptions', () => {
 
 /* ── launchAgentSessionMutationOptions ─────────────────── */
 describe('launchAgentSessionMutationOptions', () => {
-  it('invalidates agent-status, agent-activity, and owning session list on success', () => {
+  it('invalidates agent status, list Availability, and owning session list on success', () => {
     const qc = createInvalidationClient()
     launchAgentSessionMutationOptions('proj-1', qc).onSuccess(
       { sessionId: 's1' } as never,
@@ -297,6 +297,7 @@ describe('launchAgentSessionMutationOptions', () => {
     )
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-availability', 'proj-1'] })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
   })
 

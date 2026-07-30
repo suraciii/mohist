@@ -63,9 +63,35 @@ public class AgentQuerier : IScopedService
             : agent with { Readiness = await _readiness.GetAsync(projectId, agent) };
     }
 
-    public async Task<IReadOnlyList<AgentInfo>> ListAsync(string projectId, string? status = null, bool all = false)
+    public async Task<IReadOnlyList<AgentInfo>> ListAsync(
+        string projectId,
+        string? status = null,
+        bool all = false,
+        CancellationToken ct = default)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
+        var infos = await ListDefinitionsAsync(projectId, status, all, ct);
+        if (_readiness is null)
+            return infos;
+        var hydrated = new List<AgentInfo>(infos.Count);
+        foreach (var info in infos)
+        {
+            hydrated.Add(info with { Readiness = await _readiness.GetAsync(projectId, info, ct) });
+        }
+        return hydrated;
+    }
+
+    public Task<IReadOnlyList<AgentInfo>> ListActiveDefinitionsAsync(
+        string projectId,
+        CancellationToken ct = default) =>
+        ListDefinitionsAsync(projectId, AgentStatus.Active, all: false, ct);
+
+    private async Task<IReadOnlyList<AgentInfo>> ListDefinitionsAsync(
+        string projectId,
+        string? status,
+        bool all,
+        CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.Agents.AsNoTracking().Where(agent => agent.ProjectId == projectId);
 
         if (!all)
@@ -73,7 +99,7 @@ public class AgentQuerier : IScopedService
         else if (!string.IsNullOrWhiteSpace(status))
             query = query.Where(agent => agent.Status == status);
 
-        var rows = await query.ToListAsync();
+        var rows = await query.ToListAsync(ct);
         var infos = rows
             .Select(row => AgentStore.Deserialize(row.State))
             .Where(agent => agent is not null)
@@ -81,14 +107,7 @@ public class AgentQuerier : IScopedService
             .OrderByDescending(agent => agent.UpdatedAt)
             .Select(ToInfo)
             .ToList();
-        if (_readiness is null)
-            return infos;
-        var hydrated = new List<AgentInfo>(infos.Count);
-        foreach (var info in infos)
-        {
-            hydrated.Add(info with { Readiness = await _readiness.GetAsync(projectId, info) });
-        }
-        return hydrated;
+        return infos;
     }
 
     public static AgentInfo ToInfo(Domain.Agent agent) => new(
