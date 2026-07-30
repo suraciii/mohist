@@ -616,7 +616,7 @@ public class IssueQuerier : IScopedService
         // global + project layers with each issue's snapshot (which now holds
         // only built-in context + explicit issue overrides). This keeps the
         // displayed model/agent in sync with project edits; see
-        // WorkflowProfileManager.LoadVariablesAsync for the dispatch equivalent.
+        // WorkflowVariableResolver provides the dispatch equivalent.
         var globalBundle = await _configService.GetVariables();
         VariableBundle? projectBundle = null;
         if (!string.IsNullOrWhiteSpace(projectId))

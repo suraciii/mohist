@@ -236,7 +236,7 @@ public class IssueCommentEventSpecs
             services.GetRequiredService<IGrainFactory>(),
             services.GetRequiredService<IBackgroundTaskLauncher>(),
             services.GetRequiredService<IssueRepositoryResolver>(),
-            services.GetRequiredService<WorkflowProfileManager>(),
+            services.GetRequiredService<WorkflowDefinitionResolver>(),
             services.GetRequiredService<WorkflowPromptResolver>(),
             services.GetRequiredService<ProjectWorkflowProfileManager>(),
             services.GetRequiredService<IssueVariableStore>(),

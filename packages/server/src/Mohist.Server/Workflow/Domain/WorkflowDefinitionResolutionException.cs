@@ -1,7 +1,7 @@
 namespace Mohist.Server.Workflow.Domain;
 
 /// <summary>
-/// thrown by <see cref="Mohist.Server.Workflow.Services.WorkflowProfileManager"/>
+/// thrown by <see cref="Mohist.Server.Workflow.Services.WorkflowDefinitionResolver"/>
 /// when the resolved Profile or stage definition cannot be located.
 /// Carries a decidable <see cref="Reason"/> so <c>WorkflowGrain.CommitAsync</c>
 /// can branch on the type (or the discriminator) rather than on the

@@ -45,7 +45,7 @@ internal sealed class WorkflowStageInitializer
 
             initializedStages.Add(pendingStart.Stage);
 
-            var stageDef = await _owner.ProfileManager.LoadStageSpecsAsync(
+            var stageDef = await _owner.DefinitionResolver.LoadStageSpecsAsync(
                 _owner.GrainKey, pendingStart.Stage,
                 _owner.GetProjectId(),
                 _owner.GetIssueNumber(),

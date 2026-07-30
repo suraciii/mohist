@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
-public sealed class WorkflowVariableResolutionThreeScopesSpecs : WorkflowProfileManagerTestFactory
+public sealed class WorkflowVariableResolutionThreeScopesSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]
     public async Task EffectiveVariables_MergeProjectIssueAndRunWithStagePrecedence()

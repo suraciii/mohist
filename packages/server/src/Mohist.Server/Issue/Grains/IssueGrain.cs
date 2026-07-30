@@ -39,7 +39,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly IGrainFactory _grainFactory;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IssueRepositoryResolver _repositoryResolver;
-    private readonly WorkflowProfileManager _workflowProfileManager;
+    private readonly WorkflowDefinitionResolver _workflowDefinitionResolver;
     private readonly WorkflowPromptResolver _workflowPromptResolver;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueVariableStore _issueVariableStore;
@@ -60,7 +60,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IGrainFactory grainFactory,
         IBackgroundTaskLauncher backgroundTasks,
         IssueRepositoryResolver repositoryResolver,
-        WorkflowProfileManager workflowProfileManager,
+        WorkflowDefinitionResolver workflowDefinitionResolver,
         WorkflowPromptResolver workflowPromptResolver,
         ProjectWorkflowProfileManager projectProfileManager,
         IssueVariableStore issueVariableStore,
@@ -81,7 +81,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _grainFactory = grainFactory;
         _backgroundTasks = backgroundTasks;
         _repositoryResolver = repositoryResolver;
-        _workflowProfileManager = workflowProfileManager;
+        _workflowDefinitionResolver = workflowDefinitionResolver;
         _workflowPromptResolver = workflowPromptResolver;
         _projectProfileManager = projectProfileManager;
         _issueVariableStore = issueVariableStore;
@@ -101,7 +101,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IGrainFactory grainFactory,
         IBackgroundTaskLauncher backgroundTasks,
         IssueRepositoryResolver repositoryResolver,
-        WorkflowProfileManager workflowProfileManager,
+        WorkflowDefinitionResolver workflowDefinitionResolver,
         WorkflowPromptResolver workflowPromptResolver,
         ProjectWorkflowProfileManager projectProfileManager,
         IssueVariableStore issueVariableStore,
@@ -121,7 +121,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _grainFactory = grainFactory;
         _backgroundTasks = backgroundTasks;
         _repositoryResolver = repositoryResolver;
-        _workflowProfileManager = workflowProfileManager;
+        _workflowDefinitionResolver = workflowDefinitionResolver;
         _workflowPromptResolver = workflowPromptResolver;
         _projectProfileManager = projectProfileManager;
         _issueVariableStore = issueVariableStore;
@@ -310,9 +310,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // mohist/local), so the resolver's own fallback handles projects
         // without a configured default.
 
-        var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issue.Number);
+        var resolvedTemplate = await _workflowDefinitionResolver.LoadTemplateAsync(wrId, projectContext.Id, issue.Number);
         var definition = resolvedTemplate.Structure
-            ?? throw new InvalidOperationException(WorkflowProfileManager.NoEnabledWorkflowProfileMessage);
+            ?? throw new InvalidOperationException(WorkflowDefinitionResolver.NoEnabledWorkflowProfileMessage);
 
         // Resolve the effective profile (issue selection → project default →
         // system default) so prompts are merged from the same profile that
@@ -329,7 +329,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             disabledIds,
             _profiles.List().Select(p => p.Id).ToList());
         if (string.IsNullOrWhiteSpace(effectiveProfileId))
-            throw new InvalidOperationException(WorkflowProfileManager.NoEnabledWorkflowProfileMessage);
+            throw new InvalidOperationException(WorkflowDefinitionResolver.NoEnabledWorkflowProfileMessage);
 
         var availablePrompts = await _workflowPromptResolver.LoadPromptsAsync(
             wrId,

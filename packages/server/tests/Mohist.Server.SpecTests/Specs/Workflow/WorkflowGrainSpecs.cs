@@ -61,7 +61,7 @@ public abstract class WorkflowGrainSpecs
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var promptLoader = new Mohist.Server.Workflow.Services.Prompts.FilePromptLoader();
         var runVariablesStore = new Mohist.Server.Workflow.Services.WorkflowRunVariablesStore(factory);
-        var profileManager = new Mohist.Server.Workflow.Services.WorkflowProfileManager(
+        var definitionResolver = new Mohist.Server.Workflow.Services.WorkflowDefinitionResolver(
             factory,
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
             new Mohist.Server.Workflow.Services.WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
@@ -72,7 +72,7 @@ public abstract class WorkflowGrainSpecs
             runVariablesStore);
         return new WorkflowQuerier(
             factory,
-            profileManager,
+            definitionResolver,
             variableResolver,
             new WorkflowArtifactQuerier(factory));
     }

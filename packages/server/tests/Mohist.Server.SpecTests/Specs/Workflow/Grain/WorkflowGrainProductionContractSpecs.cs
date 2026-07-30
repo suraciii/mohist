@@ -73,14 +73,14 @@ public sealed class WorkflowGrainProductionContractSpecs
         await using var scope = _fixture.Services.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
 
-        var profileManager = BuildThrowingProfileManager(scope.ServiceProvider, exceptionMessage);
+        var definitionResolver = BuildThrowingDefinitionResolver(scope.ServiceProvider, exceptionMessage);
         var variableResolver = scope.ServiceProvider.GetRequiredService<WorkflowVariableResolver>();
         var identity = GrainTestContext.Create(workflowRunId, new StubProfileCoordinatorGrainFactory());
         var grain = new WorkflowGrain(
             identity.Context,
             identity.Runtime,
             store,
-            profileManager,
+            definitionResolver,
             variableResolver,
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
@@ -98,7 +98,7 @@ public sealed class WorkflowGrainProductionContractSpecs
     }
 
     /// <summary>
-    /// Build a real <see cref="WorkflowProfileManager"/> backed by a
+    /// Build a real <see cref="WorkflowDefinitionResolver"/> backed by a
     /// <see cref="StubFailingOnStageLoadProfileProvider"/>. The provider
     /// returns a valid definition for the startup call so
     /// <c>EnsureCreatedRunAsync</c> succeeds, then returns
@@ -107,11 +107,11 @@ public sealed class WorkflowGrainProductionContractSpecs
     /// <see cref="WorkflowDefinitionResolutionException"/> with the
     /// requested message.
     /// </summary>
-    private WorkflowProfileManager BuildThrowingProfileManager(IServiceProvider services, string exceptionMessage)
+    private WorkflowDefinitionResolver BuildThrowingDefinitionResolver(IServiceProvider services, string exceptionMessage)
     {
         var dbFactory = services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         var provider = new StubFailingOnStageLoadProfileProvider(exceptionMessage);
-        return new WorkflowProfileManager(
+        return new WorkflowDefinitionResolver(
             dbFactory,
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
             provider);

@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
-public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
+public class WorkflowStructureSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]
     public async Task LoadStructureAsync_ReturnsStageSequenceAndApprovalFlags_WithoutTasks()
@@ -38,7 +38,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
 
         await SeedProjectTemplateAsync("struct_proj", runId, "struct-template", templateJson);
 
-        var structure = await Manager.LoadStructureAsync(runId);
+        var structure = await DefinitionResolver.LoadStructureAsync(runId);
 
         Assert.Equal("struct-template", structure.Id);
         Assert.Equal(new[] { "plan", "build" }, structure.Stages.Select(s => s.Stage).ToArray());
@@ -84,7 +84,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
 
         // The run is not in the DB; only the explicit context will find the
         // project template.
-        var structure = await Manager.LoadStructureAsync(
+        var structure = await DefinitionResolver.LoadStructureAsync(
             runId, projectId: "explicit_proj", issueNumber: 1);
 
         Assert.Equal("explicit-tmpl", structure.Id);
@@ -97,7 +97,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
     {
         // Sanity: when neither the run nor explicit context carries a
         // project, the cascade ends at the system default template.
-        var structure = await Manager.LoadStructureAsync("unknown-run-id");
+        var structure = await DefinitionResolver.LoadStructureAsync("unknown-run-id");
 
         Assert.NotEmpty(structure.Stages);
         Assert.Contains(structure.Stages, s => s.Stage == "plan");
@@ -114,7 +114,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => Manager.LoadStructureAsync(runId, "proj-all-disabled-structure", 1));
+            () => DefinitionResolver.LoadStructureAsync(runId, "proj-all-disabled-structure", 1));
 
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -135,7 +135,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
         }
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateProfileBackedManager().LoadStartupStructureAsync(runId, projectId, 1));
+            CreateDefinitionResolver().LoadStartupStructureAsync(runId, projectId, 1));
 
         Assert.Contains(projectId, ex.Message, StringComparison.Ordinal);
         await using var verifyDb = new MohistDbContext(Database.Options);
@@ -150,7 +150,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
         await SeedWithoutRunAsync(projectId, 1, issueTemplateJson: null);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateProfileBackedManager().LoadStartupStructureAsync(runId, projectId, 1));
+            CreateDefinitionResolver().LoadStartupStructureAsync(runId, projectId, 1));
 
         Assert.Contains("no default Workflow Profile", ex.Message, StringComparison.Ordinal);
         await using var verifyDb = new MohistDbContext(Database.Options);
@@ -168,7 +168,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
             issueWorkflowProfileId: "mohist/local",
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
-        var structure = await Manager.LoadStructureAsync(runId);
+        var structure = await DefinitionResolver.LoadStructureAsync(runId);
 
         Assert.Equal("mohist/local", structure.Id);
         Assert.Contains(structure.Stages, s => s.Stage == "integrate");
@@ -187,7 +187,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
         await ReplaceRunStateAsync(runId, "proj-existing-disabled-query", 1, "mohist/local");
         var querier = new WorkflowQuerier(
             new TestDbContextFactory(Database.Options),
-            Manager,
+            DefinitionResolver,
             Resolver,
             new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(Database.Options)));
 
@@ -238,7 +238,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
         }
         var querier = new WorkflowQuerier(
             new TestDbContextFactory(Database.Options),
-            Manager,
+            DefinitionResolver,
             Resolver,
             new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(Database.Options)));
 

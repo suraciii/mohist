@@ -180,7 +180,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             identity.Context,
             identity.Runtime,
             store,
-            services.GetRequiredService<WorkflowProfileManager>(),
+            services.GetRequiredService<WorkflowDefinitionResolver>(),
             services.GetRequiredService<WorkflowVariableResolver>(),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);

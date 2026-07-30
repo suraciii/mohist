@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
-public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
+public class WorkflowVariableResolutionSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]
     public async Task ResolveLayeredVariables_ReturnsEmpty_WhenNoProfileVariablesExist()

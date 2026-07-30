@@ -54,3 +54,11 @@ The route handlers read variables from stores, and T-002 moves the remaining cro
 - `ProjectRoutes` prompt handlers inject `ProjectPromptStore`. Prompt source values remain `system`, `project`, and `project-new`; stage filtering and preview engine output are covered by `ProjectPromptStoreSpecs` and `WorkflowPromptResolverSpecs`.
 - Two hand-built spec composition roots (`GrainTestConfig` and `DispatcherFixture`) needed explicit registrations for the new Store and Resolver because they do not run the conventional service scan. The production root remains marker-based.
 - Verification: full server spec 3406 passed, unit 1610 passed, and architecture 50 passed after updating the existing `DispatcherFixture` size ratchet from 34204 to 34332 bytes.
+
+## T-004 Notes
+
+- `WorkflowProfileManager` is now `WorkflowDefinitionResolver`; its definition cascade and narrow stage/structure/approval APIs are unchanged, while `WorkflowGrain`, `IWorkflowGrainContext`, `WorkflowQuerier`, `IssueGrain`, and test composition roots inject the renamed type.
+- `IWorkflowGrainContext.ProfileManager` is now `DefinitionResolver`, and the stage initializer/lock coordinator consume that explicit definition-resolution contract.
+- The resolver has no variable or prompt dependency or implementation. Legacy template reads remain unchanged for T-006, which owns the later provider-only migration and retirement.
+- `WorkflowGrainContractRules` reads the embedded `WorkflowDefinitionResolver.cs`, retains the three typed-throw assertion, and adds a responsibility-boundary assertion. The required resolver registration increased `DispatcherFixture.cs` by four bytes, so its size ratchet is now 34336.
+- Verification: server spec 3406 passed, unit 1610 passed, and architecture 51 passed.

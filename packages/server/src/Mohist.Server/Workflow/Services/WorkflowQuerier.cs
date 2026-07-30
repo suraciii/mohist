@@ -16,18 +16,18 @@ namespace Mohist.Server.Workflow.Services;
 public class WorkflowQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _db;
-    private readonly WorkflowProfileManager _profileManager;
+    private readonly WorkflowDefinitionResolver _definitionResolver;
     private readonly WorkflowVariableResolver _variableResolver;
     private readonly IWorkflowArtifactQuerier _artifactQuerier;
 
     public WorkflowQuerier(
         IDbContextFactory<MohistDbContext> db,
-        WorkflowProfileManager profileManager,
+        WorkflowDefinitionResolver definitionResolver,
         WorkflowVariableResolver variableResolver,
         IWorkflowArtifactQuerier artifactQuerier)
     {
         _db = db;
-        _profileManager = profileManager;
+        _definitionResolver = definitionResolver;
         _variableResolver = variableResolver;
         _artifactQuerier = artifactQuerier;
     }
@@ -41,7 +41,7 @@ public class WorkflowQuerier : IScopedService
         var run = row is null ? null : Hydrate(row);
         if (run is null) return null;
 
-        var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
+        var definition = (await _definitionResolver.LoadTemplateAsync(workflowRunId)).Structure;
 
         var view = WorkflowStatusMapper.BuildStatusView(run, definition);
         if (view is null) return null;
@@ -142,13 +142,13 @@ public class WorkflowQuerier : IScopedService
 
     public async Task<string?> GetDefinitionYamlAsync(string workflowRunId)
     {
-        var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
+        var definition = (await _definitionResolver.LoadTemplateAsync(workflowRunId)).Structure;
         return definition is null ? null : WorkflowYamlSerializer.ToYaml(definition);
     }
 
     public async Task<RecoveryDefinition?> GetRecoveryAsync(string workflowRunId, string name)
     {
-        var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
+        var definition = (await _definitionResolver.LoadTemplateAsync(workflowRunId)).Structure;
         if (definition?.Recoveries is null || !definition.Recoveries.TryGetValue(name, out var recovery))
             return null;
         return recovery;

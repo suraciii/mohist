@@ -10,12 +10,12 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
-public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
+public class WorkflowTemplateSelectionSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]
     public async Task LoadTemplate_FallsBackToSystemDefault_WhenRunContextMissing()
     {
-        var result = await Manager.LoadTemplateAsync("unknown-run-id");
+        var result = await DefinitionResolver.LoadTemplateAsync("unknown-run-id");
 
         Assert.NotNull(result.Structure);
         Assert.Equal("mohist/local", result.Id);
@@ -29,7 +29,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             issueTemplateJson: SerializeDefinition("issue-custom", stageCount: 2),
             projectTemplateJson: SerializeDefinition("project-tmpl", stageCount: 3));
 
-        var result = await Manager.LoadTemplateAsync(runId);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
         Assert.Contains("issue-custom", result.Id ?? "");
@@ -44,7 +44,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             issueTemplateJson: SerializeDefinition("issue-custom", stageCount: 2),
             projectTemplateJson: SerializeDefinition("project-tmpl", stageCount: 3));
 
-        var result = await Manager.LoadTemplateAsync(runId);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
         Assert.Contains("issue-custom", result.Id ?? "");
@@ -60,7 +60,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             issueSourceTemplateId: "my-tmpl",
             projectTemplateJson: SerializeDefinition("my-tmpl", stageCount: 4));
 
-        var result = await Manager.LoadTemplateAsync(runId);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
         Assert.Equal("my-tmpl", result.Id);
@@ -77,7 +77,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             projectDefaultTemplateId: "default-tmpl",
             projectTemplateJson: SerializeDefinition("default-tmpl", stageCount: 5));
 
-        var result = await Manager.LoadTemplateAsync(runId);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
         Assert.Equal("default-tmpl", result.Id);
@@ -93,7 +93,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             issueSourceTemplateId: null,
             projectDefaultTemplateId: "mohist/local");
 
-        var result = await Manager.LoadTemplateAsync(runId);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
         Assert.Equal("mohist/local", result.Id);
@@ -110,7 +110,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             projectDefaultTemplateId: "mohist/local",
             disabledWorkflowProfileIds: ["mohist/local"]);
 
-        var result = await Manager.LoadTemplateAsync(runId, "proj-disabled-default", 1);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId, "proj-disabled-default", 1);
 
         Assert.NotNull(result.Structure);
         Assert.Equal("mohist/github-pr", result.Id);
@@ -130,7 +130,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => Manager.LoadTemplateAsync(runId, "proj-all-disabled-template", 1));
+            () => DefinitionResolver.LoadTemplateAsync(runId, "proj-all-disabled-template", 1));
 
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -146,7 +146,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => Manager.LoadTemplateAsync(runId, "proj-all-disabled-custom-template", 1));
+            () => DefinitionResolver.LoadTemplateAsync(runId, "proj-all-disabled-custom-template", 1));
 
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -162,7 +162,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             issueWorkflowProfileId: "mohist/local",
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
-        var result = await Manager.LoadTemplateAsync(runId);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
         Assert.Equal("mohist/local", result.Id);
@@ -181,7 +181,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             projectDefaultTemplateId: null,
             issueWorkflowProfileId: "mohist/github-pr");
 
-        var result = await Manager.LoadTemplateAsync(runId);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
         Assert.Equal("mohist/github-pr", result.Id);
@@ -201,7 +201,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             projectDefaultTemplateId: null,
             issueWorkflowProfileId: "mohist/local");
 
-        var result = await Manager.LoadTemplateAsync(runId);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
         Assert.Equal("mohist/local", result.Id);
@@ -220,7 +220,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             projectDefaultTemplateId: "mohist/local",
             issueWorkflowProfileId: "mohist/github-pr");
 
-        var result = await Manager.LoadTemplateAsync(runId);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
         Assert.Equal("mohist/github-pr", result.Id);
@@ -240,7 +240,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
             projectDefaultTemplateId: null,
             issueWorkflowProfileId: "mohist/github-pr");
 
-        var result = await Manager.LoadTemplateAsync(runId);
+        var result = await DefinitionResolver.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
         Assert.Equal("custom-override", result.Id);

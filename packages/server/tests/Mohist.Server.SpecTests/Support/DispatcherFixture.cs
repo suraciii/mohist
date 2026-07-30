@@ -647,7 +647,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddScoped<ProjectPromptStore>();
         siloBuilder.Services.AddScoped<WorkflowPromptResolver>();
         siloBuilder.Services.AddSingleton(WorkflowGrainTestHelpers.CreateEmptyConfigService());
-        siloBuilder.Services.AddScoped<WorkflowProfileManager>();
+        siloBuilder.Services.AddScoped<WorkflowDefinitionResolver>();
         siloBuilder.Services.AddScoped<Mohist.Server.Workflow.Services.WorkflowVariableResolver>();
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.DispatchService>();
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.WorkflowReportService>();

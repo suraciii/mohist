@@ -15,15 +15,15 @@ namespace Mohist.Server.Workflow.Services;
 /// <summary>
 /// Workflow definition resolution entrypoint.
 ///
-/// Template resolution precedence (highest first):
+/// Definition resolution precedence (highest first):
 ///   1. Issue custom YAML (issue_workflow_profile.Template)
 ///   2. Issue referenced template (issue_workflow_profile.SourceTemplateId)
 ///   3. Issue's effective workflow profile (issue.WorkflowProfileId →
 ///      project default template → first enabled system profile).
 ///
-/// Variables are resolved separately by <see cref="WorkflowVariableResolver"/>.
+/// Variable and prompt resolution are separate responsibilities.
 /// </summary>
-public class WorkflowProfileManager : IScopedService
+public class WorkflowDefinitionResolver : IScopedService
 {
     internal const string NoEnabledWorkflowProfileMessage =
         "No enabled workflow profile is available. Enable a workflow first.";
@@ -32,7 +32,7 @@ public class WorkflowProfileManager : IScopedService
     private readonly ConfigService _configService;
     private readonly IWorkflowProfileProvider _profileProvider;
 
-    public WorkflowProfileManager(
+    public WorkflowDefinitionResolver(
         IDbContextFactory<MohistDbContext> dbFactory,
         ConfigService configService,
         IWorkflowProfileProvider profileProvider)

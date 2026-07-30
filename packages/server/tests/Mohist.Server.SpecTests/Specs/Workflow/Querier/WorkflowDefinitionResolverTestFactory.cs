@@ -14,13 +14,13 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
-public abstract class WorkflowProfileManagerTestFactory : IDisposable
+public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
 {
-    protected WorkflowProfileManagerTestFactory()
+    protected WorkflowDefinitionResolverTestFactory()
     {
         Database = TestSqliteDatabase.CreateMigrated();
         var dbContextFactory = new TestDbContextFactory(Database.Options);
-        Manager = new WorkflowProfileManager(
+        DefinitionResolver = new WorkflowDefinitionResolver(
             dbContextFactory,
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
             new WorkflowProfileProvider(dbContextFactory, NullActionCatalogSource.Instance));
@@ -32,10 +32,10 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
     }
 
     protected TestSqliteDatabase Database { get; }
-    protected WorkflowProfileManager Manager { get; }
+    protected WorkflowDefinitionResolver DefinitionResolver { get; }
     protected WorkflowVariableResolver Resolver { get; }
 
-    protected WorkflowProfileManager CreateProfileBackedManager() =>
+    protected WorkflowDefinitionResolver CreateDefinitionResolver() =>
         new(
             new TestDbContextFactory(Database.Options),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
