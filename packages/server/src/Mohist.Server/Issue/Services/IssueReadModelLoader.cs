@@ -400,7 +400,7 @@ public class IssueReadModelLoader : IScopedService
     {
         try
         {
-            var run = JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options);
+            var run = JsonSerializer.Deserialize<WorkflowRun>(json, JSON.Options);
             if (run is not null) return run;
 
             _logger.LogError(

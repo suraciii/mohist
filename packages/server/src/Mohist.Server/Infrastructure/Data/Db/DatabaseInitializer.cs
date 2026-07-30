@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Workflow;
 
@@ -14,8 +15,12 @@ public static class DatabaseInitializer
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        var logger = scope.ServiceProvider
+            .GetService<ILoggerFactory>()?
+            .CreateLogger(nameof(WorkflowRunStateDataUpgrader));
         await db.Database.MigrateAsync(cancellationToken);
         await ProjectRepositoryDataUpgrader.UpgradeAsync(db, cancellationToken);
+        await WorkflowRunStateDataUpgrader.UpgradeAsync(db, cancellationToken, logger: logger);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         try
         {

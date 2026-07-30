@@ -57,9 +57,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
     ///       <c>status == "running"</c> OR a non-null <c>checksWorkId</c>.
     ///       <c>COALESCE($, $)</c> on <c>assignment.runnerId</c> /
     ///       <c>claim.runnerId</c> covers pre-rename rows whose binding
-    ///       lived under the legacy <c>claim</c> field (the in-process
-    ///       shim in <c>WorkflowRunStore.MigrateLegacyWorkflowRunJson</c> covers
-    ///       reads, but the SQL must work against the raw state).
+    ///       lived under the legacy <c>claim</c> field. The startup
+    ///       <c>WorkflowRunStateDataUpgrader</c> rewrites persisted rows after
+    ///       EF migrations, so this historical SQL must handle the raw
+    ///       pre-upgrade state itself.
     ///       Terminal (<c>completed</c> / <c>failed</c> / <c>stopped</c>) and
     ///       <c>paused</c> / <c>awaitingApproval</c> rows are already
     ///       semantically correct under the new vocabulary and are left

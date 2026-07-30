@@ -118,7 +118,7 @@ internal static class ActiveSessionReconciler
         try
         {
             var run = JsonSerializer.Deserialize<WorkflowRun>(
-                WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), AgentSessionJson.JsonOptions);
+                json, AgentSessionJson.JsonOptions);
             return run is null
                 ? new WorkflowRunState.Invalid("workflow run deserialized to null")
                 : new WorkflowRunState.Present(run);

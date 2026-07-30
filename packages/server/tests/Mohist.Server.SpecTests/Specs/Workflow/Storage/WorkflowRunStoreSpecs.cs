@@ -18,15 +18,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
 
-/// <summary>
-/// Unit specs for <see cref="WorkflowRunStore"/> covering issue-361 T-003:
-/// the store stamps the project-scoped Issue context onto the
-/// emitted WorkflowRun CloudEvent (read from
-/// <see cref="WorkflowRunMetadata.Annotations"/>), appends the event row in
-/// the same EF Core transaction as the run state, and lets an event-row
-/// write failure roll back the state transaction instead of swallowing it.
-/// </summary>
-public class WorkflowRunStoreSpecs
+/// Tests for transactional workflow-run persistence.
+public partial class WorkflowRunStoreSpecs
 {
     private const string ProjectId = "proj_workflow_store";
     private const int IssueNumber = 1;
@@ -289,6 +282,13 @@ public class WorkflowRunStoreSpecs
             await db.SaveChangesAsync();
         }
 
+        await using (var upgradeDb = factory.CreateDbContext())
+        {
+            await WorkflowRunStateDataUpgrader.UpgradeAsync(
+                upgradeDb,
+                backup: static (_, _) => Task.FromResult("test-backup"));
+        }
+
         var loaded = await store.LoadAsync(run.Id);
         Assert.NotNull(loaded);
         var historical = loaded!.CurrentStage().Tasks;
@@ -330,6 +330,13 @@ public class WorkflowRunStoreSpecs
                 State = ToLegacyRecoveryState(run),
             });
             await db.SaveChangesAsync();
+        }
+
+        await using (var upgradeDb = factory.CreateDbContext())
+        {
+            await WorkflowRunStateDataUpgrader.UpgradeAsync(
+                upgradeDb,
+                backup: static (_, _) => Task.FromResult("test-backup"));
         }
 
         var loaded = await store.LoadAsync(run.Id);

@@ -33,6 +33,13 @@ public sealed class WorkflowRunLegacyBindingSpecs
             await db.SaveChangesAsync();
         }
 
+        await using (var upgradeDb = factory.CreateDbContext())
+        {
+            await WorkflowRunStateDataUpgrader.UpgradeAsync(
+                upgradeDb,
+                backup: static (_, _) => Task.FromResult("test-backup"));
+        }
+
         var loaded = await store.LoadAsync("wr_legacy_profile_binding");
 
         Assert.NotNull(loaded);

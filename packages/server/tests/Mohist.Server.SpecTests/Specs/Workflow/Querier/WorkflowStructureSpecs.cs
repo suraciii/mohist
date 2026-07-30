@@ -203,7 +203,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
     }
 
     [Fact]
-    public async Task WorkflowQuerier_StatusRead_MigratesLegacyClaimAssignment()
+    public async Task WorkflowQuerier_StatusRead_AfterStateUpgrade_UsesCanonicalAssignment()
     {
         var runId = "wr_legacy_claim_status_query";
         await SeedAsync(
@@ -229,6 +229,12 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
               "stages": []
             }
             """);
+        await using (var upgradeDb = Database.CreateContext())
+        {
+            await WorkflowRunStateDataUpgrader.UpgradeAsync(
+                upgradeDb,
+                backup: static (_, _) => Task.FromResult("test-backup"));
+        }
         var querier = new WorkflowQuerier(
             new TestDbContextFactory(Database.Options),
             Manager,

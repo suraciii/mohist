@@ -130,14 +130,14 @@ public sealed class WorkflowRecoveryRoundTests
             }
             """;
 
-        var normalized = WorkflowRunStore.MigrateLegacyWorkflowRunJson(legacy);
+        var normalized = WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(legacy);
         using var json = JsonDocument.Parse(normalized);
         var tasks = json.RootElement.GetProperty("stages")[0].GetProperty("tasks");
         Assert.Equal(new[] { 2, 1, 0 }, tasks.EnumerateArray()
             .Select(t => t.GetProperty("recoveryRemaining").GetInt32()).ToArray());
         Assert.All(tasks.EnumerateArray(), task =>
             Assert.Equal(2, task.GetProperty("recovery").GetProperty("budget").GetInt32()));
-        Assert.Equal(normalized, WorkflowRunStore.MigrateLegacyWorkflowRunJson(normalized));
+        Assert.Equal(normalized, WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(normalized));
     }
 
     [Fact]
@@ -147,13 +147,13 @@ public sealed class WorkflowRecoveryRoundTests
             {"metadata":{"annotations":{"workflowProfileId":"legacy-profile"}}}
             """;
 
-        var normalized = WorkflowRunStore.MigrateLegacyWorkflowRunJson(legacy);
+        var normalized = WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(legacy);
 
         using var json = JsonDocument.Parse(normalized);
         Assert.Equal("legacy-profile", json.RootElement.GetProperty("workflowProfileId").GetString());
         Assert.Equal("legacy-profile", json.RootElement.GetProperty("metadata")
             .GetProperty("annotations").GetProperty("workflowProfileId").GetString());
-        Assert.Equal(normalized, WorkflowRunStore.MigrateLegacyWorkflowRunJson(normalized));
+        Assert.Equal(normalized, WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(normalized));
     }
 
     [Fact]
@@ -166,7 +166,7 @@ public sealed class WorkflowRecoveryRoundTests
             ]}]}
             """;
 
-        Assert.Equal(json, WorkflowRunStore.MigrateLegacyWorkflowRunJson(json));
+        Assert.Equal(json, WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(json));
     }
 
     [Fact]
@@ -212,7 +212,7 @@ public sealed class WorkflowRecoveryRoundTests
             """;
 
         Assert.Throws<InvalidOperationException>(() =>
-            WorkflowRunStore.MigrateLegacyWorkflowRunJson(json));
+            WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(json));
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public sealed class WorkflowRecoveryRoundTests
             ]}]}
             """;
 
-        var normalized = WorkflowRunStore.MigrateLegacyWorkflowRunJson(legacy);
+        var normalized = WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(legacy);
         using var json = JsonDocument.Parse(normalized);
         var tasks = json.RootElement.GetProperty("stages")[0].GetProperty("tasks");
         Assert.Equal(new[] { 2, 1 }, tasks.EnumerateArray()
@@ -253,7 +253,7 @@ public sealed class WorkflowRecoveryRoundTests
             """;
 
         Assert.Throws<InvalidOperationException>(() =>
-            WorkflowRunStore.MigrateLegacyWorkflowRunJson(json));
+            WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(json));
     }
 
     [Fact]
@@ -267,7 +267,7 @@ public sealed class WorkflowRecoveryRoundTests
             """;
 
         var error = Assert.Throws<InvalidOperationException>(() =>
-            WorkflowRunStore.MigrateLegacyWorkflowRunJson(json));
+            WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(json));
         Assert.Contains("definition id 'review'", error.Message);
     }
 
@@ -287,14 +287,14 @@ public sealed class WorkflowRecoveryRoundTests
             ]}]}
             """;
 
-        var normalized = WorkflowRunStore.MigrateLegacyWorkflowRunJson(json);
+        var normalized = WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(json);
 
         using var result = JsonDocument.Parse(normalized);
         var tasks = result.RootElement.GetProperty("stages")[0].GetProperty("tasks");
         var attempts = tasks.EnumerateArray().Select(t => t.GetProperty("attempt").GetInt32()).ToArray();
         Assert.Equal(new[] { 1, 2, 3 }, attempts);
         Assert.All(tasks.EnumerateArray(), task => Assert.False(task.TryGetProperty("recoveryRemaining", out _)));
-        Assert.Equal(normalized, WorkflowRunStore.MigrateLegacyWorkflowRunJson(normalized));
+        Assert.Equal(normalized, WorkflowRunStateDataUpgrader.MigrateLegacyWorkflowRunJson(normalized));
     }
 
     [Fact]
