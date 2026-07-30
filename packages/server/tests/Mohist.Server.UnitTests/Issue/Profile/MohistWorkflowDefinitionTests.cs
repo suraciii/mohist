@@ -28,6 +28,7 @@ public class MohistWorkflowDefinitionTests
         Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
         Assert.Contains("tasks.json", JsonSerializer.Serialize(loadTask.With));
 
+        var archiveChange = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:archive-change");
         var rebase = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:rebase");
         var push = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:push");
         Assert.Equal("sequential", definition.Stages[3].LockBehavior);
@@ -35,6 +36,10 @@ public class MohistWorkflowDefinitionTests
         var integrateIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
         Assert.Equal(new[] { "workspace-prepare", "integrate:archive-change", "integrate:rebase", "integrate:push", "integrate:health" }, integrateIds);
         Assert.DoesNotContain("integrate:merge", integrateIds);
+        Assert.Equal("mohist/archive-change", archiveChange.Uses);
+        var archiveChangeWithJson = JsonSerializer.Serialize(archiveChange.With);
+        Assert.Contains("openspec/changes/issue-${{ issue.number }}", archiveChangeWithJson);
+        Assert.DoesNotContain("archiveHint", archiveChangeWithJson);
         Assert.Equal("mohist/rebase", rebase.Uses);
         var rebaseWithJson = JsonSerializer.Serialize(rebase.With);
         Assert.Contains("${{ repository.baseBranch }}", rebaseWithJson);

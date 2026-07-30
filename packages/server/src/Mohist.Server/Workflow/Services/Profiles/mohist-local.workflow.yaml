@@ -305,7 +305,6 @@ stages:
         uses: mohist/archive-change
         with:
           changeDir: openspec/changes/issue-${{ issue.number }}
-          archiveHint: ${{ vars.archive }}
         recovery:
           budget: 3
           handlers:
