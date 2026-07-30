@@ -159,6 +159,9 @@ public static partial class WorkflowRunExtensions
             if (current.Initialized)
                 current.Status = StageRunStatus.Running;
 
+            if (run.Status == WorkflowRunStatus.Paused)
+                return [];
+
             ApplyActiveOrWaitingForDispatchStatus(run, now);
             return tasks.Count > 0 ? [new WorkflowRunResumed()] : [];
         }
@@ -189,6 +192,10 @@ public static partial class WorkflowRunExtensions
             if (current.IsAwaitingApproval)
                 current.ApprovalStatus = null;
             current.Status = StageRunStatus.Running;
+
+            if (run.Status == WorkflowRunStatus.Paused)
+                return [];
+
             ApplyActiveOrWaitingForDispatchStatus(run, now);
             return tasks.Count > 0 ? [new WorkflowRunResumed()] : [];
         }

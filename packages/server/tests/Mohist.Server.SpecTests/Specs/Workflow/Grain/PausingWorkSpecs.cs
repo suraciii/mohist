@@ -1,6 +1,7 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Grains;
 using Xunit;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.SpecTests.Specs.Workflow;
@@ -65,6 +66,39 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
 
         var runner2 = Grains.GetGrain<IRunnerGrain>(r3);
         Assert.Equal(RunnerStatus.Online, (await runner2.GetRuntimeStateAsync()).Status);
+    }
+
+    [Fact]
+    public async Task PausedWorkflow_TaskReportWithFollowUp_RemainsPausedUntilExplicitResume()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks:
+            [
+                new("task-1", "Task 1", "spec/task")
+            ],
+            checks: []));
+
+        var (task, runnerId) = await PollWorkAnyAsync();
+        await workflow.PauseAsync("user requested");
+
+        var acknowledgement = await workflow.ReceiveTaskReportAsync(runnerId, task.WorkId, new TaskReport(
+            task.WorkId,
+            TaskReportStatus.Succeeded,
+            Output: null,
+            Artifacts: null,
+            AddTasks: new List<RuntimeTaskInput>
+            {
+                new("follow-up", "Follow up", "spec/task")
+            }));
+
+        Assert.Equal(ReportAck.Accepted, acknowledgement);
+        Assert.Equal("Paused", await workflow.GetRunStatusAsync());
+        Assert.Null(await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(Services));
+
+        await workflow.ResumeAsync();
+
+        var (followUp, _) = await PollWorkAnyAsync();
+        Assert.StartsWith("follow-up.", followUp.WorkId);
     }
 
     [Fact]
