@@ -74,12 +74,14 @@ public sealed class WorkflowGrainProductionContractSpecs
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
 
         var profileManager = BuildThrowingProfileManager(scope.ServiceProvider, exceptionMessage);
+        var variableResolver = scope.ServiceProvider.GetRequiredService<WorkflowVariableResolver>();
         var identity = GrainTestContext.Create(workflowRunId, new StubProfileCoordinatorGrainFactory());
         var grain = new WorkflowGrain(
             identity.Context,
             identity.Runtime,
             store,
             profileManager,
+            variableResolver,
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
         await grain.OnActivateAsync(CancellationToken.None);
@@ -108,14 +110,12 @@ public sealed class WorkflowGrainProductionContractSpecs
     private WorkflowProfileManager BuildThrowingProfileManager(IServiceProvider services, string exceptionMessage)
     {
         var dbFactory = services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        var runVariablesStore = services.GetRequiredService<WorkflowRunVariablesStore>();
         var provider = new StubFailingOnStageLoadProfileProvider(exceptionMessage);
         return new WorkflowProfileManager(
             dbFactory,
             new InertPromptLoader(),
             new Mohist.Server.Workflow.Services.Prompts.PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-            runVariablesStore,
             provider);
     }
 

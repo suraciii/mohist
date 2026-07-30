@@ -14,13 +14,16 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 namespace Mohist.Server.Workflow.Services;
 
 /// <summary>
-/// Workflow template/variables/prompts resolution entrypoint.
+/// Workflow definition resolution entrypoint.
 ///
 /// Template resolution precedence (highest first):
 ///   1. Issue custom YAML (issue_workflow_profile.Template)
 ///   2. Issue referenced template (issue_workflow_profile.SourceTemplateId)
 ///   3. Issue's effective workflow profile (issue.WorkflowProfileId →
 ///      project default template → first enabled system profile).
+///
+/// Variables are resolved separately by <see cref="WorkflowVariableResolver"/>.
+/// Prompts are loaded via <see cref="LoadPromptAsync"/> / <see cref="LoadPromptsAsync"/>.
 /// </summary>
 public class WorkflowProfileManager : IScopedService
 {
@@ -31,7 +34,6 @@ public class WorkflowProfileManager : IScopedService
     private readonly IPromptLoader _promptLoader;
     private readonly PromptTemplateEngine _engine;
     private readonly ConfigService _configService;
-    private readonly WorkflowRunVariablesStore _runVariablesStore;
     private readonly IWorkflowProfileProvider _profileProvider;
 
     public WorkflowProfileManager(
@@ -39,14 +41,12 @@ public class WorkflowProfileManager : IScopedService
         IPromptLoader promptLoader,
         PromptTemplateEngine engine,
         ConfigService configService,
-        WorkflowRunVariablesStore runVariablesStore,
         IWorkflowProfileProvider profileProvider)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
         _engine = engine;
         _configService = configService;
-        _runVariablesStore = runVariablesStore;
         _profileProvider = profileProvider;
     }
 
@@ -257,53 +257,6 @@ public class WorkflowProfileManager : IScopedService
         string? ProjectDefaultId,
         string? EffectiveProfileId);
 
-    internal async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var context = await ResolveRunContextAsync(db, runId);
-        var project = await LoadProjectLayerAsync(db, context);
-        var issue = await LoadIssueLayerAsync(db, context);
-        var run = await _runVariablesStore.GetVariablesAsync(runId);
-        return MergeRunScopedVariables(project, issue, run);
-    }
-
-    private static VariableBundle MergeRunScopedVariables(
-        VariableBundle project,
-        VariableBundle issue,
-        VariableBundle run) => VariableBundle.MergeAll(project, issue, run);
-
-    public async Task<JsonElement> ResolveEffectiveVariablesAsync(string runId, string? stage)
-    {
-        var resolved = await ResolveEffectiveVariableBundleAsync(runId, stage);
-        return resolved.Vars ?? JSON.DeserializeElement("{}");
-    }
-
-    internal async Task<VariableBundle> ResolveEffectiveVariableBundleAsync(string runId, string? stage)
-    {
-        var layered = await ResolveConfiguredVariablesAsync(runId);
-        return new VariableBundle(layered.ResolveStageVars(stage), layered.Stages);
-    }
-
-    public async Task<WorkspaceIdentity?> LoadIssueWorkspaceAsync(string projectId, int issueNumber)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(projectId, issueNumber));
-        var vars = VariableBundle.FromJson(issueProfile?.Variables).Vars;
-        if (vars is not { ValueKind: JsonValueKind.Object }
-            || !vars.Value.TryGetProperty("workspace", out var workspace)
-            || workspace.ValueKind != JsonValueKind.Object
-            || !workspace.TryGetProperty("path", out var path)
-            || string.IsNullOrWhiteSpace(path.GetString()))
-        {
-            return null;
-        }
-
-        return new WorkspaceIdentity(
-            path.GetString()!,
-            workspace.TryGetProperty("branch", out var branch) ? branch.GetString() : null,
-            workspace.TryGetProperty("changeDir", out var changeDir) ? changeDir.GetString() : null);
-    }
-
     private static async Task<RunContext> ResolveRunContextAsync(MohistDbContext db, string runId)
     {
         var workflowRun = await db.WorkflowRuns.AsNoTracking()
@@ -416,22 +369,6 @@ public class WorkflowProfileManager : IScopedService
         {
             return null;
         }
-    }
-
-    private static async Task<VariableBundle> LoadIssueLayerAsync(MohistDbContext db, RunContext context)
-    {
-        var issueProfile = await LoadIssueProfileAsync(db, context);
-        return VariableBundle.FromJson(issueProfile?.Variables);
-    }
-
-    private static async Task<VariableBundle> LoadProjectLayerAsync(MohistDbContext db, RunContext context)
-    {
-        if (string.IsNullOrWhiteSpace(context.ProjectId))
-            return VariableBundle.Empty;
-
-        var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ProjectId == context.ProjectId);
-        return VariableBundle.FromJson(projectProfile?.Variables);
     }
 
     private static async Task<IssueWorkflowProfile?> LoadIssueProfileAsync(MohistDbContext db, RunContext context)

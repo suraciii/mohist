@@ -17,15 +17,18 @@ public class WorkflowQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _db;
     private readonly WorkflowProfileManager _profileManager;
+    private readonly WorkflowVariableResolver _variableResolver;
     private readonly IWorkflowArtifactQuerier _artifactQuerier;
 
     public WorkflowQuerier(
         IDbContextFactory<MohistDbContext> db,
         WorkflowProfileManager profileManager,
+        WorkflowVariableResolver variableResolver,
         IWorkflowArtifactQuerier artifactQuerier)
     {
         _db = db;
         _profileManager = profileManager;
+        _variableResolver = variableResolver;
         _artifactQuerier = artifactQuerier;
     }
 
@@ -128,7 +131,7 @@ public class WorkflowQuerier : IScopedService
 
     public async Task<JsonElement> GetEffectiveVariablesAsync(string workflowRunId, string? stage = null)
     {
-        return await _profileManager.ResolveEffectiveVariablesAsync(workflowRunId, stage);
+        return await _variableResolver.ResolveEffectiveVariablesAsync(workflowRunId, stage);
     }
 
     public async Task<JsonElement> GetEffectiveVariableAsync(string workflowRunId, string keyPath, string? stage = null)

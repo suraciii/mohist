@@ -30,25 +30,29 @@ namespace Mohist.Server.Runner.Services;
 public sealed class WorkflowItemTranslator : IScopedService
 {
     private readonly WorkflowProfileManager _profileManager;
+    private readonly WorkflowVariableResolver _variableResolver;
     private readonly IWorkflowArtifactBindService _artifactBindService;
     private readonly IAgentExecutionSnapshotResolver? _agentSnapshots;
     private readonly ILogger<WorkflowItemTranslator> _log;
 
     public WorkflowItemTranslator(
         WorkflowProfileManager profileManager,
+        WorkflowVariableResolver variableResolver,
         IWorkflowArtifactBindService artifactBindService,
         ILogger<WorkflowItemTranslator> log)
-        : this(profileManager, artifactBindService, log, null)
+        : this(profileManager, variableResolver, artifactBindService, log, null)
     {
     }
 
     public WorkflowItemTranslator(
         WorkflowProfileManager profileManager,
+        WorkflowVariableResolver variableResolver,
         IWorkflowArtifactBindService artifactBindService,
         ILogger<WorkflowItemTranslator> log,
         IAgentExecutionSnapshotResolver? agentSnapshots)
     {
         _profileManager = profileManager;
+        _variableResolver = variableResolver;
         _artifactBindService = artifactBindService;
         _agentSnapshots = agentSnapshots;
         _log = log;
@@ -188,7 +192,7 @@ EpicNumber: ReadEpicNumber(run),
         BuildPayloadAsync(string stage, string workId, string workType, string title, int attempt,
             string workflowRunId, WorkflowRun run)
     {
-        var resolved = await _profileManager.ResolveEffectiveVariableBundleAsync(workflowRunId, stage);
+        var resolved = await _variableResolver.ResolveEffectiveVariableBundleAsync(workflowRunId, stage);
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         var effectiveVarsJson = resolved.Vars ?? JSON.DeserializeElement("{}");
@@ -605,7 +609,7 @@ EpicNumber: ReadEpicNumber(run),
     private async Task<JsonElement?> ResolveBindVariablesAsync(
         string workflowRunId, WorkflowRun run, string stage)
     {
-        var resolved = await _profileManager.ResolveEffectiveVariableBundleAsync(workflowRunId, stage);
+        var resolved = await _variableResolver.ResolveEffectiveVariableBundleAsync(workflowRunId, stage);
         return resolved.Vars;
     }
 }

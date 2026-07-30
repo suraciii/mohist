@@ -249,7 +249,10 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
         siloBuilder.Services.AddSingleton(WorkflowGrainTestHelpers.CreateEmptyConfigService());
         siloBuilder.Services.AddScoped<WorkflowRunVariablesStore>();
+        siloBuilder.Services.AddScoped<ProjectVariableStore>();
+        siloBuilder.Services.AddScoped<IssueVariableStore>();
         siloBuilder.Services.AddScoped<WorkflowProfileManager>();
+        siloBuilder.Services.AddScoped<WorkflowVariableResolver>();
         siloBuilder.Services.AddScoped<WorkflowItemTranslator>();
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.DispatchService>();
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.WorkflowReportService>();

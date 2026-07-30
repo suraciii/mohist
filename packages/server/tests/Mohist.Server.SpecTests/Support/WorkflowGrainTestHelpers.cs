@@ -113,15 +113,22 @@ public static class WorkflowGrainTestHelpers
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var promptLoader = new InMemoryPromptLoader();
+        var runVariablesStore = new WorkflowRunVariablesStore(factory);
+        var profileManager = new WorkflowProfileManager(
+            factory,
+            promptLoader,
+            new PromptTemplateEngine(),
+            CreateEmptyConfigService(),
+            new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
+        var variableResolver = new WorkflowVariableResolver(
+            factory,
+            new ProjectVariableStore(factory),
+            new IssueVariableStore(factory),
+            runVariablesStore);
         return new WorkflowQuerier(
             factory,
-            new WorkflowProfileManager(
-                factory,
-                promptLoader,
-                new PromptTemplateEngine(),
-                CreateEmptyConfigService(),
-                new WorkflowRunVariablesStore(factory),
-                new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance)),
+            profileManager,
+            variableResolver,
             new WorkflowArtifactQuerier(factory));
     }
 

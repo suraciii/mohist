@@ -38,4 +38,11 @@ The enable toggle (`GetDisabledWorkflowProfileIdsAsync`/`SetProfileEnabledAsync`
 
 ## Notes for T-002
 
-The route handlers now read variables from stores, but `WorkflowProfileManager.LoadIssueWorkspaceAsync` and `WorkflowProfileManager.ResolveEffectiveVariablesAsync` still go through `_runVariablesStore` (Run) and call `GetVariablesAsync` on the SAME `ProjectWorkflowProfileManager`/`IssueWorkflowProfileManager` instances — they have no variable methods anymore, so those paths will need to switch to `ProjectVariableStore.GetVariablesAsync` / `IssueVariableStore.GetVariablesAsync` during T-002 once the merge is extracted. Don't replace the merge call sites in this PR; that's the next step.
+The route handlers read variables from stores, and T-002 moves the remaining cross-scope reads to `WorkflowVariableResolver`. The resolver uses `ProjectVariableStore.GetVariablesAsync`, `IssueVariableStore.GetVariablesAsync`, and `WorkflowRunVariablesStore.GetVariablesAsync`; no variable read goes through either Profile manager.
+
+## T-002 Notes
+
+- `WorkflowVariableResolver` owns the Project → Issue → Run merge, stage overlay, and Issue workspace identity. It resolves run context from persisted run/issue metadata, then reads variable values exclusively through `ProjectVariableStore`, `IssueVariableStore`, and `WorkflowRunVariablesStore`.
+- `WorkflowGrain`, `WorkflowQuerier`, and `WorkflowItemTranslator` now use the resolver for workspace and effective variable payloads. `WorkflowProfileManager` retains definition and prompt responsibilities only; its variable store dependency and variable methods are removed.
+- Existing variable-resolution specs were moved to the resolver and retain their prior JSON assertions. Added coverage verifies a missing stage returns the workflow-wide bundle unchanged and repeated workspace resolution returns an equal `WorkspaceIdentity` for the same Issue variables.
+- Baseline verification before the final coverage additions passed the full server spec assembly (3398 tests) and unit assembly (1610 tests); the Microsoft Testing Platform ignored the requested VSTest filters.

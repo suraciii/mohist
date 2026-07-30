@@ -188,6 +188,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
         var querier = new WorkflowQuerier(
             new TestDbContextFactory(Database.Options),
             Manager,
+            Resolver,
             new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(Database.Options)));
 
         var yaml = await querier.GetDefinitionYamlAsync(runId);
@@ -238,6 +239,7 @@ public class WorkflowStructureSpecs : WorkflowProfileManagerTestFactory
         var querier = new WorkflowQuerier(
             new TestDbContextFactory(Database.Options),
             Manager,
+            Resolver,
             new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(Database.Options)));
 
         var status = await querier.GetStatusAsync(runId);

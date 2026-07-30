@@ -25,12 +25,17 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
             new FilePromptLoader(),
             new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-            new WorkflowRunVariablesStore(dbContextFactory),
             new WorkflowProfileProvider(dbContextFactory, NullActionCatalogSource.Instance));
+        Resolver = new WorkflowVariableResolver(
+            dbContextFactory,
+            new ProjectVariableStore(dbContextFactory),
+            new IssueVariableStore(dbContextFactory),
+            new WorkflowRunVariablesStore(dbContextFactory));
     }
 
     protected TestSqliteDatabase Database { get; }
     protected WorkflowProfileManager Manager { get; }
+    protected WorkflowVariableResolver Resolver { get; }
 
     protected WorkflowProfileManager CreateProfileBackedManager() =>
         new(
@@ -38,7 +43,6 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
             new FilePromptLoader(),
             new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-            new WorkflowRunVariablesStore(new TestDbContextFactory(Database.Options)),
             new WorkflowProfileProvider(new TestDbContextFactory(Database.Options), NullActionCatalogSource.Instance));
 
     public void Dispose() => Database.Dispose();

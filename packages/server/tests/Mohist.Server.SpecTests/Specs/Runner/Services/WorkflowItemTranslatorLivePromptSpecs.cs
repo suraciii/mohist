@@ -26,19 +26,25 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
     public WorkflowItemTranslatorLivePromptSpecs()
     {
         var factory = new TestDbContextFactory(_database.Options);
+        var runVariablesStore = new WorkflowRunVariablesStore(factory);
         var profileManager = new WorkflowProfileManager(
             factory,
             new BuiltinPromptLoader(),
             new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-            new WorkflowRunVariablesStore(factory),
             new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
+        var variableResolver = new WorkflowVariableResolver(
+            factory,
+            new ProjectVariableStore(factory),
+            new IssueVariableStore(factory),
+            runVariablesStore);
         var artifactService = new WorkflowArtifactBindService(
             factory,
             NullLogger<WorkflowArtifactBindService>.Instance,
             new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
         _translator = new WorkflowItemTranslator(
             profileManager,
+            variableResolver,
             artifactService,
             NullLogger<WorkflowItemTranslator>.Instance);
     }

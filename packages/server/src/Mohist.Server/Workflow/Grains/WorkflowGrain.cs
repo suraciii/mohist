@@ -26,6 +26,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private bool _runReloadRequired;
     private readonly IWorkflowRunStore _runStore;
     private readonly WorkflowProfileManager _profileManager;
+    private readonly WorkflowVariableResolver _variableResolver;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WorkflowGrain> _log;
     private readonly WorkflowReadModel _readModel;
@@ -38,12 +39,14 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         Orleans.Runtime.IGrainRuntime runtime,
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
+        WorkflowVariableResolver variableResolver,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
         : base(context, runtime)
     {
         _runStore = runStore;
         _profileManager = profileManager;
+        _variableResolver = variableResolver;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -57,11 +60,13 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
+        WorkflowVariableResolver variableResolver,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
         _profileManager = profileManager;
+        _variableResolver = variableResolver;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -74,6 +79,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     string IWorkflowGrainContext.GrainKey => GrainKey;
     string? IWorkflowGrainContext.GetWorkflowProfileId() => _run?.WorkflowProfileId;
     WorkflowProfileManager IWorkflowGrainContext.ProfileManager => _profileManager;
+    WorkflowVariableResolver IWorkflowGrainContext.VariableResolver => _variableResolver;
     IGrainFactory IWorkflowGrainContext.Grains => GrainFactory;
     ILogger IWorkflowGrainContext.Log => _log;
     DateTimeOffset IWorkflowGrainContext.Now() => Now();
@@ -247,7 +253,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
         if (!string.IsNullOrWhiteSpace(structure.Id))
             await PersistProfileBindingAsync(context.ProjectId, structure.Id);
-        _run.Workspace = await _profileManager.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
+        _run.Workspace = await _variableResolver.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
     }
 
     public async Task ResumeAsync()
