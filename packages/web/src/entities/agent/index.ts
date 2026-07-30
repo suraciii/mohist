@@ -104,3 +104,11 @@ export type {
 } from './api/agent-sessions'
 export { AGENT_DETAIL_EVENTS, dispatchAgentEvent, onAgentEvent } from './model/events'
 export * from './model/types'
+export {
+  getAgentAvailabilityFeedback,
+  getAgentLaunchErrorFeedback,
+} from './model/launch-feedback'
+export type {
+  AgentLaunchFeedback,
+  AgentLaunchFeedbackKind,
+} from './model/launch-feedback'

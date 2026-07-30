@@ -21,6 +21,7 @@ import {
   useArchiveAgent,
   useUnarchiveAgent,
   readAgentModelAndVariant,
+  getAgentAvailabilityFeedback,
 } from '../../../entities/agent'
 import type {
   AgentAvailabilityResponse,
@@ -218,6 +219,7 @@ function AvailabilityCard({
   }
   const canStartNow = availability.canStartNow
   const reasonText = describeWaitingReason(availability.waitingReason)
+  const feedback = canStartNow ? null : getAgentAvailabilityFeedback(availability.waitingReason)
   return (
     <div
       data-testid="agent-detail-availability"
@@ -242,6 +244,15 @@ function AvailabilityCard({
         {' · '}
         Runner slots: {availability.capacity.usedSlots}/{availability.capacity.totalSlots}
       </p>
+      {feedback && (
+        <p
+          data-testid="agent-detail-availability-feedback"
+          data-feedback-kind={feedback.kind}
+          className="text-xs text-amber-800"
+        >
+          <span className="font-medium">{feedback.title}.</span> {feedback.message} {feedback.nextAction}
+        </p>
+      )}
       {waitingWork.length > 0 && (
         <div data-testid="agent-detail-waiting-work" className="space-y-1 pt-1">
           <h4 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">

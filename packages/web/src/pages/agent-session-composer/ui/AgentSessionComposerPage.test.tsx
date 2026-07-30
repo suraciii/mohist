@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-q
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type {
+  AgentAvailabilitySummaryEntry,
   AgentInfo,
   AgentSessionLaunchContext,
   AgentSessionLaunchResponse,
@@ -16,6 +17,7 @@ import {
 
 const state = {
   agentsData: [] as AgentInfo[],
+  availabilityData: [] as AgentAvailabilitySummaryEntry[],
   launchCalls: [] as Array<{ agentRef: string; body: unknown; idempotencyKey?: string }>,
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
@@ -56,6 +58,8 @@ const dataHook: AgentSessionComposerDataHook = () => {
   return {
     agents: state.agentsData,
     agentsLoading: false,
+    availability: state.availabilityData,
+    availabilityLoading: false,
     launchMutation,
   }
 }
@@ -116,6 +120,7 @@ function renderPage(initialEntries = ['/agent-sessions/new']) {
 describe('AgentSessionComposerPage', () => {
   beforeEach(() => {
     state.agentsData = []
+    state.availabilityData = []
     state.launchCalls.length = 0
     state.launchError = null
     state.launchFailuresRemaining = -1
@@ -232,7 +237,7 @@ describe('AgentSessionComposerPage', () => {
 
   it('passes context refs in launch body', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    renderPage(['/agent-sessions/new?agent=agent-1&issue=42&epic=7'])
+    renderPage(['/agent-sessions/new?agent=agent-1&issue=42&epic=7&repo=org/repo&ws=/workspace'])
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Analyze this' } })
     fireEvent.click(screen.getByTestId('launch-button'))
@@ -242,8 +247,16 @@ describe('AgentSessionComposerPage', () => {
     })
     expect(state.launchCalls[0]).toMatchObject({
       agentRef: 'agent-1',
-      body: { prompt: 'Analyze this', context: { issueNumber: 42, epicNumber: 7 } },
+      body: {
+        prompt: 'Analyze this',
+        context: { issueNumber: 42, epicNumber: 7, repository: 'org/repo', workspacePath: '/workspace' },
+      },
     })
+    expect(state.launchCalls[0].body).not.toHaveProperty('runtime')
+    expect(state.launchCalls[0].body).not.toHaveProperty('model')
+    expect(state.launchCalls[0].body).not.toHaveProperty('variant')
+    expect(state.launchCalls[0].body).not.toHaveProperty('skills')
+    expect(state.launchCalls[0].body).not.toHaveProperty('maxConcurrentRuns')
   })
 
   it('navigates to session detail on success', async () => {
@@ -338,7 +351,44 @@ describe('AgentSessionComposerPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('error-external-agent')).toBeInTheDocument()
     })
+    expect(screen.getByTestId('error-external-agent')).toHaveAttribute('data-feedback-kind', 'execution-unavailable')
     expect(screen.getByTestId('error-external-agent')).toHaveTextContent(/external agent/i)
+    expect(screen.getByTestId('error-external-agent')).toHaveTextContent(/wait.*recover/i)
+  })
+
+  it('surfaces capacity back-pressure with a next action', async () => {
+    state.agentsData = [makeAgent('agent-1')]
+    state.availabilityData = [{
+      agentId: 'agent-1',
+      canStartNow: false,
+      waitingReason: 'concurrency-limit',
+      activeRuns: 1,
+      maxConcurrentRuns: 1,
+      capacity: { usedSlots: 1, totalSlots: 2 },
+      queuedCount: 1,
+    }]
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+
+    const feedback = await screen.findByTestId('agent-availability-feedback')
+    expect(feedback).toHaveAttribute('data-feedback-kind', 'back-pressure')
+    expect(feedback).toHaveTextContent(/concurrency limit/i)
+    expect(feedback).toHaveTextContent(/active run.*finish/i)
+    fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Try later' } })
+    expect(screen.getByTestId('launch-button')).not.toBeDisabled()
+  })
+
+  it('surfaces runtime execution unavailability with recovery guidance', async () => {
+    state.agentsData = [makeAgent('agent-1')]
+    state.launchError = { error: 'runtime unavailable', code: 'runtime-unavailable' }
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Run this' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    const feedback = await screen.findByTestId('error-execution-unavailable')
+    expect(feedback).toHaveAttribute('data-feedback-kind', 'execution-unavailable')
+    expect(feedback).toHaveTextContent(/execution backend unavailable/i)
+    expect(feedback).toHaveTextContent(/recover/i)
   })
 
   it('matches no-runner error by message text fallback', async () => {

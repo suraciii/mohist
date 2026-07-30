@@ -1,1 +1,5 @@
-export { AgentSessionComposerPage } from './ui/AgentSessionComposerPage'
+export {
+  AgentSessionComposerPage,
+  type AgentSessionComposerDataHook,
+  type AgentSessionComposerPageComponents,
+} from './ui/AgentSessionComposerPage'

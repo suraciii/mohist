@@ -135,6 +135,8 @@ describe('AgentDetailPage readiness and availability', () => {
     const card = screen.getByTestId('agent-detail-availability')
     expect(card).toHaveAttribute('data-state', 'waiting')
     expect(card).toHaveAttribute('data-waiting-reason', 'capacity-full')
+    expect(screen.getByTestId('agent-detail-availability-feedback')).toHaveAttribute('data-feedback-kind', 'back-pressure')
+    expect(screen.getByTestId('agent-detail-availability-feedback')).toHaveTextContent(/wait for a runner slot/i)
     expect(screen.getByTestId('agent-detail-waiting-work-job-1')).toHaveAttribute('data-waiting-reason', 'capacity-full')
     expect(screen.getByTestId('agent-detail-waiting-work-job-2')).toHaveAttribute('data-waiting-reason', 'concurrency-limit')
     expect(screen.getByTestId('agent-detail-waiting-work-job-3')).toHaveTextContent('Waiting for dispatch')
@@ -159,5 +161,27 @@ describe('AgentDetailPage readiness and availability', () => {
     const card = screen.getByTestId('agent-detail-availability')
     expect(card).toHaveAttribute('data-state', 'ready')
     expect(card.textContent ?? '').not.toMatch(/Runner at capacity/i)
+  })
+
+  it('names Runner offline as Availability and gives the connection next step', () => {
+    state.detailStatus = {
+      agentId: 'agent-1',
+      agentName: 'Test Agent',
+      availability: {
+        canStartNow: false,
+        waitingReason: 'no-online-runner',
+        activeRuns: 0,
+        maxConcurrentRuns: null,
+        capacity: { usedSlots: 0, totalSlots: 0 },
+        observedAt: '2026-07-29T00:00:00.000Z',
+      },
+      waitingWork: [],
+    }
+    renderPage()
+
+    expect(screen.getByTestId('agent-detail-readiness-conclusion')).toHaveTextContent('Unknown')
+    const feedback = screen.getByTestId('agent-detail-availability-feedback')
+    expect(feedback).toHaveAttribute('data-feedback-kind', 'runner-offline')
+    expect(feedback).toHaveTextContent(/connect a runner/i)
   })
 })

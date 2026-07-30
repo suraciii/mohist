@@ -38,3 +38,16 @@
 
 - Focused Agent list, availability query, and launch mutation tests pass: 88 tests.
 - Web typecheck, full Web tests (392 files, 5,188 passing and 1 skipped), and FSD boundary checks pass.
+
+## T-004
+
+- The launch composer now joins the project-scoped Availability summary for its selected Agent and presents waiting states as Availability feedback without disabling launch; the server remains the authoritative launch gate.
+- Launch error feedback is normalized by obstruction class: runner offline, capacity/concurrency/dispatch back-pressure, Needs setup with returned gaps and setup link, and execution backend unavailability each include a distinct next action.
+- The same Availability feedback mapping is used by the Agent detail card. Created sessions label runtime/execution unavailability separately and tell the user to wait for recovery and retry the launch.
+- The detail-to-composer test uses injected page data hooks and verifies the Agent stays pre-bound through navigation and that success lands on the created session. Composer tests cover all context refs without execution overrides, gating, idempotent retry, and each launch feedback class.
+
+## T-004 Verification
+
+- Focused launch, detail, and session suites pass: 80 tests and 1 skipped.
+- A full Web run passed earlier at 392 files, 5,194 passing and 1 skipped. A later full run became resource-sensitive in unrelated `App.test.tsx` routing cases and exceeded the 120-second command limit; `App.test.tsx` passes independently at 15/15.
+- Web typecheck, FSD boundary checks, test-boundary checks, and `git diff --check` pass.
