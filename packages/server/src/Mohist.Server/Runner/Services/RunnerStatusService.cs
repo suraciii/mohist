@@ -4,7 +4,7 @@ using Mohist.Server.Runner.Services.SignalR;
 
 namespace Mohist.Server.Runner.Services;
 
-public class RunnerStatusService : IScopedService
+public class RunnerStatusService : IScopedService, IRunnerStatusSource
 {
     private readonly IGrainFactory _grainFactory;
     private readonly RunnerConnectionTracker _connectionTracker;
@@ -35,6 +35,9 @@ public class RunnerStatusService : IScopedService
     }
 
     public async Task<IReadOnlyList<RunnerStatusView>> GetOnlineRunnersAsync(string projectId)
+        => await GetOnlineRunnersAsync(projectId, CancellationToken.None);
+
+    public async Task<IReadOnlyList<RunnerStatusView>> GetOnlineRunnersAsync(string projectId, CancellationToken ct)
     {
         var registry = _grainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var eligible = await registry.ListEligibleRunnersAsync(projectId);

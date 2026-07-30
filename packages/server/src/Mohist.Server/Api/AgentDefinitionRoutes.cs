@@ -1,11 +1,13 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Runner.Services;
 
 namespace Mohist.Server.Api;
 
@@ -51,6 +53,24 @@ public static class AgentDefinitionRoutes
         {
             var projectId = context.GetResolvedProject().Id;
             return ApiResults.Ok(await query.ListAsync(projectId, status, all == true));
+        });
+
+        group.MapGet("/availability", async (
+            HttpContext context,
+            AgentQuerier query,
+            AgentAvailabilityService availability,
+            CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var agents = await query.ListAsync(projectId, AgentStatus.Active, all: false, ct);
+
+            var entries = await availability.GetListSummaryAsync(projectId, agents, ct);
+            var summaries = agents
+                .Select(agent => entries[agent.Id])
+                .Select(ToSummary)
+                .ToList();
+
+            return ApiResults.Ok(summaries);
         });
 
         group.MapGet("/{id}", async (HttpContext context, string id, AgentQuerier query) =>
@@ -119,6 +139,15 @@ public static class AgentDefinitionRoutes
 
         return app;
     }
+
+    private static AgentAvailabilitySummaryEntry ToSummary(AgentAvailabilityListEntry entry) => new(
+        entry.AgentId,
+        entry.CanStartNow,
+        entry.WaitingReason,
+        entry.ActiveRuns,
+        entry.MaxConcurrentRuns,
+        new AgentAvailabilitySummaryCapacity(entry.Capacity.UsedSlots, entry.Capacity.TotalSlots),
+        entry.QueuedCount);
 
     private static bool TouchesImmutableField(JsonElement raw)
     {
@@ -200,3 +229,14 @@ public sealed record AgentUpdateRequest(
             ? value.GetInt32()
             : null;
 }
+
+public sealed record AgentAvailabilitySummaryEntry(
+    string AgentId,
+    bool CanStartNow,
+    string? WaitingReason,
+    int ActiveRuns,
+    int? MaxConcurrentRuns,
+    AgentAvailabilitySummaryCapacity Capacity,
+    int QueuedCount);
+
+public sealed record AgentAvailabilitySummaryCapacity(int UsedSlots, int TotalSlots);

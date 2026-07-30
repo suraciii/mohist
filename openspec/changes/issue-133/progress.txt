@@ -1,0 +1,18 @@
+## Codebase Patterns
+
+- `AgentQuerier.ListAsync` hydrates the server-owned Readiness result on the Agent list response.
+- `AgentAvailabilityService` owns Availability calculation; runner capacity is supplied once to each per-Agent calculation.
+- Pending AgentJobs are persisted with lowercase status values and can be counted with one grouped query.
+- Runner status is registered as a concrete scoped service; `IRunnerStatusSource` is the injectable seam used by list availability tests.
+
+## T-001
+
+- The new project-scoped availability route reads active Agents only, so archived Agents are omitted without a live availability lookup.
+- `GetListSummaryAsync` makes one online-runner read, one grouped pending-job query, and one active-count grain read per active Agent.
+- Runner offline is represented by `waitingReason=no-online-runner` in Availability; Readiness remains owned by the existing Agent list query.
+- The route returns the existing `{ success, data }` envelope with one `AgentAvailabilitySummaryEntry` per active Agent.
+
+## Verification
+
+- Targeted route, service, and Unit tests pass; Web typecheck, FSD checks, Web tests, and repository build pass.
+- Full Server SpecTests had one transient timeout in the unrelated Agent launch-observation class; rerunning that class passed all 10 tests.

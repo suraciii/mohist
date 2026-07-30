@@ -45,6 +45,29 @@ public class AgentJobQuerier : IScopedService
         return rows.Select(ToItem).ToList();
     }
 
+    public async Task<IReadOnlyDictionary<string, int>> CountPendingByAgentAsync(
+        string projectId,
+        CancellationToken ct = default)
+    {
+        var pending = AgentJobStatus.Pending.ToString().ToLowerInvariant();
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var groups = await db.AgentJobs
+            .AsNoTracking()
+            .Where(r => r.ProjectId == projectId && r.Status == pending)
+            .GroupBy(r => r.AgentId)
+            .Select(g => new { AgentId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+
+        var result = new Dictionary<string, int>(groups.Count, StringComparer.Ordinal);
+        foreach (var group in groups)
+        {
+            if (group.AgentId is null) continue;
+            result[group.AgentId] = group.Count;
+        }
+        return result;
+    }
+
     public async Task<AgentJobListItem?> GetByKeyAsync(string jobKey, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);

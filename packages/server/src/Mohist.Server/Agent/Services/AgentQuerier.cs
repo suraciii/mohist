@@ -63,9 +63,13 @@ public class AgentQuerier : IScopedService
             : agent with { Readiness = await _readiness.GetAsync(projectId, agent) };
     }
 
-    public async Task<IReadOnlyList<AgentInfo>> ListAsync(string projectId, string? status = null, bool all = false)
+    public async Task<IReadOnlyList<AgentInfo>> ListAsync(
+        string projectId,
+        string? status = null,
+        bool all = false,
+        CancellationToken ct = default)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.Agents.AsNoTracking().Where(agent => agent.ProjectId == projectId);
 
         if (!all)
@@ -73,7 +77,7 @@ public class AgentQuerier : IScopedService
         else if (!string.IsNullOrWhiteSpace(status))
             query = query.Where(agent => agent.Status == status);
 
-        var rows = await query.ToListAsync();
+        var rows = await query.ToListAsync(ct);
         var infos = rows
             .Select(row => AgentStore.Deserialize(row.State))
             .Where(agent => agent is not null)
