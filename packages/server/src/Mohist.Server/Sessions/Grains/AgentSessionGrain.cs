@@ -1529,15 +1529,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         };
     }
 
-    /// <summary>
-    /// Issue-522 T-001 D8: when the Session grain observes a
-    /// <c>session.input</c> runtime event for the current Turn, the
-    /// non-launch Turn (no <see cref="AgentTurnRecord.JobId"/>) moves
-    /// Queued to Executing. The launch Turn is untouched: issue-512
-    /// removed its Runner <c>session.input</c>, so the promotion path
-    /// never fires for it. Activity is bumped to Active exactly as
-    /// before.
-    /// </summary>
     private static IReadOnlyList<AgentSessionEvent> DriveNonLaunchTurnLifecycle(
         AgentSession session,
         AgentSessionRuntimeEventInput runtimeEvent,
@@ -1568,17 +1559,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return events;
     }
 
-    /// <summary>
-    /// Issue-522 T-001 D8: when the Session grain observes a terminal
-    /// <c>session.activity</c> runtime event (idle/unknown from the
-    /// followup-handler or the cancel-handler), the non-launch Turn
-    /// moves Executing to terminal — Completed for an idle event with
-    /// status <c>completed</c>, Failed for an idle event with status
-    /// <c>failed</c>, and Unknown for an unknown activity. Launch Turns
-    /// are untouched: their terminal verdict is owned by the AgentJob
-    /// grain's authoritative <see cref="AgentJobGrain.AppendTerminalCloseAsync"/>
-    /// path.
-    /// </summary>
     private static IReadOnlyList<AgentSessionEvent> DriveTerminalActivityLifecycle(
         AgentSession session,
         AgentSessionRuntimeEventInput runtimeEvent,

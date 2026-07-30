@@ -145,13 +145,6 @@ public static class AgentSessionFollowupRoutes
             return ApiResults.Conflict(missing.Message, "runtime_session_missing", new { sessionId = missing.SessionId });
         }
 
-        // Issue-522 T-001 D1: persist the accepted SessionInput and a
-        // durable AgentTurnRecord (Queued, no JobId) on the Session grain
-        // BEFORE invoking the Runner. The Turn identity is committed
-        // ahead of dispatch so cancel can target it; the Runner does
-        // not create a duplicate session.input record (it continues to
-        // emit the existing session.input / terminal session.activity
-        // facts that drive the new Turn-id-keyed lifecycle path).
         string? inputId = null;
         string? turnId = null;
         if (reservation.StartsIdleTurn)
