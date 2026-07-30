@@ -88,9 +88,10 @@ async function handleJournaledCancel(
     const existing = await journal.get(sessionId, operationId)
     if (existing) {
       if (!samePayload(existing.request, payload)) return { state: "unavailable" }
-      return existing.state === "completed" ? existing.reply! : { state: "stop-requested" }
+      if (existing.state === "completed") return existing.reply!
+    } else {
+      await journal.start(sessionId, payload)
     }
-    await journal.start(sessionId, payload)
     const reply = await handleCancel(payload, deps)
     if (reply.state === "stop-requested" || reply.state === "unavailable") return reply
     await journal.complete(sessionId, payload, reply)
@@ -170,7 +171,7 @@ async function handleCancel(
         sessionTarget,
         binding.runtimeSessionId,
         payload.turnId,
-        confirmed ? payload.operationId : undefined,
+        payload.operationId,
         { ...facts, stopConfirmed: confirmed },
       )
     } catch (outboxError) {

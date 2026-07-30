@@ -160,6 +160,20 @@ public sealed class StopOperationInProgressException : InvalidOperationException
     public string TurnId { get; }
 }
 
+[Serializable]
+[GenerateSerializer]
+public sealed class SessionActivityUnknownException : InvalidOperationException
+{
+    public SessionActivityUnknownException(string sessionId)
+        : base($"AgentSession {sessionId} has an unknown runtime activity state.")
+    {
+        SessionId = sessionId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+}
+
 [GenerateSerializer]
 public sealed record AgentSessionMetadata(
     [property: Id(0)] IReadOnlyDictionary<string, string>? Labels = null,

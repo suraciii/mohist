@@ -259,6 +259,45 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     expect(runtime.cancelCalls).toHaveLength(1)
   })
 
+  it("StartedCancel_ReplayedAfterRunnerRestartRetriesTheRuntimeAbort", async () => {
+    const runtime = makeFakeRuntime()
+    runtime.setCancelResult({
+      ok: false,
+      error: {
+        kind: "turn-failed",
+        message: "transport dropped",
+        diagnostics: [],
+      },
+      diagnostics: [],
+    })
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    const journal = new MemoryCancelOperationJournal()
+    const payload: CancelAgentSessionPayload = {
+      ...genericCancelPayload("gen-session-1"),
+      sessionId: "gen-session-1",
+      turnId: "turn-1",
+      operationId: "stop-1",
+    }
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    buildClient({ resolver, outbox: readyOutbox(), openCodeRuntime: runtime.runtime, cancelOperationJournal: journal })
+    await expect(emitCancel(lastBuilder(), payload)).resolves.toEqual({ state: "stop-requested" })
+
+    runtime.setCancelResult({
+      ok: true,
+      value: {
+        facts: { runtimeSessionId: "runtime-1", workDir: "/work/project", cancelled: true },
+        diagnostics: [],
+      },
+      diagnostics: [],
+    })
+    buildClient({ resolver, outbox: readyOutbox(), openCodeRuntime: runtime.runtime, cancelOperationJournal: journal })
+    await expect(emitCancel(lastBuilder(), payload)).resolves.toEqual({ state: "stopped" })
+
+    expect(runtime.cancelCalls).toHaveLength(2)
+    errorSpy.mockRestore()
+  })
+
   it("UnknownSession_ResolverReturnsNull_RepliesNotCancellableAndDoesNotCallCancel", async () => {
     const runtime = makeFakeRuntime()
     const resolver = vi.fn(() => null)

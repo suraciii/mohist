@@ -427,6 +427,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             throw new FollowupOperationInProgressException(session.Id);
         if (session.Status.PendingStop is { } stop)
             throw new StopOperationInProgressException(session.Id, stop.TurnId);
+        if (session.Status.Activity == AgentSessionActivity.Unknown)
+            throw new SessionActivityUnknownException(session.Id);
 
         var startsIdleTurn = session.Status.Activity == AgentSessionActivity.Idle;
         var lease = new AgentSessionFollowupLease(

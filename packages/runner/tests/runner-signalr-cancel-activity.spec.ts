@@ -71,6 +71,7 @@ afterEach(() => {
 function opencodePayload(): CancelAgentSessionPayload {
   return {
     turnId: "turn-1",
+    operationId: "stop-1",
     target: {
       kind: "generic",
       projectId: "proj-1",
@@ -83,6 +84,7 @@ function opencodePayload(): CancelAgentSessionPayload {
 function piPayload(): CancelAgentSessionPayload {
   return {
     turnId: "turn-1",
+    operationId: "stop-1",
     target: {
       kind: "generic",
       projectId: "proj-1",
@@ -132,6 +134,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
           status: "completed",
           source: "cancel",
           turnId: "turn-1",
+          stopOperationId: "stop-1",
           stopConfirmed: true,
           runtimeSessionId: "runtime-1",
         }),
@@ -196,6 +199,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
           stopConfirmed: false,
           source: "cancel",
           turnId: "turn-1",
+          stopOperationId: "stop-1",
         }),
       },
     })

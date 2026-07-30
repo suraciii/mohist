@@ -123,6 +123,10 @@ public static class AgentSessionFollowupRoutes
         {
             return ApiResults.Conflict(ex.Message, "stop_in_progress", new { sessionId = ex.SessionId, turnId = ex.TurnId });
         }
+        catch (SessionActivityUnknownException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "session_activity_unknown", new { sessionId = ex.SessionId });
+        }
 
         if (string.IsNullOrWhiteSpace(target.RunnerId))
         {
