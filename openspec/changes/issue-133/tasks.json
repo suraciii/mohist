@@ -1,0 +1,89 @@
+{
+  "project": "mohist-local",
+  "description": "Make the Web the configuration-and-verification plane for Mohist Agents: a discovery/judgment Agents list (purpose, Readiness, Availability, workload), a complete Agent detail config surface, and a verified test-launch journey with differentiated feedback.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server: list-scoped Agent Availability summary endpoint",
+      "spec": "specs/agent-list-discovery/spec.md",
+      "description": "Add a project-scoped GET /agents/availability endpoint returning one summary entry per active Agent {canStartNow, waitingReason, activeRuns, maxConcurrentRuns, capacity{usedSlots,totalSlots}, queuedCount}. Add a list-scoped method on AgentAvailabilityService that fetches online-runner capacity ONCE and reuses it for every Agent, takes active runs from per-Agent concurrency grains, and queued count from a single batched pending-jobs query grouped by Agent. Archived Agents are omitted from the summary.",
+      "acceptanceCriteria": [
+        "GET /api/projects/{projectRef}/agents/availability returns one entry per active Agent carrying canStartNow, waitingReason, activeRuns, maxConcurrentRuns, capacity, and queuedCount.",
+        "Online-runner capacity is computed exactly once per request regardless of Agent count (verified by a fake runner-status source asserting a single capacity read for N Agents).",
+        "A Ready Agent with no online runner reports waitingReason=no-online-runner under Availability while its Readiness stays Ready (offline reads as Availability, not a configuration gap).",
+        "queuedCount equals the number of that Agent's pending jobs; activeRuns equals the concurrency grain's active count.",
+        "Server SpecTests cover list-scoped serving, single capacity read, offline-as-availability, and count derivation, using fakes (no real runner/process/wall-clock)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New GET /agents/availability route + AgentAvailabilityService list method + AgentAvailabilitySummary DTOs + SpecTests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Additive, no DB migration, no change to the existing per-Agent GET /agents/{id}/status (kept for the detail page). Response envelope follows the existing ApiResults.Ok({ success, data: [...] }) convention."
+    },
+    {
+      "id": "T-002",
+      "title": "Web: Agent detail execution-definition summary + edit-timing",
+      "spec": "specs/agent-detail-definition/spec.md",
+      "description": "Complete the Agent detail configuration surface: render Runtime and Max concurrent runs explicitly in the execution-definition summary, and add copy (in the editor or detail header) stating that Instructions/Runtime/Model/Variant/Skills edits apply only to Jobs created after the save. Keep Readiness gap explanation (Needs setup gaps + setup link; Unknown wait hint), Availability distinct from Readiness, and the Readiness-gated New Session button as they are.",
+      "acceptanceCriteria": [
+        "The detail summary displays Runtime and Max concurrent runs alongside Model/Variant, Skills, and Instructions.",
+        "Opening the definition editor surfaces a statement that edits apply only to future Jobs (not to executions already in progress).",
+        "Needs setup still lists each server gap (message + action) and the setup link; Unknown still shows a wait-for-validation hint; New Session remains disabled for Needs setup and enabled for Unknown.",
+        "Availability (waiting reason / active runs / runner slots) remains rendered separately from Readiness and is not derived from raw slots.",
+        "AgentDetailPage unit/spec tests assert the explicit Runtime/Max-concurrent rendering, the edit-timing copy, and unchanged Readiness/Availability behavior."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated AgentDetailPage.tsx + AgentProfileEditor (timing copy) + updated/added tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Uses the existing per-Agent status endpoint; no dependency on T-001. Confirmed gaps from design: editor currently carries timing language only for archive, and Runtime is derived but not rendered."
+    },
+    {
+      "id": "T-003",
+      "title": "Web: Agents list discovery surface",
+      "spec": "specs/agent-list-discovery/spec.md",
+      "description": "Turn AgentListPage into a discovery/judgment surface. Add useAgentListAvailability() + summary DTOs in entities/agent, fetch it in parallel with useAgents() and join by agentId. Render per row: description (purpose), the server Readiness conclusion, server Availability (can start now / waiting + reason), and active/queued workload. Replace the local lifecycle-only getAvailabilityStatus with two distinct signals: a lifecycle affordance (active/archived) and the server Availability signal. Invalidate the new query key on launch.",
+      "acceptanceCriteria": [
+        "Each active row renders name, description, the server Readiness conclusion (Ready/Needs setup/Unknown, not client-synthesized), Availability (can start now / waiting + reason), and active + queued counts.",
+        "A Ready Agent that is waiting (no-online-runner / capacity-full / concurrency-limit) renders as Availability, never as Needs setup or a configuration gap.",
+        "The list obtains Availability for all Agents from the single GET /agents/availability summary (no per-Agent status fan-out); a test asserts one availability request serves N Agents.",
+        "An Agent whose summary has not resolved renders Availability as loading/unknown, never as a false Needs setup.",
+        "Launching a session invalidates the list-availability query so the list reflects the new active/queued work.",
+        "AgentListPage tests cover description rendering, distinct Readiness conclusions, Availability + workload rendering, offline-as-availability, and single-request serving, via MSW fakes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New useAgentListAvailability query + DTOs in entities/agent + rewritten AgentListPage rows + tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "FSD placement unchanged (entities/agent query + page slice). Readiness already arrives in the GET /agents response; only rendering is added. Poll interval 5000ms to match existing agent status/activity polls."
+    },
+    {
+      "id": "T-004",
+      "title": "Web: test-launch journey + differentiated feedback verification",
+      "spec": "specs/agent-test-launch/spec.md",
+      "description": "Verify and refine the end-to-end test-launch journey from the Agent detail page (New Session opens the composer pre-bound to the Agent; composer accepts prompt + Issue/Epic/Repository/workspace context but no Runtime/Model/Variant/Skills/concurrency overrides; idempotent launch; success lands on the created AgentSession) and ensure differentiated, actionable feedback for queue/back-pressure, Runner offline, configuration gap, and execution-side unavailability is consistent across the launch path.",
+      "acceptanceCriteria": [
+        "Starting a test task from an active Agent's detail page opens the composer bound to that Agent with no re-selection required.",
+        "The launch request carries prompt and context only; it carries no execution-definition override fields.",
+        "Needs setup blocks launch (gaps surfaced); Unknown remains launchable with a wait-for-validation caveat; archived Agents are not launchable.",
+        "Retrying a launch after a lost response reuses the same idempotency key and returns the original work without creating a duplicate.",
+        "A successful launch navigates to the AgentSession created by that launch.",
+        "Runner offline, capacity/concurrency back-pressure, needs-setup, and execution-side unavailability each render distinct feedback naming a next action, with no raw-log reading required.",
+        "Tests cover the detail-to-composer-to-session journey, the gating matrix, idempotent retry, and each feedback class, via injected data hooks/MSW fakes."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Verified/refined AgentDetailPage New Session entry + AgentSessionComposerPage + consistent feedback + tests",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Largely verify/refine per design: gating, idempotency, no-overrides, navigation, and differentiated feedback already exist in the composer. Depends on T-002 because both edit AgentDetailPage; serializes detail-page changes. Also satisfies specs/agent-launch-feedback/spec.md."
+    }
+  ]
+}
