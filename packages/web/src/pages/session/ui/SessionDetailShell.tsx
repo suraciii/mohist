@@ -172,6 +172,7 @@ export function SessionDetailShell({
     notFound,
     sendFollowup,
     followupIsPending,
+    followupStatus,
     contextWindowUsed,
     contextWindowSize,
     contextUsagePercent,
@@ -467,6 +468,7 @@ export function SessionDetailShell({
               isSending={followupIsPending}
               disabled={!canFollowup}
               hasQueuedFollowup={queuedFollowup?.sessionKey === sessionKey}
+              followupStatus={followupStatus}
               className="py-0.5"
             />
           </div>

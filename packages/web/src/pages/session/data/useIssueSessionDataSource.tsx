@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import { issueWorkflowKeys, useIssue } from '../../../entities/issue'
 import { canFollowupSession, deriveSessionStatusKind, useCancelSessionMutation, useCoderSessions, getAgentSessionMetadata, getAgentSessionTranscript, useFollowupMutation } from '../../../entities/coder-session'
+import type { FollowupStatus, SessionFollowupResult } from '../../../entities/coder-session'
 import type { AgentSessionMetadata, AgentSessionTranscriptResponse, CoderSessionDetail, SessionTurn, WorkflowRunSession } from '../../../entities/coder-session'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useSiblingSessions } from '../../../widgets/issue-workflow'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
 import type { SessionCancelOptions, SessionDataSourceResult, EmptyStateKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 
 export interface IssueSessionDataSourceDependencies {
   useSessionTranscript?: typeof useSessionTranscript
@@ -87,6 +89,8 @@ function buildSessionMetadata(
           healthStatus: meta.usage.healthStatus ?? null,
         }
       : undefined,
+    inputs: meta.inputs,
+    turns: meta.turns,
   }
 }
 
@@ -244,12 +248,34 @@ export function useIssueSessionDataSource(
 
   const recoverySessionName = detail?.metadata?.sessionName ?? session?.sessionName ?? session?.executionId ?? lookupKey ?? ''
   const followup = useFollowup()
+  const followupKeys = useRef(new Map<string, string>())
+  const [followupResult, setFollowupResult] = useState<SessionFollowupResult | null>(null)
   const cancelMutation = useCancel()
   const canFollowup = canFollowupSession(activity) && !!runtimeSessionId && !!detail?.runtime && !!recoverySessionName
   const sendFollowup = useCallback(async (text: string) => {
-    await followup.mutateAsync({ issueNumber, sessionName: recoverySessionName, text })
+    const retryKey = `${recoverySessionName}:${text}`
+    const idempotencyKey = followupKeys.current.get(retryKey) ?? createIdempotencyKey()
+    followupKeys.current.set(retryKey, idempotencyKey)
+    const result = await followup.mutateAsync({ issueNumber, sessionName: recoverySessionName, text, idempotencyKey })
+    setFollowupResult(result)
+    if (result.status === 'unknown') {
+      throw new Error('Follow-up outcome is unknown. Retry with the same key.')
+    }
+    followupKeys.current.delete(retryKey)
   }, [followup, issueNumber, recoverySessionName])
   const currentTurnId = metadata?.currentTurnId
+  const followupStatus = useMemo<FollowupStatus | null>(() => {
+    if (!followupResult) return null
+    const input = detail?.metadata.inputs?.find((candidate) => candidate.id === followupResult.inputId)
+    const turn = detail?.metadata.turns?.find((candidate) => candidate.id === followupResult.turnId)
+    return {
+      outcome: followupResult.status,
+      inputId: followupResult.inputId,
+      turnId: followupResult.turnId,
+      inputAcceptance: input?.acceptance ?? (followupResult.status === 'accepted' ? 'accepted' : null),
+      turnStatus: turn?.status ?? (followupResult.status === 'accepted' ? 'queued' : null),
+    }
+  }, [detail?.metadata.inputs, detail?.metadata.turns, followupResult])
   const cancelSession = useCallback((operation: 'cancel' | 'stop' = 'stop', options?: SessionCancelOptions) => {
     cancelMutation.mutate(
       { issueNumber, sessionName: recoverySessionName, turnId: currentTurnId ?? '', operation },
@@ -312,6 +338,7 @@ export function useIssueSessionDataSource(
     isRunning,
     canFollowup,
     followupIsPending: followup.isPending,
+    followupStatus,
     sendFollowup,
     cancel,
     contextWindowUsed: detail?.metadata?.usage?.contextWindowUsed ?? null,

@@ -460,7 +460,9 @@ public class AgentSessionQuerier : IScopedService
             BuildGenericSessionSummaryContextRefs(record),
             AgentSessionDtoMapper.ToUsageDto(usage),
             session.Status.Activity == AgentSessionActivity.Idle,
-            CurrentTurnId(session));
+            CurrentTurnId(session),
+            AgentSessionObservationMapper.Inputs(session.Status),
+            AgentSessionObservationMapper.Turns(session.Status));
     }
 
     private static bool IsApplicableToCurrentRuntime(
@@ -548,7 +550,9 @@ public class AgentSessionQuerier : IScopedService
             WorkflowRunId: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId) : null,
             SessionName: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.SessionName) : null,
             ContextRefs: BuildUnifiedContextRefs(record),
-            Usage: AgentSessionDtoMapper.ToUsageDto(usage));
+            Usage: AgentSessionDtoMapper.ToUsageDto(usage),
+            Inputs: AgentSessionObservationMapper.Inputs(session.Status),
+            Turns: AgentSessionObservationMapper.Turns(session.Status));
     }
 
     /// <summary>
@@ -696,7 +700,9 @@ public class AgentSessionQuerier : IScopedService
             AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
             AgentSessionDtoMapper.ToUsageDto(usage),
             new AgentSessionMetadataCounts(partCount, toolCount),
-            CurrentTurnId(domainSession));
+            CurrentTurnId(domainSession),
+            AgentSessionObservationMapper.Inputs(domainSession.Status),
+            AgentSessionObservationMapper.Turns(domainSession.Status));
     }
 
     private static string? CurrentTurnId(AgentSession session) =>

@@ -91,6 +91,32 @@ export interface AgentSessionMetadata {
   metadata: AgentSessionMetadataCounts
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  inputs?: SessionInputObservation[] | null
+  turns?: AgentTurnObservation[] | null
+}
+
+export interface SessionInputObservation {
+  id: string
+  sequence: number
+  source: string
+  acceptance: string
+}
+
+export interface AgentTurnObservation {
+  id: string
+  sequence: number
+  inputIds: string[]
+  status: string
+}
+
+export type FollowupOutcome = 'accepted' | 'rejected' | 'unknown'
+
+export interface FollowupStatus {
+  outcome: FollowupOutcome
+  inputId?: string | null
+  turnId?: string | null
+  inputAcceptance?: string | null
+  turnStatus?: string | null
 }
 
 export interface FileChangeSummary {
@@ -198,6 +224,8 @@ export interface SessionMetadata {
   hasUnknownTools?: boolean
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  inputs?: SessionInputObservation[] | null
+  turns?: AgentTurnObservation[] | null
 }
 
 export interface TextPart {

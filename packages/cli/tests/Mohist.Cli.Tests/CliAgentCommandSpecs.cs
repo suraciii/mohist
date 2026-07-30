@@ -876,6 +876,28 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
+    public async Task AgentLaunch_SelectedJsonDoesNotPrintGeneratedIdempotencyKey()
+    {
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = new { jobId = "job-1" },
+        })));
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "launch", "reviewer", "--prompt", "Inspect", "--json", "jobId"],
+            output: output,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.DoesNotContain("Idempotency-Key:", stdout, StringComparison.Ordinal);
+        Assert.Equal("job-1", JsonNode.Parse(stdout)!["jobId"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task AgentUpdate_MissingInstructionsFileFailsWithScopedUsageBeforeHttp()
     {
         var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));

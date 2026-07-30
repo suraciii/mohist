@@ -25,6 +25,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public FakeAgentSessionStore StateStore { get; } = new();
     public FakeAgentSessionTranscriptStore TranscriptStore { get; } = new();
     public RecordingTranscriptEventPublisher TranscriptPublisher { get; } = new();
+    public RecordingFollowupDispatchScheduler FollowupDispatch { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public TestLogger<AgentSessionGrain> Logger { get; } = new();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
@@ -37,6 +38,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         StateStore.Reset();
         TranscriptStore.Reset();
         TranscriptPublisher.Clear();
+        FollowupDispatch.Reset();
         Logger.Entries.Clear();
     }
 
@@ -63,6 +65,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<IAgentSessionStore>(StateStore);
             siloBuilder.Services.AddSingleton<IAgentSessionTranscriptStore>(TranscriptStore);
             siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(TranscriptPublisher);
+            siloBuilder.Services.AddSingleton<IFollowupDispatchScheduler>(FollowupDispatch);
             siloBuilder.Services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
              siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
              siloBuilder.Services.AddSingleton<RunnerConnectionTracker>();

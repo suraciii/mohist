@@ -95,26 +95,34 @@ public static partial class IssueRoutes
             FollowupRequest body,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
-            IHubContext<RunnerHub> runnerHub,
-            RunnerConnectionTracker connections) =>
+            AgentSessionFollowupDispatcher dispatcher) =>
         {
-            var text = body?.Text;
-            if (string.IsNullOrWhiteSpace(text))
-                return ApiResults.BadRequest("text is required", "followup_text_missing");
-
             var project = GetRequiredProject(ctx);
             var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ctx.RequestAborted);
             if (sessionId is null)
-                return ApiResults.NotFound($"Session {name} not found");
+                return ApiResults.Ok(new AgentSessionFollowupResult(
+                    SessionId: null,
+                    Status: "rejected",
+                    Error: $"Session {name} not found",
+                    Code: "not_found"));
 
+            var text = body?.Text;
+            if (string.IsNullOrWhiteSpace(text))
+                return ApiResults.Ok(new AgentSessionFollowupResult(
+                    sessionId,
+                    Status: "rejected",
+                    Error: "text is required",
+                    Code: "followup_text_missing"));
+
+            var idempotencyKey = AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(ctx) ?? string.Empty;
             return await AgentSessionFollowupRoutes.ExecuteFollowupAsync(
                 project.Id,
                 sessionId,
                 text,
+                idempotencyKey,
                 sessions,
                 grains,
-                runnerHub,
-                connections,
+                dispatcher,
                 ctx.RequestAborted);
         });
 

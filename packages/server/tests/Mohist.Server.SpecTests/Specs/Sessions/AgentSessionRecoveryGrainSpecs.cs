@@ -396,48 +396,59 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     }
 
     [Fact]
-    public async Task Compact_AfterFollowupPromptRejected_ClearsLeaseViaAbandonFollowup()
+    public async Task Compact_AfterFollowupTurnTerminal_AllowsRecovery()
     {
-        // An idle follow-up reserves a lease (PendingFollowup) that blocks
-        // Compact/Reset until the follow-up turn reaches an outcome.
+        // The single-step AcceptFollowupAsync persists a SessionInput
+        // and an AgentTurn that progress queued → executing → terminal.
+        // The non-terminal follow-up turn blocks Compact/Reset; the
+        // Idle session.activity event for the matching operationId
+        // marks the turn terminal and unblocks recovery.
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-followup");
 
-        var reservation = await grain.BeginFollowupAsync();
-        Assert.NotNull(reservation.OperationId);
-        await grain.ConfirmFollowupAsync(reservation.OperationId!);
+        var accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "follow up text",
+            Source: "agent-session-followup",
+            IdempotencyKey: "followup-1"));
+        Assert.NotNull(accept.InputId);
+        Assert.NotNull(accept.TurnId);
 
-        // The accepted lease blocks Compact while the follow-up turn is in flight.
+        // The non-terminal follow-up turn blocks Compact until the
+        // session.activity idle event for the operationId marks it
+        // terminal.
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             grain.CompactAsync(new CompactAgentSessionCommand(Summary: "summary")));
 
-        await grain.AbandonFollowupAsync(reservation.OperationId!);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
-                $$"""{"activity":"idle","operationId":"{{reservation.OperationId}}"}""") },
+                $$"""{"activity":"idle","operationId":"{{accept.OperationId}}","status":"completed"}""") },
             "runtime-followup"));
+        await persistence.WaitAsync();
 
-        // The rejection did not create a turn and its matching lease is cleared.
         var state = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
-        Assert.Null(state.Status.PendingFollowup);
         Assert.Equal(AgentSessionActivity.Idle, state.Status.Activity);
+        Assert.Empty(state.Status.PendingFollowups ?? []);
         var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "summary"));
         Assert.Equal(sessionId, result.Id);
         Assert.True(result.WasCompacted);
     }
 
     [Fact]
-    public async Task Compact_AfterAcceptedFollowupIsLost_ExpiresTheLeaseWithoutSynthesizingATerminalEvent()
+    public async Task Compact_AfterFollowupTurnTerminalisedByIdle_LeasesCleared()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-lost-followup");
-        var followup = await grain.BeginFollowupAsync();
-        await grain.ConfirmFollowupAsync(followup.OperationId!);
-        await grain.AbandonFollowupAsync(followup.OperationId!);
+        var accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "follow up text",
+            Source: "agent-session-followup",
+            IdempotencyKey: "followup-1"));
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
-                $$"""{"activity":"idle","operationId":"{{followup.OperationId}}"}""") },
+                $$"""{"activity":"idle","operationId":"{{accept.OperationId}}","status":"completed"}""") },
             "runtime-lost-followup"));
+        await persistence.WaitAsync();
         var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "available"));
 
         Assert.True(result.WasCompacted);
@@ -458,19 +469,52 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     }
 
     [Fact]
-    public async Task PendingIdleFollowup_RejectsDuplicateDeliveryUntilItsMatchingFailureArrives()
+    public async Task PendingFollowupTurn_ConcurrentAcceptsAreAcceptedAndQueued()
     {
+        // Following the D8 reconciliation: an idle follow-up no longer
+        // rejects a concurrent follow-up as a conflicting in-progress
+        // operation. Two accepts on the same idle session both persist
+        // inputs and a queued turn (the second joins the same turn,
+        // since neither is yet executing).
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-followup-operations");
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
-        var first = await grain.BeginFollowupAsync();
-        await Assert.ThrowsAsync<FollowupOperationInProgressException>(() => grain.BeginFollowupAsync());
-        await grain.AbandonFollowupAsync(first.OperationId!);
+
+        var first = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "first follow up",
+            Source: "agent-session-followup",
+            IdempotencyKey: "followup-1"));
+        var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "second follow up",
+            Source: "agent-session-followup",
+            IdempotencyKey: "followup-2"));
+
+        Assert.NotEqual(first.InputId, second.InputId);
+        Assert.False(first.AlreadyAccepted);
+        Assert.False(second.AlreadyAccepted);
+
+        // The single queued turn now carries both inputs (the second
+        // join rule for a queued follow-up turn).
+        Assert.Equal(first.TurnId, second.TurnId);
+
+        var state = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
+        var turn = Assert.Single(state.Status.Turns!);
+        Assert.Equal(2, turn.InputIds.Count);
+        Assert.Contains(first.InputId, turn.InputIds);
+        Assert.Contains(second.InputId, turn.InputIds);
+
+        // The non-terminal follow-up turn still blocks Compact;
+        // settling the turn via the idle activity event frees it.
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            grain.CompactAsync(new CompactAgentSessionCommand(Summary: "summary")));
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                $$"""{"activity":"idle","operationId":"{{first.OperationId}}","status":"completed"}""") },
+            "runtime-followup-operations"));
 
         var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "available"));
         Assert.True(result.WasCompacted);
-        Assert.Equal(0, _fixture.TranscriptStore.Flushes.Count(flush =>
-            flush.Turn.SessionId == sessionId &&
-            flush.Parts.Any(part => part.Type == TranscriptPartTypes.Status)));
     }
 
     private async Task<(IAgentSessionGrain Grain, string SessionId)> CreateAttachedSessionAsync(string runtimeSessionId)

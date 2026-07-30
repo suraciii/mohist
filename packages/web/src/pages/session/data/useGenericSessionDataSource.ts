@@ -1,15 +1,17 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollowup, useGenericTurnControl, useCancelGenericSession, launchObservationQueryOptions } from '../../../entities/agent'
 import type { AgentLaunchObservationDto } from '../../../entities/agent'
 import { canFollowupSession, deriveSessionStatusKind } from '../../../entities/coder-session'
-import type { SessionTurn, SessionMetadata } from '../../../entities/coder-session'
+import type { SessionFollowupResult, SessionTurn, SessionMetadata } from '../../../entities/coder-session'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
 import { buildGenericSessionMetadata } from './buildGenericSessionMetadata'
+import { resolveFollowupStatus } from './followupStatus'
 import type { SessionCancelOptions, SessionDataSourceResult, EmptyStateKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 
 export interface GenericSessionDataSourceDependencies {
   useSessionTranscript: typeof useSessionTranscript
@@ -58,6 +60,8 @@ export function useGenericSessionDataSource(
   const { data: transcriptResponse } = useTranscriptResponse(sessionId)
   const { data: launchObservation } = useQuery<AgentLaunchObservationDto>(launchObservationQueryOptions(projectId, jobId))
   const genericFollowup = useFollowup()
+  const followupKeys = useRef(new Map<string, string>())
+  const [followupResult, setFollowupResult] = useState<SessionFollowupResult | null>(null)
   const cancelGeneric = useCancel()
 
   const initialTurns = useMemo<SessionTurn[]>(() => transcriptResponse?.turns ?? [], [transcriptResponse])
@@ -142,8 +146,22 @@ export function useGenericSessionDataSource(
   const workflowContextLabel = workflowContextPath ? 'Workflow context' : undefined
 
   const sendFollowup = useCallback(async (text: string) => {
-    await genericFollowup.mutateAsync({ sessionId, text })
+    const retryKey = `${sessionId}:${text}`
+    const idempotencyKey = followupKeys.current.get(retryKey) ?? createIdempotencyKey()
+    followupKeys.current.set(retryKey, idempotencyKey)
+    const result = await genericFollowup.mutateAsync({ sessionId, text, idempotencyKey })
+    setFollowupResult(result)
+    if (result.status === 'unknown') {
+      throw new Error('Follow-up outcome is unknown. Retry with the same key.')
+    }
+    followupKeys.current.delete(retryKey)
   }, [genericFollowup, sessionId])
+  const followupStatus = useMemo(() => {
+    if (!followupResult) return null
+    const input = summary?.inputs?.find((candidate) => candidate.id === followupResult.inputId)
+    const turn = summary?.turns?.find((candidate) => candidate.id === followupResult.turnId)
+    return resolveFollowupStatus(followupResult, input, turn)
+  }, [followupResult, summary?.inputs, summary?.turns])
 
   const currentTurnId = summary?.currentTurnId
   const cancelSession = useCallback((operation: 'cancel' | 'stop' = 'stop', options?: SessionCancelOptions) => {
@@ -177,6 +195,7 @@ export function useGenericSessionDataSource(
     isRunning,
     canFollowup,
     followupIsPending: genericFollowup.isPending,
+    followupStatus,
     sendFollowup,
     cancel,
     contextWindowUsed: meta?.usage?.contextWindowUsed ?? null,

@@ -1,4 +1,4 @@
-import type { AgentSessionTranscriptResponse, SessionMetadata, SessionStatusKind, SessionTurn } from '../../../entities/coder-session'
+import type { AgentSessionTranscriptResponse, FollowupStatus, SessionMetadata, SessionStatusKind, SessionTurn } from '../../../entities/coder-session'
 import type { AgentLaunchObservationDto } from '../../../entities/agent'
 import type { DisplayTurn } from '../../../widgets/session-transcript'
 
@@ -32,6 +32,7 @@ export interface SessionDataSourceResult {
   canFollowup?: boolean
 
   followupIsPending: boolean
+  followupStatus?: FollowupStatus | null
   sendFollowup: (text: string) => Promise<void>
 
   cancel: {

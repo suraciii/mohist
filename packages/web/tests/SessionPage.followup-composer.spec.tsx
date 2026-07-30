@@ -21,7 +21,13 @@ let sessionsLoading = false
 let metadata: AgentSessionMetadata | null = null
 let transcript: AgentSessionTranscriptResponse = { turns: [], partCount: 0, lastActivityAt: null }
 let transcriptVersion = 0
-const followupMutateAsync = vi.fn(async () => ({ status: 'sent' }))
+type FollowupRequest = { issueNumber: number; sessionName: string; text: string; idempotencyKey: string }
+type FollowupResponse = { status: string; inputId?: string; turnId?: string }
+const followupMutateAsync = vi.fn<(input: FollowupRequest) => Promise<FollowupResponse>>(async () => ({
+  status: 'accepted',
+  inputId: 'input-1',
+  turnId: 'turn-1',
+}))
 
 const sessionPageDependencies: SessionPageDependencies = {
   dataSource: {
@@ -205,12 +211,41 @@ describe('SessionPage followup composer integration', () => {
     })
 
     await waitFor(() => {
-      expect(followupMutateAsync).toHaveBeenCalledWith({
+      expect(followupMutateAsync).toHaveBeenCalledWith(expect.objectContaining({
         issueNumber: ISSUE,
         sessionName: SESSION,
         text: 'Continue with tests',
-      })
+        idempotencyKey: expect.any(String),
+      }))
     })
+  })
+
+  it('reuses the same idempotency key when an accepted outcome is unknown', async () => {
+    sessionsData = makeSessionsForLookup()
+    metadata = makeMetadata({ activity: 'active', completedAt: null })
+    followupMutateAsync
+      .mockResolvedValueOnce({ status: 'unknown' })
+      .mockResolvedValueOnce({ status: 'accepted', inputId: 'input-1', turnId: 'turn-1' })
+
+    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
+
+    await waitFor(() => expect(screen.getByTestId('session-followup-input')).toBeInTheDocument())
+    const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
+    fireEvent.change(input, { target: { value: 'Retry this request' } })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('session-followup-send'))
+    })
+
+    await waitFor(() => expect(screen.getByTestId('session-followup-error')).toBeInTheDocument())
+    expect(input.value).toBe('Retry this request')
+    const firstKey = followupMutateAsync.mock.calls[0]![0].idempotencyKey
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('session-followup-send'))
+    })
+
+    await waitFor(() => expect(followupMutateAsync).toHaveBeenCalledTimes(2))
+    expect(followupMutateAsync.mock.calls[1]![0].idempotencyKey).toBe(firstKey)
   })
 
   it('keeps the composer interactive when the session has finished executing (legacy completed)', async () => {
@@ -340,7 +375,7 @@ describe('SessionPage followup composer integration', () => {
     await waitFor(() => {
       expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
     })
-    expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/accepted.*pending/i)
 
     transcriptVersion = 1
     page.rerender(

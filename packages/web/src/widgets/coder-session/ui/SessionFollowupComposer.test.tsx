@@ -292,10 +292,10 @@ describe('SessionFollowupComposer — unavailable banner copy (activity unknown)
 })
 
 describe('SessionFollowupComposer — queued-state persistent indicator', () => {
-  it('disables the input and shows the queued indicator when hasQueuedFollowup is true', () => {
+  it('keeps the input enabled and shows the queued indicator when hasQueuedFollowup is true', () => {
     renderComposer({ hasQueuedFollowup: true })
 
-    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-input')).not.toBeDisabled()
     expect(screen.getByTestId('session-followup-send')).toBeDisabled()
     expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
     expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
@@ -309,7 +309,7 @@ describe('SessionFollowupComposer — queued-state persistent indicator', () => 
     expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
   })
 
-  it('keeps the queued indicator visible after isSending flips back to false while hasQueuedFollowup stays true', () => {
+  it('keeps the queued indicator visible and accepts another input after its own send settles', () => {
     const { rerender } = render(
       <SessionFollowupComposer onSend={onSendMock} isSending hasQueuedFollowup />,
     )
@@ -322,7 +322,7 @@ describe('SessionFollowupComposer — queued-state persistent indicator', () => 
     )
 
     expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
-    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-input')).not.toBeDisabled()
     expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
   })
 
@@ -356,5 +356,83 @@ describe('SessionFollowupComposer — queued-state persistent indicator', () => 
     const sendButton = screen.getByTestId('session-followup-send')
     expect(sendButton).not.toHaveAttribute('data-state', 'sent')
     expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
+  })
+})
+
+describe('SessionFollowupComposer — observed follow-up status', () => {
+  it('shows accepted-pending when the accepted input has a queued turn', () => {
+    renderComposer({
+      followupStatus: {
+        outcome: 'accepted',
+        inputAcceptance: 'accepted',
+        turnStatus: 'queued',
+        inputId: 'input-1',
+        turnId: 'turn-1',
+      },
+    })
+
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent('Accepted — pending')
+    expect(screen.getByTestId('session-followup-status')).toHaveAttribute('data-tone', 'queued')
+    expect(screen.getByTestId('session-followup-input')).not.toBeDisabled()
+  })
+
+  it('shows executing instead of pending when the observed turn is executing', () => {
+    renderComposer({
+      hasQueuedFollowup: true,
+      followupStatus: {
+        outcome: 'accepted',
+        inputAcceptance: 'accepted',
+        turnStatus: 'executing',
+        inputId: 'input-1',
+        turnId: 'turn-1',
+      },
+    })
+
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent('Executing')
+    expect(screen.getByTestId('session-followup-status')).toHaveAttribute('data-tone', 'executing')
+    expect(screen.getByTestId('session-followup-status')).not.toHaveTextContent(/pending/i)
+  })
+
+  it.each([
+    ['completed', 'Completed', 'success', 'text-success'],
+    ['failed', 'Failed', 'terminal', 'text-destructive'],
+    ['cancelled', 'Cancelled', 'terminal', 'text-warning'],
+    ['unknown', 'Unknown', 'terminal', 'text-warning'],
+  ] as const)('shows the terminal %s turn status', (turnStatus, label, tone, color) => {
+    renderComposer({
+      followupStatus: {
+        outcome: 'accepted',
+        inputAcceptance: 'accepted',
+        turnStatus,
+        inputId: 'input-1',
+        turnId: 'turn-1',
+      },
+    })
+
+    const status = screen.getByTestId('session-followup-status')
+    expect(status).toHaveTextContent(label)
+    expect(status).toHaveAttribute('data-tone', tone)
+    expect(status).toHaveClass(color)
+    expect(status).not.toHaveClass('text-transparent')
+  })
+
+  it.each([
+    ['rejected', 'Rejected', 'text-destructive'],
+    ['unknown', 'Outcome unknown — retry with the same key', 'text-warning'],
+  ] as const)('shows a visible %s outcome', (outcome, label, color) => {
+    renderComposer({
+      followupStatus: {
+        outcome,
+        inputAcceptance: null,
+        turnStatus: null,
+        inputId: null,
+        turnId: null,
+      },
+    })
+
+    const status = screen.getByTestId('session-followup-status')
+    expect(status).toHaveTextContent(label)
+    expect(status).toHaveClass(color)
+    expect(status).not.toHaveClass('text-transparent')
   })
 })

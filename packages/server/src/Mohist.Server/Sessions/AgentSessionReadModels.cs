@@ -52,7 +52,9 @@ public sealed record AgentSessionMetadataDto(
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
     [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata,
-    [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null);
+    [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null,
+    [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
+    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null);
 
 public sealed record AgentSessionMetadataCounts(
     [property: JsonPropertyName("partCount")] int PartCount,
@@ -249,7 +251,21 @@ public sealed record GenericAgentSessionSummaryDto(
     [property: JsonPropertyName("contextRefs")] GenericAgentSessionSummaryContextRefsDto? ContextRefs,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
     [property: JsonPropertyName("recoveryAvailable")] bool RecoveryAvailable,
-    [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null);
+    [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null,
+    [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
+    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null);
+
+public sealed record AgentSessionInputObservationDto(
+    string Id,
+    long Sequence,
+    string Source,
+    string Acceptance);
+
+public sealed record AgentTurnObservationDto(
+    string Id,
+    long Sequence,
+    IReadOnlyList<string> InputIds,
+    string Status);
 
 /// <summary>
 /// Lightweight association entry returned by the issue/epic agent-session
@@ -328,7 +344,9 @@ public sealed record UnifiedSessionSummaryDto(
     string? WorkflowRunId,
     string? SessionName,
     [property: JsonPropertyName("contextRefs")] UnifiedSessionContextRefsDto? ContextRefs,
-    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage,
+    [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
+    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null);
 
 /// <summary>
 /// Lightweight unified read shape for an AgentSession in the source-filtered

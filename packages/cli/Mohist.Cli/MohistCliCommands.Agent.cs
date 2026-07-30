@@ -688,7 +688,7 @@ internal static class AgentCommands
                 var idempotencyKey = string.IsNullOrWhiteSpace(suppliedIdempotencyKey)
                     ? Guid.NewGuid().ToString("N")
                     : suppliedIdempotencyKey;
-                if (string.IsNullOrWhiteSpace(suppliedIdempotencyKey))
+                if (string.IsNullOrWhiteSpace(suppliedIdempotencyKey) && mode == "table")
                     api.Output.WriteLine($"Idempotency-Key: {idempotencyKey}");
 
                 var contextRefs = BuildLaunchContext(issueRef, epicRef, repositoryRef, workspacePath);

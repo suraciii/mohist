@@ -39,6 +39,15 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task ConfirmFollowupAsync(string operationId);
     Task AbandonFollowupAsync(string operationId);
 
+    Task<AgentSessionFollowupAcceptResult> AcceptFollowupAsync(AcceptFollowupCommand command);
+    Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync();
+    Task ReleaseFollowupDispatchAsync(string operationId);
+    Task MarkFollowupTurnExecutingAsync(string operationId);
+    Task MarkFollowupTurnTerminalAsync(
+        string operationId,
+        AgentTurnStatus status,
+        AgentTurnResult? result);
+
     Task RecordFollowupTurnAsync(RecordFollowupTurnCommand command);
     Task AbandonFollowupTurnAsync(string inputId, string turnId);
 
@@ -201,6 +210,12 @@ public sealed record AgentSessionFollowupReservation(
     [property: Id(0)] string? OperationId,
     [property: Id(1)] bool StartsIdleTurn = false,
     [property: Id(2)] bool ConcurrencyPermitHeld = false);
+
+[GenerateSerializer]
+public sealed record AcceptFollowupCommand(
+    [property: Id(0)] string Text,
+    [property: Id(1)] string Source,
+    [property: Id(2)] string IdempotencyKey);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

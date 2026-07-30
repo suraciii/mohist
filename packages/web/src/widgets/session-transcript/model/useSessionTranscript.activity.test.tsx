@@ -5,14 +5,14 @@ import { dispatchAgentEvent } from '../../../entities/agent'
 import type { SessionTurn } from '../../../entities/coder-session'
 import { useSessionTranscript } from './useSessionTranscript'
 
-function Wrapper({ events }: { events: SessionTurn[] }) {
+function Wrapper({ events, isRunning = true }: { events: SessionTurn[]; isRunning?: boolean }) {
   const result = useSessionTranscript({
     issueNumber: 84,
     sessionId: 'session-84',
     runtimeSessionId: 'runtime-84',
     runtime: 'opencode',
     initialTurns: events,
-    isRunning: true,
+    isRunning,
   })
   return (
     <div>
@@ -25,6 +25,7 @@ function Wrapper({ events }: { events: SessionTurn[] }) {
           .map((part) => part.type === 'text' || part.type === 'reasoning' ? part.text : '')
           .join('')}
       </div>
+      <div data-testid="latest-user">{result.turns.at(-1)?.user.text ?? ''}</div>
     </div>
   )
 }
@@ -53,11 +54,11 @@ function followupTurn(): SessionTurn {
   }
 }
 
-function renderSessionTranscript(events: SessionTurn[]) {
+function renderSessionTranscript(events: SessionTurn[], isRunning = true) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <Wrapper events={events} />
+      <Wrapper events={events} isRunning={isRunning} />
     </QueryClientProvider>,
   )
 }
@@ -105,5 +106,22 @@ describe('useSessionTranscript activity behavior', () => {
     expect(transcript).toContain('thinking about it')
     expect(transcript).toContain('Let me check the docs.')
     expect(transcript).not.toContain('usage:Let me')
+  })
+
+  it('subscribes to follow-up input while the session is idle', () => {
+    renderSessionTranscript([followupTurn()], false)
+
+    act(() => {
+      dispatchAgentEvent('session.input', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'runtime-84',
+        runtime: 'opencode',
+        text: 'Continue',
+        kind: 'followup',
+        sentAt: '2026-06-12T00:01:00.000Z',
+      })
+    })
+
+    expect(screen.getByTestId('latest-user')).toHaveTextContent('Continue')
   })
 })

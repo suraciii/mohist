@@ -250,15 +250,7 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var status = StringOf(data, "status");
-        var statusText = string.IsNullOrEmpty(status) ? "(no status returned)" : status;
-        _out.WriteLine($"delivery: {statusText}");
-        var inputId = StringOf(data, "inputId");
-        if (!string.IsNullOrEmpty(inputId))
-            _out.WriteLine($"input:    {inputId}");
-        var turnId = StringOf(data, "turnId");
-        if (!string.IsNullOrEmpty(turnId))
-            _out.WriteLine($"turn:     {turnId}");
+        RenderFollowupResult(data);
     }
 
     private void RenderAgentSessionCancel(JsonNode? data)
@@ -560,15 +552,40 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var status = StringOf(data, "status");
-        var statusText = string.IsNullOrEmpty(status) ? "(no status returned)" : status;
-        _out.WriteLine($"delivery: {statusText}");
+        RenderFollowupResult(data);
+    }
+
+    private void RenderFollowupResult(JsonNode data)
+    {
+        var outcome = StringOf(data, "status");
+        _out.WriteLine($"status:           {(string.IsNullOrEmpty(outcome) ? "(no status returned)" : outcome)}");
+
+        var code = StringOf(data, "code");
+        if (!string.IsNullOrEmpty(code))
+            _out.WriteLine($"code:             {code}");
+
+        var error = StringOf(data, "error");
+        if (!string.IsNullOrEmpty(error))
+            _out.WriteLine($"error:            {error}");
+
         var inputId = StringOf(data, "inputId");
         if (!string.IsNullOrEmpty(inputId))
-            _out.WriteLine($"input:    {inputId}");
+            _out.WriteLine($"input id:         {inputId}");
+
         var turnId = StringOf(data, "turnId");
         if (!string.IsNullOrEmpty(turnId))
-            _out.WriteLine($"turn:     {turnId}");
+            _out.WriteLine($"turn id:          {turnId}");
+
+        var inputAcceptance = StringOf(data, "inputAcceptance");
+        if (!string.IsNullOrEmpty(inputAcceptance))
+            _out.WriteLine($"input acceptance:  {inputAcceptance}");
+
+        var turnStatus = StringOf(data, "turnStatus");
+        if (!string.IsNullOrEmpty(turnStatus))
+            _out.WriteLine($"turn status:       {turnStatus}");
+
+        if (string.Equals(outcome, "unknown", StringComparison.OrdinalIgnoreCase))
+            _out.WriteLine("reconcile:        retry with the same idempotency key");
     }
 
     private void RenderSessionCancel(JsonNode? data)
