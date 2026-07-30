@@ -60,3 +60,4 @@
 - Focused SpecTests command did not accept the legacy VSTest filter under Microsoft.Testing.Platform and ran the full collection; a repeat full SpecTests run passed (3333 tests).
 - Readiness setup responses now return the concrete Agent detail path (`/agents/{agentId}`), which is the existing profile edit surface. Both Web entry points render that path as a project-scoped link; the readiness unit test asserts the concrete response.
 - Split Agent detail readiness/availability coverage into its own 5-test file. The original file is below the 500-line budget, `check:test-boundaries` passes, and the Web suite passes (5162 passed, 1 skipped).
+- Updated `GenericFollowupEndpoint_TerminalActivityStaysFollowable` to complete its owning AgentJob through the Runner rather than only injecting a Session idle event. A terminal Session no longer escapes a still-running Job's concurrency permit; the corrected focused spec passes.
