@@ -1,4 +1,5 @@
 import { request, projectApiPath } from '../../../shared/api/client'
+import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 import type {
   AgentSessionEvent,
   AgentSessionMetadata,
@@ -99,7 +100,14 @@ export function resetGenericSession(
 }
 
 export interface SessionFollowupResult {
-  status: string
+  sessionId?: string | null
+  inputId?: string | null
+  turnId?: string | null
+  status: 'accepted' | 'rejected' | 'unknown'
+  error?: string | null
+  code?: string | null
+  inputAcceptance?: string | null
+  turnStatus?: string | null
 }
 
 export function postFollowup(
@@ -107,12 +115,15 @@ export function postFollowup(
   name: string,
   text: string,
   projectId?: string | null,
+  idempotencyKey?: string,
 ): Promise<SessionFollowupResult> {
+  const requestKey = idempotencyKey ?? createIdempotencyKey()
   return request<SessionFollowupResult>(
     projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/followup`),
     {
       method: 'POST',
       body: JSON.stringify({ text }),
+      headers: { 'Idempotency-Key': requestKey },
     },
   )
 }

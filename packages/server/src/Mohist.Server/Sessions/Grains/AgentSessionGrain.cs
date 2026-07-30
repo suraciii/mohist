@@ -28,6 +28,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly TimeProvider _timeProvider;
     private readonly IAgentSessionConnectionRegistry _connections;
     private readonly IGrainFactory _grains;
+    private readonly IFollowupDispatchScheduler? _followupDispatchScheduler;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
     private bool _sessionReloadRequired;
@@ -48,7 +49,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         TimeProvider timeProvider,
         IAgentSessionConnectionRegistry connections,
         IGrainFactory grains,
-        ILogger<AgentSessionGrain> log)
+        ILogger<AgentSessionGrain> log,
+        IFollowupDispatchScheduler? followupDispatchScheduler = null)
     {
         _stateStore = stateStore;
         _transcriptStore = transcriptStore;
@@ -58,6 +60,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _timeProvider = timeProvider;
         _connections = connections;
         _grains = grains;
+        _followupDispatchScheduler = followupDispatchScheduler;
         _log = log;
     }
 
@@ -68,7 +71,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _sessionReloadRequired = false;
         _session = await _stateStore.LoadAsync(SessionId);
         if (_session is not null)
+        {
             _session.PersistedActivitySummary = (_session.PersistedActivitySummary ?? AgentSessionActivitySummaryState.Empty).Normalize();
+            if (ReclaimUnconfirmedFollowupDispatches(_session))
+                await _stateStore.SaveAsync(SessionId, _session);
+        }
         if (_session?.Status.PendingTranscriptEvidence?.Count > 0)
             EnsurePersistenceTimer();
     }
@@ -429,7 +436,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var pending = GetPendingFollowups(session);
         if (pending.Any(lease => !lease.Accepted))
-            throw new FollowupOperationInProgressException(session.Id);
+            throw new InvalidOperationException("A follow-up operation is already in progress.");
         if (session.Status.PendingStop is { } stop)
             throw new StopOperationInProgressException(session.Id, stop.TurnId);
         if (session.Status.Activity == AgentSessionActivity.Unknown)
@@ -506,6 +513,136 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         SetPendingFollowups(session, pending.Where(candidate => !string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal)).ToArray());
         await CommitAsync(session, []);
         await ReleaseFollowupConcurrencyPermitAsync(session, lease.ConcurrencyToken, lease.ConcurrencyAgentId);
+    }
+
+    public async Task<AgentSessionFollowupAcceptResult> AcceptFollowupAsync(AcceptFollowupCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (string.IsNullOrWhiteSpace(command.Text))
+            throw new ArgumentException("Text is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.Source))
+            throw new ArgumentException("Source is required.", nameof(command));
+
+        var session = await GetRequiredAsync();
+        EnsureRuntimeSessionPresent(session);
+        if (session.Status.PendingReset is { } recovery)
+        {
+            if (recovery.Outcome is null)
+                throw new RecoveryOperationInProgressException(session.Id, recovery.Command);
+            session.Status = session.Status with { PendingReset = null };
+        }
+
+        var pending = GetPendingFollowups(session);
+        if (pending.Any(lease => !lease.Accepted))
+            throw new InvalidOperationException("A follow-up operation is already in progress.");
+        if (session.Status.PendingStop is { } stop)
+            throw new StopOperationInProgressException(session.Id, stop.TurnId);
+        if (session.Status.Activity == AgentSessionActivity.Unknown)
+            throw new SessionActivityUnknownException(session.Id);
+
+        var key = string.IsNullOrWhiteSpace(command.IdempotencyKey)
+            ? Guid.NewGuid().ToString("N")
+            : command.IdempotencyKey;
+        var existing = session.FindFollowupInputByIdempotencyKey(key);
+        if (existing is not null)
+        {
+            var accepted = existing.Input;
+            if (!string.Equals(accepted.Text, command.Text, StringComparison.Ordinal)
+                || !string.Equals(accepted.Source, command.Source, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"AgentSession {session.Id} already has input '{accepted.Id}' with different content/source for idempotency key.");
+            }
+
+            var existingTurn = existing.Turn
+                ?? throw new InvalidOperationException(
+                    $"AgentSession {session.Id} accepted input '{accepted.Id}' has no assigned turn.");
+            await CommitAsync(session, Array.Empty<AgentSessionEvent>());
+            return new AgentSessionFollowupAcceptResult(
+                InputId: accepted.Id,
+                TurnId: existingTurn.Id,
+                OperationId: existing.OperationId ?? string.Empty,
+                AlreadyAccepted: true,
+                ShouldRedeliver: existingTurn.Status == AgentTurnStatus.Queued);
+        }
+
+        const int maxQueuedTurns = 16;
+        if (session.CountQueuedFollowupInputs() >= maxQueuedTurns)
+            throw new AgentSessionFollowupCapacityExceededException(session.Id, maxQueuedTurns);
+
+        var result = session.AcceptFollowup(
+            inputId: Guid.NewGuid().ToString("N"),
+            turnId: Guid.NewGuid().ToString("N"),
+            operationId: Guid.NewGuid().ToString("N"),
+            text: command.Text,
+            source: command.Source,
+            idempotencyKey: key,
+            now: Now());
+        await CommitAsync(session, Array.Empty<AgentSessionEvent>());
+        return result;
+    }
+
+    public async Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync()
+    {
+        var session = await GetRequiredAsync();
+        var turns = session.Status.Turns ?? [];
+        if (turns.Any(turn => turn.Status == AgentTurnStatus.Executing)) return null;
+        var leases = GetPendingFollowups(session).ToList();
+        var turn = turns.FirstOrDefault(turn => string.IsNullOrEmpty(turn.JobId) && turn.Status == AgentTurnStatus.Queued);
+        if (turn is null) return null;
+        var index = leases.FindIndex(lease => string.Equals(lease.TurnId, turn.Id, StringComparison.Ordinal));
+        if (index < 0 || leases[index].Dispatching) return null;
+        var inputs = (session.Status.Inputs ?? []).ToDictionary(input => input.Id, StringComparer.Ordinal);
+        var texts = turn.InputIds.Select(id => inputs[id].Text).ToArray();
+        leases[index] = leases[index] with { Dispatching = true, PayloadSealed = true };
+        SetPendingFollowups(session, leases);
+        await CommitAsync(session, []);
+        return new AgentSessionFollowupDispatch(turn.Id, leases[index].OperationId, texts);
+    }
+
+    public async Task ReleaseFollowupDispatchAsync(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId)) return;
+        var session = await GetRequiredAsync();
+        var leases = GetPendingFollowups(session).ToList();
+        var index = leases.FindIndex(lease => string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
+        if (index < 0 || !leases[index].Dispatching) return;
+        leases[index] = leases[index] with { Dispatching = false };
+        SetPendingFollowups(session, leases);
+        await CommitAsync(session, []);
+    }
+
+    public async Task MarkFollowupTurnExecutingAsync(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId))
+            return;
+        var session = await GetRequiredAsync();
+        var events = session.MarkFollowupTurnExecuting(operationId, Now());
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
+    public async Task MarkFollowupTurnTerminalAsync(
+        string operationId,
+        AgentTurnStatus status,
+        AgentTurnResult? result)
+    {
+        if (string.IsNullOrWhiteSpace(operationId))
+            return;
+        var session = await GetRequiredAsync();
+        var events = session.MarkFollowupTurnTerminal(operationId, status, result, Now());
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            return;
+        }
+        await CommitAsync(session, events);
     }
 
     private static SessionCommandRequest BuildSessionCommandRequest(
@@ -1054,19 +1191,38 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             events.AddRange(domainEvents);
             SettleStopClaimFromRuntimeEvent(session, e);
 
+            if (e.Type == RuntimeEventTypes.SessionInput)
+            {
+                var inputPayload = SafeDeserialize(e.PayloadJson);
+                var operationId = AgentSessionJsonHelper.GetStringProp(inputPayload, "operationId");
+                if (!string.IsNullOrWhiteSpace(operationId))
+                    events.AddRange(session.MarkFollowupTurnExecuting(operationId, now));
+            }
+
             if (e.Type == RuntimeEventTypes.SessionActivity)
             {
-                var activityPayload = JSON.DeserializeElement(e.PayloadJson);
-                if (ParseActivity(activityPayload) == AgentSessionActivity.Idle)
+                var activityPayload = SafeDeserialize(e.PayloadJson);
+                var activity = ParseActivity(activityPayload);
+                var operationId = AgentSessionJsonHelper.GetStringProp(activityPayload, "operationId");
+                if (!string.IsNullOrWhiteSpace(operationId)
+                    && (activity == AgentSessionActivity.Idle || activity == AgentSessionActivity.Unknown))
                 {
-                    var operationId = AgentSessionJsonHelper.GetStringProp(activityPayload, "operationId");
-                    if (!string.IsNullOrWhiteSpace(operationId))
+                    var pending = GetPendingFollowups(session);
+                    var clearing = pending.FirstOrDefault(lease =>
+                        string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
+                    if (clearing?.ConcurrencyToken is not null && clearing.ConcurrencyAgentId is not null)
+                        pendingConcurrencyReleases.Add((clearing.ConcurrencyToken, clearing.ConcurrencyAgentId));
+
+                    if (!string.IsNullOrWhiteSpace(clearing?.TurnId))
                     {
-                        var pending = GetPendingFollowups(session);
-                        var clearing = pending.FirstOrDefault(lease =>
-                            string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
-                        if (clearing?.ConcurrencyToken is not null && clearing.ConcurrencyAgentId is not null)
-                            pendingConcurrencyReleases.Add((clearing.ConcurrencyToken, clearing.ConcurrencyAgentId));
+                        events.AddRange(session.MarkFollowupTurnTerminal(
+                            operationId,
+                            ResolveFollowupTurnTerminalStatus(activityPayload),
+                            null,
+                            now));
+                    }
+                    else
+                    {
                         SetPendingFollowups(session, pending.Where(lease =>
                             !string.Equals(lease.OperationId, operationId, StringComparison.Ordinal)).ToArray());
                     }
@@ -1641,8 +1797,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         DateTime now)
     {
         var payload = JSON.DeserializeElement(runtimeEvent.PayloadJson);
+        var operationId = AgentSessionJsonHelper.GetStringProp(payload, "operationId");
         return runtimeEvent.Type switch
         {
+            RuntimeEventTypes.SessionInput when HasPendingFollowupOperation(session, operationId) => session.SetActivity(
+                session.Status.Activity == AgentSessionActivity.Unknown
+                    ? AgentSessionActivity.Unknown
+                    : AgentSessionActivity.Active,
+                now),
+            RuntimeEventTypes.SessionActivity when HasPendingFollowupOperation(session, operationId) => session.SetActivity(
+                ParseActivity(payload),
+                now),
             RuntimeEventTypes.SessionInput => DriveNonLaunchTurnLifecycle(session, runtimeEvent, now),
             RuntimeEventTypes.SessionActivity => DriveTerminalActivityLifecycle(session, runtimeEvent, payload, now),
             RuntimeEventTypes.SessionLiveness => session.RecordActivity(now),
@@ -1662,6 +1827,35 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel"),
                 now),
             _ => []
+        };
+    }
+
+    private static JsonElement SafeDeserialize(string payloadJson)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson))
+            return default;
+        try
+        {
+            return JSON.DeserializeElement(payloadJson);
+        }
+        catch
+        {
+            return default;
+        }
+    }
+
+    private static AgentTurnStatus ResolveFollowupTurnTerminalStatus(JsonElement payload)
+    {
+        var status = AgentSessionJsonHelper.GetStringProp(payload, "status")?.ToLowerInvariant();
+        var failureCategory = AgentSessionJsonHelper.GetStringProp(payload, "failureCategory");
+        return status switch
+        {
+            "failed" => AgentTurnStatus.Failed,
+            "cancelled" => AgentTurnStatus.Cancelled,
+            "unknown" => AgentTurnStatus.Unknown,
+            _ => string.Equals(failureCategory, "unknown", StringComparison.OrdinalIgnoreCase)
+                ? AgentTurnStatus.Unknown
+                : AgentTurnStatus.Completed,
         };
     }
 
@@ -1835,6 +2029,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             _ => AgentSessionActivity.Idle,
         };
 
+    private static bool HasPendingFollowupOperation(AgentSession session, string? operationId) =>
+        !string.IsNullOrWhiteSpace(operationId)
+        && GetPendingFollowups(session).Any(lease =>
+            string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
+
     public async Task<EnsureInitialLaunchResult> EnsureInitialLaunchAsync(EnsureInitialLaunchCommand command)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -1934,6 +2133,26 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await CommitAsync(session, events);
     }
 
+    private static bool ReclaimUnconfirmedFollowupDispatches(AgentSession session)
+    {
+        var leases = GetPendingFollowups(session).ToList();
+        var queuedTurnIds = (session.Status.Turns ?? [])
+            .Where(turn => turn.Status == AgentTurnStatus.Queued)
+            .Select(turn => turn.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        var changed = false;
+        for (var index = 0; index < leases.Count; index++)
+        {
+            if (!leases[index].Dispatching || !queuedTurnIds.Contains(leases[index].TurnId ?? string.Empty))
+                continue;
+            leases[index] = leases[index] with { Dispatching = false };
+            changed = true;
+        }
+        if (changed)
+            SetPendingFollowups(session, leases);
+        return changed;
+    }
+
     public async Task MarkInitialTurnTerminalAsync(string jobId, AgentTurnStatus status, AgentTurnResult? result)
     {
         if (string.IsNullOrWhiteSpace(jobId))
@@ -1944,9 +2163,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             await _stateStore.SaveAsync(SessionId, session);
             _session = session;
+            _followupDispatchScheduler?.Schedule(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+                session.Id);
             return;
         }
         await CommitAsync(session, events);
+        _followupDispatchScheduler?.Schedule(
+            session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+            session.Id);
     }
 
     public async Task RecordFollowupTurnAsync(RecordFollowupTurnCommand command)

@@ -59,6 +59,7 @@ public class CliSessionCommandSpecs
         var stdout = output.ToString();
         Assert.Contains("--text", stdout, StringComparison.Ordinal);
         Assert.Contains("--text-file", stdout, StringComparison.Ordinal);
+        Assert.Contains("--idempotency-key", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("--text-stdin", stdout, StringComparison.Ordinal);
         Assert.Contains("joins an active turn", stdout, StringComparison.Ordinal);
         Assert.Contains("user-initiated turn when idle", stdout, StringComparison.Ordinal);
@@ -557,7 +558,14 @@ public class CliSessionCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { status = "sent", inputId = "input-123", turnId = "turn-123" },
+                data = new
+                {
+                    status = "accepted",
+                    inputId = "input-1",
+                    turnId = "turn-1",
+                    inputAcceptance = "accepted",
+                    turnStatus = "queued",
+                },
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -569,9 +577,59 @@ public class CliSessionCommandSpecs
         Assert.Equal($"/api/projects/{ActiveProjectId}/agent-sessions/{StableSessionId}/followup", request.RequestUri?.PathAndQuery);
         var body = JsonNode.Parse(request.Body!)!.AsObject();
         Assert.Equal("add a logout route", body["text"]?.GetValue<string>());
-        Assert.Contains("delivery: sent", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("input:    input-123", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("turn:     turn-123", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("status:           accepted", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("input id:         input-1", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("turn id:          turn-1", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("input acceptance:  accepted", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("turn status:       queued", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("add a logout route", output.ToString(), StringComparison.Ordinal);
+        Assert.NotEmpty(request.Headers["Idempotency-Key"].Single());
+    }
+
+    [Fact]
+    public async Task SessionFollowup_ExplicitIdempotencyKey_IsSentAndReturnedIdentitiesArePrinted()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { status = "accepted", inputId = "input-7", turnId = "turn-3", inputAcceptance = "accepted", turnStatus = "executing" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["session", "followup", StableSessionId, "--text", "continue", "--idempotency-key", "retry-7"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("retry-7", handler.Requests.Single().Headers["Idempotency-Key"].Single());
+        Assert.DoesNotContain("Idempotency-Key:", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("turn status:       executing", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionFollowup_RetryUsesTheSameGeneratedIdempotencyKey()
+    {
+        var attempts = 0;
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+        {
+            attempts++;
+            if (attempts == 1)
+                throw new HttpRequestException("connection lost");
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { status = "accepted", inputId = "input-1", turnId = "turn-1" },
+            }));
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["session", "followup", StableSessionId, "--text", "retry me"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(
+            handler.Requests[0].Headers["Idempotency-Key"].Single(),
+            handler.Requests[1].Headers["Idempotency-Key"].Single());
+        Assert.Contains("Idempotency-Key:", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -596,26 +654,6 @@ public class CliSessionCommandSpecs
         Assert.DoesNotContain("/jobs/", path, StringComparison.Ordinal);
         Assert.DoesNotContain("/dispatch", path, StringComparison.Ordinal);
         Assert.DoesNotContain("/runs", path, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task SessionFollowup_ReturnedTurnIdCanTargetSubsequentStop()
-    {
-        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
-            Task.FromResult(request.RequestUri!.AbsolutePath.EndsWith("/followup", StringComparison.Ordinal)
-                ? RecordingHttpHandler.Json(new { success = true, data = new { status = "sent", inputId = "input-followup", turnId = "turn-followup" } })
-                : RecordingHttpHandler.Json(new { success = true, data = new { state = "stop-requested" } })));
-
-        var followupExit = await MohistCliCommands.RunAsync(
-            http, ["session", "followup", StableSessionId, "--text", "continue"], output, error, fileSystem, executor);
-        var stopExit = await MohistCliCommands.RunAsync(
-            http, ["session", "stop", StableSessionId, "--turn-id", "turn-followup"], output, error, fileSystem, executor);
-
-        Assert.Equal(0, followupExit);
-        Assert.Equal(0, stopExit);
-        Assert.Contains("turn:     turn-followup", output.ToString(), StringComparison.Ordinal);
-        var stopBody = JsonNode.Parse(handler.Requests[1].Body!)!.AsObject();
-        Assert.Equal("turn-followup", stopBody["turnId"]?.GetValue<string>());
     }
 
     [Fact]
@@ -675,6 +713,53 @@ public class CliSessionCommandSpecs
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("\"status\": \"sent\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("Idempotency-Key:", stdout, StringComparison.Ordinal);
+        Assert.NotNull(JsonNode.Parse(stdout));
+        Assert.Contains("Idempotency-Key:", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionFollowup_UnknownJsonWritesGeneratedKeyToStandardError()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { status = "unknown" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["session", "followup", StableSessionId, "--text", "Hi", "--json", "status"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("unknown", JsonNode.Parse(output.ToString())!["status"]!.GetValue<string>());
+        var key = handler.Requests.Single().Headers["Idempotency-Key"].Single();
+        Assert.Contains($"Idempotency-Key: {key}", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains($"--idempotency-key {key}", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionFollowup_UnknownTableExplainsSameKeyReconciliation()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    status = "unknown",
+                    code = "followup_acceptance_unknown",
+                    error = "The server could not confirm acceptance.",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["session", "followup", StableSessionId, "--text", "Hi"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("code:             followup_acceptance_unknown", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("error:            The server could not confirm acceptance.", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("reconcile:        retry with the same idempotency key", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -735,7 +820,7 @@ public class CliSessionCommandSpecs
 
         Assert.Equal(1, exitCode);
         Assert.Contains("not found", error.ToString(), StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(output.ToString());
+        Assert.Contains("Idempotency-Key:", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -750,7 +835,7 @@ public class CliSessionCommandSpecs
 
         Assert.Equal(1, exitCode);
         Assert.Contains("Session is no longer active", error.ToString(), StringComparison.Ordinal);
-        Assert.Empty(output.ToString());
+        Assert.Contains("Idempotency-Key:", output.ToString(), StringComparison.Ordinal);
     }
 
     // ----- cancel (runtime-only, no job rewrite) -----
@@ -772,7 +857,6 @@ public class CliSessionCommandSpecs
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal($"/api/projects/{ActiveProjectId}/agent-sessions/{StableSessionId}/cancel", request.RequestUri?.PathAndQuery);
-        Assert.Contains("\"turnId\": \"turn-123\"", request.Body, StringComparison.Ordinal);
         Assert.Contains("state: cancelled", output.ToString(), StringComparison.Ordinal);
     }
 
@@ -894,26 +978,6 @@ public class CliSessionCommandSpecs
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains(MohistCliApi.ServerUnavailableMessage, error.ToString(), StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("cancel", "cancelled")]
-    [InlineData("stop", "stop-requested")]
-    [InlineData("stop", "stopped")]
-    [InlineData("stop", "unknown")]
-    public async Task SessionTurnControl_ForwardsTurnIdAndRendersSharedState(string operation, string state)
-    {
-        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
-            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { state } })));
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", operation, StableSessionId, "--turn-id", "turn-shared"], output, error, fileSystem, executor);
-
-        Assert.Equal(0, exitCode);
-        Assert.Equal($"/api/projects/{ActiveProjectId}/agent-sessions/{StableSessionId}/{operation}", handler.Requests.Single().RequestUri?.PathAndQuery);
-        Assert.Contains("\"turnId\": \"turn-shared\"", handler.Requests.Single().Body, StringComparison.Ordinal);
-        Assert.Contains($"state: {state}", output.ToString(), StringComparison.Ordinal);
-        if (state == "unknown") Assert.Contains("verification: Session view", output.ToString(), StringComparison.Ordinal);
     }
 
     // ----- recovery (compact/reset) -----

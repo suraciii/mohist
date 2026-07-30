@@ -815,6 +815,412 @@ public static partial class AgentSessionExtensions
         }
 
         /// <summary>
+        /// Find the first accepted <see cref="AgentSessionInputRecord"/>
+        /// on this session whose stored idempotency key matches the
+        /// supplied value exactly. Returns <c>null</c> when no input
+        /// matches (the caller should treat the input as new and mint
+        /// fresh ids). The lookup does not restrict by acceptance:
+        /// any stored key on the agent-owned input list is considered,
+        /// so a retry after a terminal turn still resolves to the same
+        /// input identity.
+        /// </summary>
+        public AgentSessionFollowupInputLookup? FindFollowupInputByIdempotencyKey(string idempotencyKey)
+        {
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+                return null;
+            var inputs = session.Status.Inputs ?? [];
+            for (var i = 0; i < inputs.Count; i++)
+            {
+                var input = inputs[i];
+                if (string.Equals(input.IdempotencyKey, idempotencyKey, StringComparison.Ordinal))
+                {
+                    var turn = (session.Status.Turns ?? [])
+                        .FirstOrDefault(candidate => candidate.InputIds.Contains(input.Id, StringComparer.Ordinal));
+                    var lease = (session.Status.PendingFollowups ?? [])
+                        .FirstOrDefault(candidate => string.Equals(candidate.TurnId, turn?.Id, StringComparison.Ordinal));
+                    return new AgentSessionFollowupInputLookup(input, turn, lease?.OperationId);
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Find the non-terminal (queued or executing) follow-up turn
+        /// whose lease carries the supplied operationId, or
+        /// <c>null</c> when no such turn exists. Launch turns
+        /// (JobId != null) are excluded — those are owned by the
+        /// AgentJob and progress via the launch observers.
+        /// </summary>
+        public AgentTurnRecord? FindFollowupTurnByOperationId(string operationId)
+        {
+            if (string.IsNullOrWhiteSpace(operationId))
+                return null;
+            var lease = (session.Status.PendingFollowups ?? [])
+                .FirstOrDefault(candidate =>
+                    string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal)
+                    && !string.IsNullOrEmpty(candidate.TurnId));
+            if (lease is null || string.IsNullOrEmpty(lease.TurnId))
+                return null;
+            return (session.Status.Turns ?? [])
+                .FirstOrDefault(candidate =>
+                    string.Equals(candidate.Id, lease.TurnId, StringComparison.Ordinal)
+                    && string.IsNullOrEmpty(candidate.JobId)
+                    && candidate.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
+        }
+
+        /// <summary>
+        /// Count the number of non-terminal follow-up turns (queued
+        /// or executing) on this session. Launch turns are excluded.
+        /// </summary>
+        public int CountNonTerminalFollowupTurns()
+        {
+            return (session.Status.Turns ?? [])
+                .Count(turn => IsNonTerminalFollowupTurn(session, turn));
+        }
+
+        /// <summary>
+        /// True if at least one non-terminal follow-up turn exists
+        /// on the session. Used by the recovery-idle guard.
+        /// </summary>
+        public bool HasNonTerminalFollowupTurn() =>
+            (session.Status.Turns ?? []).Any(turn => IsNonTerminalFollowupTurn(session, turn));
+
+        /// <summary>
+        /// Count the number of accepted follow-up inputs assigned to a
+        /// non-terminal follow-up turn. Used by the capacity bound so
+        /// a session that fans many inputs into a small number of
+        /// turns still hits the cap (e.g. rapid double-sends that
+        /// join the same queued turn).
+        /// </summary>
+        public int CountQueuedFollowupInputs()
+        {
+            var nonTerminalTurns = (session.Status.Turns ?? [])
+                .Where(turn => IsNonTerminalFollowupTurn(session, turn))
+                .Select(turn => turn.Id)
+                .ToHashSet(StringComparer.Ordinal);
+            if (nonTerminalTurns.Count == 0)
+                return 0;
+
+            return (session.Status.Inputs ?? [])
+                .Count(input => input.JobId is null
+                    && input.Acceptance == AgentSessionInputAcceptance.Accepted
+                    && (session.Status.Turns ?? [])
+                        .Where(turn => nonTerminalTurns.Contains(turn.Id))
+                        .Any(turn => turn.InputIds.Contains(input.Id, StringComparer.Ordinal)));
+        }
+
+        private static bool IsNonTerminalFollowupTurn(AgentSession currentSession, AgentTurnRecord turn) =>
+            string.IsNullOrEmpty(turn.JobId)
+            && turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing
+            && (currentSession.Status.Inputs ?? [])
+                .Any(input => turn.InputIds.Contains(input.Id, StringComparer.Ordinal)
+                    && string.Equals(input.Source, "agent-session-followup", StringComparison.Ordinal));
+
+        /// <summary>
+        /// Synchronous follow-up accept transition. Persists a new
+        /// <see cref="AgentSessionInputRecord"/> (no JobId), assigns
+        /// it to an <see cref="AgentTurnRecord"/> per the turn-
+        /// assignment rule (idle/queued-turn joins, executing-turn
+        /// creates a new queued turn), and records an accepted
+        /// <see cref="AgentSessionFollowupLease"/> carrying the input
+        /// and turn ids. The transition is the source of truth for
+        /// three-valued follow-up availability: persistence is
+        /// synchronous so the caller can rely on the returned
+        /// <see cref="AgentSessionFollowupAcceptResult"/> identity
+        /// before dispatching to the runner.
+        /// </summary>
+        public AgentSessionFollowupAcceptResult AcceptFollowup(
+            string inputId,
+            string turnId,
+            string operationId,
+            string text,
+            string source,
+            string idempotencyKey,
+            DateTime now)
+        {
+            if (string.IsNullOrWhiteSpace(inputId))
+                throw new ArgumentException("Input id is required.", nameof(inputId));
+            if (string.IsNullOrWhiteSpace(turnId))
+                throw new ArgumentException("Turn id is required.", nameof(turnId));
+            if (string.IsNullOrWhiteSpace(operationId))
+                throw new ArgumentException("Operation id is required.", nameof(operationId));
+            if (string.IsNullOrWhiteSpace(text))
+                throw new ArgumentException("Text is required.", nameof(text));
+            if (string.IsNullOrWhiteSpace(source))
+                throw new ArgumentException("Source is required.", nameof(source));
+
+            var inputs = (session.Status.Inputs ?? []).ToList();
+            var turns = (session.Status.Turns ?? []).ToList();
+            var leases = (session.Status.PendingFollowups ?? []).ToList();
+
+            var existing = inputs
+                .Where(candidate => candidate.JobId is null
+                    && string.Equals(candidate.IdempotencyKey, idempotencyKey, StringComparison.Ordinal))
+                .FirstOrDefault();
+
+            if (existing is not null)
+            {
+                // Idempotent retry: cannot mutate an already-accepted
+                // input's identity (id, text, source must match).
+                if (!string.Equals(existing.Text, text, StringComparison.Ordinal)
+                    || !string.Equals(existing.Source, source, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"AgentSession {session.Id} already accepts idempotency key '{idempotencyKey}' with different content.");
+                }
+
+                var existingTurn = turns.FirstOrDefault(candidate =>
+                    candidate.InputIds.Contains(existing.Id, StringComparer.Ordinal));
+                if (existingTurn is null)
+                {
+                    throw new InvalidOperationException(
+                        $"AgentSession {session.Id} accepted input '{existing.Id}' has no assigned turn.");
+                }
+
+                var turnStillQueued = existingTurn.Status == AgentTurnStatus.Queued;
+                var existingLease = leases.FirstOrDefault(candidate =>
+                    string.Equals(candidate.TurnId, existingTurn.Id, StringComparison.Ordinal));
+                return new AgentSessionFollowupAcceptResult(
+                    InputId: existing.Id,
+                    TurnId: existingTurn.Id,
+                    OperationId: existingLease?.OperationId ?? operationId,
+                    AlreadyAccepted: true,
+                    ShouldRedeliver: turnStillQueued,
+                    InputAcceptance: existing.Acceptance,
+                    TurnStatus: existingTurn.Status);
+            }
+
+            var candidateTurn = ChooseFollowupTurnForAssignment(turns, leases);
+
+            var newInput = new AgentSessionInputRecord(
+                Id: inputId,
+                Sequence: inputs.Count + 1,
+                Text: text,
+                Source: source,
+                Acceptance: AgentSessionInputAcceptance.Accepted,
+                RecordedAt: now,
+                JobId: null,
+                IdempotencyKey: idempotencyKey);
+
+            AgentTurnRecord updatedTurn;
+            var createdNewTurn = false;
+            if (candidateTurn is null)
+            {
+                updatedTurn = new AgentTurnRecord(
+                    Id: turnId,
+                    Sequence: turns.Count + 1,
+                    InputIds: [inputId],
+                    Status: AgentTurnStatus.Queued,
+                    JobId: null,
+                    Result: null,
+                    RecordedAt: now,
+                    UpdatedAt: now);
+                createdNewTurn = true;
+            }
+            else
+            {
+                var inputIds = candidateTurn.InputIds.ToList();
+                inputIds.Add(inputId);
+                updatedTurn = candidateTurn with
+                {
+                    InputIds = inputIds,
+                    UpdatedAt = now,
+                };
+            }
+
+            if (!createdNewTurn)
+            {
+                var index = turns.FindIndex(candidate => candidate.Id == updatedTurn.Id);
+                turns[index] = updatedTurn;
+            }
+            else
+            {
+                turns.Add(updatedTurn);
+            }
+            inputs.Add(newInput);
+
+            var turnOperationId = operationId;
+            if (createdNewTurn)
+            {
+                leases.Add(new AgentSessionFollowupLease(
+                    OperationId: operationId,
+                    RuntimeSessionId: session.Status.AgentRuntimeSessionId ?? string.Empty,
+                    Accepted: true,
+                    AcceptedAt: now,
+                    StartedAt: now,
+                    InputId: inputId,
+                    TurnId: updatedTurn.Id));
+            }
+            else
+            {
+                turnOperationId = leases.First(candidate =>
+                    string.Equals(candidate.TurnId, updatedTurn.Id, StringComparison.Ordinal)).OperationId;
+            }
+
+            session.Status = session.Status with
+            {
+                Inputs = inputs,
+                Turns = turns,
+                PendingFollowup = null,
+                PendingFollowups = leases,
+                LastDataAt = now,
+                CurrentTurnEndedAt = null,
+            };
+
+            return new AgentSessionFollowupAcceptResult(
+                InputId: inputId,
+                TurnId: updatedTurn.Id,
+                OperationId: turnOperationId,
+                AlreadyAccepted: false,
+                ShouldRedeliver: true,
+                InputAcceptance: newInput.Acceptance,
+                TurnStatus: updatedTurn.Status);
+        }
+
+        /// <summary>
+        /// Resolve the follow-up turn an incoming input should be
+        /// assigned to. Returns the existing queued turn whose delivery
+        /// payload has not been claimed (joins the new input in submission
+        /// order), or <c>null</c> to signal that the caller must create a
+        /// new queued turn. A dispatching or executing turn does NOT match.
+        /// </summary>
+        private static AgentTurnRecord? ChooseFollowupTurnForAssignment(
+            IReadOnlyList<AgentTurnRecord> turns,
+            IReadOnlyList<AgentSessionFollowupLease> leases)
+        {
+            for (var i = turns.Count - 1; i >= 0; i--)
+            {
+                var candidate = turns[i];
+                if (!string.IsNullOrEmpty(candidate.JobId))
+                    continue;
+                if (candidate.Status != AgentTurnStatus.Queued)
+                    continue;
+                if (leases.Any(lease => string.Equals(lease.TurnId, candidate.Id, StringComparison.Ordinal)
+                    && lease.PayloadSealed))
+                    continue;
+                return candidate;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Mark the follow-up turn linked to the supplied
+        /// operationId as <see cref="AgentTurnStatus.Executing"/>.
+        /// No-op when no matching turn is found, when the turn is
+        /// already past executing, or when the lease is missing.
+        /// </summary>
+        public IReadOnlyList<AgentSessionEvent> MarkFollowupTurnExecuting(
+            string operationId,
+            DateTime now)
+        {
+            var leases = session.Status.PendingFollowups ?? [];
+            var lease = leases.FirstOrDefault(candidate =>
+                string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal));
+            if (lease is null || string.IsNullOrEmpty(lease.TurnId))
+                return [];
+
+            var turns = (session.Status.Turns ?? []).ToList();
+            var index = turns.FindIndex(candidate =>
+                string.Equals(candidate.Id, lease.TurnId, StringComparison.Ordinal));
+            if (index < 0)
+                return [];
+
+            if (turns[index].Status is AgentTurnStatus.Executing
+                or AgentTurnStatus.Completed
+                or AgentTurnStatus.Failed
+                or AgentTurnStatus.Cancelled)
+            {
+                return [];
+            }
+
+            turns[index] = turns[index] with
+            {
+                Status = AgentTurnStatus.Executing,
+                UpdatedAt = now,
+            };
+            session.Status = session.Status with
+            {
+                Turns = turns,
+                Activity = session.Status.Activity == AgentSessionActivity.Unknown
+                    ? AgentSessionActivity.Active
+                    : session.Status.Activity,
+                LastDataAt = now,
+                CurrentTurnEndedAt = null,
+            };
+            return [];
+        }
+
+        /// <summary>
+        /// Apply a terminal status to the follow-up turn linked to
+        /// the supplied operationId. The turn moves to Completed,
+        /// Failed, Unknown, or Cancelled; the matching lease is
+        /// cleared as part of the same transition so the per-turn
+        /// lease count drops to reflect the turn's terminal state.
+        /// </summary>
+        public IReadOnlyList<AgentSessionEvent> MarkFollowupTurnTerminal(
+            string operationId,
+            AgentTurnStatus status,
+            AgentTurnResult? result,
+            DateTime now)
+        {
+            var leases = (session.Status.PendingFollowups ?? []).ToList();
+            var leaseIndex = leases.FindIndex(candidate =>
+                string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal));
+            if (leaseIndex < 0)
+                return [];
+
+            var lease = leases[leaseIndex];
+            var turns = (session.Status.Turns ?? []).ToList();
+            var turnIndex = string.IsNullOrEmpty(lease.TurnId)
+                ? -1
+                : turns.FindIndex(candidate =>
+                    string.Equals(candidate.Id, lease.TurnId, StringComparison.Ordinal));
+
+            if (turnIndex >= 0)
+            {
+                var turn = turns[turnIndex];
+                if (turn.Status is not (AgentTurnStatus.Completed
+                    or AgentTurnStatus.Failed
+                    or AgentTurnStatus.Cancelled))
+                {
+                    turns[turnIndex] = turn with
+                    {
+                        Status = status,
+                        Result = result,
+                        UpdatedAt = now,
+                    };
+                }
+            }
+
+            var remainingLeases = leases
+                .Where((candidate, index) => index != leaseIndex)
+                .ToArray();
+            var remainingFollowupTurns = turns.Count(turn => IsNonTerminalFollowupTurn(session, turn));
+
+            session.Status = session.Status with
+            {
+                Turns = turnIndex >= 0 ? turns : session.Status.Turns,
+                PendingFollowup = remainingLeases.Length == 0 ? null : session.Status.PendingFollowup,
+                PendingFollowups = remainingLeases,
+                LastDataAt = now,
+                Activity = status switch
+                {
+                    AgentTurnStatus.Unknown => AgentSessionActivity.Unknown,
+                    _ => remainingFollowupTurns == 0
+                        ? AgentSessionActivity.Idle
+                        : session.Status.Activity,
+                },
+                CurrentTurnEndedAt = status is AgentTurnStatus.Completed
+                    or AgentTurnStatus.Failed
+                    or AgentTurnStatus.Cancelled
+                    or AgentTurnStatus.Unknown
+                    ? now
+                    : session.Status.CurrentTurnEndedAt,
+            };
+            return [];
+        }
+
+        /// <summary>
         /// Appends a thinned <see cref="ContextUsageHistoryEntry"/> to
         /// <paramref name="history"/>. Behaviour:
         /// <list type="bullet">

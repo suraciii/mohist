@@ -145,6 +145,23 @@ public sealed class FollowupOperationInProgressException : InvalidOperationExcep
 
 [Serializable]
 [GenerateSerializer]
+public sealed class AgentSessionFollowupCapacityExceededException : InvalidOperationException
+{
+    public AgentSessionFollowupCapacityExceededException(string sessionId, int capacity)
+        : base($"AgentSession {sessionId} has reached its follow-up capacity of {capacity} non-terminal turns; new follow-ups are rejected.")
+    {
+        SessionId = sessionId;
+        Capacity = capacity;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public int Capacity { get; }
+}
+
+[Serializable]
+[GenerateSerializer]
 public sealed class StopOperationInProgressException : InvalidOperationException
 {
     public StopOperationInProgressException(string sessionId, string turnId)
@@ -400,7 +417,51 @@ public sealed record AgentSessionFollowupLease(
     /// route back to the same per-agent gate as the launch path.
     /// Null when <see cref="ConcurrencyToken"/> is null.
     /// </summary>
-    [property: Id(6)] string? ConcurrencyAgentId = null);
+    [property: Id(6)] string? ConcurrencyAgentId = null,
+    [property: Id(7)] string? InputId = null,
+    [property: Id(8)] string? TurnId = null,
+    [property: Id(9)] bool Dispatching = false,
+    [property: Id(10)] bool PayloadSealed = false);
+
+/// <summary>
+/// Result of a single <see cref="AgentSessionExtensions.AcceptFollowup"/>
+/// transition. Stable input / turn / operation ids are returned
+/// synchronously; <see cref="AlreadyAccepted"/> indicates the
+/// request was an idempotent retry against an existing input;
+/// <see cref="ShouldRedeliver"/> is true when the call is the
+/// first identity-creating accept for a queued turn (or the
+/// retry was issued against a still-queued turn the runner
+/// has not yet started executing) — the caller should dispatch
+/// to the runner. When false the retry is identity-only and
+/// must NOT cause a second dispatch.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentSessionFollowupAcceptResult(
+    [property: Id(0)] string InputId,
+    [property: Id(1)] string TurnId,
+    [property: Id(2)] string OperationId,
+    [property: Id(3)] bool AlreadyAccepted,
+    [property: Id(4)] bool ShouldRedeliver,
+    [property: Id(5)] AgentSessionInputAcceptance InputAcceptance = AgentSessionInputAcceptance.Accepted,
+    [property: Id(6)] AgentTurnStatus TurnStatus = AgentTurnStatus.Queued);
+
+[GenerateSerializer]
+public sealed record AgentSessionFollowupDispatch(
+    [property: Id(0)] string TurnId,
+    [property: Id(1)] string OperationId,
+    [property: Id(2)] IReadOnlyList<string> InputTexts);
+
+/// <summary>
+/// Lookup result of <see cref="AgentSessionExtensions.FindFollowupInputByIdempotencyKey"/>.
+/// <see cref="Turn"/> is <c>null</c> when the input was never
+/// assigned to a turn (an edge that should not normally happen —
+/// the search is the gateway for idempotent retry, so the input
+/// is expected to be linked to a turn).
+/// </summary>
+public sealed record AgentSessionFollowupInputLookup(
+    AgentSessionInputRecord Input,
+    AgentTurnRecord? Turn,
+    string? OperationId = null);
 
 public sealed record AgentSessionTranscriptEvidence(
     string Id,
@@ -430,7 +491,8 @@ public sealed record AgentSessionInputRecord(
     [property: Id(3)] string Source,
     [property: Id(4)] AgentSessionInputAcceptance Acceptance,
     [property: Id(5)] DateTime RecordedAt,
-    [property: Id(6)] string? JobId = null);
+    [property: Id(6)] string? JobId = null,
+    [property: Id(7)] string? IdempotencyKey = null);
 
 public enum AgentSessionInputAcceptance
 {
