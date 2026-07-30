@@ -341,3 +341,4 @@
 - Credential rotation now validates the submitted App token with `apps.connections.open` and checks the returned Socket Mode `app_id` against the App resolved from the submitted Bot token before either secret is written.
 - Disabled Connections now reject adapter-session renewal. Outbox claiming includes an enabled-Connection predicate in its atomic state transition, so an adapter cannot claim a new reply after disable.
 - `SlackConnectionApiSpecs` exercises the mapped HTTP routes with a fake Slack client for invalid App-token rotation, disabled ingress and delivery claim, disabled adapter renewal, and diagnostics.
+- Web now exposes `/:projectName/connections/:connectionId`. Its Agent Connection entity API and TanStack Query hook fetch the diagnostic, while the page shows the primary state, reason, and one next action before expandable independent facts.
