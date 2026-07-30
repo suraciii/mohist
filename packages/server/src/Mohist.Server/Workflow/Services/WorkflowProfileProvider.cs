@@ -176,6 +176,90 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
             .AnyAsync(r => r.ProjectId == projectId && r.ProfileId == profileId, ct);
     }
 
+    public async Task<IReadOnlySet<string>> GetDisabledProfileIdsAsync(
+        string projectId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("projectId is required", nameof(projectId));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.ProjectWorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId, ct);
+        return row?.DisabledWorkflowProfileIds?.ToHashSet(WorkflowProfileCatalog.IdComparer)
+            ?? new HashSet<string>(WorkflowProfileCatalog.IdComparer);
+    }
+
+    public async Task SetProfileEnabledAsync(
+        string projectId, string profileId, bool enabled, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("projectId is required", nameof(projectId));
+        if (string.IsNullOrWhiteSpace(profileId))
+            throw new ArgumentException("profileId is required", nameof(profileId));
+
+        var canonicalProfileId = ResolveCanonicalBuiltInId(profileId);
+        if (canonicalProfileId is null)
+            throw new ArgumentException($"Unknown workflow profile '{profileId}'", nameof(profileId));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.ProjectWorkflowProfiles
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId, ct);
+
+        if (row is null)
+        {
+            if (enabled)
+                return;
+
+            if (WorkflowProfileCatalog.SystemProfileIds.Count <= 1)
+                throw new InvalidOperationException(
+                    $"Cannot disable '{profileId}': at least one workflow profile must remain enabled. " +
+                    "Enable a different profile first or leave the current profile enabled.");
+
+            row = new ProjectWorkflowProfile
+            {
+                ProjectId = projectId,
+                Variables = VariableBundle.Empty.ToJson(),
+                DisabledWorkflowProfileIds = [canonicalProfileId],
+                UpdatedAt = _timeProvider.GetUtcNow(),
+            };
+            db.ProjectWorkflowProfiles.Add(row);
+        }
+        else
+        {
+            var disabled = new HashSet<string>(row.DisabledWorkflowProfileIds, WorkflowProfileCatalog.IdComparer);
+
+            if (enabled)
+                disabled.Remove(canonicalProfileId);
+            else
+                disabled.Add(canonicalProfileId);
+
+            if (!enabled)
+            {
+                var enabledCount = WorkflowProfileCatalog.SystemProfileIds
+                    .Count(id => !disabled.Contains(id));
+                if (enabledCount == 0)
+                    throw new InvalidOperationException(
+                        $"Cannot disable '{profileId}': at least one workflow profile must remain enabled. " +
+                        "Enable a different profile first or leave the current profile enabled.");
+            }
+
+            row.DisabledWorkflowProfileIds = [..disabled];
+            row.UpdatedAt = _timeProvider.GetUtcNow();
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static string? ResolveCanonicalBuiltInId(string profileId)
+    {
+        foreach (var systemId in WorkflowProfileCatalog.SystemProfileIds)
+        {
+            if (WorkflowProfileCatalog.IdComparer.Equals(systemId, profileId))
+                return systemId;
+        }
+        return null;
+    }
+
     private async Task<WorkflowProfileSaveResult> CreateOrUpdateAsync(
         string projectId,
         WorkflowProfileCollectionEntry request,
