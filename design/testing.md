@@ -90,10 +90,17 @@ Web tests run with `isolate: false`: test files share a worker module registry a
 | Track | Per test | Per file |
 |---|---|---|
 | Unit | < 50ms | < 300 LOC |
-| Spec | < 500ms (hard cap 5s); collection ≤ 2min | < 800 LOC (C# 24KB ratchet: existing baseline files cannot grow; new over-budget files fail) |
+| Spec | < 500ms (hard cap 5s); collection ≤ 2min | < 800 LOC (C# ratchet: 24,000 bytes, ≈540 lines at this repo's density) |
 | Browser | separate `npm run test:browser`; never in default `npm test` | |
 
 Extract shared setup. One product ability = one test file. Migration splits: delete old file once equivalent coverage exists.
+
+The C# ratchet freezes files that are already over budget. Each carries an
+allowance in `spec-file-size-baseline.json` equal to its size rounded up to the
+next 1,000 bytes, so ordinary edits stay inside a bucket and a file that shrinks
+hands its slack back. Crossing a bucket needs a baseline edit in the same commit
+— that edit is the review gate. The way past the ratchet is to split the file
+along the behavior it specifies, never to compress formatting to fit.
 
 ### Repository CI time budget
 
@@ -137,6 +144,30 @@ Planned:
 - C# product deny-list expansion after direct `DateTime.UtcNow` / `DateTimeOffset.UtcNow` reads are migrated to `TimeProvider`.
 - ESLint: ban `child_process`, real `@microsoft/signalr` import in tests.
 - Migrate the remaining `TestWait` polling points (currently 28) to boundary signals incrementally.
+- Measure C# test file size in lines rather than bytes (below).
+
+### Planned: measure test file size in lines
+
+Bytes are a proxy for lines, and the proxy leaks. It taxes the descriptive test
+names this repo asks for, charges triple for non-ASCII comments, and lands ~35%
+stricter than the 800-LOC budget it stands in for. Renaming a method can break
+the build while the file gets no longer.
+
+Target: budget physical lines, threshold 550. That holds the guarded set where
+it is (40 files exceed 550 lines; 36 exceed 24,000 bytes) instead of loosening
+it — the documented 800 was never what ran, and only 8 files reach it.
+
+A maximum line length ships in the same change, not as a follow-up. Line count
+is easier to game than byte count: collapsing statements onto one line lowers it
+directly, so the budget is unsound without a companion cap. At 200 characters
+163 of the repo's 153,363 test lines need splitting; at 250, 48 do.
+
+Bucket-and-equality allowances carry over unchanged; only the unit and the
+threshold move.
+
+Out of scope: per-track thresholds. The table above sets Unit < 300 LOC and Spec
+< 800 LOC, but one threshold covers every test project. Separating them moves
+~30 UnitTests files at once and is its own decision.
 
 ## Fake quick reference
 
