@@ -6,6 +6,7 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Orleans;
 using Orleans.Core.Internal;
+using Orleans.Runtime;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
@@ -85,7 +86,12 @@ public class AgentSessionFollowupConcurrencySpecs
 
         // Saturate the gate with one permit from a separate (launch-shaped)
         // caller. The follow-up path must be subject to the same authority.
-        var existing = await gate.AcquireAsync(projectId, agentId, "launch:job-1", "job-1");
+        var existing = await gate.AcquireAsync(
+            projectId,
+            agentId,
+            "launch:job-1",
+            "job-1",
+            AgentConcurrencyPermitOwnerKind.Job);
         Assert.Equal(AgentConcurrencyAcquireResult.Granted, existing);
         Assert.Equal(1, await gate.GetActiveCountAsync());
 
@@ -141,7 +147,12 @@ public class AgentSessionFollowupConcurrencySpecs
         // a second one — the busy-session path is unaffected in both
         // directions: the gate is not acquired, and the gate being at the
         // limit does not produce a concurrency-limit rejection.
-        await gate.AcquireAsync(projectId, agentId, "launch:busy", "job-busy");
+        await gate.AcquireAsync(
+            projectId,
+            agentId,
+            "launch:busy",
+            "job-busy",
+            AgentConcurrencyPermitOwnerKind.Job);
         Assert.Equal(1, await gate.GetActiveCountAsync());
 
         await session.AbandonFollowupAsync(reservation.OperationId!);
@@ -186,6 +197,26 @@ public class AgentSessionFollowupConcurrencySpecs
     }
 
     [Fact]
+    public async Task BeginFollowupAsync_ActiveLease_SurvivesConcurrencyReconciliation()
+    {
+        var projectId = $"followup-{Guid.NewGuid():N}";
+        var agentId = $"agent-{Guid.NewGuid():N}";
+        await _fixture.SeedAgentAsync(projectId, agentId, maxConcurrentRuns: 1);
+        var session = await _fixture.OpenGenericAgentSessionAsync(projectId, agentId);
+        var gate = Gate(projectId, agentId);
+
+        var reservation = await session.BeginFollowupAsync();
+        Assert.True(reservation.ConcurrencyPermitHeld);
+
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        await gate.ReceiveReminder(
+            "agent-concurrency-reconciliation",
+            new TickStatus(now, TimeSpan.FromSeconds(30), now));
+
+        Assert.Equal(1, await gate.GetActiveCountAsync());
+    }
+
+    [Fact]
     public async Task BeginFollowupAsync_AbandonLease_ReleasesPermit()
     {
         var projectId = $"followup-{Guid.NewGuid():N}";
@@ -215,7 +246,12 @@ public class AgentSessionFollowupConcurrencySpecs
         // follow-up path. Saturate with one launch-shaped permit and one
         // follow-up-shaped permit; the third attempt (a follow-up) must be
         // rejected at the limit.
-        var launchReservation = await gate.AcquireAsync(projectId, agentId, "launch:job-1", "job-1");
+        var launchReservation = await gate.AcquireAsync(
+            projectId,
+            agentId,
+            "launch:job-1",
+            "job-1",
+            AgentConcurrencyPermitOwnerKind.Job);
         Assert.Equal(AgentConcurrencyAcquireResult.Granted, launchReservation);
 
         var session = await _fixture.OpenGenericAgentSessionAsync(projectId, agentId);

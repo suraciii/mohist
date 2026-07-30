@@ -531,7 +531,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var token = $"followup:{session.Id}:{operationId}";
         var gate = _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
-        var result = await gate.AcquireAsync(projectId, agentId, token, session.Id);
+        var result = await gate.AcquireAsync(
+            projectId,
+            agentId,
+            token,
+            session.Id,
+            AgentConcurrencyPermitOwnerKind.Followup);
         if (result == AgentConcurrencyAcquireResult.Waiting)
         {
             // v1 deliberately rejects rather than queues a follow-up at

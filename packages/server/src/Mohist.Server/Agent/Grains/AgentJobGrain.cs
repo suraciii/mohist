@@ -1009,6 +1009,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 return;
             if (State.RunnerId is not null)
             {
+                await ReleaseConcurrencyPermitAsync();
                 await ScheduleNextDispatchAsync();
                 return;
             }
@@ -1019,6 +1020,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var runners = await registry.ListEligibleRunnersAsync(projectId);
         if (runners.Count == 0)
         {
+            await ReleaseConcurrencyPermitAsync();
             await ScheduleNextDispatchAsync();
             return;
         }
@@ -1031,6 +1033,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 return;
         }
 
+        await ReleaseConcurrencyPermitAsync();
         await ScheduleNextDispatchAsync();
     }
 
@@ -1048,7 +1051,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         var token = State.ConcurrencyPermitToken ??= $"{Key}:execution";
         var gate = _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
-        var result = await gate.AcquireAsync(projectId, agentId, token, Key);
+        var result = await gate.AcquireAsync(
+            projectId,
+            agentId,
+            token,
+            Key,
+            AgentConcurrencyPermitOwnerKind.Job);
         if (result == AgentConcurrencyAcquireResult.Waiting)
         {
             await SaveAsync();

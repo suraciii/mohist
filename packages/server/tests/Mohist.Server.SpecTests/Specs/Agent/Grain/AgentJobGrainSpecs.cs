@@ -9,9 +9,11 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Orleans;
+using Orleans.Runtime;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
@@ -185,6 +187,45 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             TimeSpan.FromMilliseconds(25),
             "job stays pending past first attempt");
         Assert.Equal(AgentJobStatus.Pending, stillPending);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_NoEligibleRunner_DoesNotCountPendingJobAgainstConcurrencyLimit()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+        var projectId = $"agent-job-missing-project-{Guid.NewGuid():N}";
+        await _fixture.SeedAgentAsync(projectId, "agent-test", maxConcurrentRuns: 1);
+        var job = JobGrain($"agent-job-no-runner-limit-{Guid.NewGuid():N}");
+
+        await job.SubmitAsync(MakeInput("no runner", projectId));
+
+        var gate = Grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, "agent-test"));
+        Assert.Equal(0, await gate.GetActiveCountAsync());
+    }
+
+    [Fact]
+    public async Task RunningJob_PermitSurvivesConcurrencyReconciliation()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-reconcile-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-test", maxConcurrentRuns: 1);
+        var jobKey = $"agent-job-reconcile-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        await job.SubmitAsync(MakeInput("running", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        var gate = Grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, "agent-test"));
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        await gate.ReceiveReminder(
+            "agent-concurrency-reconciliation",
+            new TickStatus(now, TimeSpan.FromSeconds(30), now));
+
+        Assert.Equal(1, await gate.GetActiveCountAsync());
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        await Grains.GetGrain<IRunnerGrain>(runnerId).ReportAgentJobResultAsync(
+            jobKey,
+            snapshot.CurrentWorkId!,
+            new WorkResult("completed"));
     }
 
     [Fact]

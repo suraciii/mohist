@@ -75,7 +75,8 @@ public sealed class AgentAvailabilityService : IScopedService
             .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
             .GetWaitersAsync();
         var concurrencyJobs = waiters
-            .Select(waiter => waiter.JobId)
+            .Where(waiter => waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
+            .Select(waiter => waiter.OwnerId)
             .ToHashSet(StringComparer.Ordinal);
 
         var pending = await _jobs.ListByAgentAsync(

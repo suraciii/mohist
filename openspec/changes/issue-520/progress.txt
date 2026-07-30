@@ -51,3 +51,10 @@
 - `mo agent view` now does two requests: the agent (which now includes readiness) and the per-agent status endpoint, then renders a Readiness section, the Availability conclusion, and the waiting-work list. Clients no longer derive any second readiness/availability verdict.
 - Server `AgentQuerier.GetByNameAsync` and `ListAsync` now hydrate readiness on every read (matching `GetByIdAsync`) so list/get-by-name paths also expose the Server's Readiness verdict.
 - New CLI tests cover `mo agent view` readiness gap + setup rendering, availability + waiting-work rendering, and `mo agent launch` 409 needs-setup gap output. Existing CLI agent suite (1446 tests) and the full web suite (5164 tests) continue to pass with `-p:SkipWebBuild=true`.
+
+## Review Fixes
+
+- Concurrency permits now retain their Job or follow-up Session owner. Reconciliation verifies each persisted permit against the mirrored AgentJob state or the persisted Session lease before pruning it, so a running execution is no longer discarded as an orphan.
+- A launch that cannot obtain a Runner or slot now releases its permit before entering dispatch backoff. Pending work therefore does not inflate `activeRuns` or turn a runner/capacity wait into a per-Agent concurrency wait.
+- Added Spec coverage for a running Job and an active follow-up lease surviving reconciliation, plus a no-Runner launch under a finite per-Agent limit leaving no active permit.
+- Focused SpecTests command did not accept the legacy VSTest filter under Microsoft.Testing.Platform and ran the full collection; a repeat full SpecTests run passed (3333 tests).

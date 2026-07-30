@@ -1,4 +1,6 @@
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Sessions.Services;
 using Orleans.Runtime;
 
 namespace Mohist.Server.Agent.Grains;
@@ -11,15 +13,21 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
 
     private readonly IPersistentState<AgentConcurrencyState> _state;
     private readonly AgentQuerier _agents;
+    private readonly AgentJobQuerier _jobs;
+    private readonly IAgentSessionStore _sessions;
     private readonly IGrainFactory _grains;
 
     public AgentConcurrencyGrain(
         [PersistentState("agent-concurrency")] IPersistentState<AgentConcurrencyState> state,
         AgentQuerier agents,
+        AgentJobQuerier jobs,
+        IAgentSessionStore sessions,
         IGrainFactory grains)
     {
         _state = state;
         _agents = agents;
+        _jobs = jobs;
+        _sessions = sessions;
         _grains = grains;
     }
 
@@ -37,39 +45,32 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
         string projectId,
         string agentId,
         string token,
-        string jobId)
+        string ownerId,
+        AgentConcurrencyPermitOwnerKind ownerKind)
     {
         if (string.IsNullOrWhiteSpace(token))
             throw new ArgumentException("Token is required.", nameof(token));
-        if (string.IsNullOrWhiteSpace(jobId))
-            throw new ArgumentException("Job id is required.", nameof(jobId));
+        if (string.IsNullOrWhiteSpace(ownerId))
+            throw new ArgumentException("Owner id is required.", nameof(ownerId));
 
         var limit = await ReadLimitAsync(projectId, agentId);
 
-        // Issue-520 T-001 D3 / T-002: a null MaxConcurrentRuns means
-        // there is no per-agent bound (agent-concurrency spec, "Unset
-        // limit imposes no per-agent bound"). The gate returns Granted
-        // immediately and does not track the token — both because no
-        // bound applies and because there is no Release that needs to
-        // be matched. The caller (AgentJobGrain, AgentSessionGrain) still
-        // records its own "permit held" view so the standard
-        // acquire/release contract is symmetric.
         if (limit is null)
             return AgentConcurrencyAcquireResult.Granted;
 
-        if (_state.State.ActiveTokens.Contains(token, StringComparer.Ordinal))
+        if (_state.State.ActivePermits.Any(permit => string.Equals(permit.Token, token, StringComparison.Ordinal)))
             return AgentConcurrencyAcquireResult.Granted;
         if (_state.State.Waiters.Any(waiter => string.Equals(waiter.Token, token, StringComparison.Ordinal)))
             return AgentConcurrencyAcquireResult.Waiting;
 
-        if (_state.State.ActiveTokens.Count < limit.Value)
+        if (_state.State.ActivePermits.Count < limit.Value)
         {
-            _state.State.ActiveTokens.Add(token);
+            _state.State.ActivePermits.Add(new AgentConcurrencyPermit(token, ownerId, ownerKind));
             await _state.WriteStateAsync();
             return AgentConcurrencyAcquireResult.Granted;
         }
 
-        _state.State.Waiters.Add(new AgentConcurrencyWaiter(token, jobId));
+        _state.State.Waiters.Add(new AgentConcurrencyWaiter(token, ownerId, ownerKind));
         await _state.WriteStateAsync();
         return AgentConcurrencyAcquireResult.Waiting;
     }
@@ -77,12 +78,10 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
     public async Task ReleaseAsync(string projectId, string agentId, string token)
     {
         var limit = await ReadLimitAsync(projectId, agentId);
-        // Same null-limit shortcut as AcquireAsync: nothing was tracked,
-        // nothing to release, nothing to grant.
         if (limit is null)
             return;
 
-        _state.State.ActiveTokens.RemoveAll(value => string.Equals(value, token, StringComparison.Ordinal));
+        _state.State.ActivePermits.RemoveAll(permit => string.Equals(permit.Token, token, StringComparison.Ordinal));
         _state.State.Waiters.RemoveAll(waiter => string.Equals(waiter.Token, token, StringComparison.Ordinal));
         await GrantWaitersAsync(projectId, agentId);
         await _state.WriteStateAsync();
@@ -90,15 +89,15 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
 
     public async Task ReconcileAsync(string projectId, string agentId, IReadOnlySet<string> activeTokens)
     {
-        _state.State.ActiveTokens.RemoveAll(token => !activeTokens.Contains(token));
+        _state.State.ActivePermits.RemoveAll(permit => !activeTokens.Contains(permit.Token));
         await GrantWaitersAsync(projectId, agentId);
         await _state.WriteStateAsync();
     }
 
-    public Task<int> GetActiveCountAsync() => Task.FromResult(_state.State.ActiveTokens.Count);
+    public Task<int> GetActiveCountAsync() => Task.FromResult(_state.State.ActivePermits.Count);
 
     public Task<IReadOnlyList<string>> GetActiveTokensAsync() =>
-        Task.FromResult<IReadOnlyList<string>>(_state.State.ActiveTokens.ToArray());
+        Task.FromResult<IReadOnlyList<string>>(_state.State.ActivePermits.Select(permit => permit.Token).ToArray());
 
     public Task<IReadOnlyList<AgentConcurrencyWaiter>> GetWaitersAsync() =>
         Task.FromResult<IReadOnlyList<AgentConcurrencyWaiter>>(_state.State.Waiters.ToArray());
@@ -113,14 +112,15 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
     {
         var limit = await ReadLimitAsync(projectId, agentId);
         while (_state.State.Waiters.Count > 0
-            && (limit is null || _state.State.ActiveTokens.Count < limit.Value))
+            && (limit is null || _state.State.ActivePermits.Count < limit.Value))
         {
             var waiter = _state.State.Waiters[0];
             _state.State.Waiters.RemoveAt(0);
-            if (_state.State.ActiveTokens.Contains(waiter.Token, StringComparer.Ordinal))
+            if (_state.State.ActivePermits.Any(permit => string.Equals(permit.Token, waiter.Token, StringComparison.Ordinal)))
                 continue;
-            _state.State.ActiveTokens.Add(waiter.Token);
-            _ = NotifyWaiterAsync(waiter.JobId);
+            _state.State.ActivePermits.Add(new AgentConcurrencyPermit(waiter.Token, waiter.OwnerId, waiter.OwnerKind));
+            if (waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
+                _ = NotifyWaiterAsync(waiter.OwnerId);
         }
     }
 
@@ -147,7 +147,32 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
         if (parts.Length != 2)
             return;
         var active = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var permit in _state.State.ActivePermits)
+        {
+            if (await IsPermitActiveAsync(parts[0], parts[1], permit))
+                active.Add(permit.Token);
+        }
         await ReconcileAsync(parts[0], parts[1], active);
+    }
+
+    private async Task<bool> IsPermitActiveAsync(
+        string projectId,
+        string agentId,
+        AgentConcurrencyPermit permit)
+    {
+        if (permit.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
+            return await _jobs.HoldsConcurrencyPermitAsync(permit.OwnerId, permit.Token);
+
+        var session = await _sessions.LoadAsync(permit.OwnerId);
+        if (session is null
+            || !string.Equals(session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
+            || !string.Equals(session.Metadata.Label(GenericAgentSessionMetadata.AgentId), agentId, StringComparison.Ordinal))
+            return false;
+
+        var leases = session.Status.PendingFollowups is { Count: > 0 }
+            ? session.Status.PendingFollowups
+            : session.Status.PendingFollowup is null ? [] : [session.Status.PendingFollowup];
+        return leases.Any(lease => string.Equals(lease.ConcurrencyToken, permit.Token, StringComparison.Ordinal));
     }
 
     private Task EnsureReminderAsync() => this.RegisterOrUpdateReminder(

@@ -134,6 +134,7 @@ public sealed class AgentSessionFollowupConcurrencyFixture : IAsyncLifetime
                 sp.GetRequiredService<RunnerConnectionTracker>());
             siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
             siloBuilder.Services.AddScoped<AgentQuerier>();
+            siloBuilder.Services.AddScoped<AgentJobQuerier>();
         });
         Cluster = builder.Build();
         return new ValueTask(Cluster.DeployAsync());
