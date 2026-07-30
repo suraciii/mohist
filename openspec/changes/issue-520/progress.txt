@@ -58,3 +58,5 @@
 - A launch that cannot obtain a Runner or slot now releases its permit before entering dispatch backoff. Pending work therefore does not inflate `activeRuns` or turn a runner/capacity wait into a per-Agent concurrency wait.
 - Added Spec coverage for a running Job and an active follow-up lease surviving reconciliation, plus a no-Runner launch under a finite per-Agent limit leaving no active permit.
 - Focused SpecTests command did not accept the legacy VSTest filter under Microsoft.Testing.Platform and ran the full collection; a repeat full SpecTests run passed (3333 tests).
+- Readiness setup responses now return the concrete Agent detail path (`/agents/{agentId}`), which is the existing profile edit surface. Both Web entry points render that path as a project-scoped link; the readiness unit test asserts the concrete response.
+- Split Agent detail readiness/availability coverage into its own 5-test file. The original file is below the 500-line budget, `check:test-boundaries` passes, and the Web suite passes (5162 passed, 1 skipped).

@@ -375,7 +375,7 @@ export function AgentSessionComposerPage({
               ) : null}
               {selectedReadiness?.setup && (
                 <p className="text-red-700/80">
-                  Fix in <span className="font-semibold">{selectedReadiness.setup.label}</span> ({selectedReadiness.setup.path}).
+                  Fix in <a className="font-semibold underline" href={toProjectPath(selectedReadiness.setup.path)}>{selectedReadiness.setup.label}</a>.
                 </p>
               )}
             </div>

@@ -39,7 +39,7 @@ public sealed class AgentReadinessServiceTests
         Assert.Contains(result.Gaps, gap => gap.Code == "model-reference-malformed");
         Assert.DoesNotContain(result.Gaps, gap => gap.Code == "variant-without-model");
         Assert.NotNull(result.Setup);
-        Assert.StartsWith("/agents/", result.Setup!.Path, StringComparison.Ordinal);
+        Assert.Equal("/agents/agent-1", result.Setup!.Path);
     }
 
     [Fact]

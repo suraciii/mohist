@@ -120,7 +120,13 @@ function describeWaitingReason(reason: string | null | undefined): string {
   }
 }
 
-function ReadinessCard({ readiness }: { readiness: AgentReadinessResult | undefined }) {
+function ReadinessCard({
+  readiness,
+  toProjectPath,
+}: {
+  readiness: AgentReadinessResult | undefined
+  toProjectPath: (path: string) => string
+}) {
   const conclusion = readiness?.conclusion ?? 'Unknown'
   const gaps = readiness?.gaps ?? []
   const setup = readiness?.setup ?? null
@@ -165,7 +171,7 @@ function ReadinessCard({ readiness }: { readiness: AgentReadinessResult | undefi
       )}
       {conclusion === 'Needs setup' && setup && (
         <p data-testid="agent-detail-readiness-setup" className="text-xs text-muted-foreground">
-          Fix in <span className="font-medium text-foreground">{setup.label}</span> ({setup.path}).
+          Fix in <a className="font-medium text-foreground underline" href={toProjectPath(setup.path)}>{setup.label}</a>.
         </p>
       )}
       {conclusion === 'Unknown' && (
@@ -450,7 +456,7 @@ export function AgentDetailPage({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-6">
-            <ReadinessCard readiness={readiness ?? undefined} />
+            <ReadinessCard readiness={readiness ?? undefined} toProjectPath={toProjectPath} />
 
             {!launchBlockedByReadiness && isUnknownReadiness && (
               <p

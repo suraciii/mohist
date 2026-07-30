@@ -39,7 +39,6 @@ public sealed class AgentReadinessException : Exception
 
 public sealed class AgentReadinessService : IScopedService
 {
-    private static readonly AgentReadinessSetup Setup = new("Agent settings", "/agents/{agentId}/settings");
     private readonly AgentJobQuerier _jobs;
 
     public AgentReadinessService(AgentJobQuerier jobs) => _jobs = jobs;
@@ -47,18 +46,18 @@ public sealed class AgentReadinessService : IScopedService
     public async Task<AgentReadinessResult> GetAsync(string projectId, AgentInfo agent, CancellationToken ct = default)
     {
         var structuralGaps = StructuralGaps(agent);
-        if (structuralGaps.Count > 0) return NeedsSetup(structuralGaps);
+        if (structuralGaps.Count > 0) return NeedsSetup(agent, structuralGaps);
         return Evaluate(agent, await _jobs.GetLatestExecutionAsync(projectId, agent.Id, ct));
     }
 
     public static AgentReadinessResult Evaluate(AgentInfo agent, AgentExecutionHistory? history)
     {
         var structuralGaps = StructuralGaps(agent);
-        if (structuralGaps.Count > 0) return NeedsSetup(structuralGaps);
+        if (structuralGaps.Count > 0) return NeedsSetup(agent, structuralGaps);
         if (history is null || !MatchesCurrentDefinition(agent, history.Input)) return Unknown();
         if (history.Status == AgentJobStatus.Completed) return Ready();
         return history.Status == AgentJobStatus.Failed && IsConfigurationFailure(history.FailureCategory)
-            ? NeedsSetup([new AgentReadinessGap("execution-config-failure", DescribeConfigurationFailure(history.FailureCategory), "Update the Agent settings and run it again.")])
+            ? NeedsSetup(agent, [new AgentReadinessGap("execution-config-failure", DescribeConfigurationFailure(history.FailureCategory), "Update the Agent settings and run it again.")])
             : Unknown();
     }
 
@@ -113,5 +112,8 @@ public sealed class AgentReadinessService : IScopedService
 
     private static AgentReadinessResult Ready() => new(AgentReadinessConclusions.Ready, [], null);
     private static AgentReadinessResult Unknown() => new(AgentReadinessConclusions.Unknown, [], null);
-    private static AgentReadinessResult NeedsSetup(IReadOnlyList<AgentReadinessGap> gaps) => new(AgentReadinessConclusions.NeedsSetup, gaps, Setup);
+    private static AgentReadinessResult NeedsSetup(AgentInfo agent, IReadOnlyList<AgentReadinessGap> gaps) => new(
+        AgentReadinessConclusions.NeedsSetup,
+        gaps,
+        new AgentReadinessSetup("Agent settings", $"/agents/{agent.Id}"));
 }
