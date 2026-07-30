@@ -199,3 +199,96 @@
   senders (theory cases). Introduced `UsersInfoResponse` as a
   `Func<string, SlackUserInfoResponse>?` on the fake alongside the existing
   single-shot `UsersInfo` property.
+
+## Issue 517 — T-003 (Enable/Disable lifecycle control and delete-boundary wording)
+
+### Implementation notes
+
+- **`POST /{connectionId}/disable`** and **`POST /{connectionId}/enable`** — both
+  mirror each other: load connection → if already in target `DesiredState`,
+  return current connection (idempotent) → otherwise `UpdateAsync(...,
+  desiredState: target)`. The `fields` set contains only `"desiredState"`, so
+  credentials, Owner, `SetupProgress`, `ConnectionHealth`, `HealthReason`,
+  `AgentReadiness`, and `LastHeartbeatAt` are untouched. The `404` branch
+  covers both "connection does not exist" and "UpdateAsync returned null".
+
+- **Ingress DesiredState guard** — sits immediately after the
+  `connections.GetAsync(...)` load and before the `IsDirectMessage` /
+  workspace-mismatch / `HandleInboundDmAsync` / dispatch / inbox / launcher
+  path. Returns `ApiResults.Ok(new { kind = "rejected", reason = "This
+  Connection is disabled." })` so the adapter acks Slack with HTTP 200 and
+  no inbox entry is created. This is the same non-error rejection shape used
+  for non-owner DMs and empty prompts — keeps the adapter ack semantics
+  uniform.
+
+- **`DELETE /{connectionId}` response body** — now wraps the deleted
+  connection plus a `slackAppRemovalNote` field stating that Mohist-side
+  records were removed and the Slack App remains installed on the workspace
+  until a workspace admin uninstalls it manually. The CLI `delete` command
+  already pipes the response body through `PrintResponseAsync` →
+  `data.ToJsonString()`, so the note reaches the operator's terminal without
+  further CLI changes. The cascade itself is unchanged — `DeleteAsync` only
+  soft-deletes the `AgentConnections` row, deletes the two Slack secrets,
+  and runs `IAgentConnectionProviderCleanup` for inbox/outbox/claim codes.
+
+### Codebase patterns
+
+- The "disable/enable routes + ingress guard" change is small enough that the
+  tests reuse the established `SlackConnectionRotateCredentialsSpecs` /
+  `SlackOwnerTransferSpecs` pattern (direct `AgentConnectionStore` +
+  `RecordingSlackApiClient` + `TestSqliteDatabase`, with route lambda body
+  mirrored inline via `RunDisableAsync` / `RunEnableAsync` /
+  `RunIngressGuardAsync` / `RunDeleteAsync` helpers). Avoids standing up a
+  full Web host; the 19 lifecycle tests run in ~2 seconds.
+
+- `AgentJobRow.Status` / `ProjectId` / `AgentId` / `SubmittedAt` are computed
+  columns projected from `State` JSON via `json_extract`. Inserting a
+  pre-`executing` AgentJob in tests therefore requires a `State` payload
+  with `input.projectId` / `input.agentId` / `status` fields populated — the
+  bare `State = "{}"` leaves the computed columns NULL. (The test now sets
+  `State` to a small JSON literal; this is a test-only pattern, not a
+  production code path.)
+
+### Test coverage (19 tests in `SlackConnectionLifecycleSpecs`)
+
+- Disable/enable semantics (5): Disable flips DesiredState; Enable flips it
+  back; both are idempotent and report no time advancement; Disable and
+  Enable leave credentials / Owner / SetupProgress / Health / HealthReason
+  / WorkspaceTeamId / AppId / BotUserId untouched.
+- Disable ≠ Degraded independence (2): a Disabled connection with healthy
+  Slack reports `Disabled + Healthy`; a `Degraded(backpressured)` connection
+  with Enabled DesiredState reports `Degraded + Enabled`. The two facts are
+  stored and surfaced independently.
+- Ingress guard (4): Disabled ingress returns `{kind:"rejected", reason:"…"}`
+  at HTTP 200; Enabled ingress is not blocked; no inbox entry is created on
+  the Disabled path; the guard fires before any claim/owner check (verified
+  with `OwnerSlackUserId == null` + `SetupProgress == ClaimOwner` — the
+  upstream branch is skipped).
+- No-replay on enable (1): messages that arrived while Disabled leave zero
+  inbox rows after Enable (the guard rejected them inline).
+- Accepted-work preservation (2): `AgentJob` + `AgentSession` rows inserted
+  before Disable survive Disable; the same rows also survive Delete. The
+  rows carry computed-column `Status` / `ProjectId` from the `State` JSON,
+  verifying that the row is read back intact and not cascade-deleted.
+- Delete wording (2): the delete response carries a non-empty
+  `slackAppRemovalNote` that contains "Slack App remains installed"; the
+  delete cascade clears App/Bot secrets from the secret store.
+- Missing-connection (1): Disable on a non-existent connection returns
+  `null` from the store-level helper.
+
+### Gotchas
+
+- The ingress guard returning `ApiResults.Ok(...)` (not a 4xx) is required by
+  design D4 — a 409 would tell Slack/Storm to retry, and the design wants
+  the adapter to ack Slack on Disabled input without spawning retries. The
+  test asserts the decision shape (`rejected` + reason) rather than the
+  HTTP status code, but the route uses `ApiResults.Ok`, so the status is
+  200 by construction.
+- The tests inline-mirror the route lambda body rather than spinning up the
+  HTTP host. The risk is that a future route edit silently diverges from
+  the tests' mirror. This is the same tradeoff already accepted by the
+  T-001 / T-002 specs in this issue.
+- `AgentJobRow` and `AgentSessionRow` insertions need `State` populated (the
+  Status / ProjectId / AgentId / SubmittedAt columns are `json_extract`
+  computed columns). An empty `State` produces NULLs that look like the
+  rows weren't really saved.

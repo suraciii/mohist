@@ -81,8 +81,40 @@ public static class SlackConnectionRoutes
 
         management.MapDelete("/{connectionId}", async (HttpContext context, string connectionId, AgentConnectionStore connections, CancellationToken ct) =>
         {
-            var deleted = await connections.DeleteAsync(context.GetResolvedProject().Id, connectionId, ct);
-            return deleted is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(deleted);
+            var projectId = context.GetResolvedProject().Id;
+            var deleted = await connections.DeleteAsync(projectId, connectionId, ct);
+            if (deleted is null) return ApiResults.NotFound("Slack Connection was not found.");
+            return ApiResults.Ok(new
+            {
+                connection = deleted,
+                slackAppRemovalNote = "Mohist-side records (credentials, inbox entries, conversation mappings, pending outbound deliveries, and owner claim codes) were removed. The Slack App remains installed on the workspace until a workspace admin uninstalls it manually.",
+            });
+        });
+
+        management.MapPost("/{connectionId}/disable", async (HttpContext context, string connectionId, AgentConnectionStore connections, CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
+            if (connection.DesiredState == DesiredStateKind.Disabled)
+                return ApiResults.Ok(connection);
+            var updated = await connections.UpdateAsync(projectId, connectionId,
+                new HashSet<string>(StringComparer.Ordinal) { "desiredState" },
+                desiredState: DesiredStateKind.Disabled, ct: ct);
+            return updated is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(updated);
+        });
+
+        management.MapPost("/{connectionId}/enable", async (HttpContext context, string connectionId, AgentConnectionStore connections, CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
+            if (connection.DesiredState == DesiredStateKind.Enabled)
+                return ApiResults.Ok(connection);
+            var updated = await connections.UpdateAsync(projectId, connectionId,
+                new HashSet<string>(StringComparer.Ordinal) { "desiredState" },
+                desiredState: DesiredStateKind.Enabled, ct: ct);
+            return updated is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(updated);
         });
 
         management.MapPost("/{connectionId}/configure", async (HttpContext context, string connectionId, SlackCredentialsBody body, AgentConnectionStore connections, ISecretStore secrets, CancellationToken ct) =>
@@ -197,6 +229,8 @@ public static class SlackConnectionRoutes
             var connection = await connections.GetAsync(projectId, connectionId, ct);
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
+            if (connection.DesiredState == DesiredStateKind.Disabled)
+                return ApiResults.Ok(new { kind = "rejected", reason = "This Connection is disabled." });
             if (body is null || !body.IsDirectMessage)
                 return ApiResults.Ok(new { kind = "ignored" });
             if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
