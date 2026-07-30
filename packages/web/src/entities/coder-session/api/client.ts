@@ -106,6 +106,8 @@ export interface SessionFollowupResult {
   status: 'accepted' | 'rejected' | 'unknown'
   error?: string | null
   code?: string | null
+  inputAcceptance?: string | null
+  turnStatus?: string | null
 }
 
 export function postFollowup(

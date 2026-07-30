@@ -46,6 +46,13 @@ Once Mohist has durably claimed a queued turn for Runner delivery, it SHALL NOT 
 - **THEN** Mohist SHALL accept the new input into a distinct queued turn
 - **AND** SHALL deliver that turn only after the prior turn becomes terminal
 
+#### Scenario: Ambiguous delivery keeps the payload sealed
+
+- **GIVEN** Mohist has claimed a queued turn and the Runner may have received its payload but the delivery result is unavailable
+- **WHEN** the Server retries the original input or accepts a follow-up with a new idempotency key
+- **THEN** the original turn SHALL retain its immutable payload and operation identity for retry
+- **AND** the new input SHALL receive a distinct queued turn
+
 ### Requirement: Client idempotency key transport
 
 A follow-up request SHALL accept a client-provided idempotency key that identifies the call identity. The same key on retry SHALL resolve to the same `SessionInput`; a new key SHALL be treated as a new call. Both Web and CLI SHALL send the idempotency key when submitting a follow-up, including on retry after a lost response.
@@ -55,6 +62,12 @@ A follow-up request SHALL accept a client-provided idempotency key that identifi
 - **WHEN** a user submits a follow-up from Web and the response is lost, then the user retries
 - **THEN** Web SHALL send the same idempotency key for the retry as for the original submission
 - **AND** the Server SHALL return the original input rather than a second input
+
+#### Scenario: CLI JSON output preserves a generated retry identity
+
+- **WHEN** a client omits the idempotency key for `mo session followup --json` and the outcome is unknown
+- **THEN** the CLI SHALL expose the generated key without corrupting its JSON stdout
+- **AND** the user SHALL be able to supply that key to retry the original call
 
 #### Scenario: CLI sends an idempotency key and reuses it on retry
 

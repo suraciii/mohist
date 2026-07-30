@@ -715,6 +715,26 @@ public class CliSessionCommandSpecs
         Assert.Contains("\"status\": \"sent\"", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("Idempotency-Key:", stdout, StringComparison.Ordinal);
         Assert.NotNull(JsonNode.Parse(stdout));
+        Assert.Contains("Idempotency-Key:", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionFollowup_UnknownJsonWritesGeneratedKeyToStandardError()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { status = "unknown" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["session", "followup", StableSessionId, "--text", "Hi", "--json", "status"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("unknown", JsonNode.Parse(output.ToString())!["status"]!.GetValue<string>());
+        var key = handler.Requests.Single().Headers["Idempotency-Key"].Single();
+        Assert.Contains($"Idempotency-Key: {key}", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

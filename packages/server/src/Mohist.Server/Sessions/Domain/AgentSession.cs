@@ -420,7 +420,8 @@ public sealed record AgentSessionFollowupLease(
     [property: Id(6)] string? ConcurrencyAgentId = null,
     [property: Id(7)] string? InputId = null,
     [property: Id(8)] string? TurnId = null,
-    [property: Id(9)] bool Dispatching = false);
+    [property: Id(9)] bool Dispatching = false,
+    [property: Id(10)] bool PayloadSealed = false);
 
 /// <summary>
 /// Result of a single <see cref="AgentSessionExtensions.AcceptFollowup"/>

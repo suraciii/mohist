@@ -1096,7 +1096,7 @@ public static partial class AgentSessionExtensions
                 if (candidate.Status != AgentTurnStatus.Queued)
                     continue;
                 if (leases.Any(lease => string.Equals(lease.TurnId, candidate.Id, StringComparison.Ordinal)
-                    && lease.Dispatching))
+                    && lease.PayloadSealed))
                     continue;
                 return candidate;
             }

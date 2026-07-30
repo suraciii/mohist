@@ -5,9 +5,10 @@ import { useProject, useProjectPath } from '../../../entities/project'
 import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollowup, useGenericTurnControl, useCancelGenericSession, launchObservationQueryOptions } from '../../../entities/agent'
 import type { AgentLaunchObservationDto } from '../../../entities/agent'
 import { canFollowupSession, deriveSessionStatusKind } from '../../../entities/coder-session'
-import type { FollowupStatus, SessionFollowupResult, SessionTurn, SessionMetadata } from '../../../entities/coder-session'
+import type { SessionFollowupResult, SessionTurn, SessionMetadata } from '../../../entities/coder-session'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
 import { buildGenericSessionMetadata } from './buildGenericSessionMetadata'
+import { resolveFollowupStatus } from './followupStatus'
 import type { SessionCancelOptions, SessionDataSourceResult, EmptyStateKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
@@ -155,17 +156,11 @@ export function useGenericSessionDataSource(
     }
     followupKeys.current.delete(retryKey)
   }, [genericFollowup, sessionId])
-  const followupStatus = useMemo<FollowupStatus | null>(() => {
+  const followupStatus = useMemo(() => {
     if (!followupResult) return null
     const input = summary?.inputs?.find((candidate) => candidate.id === followupResult.inputId)
     const turn = summary?.turns?.find((candidate) => candidate.id === followupResult.turnId)
-    return {
-      outcome: followupResult.status,
-      inputId: followupResult.inputId,
-      turnId: followupResult.turnId,
-      inputAcceptance: input?.acceptance ?? (followupResult.status === 'accepted' ? 'accepted' : null),
-      turnStatus: turn?.status ?? (followupResult.status === 'accepted' ? 'queued' : null),
-    }
+    return resolveFollowupStatus(followupResult, input, turn)
   }, [followupResult, summary?.inputs, summary?.turns])
 
   const currentTurnId = summary?.currentTurnId

@@ -804,6 +804,31 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
     }
 
     [Fact]
+    public async Task ReleaseFollowupDispatch_KeepsQueuedPayloadSealed()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-sealed-after-release");
+        var first = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "sealed first input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "sealed-first"));
+        await grain.BeginNextFollowupDispatchAsync();
+        await grain.ReleaseFollowupDispatchAsync(first.OperationId);
+
+        var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "sealed second input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "sealed-second"));
+
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Equal(2, state!.Status.Turns!.Count);
+        Assert.NotEqual(first.TurnId, second.TurnId);
+        var firstLease = state.Status.PendingFollowups!.Single(lease => lease.TurnId == first.TurnId);
+        Assert.False(firstLease.Dispatching);
+        Assert.True(firstLease.PayloadSealed);
+    }
+
+    [Fact]
     public async Task Activate_ReclaimsQueuedDispatchForSameKeyRetry()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-reclaim-dispatch");
@@ -826,6 +851,7 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
         Assert.NotNull(state);
         Assert.Equal(AgentTurnStatus.Queued, Assert.Single(state!.Status.Turns!).Status);
         Assert.False(Assert.Single(state.Status.PendingFollowups!).Dispatching);
+        Assert.True(Assert.Single(state.Status.PendingFollowups!).PayloadSealed);
         Assert.True(retry.ShouldRedeliver);
         Assert.Equal(accepted.InputId, retry.InputId);
     }

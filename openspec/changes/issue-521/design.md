@@ -42,7 +42,7 @@ When a follow-up input is accepted:
 - A **queued turn with no dispatch claim** exists → append the input Id to that turn's `InputIds` in submission order (one turn consumes multiple inputs).
 - A **dispatch-claimed** or **executing** turn exists → create a **new** `AgentTurnRecord` (`queued`) for the input; the claimed or running turn is not interrupted and the input is not merged into it.
 
-The durable dispatch claim seals the turn's `InputIds`: it is the point at which the server has formed the immutable Runner payload. The Runtime has not necessarily emitted `session.input` yet, so the turn remains `queued` for observation, but a later input starts the next queued turn instead of being silently omitted from the already-claimed payload. A turn with multiple inputs is dispatched with its inputs combined in submission order (server-side), so the runner still receives one prompt per dispatch.
+The durable dispatch claim seals the turn's `InputIds`: it is the point at which the server has formed the immutable Runner payload. The Runtime has not necessarily emitted `session.input` yet, so the turn remains `queued` for observation, but a later input starts the next queued turn instead of being silently omitted from the already-claimed payload. The seal survives a canceled, timed-out, or otherwise ambiguous delivery attempt and Server activation recovery; only the in-flight delivery attempt is released. A retry reuses the original immutable payload and operation id. A turn with multiple inputs is dispatched with its inputs combined in submission order (server-side), so the runner still receives one prompt per dispatch.
 
 - Alternative: always one-input-per-turn. Rejected because the issue's Product Shape explicitly states a turn may consume multiple inputs; the absorption rule captures rapid double-sends before execution starts.
 
@@ -89,7 +89,7 @@ Reconciliation:
 ### D9. Idempotent retry re-attempts delivery only while the turn is still queued
 
 A retry with the same idempotency key resolves to the same `SessionInput` (no duplicate, per the input spec). Its delivery behavior depends on the turn state:
-- If the turn is still `queued` (the original dispatch did not succeed, e.g. runner was offline) → the retry re-attempts runner delivery, moving the turn toward `executing`.
+- If the turn is still `queued` (the original dispatch did not succeed, e.g. runner was offline) → the retry re-attempts the original immutable Runner payload, moving the turn toward `executing`.
 - If the turn is already `executing` or terminal → the retry is pure-identity: it returns the original `inputId`/`turnId` and does NOT re-dispatch (no duplicate runtime work).
 
 This makes retry the client-driven delivery path for a stuck-queued input, without introducing server-side auto-redelivery (which remains a Non-Goal).

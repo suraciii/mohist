@@ -95,3 +95,9 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - A Runner dispatch claim now seals the queued turn input list. A follow-up accepted while that claim is awaiting the Runner result starts the next queued turn instead of mutating an already-snapshotted payload.
 - Updated the issue design and call spec with the claim boundary. The integration regression holds the first `ReceiveFollowup`, accepts a second idempotency key, then verifies distinct turns and delivery of the second payload after the first turn becomes terminal.
 - Verification passed: `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true`; direct Server Spec execution for `AgentSessionFollowupGrainSpecs` and `GenericAgentSessionCanonicalFollowupApiSpecs` (44 passed).
+
+## Review fix pass 6
+- A sealed payload now remains sealed when an in-flight attempt is canceled, times out, or is reclaimed after activation. `Dispatching` only records the retryable attempt; a new input always starts a distinct turn after the payload has been sealed.
+- Web follow-up status retains the response input acceptance and turn status until a later observation advances it, so a response reporting `executing` is not rendered as pending.
+- JSON-mode `mo session followup` keeps stdout valid JSON and writes an auto-generated retry key to stderr for later reconciliation.
+- Verification passed: Web typecheck, full Web suite (5165 passed, 1 skipped), Web FSD check, CLI tests (1469 passed), and Server SpecTests (3434 passed).
