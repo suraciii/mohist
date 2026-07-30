@@ -27,3 +27,14 @@
 
 - Focused Agent detail, Readiness/Availability, and editor tests pass: 48 tests.
 - Web typecheck, full Web tests (392 files, 5,182 passing and 1 skipped), and FSD boundary checks pass.
+
+## T-003
+
+- The Web list uses `GET /agents/availability` through a project-scoped `useAgentListAvailability` query with a 5-second refresh and joins summary entries by `agentId`; archived rows remain lifecycle-only for live availability/workload.
+- List rows render the server Readiness conclusion independently from lifecycle and Availability. Missing descriptions show `No purpose set`; unresolved summaries show Availability loading/unknown and unknown workload values rather than a synthesized setup gap.
+- Launch success invalidates the project-scoped list Availability query so active and queued counts refresh after a new session.
+
+## T-003 Verification
+
+- Focused Agent list, availability query, and launch mutation tests pass: 88 tests.
+- Web typecheck, full Web tests (392 files, 5,188 passing and 1 skipped), and FSD boundary checks pass.

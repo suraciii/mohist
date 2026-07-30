@@ -4,11 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
-import type { AgentInfo } from '../../../entities/agent'
+import type { AgentAvailabilitySummaryEntry, AgentInfo } from '../../../entities/agent'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import { AgentListPage, type AgentListPageComponents } from './AgentListPage'
 
 const AGENTS_PATH = '*/api/projects/:projectId/agents'
+const AVAILABILITY_PATH = '*/api/projects/:projectId/agents/availability'
 const STATUS_PATH = '*/api/projects/:projectId/agent/status'
 
 function mockAgents(agents: AgentInfo[]) {
@@ -17,9 +18,13 @@ function mockAgents(agents: AgentInfo[]) {
 function mockAgentsPending() {
   server.use(http.get(AGENTS_PATH, () => new Promise(() => {})))
 }
+function mockAvailability(entries: AgentAvailabilitySummaryEntry[]) {
+  server.use(http.get(AVAILABILITY_PATH, () => HttpResponse.json({ success: true, data: entries })))
+}
 
 useMswServer(
   http.get(AGENTS_PATH, () => HttpResponse.json({ success: true, data: [] })),
+  http.get(AVAILABILITY_PATH, () => HttpResponse.json({ success: true, data: [] })),
   http.get(STATUS_PATH, () =>
     HttpResponse.json({ success: true, data: { running: false, capacity: { active: 0, max: 8 } } }),
   ),
@@ -75,6 +80,19 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
   }
 }
 
+function makeAvailability(overrides: Partial<AgentAvailabilitySummaryEntry> = {}): AgentAvailabilitySummaryEntry {
+  return {
+    agentId: 'agent-1',
+    canStartNow: true,
+    waitingReason: null,
+    activeRuns: 0,
+    maxConcurrentRuns: null,
+    capacity: { usedSlots: 0, totalSlots: 4 },
+    queuedCount: 0,
+    ...overrides,
+  }
+}
+
 describe('AgentListPage', () => {
   afterEach(() => {
     cleanup()
@@ -111,6 +129,71 @@ describe('AgentListPage', () => {
       renderPage()
       expect(await screen.findByText('gpt-4')).toBeInTheDocument()
       expect(screen.getByText('high')).toBeInTheDocument()
+    })
+
+    it('renders purpose and the server Readiness conclusion distinctly', async () => {
+      mockAgents([
+        makeAgent({ id: 'ready', name: 'Ready Agent', description: 'Reviews pull requests', readiness: { conclusion: 'Ready', gaps: [], setup: null } }),
+        makeAgent({ id: 'setup', name: 'Setup Agent', description: 'Needs configuration', readiness: { conclusion: 'Needs setup', gaps: [], setup: null } }),
+        makeAgent({ id: 'unknown', name: 'Unknown Agent', description: '', readiness: null }),
+      ])
+      renderPage()
+
+      const readyRow = await screen.findByTestId('agent-row-ready')
+      expect(within(readyRow).getByTestId('agent-purpose-ready')).toHaveTextContent('Reviews pull requests')
+      expect(within(readyRow).getByTestId('agent-readiness-ready')).toHaveTextContent('Readiness: Ready')
+      expect(within(screen.getByTestId('agent-row-setup')).getByTestId('agent-readiness-setup')).toHaveTextContent('Readiness: Needs setup')
+      expect(within(screen.getByTestId('agent-row-unknown')).getByTestId('agent-readiness-unknown')).toHaveTextContent('Readiness: Unknown')
+      expect(within(screen.getByTestId('agent-row-unknown')).getByTestId('agent-purpose-unknown')).toHaveTextContent('No purpose set')
+    })
+
+    it('renders server Availability and active/queued workload without turning waiting into setup', async () => {
+      mockAgents([makeAgent({ id: 'offline', name: 'Offline Ready', readiness: { conclusion: 'Ready', gaps: [], setup: null } })])
+      mockAvailability([makeAvailability({
+        agentId: 'offline',
+        canStartNow: false,
+        waitingReason: 'no-online-runner',
+        activeRuns: 2,
+        queuedCount: 3,
+      })])
+      renderPage()
+
+      const row = await screen.findByTestId('agent-row-offline')
+      expect(within(row).getByTestId('agent-readiness-offline')).toHaveTextContent('Readiness: Ready')
+      expect(within(row).getByTestId('agent-availability-offline')).toHaveTextContent('Availability: Waiting (no-online-runner)')
+      expect(within(row).getByTestId('agent-workload-offline')).toHaveTextContent('Active: 2, Queued: 3')
+      expect(within(row).getByTestId('agent-readiness-offline')).not.toHaveTextContent('Needs setup')
+    })
+
+    it('uses one list Availability request for multiple Agents', async () => {
+      let availabilityRequests = 0
+      server.use(
+        http.get(AVAILABILITY_PATH, () => {
+          availabilityRequests += 1
+          return HttpResponse.json({
+            success: true,
+            data: [makeAvailability({ agentId: 'a1' }), makeAvailability({ agentId: 'a2', activeRuns: 1, queuedCount: 2 })],
+          })
+        }),
+      )
+      mockAgents([makeAgent({ id: 'a1' }), makeAgent({ id: 'a2' })])
+      renderPage()
+
+      await screen.findByText('Active: 1, Queued: 2')
+      expect(availabilityRequests).toBe(1)
+      expect(screen.queryByTestId('agent-availability-a1')).toHaveTextContent('Can start now')
+      expect(screen.queryByTestId('agent-availability-a2')).toHaveTextContent('Can start now')
+    })
+
+    it('shows loading Availability while the summary is unresolved', async () => {
+      mockAgents([makeAgent({ id: 'pending', readiness: { conclusion: 'Ready', gaps: [], setup: null } })])
+      server.use(http.get(AVAILABILITY_PATH, () => new Promise(() => {})))
+      renderPage()
+
+      const row = await screen.findByTestId('agent-row-pending')
+      expect(within(row).getByTestId('agent-availability-pending')).toHaveTextContent('Availability: Loading')
+      expect(within(row).getByTestId('agent-readiness-pending')).toHaveTextContent('Readiness: Ready')
+      expect(within(row).getByTestId('agent-readiness-pending')).not.toHaveTextContent('Needs setup')
     })
 
     it('distinguishes archived agents with opacity and badge', async () => {

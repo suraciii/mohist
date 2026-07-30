@@ -1,8 +1,8 @@
 import { useMemo, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PlusIcon, BotIcon, ArchiveIcon, CircleIcon } from 'lucide-react'
-import { useAgents, readAgentModelAndVariant } from '../../../entities/agent'
-import type { AgentInfo } from '../../../entities/agent'
+import { useAgentListAvailability, useAgents, readAgentModelAndVariant } from '../../../entities/agent'
+import type { AgentAvailabilitySummaryEntry, AgentInfo } from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { Button } from '@/shared/ui/components/button'
@@ -25,20 +25,29 @@ function getAgentType(agent: AgentInfo): string {
   return 'opencode'
 }
 
-function getAvailabilityStatus(agent: AgentInfo): { label: string; dotClass: string } {
+function getLifecycleStatus(agent: AgentInfo): { label: string; dotClass: string } {
   if (agent.status === 'archived') {
     return { label: 'Archived', dotClass: 'bg-gray-400' }
   }
   return { label: 'Active', dotClass: 'bg-emerald-500' }
 }
 
-function AgentRow({ agent }: { agent: AgentInfo }) {
+function AgentRow({
+  agent,
+  availability,
+  availabilityLoading,
+}: {
+  agent: AgentInfo
+  availability?: AgentAvailabilitySummaryEntry
+  availabilityLoading: boolean
+}) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
   const { model, variant } = useMemo(() => readAgentModelAndVariant(agent), [agent])
   const agentType = useMemo(() => getAgentType(agent), [agent])
-  const availability = useMemo(() => getAvailabilityStatus(agent), [agent])
+  const lifecycle = useMemo(() => getLifecycleStatus(agent), [agent])
   const isArchived = agent.status === 'archived'
+  const readiness = agent.readiness?.conclusion ?? 'Unknown'
 
   return (
     <div
@@ -50,46 +59,81 @@ function AgentRow({ agent }: { agent: AgentInfo }) {
       onKeyDown={(e) => {
         if (e.key === 'Enter') navigate(toProjectPath(`/agents/${encodeURIComponent(agent.id)}`))
       }}
-      className={`flex items-center gap-4 px-4 py-3 cursor-pointer transition-colors hover:bg-muted/50 ${
+      className={`px-4 py-3 cursor-pointer transition-colors hover:bg-muted/50 ${
         isArchived ? 'opacity-60' : ''
       }`}
     >
-      <div className="flex items-center justify-center size-10 rounded-lg bg-muted shrink-0">
-        <BotIcon className={`size-5 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />
+      <div className="flex items-center gap-4">
+        <div className="flex items-center justify-center size-10 rounded-lg bg-muted shrink-0">
+          <BotIcon className={`size-5 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />
+        </div>
+
+        <div className="flex min-w-0 flex-1 items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground truncate">{agent.name}</span>
+              {isArchived && (
+                <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 text-muted-foreground">
+                  <ArchiveIcon className="size-3 mr-0.5" />
+                  Archived
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs text-muted-foreground">{agentType}</span>
+              {model && (
+                <>
+                  <span className="text-xs text-muted-foreground/50">·</span>
+                  <span className="text-xs text-muted-foreground">{model}</span>
+                  {variant && (
+                    <>
+                      <span className="text-xs text-muted-foreground/50">·</span>
+                      <span className="text-xs text-muted-foreground">{variant}</span>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+            <p data-testid={`agent-purpose-${agent.id}`} className="mt-2 text-xs text-muted-foreground">
+              {agent.description?.trim() || 'No purpose set'}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <CircleIcon className={`size-2 ${lifecycle.dotClass}`} />
+            <span className="text-xs text-muted-foreground">{lifecycle.label}</span>
+          </div>
+        </div>
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground truncate">{agent.name}</span>
-            {isArchived && (
-              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 text-muted-foreground">
-                <ArchiveIcon className="size-3 mr-0.5" />
-                Archived
-              </Badge>
-            )}
-          </div>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-xs text-muted-foreground">{agentType}</span>
-            {model && (
-              <>
-                <span className="text-xs text-muted-foreground/50">·</span>
-                <span className="text-xs text-muted-foreground">{model}</span>
-                {variant && (
-                  <>
-                    <span className="text-xs text-muted-foreground/50">·</span>
-                    <span className="text-xs text-muted-foreground">{variant}</span>
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          <CircleIcon className={`size-2 ${availability.dotClass}`} />
-          <span className="text-xs text-muted-foreground">{availability.label}</span>
-        </div>
+      <div className="mt-3 grid grid-cols-1 gap-1.5 border-t border-border/60 pt-3 text-xs sm:grid-cols-3">
+        <span
+          data-testid={`agent-readiness-${agent.id}`}
+          data-conclusion={readiness}
+          className={readiness === 'Ready' ? 'text-emerald-700' : readiness === 'Needs setup' ? 'text-amber-700' : 'text-muted-foreground'}
+        >
+          Readiness: {readiness}
+        </span>
+        <span
+          data-testid={`agent-availability-${agent.id}`}
+          data-state={isArchived ? 'archived' : availability ? (availability.canStartNow ? 'available' : 'waiting') : 'unknown'}
+          className={availability?.canStartNow ? 'text-emerald-700' : 'text-muted-foreground'}
+        >
+          {isArchived
+            ? 'Availability: Not tracked for archived agents'
+            : availability
+              ? availability.canStartNow
+                ? 'Availability: Can start now'
+                : `Availability: Waiting (${availability.waitingReason ?? 'unknown reason'})`
+              : availabilityLoading
+                ? 'Availability: Loading...'
+                : 'Availability: Unknown'}
+        </span>
+        <span data-testid={`agent-workload-${agent.id}`} className="text-muted-foreground">
+          {isArchived
+            ? 'Workload: Not tracked'
+            : `Active: ${availability?.activeRuns ?? 'unknown'}, Queued: ${availability?.queuedCount ?? 'unknown'}`}
+        </span>
       </div>
     </div>
   )
@@ -123,7 +167,12 @@ export function AgentListPage({
   const { AgentProfileEditor } = { ...defaultComponents, ...components }
   useDocumentTitle('Agents — Mohist')
   const { data: agents, isLoading } = useAgents()
+  const { data: availability, isLoading: availabilityLoading } = useAgentListAvailability()
   const [editorOpen, setEditorOpen] = useState(false)
+  const availabilityByAgentId = useMemo(
+    () => new Map((availability ?? []).map((entry) => [entry.agentId, entry])),
+    [availability],
+  )
 
   if (isLoading) {
     return (
@@ -171,7 +220,12 @@ export function AgentListPage({
                   Active ({activeAgents.length})
                 </div>
                 {activeAgents.map((agent) => (
-                  <AgentRow key={agent.id} agent={agent} />
+                  <AgentRow
+                    key={agent.id}
+                    agent={agent}
+                    availability={availabilityByAgentId.get(agent.id)}
+                    availabilityLoading={availabilityLoading}
+                  />
                 ))}
               </div>
             )}
@@ -181,7 +235,12 @@ export function AgentListPage({
                   Archived ({archivedAgents.length})
                 </div>
                 {archivedAgents.map((agent) => (
-                  <AgentRow key={agent.id} agent={agent} />
+                  <AgentRow
+                    key={agent.id}
+                    agent={agent}
+                    availability={availabilityByAgentId.get(agent.id)}
+                    availabilityLoading={availabilityLoading}
+                  />
                 ))}
               </div>
             )}

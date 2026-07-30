@@ -268,6 +268,7 @@ export function launchAgentSessionMutationOptions(projectId: string | null | und
     onSuccess: (_data: AgentSessionLaunchResponse, variables: { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-availability', projectId] })
       queryClient.invalidateQueries({ queryKey: ['agents', projectId, variables.agentRef, 'sessions'] })
       toast.success('Session launched')
     },
