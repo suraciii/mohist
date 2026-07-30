@@ -92,19 +92,31 @@ public sealed class SlackSetupVerifier
     {
         var connection = await _connections.GetAsync(projectId, connectionId, ct)
             ?? throw new InvalidOperationException("Connection was not found.");
-        return await RunVerificationAsync(connection, botToken, ct);
+        return await RunVerificationAsync(appToken, botToken, ct);
     }
 
-    private async Task<RotationCheckResult> RunVerificationAsync(AgentConnection connection, string botToken, CancellationToken ct)
+    private async Task<RotationCheckResult> RunVerificationAsync(
+        string appToken,
+        string botToken,
+        CancellationToken ct)
     {
+        SlackAppsConnectionOpenResponse app;
         SlackAuthTestResponse auth;
         SlackBotInfoResponse bot;
         SlackPermissionsScopesListResponse grantedScopes;
         try
         {
+            app = await _slack.AppsConnectionsOpenAsync(appToken, ct);
+            if (!app.Ok || string.IsNullOrWhiteSpace(app.Url))
+                return new(false, $"Slack rejected the App token: {app.Error ?? "invalid_auth"}. Generate a new token.", null, null, null, null, null);
+            var appId = AppIdFromSocketModeUrl(app.Url);
+            if (appId is null)
+                return new(false, "Slack did not return an App identity for the App token. Generate a new App token.", null, null, null, null, null);
             auth = await _slack.AuthTestAsync(botToken, ct);
             if (!auth.Ok || string.IsNullOrWhiteSpace(auth.TeamId) || string.IsNullOrWhiteSpace(auth.AppId) || string.IsNullOrWhiteSpace(auth.UserId) || string.IsNullOrWhiteSpace(auth.BotId))
                 return new(false, $"Slack rejected the Bot token: {auth.Error ?? "invalid_auth"}. Generate a new token.", null, null, null, null, null);
+            if (!string.Equals(appId, auth.AppId, StringComparison.Ordinal))
+                return new(false, "The App token and Bot token belong to different Slack Apps. Reinstall the matching App and Bot.", null, null, null, null, null);
             bot = await _slack.BotsInfoAsync(auth.BotId, botToken, ct);
             grantedScopes = await _slack.PermissionsScopesListAsync(botToken, ct);
         }
@@ -125,6 +137,21 @@ public sealed class SlackSetupVerifier
 
         var verifiedBot = bot.Bot!;
         return new(true, null, auth.TeamId, auth.AppId, auth.UserId, verifiedBot.Name, verifiedBot.IconUrl);
+    }
+
+    private static string? AppIdFromSocketModeUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
+        foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=');
+            if (separator < 0) continue;
+            var key = Uri.UnescapeDataString(pair[..separator]);
+            if (!string.Equals(key, "app_id", StringComparison.Ordinal)) continue;
+            var value = Uri.UnescapeDataString(pair[(separator + 1)..]);
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+        return null;
     }
 
     public async Task<AgentConnection?> RecordAdapterHeartbeatAsync(string projectId, string connectionId, CancellationToken ct = default)

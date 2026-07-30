@@ -373,6 +373,8 @@ public static class SlackConnectionRoutes
             var connection = await connections.GetAsync(projectId, connectionId, ct);
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
+            if (connection.DesiredState == DesiredStateKind.Disabled)
+                return ApiResults.Conflict("This Slack Connection is disabled.", "connection_disabled");
             if (string.IsNullOrWhiteSpace(body?.AdapterId))
                 return ApiResults.BadRequest("adapterId is required.");
             var appToken = await secrets.LoadAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), ct);

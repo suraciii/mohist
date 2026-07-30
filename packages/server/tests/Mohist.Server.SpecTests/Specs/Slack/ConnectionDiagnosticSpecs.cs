@@ -94,6 +94,9 @@ public sealed class ConnectionDiagnosticSpecs
         public SlackUserInfoResponse UsersInfo { get; init; } = new(true, null, null);
         public bool ThrowOnUsersInfo { get; init; }
 
+        public Task<SlackAppsConnectionOpenResponse> AppsConnectionsOpenAsync(string appToken, CancellationToken ct = default) =>
+            Task.FromResult(new SlackAppsConnectionOpenResponse(true, null, "wss://socket.slack.com/?app_id=A123"));
+
         public Task<SlackAuthTestResponse> AuthTestAsync(string botToken, CancellationToken ct = default) =>
             Task.FromResult(new SlackAuthTestResponse(false, null, null, null, null, null, null, null));
 

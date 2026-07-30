@@ -212,7 +212,12 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         var candidates = await db.SlackOutboxRows
             .Where(row => row.ProjectId == projectId
                 && row.ConnectionId == connectionId
-                && row.State == SlackOutboxStates.Pending)
+                && row.State == SlackOutboxStates.Pending
+                && db.AgentConnections.Any(connection =>
+                    connection.ProjectId == projectId
+                    && connection.Id == connectionId
+                    && connection.DeletedAt == null
+                    && connection.DesiredState == DesiredStateKind.Enabled))
             .OrderBy(row => row.Id)
             .ToListAsync(ct);
         var candidate = candidates.FirstOrDefault(row =>
@@ -220,18 +225,27 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         if (candidate is null)
             return null;
 
+        var changed = await db.SlackOutboxRows
+            .Where(row => row.Id == candidate.Id
+                && row.ProjectId == projectId
+                && row.ConnectionId == connectionId
+                && row.State == SlackOutboxStates.Pending
+                && db.AgentConnections.Any(connection =>
+                    connection.ProjectId == projectId
+                    && connection.Id == connectionId
+                    && connection.DeletedAt == null
+                    && connection.DesiredState == DesiredStateKind.Enabled))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.State, SlackOutboxStates.Claimed)
+                .SetProperty(row => row.ClaimedAt, now)
+                .SetProperty(row => row.ClaimedByAdapterId, adapterId)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+        if (changed == 0)
+            return null;
         candidate.State = SlackOutboxStates.Claimed;
         candidate.ClaimedAt = now;
         candidate.ClaimedByAdapterId = adapterId;
         candidate.UpdatedAt = now;
-        try
-        {
-            await db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            return null;
-        }
         return ToEntry(candidate);
     }
 

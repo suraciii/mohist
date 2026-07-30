@@ -335,3 +335,9 @@
 - The first full `npm run verify` attempt failed only in the Web suite: `src/app/App.test.tsx` timed out in the Logs navigation test (`logRequests` stayed at zero); Server (3452 spec tests) and CLI (1474 tests) passed.
 - The affected App test passes when run alone. The Web suite also reproduced the failure under default parallel workers, while the same 389 files and 5154 tests passed with `--maxWorkers=1`.
 - At the time of the failure, unrelated long-running `dotnet test` and Vitest processes from other workspaces were present. The failure is resource contention during parallel Web test execution, not an issue-517 implementation or assertion defect. No source workaround was added.
+
+## Review fixes
+
+- Credential rotation now validates the submitted App token with `apps.connections.open` and checks the returned Socket Mode `app_id` against the App resolved from the submitted Bot token before either secret is written.
+- Disabled Connections now reject adapter-session renewal. Outbox claiming includes an enabled-Connection predicate in its atomic state transition, so an adapter cannot claim a new reply after disable.
+- `SlackConnectionApiSpecs` exercises the mapped HTTP routes with a fake Slack client for invalid App-token rotation, disabled ingress and delivery claim, disabled adapter renewal, and diagnostics.

@@ -6,6 +6,7 @@ namespace Mohist.Server.Slack;
 
 public interface ISlackApiClient
 {
+    Task<SlackAppsConnectionOpenResponse> AppsConnectionsOpenAsync(string appToken, CancellationToken ct = default);
     Task<SlackAuthTestResponse> AuthTestAsync(string botToken, CancellationToken ct = default);
     Task<SlackBotInfoResponse> BotsInfoAsync(string botId, string botToken, CancellationToken ct = default);
     Task<SlackPermissionsScopesListResponse> PermissionsScopesListAsync(string botToken, CancellationToken ct = default);
@@ -16,6 +17,9 @@ public interface ISlackApiClient
 
 public sealed class SlackApiClient(HttpClient http) : ISlackApiClient
 {
+    public Task<SlackAppsConnectionOpenResponse> AppsConnectionsOpenAsync(string appToken, CancellationToken ct = default) =>
+        PostAsync<SlackAppsConnectionOpenResponse>("apps.connections.open", new { }, appToken, ct);
+
     public Task<SlackAuthTestResponse> AuthTestAsync(string botToken, CancellationToken ct = default) =>
         PostAsync<SlackAuthTestResponse>("auth.test", new { }, botToken, ct);
 
@@ -57,6 +61,7 @@ public sealed record SlackAuthTestResponse(
     string? User,
     [property: JsonPropertyName("bot_id")] string? BotId,
     [property: JsonPropertyName("app_id")] string? AppId);
+public sealed record SlackAppsConnectionOpenResponse(bool Ok, string? Error, string? Url);
 public sealed record SlackBotInfoResponse(bool Ok, string? Error, SlackBotInfo? Bot);
 public sealed record SlackBotInfo(
     string? Id,

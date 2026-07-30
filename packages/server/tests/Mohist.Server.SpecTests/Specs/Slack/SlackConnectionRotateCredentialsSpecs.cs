@@ -377,6 +377,7 @@ public sealed class SlackConnectionRotateCredentialsSpecs : IAsyncLifetime
     private sealed class RecordingSlackApiClient : ISlackApiClient
     {
         public List<string> Calls { get; } = [];
+        public SlackAppsConnectionOpenResponse AppsConnectionOpen { get; set; } = new(true, null, "wss://socket.slack.com/?app_id=A123");
         public SlackAuthTestResponse AuthTest { get; set; } = new(true, null, "T123", "Workspace", "U123", "Mohist", "B123", "A123");
         public SlackBotInfoResponse BotsInfo { get; set; } = new(true, null,
             new("B123", "Mohist", "A123", new SlackBotIcons(Image48: "https://slack/icon-48.png")));
@@ -385,6 +386,12 @@ public sealed class SlackConnectionRotateCredentialsSpecs : IAsyncLifetime
             ["im"] = ["chat:write", "im:history"],
             ["team"] = ["users:read"],
         });
+
+        public Task<SlackAppsConnectionOpenResponse> AppsConnectionsOpenAsync(string appToken, CancellationToken ct = default)
+        {
+            Calls.Add("apps.connections.open");
+            return Task.FromResult(AppsConnectionOpen);
+        }
 
         public Task<SlackAuthTestResponse> AuthTestAsync(string botToken, CancellationToken ct = default)
         {

@@ -315,6 +315,9 @@ public sealed class SlackOwnerTransferSpecs : IAsyncLifetime
 
     private sealed class RecordingSlackApiClient : ISlackApiClient
     {
+        public Task<SlackAppsConnectionOpenResponse> AppsConnectionsOpenAsync(string appToken, CancellationToken ct = default) =>
+            Task.FromResult(new SlackAppsConnectionOpenResponse(true, null, "wss://socket.slack.com/?app_id=A1"));
+
         public Func<string, SlackUserInfoResponse>? UsersInfoResponse { get; set; }
         public SlackUserInfoResponse UsersInfo
         {
