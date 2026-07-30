@@ -1,94 +1,103 @@
-# Self-Review: Issue 517
+# Self-Review: Issue 517 (Round 2)
 
 ## Review Summary
 
-Reviewed all plan artifacts (`proposal.md`, `design.md`, `tasks.json`, `specs/`) against
-issue 517's acceptance criteria, domain model, and non-goals. Also cross-checked design
-claims against source code (`SlackSetupVerifier.cs`, `ISlackApiClient.cs`,
-`AgentConnectionStore.cs`, `SlackOwnerClaimService.cs`, `SlackConnectionRoutes.cs`).
-
-Overall the plan is strong: the four capabilities map cleanly to the six acceptance criteria,
-the design decisions are well-justified with alternatives, the task graph is a valid DAG,
-and specs use correct normative formatting. However, one spec-design contract contradiction
-must be resolved before building.
+Re-reviewed all plan artifacts after the round-1 fixes (avatar drift brought into scope,
+precedence table split, configure guard reconciled, FixSlackSetup edge case resolved). The
+previous four issues are confirmed fixed. This round found one new blocking problem
+introduced by the avatar-drift fix: the comparison mechanism is not implementable as
+described.
 
 ---
 
 ## Blocking Problems
 
-### 1. Avatar drift: spec requires it, design defers it (spec-design contract broken)
+### 1. Avatar drift comparison requires two snapshots but the design stores only one
 
-The issue's acceptance criterion explicitly includes avatar drift:
+Design D7 (line 133) defines avatar drift as:
 
-> Slack App 名称、**头像** 与 Agent 名称漂移时如实显示差异，不自动改写 Slack 侧。
+> "the `VerifiedBotIconUrl` captured at the latest verification differs from the
+> `VerifiedBotIconUrl` stored from the **previous** verification"
 
-The `connection-diagnostics` spec captures this as a SHALL requirement with a dedicated
-scenario:
+But D7 (line 127) also says verification **overwrites** `VerifiedBotIconUrl` on every
+successful verification:
 
-> **Requirement:** Identity drift is detected and shown honestly without auto-rewrite
-> — "The diagnostic SHALL detect when the Slack-side App or Bot name **or avatar** differs..."
->
-> **Scenario: Avatar drift surfaced** — "WHEN the Slack-side Bot avatar hash differs from
-> the Connection's recorded AvatarHash THEN the diagnostic surfaces the avatar drift..."
+> "`VerifyAsync` and `VerifyRotationAsync` capture both `VerifiedBotName` … and
+> `VerifiedBotIconUrl` … **on every successful verification**."
 
-But design D7 explicitly defers avatar drift:
+After the latest verification overwrites the field, the previous value is gone. The
+diagnostic endpoint runs separately from verification (D6: it loads the connection and
+probes owner availability; it does not re-run verification or call `bots.info` live — D7
+rejected that). So when the diagnostic runs, it sees only the single current
+`VerifiedBotIconUrl` with no previous value to compare against.
 
-> "Avatar drift is deferred: Slack's `bots.info` returns icon URLs, not a stable hash, so
-> a meaningful comparison requires fetching and hashing the image — out of scope for this
-> issue."
+The name drift works because it compares **two different fields** from two different
+sources: `VerifiedBotName` (Slack-side observation) vs `BotName` (operator-configured
+value). Avatar drift has no such pair — the design stores only one Slack-side observation
+(`VerifiedBotIconUrl`) and explicitly rejects comparing it against the operator-set
+`AvatarHash` (line 137):
 
-And design Open Questions lists it as unresolved:
+> "AvatarHash on the Connection is an operator-provided presentation field with no
+> guaranteed relationship to Slack's icon URL format, so it is not a reliable comparison
+> target."
 
-> "Avatar drift (D7): ...defer avatar drift to a follow-up and ship name-only drift in this issue."
+The spec scenario (line 62) mirrors the same gap:
 
-I verified the technical constraint: `SlackBotInfo` (`ISlackApiClient.cs:61`) carries only
-`Id`, `Name`, `AppId` — no avatar/icon field. So the design's deferral rationale is sound.
-But the spec asserts avatar drift as a non-negotiable SHALL, which the design does not
-deliver. An implementer following the design would fail the spec; an implementer following
-the spec would need to solve a problem the design says is out of scope.
+> "WHEN the Slack-side Bot icon URL captured at the latest verification differs from the
+> icon URL recorded at the **previous** verification"
 
-**Fix:** Either (a) update the spec to scope avatar drift to a follow-up issue (e.g., add a
-note that avatar drift is deferred and name-only drift ships in this issue, matching the
-design), or (b) if avatar drift must ship now, update the design to include an approach
-(e.g., extend `SlackBotInfo` to capture the icon URL from `bots.info` and compare URLs, or
-fetch+hash the image) and add the corresponding task coverage.
+This also requires two snapshots. An implementer following these artifacts would have no
+way to detect avatar drift at diagnostic time.
+
+**Fix (recommended):** Align avatar drift with the name-drift pattern — compare
+`VerifiedBotIconUrl` (what Slack reports) against `AvatarHash` (what the operator recorded
+on the Connection). This uses two fields from two different sources, exactly like
+`VerifiedBotName` vs `BotName`. The format difference (URL vs hash) is itself the drift
+signal: the diagnostic shows both values honestly and lets the operator decide. Update:
+- D7 line 133: change the avatar drift bullet to "`VerifiedBotIconUrl` ≠ `AvatarHash`"
+- D7 line 137: remove the rejection of the `AvatarHash` comparison; instead explain that
+  the comparison surfaces the difference between what Slack shows and what the operator
+  recorded, same pattern as name drift
+- Spec line 62: change the scenario to "the Slack-side Bot icon URL differs from the
+  Connection's recorded AvatarHash"
+- Alternatively, add a second field (`PreviousVerifiedBotIconUrl`) — but this is more
+  model complexity for the same outcome.
 
 ---
 
 ## Non-Blocking Notes
 
-### 2. Diagnostic precedence table conflates Unhealthy health reasons
+### 2. Migration plan steps omit VerifiedBotIconUrl
 
-Design D6's precedence table maps `ConnectionHealth == Unhealthy` uniformly to "Credentials
-invalid → Rotate credentials" (priority 2). But `SlackSetupVerifier.FailAsync` (line 83-87)
-sets `Unhealthy` with reasons that include both credential failures ("Slack rejected the Bot
-token") AND service/network failures ("Slack could not be reached. Start mohist-slack and
-retry verification."). The latter should not produce a "Rotate credentials" next action —
-it is a service issue, not a credential issue. The implementer should refine priority 2 to
-check the `HealthReason` content (or introduce a sub-condition) so that service-unreachable
-Unhealthy maps to a service next action rather than credential rotation.
+Design migration plan step 1 (line 172) says "add `VerifiedBotName` to
+`AgentConnectionRow`" and step 5 (line 176) says "`VerifiedBotName` capture in
+`VerifyAsync`" — both omit `VerifiedBotIconUrl` and `SlackBotInfo.IconUrl`. The decision
+body (D7), tasks (T-004), and risks section all correctly mention both. The migration plan
+steps should be updated for consistency.
 
-### 3. `configure` guard strictness is an open question (acknowledged)
+### 3. Proposal What Changes still mentions AvatarHash comparison target
 
-Design Open Question #3 asks whether refusing `configure` on already-bound connections
-(redirecting to `rotate-credentials`) is acceptable. The proposal's What Changes says
-"configure 对已验证 Connection 执行轮换语义" (configure performs rotation semantics),
-while the design chose a separate route with a configure guard. The proposal's Impact
-section offered the choice ("新增 rotate-credentials 或扩展 configure 语义"), so this is
-within scope, but the divergence between the proposal's What Changes wording and the design
-decision should be reconciled when the open question is resolved.
+Proposal line 12 says "Slack 侧返回的 App 名称/头像与 Connection 记录的 BotName/AvatarHash"
+— this already references `AvatarHash` as the comparison target for avatar, which aligns
+with the recommended fix above (comparing `VerifiedBotIconUrl` vs `AvatarHash`). No change
+needed if the fix follows the recommendation; noting for traceability.
 
-### 4. Edge case: FixSlackSetup with bound identity
+---
 
-A connection that was once `Complete` can regress to `FixSlackSetup` when credentials expire
-(`VerifyAsync` runs on every heartbeat and calls `FailAsync` on failure). In this state,
-identity is still bound but `SetupProgress` is `FixSlackSetup`, which is NOT in the
-configure guard's blocklist (`{ClaimOwner, Complete}`). So `configure` would be accepted,
-silently overwriting tokens without synchronous verification. The async `VerifyAsync` on the
-next heartbeat would catch identity mismatches via `BindSlackIdentityAsync`'s
-`immutable_binding` guard, so it is safe — just not synchronously verified. The design could
-clarify that `FixSlackSetup` with bound identity is an expected configure path (fix broken
-creds), or that the guard should check bound-identity state rather than SetupProgress values.
+## Previous-Round Fixes Confirmed
+
+All four round-1 issues are verified resolved:
+
+1. **Avatar drift in scope** — spec, design D7, and tasks T-004 now include
+   `VerifiedBotIconUrl` and `SlackBotInfo.IconUrl`; deferral removed from risks and open
+   questions. ✅ (mechanism gap is a new issue — see blocking #1 above)
+2. **Diagnostic precedence split** — D6 table (lines 107-108) distinguishes
+   credential-failure Unhealthy (priority 2) from service-unreachable Unhealthy (priority 3)
+   via `HealthReason` content, with explanatory paragraph (line 115). ✅
+3. **configure guard reconciled** — proposal line 7 matches design decision (guard +
+   redirect, not inline rotation); Open Question removed. ✅
+4. **FixSlackSetup edge case** — D1 (lines 42, 48) uses `HasBoundIdentity` check instead of
+   SetupProgress values; T-001 acceptance criteria include FixSlackSetup rotation. ✅
 
 ---
 
@@ -101,9 +110,9 @@ creds), or that the guard should check bound-identity state rather than SetupPro
 | Owner transfer, old effective until new claims, no auto-transfer | `connection-owner-transfer` | D2 | T-002 |
 | Disable stops input/replies, preserves work; Enable no replay | `connection-lifecycle-control` | D4 | T-003 |
 | Delete clears provider records, preserves Agent/work, honest about Slack App | `connection-lifecycle-control` | D5 | T-003 |
-| Identity drift (name + avatar) shown honestly, no auto-rewrite | `connection-diagnostics` | D7 (avatar deferred) | T-004 |
+| Identity drift (name + avatar) shown honestly, no auto-rewrite | `connection-diagnostics` | D7 (mechanism gap) | T-004 |
 
-## Consistency Checks (all pass except avatar drift above)
+## Consistency Checks
 
 - Proposal capabilities (4) ↔ spec directories (4): match.
 - Task spec references ↔ spec requirement headings: all 6 valid.
@@ -111,10 +120,5 @@ creds), or that the guard should check bound-identity state rather than SetupPro
 - Non-goals aligned across issue, proposal, design, specs.
 - Spec formatting: all requirements use `###`, all scenarios use `####`, every requirement
   has ≥1 scenario, normative SHALL/MUST language throughout, no delta headers.
-- Design claims verified against source: `SlackBotInfo` lacks avatar field (confirms D7
-  constraint); `FailAsync` sets Unhealthy for both credential and service reasons (confirms
-  note #2); `ListForAdapterAsync` already filters on Enabled (confirms D4); `GenerateAsync`
-  rejects existing owner (confirms D2 gap); `TryClaimAsync` uses `WHERE OwnerSlackUserId ==
-  null` (confirms D2 atomic-swap approach).
 
 <promise>FAIL</promise>
