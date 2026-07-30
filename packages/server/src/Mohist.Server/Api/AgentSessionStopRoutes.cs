@@ -81,73 +81,77 @@ public static class AgentSessionStopRoutes
         if (!claim.CanDispatch)
             return ApiResults.Ok(new { state = "stop-requested" });
 
-        var runnerId = connections.GetConnectionId(target.RunnerId);
-        if (string.IsNullOrWhiteSpace(runnerId)
-            || string.IsNullOrWhiteSpace(target.Runtime)
-            || string.IsNullOrWhiteSpace(target.RuntimeSessionId)
-            || string.IsNullOrWhiteSpace(target.WorkDir))
-        {
-            await session.CompleteTurnStopAsync(control.TurnId);
-            return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
-        }
-
-        object binding = new
-        {
-            runtime = target.Runtime,
-            runtimeSessionId = target.RuntimeSessionId,
-            runnerId = target.RunnerId,
-            workDir = target.WorkDir,
-        };
-        object wireTarget = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
-            ? new
-            {
-                kind = "workflow",
-                projectId,
-                workflowRunId = target.WorkflowRunId,
-                sessionName = target.SessionName,
-                binding,
-            }
-            : new
-            {
-                kind = "generic",
-                projectId,
-                sessionId = target.SessionId,
-                binding,
-            };
-
-        RunnerStopReply? reply;
         try
         {
-            reply = await runnerHub.Clients.Client(runnerId).InvokeAsync<RunnerStopReply?>(
-                "CancelAgentSession",
-                new { target = wireTarget, turnId = request.TurnId },
-                ct);
-        }
-        catch
-        {
-            return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
-        }
+            var runnerId = connections.GetConnectionId(target.RunnerId);
+            if (string.IsNullOrWhiteSpace(runnerId)
+                || string.IsNullOrWhiteSpace(target.Runtime)
+                || string.IsNullOrWhiteSpace(target.RuntimeSessionId)
+                || string.IsNullOrWhiteSpace(target.WorkDir))
+            {
+                return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+            }
 
-        if (reply is null)
-            return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+            object binding = new
+            {
+                runtime = target.Runtime,
+                runtimeSessionId = target.RuntimeSessionId,
+                runnerId = target.RunnerId,
+                workDir = target.WorkDir,
+            };
+            object wireTarget = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
+                ? new
+                {
+                    kind = "workflow",
+                    projectId,
+                    workflowRunId = target.WorkflowRunId,
+                    sessionName = target.SessionName,
+                    binding,
+                }
+                : new
+                {
+                    kind = "generic",
+                    projectId,
+                    sessionId = target.SessionId,
+                    binding,
+                };
 
-        if (control.IsLaunchTurn
-            && string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))
-        {
-            await grains.GetGrain<IAgentJobGrain>(control.JobId!).MarkUnknownAsync("stop-unconfirmed");
+            RunnerStopReply? reply;
+            try
+            {
+                reply = await runnerHub.Clients.Client(runnerId).InvokeAsync<RunnerStopReply?>(
+                    "CancelAgentSession",
+                    new { target = wireTarget, turnId = request.TurnId },
+                    ct);
+            }
+            catch
+            {
+                return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+            }
+
+            if (reply is null)
+                return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+
+            if (control.IsLaunchTurn
+                && string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                await grains.GetGrain<IAgentJobGrain>(control.JobId!).MarkUnknownAsync("stop-unconfirmed");
+            }
+            else if (string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                await session.MarkTurnTerminalAsync(control.TurnId, AgentTurnStatus.Unknown, null);
+            }
+
+            return ApiResults.Ok(new
+            {
+                state = reply.State,
+                interruptUnconfirmed = reply.InterruptUnconfirmed,
+            });
         }
-        else if (string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))
+        finally
         {
-            await session.MarkTurnTerminalAsync(control.TurnId, AgentTurnStatus.Unknown, null);
+            await session.CompleteTurnStopAsync(control.TurnId);
         }
-
-        await session.CompleteTurnStopAsync(control.TurnId);
-
-        return ApiResults.Ok(new
-        {
-            state = reply.State,
-            interruptUnconfirmed = reply.InterruptUnconfirmed,
-        });
     }
 }
 
