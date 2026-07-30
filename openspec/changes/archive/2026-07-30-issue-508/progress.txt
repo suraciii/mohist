@@ -1,0 +1,98 @@
+## Codebase Patterns
+
+The Stores for variables follow the established pattern of `WorkflowRunVariablesStore`:
+- Each is `public class XxxStore : IScopedService`
+- Single ctor dependency: `IDbContextFactory<MohistDbContext>`
+- Three methods: `GetVariablesAsync`, `SetVariablesAsync`, `PatchVariablesAsync`
+- Get returns `VariableBundle.Empty` for missing rows
+- Set/Patch call `VariableBundleShapeValidator.Validate(...)` first
+- Patch deep-merges via `VariableBundle.Patch(current, patch)` and round-trips through Set
+
+Project-write invariants preserved:
+- `SetVariablesAsync(projectId, bundle)` runs `ProjectVariablesFilter.Sanitize(bundle)` so only `{model, variant}` persist under `vars.agent` and `stages.<stage>.vars.agent`
+- Issue-scope `SetVariablesAsync`/`PatchVariablesAsync` first call `VariableBundleShapeValidator.Validate`, then run a `RejectNamedAgentRuntime` guard that throws `ArgumentException` if either `vars.agent.runtime` or any `stages.<stage>.vars.agent.runtime` is present. Both rejection paths run BEFORE any `db.SaveChangesAsync`/`db.IssueWorkflowProfiles.Add`.
+
+`IScopedService` is auto-registered by the existing `MohistServiceRegistration`, so no DI edits are needed for the new types.
+
+The IssueWorkflowProfileManager is no longer the home of Variables — its remaining responsibilities are template selection (GetTemplateAsync/GetStateAsync/UpdateTemplateAsync/GetProfileAsync). T-006 will move them out and delete the class.
+
+The enable toggle (`GetDisabledWorkflowProfileIdsAsync`/`SetProfileEnabledAsync`) and prompts methods stay on ProjectWorkflowProfileManager for T-003/T-006; only variable methods leave.
+
+## Decisions
+
+- The variable validation guard moved into IssueVariableStore 1:1 — same ArgumentException message, same `vars.agent.runtime` key path. Route error code (`invalid_agent_config`) is unchanged because the catch site didn't change.
+- Patch semantics in both stores: validate patch, deep-merge current+pach, persist merged, return merged. Shape validation is run on the patch input only (the persisted merged form has already been validated at its previous write, and existing spec coverage confirms the shape stays valid across merge).
+- Test coverage: moved 3 variable tests from ProjectWorkflowProfileManagerSpecs into new ProjectVariableStoreSpecs (GetVariables_Empty, SetVariables_StoresBundle, PatchVariables_DeepMerges). Moved 5 variable tests from IssueWorkflowProfileManagerSpecs into new IssueVariableStoreSpecs (Get, Set, Patch, Variable/TemplaateIsolation, ChineseValueRoundtrip), plus 4 newly written negative tests (root runtime rejection, stage runtime rejection, non-object root rejection, non-object stage rejection). The old Project/Issue manager specs only retain non-variable tests.
+- The `_issueProfileManager.GetVariablesAsync` call inside IssueGrain (variables for Issue start) is replaced by `_issueVariableStore.GetVariablesAsync` in IssueGrain.cs:353; same for the following Set call. IssueGrain keeps `_projectProfileManager` only for `GetDefaultTemplateAsync` + `GetDisabledWorkflowProfileIdsAsync` (T-006).
+
+## Gotchas
+
+- `IssueGrain` declares `IssueVariableStore issueVariableStore` and the corresponding DI in production is registered through `IScopedService`. Test fixtures (`IssueCommentEventSpecs`, `IssueGrainEventSaveFailureSpecs`, `IssueWorkflowReadPathSpecs`) needed their `IssueGrain.Create` invocation sites updated to construct `IssueVariableStore` from the same `IDbContextFactory` and pass it in.
+- `RoutingDispatchTestSupport` still only registers `IssueWorkflowProfileManager` because the routes it exercises (routing dispatch) don't reach the create/update handlers that consume `IssueVariableStore`. No DI change was needed for that support class.
+- `WorkflowGrainTestHelpers` + `WorkflowGrainSpecs.PatchProjectVariablesAsync`/`PatchIssueVariablesAsync` switched from constructing the old managers (which required `IPromptLoader`/`PromptTemplateEngine`/etc. for the manager ctor) to constructing the bare Stores. This deletes the dead `null!` IPromptLoader argument.
+
+## Verification
+
+- `npm run build` succeeds.
+- `npm test` is green: server unit 1610, server spec 3398, server arch 50, cli 1465, runner, mohist-slack, web. The 3398 spec runs include both new stores' specs (`ProjectVariableStoreSpecs` 6 tests, `IssueVariableStoreSpecs` 9 tests) and the retained Project/IssueWorkflowProfileManagerSpecs with only non-variable tests.
+
+## Notes for T-002
+
+The route handlers read variables from stores, and T-002 moves the remaining cross-scope reads to `WorkflowVariableResolver`. The resolver uses `ProjectVariableStore.GetVariablesAsync`, `IssueVariableStore.GetVariablesAsync`, and `WorkflowRunVariablesStore.GetVariablesAsync`; no variable read goes through either Profile manager.
+
+## T-002 Notes
+
+- `WorkflowVariableResolver` owns the Project → Issue → Run merge, stage overlay, and Issue workspace identity. It resolves run context from persisted run/issue metadata, then reads variable values exclusively through `ProjectVariableStore`, `IssueVariableStore`, and `WorkflowRunVariablesStore`.
+- `WorkflowGrain`, `WorkflowQuerier`, and `WorkflowItemTranslator` now use the resolver for workspace and effective variable payloads. `WorkflowProfileManager` retains definition and prompt responsibilities only; its variable store dependency and variable methods are removed.
+- Existing variable-resolution specs were moved to the resolver and retain their prior JSON assertions. Added coverage verifies a missing stage returns the workflow-wide bundle unchanged and repeated workspace resolution returns an equal `WorkspaceIdentity` for the same Issue variables.
+- Baseline verification before the final coverage additions passed the full server spec assembly (3398 tests) and unit assembly (1610 tests); the Microsoft Testing Platform ignored the requested VSTest filters.
+
+## T-003 Notes
+
+- `ProjectPromptStore` owns system/project prompt listing, body CRUD, merged prompt bodies for Issue profile variables, and preview rendering. It reads only `ProjectWorkflowProfile.Prompts`; no new `ProjectPromptTemplateRow` is constructed and the legacy override methods are gone.
+- `WorkflowPromptResolver` owns run-context lookup and converts the Store's effective prompts to `ResolvedPrompt`. `WorkflowItemTranslator` and `IssueGrain` now use it; `MohistIssueWorkflowProfileBase` uses the Store for project prompt merge.
+- `ProjectRoutes` prompt handlers inject `ProjectPromptStore`. Prompt source values remain `system`, `project`, and `project-new`; stage filtering and preview engine output are covered by `ProjectPromptStoreSpecs` and `WorkflowPromptResolverSpecs`.
+- Two hand-built spec composition roots (`GrainTestConfig` and `DispatcherFixture`) needed explicit registrations for the new Store and Resolver because they do not run the conventional service scan. The production root remains marker-based.
+- Verification: full server spec 3406 passed, unit 1610 passed, and architecture 50 passed after updating the existing `DispatcherFixture` size ratchet from 34204 to 34332 bytes.
+
+## T-004 Notes
+
+- `WorkflowProfileManager` is now `WorkflowDefinitionResolver`; its definition cascade and narrow stage/structure/approval APIs are unchanged, while `WorkflowGrain`, `IWorkflowGrainContext`, `WorkflowQuerier`, `IssueGrain`, and test composition roots inject the renamed type.
+- `IWorkflowGrainContext.ProfileManager` is now `DefinitionResolver`, and the stage initializer/lock coordinator consume that explicit definition-resolution contract.
+- The resolver has no variable or prompt dependency or implementation. Legacy template reads remain unchanged for T-006, which owns the later provider-only migration and retirement.
+- `WorkflowGrainContractRules` reads the embedded `WorkflowDefinitionResolver.cs`, retains the three typed-throw assertion, and adds a responsibility-boundary assertion. The required resolver registration increased `DispatcherFixture.cs` by four bytes, so its size ratchet is now 34336.
+- Verification: server spec 3406 passed, unit 1610 passed, and architecture 51 passed.
+
+## T-005 Notes
+
+- `IIssueWorkflowProfile` now exposes only the descriptive face: `WorkflowProfile Profile { get; }`. The two `ProjectWorkflowState(...)` overloads are gone from the interface, the base, and the registry.
+- `MohistDefaultWorkflowProjection` stays a profile-independent static class. Callers reach it directly: `IssueGrain.GetWorkflowStatusAsync` and `IssueReadModelLoader.ApplyWorkflowProjections` no longer route projection through `_profiles.Get(...).ProjectWorkflowState(...)`.
+- The `MohistLocalIssueWorkflowProfile` / `MohistGithubPrIssueWorkflowProfile` classes lose their prompt-store constructor argument and now expose `Profile => WorkflowProfileCatalog.Profile` / `WorkflowProfileCatalog.GithubPrProfileAsset` — i.e. they hand the consumer the authoritative `WorkflowProfile` record rather than re-declaring id/name/description/definition/IsDefault on themselves.
+- The registry is reshaped to hold `Dictionary<string, WorkflowProfile>`. Its `Get(id)` returns `WorkflowProfile`; `List()` / `ListDescribed()` / `Default` map the descriptive record onto the public API shapes (`WorkflowProfileInfo` / `WorkflowProfileDescription`), with `IsDefault` derived from the `mohist/local` id match (only `mohist/local` is default among built-ins).
+- The dead projection methods (`ProjectWorkflowState`) and the dead prompt-aware methods (`BuildVariables`, `BuildStageVariables`, `GetMergedPromptsAsync`) on `MohistIssueWorkflowProfileBase` were dropped together — they had no callers and now the prompt merge responsibility lives on `ProjectPromptStore` / `WorkflowPromptResolver` (T-003).
+- `IssueReadModelLoader` / `IssueMetricsQuerier` no longer take an `IssueWorkflowProfileRegistry` argument (the read-model loader used it only for the projection that has moved to `MohistDefaultWorkflowProjection`; the metrics querier had the field unused). The loader now constructs its projection via `MohistDefaultWorkflowProjection.ProjectWorkflowState(issue.Number, issue.Title, issue.Status, status)`; the resolved projection's status / health / blocked-reason / change-dir / completed flag are identical for the same issue status and workflow view, independent of which Profile is selected (verified by the new `MohistDefaultWorkflowProjectionSpecs`).
+- The `IIssueWorkflowProfile` interface survives as the descriptive marker (the registry needs a polymorphic shape for `MohistLocalIssueWorkflowProfile` / `MohistGithubPrIssueWorkflowProfile`); the only member it now exposes is `Profile`. `IssueGrain` still uses the registry for `Exists` / `List` (descriptive concerns), so `_profiles` stays in that grain.
+- Test surface updates: `MohistPrIssueWorkflowProfileSpecs`, `WorkflowProfileCatalogSpecs`, `EffectiveWorkflowProfileResolverSpecs` switch to a parameter-less registry constructor and read descriptive fields through `WorkflowProfile` (`profile.Name` / `profile.Description` / `profile.Definition`); `IssueMetricsQualitySpecs` drops the registry from its hand-constructed `IssueReadModelLoader` and `IssueMetricsQuerier` arguments.
+- New `MohistDefaultWorkflowProjectionSpecs` anchors the split guarantees: reflection asserts on `MohistDefaultWorkflowProjection.ProjectWorkflowState`'s signature (no profile parameter), reflection asserts on `IIssueWorkflowProfile` (only `Profile` property, no `ProjectWorkflowState` method), and behavior scenarios for done / awaiting-approval / failed / change-dir / no-workflow mirror the spec file's WHEN/THEN list.
+- Verification: server spec 3417 (+11 new), unit 1610, arch 51, cli 1465, workflow-definition 175 all green; web typecheck + tests unaffected; runner typecheck + tests unaffected.
+
+## T-006 Notes
+
+- T-006 lands in two commits: the first commit moves the system-Profile enable toggle (`GetDisabledWorkflowProfileIdsAsync` read + `SetProfileEnabledAsync` write) onto `IWorkflowProfileProvider` as `GetDisabledProfileIdsAsync` / `SetProfileEnabledAsync`. Built-in canonicalization, the empty-row / no-row write paths, the last-enabled guard, and the `DisabledWorkflowProfileIds` JSON column are preserved verbatim from the previous `ProjectWorkflowProfileManager` implementation.
+- The `StubFailingOnStageLoadProfileProvider` in `WorkflowGrainProductionContractSpecs.cs` must implement the new interface members (`GetDisabledProfileIdsAsync` / `SetProfileEnabledAsync`) so the build stays green between steps; both throw `NotSupportedException`, matching the existing pattern for members the contract test doesn't exercise.
+- The remaining six consumers (`IssueGrain`, `IssueQuerier`, `IssueReadModelLoader`, `IssueMetricsQuerier`), the legacy `ProjectWorkflowTemplates` / `IssueWorkflowProfile.Template` retirement, and the `ProjectWorkflowProfileManager` deletion follow in the next T-006 commit.
+
+## T-006 Completion Notes
+
+- `IWorkflowProfileProvider` now owns reads of the Project default Profile and disabled Profile set. `IssueGrain`, Issue read projections, metrics, and `WorkflowDefinitionResolver` use those APIs; the two legacy manager classes are deleted.
+- Definition resolution now considers only the bound Profile, Issue Profile id, Project `DefaultWorkflowProfileId`, and enabled built-ins. Legacy template rows and Issue inline YAML remain available exclusively to `WorkflowProfileDataMigrator` and are not read at runtime.
+- `WorkflowProfileCanonicalYamlRenderer` emits the Definition at the YAML root accepted by `WorkflowProfileYamlParser`, so `CanonicalLegacy` records created by migration resolve through `WorkflowProfileProvider`.
+- Resolver fixtures now seed `WorkflowProfileRecordRow` and exercise custom/default resolution, stage hot reload, and disabled fallback without legacy tables. `WorkflowProfileCollectionSpecs` adds provider enablement and default-binding coverage.
+- Verification: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true` passed (3347).
+
+## Review Follow-up
+
+- Issue read projections now resolve Issue selections and Project defaults against the provider's Project collection, so custom Profiles remain visible as the effective Profile instead of falling back to a built-in registry entry. The list path loads the collection once per Project.
+- `IssueGrain` relies on the Definition resolver's provider-backed result and no longer repeats a built-in-only Profile check before startup.
+- Verification: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true` passed (3350).
+- Follow-up: the composite child projection now shares the provider-backed membership resolver; `IssueQuerierSpecs` covers both an explicit custom child Profile and a child inheriting a custom Project default.

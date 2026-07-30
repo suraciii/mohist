@@ -73,13 +73,15 @@ public sealed class WorkflowGrainProductionContractSpecs
         await using var scope = _fixture.Services.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
 
-        var profileManager = BuildThrowingProfileManager(scope.ServiceProvider, exceptionMessage);
+        var definitionResolver = BuildThrowingDefinitionResolver(scope.ServiceProvider, exceptionMessage);
+        var variableResolver = scope.ServiceProvider.GetRequiredService<WorkflowVariableResolver>();
         var identity = GrainTestContext.Create(workflowRunId, new StubProfileCoordinatorGrainFactory());
         var grain = new WorkflowGrain(
             identity.Context,
             identity.Runtime,
             store,
-            profileManager,
+            definitionResolver,
+            variableResolver,
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance);
         await grain.OnActivateAsync(CancellationToken.None);
@@ -96,7 +98,7 @@ public sealed class WorkflowGrainProductionContractSpecs
     }
 
     /// <summary>
-    /// Build a real <see cref="WorkflowProfileManager"/> backed by a
+    /// Build a real <see cref="WorkflowDefinitionResolver"/> backed by a
     /// <see cref="StubFailingOnStageLoadProfileProvider"/>. The provider
     /// returns a valid definition for the startup call so
     /// <c>EnsureCreatedRunAsync</c> succeeds, then returns
@@ -105,17 +107,13 @@ public sealed class WorkflowGrainProductionContractSpecs
     /// <see cref="WorkflowDefinitionResolutionException"/> with the
     /// requested message.
     /// </summary>
-    private WorkflowProfileManager BuildThrowingProfileManager(IServiceProvider services, string exceptionMessage)
+    private WorkflowDefinitionResolver BuildThrowingDefinitionResolver(IServiceProvider services, string exceptionMessage)
     {
         var dbFactory = services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        var runVariablesStore = services.GetRequiredService<WorkflowRunVariablesStore>();
         var provider = new StubFailingOnStageLoadProfileProvider(exceptionMessage);
-        return new WorkflowProfileManager(
+        return new WorkflowDefinitionResolver(
             dbFactory,
-            new InertPromptLoader(),
-            new Mohist.Server.Workflow.Services.Prompts.PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-            runVariablesStore,
             provider);
     }
 
@@ -187,11 +185,21 @@ public sealed class WorkflowGrainProductionContractSpecs
         public Task<bool> ContainsAsync(string projectId, string profileId, CancellationToken ct = default) =>
             Task.FromResult(true);
 
+        public Task<string?> GetDefaultProfileIdAsync(string projectId, CancellationToken ct = default) =>
+            Task.FromResult<string?>(null);
+
         public Task<IReadOnlyList<WorkflowProfileCollectionEntry>> ListAsync(string projectId, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
         public Task<WorkflowProfileCollectionEntry?> GetAsync(string projectId, string profileId, CancellationToken ct = default) =>
-            throw new NotSupportedException();
+            Task.FromResult<WorkflowProfileCollectionEntry?>(new WorkflowProfileCollectionEntry(
+                projectId,
+                profileId,
+                profileId,
+                string.Empty,
+                WorkflowProfileSourceProvenance.BuiltIn,
+                true,
+                null));
 
         public Task<string?> GetDefinitionSourceAsync(string projectId, string profileId, CancellationToken ct = default) =>
             throw new NotSupportedException();
@@ -212,6 +220,12 @@ public sealed class WorkflowGrainProductionContractSpecs
             throw new NotSupportedException();
 
         public Task<bool> DeleteAsync(string projectId, string profileId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlySet<string>> GetDisabledProfileIdsAsync(string projectId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(WorkflowProfileCatalog.IdComparer));
+
+        public Task SetProfileEnabledAsync(string projectId, string profileId, bool enabled, CancellationToken ct = default) =>
             throw new NotSupportedException();
     }
 

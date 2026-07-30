@@ -1,16 +1,15 @@
-using Mohist.Server.Issue.Grains;
 using Mohist.Workflow.Definition;
-using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
+/// <summary>
+/// Descriptive face of a built-in Workflow Profile. The id, name,
+/// description, and definition are sourced from <see cref="WorkflowProfile"/>
+/// rather than re-declared here, and the projection of issue workflow state
+/// is reached through <see cref="MohistDefaultWorkflowProjection"/> rather
+/// than a member of this interface.
+/// </summary>
 public interface IIssueWorkflowProfile
 {
-    string Id { get; }
-    string DisplayName { get; }
-    string Description { get; }
-    bool IsDefault { get; }
-    WorkflowDefinition Definition { get; }
-    MohistDefaultWorkflowState ProjectWorkflowState(Domain.Issue issue, WorkflowStatusView? workflow);
-    MohistDefaultWorkflowState ProjectWorkflowState(IssueReadModel issue, WorkflowStatusView? workflow);
+    WorkflowProfile Profile { get; }
 }

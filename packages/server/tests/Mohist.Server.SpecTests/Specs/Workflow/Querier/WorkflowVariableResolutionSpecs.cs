@@ -4,13 +4,14 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
-public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
+public class WorkflowVariableResolutionSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]
     public async Task ResolveLayeredVariables_ReturnsEmpty_WhenNoProfileVariablesExist()
@@ -22,7 +23,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
             runId: runId,
             issueTemplateJson: SerializeDefinition("empty-vars-template"));
 
-        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
+        var result = await Resolver.ResolveConfiguredVariablesAsync(runId);
 
         Assert.False(result.Vars.HasValue);
         Assert.Null(result.Stages);
@@ -41,7 +42,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
 
         await SeedAllLayersAsync("proj6", 1, runId, proj, issue);
 
-        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
+        var result = await Resolver.ResolveConfiguredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
@@ -77,7 +78,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
             await db.SaveChangesAsync();
         }
 
-        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
+        var result = await Resolver.ResolveConfiguredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
@@ -99,7 +100,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
 
         await SeedAllLayersAsync("proj_override", 1, runId, proj, issue);
 
-        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
+        var result = await Resolver.ResolveConfiguredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
@@ -133,7 +134,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
 
         await SeedAllLayersAsync("proj_project_stage", 1, runId, project, issue);
 
-        var result = await Manager.ResolveEffectiveVariablesAsync(runId, "check");
+        var result = await Resolver.ResolveEffectiveVariablesAsync(runId, "check");
 
         Assert.Equal(JsonValueKind.Object, result.ValueKind);
         var agent = result.GetProperty("agent");
@@ -169,14 +170,61 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
 
         await SeedIssueOnlyAsync("proj_stage", 1, runId, issue);
 
-        var result = await Manager.ResolveEffectiveVariablesAsync(runId, "build");
+        var result = await Resolver.ResolveEffectiveVariablesAsync(runId, "build");
 
         Assert.Equal("anthropic/claude-sonnet-4-6",
             result.GetProperty("agent").GetProperty("model").GetString());
 
-        var topLevelResult = await Manager.ResolveEffectiveVariablesAsync(runId, null);
+        var topLevelResult = await Resolver.ResolveEffectiveVariablesAsync(runId, null);
         Assert.Equal("minimax-coding-plan/MiniMax-M3",
             topLevelResult.GetProperty("agent").GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public async Task ResolveEffectiveVariables_UsesWorkflowWideVarsWhenStageHasNoVars()
+    {
+        var runId = "wr_stage_missing01";
+        var issue = new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new
+            {
+                agent = new { model = "workflow-wide-model" },
+                shared = "workflow-wide",
+            }));
+
+        await SeedIssueOnlyAsync("proj_stage_missing", 1, runId, issue);
+
+        var topLevelResult = await Resolver.ResolveEffectiveVariablesAsync(runId, null);
+        var stageResult = await Resolver.ResolveEffectiveVariablesAsync(runId, "build");
+
+        Assert.Equal(topLevelResult.GetRawText(), stageResult.GetRawText());
+    }
+
+    [Fact]
+    public async Task LoadIssueWorkspace_ReturnsStableIdentityFromIssueVariables()
+    {
+        var runId = "wr_workspace01";
+        var issue = new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new
+            {
+                workspace = new
+                {
+                    path = "/workspaces/issue-1",
+                    branch = "issue/1",
+                    changeDir = "packages/server",
+                },
+            }));
+
+        await SeedIssueOnlyAsync("proj_workspace", 1, runId, issue);
+
+        var first = await Resolver.LoadIssueWorkspaceAsync("proj_workspace", 1);
+        var second = await Resolver.LoadIssueWorkspaceAsync("proj_workspace", 1);
+
+        var expected = new WorkspaceIdentity(
+            "/workspaces/issue-1",
+            "issue/1",
+            "packages/server");
+        Assert.Equal(expected, first);
+        Assert.Equal(first, second);
     }
 
     [Fact]
@@ -210,7 +258,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
             issueTemplateJson: templateJson,
             runtime: runtime);
 
-        var result = await Manager.ResolveConfiguredVariablesAsync(runId);
+        var result = await Resolver.ResolveConfiguredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
@@ -253,7 +301,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
         await SeedAllLayersAsync("proj_effective_stage", 1, runId, project, issue,
             issueTemplateJson: templateJson);
 
-        var result = await Manager.ResolveEffectiveVariablesAsync(runId, "build");
+        var result = await Resolver.ResolveEffectiveVariablesAsync(runId, "build");
 
         Assert.Equal(JsonValueKind.Object, result.ValueKind);
         Assert.False(result.TryGetProperty("vars", out _));

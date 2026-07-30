@@ -10,7 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
-public class WorkflowApprovalConfigSpecs : WorkflowProfileManagerTestFactory
+public class WorkflowApprovalConfigSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]
     public async Task LoadApprovalConfigAsync_ExistingRunIgnoresLaterDisabledProfiles()
@@ -23,7 +23,7 @@ public class WorkflowApprovalConfigSpecs : WorkflowProfileManagerTestFactory
             issueWorkflowProfileId: "mohist/local",
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
-        var approval = await Manager.LoadApprovalConfigAsync(runId);
+        var approval = await DefinitionResolver.LoadApprovalConfigAsync(runId);
 
         var task = Assert.Single(approval!.Feedback!.Tasks!);
         Assert.Equal("apply-feedback", task.Id);
@@ -53,7 +53,7 @@ public class WorkflowApprovalConfigSpecs : WorkflowProfileManagerTestFactory
 
         await SeedProjectTemplateAsync("approval_proj", runId, "approval-template", templateJson);
 
-        var loaded = await Manager.LoadApprovalConfigAsync(runId);
+        var loaded = await DefinitionResolver.LoadApprovalConfigAsync(runId);
 
         Assert.NotNull(loaded);
         Assert.NotNull(loaded!.Feedback);
@@ -71,7 +71,7 @@ public class WorkflowApprovalConfigSpecs : WorkflowProfileManagerTestFactory
 
         await SeedProjectTemplateAsync("no_approval_proj", runId, "no-approval-template", templateJson);
 
-        var loaded = await Manager.LoadApprovalConfigAsync(runId);
+        var loaded = await DefinitionResolver.LoadApprovalConfigAsync(runId);
 
         Assert.Null(loaded);
     }

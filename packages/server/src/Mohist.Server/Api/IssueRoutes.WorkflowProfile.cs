@@ -14,13 +14,13 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             int number,
-            IssueWorkflowProfileManager issueProfileManager,
+            IssueVariableStore variableStore,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
-            return ApiResults.Ok(await issueProfileManager.GetVariablesAsync(project.Id, number));
+            return ApiResults.Ok(await variableStore.GetVariablesAsync(project.Id, number));
         });
 
         group.MapPut("/{number:int}/variables", async (
@@ -28,7 +28,7 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             VariableBundle bundle,
-            IssueWorkflowProfileManager issueProfileManager,
+            IssueVariableStore variableStore,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
@@ -36,7 +36,7 @@ public static partial class IssueRoutes
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
-                return ApiResults.Ok(await issueProfileManager.SetVariablesAsync(project.Id, number, bundle));
+                return ApiResults.Ok(await variableStore.SetVariablesAsync(project.Id, number, bundle));
             }
             catch (ArgumentException ex)
             {
@@ -49,7 +49,7 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             VariableBundle patch,
-            IssueWorkflowProfileManager issueProfileManager,
+            IssueVariableStore variableStore,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
@@ -57,7 +57,7 @@ public static partial class IssueRoutes
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
-                return ApiResults.Ok(await issueProfileManager.PatchVariablesAsync(project.Id, number, patch));
+                return ApiResults.Ok(await variableStore.PatchVariablesAsync(project.Id, number, patch));
             }
             catch (ArgumentException ex)
             {

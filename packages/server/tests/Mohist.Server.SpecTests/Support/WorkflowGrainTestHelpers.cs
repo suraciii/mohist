@@ -113,15 +113,20 @@ public static class WorkflowGrainTestHelpers
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var promptLoader = new InMemoryPromptLoader();
+        var runVariablesStore = new WorkflowRunVariablesStore(factory);
+        var definitionResolver = new WorkflowDefinitionResolver(
+            factory,
+            CreateEmptyConfigService(),
+            new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
+        var variableResolver = new WorkflowVariableResolver(
+            factory,
+            new ProjectVariableStore(factory),
+            new IssueVariableStore(factory),
+            runVariablesStore);
         return new WorkflowQuerier(
             factory,
-            new WorkflowProfileManager(
-                factory,
-                promptLoader,
-                new PromptTemplateEngine(),
-                CreateEmptyConfigService(),
-                new WorkflowRunVariablesStore(factory),
-                new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance)),
+            definitionResolver,
+            variableResolver,
             new WorkflowArtifactQuerier(factory));
     }
 
@@ -259,8 +264,8 @@ public static class WorkflowGrainTestHelpers
             .UseSqlite(connectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine(), NullActionCatalogSource.Instance);
-        await manager.PatchVariablesAsync(projectId, patch);
+        var store = new ProjectVariableStore(factory);
+        await store.PatchVariablesAsync(projectId, patch);
     }
 
     public static async Task PatchIssueVariablesAsync(
@@ -273,8 +278,8 @@ public static class WorkflowGrainTestHelpers
             .UseSqlite(connectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new IssueWorkflowProfileManager(factory, NullActionCatalogSource.Instance);
-        await manager.PatchVariablesAsync(projectId, issueNumber, patch);
+        var store = new IssueVariableStore(factory);
+        await store.PatchVariablesAsync(projectId, issueNumber, patch);
     }
 
     public static WorkflowDefinition TwoStages()

@@ -26,20 +26,17 @@ namespace Mohist.Server.Issue.Services;
 /// </summary>
 public class IssueReadModelLoader : IScopedService
 {
-    private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
-    private readonly ProjectWorkflowProfileManager _projectProfileManager;
+    private readonly IWorkflowProfileProvider _profileProvider;
     private readonly ILogger<IssueReadModelLoader> _logger;
 
     public IssueReadModelLoader(
-        IssueWorkflowProfileRegistry profiles,
         EffectiveWorkflowProfileResolver effectiveProfileResolver,
-        ProjectWorkflowProfileManager projectProfileManager,
+        IWorkflowProfileProvider profileProvider,
         ILogger<IssueReadModelLoader> logger)
     {
-        _profiles = profiles;
         _effectiveProfileResolver = effectiveProfileResolver;
-        _projectProfileManager = projectProfileManager;
+        _profileProvider = profileProvider;
         _logger = logger;
     }
 
@@ -89,13 +86,37 @@ public class IssueReadModelLoader : IScopedService
 
         if (rows.Count == 0) return [];
 
-        var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
-        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
+        var projectDefaultProfileId = await LoadProjectDefaultProfileAsync(db, projectId);
+        var disabledIds = await _profileProvider.GetDisabledProfileIdsAsync(projectId);
+        var profiles = await _profileProvider.ListAsync(projectId);
 
         return IssueRowMapper.ByNumber(rows, projectId)
-            .Select(issue => ToReadModel(BuildInfo(issue, project, _effectiveProfileResolver.Resolve(
-                issue.WorkflowProfileId, projectDefaultTemplateId, disabledIds))))
+            .Select(issue => ToReadModel(BuildInfo(issue, project, ResolveProfileId(
+                issue.WorkflowProfileId,
+                projectDefaultProfileId,
+                profiles,
+                disabledIds))))
             .ToList();
+    }
+
+    internal static string? ResolveProfileId(
+        string? issueProfileId,
+        string? projectDefaultProfileId,
+        IReadOnlyList<WorkflowProfileCollectionEntry> profiles,
+        IReadOnlySet<string>? disabledIds)
+    {
+        var profileIds = profiles.Select(profile => profile.ProfileId)
+            .ToHashSet(WorkflowProfileCatalog.IdComparer);
+        var systemProfileIds = profiles.Where(profile => profile.IsBuiltIn)
+            .Select(profile => profile.ProfileId)
+            .ToList();
+
+        return EffectiveWorkflowProfileResolver.ResolveCore(
+            issueProfileId,
+            projectDefaultProfileId,
+            profileIds.Contains,
+            disabledIds,
+            systemProfileIds);
     }
 
     /// <summary>
@@ -289,12 +310,12 @@ public class IssueReadModelLoader : IScopedService
     /// only the default-template id (single-issue lookups, stage-order
     /// resolution) can avoid duplicating the SQL.
     /// </summary>
-    public async Task<string?> LoadProjectDefaultTemplateAsync(MohistDbContext db, string projectId)
+    public async Task<string?> LoadProjectDefaultProfileAsync(MohistDbContext db, string projectId)
     {
         if (string.IsNullOrWhiteSpace(projectId)) return null;
         var row = await db.ProjectWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        return row?.DefaultTemplateId;
+        return row?.DefaultWorkflowProfileId;
     }
 
     private void ApplyWorkflowProjections(
@@ -307,7 +328,11 @@ public class IssueReadModelLoader : IScopedService
 
             if (string.IsNullOrWhiteSpace(issue.WorkflowProfileId)) continue;
 
-            var projection = _profiles.Get(issue.WorkflowProfileId).ProjectWorkflowState(issue, status);
+            var projection = MohistDefaultWorkflowProjection.ProjectWorkflowState(
+                issue.Number,
+                issue.Title,
+                issue.Status,
+                status);
 
             issue.Status = projection.IssueStatus;
             issue.Health = projection.Health;

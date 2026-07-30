@@ -65,7 +65,7 @@ public sealed class IssueListProjectionCostSpecs
             scope.ServiceProvider.GetRequiredService<ProjectQuerier>(),
             scope.ServiceProvider.GetRequiredService<ConfigService>(),
             scope.ServiceProvider.GetRequiredService<EffectiveWorkflowProfileResolver>(),
-            scope.ServiceProvider.GetRequiredService<ProjectWorkflowProfileManager>(),
+            scope.ServiceProvider.GetRequiredService<IWorkflowProfileProvider>(),
             scope.ServiceProvider.GetRequiredService<IssueReadModelLoader>());
 
         var baseline = await querier.ListWithLabelFiltersAsync(

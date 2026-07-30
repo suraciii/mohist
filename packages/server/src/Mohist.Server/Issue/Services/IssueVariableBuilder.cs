@@ -155,7 +155,7 @@ public static class IssueVariableBuilder
     /// (and create) to persist <c>model</c>, <c>agentConfig</c>,
     /// <c>stageModels</c>, and <c>stageModelVariants</c> on the workflow profile
     /// path. The resulting bundle is fed to
-    /// <see cref="Workflow.Services.IssueWorkflowProfileManager.PatchVariablesAsync"/>,
+    /// <see cref="Workflow.Services.IssueVariableStore.PatchVariablesAsync"/>,
     /// so each provided key overlays the existing variables via deep merge —
     /// absent keys stay untouched.
     /// </summary>
@@ -297,7 +297,7 @@ public static class IssueVariableBuilder
     /// the <c>vars.agent</c> surface only carries
     /// <c>{model, variant}</c>; legacy runtime/liveness keys carried via any
     /// read-in path (ConfigService.GetAgentConfigAsync,
-    /// ProjectWorkflowProfileManager.SetVariablesAsync project write path,
+    /// ProjectVariableStore.SetVariablesAsync project write path,
     /// already-persisted bundle) MUST be projected away before
     /// <c>vars.agent</c> reaches a downstream dispatch. Legacy keys in
     /// underlying storage remain byte-equivalent — this filter only acts
