@@ -64,13 +64,19 @@ public static class AgentSessionStopRoutes
             return ApiResults.NotFound($"Agent session {sessionId} not found");
 
         var session = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
+        var inFlight = stopClaims.Register(target.SessionId, request.TurnId);
         var claim = await session.ClaimTurnStopAsync(request.TurnId);
         var control = claim.Control;
         if (control is null)
+        {
+            inFlight.Dispose();
             return ApiResults.NotFound($"Turn {request.TurnId} not found");
+        }
 
         if (control.Classification == AgentTurnControlClassification.Terminal)
         {
+            inFlight.Dispose();
+            await session.CompleteTurnStopAsync(control.TurnId);
             return ApiResults.Ok(new
             {
                 state = "turn-already-ended",
@@ -79,12 +85,17 @@ public static class AgentSessionStopRoutes
         }
 
         if (control.Classification == AgentTurnControlClassification.Queued)
+        {
+            inFlight.Dispose();
             return ApiResults.Ok(new { state = "queued", action = "cancel" });
+        }
 
         if (!claim.CanDispatch)
+        {
+            inFlight.Dispose();
             return ApiResults.Ok(new { state = "stop-requested" });
+        }
 
-        var inFlight = stopClaims.Register(target.SessionId, control.TurnId);
         try
         {
             var runnerId = connections.GetConnectionId(target.RunnerId);
