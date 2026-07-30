@@ -59,3 +59,30 @@
   from existing JSON, validates that every nonterminal row reconstructs, and
   adds indexes. The migration aborts inside a transaction when validation
   fails; no rows change.
+## Status (interrupted 2026-07-30)
+
+T-001 was committed in 912f34974 on the mohist/run-wr_961132d1098141959d0d2e92c2609c6d branch
+ahead of this turn; no further code changes were attempted. Verified the build
+clean for server + SpecTests. Verified AgentJobStoreSpecs passes 23/23 in ~2s;
+AgentJobGrainSpecs output was suppressed by the test runner before interruption
+so coverage of the grain-level specs still needs re-confirmation in a fresh
+run. No work-in-progress on disk; the interrupted turn was investigative only.
+
+## Next steps for the resumed turn
+
+1. Re-run the AgentJobGrain collection in a clean shell (output via
+   `--output detailed` to capture pass/fail counts). Focus on
+   AgentJobGrainSpecs, AgentJobGrainPersistenceSpecs,
+   AgentJobWriteThroughMirrorSpecs, AgentJobGrainRoutedLaunchSpecs,
+   AgentJobTerminalDeliverySpecs, AgentJobTerminalTranscriptPersistenceSpecs,
+   AgentJobDispatchEnvelopeSpecs, and AgentJobOptionsBindingSpecs.
+2. Cover the acceptance criteria that the prior commit did not exercise:
+   - admission writes nothing in `RunnerWorks`
+   - interrupted ledger write is observable as either pre- or post-transition
+   - admission capacity race leaves job pending for readiness timeout
+   - migration abort semantics for malformed nonterminal rows
+   - query cost independent of terminal history (assert elapsed < bound
+     across N terminal + 1 active rows)
+3. If those need new specs, add them under
+   `packages/server/tests/Mohist.Server.SpecTests/Specs/Agent/...` per the
+   patterns already used in `AgentJobStoreSpecs` and the grain fixtures.
