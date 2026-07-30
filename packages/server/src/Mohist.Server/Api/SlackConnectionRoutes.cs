@@ -158,6 +158,23 @@ public static class SlackConnectionRoutes
             }
         });
 
+        management.MapPost("/{connectionId}/transfer-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
+        {
+            try
+            {
+                var code = await claims.GenerateAsync(
+                    context.GetResolvedProject().Id,
+                    connectionId,
+                    Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeKinds.Transfer,
+                    ct: ct);
+                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "claim_unavailable");
+            }
+        });
+
         var group = app.MapGroup("/api/projects/{projectRef}/slack-connections/{connectionId}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
@@ -199,6 +216,11 @@ public static class SlackConnectionRoutes
             {
                 await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, "Owner claimed successfully.", null, ct);
                 return ApiResults.Ok(new { kind = "claimed" });
+            }
+            if (decision.Kind == SlackInboundDecisionKind.Transferred)
+            {
+                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, "Owner transferred successfully.", null, ct);
+                return ApiResults.Ok(new { kind = "transferred" });
             }
             if (decision.Kind == SlackInboundDecisionKind.Rejected)
             {

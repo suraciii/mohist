@@ -467,6 +467,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
                     b.Property<DateTimeOffset>("ExpiresAt").HasColumnType("TEXT");
 
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("initial");
+
                     b.Property<string>("ProjectId")
                         .IsRequired()
                         .HasMaxLength(256)

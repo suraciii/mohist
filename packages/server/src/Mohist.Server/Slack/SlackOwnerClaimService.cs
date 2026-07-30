@@ -24,6 +24,7 @@ public sealed record SlackInboundDecision(string Kind, string? Reason)
 public static class SlackInboundDecisionKind
 {
     public const string Claimed = "claimed";
+    public const string Transferred = "transferred";
     public const string AcceptedOwnerTask = "accepted_owner_task";
     public const string Rejected = "rejected";
 }
@@ -52,6 +53,14 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
         string projectId,
         string connectionId,
         TimeSpan? lifetime = null,
+        CancellationToken ct = default) =>
+        await GenerateAsync(projectId, connectionId, SlackOwnerClaimCodeKinds.Initial, lifetime, ct);
+
+    public async Task<SlackOwnerClaimCode> GenerateAsync(
+        string projectId,
+        string connectionId,
+        string kind,
+        TimeSpan? lifetime = null,
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -59,10 +68,25 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
             row => row.ProjectId == projectId && row.Id == connectionId && row.DeletedAt == null, ct);
         if (connection is null)
             throw new InvalidOperationException("Connection was not found.");
-        if (connection.OwnerSlackUserId is not null || connection.SetupProgress == SetupProgressKind.Complete)
-            throw new InvalidOperationException("The Connection already has an owner.");
-        if (connection.SetupProgress != SetupProgressKind.ClaimOwner)
-            throw new InvalidOperationException("Slack setup must be verified before generating an owner claim code.");
+
+        if (string.Equals(kind, SlackOwnerClaimCodeKinds.Initial, StringComparison.Ordinal))
+        {
+            if (connection.OwnerSlackUserId is not null || connection.SetupProgress == SetupProgressKind.Complete)
+                throw new InvalidOperationException("The Connection already has an owner.");
+            if (connection.SetupProgress != SetupProgressKind.ClaimOwner)
+                throw new InvalidOperationException("Slack setup must be verified before generating an owner claim code.");
+        }
+        else if (string.Equals(kind, SlackOwnerClaimCodeKinds.Transfer, StringComparison.Ordinal))
+        {
+            if (connection.OwnerSlackUserId is null)
+                throw new InvalidOperationException("The Connection has no current owner. Use claim-owner instead.");
+            if (connection.SetupProgress != SetupProgressKind.Complete)
+                throw new InvalidOperationException("Slack setup must be complete before transferring ownership.");
+        }
+        else
+        {
+            throw new ArgumentException($"Unknown owner claim code kind '{kind}'.", nameof(kind));
+        }
 
         var now = _time.GetUtcNow();
         var expiresAt = now.Add(lifetime ?? DefaultLifetime);
@@ -70,7 +94,7 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
         var value = CreateCode();
 
         var previous = await db.SlackOwnerClaimCodes
-            .Where(row => row.ProjectId == projectId && row.ConnectionId == connectionId && row.UsedAt == null && row.SupersededBy == null)
+            .Where(row => row.ProjectId == projectId && row.ConnectionId == connectionId && row.Kind == kind && row.UsedAt == null && row.SupersededBy == null)
             .ToListAsync(ct);
         foreach (var row in previous)
             row.SupersededBy = id;
@@ -81,6 +105,7 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
             ProjectId = projectId,
             ConnectionId = connectionId,
             CodeHash = Hash(value),
+            Kind = kind,
             ExpiresAt = expiresAt,
             CreatedAt = now,
         });
@@ -109,6 +134,12 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
                 return Reject("This owner claim code is no longer valid. Generate a new code.");
             if (_time.GetUtcNow() >= code.ExpiresAt)
                 return Reject("This owner claim code has expired. Generate a new code.");
+            if (string.Equals(code.Kind, SlackOwnerClaimCodeKinds.Transfer, StringComparison.Ordinal))
+            {
+                if (connection.OwnerSlackUserId is null)
+                    return Reject("This Connection has no current owner to transfer. Use claim-owner instead.");
+                return await TryTransferAsync(db, connection, code, inbound.SenderSlackUserId, ct);
+            }
             return await TryClaimAsync(db, connection, code, inbound.SenderSlackUserId, ct);
         }
 
@@ -161,6 +192,43 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
         code.UsedAt = now;
         await db.SaveChangesAsync(ct);
         return new(SlackInboundDecisionKind.Claimed, null);
+    }
+
+    private async Task<SlackInboundDecision> TryTransferAsync(
+        MohistDbContext db,
+        AgentConnectionRow connection,
+        SlackOwnerClaimCodeRow code,
+        string senderSlackUserId,
+        CancellationToken ct)
+    {
+        var token = await _secrets.LoadAsync(
+            new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken), ct);
+        if (token is null || token.Length == 0)
+            return Reject("Slack setup is incomplete: configure the Bot token before transferring ownership.");
+
+        var userResponse = await _slack.UsersInfoAsync(
+            senderSlackUserId, Encoding.UTF8.GetString(token), ct);
+        if (!IsEligibleMember(userResponse, connection.WorkspaceTeamId, senderSlackUserId))
+            return Reject("Only a current regular member of this Slack workspace can take over ownership.");
+
+        var currentOwner = connection.OwnerSlackUserId;
+        if (currentOwner is null)
+            return Reject("This Connection no longer has a current owner. Use claim-owner instead.");
+        if (string.Equals(currentOwner, senderSlackUserId, StringComparison.Ordinal))
+            return Reject("You are already the owner of this Connection.");
+
+        var now = _time.GetUtcNow();
+        var changed = await db.AgentConnections
+            .Where(row => row.ProjectId == connection.ProjectId && row.Id == connection.Id && row.DeletedAt == null && row.OwnerSlackUserId == currentOwner)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.OwnerSlackUserId, senderSlackUserId)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+        if (changed == 0)
+            return Reject("Ownership has already been transferred. Generate a new transfer code if you still need to take ownership.");
+
+        code.UsedAt = now;
+        await db.SaveChangesAsync(ct);
+        return new(SlackInboundDecisionKind.Transferred, null);
     }
 
     private static bool IsEligibleMember(

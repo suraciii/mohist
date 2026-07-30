@@ -87,3 +87,115 @@
   bots.info) is internal to verification — it is a different signal from the
   route-level binding-mismatch check (auth result vs the connection's stored
   binding). The fake needs to keep them in sync to exercise the right branch.
+## Issue 517 — T-002 (Owner transfer via claim-code Kind and atomic swap)
+
+### Implementation notes
+
+- **`SlackOwnerClaimCodeKinds`** — new constants class in
+  `Infrastructure/Data/Slack/SlackOwnerClaimCodeRow.cs` exposing
+  `Initial = "initial"` and `Transfer = "transfer"`. Discriminator stored on
+  the row; default of `initial` makes the migration purely additive for
+  existing rows.
+
+- **`SlackOwnerClaimCodeRow.Kind`** — additive column. Hand-written migration
+  `20260730000000_AddSlackOwnerClaimCodeKind` is `AddColumn` with
+  `defaultValue: "initial"` so existing rows apply cleanly.
+  `MohistDbContextModelSnapshot.cs` updated to mirror the model (column +
+  `HasDefaultValue("initial")`).
+
+- **`SlackOwnerClaimService.GenerateAsync`** — now has a `kind` parameter
+  overload. Opposite preconditions:
+    - `initial`: existing behavior — requires no owner AND `SetupProgress ==
+      ClaimOwner` (the `|| Complete` check still rejects the no-claim-state +
+      owner-already-set combination).
+    - `transfer`: requires an existing owner AND `SetupProgress == Complete`
+      (the inverse). Throws an explicit message ("Use claim-owner instead." /
+      "Slack setup must be complete before transferring ownership.").
+  Both kinds share the same hashing + expiry + supersession logic. The
+  supersession `Where(...)` now includes `Kind == kind` so a fresh transfer
+  code supersedes only prior *transfer* codes (initial codes stay valid), and
+  vice versa.
+
+- **`SlackOwnerClaimService.HandleInboundDmAsync`** — when a code matches,
+  dispatches by `code.Kind`. Transfer codes call the new `TryTransferAsync`
+  (with the `WHERE OwnerSlackUserId == currentOwner` conditional swap);
+  initial codes keep the existing `TryClaimAsync` path
+  (`WHERE OwnerSlackUserId == null`).
+
+- **`TryTransferAsync`** — mirrors `TryClaimAsync`'s shape: load bot token
+  → `UsersInfoAsync` → `IsEligibleMember` guard → `ExecuteUpdateAsync`
+  with `WHERE OwnerSlackUserId == currentOwner` (the swap guard from design
+  D2, eliminating the no-owner window). If the swap returns 0 rows
+  (concurrent transfer or owner already changed), rejects with
+  "Ownership has already been transferred. Generate a new transfer code if
+  you still need to take ownership." → no swap, no double-owner.
+  Self-transfer (sender == currentOwner) is explicitly rejected.
+
+- **New decision kind** — `SlackInboundDecisionKind.Transferred = "transferred"`
+  paired with an explicit "Owner transferred successfully." reply in the
+  ingress route. Caller-visible `{ kind: "transferred" }` mirrors the
+  existing `claimed` ack shape.
+
+- **`POST /{connectionId}/transfer-owner`** — mirrors `claim-owner` exactly
+  except the service call uses `kind: SlackOwnerClaimCodeKinds.Transfer`.
+  Reuses the existing `claim_unavailable` error code on the
+  `InvalidOperationException` precondition path.
+
+### Codebase patterns
+
+- The `SlackConnectionRotateCredentialsSpecs` pattern (direct construction +
+  `RecordingSlackApiClient` + `TestSqliteDatabase`) carries over to the new
+  `SlackOwnerTransferSpecs`. Tests use `FakeTimeProvider` for code expiry
+  and injectable `ISlackApiClient` for membership probing — no real network.
+- The `Migration` chain refuses to add a column with `HasDefaultValue` via
+  `dotnet ef migrations add` when the previous migration's `.Designer.cs`
+  delegates to `MohistDbContextModelSnapshot.BuildModelCore` — EF computes
+  the diff against the current snapshot and emits an `AlterColumn` that
+  would fail on fresh databases. **Workaround**: write the migration by
+  hand as `AddColumn` (matches the established `20260612012629_AddPendingUploadKind`
+  pattern) and keep the existing `.Designer.cs` delegating pattern unchanged.
+
+### Test coverage (17 new tests in `SlackOwnerTransferSpecs`)
+
+- Initial-vs-default behavior (2): `GenerateAsync(transfer)` rows are
+  `Kind=transfer`; `GenerateAsync()` without kind defaults to `Initial`.
+- Preconditions (2): transfer rejected when no owner; transfer rejected
+  when SetupProgress ≠ Complete.
+- Supersession scoping (1): regenerating a transfer code supersedes only
+  the prior transfer code; initial codes stay valid.
+- Expiry (1): expired transfer code is rejected with
+  "This owner claim code has expired. Generate a new code." message.
+- Atomic swap (1): eligible member redeems → `Transferred` decision;
+  old owner is rejected on the next DM ("only to its owner"), new owner
+  accepted.
+- Single-use (1): replaying a used transfer code rejects.
+- Self-transfer (1): sending the code to the existing owner is rejected
+  with "You are already the owner of this Connection." — no swap.
+- Membership theory (5): bot / deactivated / guest / cross-workspace
+  senders all rejected; only current regular bound member succeeds.
+- Self-transfer replay scenario: a superseded first code followed by
+  a second code where only the second is usable (covers the "regenerating
+  invalidates prior" acceptance criterion).
+- Initial claim still works (1): claim path unchanged for an
+  un-owned, SetupProgress=ClaimOwner Connection.
+
+### Gotchas
+
+- The migration inconsistency: EF's `AddSlackOwnerClaimCodes` migration has
+  a `.Designer.cs` that delegates to `MohistDbContextModelSnapshot.BuildModelCore`.
+  When the snapshot is updated to match the new model, EF can no longer
+  emit an `AddColumn` migration — only `AlterColumn`. Since the dev
+  database is the only consumer and migrations like
+  `20260612012629_AddPendingUploadKind` established the hand-written pattern,
+  the migration is hand-written with `AddColumn`. EF's `migrations remove`
+  also resets the snapshot to a non-`BuildModelCore` form (line-by-line),
+  breaking the other 13 migrations that delegate to it — restore via
+  `git checkout` before any further `dotnet ef` use.
+- SQLite does not support `OrderBy(row.CreatedAt)` (`DateTimeOffset`
+  ordering inside SQL). Tests that need ordering read into memory first
+  and count, instead of ordering in EF.
+- The `ISlackApiClient` test fake needs `UsersInfoAsync(userId, …)` to be
+  per-userId when the same test wants different identities for different
+  senders (theory cases). Introduced `UsersInfoResponse` as a
+  `Func<string, SlackUserInfoResponse>?` on the fake alongside the existing
+  single-shot `UsersInfo` property.

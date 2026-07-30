@@ -487,6 +487,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.CodeHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Kind).HasMaxLength(32).IsRequired().HasDefaultValue(SlackOwnerClaimCodeKinds.Initial);
             entity.Property(e => e.ExpiresAt).IsRequired();
             entity.Property(e => e.SupersededBy).HasMaxLength(256);
             entity.Property(e => e.CreatedAt).IsRequired();
