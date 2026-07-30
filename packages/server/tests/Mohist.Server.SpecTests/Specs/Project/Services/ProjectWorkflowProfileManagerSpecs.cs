@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -257,54 +256,6 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         await _manager.SetDefaultTemplateAsync("proj-clear", "t1");
         await _manager.SetDefaultTemplateAsync("proj-clear", null);
         Assert.Null(await _manager.GetDefaultTemplateAsync("proj-clear"));
-    }
-
-    // ===================== Variables Set/Patch =====================
-
-    [Fact]
-    public async Task GetVariables_ReturnsEmpty_WhenNotSet()
-    {
-        var bundle = await _manager.GetVariablesAsync("proj-none");
-        Assert.Same(VariableBundle.Empty, bundle);
-    }
-
-    [Fact]
-    public async Task SetVariables_StoresBundle()
-    {
-        var bundle = new VariableBundle(
-            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new { a = 1 })));
-
-        await _manager.SetVariablesAsync("proj-set-vars", bundle);
-        var result = await _manager.GetVariablesAsync("proj-set-vars");
-
-        Assert.NotNull(result.Vars);
-    }
-
-    [Fact]
-    public async Task PatchVariables_DeepMerges_WithExisting()
-    {
-        // Per #410 T-002 design D5: SetVariablesAsync / PatchVariablesAsync
-        // run the project write through ProjectVariablesFilter, which
-        // projects every vars.agent / stages.<stage>.vars.agent block down
-        // to the converged {model, variant} whitelist. Legacy keys
-        // supplied on either side of the patch are stripped before
-        // persistence.
-        var initial = new VariableBundle(
-            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(
-                new { agent = new { model = "sonnet-4", variant = "high" } })));
-        await _manager.SetVariablesAsync("proj-patch", initial);
-
-        var patch = new VariableBundle(
-            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(
-                new { agent = new { model = "gpt-4o" } })));
-        await _manager.PatchVariablesAsync("proj-patch", patch);
-
-        var result = await _manager.GetVariablesAsync("proj-patch");
-        Assert.NotNull(result.Vars);
-        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
-        var agent = doc.RootElement.GetProperty("agent");
-        Assert.False(agent.TryGetProperty("type", out _));
-        Assert.Equal("gpt-4o", agent.GetProperty("model").GetString());
     }
 
     // ===================== helpers =====================

@@ -41,7 +41,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly IssueRepositoryResolver _repositoryResolver;
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
-    private readonly IssueWorkflowProfileManager _issueProfileManager;
+    private readonly IssueVariableStore _issueVariableStore;
     private readonly AttachmentService _attachmentService;
     private readonly IConfiguration _configuration;
     private readonly IEnvironmentVariableProvider _environment;
@@ -61,7 +61,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IssueRepositoryResolver repositoryResolver,
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
-        IssueWorkflowProfileManager issueProfileManager,
+        IssueVariableStore issueVariableStore,
         AttachmentService attachmentService,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
@@ -81,7 +81,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _repositoryResolver = repositoryResolver;
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
-        _issueProfileManager = issueProfileManager;
+        _issueVariableStore = issueVariableStore;
         _attachmentService = attachmentService;
         _configuration = configuration;
         _environment = environment;
@@ -100,7 +100,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IssueRepositoryResolver repositoryResolver,
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
-        IssueWorkflowProfileManager issueProfileManager,
+        IssueVariableStore issueVariableStore,
         AttachmentService attachmentService,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
@@ -119,7 +119,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _repositoryResolver = repositoryResolver;
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
-        _issueProfileManager = issueProfileManager;
+        _issueVariableStore = issueVariableStore;
         _attachmentService = attachmentService;
         _configuration = configuration;
         _environment = environment;
@@ -350,7 +350,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // agent block) are preserved by passing the existing bundle into
         // the builder — the seed only fires when the issue would otherwise
         // expose `vars.agent` as undefined.
-        var existingVariables = await _issueProfileManager.GetVariablesAsync(issue.ProjectId, issue.Number);
+        var existingVariables = await _issueVariableStore.GetVariablesAsync(issue.ProjectId, issue.Number);
         var issueBundle = IssueVariableBuilder.BuildContextBundle(
             wrId,
             issue,
@@ -358,7 +358,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             workspace,
             existingVariables);
         var mergedVariables = VariableBundle.Patch(existingVariables, issueBundle);
-        await _issueProfileManager.SetVariablesAsync(issue.ProjectId, issue.Number, mergedVariables);
+        await _issueVariableStore.SetVariablesAsync(issue.ProjectId, issue.Number, mergedVariables);
 
         return (repositoryContext, workspace, new IssueWorkStartedContext(
             issue.ProjectId,

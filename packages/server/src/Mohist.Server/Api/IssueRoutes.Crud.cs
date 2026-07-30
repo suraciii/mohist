@@ -54,7 +54,7 @@ public static partial class IssueRoutes
             IssueQuerier issuesQuery,
             IssueRepositoryResolver repositoryResolver,
             IWorkflowProfileProvider profileProvider,
-            IssueWorkflowProfileManager issueProfileManager) =>
+            IssueVariableStore issueVariableStore) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
                 return ApiResults.BadRequest("title is required");
@@ -162,7 +162,7 @@ public static partial class IssueRoutes
 
             try
             {
-                await ApplyCreateModelMetadataAsync(issueProfileManager, project.Id, number, req);
+                await ApplyCreateModelMetadataAsync(issueVariableStore, project.Id, number, req);
             }
             catch (AttachmentLimitException ex)
             {
@@ -197,7 +197,7 @@ public static partial class IssueRoutes
             IssueQuerier issuesQuery,
             IssueRepositoryResolver repositoryResolver,
             IWorkflowProfileProvider profileProvider,
-            IssueWorkflowProfileManager issueProfileManager) =>
+            IssueVariableStore issueVariableStore) =>
         {
             var project = GetRequiredProject(ctx);
 
@@ -343,7 +343,7 @@ public static partial class IssueRoutes
                             coordinatorResult.Message ?? "Repository change rejected");
                 }
 
-                await ApplyUpdateModelMetadataAsync(issueProfileManager, project.Id, number, req, req.Raw);
+                await ApplyUpdateModelMetadataAsync(issueVariableStore, project.Id, number, req, req.Raw);
 
                 var info = await issuesQuery.GetAsync(project.Id, number);
                 return ApiResults.Ok(info);
@@ -402,7 +402,7 @@ public static partial class IssueRoutes
                         return ApiResults.Conflict(coordinatorResult.Message ?? "Issue update rejected");
                 }
 
-                await ApplyUpdateModelMetadataAsync(issueProfileManager, project.Id, number, req, req.Raw);
+                await ApplyUpdateModelMetadataAsync(issueVariableStore, project.Id, number, req, req.Raw);
                 return ApiResults.Ok(await issuesQuery.GetAsync(project.Id, number));
             }
 
@@ -454,7 +454,7 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest(ex.Message, "invalid_attachment");
             }
 
-            await ApplyUpdateModelMetadataAsync(issueProfileManager, project.Id, number, req, req.Raw);
+            await ApplyUpdateModelMetadataAsync(issueVariableStore, project.Id, number, req, req.Raw);
 
             var patched = await issuesQuery.GetAsync(project.Id, number);
             return ApiResults.Ok(patched);
@@ -585,7 +585,7 @@ public static partial class IssueRoutes
     }
 
     private static async Task ApplyCreateModelMetadataAsync(
-        IssueWorkflowProfileManager profileManager,
+        IssueVariableStore variableStore,
         string projectId,
         int issueNumber,
         CreateIssueRequest req)
@@ -594,11 +594,11 @@ public static partial class IssueRoutes
         if (!patch.TouchesAnyField) return;
 
         var seed = IssueModelMetadata.ApplyModelMetadata(VariableBundle.Empty, patch);
-        await profileManager.SetVariablesAsync(projectId, issueNumber, seed);
+        await variableStore.SetVariablesAsync(projectId, issueNumber, seed);
     }
 
     private static async Task ApplyUpdateModelMetadataAsync(
-        IssueWorkflowProfileManager profileManager,
+        IssueVariableStore variableStore,
         string projectId,
         int issueNumber,
         UpdateIssueRequest req,
@@ -607,9 +607,9 @@ public static partial class IssueRoutes
         var patch = BuildUpdatePatch(req, rawPatch);
         if (!patch.TouchesAnyField) return;
 
-        var current = await profileManager.GetVariablesAsync(projectId, issueNumber);
+        var current = await variableStore.GetVariablesAsync(projectId, issueNumber);
         var patched = IssueModelMetadata.ApplyModelMetadata(current, patch);
-        await profileManager.SetVariablesAsync(projectId, issueNumber, patched);
+        await variableStore.SetVariablesAsync(projectId, issueNumber, patched);
     }
 
     /// <summary>

@@ -259,8 +259,8 @@ public static class WorkflowGrainTestHelpers
             .UseSqlite(connectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine(), NullActionCatalogSource.Instance);
-        await manager.PatchVariablesAsync(projectId, patch);
+        var store = new ProjectVariableStore(factory);
+        await store.PatchVariablesAsync(projectId, patch);
     }
 
     public static async Task PatchIssueVariablesAsync(
@@ -273,8 +273,8 @@ public static class WorkflowGrainTestHelpers
             .UseSqlite(connectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new IssueWorkflowProfileManager(factory, NullActionCatalogSource.Instance);
-        await manager.PatchVariablesAsync(projectId, issueNumber, patch);
+        var store = new IssueVariableStore(factory);
+        await store.PatchVariablesAsync(projectId, issueNumber, patch);
     }
 
     public static WorkflowDefinition TwoStages()

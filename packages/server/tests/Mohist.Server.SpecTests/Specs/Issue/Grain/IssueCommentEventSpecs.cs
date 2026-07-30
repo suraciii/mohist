@@ -238,7 +238,7 @@ public class IssueCommentEventSpecs
             services.GetRequiredService<IssueRepositoryResolver>(),
             services.GetRequiredService<WorkflowProfileManager>(),
             services.GetRequiredService<ProjectWorkflowProfileManager>(),
-            services.GetRequiredService<IssueWorkflowProfileManager>(),
+            services.GetRequiredService<IssueVariableStore>(),
             services.GetRequiredService<AttachmentService>(),
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),

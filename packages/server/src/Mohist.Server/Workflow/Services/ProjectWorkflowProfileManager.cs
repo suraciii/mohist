@@ -15,8 +15,8 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 namespace Mohist.Server.Workflow.Services;
 
 /// <summary>
-/// Project-scope template + variables + prompts write endpoint.
-/// 管理: 项目模板 CRUD + 项目级变量 Set/Patch + 系统模板 catalog 读取 + 项目默认模板设置 + 项目提示词。
+/// Project-scope template and prompt endpoint.
+/// 管理: 项目模板 CRUD + 系统模板 catalog 读取 + 项目默认模板设置 + 项目提示词。
 /// </summary>
 public class ProjectWorkflowProfileManager : IScopedService
 {
@@ -231,55 +231,6 @@ public class ProjectWorkflowProfileManager : IScopedService
         var row = await db.ProjectWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
         return row?.DefaultTemplateId;
-    }
-
-    // =======================================================================
-    // Project variables (Set + Patch)
-    // =======================================================================
-
-    public async Task<VariableBundle> GetVariablesAsync(string projectId)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        return row is null ? VariableBundle.Empty : VariableBundle.FromJson(row.Variables);
-    }
-
-    public async Task<VariableBundle> SetVariablesAsync(string projectId, VariableBundle bundle)
-    {
-        VariableBundleShapeValidator.Validate(bundle);
-        var sanitized = ProjectVariablesFilter.Sanitize(bundle);
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-
-        if (row is null)
-        {
-            row = new ProjectWorkflowProfile
-            {
-                ProjectId = projectId,
-                Variables = sanitized.ToJson(),
-                UpdatedAt = DateTimeOffset.UtcNow,
-            };
-            db.ProjectWorkflowProfiles.Add(row);
-        }
-        else
-        {
-            row.Variables = sanitized.ToJson();
-            row.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-
-        await db.SaveChangesAsync();
-        return sanitized;
-    }
-
-    public async Task<VariableBundle> PatchVariablesAsync(string projectId, VariableBundle patch)
-    {
-        VariableBundleShapeValidator.Validate(patch);
-        var sanitizedPatch = ProjectVariablesFilter.Sanitize(patch);
-        var current = await GetVariablesAsync(projectId);
-        var merged = VariableBundle.Patch(current, sanitizedPatch);
-        return await SetVariablesAsync(projectId, merged);
     }
 
     // =======================================================================

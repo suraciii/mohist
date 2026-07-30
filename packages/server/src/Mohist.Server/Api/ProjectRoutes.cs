@@ -424,19 +424,19 @@ public static class ProjectRoutes
             }
         });
 
-        byRef.MapGet("/variables", async (HttpContext context, ProjectWorkflowProfileManager manager) =>
+        byRef.MapGet("/variables", async (HttpContext context, ProjectVariableStore variableStore) =>
         {
             var project = context.GetResolvedProject();
-            var variables = await manager.GetVariablesAsync(project.Id);
+            var variables = await variableStore.GetVariablesAsync(project.Id);
             return ApiResults.Ok(variables);
         });
 
-        byRef.MapPut("/variables", async (HttpContext context, VariableBundle bundle, ProjectWorkflowProfileManager manager) =>
+        byRef.MapPut("/variables", async (HttpContext context, VariableBundle bundle, ProjectVariableStore variableStore) =>
         {
             var project = context.GetResolvedProject();
             try
             {
-                return ApiResults.Ok(await manager.SetVariablesAsync(project.Id, bundle));
+                return ApiResults.Ok(await variableStore.SetVariablesAsync(project.Id, bundle));
             }
             catch (ArgumentException ex)
             {
@@ -444,12 +444,12 @@ public static class ProjectRoutes
             }
         });
 
-        byRef.MapPatch("/variables", async (HttpContext context, VariableBundle patch, ProjectWorkflowProfileManager manager) =>
+        byRef.MapPatch("/variables", async (HttpContext context, VariableBundle patch, ProjectVariableStore variableStore) =>
         {
             var project = context.GetResolvedProject();
             try
             {
-                return ApiResults.Ok(await manager.PatchVariablesAsync(project.Id, patch));
+                return ApiResults.Ok(await variableStore.PatchVariablesAsync(project.Id, patch));
             }
             catch (ArgumentException ex)
             {

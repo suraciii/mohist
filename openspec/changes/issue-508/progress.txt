@@ -1,0 +1,41 @@
+## Codebase Patterns
+
+The Stores for variables follow the established pattern of `WorkflowRunVariablesStore`:
+- Each is `public class XxxStore : IScopedService`
+- Single ctor dependency: `IDbContextFactory<MohistDbContext>`
+- Three methods: `GetVariablesAsync`, `SetVariablesAsync`, `PatchVariablesAsync`
+- Get returns `VariableBundle.Empty` for missing rows
+- Set/Patch call `VariableBundleShapeValidator.Validate(...)` first
+- Patch deep-merges via `VariableBundle.Patch(current, patch)` and round-trips through Set
+
+Project-write invariants preserved:
+- `SetVariablesAsync(projectId, bundle)` runs `ProjectVariablesFilter.Sanitize(bundle)` so only `{model, variant}` persist under `vars.agent` and `stages.<stage>.vars.agent`
+- Issue-scope `SetVariablesAsync`/`PatchVariablesAsync` first call `VariableBundleShapeValidator.Validate`, then run a `RejectNamedAgentRuntime` guard that throws `ArgumentException` if either `vars.agent.runtime` or any `stages.<stage>.vars.agent.runtime` is present. Both rejection paths run BEFORE any `db.SaveChangesAsync`/`db.IssueWorkflowProfiles.Add`.
+
+`IScopedService` is auto-registered by the existing `MohistServiceRegistration`, so no DI edits are needed for the new types.
+
+The IssueWorkflowProfileManager is no longer the home of Variables — its remaining responsibilities are template selection (GetTemplateAsync/GetStateAsync/UpdateTemplateAsync/GetProfileAsync). T-006 will move them out and delete the class.
+
+The enable toggle (`GetDisabledWorkflowProfileIdsAsync`/`SetProfileEnabledAsync`) and prompts methods stay on ProjectWorkflowProfileManager for T-003/T-006; only variable methods leave.
+
+## Decisions
+
+- The variable validation guard moved into IssueVariableStore 1:1 — same ArgumentException message, same `vars.agent.runtime` key path. Route error code (`invalid_agent_config`) is unchanged because the catch site didn't change.
+- Patch semantics in both stores: validate patch, deep-merge current+pach, persist merged, return merged. Shape validation is run on the patch input only (the persisted merged form has already been validated at its previous write, and existing spec coverage confirms the shape stays valid across merge).
+- Test coverage: moved 3 variable tests from ProjectWorkflowProfileManagerSpecs into new ProjectVariableStoreSpecs (GetVariables_Empty, SetVariables_StoresBundle, PatchVariables_DeepMerges). Moved 5 variable tests from IssueWorkflowProfileManagerSpecs into new IssueVariableStoreSpecs (Get, Set, Patch, Variable/TemplaateIsolation, ChineseValueRoundtrip), plus 4 newly written negative tests (root runtime rejection, stage runtime rejection, non-object root rejection, non-object stage rejection). The old Project/Issue manager specs only retain non-variable tests.
+- The `_issueProfileManager.GetVariablesAsync` call inside IssueGrain (variables for Issue start) is replaced by `_issueVariableStore.GetVariablesAsync` in IssueGrain.cs:353; same for the following Set call. IssueGrain keeps `_projectProfileManager` only for `GetDefaultTemplateAsync` + `GetDisabledWorkflowProfileIdsAsync` (T-006).
+
+## Gotchas
+
+- `IssueGrain` declares `IssueVariableStore issueVariableStore` and the corresponding DI in production is registered through `IScopedService`. Test fixtures (`IssueCommentEventSpecs`, `IssueGrainEventSaveFailureSpecs`, `IssueWorkflowReadPathSpecs`) needed their `IssueGrain.Create` invocation sites updated to construct `IssueVariableStore` from the same `IDbContextFactory` and pass it in.
+- `RoutingDispatchTestSupport` still only registers `IssueWorkflowProfileManager` because the routes it exercises (routing dispatch) don't reach the create/update handlers that consume `IssueVariableStore`. No DI change was needed for that support class.
+- `WorkflowGrainTestHelpers` + `WorkflowGrainSpecs.PatchProjectVariablesAsync`/`PatchIssueVariablesAsync` switched from constructing the old managers (which required `IPromptLoader`/`PromptTemplateEngine`/etc. for the manager ctor) to constructing the bare Stores. This deletes the dead `null!` IPromptLoader argument.
+
+## Verification
+
+- `npm run build` succeeds.
+- `npm test` is green: server unit 1610, server spec 3398, server arch 50, cli 1465, runner, mohist-slack, web. The 3398 spec runs include both new stores' specs (`ProjectVariableStoreSpecs` 6 tests, `IssueVariableStoreSpecs` 9 tests) and the retained Project/IssueWorkflowProfileManagerSpecs with only non-variable tests.
+
+## Notes for T-002
+
+The route handlers now read variables from stores, but `WorkflowProfileManager.LoadIssueWorkspaceAsync` and `WorkflowProfileManager.ResolveEffectiveVariablesAsync` still go through `_runVariablesStore` (Run) and call `GetVariablesAsync` on the SAME `ProjectWorkflowProfileManager`/`IssueWorkflowProfileManager` instances — they have no variable methods anymore, so those paths will need to switch to `ProjectVariableStore.GetVariablesAsync` / `IssueVariableStore.GetVariablesAsync` during T-002 once the merge is extracted. Don't replace the merge call sites in this PR; that's the next step.
