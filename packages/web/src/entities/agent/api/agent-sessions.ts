@@ -287,7 +287,7 @@ export function genericFollowupMutationOptions(projectId: string | null | undefi
   return {
     mutationFn: ({ sessionId, text, idempotencyKey }: { sessionId: string; text: string; idempotencyKey?: string }) =>
       postGenericFollowup(projectId!, sessionId, { text }, idempotencyKey),
-    onSuccess: (_data: SessionFollowupResult, variables: { sessionId: string; text: string; agentRef?: string }) => {
+    onSuccess: (data: SessionFollowupResult, variables: { sessionId: string; text: string; agentRef?: string }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agent-session', projectId, variables.sessionId] })
@@ -295,7 +295,15 @@ export function genericFollowupMutationOptions(projectId: string | null | undefi
       if (variables.agentRef) {
         queryClient.invalidateQueries({ queryKey: ['agents', projectId, variables.agentRef, 'sessions'] })
       }
-      toast.success('Follow-up sent')
+      if (data.status === 'accepted') {
+        toast.success('Follow-up sent')
+        return
+      }
+      if (data.status === 'rejected') {
+        toast.error(data.error ?? 'Follow-up rejected')
+        return
+      }
+      toast.warning('Follow-up outcome is unknown. Retry with the same key.')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')

@@ -74,3 +74,11 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - F1/F2: dispatch claim now atomically advances the selected follow-up turn to executing. A rejected SignalR delivery releases the claim and restores queued, allowing the same idempotency key to retry; once delivery is accepted, later inputs are assigned to a subsequent turn rather than omitted from an immutable dispatch payload.
 - F3: issue-session follow-up acceptance invalidates metadata/transcript observations, and transcript event subscriptions remain active for idle sessions so the following session.input event refreshes executing status.
 - Verification passed: Web typecheck, FSD boundary check, focused follow-up transcript/data-source tests (29), the full Web suite (5159 passed, 1 skipped), and CLI tests (1445 passed). Server SpecTests rebuilt successfully but their child test process was interrupted by the execution environment even with explicit `DOTNET_ROOT`; rerun it in a stable shell before final integration.
+
+## Review fix pass 3 (in progress)
+- F1: initial Turn terminal state now schedules the same queued-follow-up dispatcher used by the request and runtime-event paths. The scheduler runs outside the Session grain, so it cannot block recovery commands while Runner delivery is pending.
+- F2: a delivery claim keeps the AgentTurn queued; only `session.input` moves it to executing. Grain activation clears an unconfirmed queued claim, allowing the same idempotency key and operation id to re-attempt delivery through the Runner journal without duplicate runtime work.
+- F3: issue-session metadata now projects follow-up input acceptance and Turn status/identity, matching generic and unified session observations without exposing input text.
+- F4: generic Web follow-up feedback distinguishes accepted, rejected, and unknown server outcomes instead of reporting every HTTP 200 as sent.
+- Focused verification passed: Server build; follow-up grain specs (34); generic follow-up API specs (18); issue metadata observation spec; initial-turn terminal dispatch integration spec; Web typecheck, FSD check, and agent-session API tests (42).
+- Next: run complete server/Web verification and ArchTests, then commit the lifecycle, observation, and Web feedback changes separately.

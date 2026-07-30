@@ -336,8 +336,29 @@ describe('genericFollowupMutationOptions', () => {
   })
 
   it('shows success toast', () => {
-    genericFollowupMutationOptions('proj-1', createInvalidationClient()).onSuccess({} as never, { sessionId: 's1', text: 't' })
+    genericFollowupMutationOptions('proj-1', createInvalidationClient()).onSuccess(
+      { status: 'accepted' },
+      { sessionId: 's1', text: 't' },
+    )
     expect(toast.success).toHaveBeenCalledWith('Follow-up sent')
+  })
+
+  it('shows the confirmed rejection', () => {
+    genericFollowupMutationOptions('proj-1', createInvalidationClient()).onSuccess(
+      { status: 'rejected', error: 'Queue is full' },
+      { sessionId: 's1', text: 't' },
+    )
+    expect(toast.error).toHaveBeenCalledWith('Queue is full')
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('shows unknown outcome without claiming delivery', () => {
+    genericFollowupMutationOptions('proj-1', createInvalidationClient()).onSuccess(
+      { status: 'unknown' },
+      { sessionId: 's1', text: 't' },
+    )
+    expect(toast.warning).toHaveBeenCalledWith('Follow-up outcome is unknown. Retry with the same key.')
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it('shows error toast on failure', () => {
