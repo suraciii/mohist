@@ -404,7 +404,8 @@ public sealed record AgentTurnRecord(
 
 [GenerateSerializer]
 public sealed record AgentSessionStopClaim(
-    [property: Id(0)] string TurnId);
+    [property: Id(0)] string TurnId,
+    [property: Id(1)] string OperationId);
 
 public enum AgentTurnStatus
 {
@@ -448,7 +449,8 @@ public sealed record AgentTurnCancelResult(
 [GenerateSerializer]
 public sealed record AgentTurnStopClaimResult(
     [property: Id(0)] AgentTurnControlState? Control,
-    [property: Id(1)] bool CanDispatch);
+    [property: Id(1)] bool CanDispatch,
+    [property: Id(2)] string? OperationId);
 
 [GenerateSerializer]
 public enum AgentTurnControlClassification

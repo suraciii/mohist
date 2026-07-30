@@ -138,6 +138,8 @@ export interface ReceiveWorkflowRunStatusPayload {
 export interface CancelAgentSessionPayload {
   target: ReceiveFollowupSessionTarget
   turnId?: string
+  sessionId?: string
+  operationId?: string
 }
 
 /**

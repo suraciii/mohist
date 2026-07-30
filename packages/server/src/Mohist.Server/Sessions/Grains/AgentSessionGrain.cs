@@ -25,7 +25,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TimeProvider _timeProvider;
     private readonly IAgentSessionConnectionRegistry _connections;
-    private readonly IAgentSessionStopClaimRegistry _stopClaims;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
     private bool _sessionReloadRequired;
@@ -45,7 +44,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IAgentSessionPersistenceObserver persistenceObserver,
         TimeProvider timeProvider,
         IAgentSessionConnectionRegistry connections,
-        IAgentSessionStopClaimRegistry stopClaims,
         ILogger<AgentSessionGrain> log)
     {
         _stateStore = stateStore;
@@ -55,7 +53,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _persistenceObserver = persistenceObserver;
         _timeProvider = timeProvider;
         _connections = connections;
-        _stopClaims = stopClaims;
         _log = log;
     }
 
@@ -927,6 +924,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             var domainEvents = ApplyRuntimeEventToDomain(session, e, now);
             events.AddRange(domainEvents);
+            SettleStopClaimFromRuntimeEvent(session, e);
 
             if (e.Type == RuntimeEventTypes.SessionActivity)
             {
@@ -1532,6 +1530,26 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         };
     }
 
+    private static void SettleStopClaimFromRuntimeEvent(
+        AgentSession session,
+        AgentSessionRuntimeEventInput runtimeEvent)
+    {
+        if (runtimeEvent.Type != RuntimeEventTypes.SessionActivity)
+            return;
+
+        var payload = JSON.DeserializeElement(runtimeEvent.PayloadJson);
+        var terminal = MapTerminalActivityToTurnStatus(
+            ParseActivity(payload),
+            AgentSessionJsonHelper.GetStringProp(payload, "status"));
+        if (terminal is null
+            || !TryResolveTurnId(runtimeEvent.PayloadJson, out var turnId))
+            return;
+
+        var operationId = AgentSessionJsonHelper.GetStringProp(payload, "stopOperationId");
+        if (!string.IsNullOrWhiteSpace(operationId))
+            session.CompleteTurnStop(turnId, operationId);
+    }
+
     private static IReadOnlyList<AgentSessionEvent> DriveNonLaunchTurnLifecycle(
         AgentSession session,
         AgentSessionRuntimeEventInput runtimeEvent,
@@ -1860,11 +1878,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return;
         var session = await GetRequiredAsync();
         var events = session.MarkTurnTerminal(turnId, status, result, Now());
-        if (string.Equals(session.Status.PendingStop?.TurnId, turnId, StringComparison.Ordinal)
-            && !_stopClaims.IsActive(SessionId, turnId))
-        {
-            session.CompleteTurnStop(turnId);
-        }
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);
@@ -1899,12 +1912,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return result;
     }
 
-    public async Task CompleteTurnStopAsync(string turnId)
+    public async Task CompleteTurnStopAsync(string turnId, string operationId)
     {
-        if (_stopClaims.IsActive(SessionId, turnId))
+        if (string.IsNullOrWhiteSpace(turnId) || string.IsNullOrWhiteSpace(operationId))
             return;
         var session = await GetRequiredAsync();
-        session.CompleteTurnStop(turnId);
+        session.CompleteTurnStop(turnId, operationId);
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
     }

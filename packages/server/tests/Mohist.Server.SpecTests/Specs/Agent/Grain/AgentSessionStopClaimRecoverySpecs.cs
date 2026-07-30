@@ -45,7 +45,11 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
         Assert.True(claim.CanDispatch);
 
         await session.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
-        await session.MarkTurnTerminalAsync(turnId, AgentTurnStatus.Completed, null);
+        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                $"{{\"activity\":\"idle\",\"status\":\"completed\",\"turnId\":\"{turnId}\",\"stopOperationId\":\"{claim.OperationId}\"}}") },
+            "runtime-1"));
 
         var reservation = await session.BeginFollowupAsync();
         Assert.True(reservation.StartsIdleTurn);

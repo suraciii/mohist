@@ -32,6 +32,7 @@ import {
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiCatalog, type PiRuntime } from "./pi/index.js"
 import { SessionCommandJournal } from "./session-command-journal.js"
 import { FollowupOperationJournal } from "./followup-operation-journal.js"
+import { CancelOperationJournal } from "./cancel-operation-journal.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { DispatchWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
@@ -138,6 +139,7 @@ export class RunnerHost {
    */
   private readonly sessionCommandJournal: SessionCommandJournal
   private readonly followupOperationJournal: FollowupOperationJournal
+  private readonly cancelOperationJournal: CancelOperationJournal
   private readonly skillResolver = new SkillResolver()
 
   // The active outer-run signal. The onReconnected callback fires from
@@ -200,6 +202,7 @@ export class RunnerHost {
     this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry)
     this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.followupOperationJournal = new FollowupOperationJournal(options.runnerRoot)
+    this.cancelOperationJournal = new CancelOperationJournal(options.runnerRoot)
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
       options.runnerId,
@@ -215,6 +218,7 @@ export class RunnerHost {
         serverConnection: this.connection,
         sessionCommandJournal: this.sessionCommandJournal,
         followupOperationJournal: this.followupOperationJournal,
+        cancelOperationJournal: this.cancelOperationJournal,
         bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
         skillResolver: this.skillResolver,
       },

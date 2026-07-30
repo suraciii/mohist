@@ -95,8 +95,6 @@ public static class MohistServiceRegistration
         services.AddSingleton<IAgentJobWorkCoordinator>(sp => sp.GetRequiredService<AgentJobWorkCoordinator>());
         services.AddSingleton<Mohist.Server.Sessions.Services.IAgentSessionConnectionRegistry>(sp =>
             sp.GetRequiredService<Mohist.Server.Runner.Services.SignalR.RunnerConnectionTracker>());
-        services.AddSingleton<Mohist.Server.Sessions.Services.IAgentSessionStopClaimRegistry,
-            Mohist.Server.Sessions.Services.AgentSessionStopClaimRegistry>();
 
         var connectionString = ResolveSqliteConnectionString(configuration);
 

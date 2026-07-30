@@ -44,21 +44,61 @@ import type {
   AgentSessionRuntimeEventOutbox,
   RuntimeEventRecord,
 } from "./runtime-event-outbox.js"
+import type { CancelOperationJournalStore } from "../runtime/cancel-operation-journal.js"
 
 export interface CancelHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
   openCodeRuntime?: CommandRuntimeAccessors["openCode"]
   piRuntime?: CommandRuntimeAccessors["pi"]
   agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
+  cancelOperationJournal?: CancelOperationJournalStore | null
 }
 
 export function registerCancelHandler(
   conn: signalR.HubConnection,
   deps: CancelHandlerDeps,
 ): void {
+  const inFlight = new Map<string, Promise<CancelAgentSessionReply>>()
   conn.on("CancelAgentSession", async (payload: CancelAgentSessionPayload | null | undefined) => {
-    return await handleCancel(payload, deps)
+    const key = operationKey(payload)
+    if (!key) return await handleCancel(payload, deps)
+    const existing = inFlight.get(key)
+    if (existing) return await existing
+    const operation = handleJournaledCancel(payload!, deps)
+    inFlight.set(key, operation)
+    try {
+      return await operation
+    } finally {
+      if (inFlight.get(key) === operation) inFlight.delete(key)
+    }
   })
+}
+
+async function handleJournaledCancel(
+  payload: CancelAgentSessionPayload,
+  deps: CancelHandlerDeps,
+): Promise<CancelAgentSessionReply> {
+  const journal = deps.cancelOperationJournal ?? null
+  const sessionId = payload.sessionId ?? ""
+  const operationId = payload.operationId ?? ""
+  const outbox = deps.agentSessionRuntimeEventOutbox ?? null
+  if (!journal || !sessionId || !operationId || !outbox?.ready()) return { state: "unavailable" }
+
+  try {
+    const existing = await journal.get(sessionId, operationId)
+    if (existing) {
+      if (!samePayload(existing.request, payload)) return { state: "unavailable" }
+      return existing.state === "completed" ? existing.reply! : { state: "stop-requested" }
+    }
+    await journal.start(sessionId, payload)
+    const reply = await handleCancel(payload, deps)
+    if (reply.state === "stop-requested" || reply.state === "unavailable") return reply
+    await journal.complete(sessionId, payload, reply)
+    return reply
+  } catch (error) {
+    console.error("cancel operation journal failed:", error instanceof Error ? error.message : String(error))
+    return { state: "unavailable" }
+  }
 }
 
 async function handleCancel(
@@ -117,20 +157,26 @@ async function handleCancel(
         return { state: "not-cancellable" }
       }
       console.error("cancel runtime.cancel rejected:", readErrorMessage(result))
-      return { state: "not-cancellable" }
+      return { state: "stop-requested" }
     }
     const facts = readCancelFacts(result)
     if (!facts || !facts.cancelled) {
       return { state: "not-cancellable" }
     }
     const confirmed = handle.kind === "opencode" || facts.stopConfirmed === true
-    recordCancelActivity(
-      deps.agentSessionRuntimeEventOutbox ?? null,
-      sessionTarget,
-      binding.runtimeSessionId,
-      payload.turnId,
-      { ...facts, stopConfirmed: confirmed },
-    )
+    try {
+      await recordCancelActivity(
+        deps.agentSessionRuntimeEventOutbox ?? null,
+        sessionTarget,
+        binding.runtimeSessionId,
+        payload.turnId,
+        confirmed ? payload.operationId : undefined,
+        { ...facts, stopConfirmed: confirmed },
+      )
+    } catch (outboxError) {
+      console.error("failed to persist cancel activity:", outboxError)
+      return { state: "stop-requested" }
+    }
     return facts.stopConfirmed === false
       ? { state: "unknown", interruptUnconfirmed: true }
       : confirmed
@@ -138,17 +184,18 @@ async function handleCancel(
         : { state: "stop-requested" }
   } catch (error) {
     console.error("cancel runtime.cancel threw:", error instanceof Error ? error.message : String(error))
-    return { state: "not-cancellable" }
+    return { state: "stop-requested" }
   }
 }
 
-function recordCancelActivity(
+async function recordCancelActivity(
   outbox: AgentSessionRuntimeEventOutbox | null,
   sessionTarget: SessionTarget,
   runtimeSessionId: string,
   turnId: string | undefined,
+  operationId: string | undefined,
   facts: { readonly cancelled: boolean; readonly stopConfirmed: boolean },
-): void {
+): Promise<void> {
   if (!outbox) return
   const activity = facts.stopConfirmed ? "idle" : "unknown"
   const completedAt = new Date().toISOString()
@@ -165,6 +212,7 @@ function recordCancelActivity(
         status: facts.stopConfirmed ? "completed" : "failed",
         source: "cancel",
         ...(turnId ? { turnId } : {}),
+        ...(operationId ? { stopOperationId: operationId } : {}),
         stopConfirmed: facts.stopConfirmed,
         runtimeSessionId,
         completedAt,
@@ -172,9 +220,18 @@ function recordCancelActivity(
     },
     acknowledgementPolicy: "successful-response",
   }
-  outbox.enqueueProducedFact(record).catch((outboxError) => {
-    console.error("failed to persist cancel activity:", outboxError)
-  })
+  await outbox.enqueueProducedFact(record)
+}
+
+function operationKey(payload: CancelAgentSessionPayload | null | undefined): string | null {
+  return payload?.sessionId && payload.operationId ? `${payload.sessionId}:${payload.operationId}` : null
+}
+
+function samePayload(left: CancelAgentSessionPayload, right: CancelAgentSessionPayload): boolean {
+  return left.sessionId === right.sessionId
+    && left.operationId === right.operationId
+    && left.turnId === right.turnId
+    && JSON.stringify(left.target) === JSON.stringify(right.target)
 }
 
 function sessionTargetToRuntimeTarget(target: SessionTarget): RuntimeEventRecord["target"] {

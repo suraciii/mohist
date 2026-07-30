@@ -3,6 +3,7 @@ import * as signalR from "@microsoft/signalr"
 import { RunnerSignalRClient, type CancelAgentSessionPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { SessionTarget } from "../src/server/session-target.js"
 import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
+import type { CancelOperationJournalEntry, CancelOperationJournalStore } from "../src/runtime/cancel-operation-journal.js"
 import type {
   OpenCodeRuntime,
   RuntimeCancelRequest,
@@ -140,6 +141,7 @@ function buildClient(opts: {
   outbox?: AgentSessionRuntimeEventOutbox | null
   openCodeRuntime?: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
   piRuntime?: unknown
+  cancelOperationJournal?: CancelOperationJournalStore | null
 }) {
   builders.length = 0
   const resolver = opts.resolver === undefined ? null : opts.resolver
@@ -154,9 +156,44 @@ function buildClient(opts: {
       agentSessionRuntimeEventOutbox: opts.outbox ?? null,
       openCodeRuntime: openCodeRuntime as never,
       ...(opts.piRuntime !== undefined ? { piRuntime: opts.piRuntime as never } : {}),
+      ...(opts.cancelOperationJournal !== undefined ? { cancelOperationJournal: opts.cancelOperationJournal } : {}),
     },
   )
   return client
+}
+
+class MemoryCancelOperationJournal implements CancelOperationJournalStore {
+  private readonly entries = new Map<string, CancelOperationJournalEntry>()
+
+  async load(): Promise<void> {}
+  async get(sessionId: string, operationId: string): Promise<CancelOperationJournalEntry | null> {
+    return this.entries.get(`${sessionId}:${operationId}`) ?? null
+  }
+  async start(sessionId: string, payload: CancelAgentSessionPayload): Promise<CancelOperationJournalEntry> {
+    const key = `${sessionId}:${payload.operationId}`
+    const existing = this.entries.get(key)
+    if (existing) return existing
+    const entry: CancelOperationJournalEntry = { request: structuredClone(payload), state: "started" }
+    this.entries.set(key, entry)
+    return entry
+  }
+  async complete(sessionId: string, payload: CancelAgentSessionPayload, reply: { state: string; interruptUnconfirmed?: boolean }): Promise<void> {
+    this.entries.set(`${sessionId}:${payload.operationId}`, { request: structuredClone(payload), state: "completed", reply })
+  }
+}
+
+function readyOutbox(): AgentSessionRuntimeEventOutbox {
+  return {
+    ready: () => true,
+    load: async () => {},
+    recover: async () => {},
+    enqueueBeforeExecution: async () => {},
+    enqueueProducedFact: async () => {},
+    enqueueProducedFactBatch: async () => {},
+    kick: async () => {},
+    stop: async () => {},
+    snapshot: () => [],
+  }
 }
 
 function emitCancel(builder: CapturedBuilder, payload: CancelAgentSessionPayload | null | undefined): Promise<unknown> {
@@ -198,6 +235,28 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     expect(runtime.cancelCalls[0]).toEqual({
       target: { runtime: "opencode", runtimeSessionId: "runtime-1", workDir: "/work/project" },
     })
+  })
+
+  it("ConfirmedCancel_ReplayedOperationDoesNotAbortTheSessionTwice", async () => {
+    const runtime = makeFakeRuntime()
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    buildClient({
+      resolver,
+      outbox: readyOutbox(),
+      openCodeRuntime: runtime.runtime,
+      cancelOperationJournal: new MemoryCancelOperationJournal(),
+    })
+    const builder = lastBuilder()
+    const payload: CancelAgentSessionPayload = {
+      ...genericCancelPayload("gen-session-1"),
+      sessionId: "gen-session-1",
+      turnId: "turn-1",
+      operationId: "stop-1",
+    }
+
+    await expect(emitCancel(builder, payload)).resolves.toEqual({ state: "stopped" })
+    await expect(emitCancel(builder, payload)).resolves.toEqual({ state: "stopped" })
+    expect(runtime.cancelCalls).toHaveLength(1)
   })
 
   it("UnknownSession_ResolverReturnsNull_RepliesNotCancellableAndDoesNotCallCancel", async () => {
@@ -274,7 +333,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     expect(runtime.cancelCalls).toHaveLength(0)
   })
 
-  it("RuntimeCancelRejects_RepliesNotCancellable", async () => {
+  it("RuntimeCancelRejects_LeavesStopRequested", async () => {
     const runtime = makeFakeRuntime()
     runtime.setCancelResult({
       ok: false,
@@ -293,7 +352,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 
     const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
 
-    expect(reply).toEqual({ state: "not-cancellable" })
+    expect(reply).toEqual({ state: "stop-requested" })
     expect(runtime.cancelCalls).toHaveLength(1)
     expect(errorSpy).toHaveBeenCalledWith("cancel runtime.cancel rejected:", expect.stringContaining("transport dropped"))
     errorSpy.mockRestore()

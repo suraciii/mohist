@@ -324,7 +324,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     expect(recording.producedFactCalls).toHaveLength(0)
   })
 
-  it("Cancel_FailedEnqueue_StillReturnsCancelReply", async () => {
+  it("Cancel_FailedEnqueue_LeavesStopRequested", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const failingOutbox: AgentSessionRuntimeEventOutbox = {
       ready: () => true,
@@ -349,8 +349,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
       const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-      expect(reply).toEqual({ state: "stopped" })
-      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(reply).toEqual({ state: "stop-requested" })
       expect(errorSpy).toHaveBeenCalledWith(
         "failed to persist cancel activity:",
         expect.any(Error),

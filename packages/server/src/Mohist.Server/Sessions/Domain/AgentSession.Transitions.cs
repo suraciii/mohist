@@ -692,21 +692,25 @@ public static partial class AgentSessionExtensions
         {
             var control = session.ResolveTurnControl(turnId);
             if (control?.Classification != AgentTurnControlClassification.Executing)
-                return new AgentTurnStopClaimResult(control, false);
+                return new AgentTurnStopClaimResult(control, false, null);
 
             var pending = session.Status.PendingStop;
             if (pending is not null && !string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
-                return new AgentTurnStopClaimResult(control, false);
+                return new AgentTurnStopClaimResult(control, false, null);
 
             if (pending is null)
-                session.Status = session.Status with { PendingStop = new AgentSessionStopClaim(turnId) };
+            {
+                pending = new AgentSessionStopClaim(turnId, Guid.NewGuid().ToString("N"));
+                session.Status = session.Status with { PendingStop = pending };
+            }
 
-            return new AgentTurnStopClaimResult(control, true);
+            return new AgentTurnStopClaimResult(control, true, pending.OperationId);
         }
 
-        public void CompleteTurnStop(string turnId)
+        public void CompleteTurnStop(string turnId, string operationId)
         {
-            if (string.Equals(session.Status.PendingStop?.TurnId, turnId, StringComparison.Ordinal))
+            if (string.Equals(session.Status.PendingStop?.TurnId, turnId, StringComparison.Ordinal)
+                && string.Equals(session.Status.PendingStop?.OperationId, operationId, StringComparison.Ordinal))
                 session.Status = session.Status with { PendingStop = null };
         }
 

@@ -41,6 +41,7 @@ import { registerWorkflowRunStatusHandler } from "./workflow-run-status-handler.
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "./runtime-event-outbox.js"
 import type { SessionCommandJournalStore } from "../runtime/session-command-journal.js"
 import type { FollowupOperationJournalStore } from "../runtime/followup-operation-journal.js"
+import type { CancelOperationJournalStore } from "../runtime/cancel-operation-journal.js"
 import type { BindingRecoveryCoordinator } from "../runtime/binding-recovery.js"
 import type { ServerConnection } from "./connection.js"
 import type { PiTurnObserver } from "../runtime/pi/index.js"
@@ -98,6 +99,7 @@ export interface RunnerSignalRClientOptions {
    */
   sessionCommandJournal?: SessionCommandJournalStore | null
   followupOperationJournal?: FollowupOperationJournalStore | null
+  cancelOperationJournal?: CancelOperationJournalStore | null
   bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
   skillResolver?: import("../runtime/skill-resolver.js").SkillResolver
   allowUnverifiedWorkspaceQueriesForTest?: boolean
@@ -116,6 +118,7 @@ export class RunnerSignalRClient {
   private readonly serverConnection: ServerConnection | null
   private readonly sessionCommandJournal: SessionCommandJournalStore | null
   private readonly followupOperationJournal: FollowupOperationJournalStore | null
+  private readonly cancelOperationJournal: CancelOperationJournalStore | null
   private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null
   private readonly skillResolver: RunnerSignalRClientOptions["skillResolver"]
   private readonly allowUnverifiedWorkspaceQueriesForTest: boolean
@@ -146,6 +149,7 @@ export class RunnerSignalRClient {
     this.serverConnection = options.serverConnection ?? null
     this.sessionCommandJournal = options.sessionCommandJournal ?? null
     this.followupOperationJournal = options.followupOperationJournal ?? null
+    this.cancelOperationJournal = options.cancelOperationJournal ?? null
     this.bindingRecoveryCoordinator = options.bindingRecoveryCoordinator ?? null
     this.skillResolver = options.skillResolver
     this.allowUnverifiedWorkspaceQueriesForTest = options.allowUnverifiedWorkspaceQueriesForTest === true
@@ -170,6 +174,13 @@ export class RunnerSignalRClient {
         await this.followupOperationJournal.load()
       } catch (error) {
         console.error("followup operation journal failed to load:", error)
+      }
+    }
+    if (this.cancelOperationJournal) {
+      try {
+        await this.cancelOperationJournal.load()
+      } catch (error) {
+        console.error("cancel operation journal failed to load:", error)
       }
     }
     await this.connection.start()
@@ -240,6 +251,7 @@ export class RunnerSignalRClient {
       openCodeRuntime: this.openCodeRuntime,
       piRuntime: this.piRuntime,
       agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+      cancelOperationJournal: this.cancelOperationJournal,
     })
 
     registerSessionCommandHandler(this.connection, {

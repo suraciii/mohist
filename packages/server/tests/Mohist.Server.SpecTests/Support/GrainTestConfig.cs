@@ -284,9 +284,8 @@ public static class GrainTestConfig
             persistence ?? new AgentSessionPersistenceTestProbe());
         siloBuilder.Services.AddSingleton<TimeProvider>(timeProvider ?? new FakeTimeProvider(TestTime.UtcNow));
          siloBuilder.Services.AddSingleton<RunnerConnectionTracker>();
-          siloBuilder.Services.AddSingleton<IAgentSessionConnectionRegistry>(sp =>
+         siloBuilder.Services.AddSingleton<IAgentSessionConnectionRegistry>(sp =>
               sp.GetRequiredService<RunnerConnectionTracker>());
-         siloBuilder.Services.AddSingleton<IAgentSessionStopClaimRegistry, AgentSessionStopClaimRegistry>();
          siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         siloBuilder.Services.AddScoped<AgentSessionQuery>();
         siloBuilder.Services.Configure<AgentJobOptions>(opts =>

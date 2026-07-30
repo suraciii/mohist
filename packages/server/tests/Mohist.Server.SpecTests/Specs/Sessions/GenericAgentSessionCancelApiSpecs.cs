@@ -228,7 +228,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
-    public async Task Stop_RunnerWithoutReplyReleasesTurnClaim()
+    public async Task Stop_RunnerWithoutReplyKeepsTurnClaimUntilAConfirmedRuntimeFactArrives()
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -240,9 +240,84 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        await Assert.ThrowsAsync<StopOperationInProgressException>(session.BeginFollowupAsync);
+    }
+
+    [Fact]
+    public async Task Stop_ConfirmedRuntimeFactReleasesTurnClaimAfterReplyLoss()
+    {
+        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+        hub.SetInvocationResponseFactory("CancelAgentSession", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var payload = JsonSerializer.SerializeToElement(Assert.Single(hub.Invocations).Arguments.Single());
+        var operationId = payload.GetProperty("operationId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(operationId));
+        var runtimeSessionId = (await session.GetAsync())!.AgentSessionId!;
+        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                $"{{\"activity\":\"idle\",\"status\":\"completed\",\"turnId\":\"{turnId}\",\"stopOperationId\":\"{operationId}\"}}") },
+            runtimeSessionId));
+
         var reservation = await session.BeginFollowupAsync();
         Assert.True(reservation.StartsIdleTurn);
         await session.AbandonFollowupAsync(reservation.OperationId!);
+    }
+
+    [Fact]
+    public async Task Cancel_LaterTurnDoesNotChangeTerminalLaunchJob()
+    {
+        var (project, sessionId, turnId, jobId) = await CreateTerminalLaunchWithExecutingFollowupAsync();
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+
+        using var response = await PostCancelAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("executing", (await ReadDataAsync(response)).GetProperty("state").GetString());
+        Assert.Empty(hub.Invocations);
+        Assert.Equal(AgentJobStatus.Failed, await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).GetStatusAsync());
+    }
+
+    [Fact]
+    public async Task Stop_LaterTurnDoesNotChangeTerminalLaunchJob()
+    {
+        var (project, sessionId, turnId, jobId) = await CreateTerminalLaunchWithExecutingFollowupAsync();
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("stopped", (await ReadDataAsync(response)).GetProperty("state").GetString());
+        Assert.Equal(AgentJobStatus.Failed, await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).GetStatusAsync());
+    }
+
+    private async Task<(ProjectRef Project, string SessionId, string TurnId, string JobId)> CreateTerminalLaunchWithExecutingFollowupAsync()
+    {
+        var (project, sessionId, initialTurnId, jobId) = await CreateExecutingLaunchSessionForStopAsync();
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).FailAsync("terminal-before-followup");
+        await session.MarkTurnTerminalAsync(initialTurnId, AgentTurnStatus.Failed, null);
+
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            $"input-{Guid.NewGuid():N}",
+            turnId,
+            "later follow up",
+            "generic-followup"));
+        await session.MarkTurnExecutingAsync(turnId);
+        return (project, sessionId, turnId, jobId);
     }
 
     private static async Task<RunnerStopReply?> CompleteTargetBeforeStopReplyAsync(
