@@ -11,6 +11,8 @@ public sealed class AgentConnectionRow
     public string BotUserId { get; set; } = string.Empty;
     public string BotName { get; set; } = string.Empty;
     public string? AvatarHash { get; set; }
+    public string? VerifiedBotName { get; set; }
+    public string? VerifiedBotIconUrl { get; set; }
     public string SetupProgress { get; set; } = string.Empty;
     public string DesiredState { get; set; } = string.Empty;
     public string ConnectionHealth { get; set; } = string.Empty;

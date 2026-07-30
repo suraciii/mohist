@@ -242,13 +242,14 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
             var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             var sessionInfo = await sessionGrain.GetAsync();
             Assert.NotNull(sessionInfo);
             Assert.Equal("pi", sessionInfo!.Runtime);
 
-            var snapshot = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
             Assert.Equal("pi", ReadRuntimeFromDispatch(polledDispatch));
         }
@@ -273,13 +274,14 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
             var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             var sessionInfo = await sessionGrain.GetAsync();
             Assert.NotNull(sessionInfo);
             Assert.Equal("opencode", sessionInfo!.Runtime);
 
-            var snapshot = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
             Assert.Equal("opencode", ReadRuntimeFromDispatch(polledDispatch));
         }
@@ -444,8 +446,9 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var snapshot = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             var firstDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
             Assert.Equal("pi", ReadRuntimeFromDispatch(firstDispatch));
 

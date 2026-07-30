@@ -11,6 +11,8 @@ public sealed class AgentConnection
     public string BotUserId { get; set; } = string.Empty;
     public string BotName { get; set; } = string.Empty;
     public string? AvatarHash { get; set; }
+    public string? VerifiedBotName { get; set; }
+    public string? VerifiedBotIconUrl { get; set; }
     public string SetupProgress { get; set; } = SetupProgressKind.CreateAppCredentials;
     public string DesiredState { get; set; } = DesiredStateKind.Enabled;
     public string ConnectionHealth { get; set; } = ConnectionHealthKind.Healthy;

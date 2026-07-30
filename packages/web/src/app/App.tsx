@@ -31,6 +31,7 @@ const InsightsPage = lazy(() => import('../pages/insights').then(({ InsightsPage
 const AgentListPage = lazy(() => import('../pages/agent-list').then(({ AgentListPage }) => ({ default: AgentListPage })))
 const AgentDetailPage = lazy(() => import('../pages/agent-detail').then(({ AgentDetailPage }) => ({ default: AgentDetailPage })))
 const AgentSessionComposerPage = lazy(() => import('../pages/agent-session-composer').then(({ AgentSessionComposerPage }) => ({ default: AgentSessionComposerPage })))
+const ConnectionDiagnosticPage = lazy(() => import('../pages/connection-diagnostic').then(({ ConnectionDiagnosticPage }) => ({ default: ConnectionDiagnosticPage })))
 
 export function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
@@ -72,6 +73,7 @@ export function AppContent() {
                   <Route path="issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
                   <Route path="agents" element={<AgentListPage />} />
                   <Route path="agents/:agentId" element={<AgentDetailPage />} />
+                  <Route path="connections/:connectionId" element={<ConnectionDiagnosticPage />} />
                   <Route path="agent-sessions/new" element={<AgentSessionComposerPage />} />
                   <Route path="agent-sessions/:sessionId" element={<GenericSessionPage />} />
                   <Route path="activity" element={<ActivityPage />} />

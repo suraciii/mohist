@@ -69,6 +69,36 @@ public static class SlackConnectionRoutes
             return connection is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(connection);
         });
 
+        management.MapGet("/{connectionId}/diagnostic", async (
+            HttpContext context,
+            string connectionId,
+            AgentConnectionStore connections,
+            AgentQuerier agents,
+            ISecretStore secrets,
+            ISlackApiClient slack,
+            SlackSetupVerifier verifier,
+            CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null)
+                return ApiResults.NotFound("Slack Connection was not found.");
+
+            var ownerAvailability = await ProbeOwnerAvailabilityAsync(connection, secrets, slack, ct);
+            var agent = await agents.GetByIdAsync(projectId, connection.AgentId);
+            var agentReadiness = agent is null
+                ? connection.AgentReadiness
+                : AgentReadinessDeriver.Derive(agent.AgentConfig);
+            var result = ConnectionDiagnostic.Compute(
+                connection,
+                new DiagnosticInputs(
+                    verifier.IsAdapterOnline(connection),
+                    ownerAvailability,
+                    agentReadiness,
+                    agent?.Name));
+            return ApiResults.Ok(result);
+        });
+
         management.MapPatch("/{connectionId}", async (HttpContext context, string connectionId, SlackConnectionEditBody body, AgentConnectionStore connections, CancellationToken ct) =>
         {
             var fields = new HashSet<string>(StringComparer.Ordinal);
@@ -81,8 +111,40 @@ public static class SlackConnectionRoutes
 
         management.MapDelete("/{connectionId}", async (HttpContext context, string connectionId, AgentConnectionStore connections, CancellationToken ct) =>
         {
-            var deleted = await connections.DeleteAsync(context.GetResolvedProject().Id, connectionId, ct);
-            return deleted is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(deleted);
+            var projectId = context.GetResolvedProject().Id;
+            var deleted = await connections.DeleteAsync(projectId, connectionId, ct);
+            if (deleted is null) return ApiResults.NotFound("Slack Connection was not found.");
+            return ApiResults.Ok(new
+            {
+                connection = deleted,
+                slackAppRemovalNote = "Mohist-side records (credentials, inbox entries, conversation mappings, pending outbound deliveries, and owner claim codes) were removed. The Slack App remains installed on the workspace until a workspace admin uninstalls it manually.",
+            });
+        });
+
+        management.MapPost("/{connectionId}/disable", async (HttpContext context, string connectionId, AgentConnectionStore connections, CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
+            if (connection.DesiredState == DesiredStateKind.Disabled)
+                return ApiResults.Ok(connection);
+            var updated = await connections.UpdateAsync(projectId, connectionId,
+                new HashSet<string>(StringComparer.Ordinal) { "desiredState" },
+                desiredState: DesiredStateKind.Disabled, ct: ct);
+            return updated is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(updated);
+        });
+
+        management.MapPost("/{connectionId}/enable", async (HttpContext context, string connectionId, AgentConnectionStore connections, CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
+            if (connection.DesiredState == DesiredStateKind.Enabled)
+                return ApiResults.Ok(connection);
+            var updated = await connections.UpdateAsync(projectId, connectionId,
+                new HashSet<string>(StringComparer.Ordinal) { "desiredState" },
+                desiredState: DesiredStateKind.Enabled, ct: ct);
+            return updated is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(updated);
         });
 
         management.MapPost("/{connectionId}/configure", async (HttpContext context, string connectionId, SlackCredentialsBody body, AgentConnectionStore connections, ISecretStore secrets, CancellationToken ct) =>
@@ -92,6 +154,10 @@ public static class SlackConnectionRoutes
             var projectId = context.GetResolvedProject().Id;
             var connection = await connections.GetAsync(projectId, connectionId, ct);
             if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
+            if (AgentConnectionStore.HasBoundIdentity(connection))
+                return ApiResults.Conflict(
+                    "Connection identity is already bound. Use rotate-credentials to update credentials.",
+                    "use_rotate_credentials");
             await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), Encoding.UTF8.GetBytes(body.AppToken), ct);
             await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes(body.BotToken), ct);
             var updated = await connections.UpdateAsync(projectId, connectionId,
@@ -100,11 +166,75 @@ public static class SlackConnectionRoutes
             return ApiResults.Ok(updated);
         });
 
+        management.MapPost("/{connectionId}/rotate-credentials", async (HttpContext context, string connectionId, SlackCredentialsBody body, AgentConnectionStore connections, ISecretStore secrets, SlackSetupVerifier verifier, CancellationToken ct) =>
+        {
+            if (body is null || string.IsNullOrWhiteSpace(body.AppToken) || string.IsNullOrWhiteSpace(body.BotToken))
+                return ApiResults.BadRequest("appToken and botToken are required.");
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
+            if (!AgentConnectionStore.HasBoundIdentity(connection))
+                return ApiResults.BadRequest(
+                    "Connection identity is not bound yet. Use configure to set up credentials.",
+                    "identity_not_bound");
+
+            var check = await verifier.VerifyRotationAsync(projectId, connectionId, body.AppToken, body.BotToken, ct);
+            if (!check.Verified)
+                return ApiResults.BadRequest(check.Reason ?? "Slack rejected the credentials.", "credential_verification_failed");
+
+            if (!string.Equals(check.ResolvedTeamId, connection.WorkspaceTeamId, StringComparison.Ordinal)
+                || !string.Equals(check.ResolvedAppId, connection.AppId, StringComparison.Ordinal)
+                || !string.Equals(check.ResolvedBotUserId, connection.BotUserId, StringComparison.Ordinal))
+                return ApiResults.BadRequest(
+                    $"New tokens resolve to workspace/App/Bot '{check.ResolvedTeamId}/{check.ResolvedAppId}/{check.ResolvedBotUserId}', which does not match the bound identity. Rotation cannot rebind; create a new Connection instead.",
+                    "credential_binding_mismatch");
+
+            await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), Encoding.UTF8.GetBytes(body.AppToken), ct);
+            await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes(body.BotToken), ct);
+
+            string? newHealth = null;
+            var fields = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "healthReason", "verifiedBotName", "verifiedBotIconUrl",
+            };
+            if (connection.ConnectionHealth == ConnectionHealthKind.Unhealthy
+                && IsCredentialRelatedHealthReason(connection.HealthReason))
+            {
+                fields.Add("connectionHealth");
+                newHealth = ConnectionHealthKind.Healthy;
+            }
+            await connections.UpdateAsync(projectId, connectionId, fields,
+                healthReason: null,
+                connectionHealth: newHealth,
+                verifiedBotName: check.VerifiedBotName,
+                verifiedBotIconUrl: check.VerifiedBotIconUrl,
+                ct: ct);
+
+            return ApiResults.Ok(await connections.GetAsync(projectId, connectionId, ct));
+        });
+
         management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
         {
             try
             {
                 var code = await claims.GenerateAsync(context.GetResolvedProject().Id, connectionId, ct: ct);
+                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "claim_unavailable");
+            }
+        });
+
+        management.MapPost("/{connectionId}/transfer-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
+        {
+            try
+            {
+                var code = await claims.GenerateAsync(
+                    context.GetResolvedProject().Id,
+                    connectionId,
+                    Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeKinds.Transfer,
+                    ct: ct);
                 return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt });
             }
             catch (InvalidOperationException ex)
@@ -135,6 +265,8 @@ public static class SlackConnectionRoutes
             var connection = await connections.GetAsync(projectId, connectionId, ct);
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
+            if (connection.DesiredState == DesiredStateKind.Disabled)
+                return ApiResults.Ok(new { kind = "rejected", reason = "This Connection is disabled." });
             if (body is null || !body.IsDirectMessage)
                 return ApiResults.Ok(new { kind = "ignored" });
             if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
@@ -154,6 +286,11 @@ public static class SlackConnectionRoutes
             {
                 await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, "Owner claimed successfully.", null, ct);
                 return ApiResults.Ok(new { kind = "claimed" });
+            }
+            if (decision.Kind == SlackInboundDecisionKind.Transferred)
+            {
+                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, "Owner transferred successfully.", null, ct);
+                return ApiResults.Ok(new { kind = "transferred" });
             }
             if (decision.Kind == SlackInboundDecisionKind.Rejected)
             {
@@ -236,6 +373,8 @@ public static class SlackConnectionRoutes
             var connection = await connections.GetAsync(projectId, connectionId, ct);
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
+            if (connection.DesiredState == DesiredStateKind.Disabled)
+                return ApiResults.Conflict("This Slack Connection is disabled.", "connection_disabled");
             if (string.IsNullOrWhiteSpace(body?.AdapterId))
                 return ApiResults.BadRequest("adapterId is required.");
             var appToken = await secrets.LoadAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), ct);
@@ -332,6 +471,49 @@ public static class SlackConnectionRoutes
         if (!string.IsNullOrWhiteSpace(botUserId))
             result = result.Replace($"<@{botUserId}>", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
         return result;
+    }
+
+    internal static async Task<string> ProbeOwnerAvailabilityAsync(
+        AgentConnection connection,
+        ISecretStore secrets,
+        ISlackApiClient slack,
+        CancellationToken ct)
+    {
+        if (connection.OwnerSlackUserId is null)
+            return OwnerAvailabilityKind.NotConfigured;
+
+        var token = await secrets.LoadAsync(
+            new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken), ct);
+        if (token is null || token.Length == 0)
+            return OwnerAvailabilityKind.Unknown;
+
+        try
+        {
+            var response = await slack.UsersInfoAsync(
+                connection.OwnerSlackUserId,
+                Encoding.UTF8.GetString(token),
+                ct);
+            return SlackOwnerClaimService.IsEligibleMember(
+                response,
+                connection.WorkspaceTeamId,
+                connection.OwnerSlackUserId)
+                ? OwnerAvailabilityKind.Available
+                : OwnerAvailabilityKind.Unavailable;
+        }
+        catch (HttpRequestException)
+        {
+            return OwnerAvailabilityKind.Unknown;
+        }
+    }
+
+    private static bool IsCredentialRelatedHealthReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return false;
+        if (reason.Contains("token", StringComparison.OrdinalIgnoreCase)) return true;
+        if (reason.Contains("scope", StringComparison.OrdinalIgnoreCase)) return true;
+        if (reason.Contains("credential", StringComparison.OrdinalIgnoreCase)) return true;
+        if (reason.Contains("App and Bot", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 }
 

@@ -23,6 +23,7 @@ using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SystemInfo;
+using Mohist.Server.Slack;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Services.Prompts;
 using Orleans.Configuration;
@@ -53,6 +54,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
     public AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
+    public RecordingSlackApiClient Slack { get; } = new();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
     public string ConnectionString { get; private set; } = null!;
@@ -86,7 +88,8 @@ public class MohistIntegrationFixture : IAsyncLifetime
             TimeProvider,
             siloPort,
             gatewayPort,
-            _otelEnabled);
+            _otelEnabled,
+            Slack);
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add(Mohist.Server.Infrastructure.Security.OperatorCredential.HeaderName, OperatorToken);
         await _factory.EnsureSchemaAsync();
@@ -120,6 +123,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly int _siloPort;
     private readonly int _gatewayPort;
     private readonly bool _otelEnabled;
+    private readonly ISlackApiClient? _slackApiClient;
     public AgentSessionPersistenceTestProbe Persistence { get; }
     // Keeper for the in-memory OtelDb override; disposed with the factory.
     private SqliteConnection? _otelKeeper;
@@ -134,7 +138,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         FakeTimeProvider? timeProvider = null,
         int? siloPort = null,
         int? gatewayPort = null,
-        bool otelEnabled = false)
+        bool otelEnabled = false,
+        ISlackApiClient? slackApiClient = null)
         : this(
             connectionString,
             runnerRoot,
@@ -143,7 +148,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             timeProvider,
             siloPort,
             gatewayPort,
-            otelEnabled)
+            otelEnabled,
+            slackApiClient)
     {
     }
 
@@ -155,7 +161,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         FakeTimeProvider? timeProvider = null,
         int? siloPort = null,
         int? gatewayPort = null,
-        bool otelEnabled = false)
+        bool otelEnabled = false,
+        ISlackApiClient? slackApiClient = null)
     {
         _connectionString = connectionString;
         _runnerRoot = runnerRoot;
@@ -165,6 +172,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _siloPort = siloPort ?? EndpointOptions.DEFAULT_SILO_PORT;
         _gatewayPort = gatewayPort ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
         _otelEnabled = otelEnabled;
+        _slackApiClient = slackApiClient;
         Persistence = new AgentSessionPersistenceTestProbe(
             () => _timeProvider.Advance(TimeSpan.FromSeconds(1)));
     }
@@ -210,6 +218,11 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            if (_slackApiClient is not null)
+            {
+                services.RemoveAll<ISlackApiClient>();
+                services.AddSingleton(_slackApiClient);
+            }
             for (var index = services.Count - 1; index >= 0; index--)
             {
                 if (services[index].ServiceType == typeof(ILoggerProvider))

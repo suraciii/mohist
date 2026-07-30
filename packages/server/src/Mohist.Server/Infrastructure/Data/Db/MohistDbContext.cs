@@ -459,6 +459,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.BotUserId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.BotName).HasMaxLength(512).IsRequired();
             entity.Property(e => e.AvatarHash).HasMaxLength(512);
+            entity.Property(e => e.VerifiedBotName).HasMaxLength(512);
+            entity.Property(e => e.VerifiedBotIconUrl).HasMaxLength(2048);
             entity.Property(e => e.SetupProgress).HasMaxLength(64).IsRequired();
             entity.Property(e => e.DesiredState).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ConnectionHealth).HasMaxLength(32).IsRequired();
@@ -487,6 +489,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.CodeHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Kind).HasMaxLength(32).IsRequired().HasDefaultValue(SlackOwnerClaimCodeKinds.Initial);
             entity.Property(e => e.ExpiresAt).IsRequired();
             entity.Property(e => e.SupersededBy).HasMaxLength(256);
             entity.Property(e => e.CreatedAt).IsRequired();

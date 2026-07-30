@@ -90,7 +90,7 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
             // Exactly one AgentJob: exactly one dispatch carrying that
             // session id is observable on the runner, and that dispatch
             // references the launched job id verbatim.
-            var polled = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             Assert.Equal(jobId, polled.AgentJobId);
             Assert.Equal(sessionId, polled.AgentSessionId);
             Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled.OwnerKind);

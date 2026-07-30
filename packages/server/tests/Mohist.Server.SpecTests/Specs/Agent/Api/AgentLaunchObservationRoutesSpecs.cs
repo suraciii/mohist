@@ -106,7 +106,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polled = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             var report = await jobGrain.ReportResultAsync(
@@ -277,7 +277,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             // Reconciliation: an authoritative terminal report from
             // the original Runner resolves the same Job and Turn to
             // Completed — no second dispatch, no new Input/Turn.
-            var polled = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             var report = await jobGrain!.ReportResultAsync(
                 runnerId,
@@ -367,7 +367,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polled = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             await jobGrain.ReportResultAsync(

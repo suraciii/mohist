@@ -120,6 +120,8 @@ public sealed class AgentConnectionStore : IScopedService
         IReadOnlySet<string> fields,
         string? botName = null,
         string? avatarHash = null,
+        string? verifiedBotName = null,
+        string? verifiedBotIconUrl = null,
         string? setupProgress = null,
         string? desiredState = null,
         string? connectionHealth = null,
@@ -144,6 +146,8 @@ public sealed class AgentConnectionStore : IScopedService
 
         if (fields.Contains(nameof(botName))) row.BotName = botName?.Trim() ?? string.Empty;
         if (fields.Contains(nameof(avatarHash))) row.AvatarHash = avatarHash;
+        if (fields.Contains(nameof(verifiedBotName))) row.VerifiedBotName = verifiedBotName;
+        if (fields.Contains(nameof(verifiedBotIconUrl))) row.VerifiedBotIconUrl = verifiedBotIconUrl;
         if (fields.Contains(nameof(setupProgress))) row.SetupProgress = setupProgress ?? existing.SetupProgress;
         if (fields.Contains(nameof(desiredState))) row.DesiredState = desiredState ?? existing.DesiredState;
         if (fields.Contains(nameof(connectionHealth))) row.ConnectionHealth = connectionHealth ?? existing.ConnectionHealth;
@@ -233,7 +237,12 @@ public sealed class AgentConnectionStore : IScopedService
             throw new AgentConnectionValidationException($"Agent '{agentId}' is archived.", "agent_archived");
     }
 
-    private static bool HasBoundIdentity(AgentConnectionRow row) =>
+    public static bool HasBoundIdentity(AgentConnection connection) =>
+        !string.IsNullOrWhiteSpace(connection.WorkspaceTeamId)
+        || !string.IsNullOrWhiteSpace(connection.AppId)
+        || !string.IsNullOrWhiteSpace(connection.BotUserId);
+
+    public static bool HasBoundIdentity(AgentConnectionRow row) =>
         !string.IsNullOrWhiteSpace(row.WorkspaceTeamId)
         || !string.IsNullOrWhiteSpace(row.AppId)
         || !string.IsNullOrWhiteSpace(row.BotUserId);
@@ -249,6 +258,8 @@ public sealed class AgentConnectionStore : IScopedService
         BotUserId = row.BotUserId,
         BotName = row.BotName,
         AvatarHash = row.AvatarHash,
+        VerifiedBotName = row.VerifiedBotName,
+        VerifiedBotIconUrl = row.VerifiedBotIconUrl,
         SetupProgress = row.SetupProgress,
         DesiredState = row.DesiredState,
         ConnectionHealth = row.ConnectionHealth,
@@ -272,6 +283,8 @@ public sealed class AgentConnectionStore : IScopedService
         BotUserId = connection.BotUserId,
         BotName = connection.BotName,
         AvatarHash = connection.AvatarHash,
+        VerifiedBotName = connection.VerifiedBotName,
+        VerifiedBotIconUrl = connection.VerifiedBotIconUrl,
         SetupProgress = connection.SetupProgress,
         DesiredState = connection.DesiredState,
         ConnectionHealth = connection.ConnectionHealth,

@@ -253,9 +253,10 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var mintedSessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
             Assert.False(string.IsNullOrWhiteSpace(mintedSessionId));
 
-            var polled = await PollDispatchForSessionAsync(runnerId, mintedSessionId);
+            var polled = await PollDispatchForSessionAsync(jobId, runnerId, mintedSessionId);
 
             // Launch-route regression guard: the dispatch envelope the
             // runner picks up must carry the minted AgentSessionId verbatim
@@ -290,8 +291,9 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polled = await PollDispatchForSessionAsync(runnerId, sessionId);
+            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             Assert.False(string.IsNullOrWhiteSpace(polled.AgentJobId));
 
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(polled.AgentJobId!);

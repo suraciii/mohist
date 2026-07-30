@@ -25,7 +25,7 @@ public sealed record SlackOutboxDraft(
 /// replaced the existing ReplaceableProgress row and no new row was
 /// created — the caller may continue as if a fresh insert succeeded.
 /// </summary>
-public sealed record SlackOutboxEnqueueResult(string Id, bool MergedIntoExisting);
+public sealed record SlackOutboxEnqueueResult(string Id, bool MergedIntoExisting, bool Suppressed = false);
 
 /// <summary>
 /// Read model for the outbox. Mirrors the row columns plus the
