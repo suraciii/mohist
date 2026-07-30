@@ -11,7 +11,11 @@ internal static class AgentConnectionCommands
         var group = new Command("connection", "Manage Slack Agent Connections");
         group.Subcommands.Add(BuildCreate(api));
         group.Subcommands.Add(BuildConfigure(api));
+        group.Subcommands.Add(BuildRotateCredentials(api));
         group.Subcommands.Add(BuildClaimOwner(api));
+        group.Subcommands.Add(BuildTransferOwner(api));
+        group.Subcommands.Add(BuildDisable(api));
+        group.Subcommands.Add(BuildEnable(api));
         group.Subcommands.Add(BuildView(api));
         group.Subcommands.Add(BuildList(api));
         group.Subcommands.Add(BuildEdit(api));
@@ -98,6 +102,74 @@ internal static class AgentConnectionCommands
         return command;
     }
 
+    private static Command BuildRotateCredentials(MohistCliApi api)
+    {
+        var command = new Command("rotate-credentials", "Verify and rotate Slack App and Bot credentials");
+        var id = new Argument<string>("connection-id");
+        var file = new Option<string?>("--credentials-file")
+        {
+            Description = "UTF-8 JSON file containing exactly appToken and botToken",
+        };
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(id);
+        command.Options.Add(file);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
+            if (exit != 0 || projectId is null) return exit;
+            var credentials = await ReadCredentialsAsync(api, ctx.GetValue(file));
+            if (credentials is null) return 2;
+            var result = await api.PostAndReadAsync(
+                Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/rotate-credentials"),
+                credentials);
+            return result.ExitCode;
+        });
+        return command;
+    }
+
+    private static Command BuildTransferOwner(MohistCliApi api)
+    {
+        var command = new Command("transfer-owner", "Generate a one-time Slack owner transfer code");
+        var id = new Argument<string>("connection-id");
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(id);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
+            if (exit != 0 || projectId is null) return exit;
+            var result = await api.PostAndReadAsync(
+                Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/transfer-owner"),
+                new { });
+            return result.ExitCode;
+        });
+        return command;
+    }
+
+    private static Command BuildDisable(MohistCliApi api) => BuildDesiredStateCommand(api, "disable", "Disabled");
+
+    private static Command BuildEnable(MohistCliApi api) => BuildDesiredStateCommand(api, "enable", "Enabled");
+
+    private static Command BuildDesiredStateCommand(MohistCliApi api, string operation, string desiredState)
+    {
+        var command = new Command(operation, $"{desiredState} a Slack Connection");
+        var id = new Argument<string>("connection-id");
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(id);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
+            if (exit != 0 || projectId is null) return exit;
+            var result = await api.PostAndReadAsync(
+                Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/{operation}"),
+                new { });
+            return result.ExitCode;
+        });
+        return command;
+    }
+
     private static Command BuildView(MohistCliApi api)
     {
         var command = new Command("view", "View a Slack Connection");
@@ -108,7 +180,11 @@ internal static class AgentConnectionCommands
         command.SetAction(async ctx =>
         {
             var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
-            return exit != 0 || projectId is null ? exit : await api.PrintGetAsync(Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!) }"));
+            if (exit != 0 || projectId is null) return exit;
+            var result = await api.GetDataOrPrintErrorAsync(
+                Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/diagnostic"));
+            if (result.ExitCode != 0) return result.ExitCode;
+            return RenderDiagnostic(api.Output, result.Data);
         });
         return command;
     }
@@ -121,9 +197,143 @@ internal static class AgentConnectionCommands
         command.SetAction(async ctx =>
         {
             var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
-            return exit != 0 || projectId is null ? exit : await api.PrintGetAsync(Path(projectId));
+            if (exit != 0 || projectId is null) return exit;
+            var result = await api.GetDataOrPrintErrorAsync(Path(projectId));
+            if (result.ExitCode != 0) return result.ExitCode;
+            RenderConnectionList(api.Output, result.Data);
+            return 0;
         });
         return command;
+    }
+
+    private static int RenderDiagnostic(TextWriter output, JsonNode? data)
+    {
+        if (data is not JsonObject diagnostic)
+        {
+            output.WriteLine(data?.ToJsonString(MohistCliApi.JsonOutputOptions) ?? "(no diagnostic data)");
+            return 0;
+        }
+
+        output.WriteLine("Connection diagnostic");
+        WriteValue(output, "  primary state", ValueOf(diagnostic, "primaryState"));
+        WriteValue(output, "  reason", ValueOf(diagnostic, "reason"));
+        WriteValue(output, "  next action", ValueOf(diagnostic, "nextAction"));
+
+        output.WriteLine();
+        output.WriteLine("Supporting facts");
+        if (diagnostic["facts"] is not JsonObject facts)
+        {
+            output.WriteLine("  (none)");
+            return 0;
+        }
+
+        foreach (var key in new[]
+        {
+            "setupProgress", "desiredState", "connectionHealth", "healthReason",
+            "credentialStatus", "adapterOnline", "ownerAvailability", "agentReadiness",
+        })
+            WriteValue(output, $"  {key}", ValueOf(facts, key));
+
+        if (facts["identity"] is JsonObject identity)
+        {
+            output.WriteLine("  identity:");
+            foreach (var key in new[]
+            {
+                "verificationStatus", "verifiedBotName", "botName", "agentName",
+                "verifiedBotIconUrl", "avatarHash", "driftKinds",
+            })
+                WriteValue(output, $"    {key}", ValueOf(identity, key));
+        }
+
+        return 0;
+    }
+
+    private static void RenderConnectionList(TextWriter output, JsonNode? data)
+    {
+        if (data is not JsonArray rows || rows.Count == 0)
+        {
+            output.WriteLine("No Slack Connections");
+            return;
+        }
+
+        var headers = new[] { "id", "bot", "primary state", "next action" };
+        var widths = new[] { 24, 24, 20, 42 };
+        output.WriteLine(string.Join("  ", headers.Select((header, index) => header.PadRight(widths[index]))).TrimEnd());
+        foreach (var row in rows.OfType<JsonObject>())
+        {
+            var state = StoredPrimaryState(row);
+            var cells = new[]
+            {
+                Truncate(ValueOf(row, "id"), widths[0]),
+                Truncate(ValueOf(row, "botName"), widths[1]),
+                Truncate(state.State, widths[2]),
+                Truncate(state.NextAction, widths[3]),
+            };
+            output.WriteLine(string.Join("  ", cells.Select((cell, index) => cell.PadRight(widths[index]))).TrimEnd());
+        }
+    }
+
+    private static (string State, string NextAction) StoredPrimaryState(JsonObject connection)
+    {
+        var setup = ValueOf(connection, "setupProgress");
+        if (!string.Equals(setup, "complete", StringComparison.Ordinal))
+            return ("setup_incomplete", "Advance the current setup step.");
+
+        var health = ValueOf(connection, "connectionHealth");
+        var reason = ValueOf(connection, "healthReason");
+        if (string.Equals(health, "unhealthy", StringComparison.Ordinal)
+            && ContainsAny(reason, "token", "scope", "credential", "invalid_auth", "app and bot", "missing required"))
+            return ("credentials_invalid", "Rotate credentials.");
+
+        if (string.Equals(health, "unhealthy", StringComparison.Ordinal))
+            return ("service_offline", "Start mohist-slack / check Slack connectivity.");
+
+        if (string.Equals(ValueOf(connection, "agentReadiness"), "needs_setup", StringComparison.Ordinal))
+            return ("agent_needs_setup", "Configure Agent runtime/model.");
+
+        if (string.Equals(ValueOf(connection, "desiredState"), "disabled", StringComparison.Ordinal))
+            return ("disabled", "Enable the Connection.");
+
+        if (HasStoredIdentityDrift(connection))
+            return ("identity_drift", "Review the name/avatar difference.");
+
+        return ("healthy", "No action needed.");
+    }
+
+    private static bool HasStoredIdentityDrift(JsonObject connection)
+    {
+        var verifiedName = ValueOf(connection, "verifiedBotName");
+        var botName = ValueOf(connection, "botName");
+        var verifiedIcon = ValueOf(connection, "verifiedBotIconUrl");
+        var avatarHash = ValueOf(connection, "avatarHash");
+        return (!string.IsNullOrEmpty(verifiedName) && !string.Equals(verifiedName, botName, StringComparison.Ordinal))
+            || (!string.IsNullOrEmpty(verifiedIcon) && !string.Equals(verifiedIcon, avatarHash, StringComparison.Ordinal));
+    }
+
+    private static bool ContainsAny(string value, params string[] needles) =>
+        needles.Any(needle => value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+
+    private static string ValueOf(JsonNode? node, string key)
+    {
+        var value = node?[key];
+        if (value is null) return "";
+        if (value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var text))
+            return text ?? "";
+        return value.ToJsonString(MohistCliApi.JsonCompactOutputOptions);
+    }
+
+    private static void WriteValue(TextWriter output, string key, string value) =>
+        output.WriteLine(string.IsNullOrEmpty(value) ? $"{key}:" : $"{key}: {value}");
+
+    private static string Truncate(string value, int softCap)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        var firstLine = value.AsSpan();
+        var newline = firstLine.IndexOf('\n');
+        if (newline >= 0) firstLine = firstLine[..newline];
+        if (firstLine.Length <= softCap) return firstLine.ToString();
+        if (softCap <= 1) return firstLine[..softCap].ToString();
+        return string.Concat(firstLine[..(softCap - 1)], "...");
     }
 
     private static Command BuildEdit(MohistCliApi api)

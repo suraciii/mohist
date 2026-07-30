@@ -313,3 +313,19 @@
 
 - The EF snapshot contains many `UpdatedAt` properties; when editing it manually, the new AgentConnection properties must be inserted in the AgentConnection block, not the first matching entity block.
 - T-001's rotation verifier intentionally does not mutate the store. Snapshot persistence belongs to the successful rotation route so failed or mismatched rotations cannot overwrite the last verified identity.
+
+## Issue 517 — T-005 (CLI connection operations and diagnostic rendering)
+
+### Implementation notes
+
+- `AgentConnectionCommands.Build` now registers `rotate-credentials`, `transfer-owner`, `disable`, and `enable`. Rotation uses the existing `ReadCredentialsAsync` and `IsProtectedFile` path without adding token options or changing the protected-file rules.
+- The CLI entry-point credential guard now covers both `configure` and `rotate-credentials`. It rejects extra positional token values before System.CommandLine parses them, preventing parser diagnostics from echoing a token.
+- `view` fetches `/diagnostic` and renders the primary state, reason, next action, and nested supporting facts. `list` remains a single raw list request and derives a compact state/next-action table from stored fields only; it never calls `/diagnostic` or Slack.
+
+### Test coverage
+
+- `CliAgentConnectionCommandSpecs` now verifies command registration, rotation endpoint/body and protected-input failures, transfer code/expiry output, enable/disable endpoint targeting and reported DesiredState, diagnostic rendering, and stored-facts-only list rendering.
+
+### Gotchas
+
+- `dotnet test ... --filter` is ignored by this repository's Microsoft Testing Platform setup. The CLI assembly's xUnit in-process runner supports class/method filtering directly and was used to isolate the first failure.

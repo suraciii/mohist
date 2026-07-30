@@ -265,12 +265,38 @@ internal static class MohistCliCommands
 
     private static bool IsDirectSlackCredentialArgument(string[] args)
     {
-        var configure = args.Length >= 3
+        var credentialCommand = args.Length >= 3
             && string.Equals(args[0], "agent", StringComparison.Ordinal)
             && string.Equals(args[1], "connection", StringComparison.Ordinal)
-            && string.Equals(args[2], "configure", StringComparison.Ordinal);
-        return configure && args.Any(arg => string.Equals(arg, "--app-token", StringComparison.Ordinal)
-            || string.Equals(arg, "--bot-token", StringComparison.Ordinal));
+            && (string.Equals(args[2], "configure", StringComparison.Ordinal)
+                || string.Equals(args[2], "rotate-credentials", StringComparison.Ordinal));
+        if (!credentialCommand)
+            return false;
+
+        if (args.Any(arg => string.Equals(arg, "--app-token", StringComparison.Ordinal)
+            || string.Equals(arg, "--bot-token", StringComparison.Ordinal)))
+            return true;
+
+        if (!string.Equals(args[2], "rotate-credentials", StringComparison.Ordinal))
+            return false;
+
+        for (var index = 4; index < args.Length; index++)
+        {
+            var argument = args[index];
+            if (argument is "--credentials-file" or "--project")
+            {
+                index++;
+                continue;
+            }
+            if (argument.StartsWith("--credentials-file=", StringComparison.Ordinal)
+                || argument.StartsWith("--project=", StringComparison.Ordinal)
+                || IsHelpToken(argument))
+                continue;
+            if (!argument.StartsWith("-", StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     private sealed class EnvironmentVariableAdapter : ICliEnvironment
