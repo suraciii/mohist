@@ -16,15 +16,9 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task HeartbeatAsync();
     /// <summary>Refreshes runner information. Does not refresh presence.</summary>
     Task HeartbeatRepairAsync(RunnerInfo info);
-    /// <summary>
-    /// Legacy push assignment retained until Runner work staging is removed.
-    /// </summary>
-    [AlwaysInterleave]
-    Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work);
-    Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result);
-    /// <summary>Atomically admits one reconciliation round and captures its capacity.</summary>
+    /// <summary>Atomically admits one poll round and captures its capacity.</summary>
     Task<RunnerPollAdmission> TryBeginPollAsync();
-    /// <summary>Releases the reconciliation round admitted by <see cref="TryBeginPollAsync"/>.</summary>
+    /// <summary>Releases the poll round admitted by <see cref="TryBeginPollAsync"/>.</summary>
     Task EndPollAsync();
     /// <summary>
     /// Claims one workflow work item while checking the runner's live
@@ -35,7 +29,6 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task<WorkItem?> TryClaimWorkflowAsync(string workflowRunId, string? projectId, bool assignWorker);
     /// <summary>Claims one AgentJob from its owner ledger during a poll.</summary>
     Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId);
-    Task<AgentJobPollState> ReconcileAgentJobsAsync(List<string> reportedWorkKeys);
     /// <summary>
     /// Marks the runner present. Poll IS the heartbeat under the
     /// reconciliation model: the
@@ -240,11 +233,6 @@ public sealed record RunnerPollResponse(
 }
 
 [GenerateSerializer]
-public sealed record AgentJobPollState(
-    [property: Id(0)] int ActiveCount,
-    [property: Id(1)] WorkDispatch? Dispatch);
-
-[GenerateSerializer]
 public record WorkResult(
     string Status,
     string? Message = null,
@@ -263,26 +251,6 @@ public record WorkResult(
     /// </summary>
     public string? ErrorCode => Error?.Code;
 }
-
-[GenerateSerializer]
-public sealed record RunnerWorkAssignmentResult(
-    [property: Id(0)] RunnerWorkAssignmentStatus Status,
-    [property: Id(1)] string? Reason = null);
-
-public enum RunnerWorkAssignmentStatus
-{
-    Assigned,
-    Rejected
-}
-
-[GenerateSerializer]
-public sealed record RunnerWorkReportResult(
-    [property: Id(0)] string WorkflowRunId,
-    [property: Id(1)] string? WorkflowStatus,
-    [property: Id(2)] bool Tracked,
-    [property: Id(3)] string? Reason = null,
-    [property: Id(4)] string? OwnerKind = null,
-    [property: Id(5)] string? OwnerId = null);
 
 public enum RunnerStatus { Online, Offline }
 

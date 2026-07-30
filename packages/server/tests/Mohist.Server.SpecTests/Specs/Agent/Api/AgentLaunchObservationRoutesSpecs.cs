@@ -310,46 +310,6 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     }
 
     [Fact]
-    public async Task Observation_AfterAuthoritativeRunningReport_ResolvesUnknownToActiveExecutingTurn()
-    {
-        var projectId = await CreateProjectAsync("obs-resolve-running");
-        var runnerId = $"obs-resolve-running-runner-{Guid.NewGuid():N}";
-        var agent = await CreateAgentAsync(projectId, "obs-resolve-running-agent");
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-
-        try
-        {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "recover to running" });
-            Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
-            var data = (await launch.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-            var jobId = data.GetProperty("jobId").GetString()!;
-
-            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
-            var beforeTimeout = await jobGrain.GetRuntimeSnapshotAsync();
-            Assert.False(string.IsNullOrWhiteSpace(beforeTimeout.RunnerId));
-            Assert.False(string.IsNullOrWhiteSpace(beforeTimeout.CurrentWorkId));
-
-            _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));
-            await jobGrain.CheckTimeoutsAsync();
-            Assert.Equal(AgentJobStatus.Unknown, await jobGrain.GetStatusAsync());
-
-            await jobGrain.ReconcileRunningAsync(beforeTimeout.RunnerId!, beforeTimeout.CurrentWorkId!);
-
-            var observation = await ReadObservationAsync(projectId, jobId);
-            Assert.NotNull(observation);
-            var obs = observation!.Value.GetProperty("data");
-            Assert.Equal("running", obs.GetProperty("jobStatus").GetString());
-            Assert.Equal("executing", obs.GetProperty("turnStatus").GetString());
-            Assert.Equal("active", obs.GetProperty("sessionActivity").GetString());
-        }
-        finally
-        {
-            await DrainDispatchAsync(runnerId);
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
     public async Task Observation_AfterCompletedJob_LeavesAgentSessionUsable()
     {
         // Spec: a completed initial Job leaves its AgentSession usable;

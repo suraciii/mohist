@@ -207,85 +207,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         return new ClaimResult(Key, runnerId, State.WorkId!, dispatch);
     }
 
-    public async Task AssignRunnerAsync(string runnerId, string workId)
-    {
-        await HydrateAsync();
-        if (IsTerminal)
-            throw new InvalidOperationException(
-                $"AgentJob '{Key}' cannot accept runner assignment in status {State.Status}");
-
-        if (State.Status != AgentJobStatus.Pending)
-            return;
-
-        if (State.Input is null)
-            throw new InvalidOperationException(
-                $"AgentJob '{Key}' cannot accept runner assignment before an Input is persisted");
-
-        var now = _timeProvider.GetUtcNow();
-        var dispatch = BuildDispatch(workId);
-        State.RunnerId = runnerId;
-        State.WorkId = workId;
-        State.RunnerAccepted = true;
-        State.Status = AgentJobStatus.Running;
-        State.RunningSince = now;
-
-        var stateJson = JsonSerializer.Serialize(State, JSON.Options);
-        var record = new AgentJobLedgerRecord(
-            JobKey: Key,
-            StateJson: stateJson,
-            Revision: _ledger?.Revision ?? 0,
-            AssignedRunnerId: runnerId,
-            WorkId: workId,
-            ReadySince: null,
-            RunningSince: now,
-            DispatchJson: JsonSerializer.Serialize(dispatch, JSON.Options),
-            WorkType: "agent-job",
-            Stage: "agent",
-            Title: "Agent Job",
-            IssueProjectId: State.Input?.ProjectId,
-            IssueNumber: State.Input?.IssueNumber,
-            AgentSessionId: State.Input?.AgentSessionId,
-            InitialInputId: State.Input?.InitialInputId,
-            InitialTurnId: State.Input?.InitialTurnId);
-
-        if (_ledger is null)
-        {
-            _ledger = await _jobStore.InsertLedgerAsync(record);
-        }
-        else
-        {
-            try
-            {
-                _ledger = await _jobStore.SaveLedgerAsync(record);
-            }
-            catch (AgentJobLedgerConflictException)
-            {
-                _hydrated = false;
-                await HydrateAsync();
-                throw;
-            }
-        }
-
-        ArmJobTimeout();
-        await MarkInitialTurnExecutingAsync();
-    }
-
-    private void AssignRunnerInternal(string runnerId, string workId)
-    {
-        State.RunnerId = runnerId;
-        State.WorkId = workId;
-        State.RunnerAccepted = false;
-        State.RunningSince = null;
-    }
-
-    public Task<bool> IsWorkRunnableAsync(string runnerId, string workId)
-    {
-        return Task.FromResult(
-            !IsTerminal
-            && string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
-            && string.Equals(State.WorkId, workId, StringComparison.Ordinal));
-    }
-
     public async Task<bool> RecordRuntimeSessionBindingAsync(
         string runnerId,
         string workId,
@@ -319,7 +240,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 Key, runnerId, workId, State.Status);
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
-            return new AgentJobReportResult(false, "already-terminal");
+            return new AgentJobReportResult(false, "stale");
         }
 
         if (State.Status != AgentJobStatus.Running
@@ -369,26 +290,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             result.ExitCode);
 
         return new AgentJobReportResult(true);
-    }
-
-    public async Task ReconcileRunningAsync(string runnerId, string workId)
-    {
-        await HydrateAsync();
-
-        if (IsTerminal
-            || !string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
-            || !string.Equals(State.WorkId, workId, StringComparison.Ordinal))
-            return;
-
-        if (State.Status == AgentJobStatus.Unknown)
-        {
-            State.Status = AgentJobStatus.Running;
-            State.FailureReason = null;
-            State.RunningSince ??= _timeProvider.GetUtcNow();
-            await PersistAsync();
-            ArmJobTimeout();
-            await MarkInitialTurnExecutingAsync();
-        }
     }
 
     public async Task FailAsync(string reason, string? agentId = null)
@@ -696,19 +597,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             await PersistAsync();
         }
         await TryAdmitAsync();
-    }
-
-    public async Task MarkUnknownAsync(string reason)
-    {
-        await HydrateAsync();
-        if (IsTerminal)
-            return;
-        if (State.Status == AgentJobStatus.Unknown
-            && string.Equals(State.FailureReason ?? string.Empty, reason ?? string.Empty, StringComparison.Ordinal))
-        {
-            return;
-        }
-        await EnterUnknownStateAsync(reason ?? AgentJobFailureReasons.RunnerUnavailable);
     }
 
     internal async Task EnterUnknownStateAsync(string reason)

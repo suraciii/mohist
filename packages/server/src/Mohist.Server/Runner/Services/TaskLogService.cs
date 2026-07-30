@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
@@ -29,20 +30,20 @@ namespace Mohist.Server.Runner.Services;
 public sealed class TaskLogService : IScopedService
 {
     private readonly TaskLogStore _store;
-    private readonly RunnerWorkStore _runnerWorks;
+    private readonly IAgentJobStore _agentJobs;
     private readonly WorkflowRunQuerier _runQuerier;
     private readonly ITaskLogDeltaPublisher _publisher;
     private readonly ILogger<TaskLogService> _log;
 
     public TaskLogService(
         TaskLogStore store,
-        RunnerWorkStore runnerWorks,
+        IAgentJobStore agentJobs,
         WorkflowRunQuerier runQuerier,
         ITaskLogDeltaPublisher publisher,
         ILogger<TaskLogService> log)
     {
         _store = store;
-        _runnerWorks = runnerWorks;
+        _agentJobs = agentJobs;
         _runQuerier = runQuerier;
         _publisher = publisher;
         _log = log;
@@ -186,8 +187,9 @@ public sealed class TaskLogService : IScopedService
             return run?.FindActiveWork(workId, runnerId) is not null;
         }
 
-        var work = await _runnerWorks.FindAsync(runnerId, ownerKind, ownerId, workId, ct);
-        return work?.Status == RunnerWorkStatus.Outstanding;
+        return (await _agentJobs.ListRunningForRunnerAsync(runnerId, ct))
+            .Any(work => string.Equals(work.JobKey, ownerId, StringComparison.Ordinal)
+                && string.Equals(work.WorkId, workId, StringComparison.Ordinal));
     }
 
     /// <summary>

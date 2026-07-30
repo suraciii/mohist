@@ -8,7 +8,6 @@ namespace Mohist.Server.Agent.Grains;
 
 public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
 {
-    Task<bool> IsWorkRunnableAsync(string runnerId, string workId);
     Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result);
     Task<AgentJobStatus> GetStatusAsync();
     Task<AgentJobCancelResult> CancelAsync() =>
@@ -38,18 +37,6 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     [ResponseTimeout("10675199.02:48:05.4775807")]
     Task<AgentJobTerminalResult> WaitForTerminalAsync();
     Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync();
-
-    /// <summary>
-    /// Test / coordinator helper that pre-dates the owner-ledger
-    /// migration. Writes the AgentJob ledger row directly with the
-    /// supplied runner / work identity and a dispatch snapshot — the
-    /// grain does NOT push to <see cref="IRunnerGrain"/>. Used by tests
-    /// that need a Running AgentJob without exercising the poll-time
-    /// claim path. The grain still owns the runner/work validation; a
-    /// subsequent <see cref="ReportResultAsync"/> from a different
-    /// runner is rejected.
-    /// </summary>
-    Task AssignRunnerAsync(string runnerId, string workId);
 
     /// <summary>
     /// Idempotent routed-launch preparation entry point. The caller
@@ -103,7 +90,6 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// belongs to a different plan.
     /// </summary>
     Task SubmitPreparedLaunchAsync() => Task.CompletedTask;
-
     /// <summary>
     /// Move a non-terminal AgentJob to <see cref="AgentJobStatus.Unknown"/>
     /// Used when a Runner disconnect, a status

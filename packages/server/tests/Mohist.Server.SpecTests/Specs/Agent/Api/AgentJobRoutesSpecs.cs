@@ -334,9 +334,9 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                 });
 
             var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
-            var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            await runnerGrain.ReportAgentJobResultAsync(
-                jobKey,
+            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
+            await jobGrain.ReportResultAsync(
+                runnerId,
                 workId,
                 new WorkResult("completed", "ok", JSON.DeserializeElement("{\"hello\":\"world\"}"), 0, ["artifact-a"]));
 
@@ -355,7 +355,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.Equal(AgentJobStatus.Completed, snapshot.Status);
             Assert.Equal(runnerId, snapshot.RunnerId);
 
-            var finalState = await runnerGrain.GetRuntimeStateAsync();
+            var finalState = await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync();
             Assert.DoesNotContain(jobKey, finalState.ActiveWorks.Select(w => w.OwnerId));
         }
         finally
@@ -387,9 +387,8 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                 });
 
             var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
-            var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            await runnerGrain.ReportAgentJobResultAsync(
-                jobKey,
+            await _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey).ReportResultAsync(
+                runnerId,
                 workId,
                 new WorkResult("failed", "runner reported failure", JSON.DeserializeElement("{\"error\":\"x\"}"), 1));
 
@@ -496,9 +495,8 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.Equal(WorkDispatchOwnerKinds.AgentJob, httpBody.GetProperty("ownerKind").GetString());
             Assert.Equal(jobKey, httpBody.GetProperty("agentJobId").GetString());
 
-            var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            await runnerGrain.ReportAgentJobResultAsync(
-                jobKey,
+            await _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey).ReportResultAsync(
+                runnerId,
                 workId,
                 new WorkResult(Status: "completed", Message: "ok"));
 

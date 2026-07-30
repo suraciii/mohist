@@ -1550,56 +1550,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.RunnerWorkRow", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTimeOffset?>("FinishedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OwnerId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OwnerKind")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RunnerId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("TakenAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WorkId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RunnerId", "Status");
-
-                    b.HasIndex("RunnerId", "OwnerKind", "OwnerId", "WorkId");
-
-                    b.ToTable("RunnerWorks", (string)null);
-                });
-
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.TaskLogBatchRow", b =>
                 {
                     b.Property<string>("OwnerKind")

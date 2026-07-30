@@ -30,8 +30,6 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public FakeRunnerWorkspaceClient RunnerWorkspace => Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public ControllableAgentJobDispatchObserver DispatchObserver { get; } = new();
-    public ControllableRunnerGrainAssignmentObserver RunnerAssignmentObserver { get; } = new();
-    public ControllableRunnerGrainCloseoutObserver CloseoutObserver { get; } = new();
     public ControllableAgentSessionTranscriptPersistence SessionPersistence { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
 
@@ -66,8 +64,6 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
                 TimeProvider,
                 Persistence);
             siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(DispatchObserver);
-            siloBuilder.Services.AddSingleton<IRunnerGrainAssignmentObserver>(RunnerAssignmentObserver);
-            siloBuilder.Services.AddSingleton<IRunnerGrainCloseoutObserver>(CloseoutObserver);
             siloBuilder.Services.AddSingleton(SessionPersistence);
             siloBuilder.Services.RemoveAll<IAgentSessionTranscriptStore>();
             siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore>(provider =>
@@ -105,9 +101,8 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
 
             if (snapshot.RunnerId is not null && snapshot.CurrentWorkId is not null)
             {
-                var runner = Grains.GetGrain<IRunnerGrain>(snapshot.RunnerId);
-                await runner.ReportAgentJobResultAsync(
-                    jobKey,
+                await job.ReportResultAsync(
+                    snapshot.RunnerId,
                     snapshot.CurrentWorkId,
                     new WorkResult("completed"));
             }
@@ -264,52 +259,6 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
         _assignmentPrepared = NewSignal();
         _runnerAccepted = NewSignal();
     }
-
-    private static TaskCompletionSource NewSignal() =>
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
-}
-
-public sealed class ControllableRunnerGrainAssignmentObserver : IRunnerGrainAssignmentObserver
-{
-    private TaskCompletionSource _assignmentAdmission = NewSignal();
-    private TaskCompletionSource? _assignmentAdmissionBlock;
-
-    public Task AssignmentAdmissionAsync(string runnerId, WorkDispatch work)
-    {
-        _assignmentAdmission.TrySetResult();
-        return _assignmentAdmissionBlock?.Task ?? Task.CompletedTask;
-    }
-
-    public Task WaitForAssignmentAdmissionAsync() => _assignmentAdmission.Task;
-
-    public void BlockAssignmentAdmission() => _assignmentAdmissionBlock ??= NewSignal();
-
-    public void ReleaseAssignmentAdmission() => _assignmentAdmissionBlock?.TrySetResult();
-
-    public void Reset()
-    {
-        _assignmentAdmissionBlock?.TrySetResult();
-        _assignmentAdmissionBlock = null;
-        _assignmentAdmission = NewSignal();
-    }
-
-    private static TaskCompletionSource NewSignal() =>
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
-}
-
-public sealed class ControllableRunnerGrainCloseoutObserver : IRunnerGrainCloseoutObserver
-{
-    private TaskCompletionSource _agentJobCloseoutStarted = NewSignal();
-
-    public Task AgentJobCloseoutStartingAsync(string runnerId, string agentJobId, string workId)
-    {
-        _agentJobCloseoutStarted.TrySetResult();
-        return Task.CompletedTask;
-    }
-
-    public Task WaitForAgentJobCloseoutStartingAsync() => _agentJobCloseoutStarted.Task;
-
-    public void Reset() => _agentJobCloseoutStarted = NewSignal();
 
     private static TaskCompletionSource NewSignal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
-using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
@@ -46,12 +45,6 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
             Assert.NotNull(ledger!.DispatchJson);
             Assert.Equal(runnerId, ledger.AssignedRunnerId);
 
-            var runnerWorks = scope.ServiceProvider.GetRequiredService<RunnerWorkStore>();
-            Assert.Null(await runnerWorks.FindAsync(
-                runnerId,
-                WorkDispatchOwnerKinds.AgentJob,
-                jobId,
-                ledger.WorkId!));
         }
 
         var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));

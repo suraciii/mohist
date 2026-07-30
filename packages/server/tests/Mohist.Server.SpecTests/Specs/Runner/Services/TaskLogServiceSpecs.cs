@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -24,7 +25,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
         var factory = new TestDbContextFactory(_database.Options);
         _service = new TaskLogService(
             new TaskLogStore(factory, _timeProvider),
-            new RunnerWorkStore(factory),
+            new AgentJobStore(factory, NullLogger<AgentJobStore>.Instance, _timeProvider),
             new WorkflowRunQuerier(factory),
             new NoopTaskLogDeltaPublisher(),
             NullLogger<TaskLogService>.Instance);

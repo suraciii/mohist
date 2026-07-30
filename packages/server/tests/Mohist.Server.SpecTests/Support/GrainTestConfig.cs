@@ -243,7 +243,6 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentReadinessService>();
         siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
-        siloBuilder.Services.AddScoped<RunnerWorkStore>();
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
         siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
@@ -259,7 +258,6 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.DispatchService>();
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.WorkflowReportService>();
         siloBuilder.Services.AddScoped<RepositoryDeletionBlockerQuery>();
-        siloBuilder.Services.AddSingleton<IAgentJobWorkCoordinator, AgentJobWorkCoordinator>();
         siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
         siloBuilder.Services.AddScoped<EffectiveWorkflowProfileResolver>();
         siloBuilder.Services.AddSingleton<FakeRunnerWorkspaceClient>();
