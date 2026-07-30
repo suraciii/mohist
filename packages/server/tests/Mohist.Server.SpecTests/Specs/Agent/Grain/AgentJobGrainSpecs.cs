@@ -239,19 +239,18 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         await firstJob.SubmitAsync(MakeInput("occupy slot", projectId, "/tmp/agent-job-capacity-first"));
         await WaitForStatusAsync(firstJob, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        await secondJob.SubmitAsync(MakeInput("wait for slot", projectId, "/tmp/agent-job-capacity-second"));
+        await secondJob.SubmitAsync(MakeInput("no capacity", projectId, "/tmp/agent-job-capacity-second"));
 
-        var secondStatus = await WaitForAsync(
-            () => secondJob.GetStatusAsync(),
-            status => status == AgentJobStatus.Pending,
-            TimeSpan.FromMilliseconds(150),
-            TimeSpan.FromMilliseconds(25),
-            "second job remains pending while runner slot is occupied");
-        Assert.Equal(AgentJobStatus.Pending, secondStatus);
+        await WaitForStatusAsync(secondJob, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
         var secondSnapshot = await secondJob.GetRuntimeSnapshotAsync();
         Assert.Null(secondSnapshot.RunnerId);
         Assert.Null(secondSnapshot.CurrentWorkId);
+        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, secondSnapshot.FailureReason);
+
+        var secondTerminal = await secondJob.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, secondTerminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, secondTerminal.FailureReason);
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var activeWorks = (await runner.GetRuntimeStateAsync()).ActiveWorks;

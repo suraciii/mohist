@@ -193,3 +193,79 @@ working tree (tracked as untracked file). No production code reads or
 writes `RunnerWorks`. `AgentJobWriteThroughMirrorSpecs` was kept (the
 mirror is no longer used but tests still assert it is unused, which is
 the regression contract).
+
+## Status (fix-ci resumed 2026-07-30)
+
+### Root cause
+
+`AgentJobGrainSpecs` was hanging at
+`SubmitAsync_RunnerAtPersistedSlots_LeavesSecondAgentJobPending`. The
+hang was the visible symptom, but the underlying regression was the
+combined budget/time waste from running a long serial collection under
+a 10-minute wall clock cap. Reproduced locally with `dotnet test`
+(passes) vs the MTP runner (`dotnet Mohist.Server.SpecTests -class
+…AgentJobGrainSpecs`): the runner produces test-by-test progress and
+the failing class exited at 16 tests run / 2 failed / wall time
+≈ 2.9 s. No `dotnet test` invocation completes discovery within the
+budget because MTP startup alone exceeds the budget for this class.
+
+The actual failure that consumed the verification budget was the
+`AgentJobGrainSpecs` collection:
+1. T-001 (`912f34974`) removed the production calls to
+   `IAgentJobDispatchObserver.AssignmentPreparedAsync` and
+   `RunnerAcceptedAsync` from `AgentJobGrain`. The old push path used
+   these hooks to flip `State.Status = Running` synchronously after
+   the runner accepted; the new poll path moves Pending → Running
+   inside `_jobStore.ClaimAsync` inside `ClaimNextAsync`. The
+   observer hooks were not reinstated at the new call sites, so
+   every `WaitForRunningAsync` test blocked forever waiting on a
+   signal that was never raised.
+2. `WaitForRunningAsync` itself did not drive the runner poll that
+   triggers `ClaimNextAsync`. Under the reconciliation model only a
+   poll can claim an AgentJob; the test support never invoked one.
+3. `SubmitAsync_RunnerAtPersistedSlots_LeavesSecondAgentJobPending`
+   asserted the legacy push-retry behavior — the second job stays
+   Pending until the runner frees a slot. The T-001 spec
+   (`specs/work-dispatch-ledger/spec.md#Polling-prioritizes-recovery-and-enforces-shared-capacity`,
+   scenario "Admission finds no capacity") defines the post-T-001
+   behavior: the second job must be terminal `runner-unavailable`
+   with no pending dispatch.
+
+### Fix (this turn)
+
+1. `AgentJobGrain` (server): inject `IAgentJobDispatchObserver`;
+   fire `AssignmentPreparedAsync` after `TryAdmitOnRunnerAsync`
+   persists the ledger row, and `RunnerAcceptedAsync` after
+   `ClaimAsync` reloads the row into Running. These restore the
+   production observation points the tests rely on.
+2. `AgentJobGrainTestSupport` (spec): `WaitForRunningAsync` now
+   resolves the runner id from the job snapshot, triggers a
+   `DispatchService.PollAsync` against the test silo service
+   provider, and then awaits the observer signal. This is the
+   reconciliation-model equivalent of the runner process polling
+   for a fresh claim.
+3. `AgentJobGrainSpecs`: the capacity scenario was renamed
+   (`SubmitAsync_RunnerAtPersistedSlots_TerminatesSecondAgentJobWithRunnerUnavailable`)
+   and re-asserted against the post-T-001 spec — second job ends
+   Failed with `RunnerUnavailable`, no runner assignment, runner
+   still shows only the first job as active work.
+
+### Remaining follow-ups (interrupted, not committed)
+
+- `AgentJobGrainSpecs.SubmitAsync_NoEligibleRunner_StaysPendingAndRetriesWithBackoff`
+  asserts the job stays Pending past the first attempt. Under the
+  new spec, "no eligible runner → terminal runner-unavailable"
+  fires synchronously from `TryAdmitAsync`. The test name and
+  premise are obsolete; needs the same spec-aligned rewrite as the
+  capacity test.
+- `AgentJobGrainSpecs.DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime`
+  hits a still-unverified second failure path after the runner-
+  poll helper was added. The advance-time-before-submit ordering
+  and the session's reminder state need to be re-traced against
+  the post-T-001 flow before the rewrite can land.
+- The same `WaitForRunningAsync` helper change applies to
+  `AgentJobGrainPersistenceSpecs`, `AgentJobTerminalDeliverySpecs`,
+  `AgentJobTerminalTranscriptPersistenceSpecs`,
+  `AgentJobWriteThroughMirrorSpecs`, and the AgentJob routes specs
+  — they all use the same observer-driven wait pattern and have
+  not yet been re-run.

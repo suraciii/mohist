@@ -57,6 +57,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IEventStore _eventStore;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IGrainFactory _grains;
+    private readonly IAgentJobDispatchObserver _dispatchObserver;
     private IDisposable? _jobTimeoutTimer;
 
     private AgentJobState? _state;
@@ -70,7 +71,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         IAgentJobStore jobStore,
         IEventStore eventStore,
         IBackgroundTaskLauncher backgroundTasks,
-        IGrainFactory grains)
+        IGrainFactory grains,
+        IAgentJobDispatchObserver dispatchObserver)
     {
         _log = log;
         _options = options.Value;
@@ -79,6 +81,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _eventStore = eventStore;
         _backgroundTasks = backgroundTasks;
         _grains = grains;
+        _dispatchObserver = dispatchObserver;
     }
 
     public override async Task OnActivateAsync(CancellationToken ct)
@@ -196,13 +199,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return null;
 
         var record = await _jobStore.ClaimAsync(Key, runnerId, _timeProvider.GetUtcNow());
-        // Reload from the durable row so the in-memory state reflects
-        // the claim.
         _hydrated = false;
         await HydrateAsync();
         var dispatch = DeserializeDispatch(record.DispatchJson)
             ?? throw new AgentJobLedgerReconstructionException(
                 $"AgentJob '{Key}' claim returned a row without a parseable dispatch snapshot");
+
+        await _dispatchObserver.RunnerAcceptedAsync(Key, runnerId, State.WorkId!);
 
         return new ClaimResult(Key, runnerId, State.WorkId!, dispatch);
     }
@@ -915,6 +918,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _log.LogInformation(
             "AgentJob {Id} admitted to runner {Runner} as work {Work} (readySince={ReadySince})",
             Key, runnerId, workId, now);
+
+        await _dispatchObserver.AssignmentPreparedAsync(Key, runnerId, workId);
+
         return true;
     }
 
