@@ -63,3 +63,5 @@
 - `AgentQuerierListDefinitionsSpecs` uses a SQL command recorder to lock that no `AgentJobs` read occurs on the summary definition path.
 - Waiting rows now map Availability reasons to their user-facing explanation and next action for runner offline, capacity, concurrency, and dispatch waits.
 - The Agent detail header now shows the configured purpose and a lifecycle label for both Active and Archived definitions.
+- The Agent detail test remains below the Web test-file size budget after adding definition-summary coverage.
+- PR 244 Node CI repair: `npm run test:ci -w packages/web` and `npm run build -w packages/web` pass.
