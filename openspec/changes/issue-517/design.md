@@ -130,11 +130,11 @@ The diagnostic detects three drift kinds:
 
 - **Presentation name drift:** `VerifiedBotName` (what Slack actually shows) ≠ `BotName` (what the operator configured on the Connection).
 - **Agent-name drift:** `BotName` (the Bot's configured display name) ≠ `Agent.Name` (the bound Agent's name).
-- **Avatar drift:** the `VerifiedBotIconUrl` captured at the latest verification differs from the `VerifiedBotIconUrl` stored from the previous verification — meaning the Slack-side Bot icon changed between verifications.
+- **Avatar drift:** `VerifiedBotIconUrl` (what Slack reports) ≠ `AvatarHash` (what the operator recorded on the Connection) — the same two-source pattern as name drift.
 
 All three are surfaced as diagnostic facts with the concrete values shown. Mohist does NOT modify the Slack side or overwrite `BotName`/`VerifiedBotName`/`VerifiedBotIconUrl` to mask the difference.
 
-Avatar drift compares icon URL to icon URL (Slack-side current vs Slack-side last-verified), not URL to hash — `AvatarHash` on the Connection is an operator-provided presentation field with no guaranteed relationship to Slack's icon URL format, so it is not a reliable comparison target. The icon-URL-to-icon-URL comparison detects real avatar changes on the Slack side without fetching or hashing image bytes.
+Avatar drift follows the name-drift pattern: `VerifiedBotName` vs `BotName` compares a Slack-side observation against an operator-configured value, and `VerifiedBotIconUrl` vs `AvatarHash` does the same for avatars. The values may be different representations (URL vs hash); the diagnostic surfaces both honestly so the operator can visually compare — the mismatch itself is the drift signal.
 
 **Rationale:** capturing the Slack-side name and icon at verification time (which already calls `bots.info`) is zero-cost — no extra API call. The snapshots are refreshed on every heartbeat-triggered verification, so they track Slack-side renames and icon changes without a dedicated polling loop. `VerifiedBotName` and `VerifiedBotIconUrl` are observations (what Slack reports), not Mohist-owned settings, so they sit alongside `BotName` (what the operator chose) without conflating them.
 
@@ -165,15 +165,15 @@ Introduce a Web route and component for the Connection diagnostic: a summary car
 - **[VerifiedBotName and VerifiedBotIconUrl columns require a migration (D7)]** -> additive nullable columns; existing connections have `null` until next verification; diagnostic reports "not yet verified" for drift rather than a false positive.
 - **[Diagnostic precedence is a product judgment call (D6)]** -> the precedence table is documented and testable; if field evidence shows a different priority (e.g., disabled should rank above owner-unavailable), it is a one-place change in the pure function.
 - **[Disable does not cancel in-flight adapter deliveries already claimed (D4)]** -> a delivery claimed by the adapter before disable may still be sent; this is acceptable (it was accepted before disable) and matches "accepted work is preserved." The adapter will not claim new deliveries after discovery refresh excludes the connection.
-- **[Avatar drift uses icon URL comparison, not image hashing (D7)]** -> Slack's `bots.info` returns icon URLs not stable hashes; URL-to-URL comparison detects real avatar changes at zero cost (no image fetch/hashing) but misses cases where the URL stays the same while the image content changes (rare for Slack-hosted avatars).
+- **[Avatar drift compares URL to hash (D7)]** -> `VerifiedBotIconUrl` (a Slack icon URL) and `AvatarHash` (an operator-provided value) may be different representations of the same image; the diagnostic surfaces both values honestly so the operator can visually judge, rather than masking or auto-resolving the difference.
 
 ## Migration Plan
 
-1. **Server — model + migrations (D2, D7):** add `Kind` to `SlackOwnerClaimCodeRow` (default `initial`); add `VerifiedBotName` to `AgentConnectionRow`. EF migration is purely additive.
+1. **Server — model + migrations (D2, D7):** add `Kind` to `SlackOwnerClaimCodeRow` (default `initial`); add `VerifiedBotName` and `VerifiedBotIconUrl` to `AgentConnectionRow`; extend `SlackBotInfo` with `IconUrl`. EF migration is purely additive.
 2. **Server — credential rotation (D1):** `SlackSetupVerifier.VerifyRotationAsync`; `rotate-credentials` route; `configure` guard for already-bound connections.
 3. **Server — owner transfer (D2, D3):** extend `GenerateAsync` with `kind`; `TryTransferAsync`; `transfer-owner` route; owner-availability probe helper.
 4. **Server — enable/disable + ingress guard (D4):** `disable`/`enable` routes; ingress DesiredState check.
-5. **Server — diagnostic (D6, D7):** `ConnectionDiagnostic.Compute` pure function; `/diagnostic` route; `VerifiedBotName` capture in `VerifyAsync`.
+5. **Server — diagnostic (D6, D7):** `ConnectionDiagnostic.Compute` pure function; `/diagnostic` route; `VerifiedBotName` and `VerifiedBotIconUrl` capture in `VerifyAsync`.
 6. **Server — delete wording (D5):** response/message update.
 7. **CLI (D8):** four new subcommands; `view`/`list` diagnostic rendering; spec test update.
 8. **Web (D9):** diagnostic route + component + API client hook.

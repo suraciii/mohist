@@ -59,8 +59,8 @@ The diagnostic SHALL detect when the Slack-side App or Bot name or icon differs 
 - **THEN** the diagnostic surfaces the identity-drift state showing the difference, and does not modify the Slack side or silently overwrite the Connection record
 
 #### Scenario: Avatar drift surfaced
-- **WHEN** the Slack-side Bot icon URL captured at the latest verification differs from the icon URL recorded at the previous verification
-- **THEN** the diagnostic surfaces the avatar drift showing both icon URLs, and does not modify the Slack side
+- **WHEN** the Slack-side Bot icon URL captured at verification differs from the Connection's recorded AvatarHash
+- **THEN** the diagnostic surfaces the avatar drift showing both values, and does not modify the Slack side
 
 ### Requirement: The Web presents the diagnostic summary
 
