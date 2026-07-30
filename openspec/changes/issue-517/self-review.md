@@ -1,103 +1,38 @@
-# Self-Review: Issue 517 (Round 2)
+# Self-Review: Issue 517 (Round 3)
 
 ## Review Summary
 
-Re-reviewed all plan artifacts after the round-1 fixes (avatar drift brought into scope,
-precedence table split, configure guard reconciled, FixSlackSetup edge case resolved). The
-previous four issues are confirmed fixed. This round found one new blocking problem
-introduced by the avatar-drift fix: the comparison mechanism is not implementable as
-described.
-
----
-
-## Blocking Problems
-
-### 1. Avatar drift comparison requires two snapshots but the design stores only one
-
-Design D7 (line 133) defines avatar drift as:
-
-> "the `VerifiedBotIconUrl` captured at the latest verification differs from the
-> `VerifiedBotIconUrl` stored from the **previous** verification"
-
-But D7 (line 127) also says verification **overwrites** `VerifiedBotIconUrl` on every
-successful verification:
-
-> "`VerifyAsync` and `VerifyRotationAsync` capture both `VerifiedBotName` … and
-> `VerifiedBotIconUrl` … **on every successful verification**."
-
-After the latest verification overwrites the field, the previous value is gone. The
-diagnostic endpoint runs separately from verification (D6: it loads the connection and
-probes owner availability; it does not re-run verification or call `bots.info` live — D7
-rejected that). So when the diagnostic runs, it sees only the single current
-`VerifiedBotIconUrl` with no previous value to compare against.
-
-The name drift works because it compares **two different fields** from two different
-sources: `VerifiedBotName` (Slack-side observation) vs `BotName` (operator-configured
-value). Avatar drift has no such pair — the design stores only one Slack-side observation
-(`VerifiedBotIconUrl`) and explicitly rejects comparing it against the operator-set
-`AvatarHash` (line 137):
-
-> "AvatarHash on the Connection is an operator-provided presentation field with no
-> guaranteed relationship to Slack's icon URL format, so it is not a reliable comparison
-> target."
-
-The spec scenario (line 62) mirrors the same gap:
-
-> "WHEN the Slack-side Bot icon URL captured at the latest verification differs from the
-> icon URL recorded at the **previous** verification"
-
-This also requires two snapshots. An implementer following these artifacts would have no
-way to detect avatar drift at diagnostic time.
-
-**Fix (recommended):** Align avatar drift with the name-drift pattern — compare
-`VerifiedBotIconUrl` (what Slack reports) against `AvatarHash` (what the operator recorded
-on the Connection). This uses two fields from two different sources, exactly like
-`VerifiedBotName` vs `BotName`. The format difference (URL vs hash) is itself the drift
-signal: the diagnostic shows both values honestly and lets the operator decide. Update:
-- D7 line 133: change the avatar drift bullet to "`VerifiedBotIconUrl` ≠ `AvatarHash`"
-- D7 line 137: remove the rejection of the `AvatarHash` comparison; instead explain that
-  the comparison surfaces the difference between what Slack shows and what the operator
-  recorded, same pattern as name drift
-- Spec line 62: change the scenario to "the Slack-side Bot icon URL differs from the
-  Connection's recorded AvatarHash"
-- Alternatively, add a second field (`PreviousVerifiedBotIconUrl`) — but this is more
-  model complexity for the same outcome.
-
----
-
-## Non-Blocking Notes
-
-### 2. Migration plan steps omit VerifiedBotIconUrl
-
-Design migration plan step 1 (line 172) says "add `VerifiedBotName` to
-`AgentConnectionRow`" and step 5 (line 176) says "`VerifiedBotName` capture in
-`VerifyAsync`" — both omit `VerifiedBotIconUrl` and `SlackBotInfo.IconUrl`. The decision
-body (D7), tasks (T-004), and risks section all correctly mention both. The migration plan
-steps should be updated for consistency.
-
-### 3. Proposal What Changes still mentions AvatarHash comparison target
-
-Proposal line 12 says "Slack 侧返回的 App 名称/头像与 Connection 记录的 BotName/AvatarHash"
-— this already references `AvatarHash` as the comparison target for avatar, which aligns
-with the recommended fix above (comparing `VerifiedBotIconUrl` vs `AvatarHash`). No change
-needed if the fix follows the recommendation; noting for traceability.
+Re-reviewed all plan artifacts after round-2 fixes (avatar drift comparison mechanism
+corrected to `VerifiedBotIconUrl` vs `AvatarHash`, migration plan steps completed). All
+blocking and non-blocking issues from rounds 1 and 2 are confirmed resolved. No new
+problems found.
 
 ---
 
 ## Previous-Round Fixes Confirmed
 
-All four round-1 issues are verified resolved:
+### Round 1 (all resolved)
 
-1. **Avatar drift in scope** — spec, design D7, and tasks T-004 now include
-   `VerifiedBotIconUrl` and `SlackBotInfo.IconUrl`; deferral removed from risks and open
-   questions. ✅ (mechanism gap is a new issue — see blocking #1 above)
-2. **Diagnostic precedence split** — D6 table (lines 107-108) distinguishes
-   credential-failure Unhealthy (priority 2) from service-unreachable Unhealthy (priority 3)
-   via `HealthReason` content, with explanatory paragraph (line 115). ✅
+1. **Avatar drift in scope** — spec, design D7, and tasks T-004 include `VerifiedBotIconUrl`
+   and `SlackBotInfo.IconUrl`; deferral removed from risks and open questions. ✅
+2. **Diagnostic precedence split** — D6 table (lines 107-108) distinguishes credential-failure
+   Unhealthy (priority 2) from service-unreachable Unhealthy (priority 3) via `HealthReason`
+   content, with explanatory paragraph (line 115). ✅
 3. **configure guard reconciled** — proposal line 7 matches design decision (guard +
-   redirect, not inline rotation); Open Question removed. ✅
+   redirect); Open Question removed. ✅
 4. **FixSlackSetup edge case** — D1 (lines 42, 48) uses `HasBoundIdentity` check instead of
    SetupProgress values; T-001 acceptance criteria include FixSlackSetup rotation. ✅
+
+### Round 2 (all resolved)
+
+1. **Avatar drift comparison mechanism** — D7 line 133 now defines avatar drift as
+   `VerifiedBotIconUrl ≠ AvatarHash` (same two-source pattern as `VerifiedBotName` vs
+   `BotName`). The old "latest vs previous verification" comparison (impossible with one
+   field) is gone. Spec scenario (line 62) says "icon URL captured at verification differs
+   from the Connection's recorded AvatarHash." Tasks T-004 (lines 77, 83, 94) consistently
+   use `VerifiedBotIconUrl ≠ AvatarHash`. Risk entry (line 168) updated. ✅
+2. **Migration plan completeness** — step 1 (line 172) mentions both `VerifiedBotName` and
+   `VerifiedBotIconUrl` plus `SlackBotInfo.IconUrl`; step 5 (line 176) mentions both. ✅
 
 ---
 
@@ -110,9 +45,9 @@ All four round-1 issues are verified resolved:
 | Owner transfer, old effective until new claims, no auto-transfer | `connection-owner-transfer` | D2 | T-002 |
 | Disable stops input/replies, preserves work; Enable no replay | `connection-lifecycle-control` | D4 | T-003 |
 | Delete clears provider records, preserves Agent/work, honest about Slack App | `connection-lifecycle-control` | D5 | T-003 |
-| Identity drift (name + avatar) shown honestly, no auto-rewrite | `connection-diagnostics` | D7 (mechanism gap) | T-004 |
+| Identity drift (name + avatar) shown honestly, no auto-rewrite | `connection-diagnostics` | D7 | T-004 |
 
-## Consistency Checks
+## Consistency Checks (all pass)
 
 - Proposal capabilities (4) ↔ spec directories (4): match.
 - Task spec references ↔ spec requirement headings: all 6 valid.
@@ -120,5 +55,13 @@ All four round-1 issues are verified resolved:
 - Non-goals aligned across issue, proposal, design, specs.
 - Spec formatting: all requirements use `###`, all scenarios use `####`, every requirement
   has ≥1 scenario, normative SHALL/MUST language throughout, no delta headers.
+- Avatar drift comparison is consistent across spec (line 62: "icon URL … differs from the
+  Connection's recorded AvatarHash"), design D7 (line 133: "VerifiedBotIconUrl ≠ AvatarHash"),
+  and tasks T-004 (line 83: "VerifiedBotIconUrl ≠ AvatarHash"). All use the same two-source
+  pattern as name drift.
+- configure guard is consistent across proposal (line 7), design D1 (lines 42, 48), and task
+  T-001 (lines 9, 12, 16): all use `HasBoundIdentity` check, not SetupProgress values.
+- Diagnostic precedence table (D6) correctly splits Unhealthy by HealthReason content;
+  design body and risk entry are consistent.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
