@@ -780,6 +780,29 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
     }
 
     [Fact]
+    public async Task AcceptFollowup_DispatchInProgress_JoinsQueuedTurn()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-join-dispatching-turn");
+        var first = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "first queued input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "join-dispatching-first"));
+        await grain.BeginNextFollowupDispatchAsync();
+
+        var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "second queued input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "join-dispatching-second"));
+
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        var turn = Assert.Single(state!.Status.Turns!);
+        Assert.Equal(first.TurnId, second.TurnId);
+        Assert.Equal([first.InputId, second.InputId], turn.InputIds);
+        Assert.True(Assert.Single(state.Status.PendingFollowups!).Dispatching);
+    }
+
+    [Fact]
     public async Task Activate_ReclaimsQueuedDispatchForSameKeyRetry()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-reclaim-dispatch");

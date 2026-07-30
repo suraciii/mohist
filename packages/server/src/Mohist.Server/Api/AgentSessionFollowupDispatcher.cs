@@ -33,19 +33,28 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
         if (dispatch is null)
             return;
 
-        var result = await _delivery.DispatchAsync(new FollowupDeliveryRequest(
-            ProjectId: projectId,
-            SessionId: target.SessionId,
-            SourceKind: target.SourceKind,
-            WorkflowRunId: target.WorkflowRunId,
-            SessionName: target.SessionName,
-            RunnerId: target.RunnerId,
-            Runtime: target.Runtime,
-            RuntimeSessionId: target.RuntimeSessionId,
-            WorkDir: target.WorkDir,
-            Definition: target.Definition,
-            OperationId: dispatch.OperationId,
-            InputTexts: dispatch.InputTexts), ct);
+        FollowupDeliveryResult result;
+        try
+        {
+            result = await _delivery.DispatchAsync(new FollowupDeliveryRequest(
+                ProjectId: projectId,
+                SessionId: target.SessionId,
+                SourceKind: target.SourceKind,
+                WorkflowRunId: target.WorkflowRunId,
+                SessionName: target.SessionName,
+                RunnerId: target.RunnerId,
+                Runtime: target.Runtime,
+                RuntimeSessionId: target.RuntimeSessionId,
+                WorkDir: target.WorkDir,
+                Definition: target.Definition,
+                OperationId: dispatch.OperationId,
+                InputTexts: dispatch.InputTexts), ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+            throw;
+        }
         if (!result.Accepted)
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
     }

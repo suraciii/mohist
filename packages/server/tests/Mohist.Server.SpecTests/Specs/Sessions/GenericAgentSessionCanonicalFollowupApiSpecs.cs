@@ -284,6 +284,55 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
     }
 
     [Fact]
+    public async Task CancelledFollowupDelivery_ReleasesClaimForSameKeyRetry()
+    {
+        var (project, sessionId, _) = await CreateIdleGenericSessionAsync("followup-cancelled-delivery");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstDelivery = new TaskCompletionSource<RunnerFollowupDeliveryResult?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempt = 0;
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponseFactory("ReceiveFollowup", _ =>
+        {
+            attempt++;
+            started.TrySetResult();
+            return attempt == 1 ? firstDelivery.Task : new RunnerFollowupDeliveryResult(true);
+        });
+        tracker.Register(_runnerId, "conn-followup-cancelled-delivery");
+        try
+        {
+            using var cancellation = new CancellationTokenSource();
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"/api/projects/{project.Id}/agent-sessions/{sessionId}/followup")
+            {
+                Content = JsonContent.Create(new { text = "retry after cancellation" }),
+            };
+            request.Headers.Add("Idempotency-Key", "cancelled-delivery-key");
+
+            var first = _client.SendAsync(request, cancellation.Token);
+            await started.Task;
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+
+            using var retry = await PostGenericFollowupAsync(
+                project.Id,
+                sessionId,
+                new { text = "retry after cancellation" },
+                "cancelled-delivery-key");
+            Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+            Assert.Equal(2, attempt);
+        }
+        finally
+        {
+            firstDelivery.TrySetResult(new RunnerFollowupDeliveryResult(true));
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Fact]
     public async Task OfflineRunnerFollowup_AcceptsAndQueues_BlockingCompactUntilTerminal()
     {
         // Per the new accept semantics (D4): a runner-offline result
