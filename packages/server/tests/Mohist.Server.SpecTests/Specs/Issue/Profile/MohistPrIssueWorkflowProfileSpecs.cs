@@ -383,7 +383,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var archiveChange = integrate.Tasks.Single(t => t.Id == "archive-change");
         Assert.Equal("mohist/archive-change", archiveChange.Uses);
-         Assert.Equal("openspec/changes/issue-${{ issue.number }}", ReadStringWith(archiveChange, "changeDir"));
+        Assert.Equal("openspec/changes/issue-${{ issue.number }}", ReadStringWith(archiveChange, "changeDir"));
+        Assert.Null(ReadStringWith(archiveChange, "archiveHint"));
 
         var push = integrate.Tasks.Single(t => t.Id == "push");
         Assert.Equal("mohist/push", push.Uses);
