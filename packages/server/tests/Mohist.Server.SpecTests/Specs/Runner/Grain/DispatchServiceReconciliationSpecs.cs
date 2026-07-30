@@ -217,6 +217,21 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
+    public async Task PollAsync_AssignedWorkflowCanClaimItsOwnNextWorkAtCapacity()
+    {
+        var (runnerId, workflowIds) = await StartReadyWorkflowsAsync(
+            $"poll-assigned-capacity-{Guid.NewGuid():N}", count: 1, slots: 1);
+        var workflow = Grains.GetGrain<IWorkflowGrain>(Assert.Single(workflowIds));
+
+        var assignment = await workflow.AssignWorkerAsync(runnerId);
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
+
+        var dispatch = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        Assert.Equal(workflowIds[0], dispatch.WorkflowRunId);
+    }
+
+    [Fact]
     public async Task FindRunningAssignedToAsync_ReturnsOnlyRunningForTheRunner()
     {
         var prefix = $"desired-{Guid.NewGuid():N}";

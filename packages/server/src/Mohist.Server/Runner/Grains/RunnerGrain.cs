@@ -338,7 +338,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 return null;
             }
 
-            var activeWorkflowCount = (await _workflowRuns.FindRunningAssignedToAsync(RunnerId)).Count;
+            var activeWorkflowCount = (await _workflowRuns.FindRunningAssignedToAsync(RunnerId))
+                .Count(runId => !string.Equals(runId, workflowRunId, StringComparison.Ordinal));
             var activeAgentJobCount = GetWorks()
                 .Where(IsActiveAgentJobWork)
                 .Select(work => work.OwnerId)
