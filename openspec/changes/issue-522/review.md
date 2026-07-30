@@ -2,16 +2,16 @@
 
 ## Findings
 
-### High: Turn control's stale guard is not held through the side effect
+### High: A persisted stop claim can permanently block a Session after Server loss
 
-`AgentSessionStopRoutes.ExecuteStopAsync` first reads `ResolveTurnControlAsync` (`packages/server/src/Mohist.Server/Api/AgentSessionStopRoutes.cs:64`) and later sends the session-scoped `CancelAgentSession` command (`:116-119`). Nothing revalidates that the same Turn is still executing between those two calls. The Runner receives the supplied `turnId`, but `cancel-handler.ts` only uses it when recording the resulting activity fact (`packages/runner/src/server/cancel-handler.ts:127-133`, `:145-177`); its actual `callCancel` at `:110` aborts the physical Runtime session.
+`ClaimTurnStop` writes `PendingStop` into `AgentSessionStatusSnapshot` (`packages/server/src/Mohist.Server/Sessions/Domain/AgentSession.Transitions.cs:697-704` and `AgentSession.cs:299`), so the in-flight HTTP stop is durable. `CompleteTurnStopAsync` clears it only from the still-running route's `finally` block. If the Server or the grain activation is lost after the claim is saved and before that callback, activation reloads the same `PendingStop` unchanged (`AgentSessionGrain.OnActivateAsync`, `:61-69`). There is no expiry, recovery protocol, or reconciliation path for it.
 
-Consequently, an executing target can finish after the grain read, its terminal fact can make the Session idle, and a later follow-up can begin on that same Runtime session before the delayed stop reaches the Runner. The old request then aborts the later Turn. This is exactly the stale-entry failure the Turn-addressing contract forbids, even though the later activity fact remains correlated to the original Turn. The cancel path has the same TOCTOU shape: it resolves a queued Turn (`AgentSessionCancelRoutes.cs:59`) and separately invokes the void `CancelTurnAsync` (`:92`); if a `session.input` fact promotes it in between, `CancelTurn` no-ops but the route still returns `state: "cancelled"` (`:93`).
+`BeginFollowupAsync` then unconditionally throws while `PendingStop` exists (`AgentSessionGrain.cs:425-429`), even if a later authoritative terminal Runtime fact has already marked the claimed Turn terminal. The Session can therefore remain permanently unable to accept another Turn after a crash or activation loss during a stop request.
 
-Make target eligibility and the control transition/claim atomic in the Session grain, then ensure a stop cannot call the session-scoped Runtime abort once that claim is stale. The operation must return the settled target state rather than allowing the route to fabricate `cancelled`. Add deterministic API/Runner tests that interleave terminal-plus-next-Turn progression between the initial control request and Runner dispatch, and that interleave queued-to-executing before cancellation.
+Keep the stale-stop protection, but give the claim a durable completion/recovery lifecycle: for example, record enough correlation to reconcile it from the Runtime outcome, or expire/recover it safely after the request's owner is gone. Add a restart/activation regression that claims a stop, loses the request path before Runner reply, delivers the terminal fact, and proves a later follow-up is eventually admitted without allowing the old abort to affect it.
 
 ## Verification
 
-The branch records passing full .NET, Web, and Runner validation. This review inspected the current control routes, Session-grain transitions, Runner handler, and API regressions; the existing stale tests cover a target already terminal before the request, not this read-to-side-effect interleaving.
+The branch records passing .NET, Web, and Runner suites. This review traced the new persisted claim through activation and the follow-up gate; existing claim tests cover Runner replies in one live request but not ownership loss between claim and completion.
 
 <promise>FAIL</promise>
