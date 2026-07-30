@@ -182,6 +182,10 @@ export class RunnerSignalRClient {
     await this.connection.stop()
   }
 
+  async disconnect(): Promise<void> {
+    await this.connection.stop()
+  }
+
   getConnectionId(): string | null {
     return this.connection.connectionId
   }

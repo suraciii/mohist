@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   agentSessionRuntimeEvents: vi.fn(),
   startSignalR: vi.fn(),
   stopSignalR: vi.fn(),
+  disconnectSignalR: vi.fn(),
   getConnectionId: vi.fn(() => "conn-1"),
   probeLiveness: vi.fn(async () => true),
   blockingAction: vi.fn(),
@@ -41,6 +42,7 @@ const {
   agentSessionRuntimeEvents,
   startSignalR,
   stopSignalR,
+  disconnectSignalR,
   getConnectionId,
   probeLiveness,
   blockingAction,
@@ -68,6 +70,7 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   RunnerSignalRClient: class {
     start = startSignalR
     stop = stopSignalR
+    disconnect = disconnectSignalR
     getConnectionId = getConnectionId
     probeLiveness = probeLiveness
     forceReconnect = forceReconnect
@@ -475,6 +478,8 @@ describe("RunnerHost", () => {
       await secondSignalRStarted.promise
       expect(poll).not.toHaveBeenCalled()
       expect(disconnect).toHaveBeenCalledWith(expect.any(AbortSignal))
+      expect(disconnectSignalR).toHaveBeenCalledTimes(1)
+      expect(stopSignalR).not.toHaveBeenCalled()
 
       secondSignalRRelease.resolve()
       await firstPollStarted.promise

@@ -317,6 +317,22 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
     await client.stop()
   })
 
+  it("Disconnect_DoesNotStopRuntimeEventOutbox", async () => {
+    builders.length = 0
+    const stopOutbox = vi.fn(async () => {})
+    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+      agentSessionRuntimeEventOutbox: {
+        ...recoveryOutbox(),
+        stop: stopOutbox,
+      },
+    })
+
+    await client.disconnect()
+
+    expect(builders.at(-1)?.connection.stop).toHaveBeenCalledTimes(1)
+    expect(stopOutbox).not.toHaveBeenCalled()
+  })
+
   it("ProbeLiveness_ReturnsFalse_WhenNotConnected", async () => {
     builders.length = 0
     const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
