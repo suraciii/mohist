@@ -81,4 +81,6 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - F3: issue-session metadata now projects follow-up input acceptance and Turn status/identity, matching generic and unified session observations without exposing input text.
 - F4: generic Web follow-up feedback distinguishes accepted, rejected, and unknown server outcomes instead of reporting every HTTP 200 as sent.
 - Focused verification passed: Server build; follow-up grain specs (34); generic follow-up API specs (18); issue metadata observation spec; initial-turn terminal dispatch integration spec; Web typecheck, FSD check, and agent-session API tests (42).
-- Next: run complete server/Web verification and ArchTests, then commit the lifecycle, observation, and Web feedback changes separately.
+- Commits: `daa59e8b9` (Server lifecycle/retry/observation), `e71bd1707` (Web outcome feedback).
+- Complete .NET verification passed: Workflow Definition 175, CLI 1445, Server Unit 1535, Server Arch 35, Server Spec 3359. Runner test CI passed 1443 tests. Web typecheck, FSD check, and full Vitest suite passed (5161 passed, 1 skipped).
+- Root `npm test` remains non-green solely because the pre-existing, untouched `packages/web/src/widgets/session-transcript/model/useSessionTranscript.test.tsx` is 516 lines and fails the 500-line file-size guard. No verification command created a Git-visible product change.
