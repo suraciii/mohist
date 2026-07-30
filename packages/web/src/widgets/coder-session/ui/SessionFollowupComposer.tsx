@@ -194,9 +194,13 @@ export function SessionFollowupComposer({
               ? 'text-warning'
               : isObservedExecuting
                 ? 'text-info'
-                : buttonState === 'sent'
-                ? 'text-success'
-                : 'text-transparent',
+                : followupStatus?.outcome === 'rejected'
+                  ? 'text-destructive'
+                  : followupStatus?.outcome === 'unknown'
+                    ? 'text-warning'
+                    : buttonState === 'sent'
+                      ? 'text-success'
+                      : 'text-transparent',
           )}
         >
           {statusLabel ?? 'placeholder'}

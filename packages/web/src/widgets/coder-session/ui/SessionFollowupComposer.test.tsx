@@ -392,4 +392,24 @@ describe('SessionFollowupComposer — observed follow-up status', () => {
     expect(screen.getByTestId('session-followup-status')).toHaveAttribute('data-tone', 'executing')
     expect(screen.getByTestId('session-followup-status')).not.toHaveTextContent(/pending/i)
   })
+
+  it.each([
+    ['rejected', 'Rejected', 'text-destructive'],
+    ['unknown', 'Outcome unknown — retry with the same key', 'text-warning'],
+  ] as const)('shows a visible %s outcome', (outcome, label, color) => {
+    renderComposer({
+      followupStatus: {
+        outcome,
+        inputAcceptance: null,
+        turnStatus: null,
+        inputId: null,
+        turnId: null,
+      },
+    })
+
+    const status = screen.getByTestId('session-followup-status')
+    expect(status).toHaveTextContent(label)
+    expect(status).toHaveClass(color)
+    expect(status).not.toHaveClass('text-transparent')
+  })
 })

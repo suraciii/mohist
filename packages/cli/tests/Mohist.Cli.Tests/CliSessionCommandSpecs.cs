@@ -713,6 +713,8 @@ public class CliSessionCommandSpecs
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("\"status\": \"sent\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("Idempotency-Key:", stdout, StringComparison.Ordinal);
+        Assert.NotNull(JsonNode.Parse(stdout));
     }
 
     [Fact]
