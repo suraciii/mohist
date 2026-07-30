@@ -51,3 +51,8 @@
 - Focused launch, detail, and session suites pass: 80 tests and 1 skipped.
 - A full Web run passed earlier at 392 files, 5,194 passing and 1 skipped. A later full run became resource-sensitive in unrelated `App.test.tsx` routing cases and exceeded the 120-second command limit; `App.test.tsx` passes independently at 15/15.
 - Web typecheck, FSD boundary checks, test-boundary checks, and `git diff --check` pass.
+
+## Verification Repair
+
+- The failed default Web run was caused by Vitest starting one worker per available CPU on this 32-core workspace; concurrent jsdom initialization delayed lazy settings routes beyond the 10-second test timeout and left the run incomplete. The affected `App.test.tsx` passes independently at 15/15, and the failure is not caused by T-004 behavior.
+- Capping Web Vitest at four workers in `vite.config.ts` preserves the full suite and makes the resource limit explicit. The full Web suite then passed at 392 files, 5,193 passing and 1 skipped.
