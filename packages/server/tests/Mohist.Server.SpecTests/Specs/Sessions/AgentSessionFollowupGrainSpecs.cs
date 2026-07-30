@@ -780,7 +780,7 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
     }
 
     [Fact]
-    public async Task AcceptFollowup_DispatchInProgress_JoinsQueuedTurn()
+    public async Task AcceptFollowup_DispatchInProgress_CreatesNextQueuedTurn()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-join-dispatching-turn");
         var first = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
@@ -796,10 +796,11 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
 
         var state = await _fixture.StateStore.LoadAsync(sessionId);
         Assert.NotNull(state);
-        var turn = Assert.Single(state!.Status.Turns!);
-        Assert.Equal(first.TurnId, second.TurnId);
-        Assert.Equal([first.InputId, second.InputId], turn.InputIds);
-        Assert.True(Assert.Single(state.Status.PendingFollowups!).Dispatching);
+        Assert.Equal(2, state!.Status.Turns!.Count);
+        Assert.NotEqual(first.TurnId, second.TurnId);
+        Assert.Equal([first.InputId], state.Status.Turns[0].InputIds);
+        Assert.Equal([second.InputId], state.Status.Turns[1].InputIds);
+        Assert.True(state.Status.PendingFollowups!.Single(lease => lease.TurnId == first.TurnId).Dispatching);
     }
 
     [Fact]

@@ -35,14 +35,14 @@ The HTTP layer reads the `Idempotency-Key` header (same helper as compact/reset,
 
 - Alternative: require the key (like manual launch, `AgentSessionLaunchRoutes`). Rejected for follow-up because it is a lighter-weight continuation and the optional-with-fallback convention is already established for the other session commands; requiring it adds friction without a domain benefit, since clients that want retry safety simply provide a key.
 
-### D3. Turn assignment: join a queued turn, start a new one during execution
+### D3. Turn assignment: join an unclaimed queued turn, start a new one after dispatch claim or during execution
 
 When a follow-up input is accepted:
 - **Idle** (no queued/executing turn) → create a new `AgentTurnRecord` (`queued`) and assign the input.
-- A **queued** (not-yet-executing) turn exists → append the input Id to that turn's `InputIds` in submission order (one turn consumes multiple inputs).
-- An **executing** turn exists → create a **new** `AgentTurnRecord` (`queued`) for the input; the running turn is not interrupted and the input is not merged into it.
+- A **queued turn with no dispatch claim** exists → append the input Id to that turn's `InputIds` in submission order (one turn consumes multiple inputs).
+- A **dispatch-claimed** or **executing** turn exists → create a **new** `AgentTurnRecord` (`queued`) for the input; the claimed or running turn is not interrupted and the input is not merged into it.
 
-This satisfies "one turn consumes one or more inputs in order" and "inputs during execution queue behind without interrupting or merging". A turn with multiple inputs is dispatched with its inputs combined in submission order (server-side), so the runner still receives one prompt per dispatch.
+The durable dispatch claim seals the turn's `InputIds`: it is the point at which the server has formed the immutable Runner payload. The Runtime has not necessarily emitted `session.input` yet, so the turn remains `queued` for observation, but a later input starts the next queued turn instead of being silently omitted from the already-claimed payload. A turn with multiple inputs is dispatched with its inputs combined in submission order (server-side), so the runner still receives one prompt per dispatch.
 
 - Alternative: always one-input-per-turn. Rejected because the issue's Product Shape explicitly states a turn may consume multiple inputs; the absorption rule captures rapid double-sends before execution starts.
 

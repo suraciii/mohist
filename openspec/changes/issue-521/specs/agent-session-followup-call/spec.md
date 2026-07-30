@@ -35,6 +35,17 @@ An `accepted` follow-up response SHALL return the stable `SessionInput` Id and t
 - **THEN** the response SHALL return the original `SessionInput` Id and `AgentTurn` Id
 - **AND** SHALL NOT return a new identity
 
+### Requirement: Dispatch claim seals a queued turn
+
+Once Mohist has durably claimed a queued turn for Runner delivery, it SHALL NOT append a later accepted input to that turn, even before the Runtime reports execution. The later input SHALL receive a new queued turn so every accepted input belongs to a Runner payload that can be delivered exactly once.
+
+#### Scenario: Follow-up accepted while the prior payload is being delivered
+
+- **GIVEN** Mohist has claimed a queued turn and is waiting for the Runner delivery result
+- **WHEN** a client submits a follow-up with a new idempotency key
+- **THEN** Mohist SHALL accept the new input into a distinct queued turn
+- **AND** SHALL deliver that turn only after the prior turn becomes terminal
+
 ### Requirement: Client idempotency key transport
 
 A follow-up request SHALL accept a client-provided idempotency key that identifies the call identity. The same key on retry SHALL resolve to the same `SessionInput`; a new key SHALL be treated as a new call. Both Web and CLI SHALL send the idempotency key when submitting a follow-up, including on retry after a lost response.

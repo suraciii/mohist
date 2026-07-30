@@ -1079,11 +1079,10 @@ public static partial class AgentSessionExtensions
 
         /// <summary>
         /// Resolve the follow-up turn an incoming input should be
-        /// assigned to. Returns the existing non-executing turn when
-        /// one exists (joins the new input in submission order), or
-        /// <c>null</c> to signal that the caller must create a new
-        /// queued turn. An executing turn does NOT match — inputs
-        /// accepted during execution start a new turn.
+        /// assigned to. Returns the existing queued turn whose delivery
+        /// payload has not been claimed (joins the new input in submission
+        /// order), or <c>null</c> to signal that the caller must create a
+        /// new queued turn. A dispatching or executing turn does NOT match.
         /// </summary>
         private static AgentTurnRecord? ChooseFollowupTurnForAssignment(
             IReadOnlyList<AgentTurnRecord> turns,
@@ -1095,6 +1094,9 @@ public static partial class AgentSessionExtensions
                 if (!string.IsNullOrEmpty(candidate.JobId))
                     continue;
                 if (candidate.Status != AgentTurnStatus.Queued)
+                    continue;
+                if (leases.Any(lease => string.Equals(lease.TurnId, candidate.Id, StringComparison.Ordinal)
+                    && lease.Dispatching))
                     continue;
                 return candidate;
             }

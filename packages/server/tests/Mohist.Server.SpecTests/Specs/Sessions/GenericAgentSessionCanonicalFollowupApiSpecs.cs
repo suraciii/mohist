@@ -284,6 +284,80 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
     }
 
     [Fact]
+    public async Task FollowupAcceptedDuringClaimedDelivery_QueuesAndDeliversNextTurn()
+    {
+        var (project, sessionId, runtimeSessionId) = await CreateIdleGenericSessionAsync("followup-claimed-delivery");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        var firstDeliveryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstDelivery = new TaskCompletionSource<RunnerFollowupDeliveryResult?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var deliveries = 0;
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponseFactory("ReceiveFollowup", _ =>
+        {
+            deliveries++;
+            if (deliveries == 1)
+            {
+                firstDeliveryStarted.TrySetResult();
+                return firstDelivery.Task;
+            }
+
+            return new RunnerFollowupDeliveryResult(true);
+        });
+        tracker.Register(_runnerId, "conn-followup-claimed-delivery");
+        try
+        {
+            var first = PostGenericFollowupAsync(project.Id, sessionId, new { text = "first input" }, "claimed-delivery-first");
+            await firstDeliveryStarted.Task;
+
+            using var second = await PostGenericFollowupAsync(
+                project.Id,
+                sessionId,
+                new { text = "second input" },
+                "claimed-delivery-second");
+            var secondData = (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+            Assert.Single(runnerHub.Invocations);
+
+            firstDelivery.SetResult(new RunnerFollowupDeliveryResult(true));
+            using var firstResponse = await first;
+            var firstData = (await firstResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.NotEqual(firstData.GetProperty("turnId").GetString(), secondData.GetProperty("turnId").GetString());
+
+            var firstPayload = JsonSerializer.SerializeToElement(runnerHub.Invocations[0].Arguments.Single());
+            var firstOperationId = firstPayload.GetProperty("operationId").GetString();
+            Assert.Equal("first input", firstPayload.GetProperty("text").GetString());
+
+            var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+                new[]
+                {
+                    new AgentSessionRuntimeEventInput(
+                        RuntimeEventTypes.SessionInput,
+                        $$"""{"text":"first input","kind":"followup","operationId":"{{firstOperationId}}"}"""),
+                    new AgentSessionRuntimeEventInput(
+                        RuntimeEventTypes.SessionActivity,
+                        $$"""{"activity":"idle","status":"completed","operationId":"{{firstOperationId}}"}"""),
+                },
+                runtimeSessionId));
+
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var dispatcher = scope.ServiceProvider.GetRequiredService<AgentSessionFollowupDispatcher>();
+            await dispatcher.DispatchNextAsync(project.Id, sessionId, CancellationToken.None);
+
+            Assert.Equal(2, runnerHub.Invocations.Count);
+            var secondPayload = JsonSerializer.SerializeToElement(runnerHub.Invocations[1].Arguments.Single());
+            Assert.Equal("second input", secondPayload.GetProperty("text").GetString());
+        }
+        finally
+        {
+            firstDelivery.TrySetResult(new RunnerFollowupDeliveryResult(true));
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Fact]
     public async Task CancelledFollowupDelivery_ReleasesClaimForSameKeyRetry()
     {
         var (project, sessionId, _) = await CreateIdleGenericSessionAsync("followup-cancelled-delivery");
