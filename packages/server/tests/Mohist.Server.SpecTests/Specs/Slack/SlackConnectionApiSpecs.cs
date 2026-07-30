@@ -4,10 +4,15 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Project;
+using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack;
@@ -138,6 +143,49 @@ public sealed class SlackConnectionApiSpecs
     }
 
     [Fact]
+    public async Task Enable_does_not_replay_a_terminal_delivery_created_while_disabled()
+    {
+        var connection = await CreateConnectionAsync();
+        using var disable = await _fixture.Client.PostAsync(Path(connection, "/disable"), null);
+        disable.EnsureSuccessStatusCode();
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var handler = new SlackTerminalDeliveryHandler(
+                scope.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<SlackTerminalDeliveryHandler>.Instance);
+            var evt = new CloudEvent(
+                "terminal-delivery",
+                new Uri("/mohist/agent-job/job-1", UriKind.Relative),
+                EventCatalog.ReverseDns.AgentJobTerminalDelivery,
+                _fixture.TimeProvider.GetUtcNow(),
+                JsonSerializer.SerializeToElement(new
+                {
+                    jobKey = "job-1",
+                    connectionId = connection.Id,
+                    workspaceTeamId = connection.WorkspaceTeamId,
+                    dmConversationId = "D123",
+                    status = "completed",
+                    message = "completed",
+                    failureReason = (string?)null,
+                    failureCategory = (string?)null,
+                    artifactCount = 0,
+                    exitCode = (int?)null,
+                }),
+                subject: "job-1",
+                extensions: new Dictionary<string, string> { [EventCatalog.Lineage.ProjectId] = connection.ProjectId });
+            await handler.HandleAsync(evt, CancellationToken.None);
+        }
+
+        using var enable = await _fixture.Client.PostAsync(Path(connection, "/enable"), null);
+        enable.EnsureSuccessStatusCode();
+        using var claim = await _fixture.Client.PostAsJsonAsync(Path(connection, "/deliveries/claim"), new { adapterId = "adapter-1" });
+        claim.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await claim.Content.ReadAsStringAsync());
+        Assert.False(document.RootElement.TryGetProperty("data", out _));
+    }
+
+    [Fact]
     public async Task Delete_reports_that_the_Slack_App_remains_installed()
     {
         var connection = await CreateConnectionAsync();
@@ -151,6 +199,38 @@ public sealed class SlackConnectionApiSpecs
         var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
         Assert.Null(await secrets.LoadAsync(new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.AppToken)));
         Assert.Null(await secrets.LoadAsync(new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken)));
+    }
+
+    [Theory]
+    [InlineData("disable")]
+    [InlineData("delete")]
+    public async Task Lifecycle_operations_preserve_accepted_work_records(string operation)
+    {
+        var connection = await CreateConnectionAsync();
+        var work = await SeedAcceptedWorkAsync(connection);
+
+        using var response = operation == "disable"
+            ? await _fixture.Client.PostAsync(Path(connection, "/disable"), null)
+            : await _fixture.Client.DeleteAsync(Path(connection, string.Empty));
+        response.EnsureSuccessStatusCode();
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Equal("executing", await db.AgentJobs
+            .Where(row => row.JobKey == work.JobKey)
+            .Select(row => row.Status)
+            .SingleAsync());
+        var session = await db.AgentSessions.SingleAsync(row => row.Id == work.SessionId);
+        Assert.Equal("bound", session.Status);
+        Assert.Equal(work.SessionState, session.State);
+        Assert.Equal("input prompt", await db.AgentSessionTranscriptTurns
+            .Where(row => row.SessionId == session.Id)
+            .Select(row => row.PromptText)
+            .SingleAsync());
+        Assert.Equal(work.AttachmentId, await db.Attachments
+            .Where(row => row.Id == work.AttachmentId)
+            .Select(row => row.Id)
+            .SingleAsync());
     }
 
     [Fact]
@@ -223,6 +303,56 @@ public sealed class SlackConnectionApiSpecs
             WorkspaceTeamId = "T123",
         };
     }
+
+    private async Task<AcceptedWork> SeedAcceptedWorkAsync(AgentConnection connection)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var jobKey = $"job-{connection.Id}";
+        var sessionId = $"session-{connection.Id}";
+        var attachmentId = $"attachment-{connection.Id}";
+        var sessionState = $"{{\"inputs\":[{{\"id\":\"input-{connection.Id}\"}}],\"turns\":[{{\"id\":\"turn-{connection.Id}\"}}]}}";
+        db.AgentJobs.Add(new AgentJobRow
+        {
+            JobKey = jobKey,
+            State = $"{{\"input\":{{\"projectId\":\"{connection.ProjectId}\",\"agentId\":\"agent-1\"}},\"status\":\"executing\",\"submittedAt\":\"{now:O}\"}}",
+        });
+        db.AgentSessions.Add(new AgentSessionRow
+        {
+            Id = sessionId,
+            AgentSessionId = sessionId,
+            Status = "bound",
+            State = sessionState,
+            CreatedAt = now.UtcDateTime,
+        });
+        db.AgentSessionTranscriptTurns.Add(new AgentSessionTranscriptTurnRow
+        {
+            SessionId = sessionId,
+            RuntimeSessionId = "runtime-accepted",
+            Sequence = 1,
+            PromptText = "input prompt",
+            PromptKind = "task",
+            StartedAt = now.UtcDateTime,
+            UpdatedAt = now.UtcDateTime,
+        });
+        db.Attachments.Add(new AttachmentRow
+        {
+            Id = attachmentId,
+            ProjectId = connection.ProjectId,
+            OwnerKind = "session",
+            OwnerId = sessionId,
+            OriginalFileName = "evidence.txt",
+            ContentType = "text/plain",
+            Size = 8,
+            StoragePath = "/mohist-tests/artifacts/evidence.txt",
+            CreatedAt = now,
+        });
+        await db.SaveChangesAsync();
+        return new AcceptedWork(jobKey, sessionId, sessionState, attachmentId);
+    }
+
+    private sealed record AcceptedWork(string JobKey, string SessionId, string SessionState, string AttachmentId);
 
     private static string Path(AgentConnection connection, string suffix) =>
         $"/api/projects/{connection.ProjectId}/slack-connections/{connection.Id}{suffix}";

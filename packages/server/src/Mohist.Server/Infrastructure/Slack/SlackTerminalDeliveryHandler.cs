@@ -37,7 +37,7 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
 
         await using var scope = _scopeFactory.CreateAsyncScope();
         var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
-        await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
+        var result = await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
             delivery.ResolveProjectId(evt.Extensions),
             delivery.ConnectionId,
             delivery.WorkspaceTeamId,
@@ -46,10 +46,16 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             $"agent-job:{delivery.JobKey}:terminal-delivery",
             JsonSerializer.Serialize(new { text = Render(delivery) })), ct);
 
-        _log.LogInformation(
-            "Queued Slack terminal delivery for AgentJob {JobKey} on connection {ConnectionId}",
-            delivery.JobKey,
-            delivery.ConnectionId);
+        if (result.Suppressed)
+            _log.LogInformation(
+                "Suppressed Slack terminal delivery for AgentJob {JobKey} on inactive connection {ConnectionId}",
+                delivery.JobKey,
+                delivery.ConnectionId);
+        else
+            _log.LogInformation(
+                "Queued Slack terminal delivery for AgentJob {JobKey} on connection {ConnectionId}",
+                delivery.JobKey,
+                delivery.ConnectionId);
     }
 
     public static string Render(SlackTerminalDelivery delivery)

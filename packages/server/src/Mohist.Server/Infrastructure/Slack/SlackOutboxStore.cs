@@ -127,6 +127,11 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (!await IsEnabledConnectionAsync(db, draft.ProjectId, draft.ConnectionId, ct))
+        {
+            await transaction.CommitAsync(ct);
+            return new SlackOutboxEnqueueResult(string.Empty, MergedIntoExisting: false, Suppressed: true);
+        }
         var existing = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == draft.ConnectionId
                 && row.Kind == draft.Kind
@@ -168,6 +173,18 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
                 draft.ProjectId, draft.ConnectionId, SlackProviderBackpressureReasons.OutboxOverflow, ct);
         return new SlackOutboxEnqueueResult(row.Id, MergedIntoExisting: false);
     }
+
+    private static Task<bool> IsEnabledConnectionAsync(
+        MohistDbContext db,
+        string projectId,
+        string connectionId,
+        CancellationToken ct) =>
+        db.AgentConnections.AnyAsync(connection =>
+            connection.ProjectId == projectId
+            && connection.Id == connectionId
+            && connection.DeletedAt == null
+            && connection.DesiredState == DesiredStateKind.Enabled,
+            ct);
 
     private async Task<SlackOutboxEnqueueResult?> TryMergeReplaceableAsync(
         MohistDbContext db,
