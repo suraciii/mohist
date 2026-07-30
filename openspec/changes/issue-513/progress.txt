@@ -1,0 +1,20 @@
+## Codebase Patterns
+
+- `AttachmentService.OwnerKind*` constants drive the existing issue/comment ownership; bind helpers follow the `Bind*Async` / `Validate*Bind*Async` pair pattern that reuses `ValidateAvailableAsync` + `EnsureAttachmentLimit`. `CleanupExpiredPendingAsync` keys on `OwnerKind == null`, so any new owner kind that clears `ExpiresAt` is automatically retention-protected without extra logic.
+- `AttachmentRow.OwnerId` is a free-form string (max 256) used to carry owner-scoped identity. For a composite owner (session+input), encode as a `/`-separated string; both session and input ids are `Guid.NewGuid().ToString("N")` (32 hex chars, no slashes) so the separator is unambiguous.
+- API attachment routes register inside the project group (`/api/projects/{projectRef}`) and use `IssueRoutes.GetRequiredProject(ctx)` to resolve the project. Spec tests in the integration collection reuse the fixture's `_fixture.Services.CreateAsyncScope()` to grab `AttachmentService` directly for cases where there's no API caller yet (e.g., bind before the launch/follow-up API exists).
+- Fake `IAttachmentStorage` exists in two flavors: a full `InMemoryAttachmentStorage` in SpecTests/Support (used by HTTP spec tests) and a lighter `FakeAttachmentStorage` in UnitTests/Support (used by service-level unit tests with `FakeTimeProvider`). Keep the UnitTests version in UnitTests/Support rather than crossing the SpecTests project boundary.
+- Service unit tests use in-memory SQLite with `EnsureCreated()` against `MohistDbContext`, a `TestDbContextFactory` wrapping `DbContextOptions`, and `FakeTimeProvider` for time. `using var db = database.CreateContext();` (not `await using`) matches the existing AesGcmSecretStoreTests pattern; use `SingleAsync`/`AnyAsync`/`ToListAsync` for awaited EF calls.
+
+## T-001 decisions
+
+- Added `OwnerKindAgentInput = "agent-input"` and a composite owner-id builder `BuildAgentInputOwnerId(sessionId, inputId)` returning `"{sessionId}/{inputId}"`. The route path mirrors this: `/api/projects/{projectRef}/agent-sessions/{sessionId}/inputs/{inputId}/attachments/{attachmentId}/content`.
+- The content route uses the same `StreamAttachment` helper as issue/comment attachments, so disposition + content-type handling stays uniform. No projectId-or-issue gate (no need to look up an issue first — ownership is the only gate, exactly as the spec mandates).
+- Validation path delegates to a new `ValidateAgentInputBindCoreAsync` that mirrors the issue/comment helpers; this keeps the rejection contract (missing id, already bound) identical to the existing flows.
+- `AttachmentRow` itself is unchanged — name/content-type/size/source are already stored on the row and never needed a caller-temp-URL/token/event-payload column, so the "no secrets in the stored record" criterion is satisfied by the existing schema; the unit test asserts that no such columns exist rather than scrubbing values.
+
+## Gotchas
+
+- `OwnerId` already has `HasMaxLength(16)` set on the kind column and `HasMaxLength(256)` on `OwnerId`. The composite `{sessionId}/{inputId}` (33 chars max) fits comfortably.
+- EF's `Single`/`Any`/`ToList` are sync, `SingleAsync`/`AnyAsync`/`ToListAsync` are the awaited versions. Misusing `await db.X.Single(...)` compiles but produces a confusing "X does not contain GetAwaiter" LSP/runtime error — always use the *Async variants in awaited test code.
+- For the integration HTTP tests, `MohistIntegrationFixture` already wires `InMemoryAttachmentStorage` into DI, so the spec test can bind via `scope.ServiceProvider.GetRequiredService<AttachmentService>()` without constructing a new storage. The unit test path constructs its own `FakeAttachmentStorage` to keep the service boundary clean.

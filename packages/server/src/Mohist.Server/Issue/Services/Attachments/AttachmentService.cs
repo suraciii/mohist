@@ -16,7 +16,9 @@ public sealed class AttachmentService : IScopedService
 {
     public const string OwnerKindIssue = "issue";
     public const string OwnerKindComment = "comment";
+    public const string OwnerKindAgentInput = "agent-input";
     public static readonly TimeSpan PendingTtl = TimeSpan.FromHours(24);
+    public const string AgentInputOwnerIdSeparator = "/";
 
     private static readonly Regex AttachmentReferenceRegex = new(
         @"!?\[[^\]]*\]\(att:(?<id>att_[A-Za-z0-9_\-]+)\)",
@@ -260,6 +262,72 @@ public sealed class AttachmentService : IScopedService
         CancellationToken cancellationToken = default) =>
         await ValidateCommentBindCoreAsync(projectId, commentId, attachmentIds, cancellationToken).ConfigureAwait(false);
 
+    public async Task BindAgentInputAsync(
+        string projectId,
+        string agentSessionId,
+        string inputId,
+        IReadOnlyCollection<string>? attachmentIds,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAgentInputOwnerScope(agentSessionId, inputId);
+        var ownerId = BuildAgentInputOwnerId(agentSessionId, inputId);
+        var ids = await ValidateAgentInputBindCoreAsync(projectId, ownerId, attachmentIds, cancellationToken).ConfigureAwait(false);
+        if (ids.Length == 0) return;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.Attachments.Where(a =>
+                a.ProjectId == projectId
+                && ids.Contains(a.Id))
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var row in rows)
+        {
+            row.OwnerKind = OwnerKindAgentInput;
+            row.OwnerId = ownerId;
+            row.OwnerIssueNumber = null;
+            row.ExpiresAt = null;
+        }
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<AttachmentContentResult?> OpenAgentInputContentAsync(
+        string projectId,
+        string agentSessionId,
+        string inputId,
+        string attachmentId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAgentInputOwnerScope(agentSessionId, inputId);
+        var ownerId = BuildAgentInputOwnerId(agentSessionId, inputId);
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.Attachments.AsNoTracking().FirstOrDefaultAsync(a =>
+            a.ProjectId == projectId
+            && a.Id == attachmentId
+            && a.OwnerKind == OwnerKindAgentInput
+            && a.OwnerId == ownerId,
+            cancellationToken).ConfigureAwait(false);
+        return row is null ? null : OpenContent(row);
+    }
+
+    public async Task ValidateAgentInputBindAsync(
+        string projectId,
+        string agentSessionId,
+        string inputId,
+        IReadOnlyCollection<string>? attachmentIds,
+        CancellationToken cancellationToken = default) =>
+        await ValidateAgentInputBindCoreAsync(projectId, BuildAgentInputOwnerId(agentSessionId, inputId), attachmentIds, cancellationToken).ConfigureAwait(false);
+
+    public static string BuildAgentInputOwnerId(string agentSessionId, string inputId) =>
+        $"{agentSessionId}{AgentInputOwnerIdSeparator}{inputId}";
+
+    private static void EnsureAgentInputOwnerScope(string agentSessionId, string inputId)
+    {
+        if (string.IsNullOrWhiteSpace(agentSessionId))
+            throw new ArgumentException("Agent session id is required.", nameof(agentSessionId));
+        if (string.IsNullOrWhiteSpace(inputId))
+            throw new ArgumentException("Input id is required.", nameof(inputId));
+    }
+
     public async Task<AttachmentContentResult?> OpenIssueContentAsync(
         string projectId,
         int issueNumber,
@@ -416,6 +484,26 @@ public sealed class AttachmentService : IScopedService
             a.ProjectId == projectId
             && a.OwnerKind == OwnerKindComment
             && a.OwnerId == commentId,
+            cancellationToken).ConfigureAwait(false);
+        EnsureAttachmentLimit(existingCount, ids.Length);
+        await ValidateAvailableAsync(db, projectId, ids, cancellationToken).ConfigureAwait(false);
+        return ids;
+    }
+
+    private async Task<string[]> ValidateAgentInputBindCoreAsync(
+        string projectId,
+        string ownerId,
+        IReadOnlyCollection<string>? attachmentIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = NormalizeAttachmentIds(attachmentIds);
+        if (ids.Length == 0) return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var existingCount = await db.Attachments.CountAsync(a =>
+            a.ProjectId == projectId
+            && a.OwnerKind == OwnerKindAgentInput
+            && a.OwnerId == ownerId,
             cancellationToken).ConfigureAwait(false);
         EnsureAttachmentLimit(existingCount, ids.Length);
         await ValidateAvailableAsync(db, projectId, ids, cancellationToken).ConfigureAwait(false);
