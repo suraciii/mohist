@@ -129,7 +129,9 @@ public sealed class AgentAvailabilityService : IScopedService
                 "waiting",
                 concurrencyJobs.Contains(job.JobKey)
                     ? AgentAvailabilityWaitReasons.ConcurrencyLimit
-                    : availabilityReason ?? AgentAvailabilityWaitReasons.NoOnlineRunner,
+                    : job.WaitingReason
+                        ?? availabilityReason
+                        ?? AgentAvailabilityWaitReasons.NoOnlineRunner,
                 job.SubmittedAt))
             .ToList();
 

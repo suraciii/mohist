@@ -101,12 +101,17 @@ public class AgentJobQuerier : IScopedService
         return null;
     }
 
-    private static AgentJobListItem ToItem(AgentJobRow row) => new(
-        row.JobKey,
-        row.AgentId,
-        row.Status,
-        row.SubmittedAt,
-        row.TerminalAt);
+    private static AgentJobListItem ToItem(AgentJobRow row)
+    {
+        var state = JSON.Deserialize<AgentJobState>(row.State);
+        return new AgentJobListItem(
+            row.JobKey,
+            row.AgentId,
+            row.Status,
+            row.SubmittedAt,
+            row.TerminalAt,
+            state?.WaitingReason);
+    }
 }
 
 public sealed record AgentJobListItem(
@@ -114,7 +119,8 @@ public sealed record AgentJobListItem(
     string? AgentId,
     string? Status,
     string? SubmittedAt,
-    string? TerminalAt);
+    string? TerminalAt,
+    string? WaitingReason = null);
 
 public sealed record AgentExecutionHistory(
     AgentJobStatus Status,

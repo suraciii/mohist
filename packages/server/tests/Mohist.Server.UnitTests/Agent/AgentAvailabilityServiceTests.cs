@@ -51,7 +51,7 @@ public sealed class AgentAvailabilityServiceTests
     {
         var pending = new[]
         {
-            new AgentJobListItem("job-capacity", "agent-1", "pending", "2026-07-29T12:00:00Z", null),
+            new AgentJobListItem("job-capacity", "agent-1", "pending", "2026-07-29T12:00:00Z", null, AgentAvailabilityWaitReasons.CapacityFull),
             new AgentJobListItem("job-concurrency", "agent-1", "pending", "2026-07-29T12:01:00Z", null),
         };
 
@@ -63,5 +63,27 @@ public sealed class AgentAvailabilityServiceTests
         Assert.All(waiting, item => Assert.Equal("waiting", item.Status));
         Assert.Equal(AgentAvailabilityWaitReasons.CapacityFull, waiting[0].WaitingReason);
         Assert.Equal(AgentAvailabilityWaitReasons.ConcurrencyLimit, waiting[1].WaitingReason);
+    }
+
+    [Fact]
+    public void Waiting_work_keeps_its_last_server_decided_reason_when_capacity_recovers()
+    {
+        var pending = new[]
+        {
+            new AgentJobListItem(
+                "job-capacity",
+                "agent-1",
+                "pending",
+                "2026-07-29T12:00:00Z",
+                null,
+                AgentAvailabilityWaitReasons.CapacityFull),
+        };
+
+        var waiting = AgentAvailabilityService.BuildWaitingWork(
+            pending,
+            new HashSet<string>(StringComparer.Ordinal),
+            availabilityReason: null);
+
+        Assert.Equal(AgentAvailabilityWaitReasons.CapacityFull, Assert.Single(waiting).WaitingReason);
     }
 }

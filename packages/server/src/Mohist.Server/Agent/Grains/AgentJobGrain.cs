@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -259,6 +260,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         State.RunnerAccepted = true;
         State.Status = AgentJobStatus.Running;
         State.RunningSince = _timeProvider.GetUtcNow();
+        State.WaitingReason = null;
         await SaveAsync();
         ArmJobTimeout();
         await MarkInitialTurnExecutingAsync();
@@ -1000,6 +1002,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!await AcquireConcurrencyPermitAsync())
             return;
 
+        State.WaitingReason = null;
         State.DispatchAttempts++;
         await SaveAsync();
 
@@ -1009,6 +1012,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 return;
             if (State.RunnerId is not null)
             {
+                State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
                 await ReleaseConcurrencyPermitAsync();
                 await ScheduleNextDispatchAsync();
                 return;
@@ -1020,6 +1024,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var runners = await registry.ListEligibleRunnersAsync(projectId);
         if (runners.Count == 0)
         {
+            State.WaitingReason = AgentAvailabilityWaitReasons.NoOnlineRunner;
             await ReleaseConcurrencyPermitAsync();
             await ScheduleNextDispatchAsync();
             return;
@@ -1033,6 +1038,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 return;
         }
 
+        State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
         await ReleaseConcurrencyPermitAsync();
         await ScheduleNextDispatchAsync();
     }
@@ -1059,6 +1065,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             AgentConcurrencyPermitOwnerKind.Job);
         if (result == AgentConcurrencyAcquireResult.Waiting)
         {
+            State.WaitingReason = AgentAvailabilityWaitReasons.ConcurrencyLimit;
             await SaveAsync();
             return false;
         }

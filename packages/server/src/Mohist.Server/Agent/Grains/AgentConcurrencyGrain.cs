@@ -10,25 +10,29 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
     internal const string ReconciliationReminderName = "agent-concurrency-reconciliation";
     private static readonly TimeSpan ReminderDue = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ReminderPeriod = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan UnconfirmedPermitRetention = TimeSpan.FromMinutes(1);
 
     private readonly IPersistentState<AgentConcurrencyState> _state;
     private readonly AgentQuerier _agents;
     private readonly AgentJobQuerier _jobs;
     private readonly IAgentSessionStore _sessions;
     private readonly IGrainFactory _grains;
+    private readonly TimeProvider _timeProvider;
 
     public AgentConcurrencyGrain(
         [PersistentState("agent-concurrency")] IPersistentState<AgentConcurrencyState> state,
         AgentQuerier agents,
         AgentJobQuerier jobs,
         IAgentSessionStore sessions,
-        IGrainFactory grains)
+        IGrainFactory grains,
+        TimeProvider timeProvider)
     {
         _state = state;
         _agents = agents;
         _jobs = jobs;
         _sessions = sessions;
         _grains = grains;
+        _timeProvider = timeProvider;
     }
 
     private string Key => this.GetPrimaryKeyString();
@@ -65,7 +69,11 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
 
         if (_state.State.ActivePermits.Count < limit.Value)
         {
-            _state.State.ActivePermits.Add(new AgentConcurrencyPermit(token, ownerId, ownerKind));
+            _state.State.ActivePermits.Add(new AgentConcurrencyPermit(
+                token,
+                ownerId,
+                ownerKind,
+                _timeProvider.GetUtcNow()));
             await _state.WriteStateAsync();
             return AgentConcurrencyAcquireResult.Granted;
         }
@@ -149,7 +157,8 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
         var active = new HashSet<string>(StringComparer.Ordinal);
         foreach (var permit in _state.State.ActivePermits)
         {
-            if (await IsPermitActiveAsync(parts[0], parts[1], permit))
+            if (await IsPermitActiveAsync(parts[0], parts[1], permit)
+                || IsAwaitingOwnerPersistence(permit))
                 active.Add(permit.Token);
         }
         await ReconcileAsync(parts[0], parts[1], active);
@@ -174,6 +183,10 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             : session.Status.PendingFollowup is null ? [] : [session.Status.PendingFollowup];
         return leases.Any(lease => string.Equals(lease.ConcurrencyToken, permit.Token, StringComparison.Ordinal));
     }
+
+    private bool IsAwaitingOwnerPersistence(AgentConcurrencyPermit permit) =>
+        permit.GrantedAt is { } grantedAt
+        && _timeProvider.GetUtcNow() - grantedAt < UnconfirmedPermitRetention;
 
     private Task EnsureReminderAsync() => this.RegisterOrUpdateReminder(
         ReconciliationReminderName,

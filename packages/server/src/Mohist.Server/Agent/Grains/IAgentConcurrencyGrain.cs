@@ -17,7 +17,8 @@ public enum AgentConcurrencyPermitOwnerKind
 public sealed record AgentConcurrencyPermit(
     [property: Id(0)] string Token,
     [property: Id(1)] string OwnerId,
-    [property: Id(2)] AgentConcurrencyPermitOwnerKind OwnerKind);
+    [property: Id(2)] AgentConcurrencyPermitOwnerKind OwnerKind,
+    [property: Id(3)] DateTimeOffset? GrantedAt = null);
 
 [GenerateSerializer]
 public sealed record AgentConcurrencyWaiter(

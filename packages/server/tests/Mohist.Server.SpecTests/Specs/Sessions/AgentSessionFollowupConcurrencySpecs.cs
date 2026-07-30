@@ -217,6 +217,41 @@ public class AgentSessionFollowupConcurrencySpecs
     }
 
     [Fact]
+    public async Task Reconciliation_retains_a_grant_until_the_followup_lease_is_persisted()
+    {
+        var projectId = $"followup-{Guid.NewGuid():N}";
+        var agentId = $"agent-{Guid.NewGuid():N}";
+        await _fixture.SeedAgentAsync(projectId, agentId, maxConcurrentRuns: 1);
+        var session = await _fixture.OpenGenericAgentSessionAsync(projectId, agentId);
+        var gate = Gate(projectId, agentId);
+        var token = $"followup:{session.GetPrimaryKeyString()}:race";
+
+        Assert.Equal(
+            AgentConcurrencyAcquireResult.Granted,
+            await gate.AcquireAsync(
+                projectId,
+                agentId,
+                token,
+                session.GetPrimaryKeyString(),
+                AgentConcurrencyPermitOwnerKind.Followup));
+
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        await gate.ReceiveReminder(
+            "agent-concurrency-reconciliation",
+            new TickStatus(now, TimeSpan.FromSeconds(30), now));
+
+        Assert.Equal(1, await gate.GetActiveCountAsync());
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        await gate.ReceiveReminder(
+            "agent-concurrency-reconciliation",
+            new TickStatus(now, TimeSpan.FromSeconds(30), now));
+
+        Assert.Equal(0, await gate.GetActiveCountAsync());
+    }
+
+    [Fact]
     public async Task BeginFollowupAsync_AbandonLease_ReleasesPermit()
     {
         var projectId = $"followup-{Guid.NewGuid():N}";

@@ -61,3 +61,10 @@
 - Readiness setup responses now return the concrete Agent detail path (`/agents/{agentId}`), which is the existing profile edit surface. Both Web entry points render that path as a project-scoped link; the readiness unit test asserts the concrete response.
 - Split Agent detail readiness/availability coverage into its own 5-test file. The original file is below the 500-line budget, `check:test-boundaries` passes, and the Web suite passes (5162 passed, 1 skipped).
 - Updated `GenericFollowupEndpoint_TerminalActivityStaysFollowable` to complete its owning AgentJob through the Runner rather than only injecting a Session idle event. A terminal Session no longer escapes a still-running Job's concurrency permit; the corrected focused spec passes.
+
+## Review Fixes Follow-up
+
+- Fresh gate grants now persist their grant time. Reconciliation keeps an unconfirmed permit for one minute, allowing the Job `ConcurrencyPermitHeld` flag or Session follow-up lease to become durable before it is eligible for orphan reclamation. Once the retention window passes, an unclaimed grant is pruned as before.
+- Pending AgentJobs now persist their server-decided waiting reason. The availability read model projects that reason instead of deriving a replacement from the current aggregate availability, so a capacity recovery during dispatch backoff does not turn an existing capacity wait into `no-online-runner`.
+- Added deterministic reconciliation coverage for an unclaimed Job permit and an unclaimed follow-up permit, plus a unit test for a persisted capacity wait after availability becomes ready.
+- Verification: `dotnet build Mohist.sln -p:SkipWebBuild=true`, `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj -p:SkipWebBuild=true` (1548 passed), and `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true` (3335 passed).
