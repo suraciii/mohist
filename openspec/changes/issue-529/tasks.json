@@ -1,0 +1,68 @@
+{
+  "project": "mohist-local",
+  "description": "Route mo otel query through the Server query surface, add --json field selection, surface truncation, and remove the local SQLite bypass.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add columns to Server QueryResult response",
+      "spec": "specs/otel-cli-query/spec.md#otel-query-executes-sql-through-the-server-query-surface",
+      "description": "Add a `columns` field (string array) to the Server-side `QueryResult` record and populate it in `TraceQuerier.ExecuteBoundedQuery` across all return paths (normal, row-limit truncation, byte-limit truncation). The field names are already collected from the reader before the read loop; this wires them into the response so consumers can render headers for empty or byte-truncated results. Update the Server spec tests to assert `columns` is present and carries the correct field names.",
+      "acceptanceCriteria": [
+        "`POST /otel/api/query` response `data` includes a `columns` array matching the SELECT field names",
+        "A result with 0 rows still carries the correct `columns` array",
+        "Row-limit and byte-limit truncated results carry the correct `columns` array",
+        "Existing `OtelQueryRoutesIntegrationSpecs` pass with the added `columns` assertions",
+        "`dotnet build packages/server` succeeds with no warnings"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated QueryResult record and TraceQuerier.ExecuteBoundedQuery in packages/server; updated OtelQueryRoutesIntegrationSpecs with columns assertions",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design Decision 1. The fieldNames are already collected at TraceQuerier.cs:166-170; only the record and return statements change."
+    },
+    {
+      "id": "T-002",
+      "title": "Route mo otel query through Server and add --json field selection",
+      "spec": "specs/otel-cli-query/spec.md#otel-query-executes-sql-through-the-server-query-surface",
+      "description": "Rewrite `OtelCommands.BuildQuery` / `RunQueryAsync` to POST `{ sql }` to `/otel/api/query` via `api.SendAsync`, read the response through `ExtractEnvelope`, and render columns/rows from the Server result. Add a `--json` option wired through `JsonSelectionOption` with a static descriptor (`columns`, `rows`, `truncated`, `truncate_reason`). Surface truncation with a notice line naming the reason. On Server error, surface the envelope error/code to stderr. On HttpRequestException, surface the standard ServerUnavailableMessage. Remove the `--db` option, `SqliteOtelQueryExecutor`, `IOtelQueryExecutor`, `OtelQueryResult`, `OtelQueryException`, `ResolveDatabasePath`, and all local-path resolution. Simplify `OtelCommands.Build` to drop the `environment` and `queryExecutor` parameters, and remove the `queryExecutor` parameter from `MohistCliCommands.RunAsync` and the DI resolution at the call site. Rewrite all CLI query tests to use `RecordingHttpHandler` fakes and delete `FakeOtelQueryExecutor`.",
+      "acceptanceCriteria": [
+        "`mo otel query \"SELECT 1\"` sends POST /otel/api/query and renders the Server result",
+        "`mo otel query --db foo` is rejected as an unknown option with non-zero exit",
+        "`mo otel query --json` lists fields [columns, rows, truncated, truncate_reason] without contacting Server",
+        "`mo otel query \"SELECT ...\" --json rows,truncated` emits only the selected fields as JSON",
+        "Truncated results render a notice with the truncate_reason",
+        "Server unreachable produces the standard ServerUnavailableMessage on stderr with non-zero exit",
+        "Server query errors surface the error message and code to stderr with non-zero exit",
+        "No `SqliteOtelQueryExecutor`, `IOtelQueryExecutor`, `--db`, or `ResolveDatabasePath` reference remains in packages/cli",
+        "`npm run typecheck` and `dotnet build packages/cli` succeed with no warnings",
+        "All CLI otel tests pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Rewritten MohistCliCommands.Otel.cs, updated MohistCliCommands.cs call site, rewritten CliOtelCommandSpecs.cs, deleted FakeOtelQueryExecutor.cs",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design Decisions 2-6. T-001 must land first so the CLI can consume the columns field. The environment parameter is removed from OtelCommands.Build because it was only used for database path resolution."
+    },
+    {
+      "id": "T-003",
+      "title": "Update CLI reference docs to close the otel query implementation gap",
+      "spec": "specs/otel-cli-query/spec.md#otel-query-executes-sql-through-the-server-query-surface",
+      "description": "Remove the implementation-gap note in `docs/cli-reference.md` that records `otel query` as reading local storage and only outputting tables. The documented command contract (query through Server, --json field selection) now matches the implementation.",
+      "acceptanceCriteria": [
+        "docs/cli-reference.md no longer lists otel query as reading local storage in the implementation-gap section",
+        "The otel query command shape in the cheat-sheet reflects Server-routed execution with --json support"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated docs/cli-reference.md",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "docs/cli-reference.md currently has the gap at the 'otel query' bullet in the implementation-gap section (~line 401)."
+    }
+  ]
+}
