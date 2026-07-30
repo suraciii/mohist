@@ -207,6 +207,35 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         Assert.Empty(hub.Invocations);
     }
 
+    [Fact]
+    public async Task Stop_TargetTerminalBeforeRunnerReplyDoesNotAdmitLaterTurn()
+    {
+        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+        hub.SetInvocationResponseFactory("CancelAgentSession", _ => CompleteTargetBeforeStopReplyAsync(session, turnId));
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("stopped", (await ReadDataAsync(response)).GetProperty("state").GetString());
+        Assert.Single(hub.Invocations);
+        var reservation = await session.BeginFollowupAsync();
+        Assert.True(reservation.StartsIdleTurn);
+        await session.AbandonFollowupAsync(reservation.OperationId!);
+    }
+
+    private static async Task<RunnerStopReply?> CompleteTargetBeforeStopReplyAsync(
+        IAgentSessionGrain session,
+        string turnId)
+    {
+        await session.MarkTurnTerminalAsync(turnId, AgentTurnStatus.Completed, null);
+        await Assert.ThrowsAsync<StopOperationInProgressException>(session.BeginFollowupAsync);
+        return new RunnerStopReply("stopped");
+    }
+
     private async Task<JsonElement> ReadDataAsync(HttpResponseMessage response)
     {
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

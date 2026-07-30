@@ -56,9 +56,13 @@ public static class AgentSessionCancelRoutes
             return ApiResults.NotFound($"Agent session {sessionId} not found");
 
         var session = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
-        var control = await session.ResolveTurnControlAsync(request.TurnId);
+        var cancellation = await session.CancelQueuedTurnAsync(request.TurnId);
+        var control = cancellation.Control;
         if (control is null)
             return ApiResults.NotFound($"Turn {request.TurnId} not found");
+
+        if (cancellation.Cancelled)
+            return ApiResults.Ok(new { state = "cancelled" });
 
         if (control.Classification == AgentTurnControlClassification.Terminal)
         {
@@ -89,7 +93,6 @@ public static class AgentSessionCancelRoutes
             };
         }
 
-        await session.CancelTurnAsync(request.TurnId);
         return ApiResults.Ok(new { state = "cancelled" });
     }
 

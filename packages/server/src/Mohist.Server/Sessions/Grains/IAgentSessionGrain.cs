@@ -84,7 +84,11 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     /// Converges Session activity to Idle so a subsequently accepted
     /// input can start its own Turn.
     /// </summary>
+    Task<AgentTurnCancelResult> CancelQueuedTurnAsync(string turnId);
     Task CancelTurnAsync(string turnId);
+
+    Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId);
+    Task CompleteTurnStopAsync(string turnId);
 
     /// <summary>
     /// Issue-522 T-001: shared Turn-control resolver. Returns the

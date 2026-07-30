@@ -143,6 +143,23 @@ public sealed class FollowupOperationInProgressException : InvalidOperationExcep
     public string SessionId { get; }
 }
 
+[Serializable]
+[GenerateSerializer]
+public sealed class StopOperationInProgressException : InvalidOperationException
+{
+    public StopOperationInProgressException(string sessionId, string turnId)
+        : base($"AgentSession {sessionId} is stopping turn {turnId}.")
+    {
+        SessionId = sessionId;
+        TurnId = turnId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string TurnId { get; }
+}
+
 [GenerateSerializer]
 public sealed record AgentSessionMetadata(
     [property: Id(0)] IReadOnlyDictionary<string, string>? Labels = null,
@@ -278,7 +295,8 @@ public sealed record AgentSessionStatusSnapshot(
     /// AgentSession remains the authority for input acceptance and
     /// turn status, not for the AgentJob's terminal result.
     /// </summary>
-    IReadOnlyList<AgentTurnRecord>? Turns = null)
+    IReadOnlyList<AgentTurnRecord>? Turns = null,
+    AgentSessionStopClaim? PendingStop = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: []);
@@ -384,6 +402,10 @@ public sealed record AgentTurnRecord(
     [property: Id(6)] DateTime? RecordedAt = null,
     [property: Id(7)] DateTime? UpdatedAt = null);
 
+[GenerateSerializer]
+public sealed record AgentSessionStopClaim(
+    [property: Id(0)] string TurnId);
+
 public enum AgentTurnStatus
 {
     Queued,
@@ -417,6 +439,16 @@ public sealed record AgentTurnControlState(
     [property: Id(2)] AgentTurnControlClassification Classification,
     [property: Id(3)] bool IsLaunchTurn,
     [property: Id(4)] string? JobId = null);
+
+[GenerateSerializer]
+public sealed record AgentTurnCancelResult(
+    [property: Id(0)] AgentTurnControlState? Control,
+    [property: Id(1)] bool Cancelled);
+
+[GenerateSerializer]
+public sealed record AgentTurnStopClaimResult(
+    [property: Id(0)] AgentTurnControlState? Control,
+    [property: Id(1)] bool CanDispatch);
 
 [GenerateSerializer]
 public enum AgentTurnControlClassification

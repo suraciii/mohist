@@ -10,6 +10,10 @@ A stop SHALL request the bound Runtime to interrupt the execution of its target 
 - **WHEN** a stop is issued for a Turn whose status is queued
 - **THEN** no runtime stop request is dispatched and the caller is directed to the cancel path
 
+#### Scenario: A stale stop cannot abort a later Turn
+- **WHEN** the target Turn becomes terminal while its stop request is being dispatched
+- **THEN** the Session does not admit a later Turn until that stop request settles, and the old request cannot abort later work
+
 ### Requirement: Stop confirmation is honest
 
 The stop result SHALL distinguish a confirmed stop from an unconfirmed stop by surfacing the state the Runtime reported. The API SHALL NOT report a successful stop when the stop could not be confirmed.

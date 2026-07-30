@@ -92,6 +92,8 @@ Cancel and stop carry `turnId` in the request body of the session-scoped endpoin
 
 The runner stop payload carries the `turnId` for correlation/logging only; the Runtime abort remains session-scoped because both supported runtimes abort by physical session.
 
+Before sending that session-scoped abort, the Session grain atomically records a stop claim for the executing target. While the claim is held, the grain rejects a follow-up that would begin a later Turn. A retry for the same claimed Turn may reissue the stop, but a different Turn cannot start until the Runner reply has settled the claim. This keeps a terminal event for the old Turn from opening the Session to newer work in the interval before the old Runtime abort is sent.
+
 **Rationale:** the design contract (issue-512 D5, `design/agent-execution.md:194`) fixes Input and Turn as Session children accessed through their Session — a `/turns/{turnId}` path resource would violate it. The stale-guard is enforced at the grain (the single write authority) so every entry point — Web, CLI, issue-scoped alias — shares one guard.
 
 **Alternatives considered:** a top-level `/agent-turns/{id}` resource was rejected as a second addressable aggregate; enforcing the stale-guard only in the HTTP route was rejected because it bypasses direct grain callers.

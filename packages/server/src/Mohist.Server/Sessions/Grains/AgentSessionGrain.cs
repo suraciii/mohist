@@ -425,6 +425,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var pending = GetPendingFollowups(session);
         if (pending.Any(lease => !lease.Accepted))
             throw new FollowupOperationInProgressException(session.Id);
+        if (session.Status.PendingStop is { } stop)
+            throw new StopOperationInProgressException(session.Id, stop.TurnId);
 
         var startsIdleTurn = session.Status.Activity == AgentSessionActivity.Idle;
         var lease = new AgentSessionFollowupLease(
@@ -1884,19 +1886,37 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await CommitAsync(session, events);
     }
 
-    public async Task CancelTurnAsync(string turnId)
+    public async Task<AgentTurnCancelResult> CancelQueuedTurnAsync(string turnId)
     {
         if (string.IsNullOrWhiteSpace(turnId))
-            return;
+            return new AgentTurnCancelResult(null, false);
         var session = await GetRequiredAsync();
-        var events = session.CancelTurn(turnId, Now());
-        if (events.Count == 0)
-        {
-            await _stateStore.SaveAsync(SessionId, session);
-            _session = session;
-            return;
-        }
-        await CommitAsync(session, events);
+        var result = session.CancelQueuedTurn(turnId, Now());
+        await _stateStore.SaveAsync(SessionId, session);
+        _session = session;
+        return result;
+    }
+
+    public async Task CancelTurnAsync(string turnId)
+    {
+        _ = await CancelQueuedTurnAsync(turnId);
+    }
+
+    public async Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId)
+    {
+        var session = await GetRequiredAsync();
+        var result = session.ClaimTurnStop(turnId);
+        await _stateStore.SaveAsync(SessionId, session);
+        _session = session;
+        return result;
+    }
+
+    public async Task CompleteTurnStopAsync(string turnId)
+    {
+        var session = await GetRequiredAsync();
+        session.CompleteTurnStop(turnId);
+        await _stateStore.SaveAsync(SessionId, session);
+        _session = session;
     }
 
     public async Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId)

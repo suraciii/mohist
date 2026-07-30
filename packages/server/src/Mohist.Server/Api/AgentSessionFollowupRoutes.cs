@@ -119,6 +119,10 @@ public static class AgentSessionFollowupRoutes
         {
             return ApiResults.Conflict(ex.Message, "followup_in_progress", new { sessionId = ex.SessionId });
         }
+        catch (StopOperationInProgressException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "stop_in_progress", new { sessionId = ex.SessionId, turnId = ex.TurnId });
+        }
 
         if (string.IsNullOrWhiteSpace(target.RunnerId))
         {

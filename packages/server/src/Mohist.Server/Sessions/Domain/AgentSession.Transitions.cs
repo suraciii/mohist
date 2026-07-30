@@ -678,6 +678,38 @@ public static partial class AgentSessionExtensions
             return [];
         }
 
+        public AgentTurnCancelResult CancelQueuedTurn(string turnId, DateTime now)
+        {
+            var control = session.ResolveTurnControl(turnId);
+            if (control?.Classification != AgentTurnControlClassification.Queued || control.IsLaunchTurn)
+                return new AgentTurnCancelResult(control, false);
+
+            _ = session.CancelTurn(turnId, now);
+            return new AgentTurnCancelResult(session.ResolveTurnControl(turnId), true);
+        }
+
+        public AgentTurnStopClaimResult ClaimTurnStop(string turnId)
+        {
+            var control = session.ResolveTurnControl(turnId);
+            if (control?.Classification != AgentTurnControlClassification.Executing)
+                return new AgentTurnStopClaimResult(control, false);
+
+            var pending = session.Status.PendingStop;
+            if (pending is not null && !string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
+                return new AgentTurnStopClaimResult(control, false);
+
+            if (pending is null)
+                session.Status = session.Status with { PendingStop = new AgentSessionStopClaim(turnId) };
+
+            return new AgentTurnStopClaimResult(control, true);
+        }
+
+        public void CompleteTurnStop(string turnId)
+        {
+            if (string.Equals(session.Status.PendingStop?.TurnId, turnId, StringComparison.Ordinal))
+                session.Status = session.Status with { PendingStop = null };
+        }
+
         public IReadOnlyList<AgentSessionEvent> AbandonFollowupTurn(string inputId, string turnId, DateTime now)
         {
             var turns = (session.Status.Turns ?? []).ToList();
