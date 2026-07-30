@@ -22,7 +22,7 @@
       "output": "ProjectVariableStore and IssueVariableStore classes with moved variable CRUD + validation; route and grain consumers rewired; variable spec/unit tests moved to the new stores.",
       "dependsOn": [],
       "passes": false,
-      "notes": "WorkflowRunVariablesStore already exists for Run scope and is untouched. Variable merge logic stays in WorkflowProfileManager until T-002."
+      "notes": "WorkflowRunVariablesStore already exists for Run scope and is untouched. Variable merge logic stays in WorkflowProfileManager until T-002. The enable toggle and legacy template CRUD stay in the shrinking ProjectWorkflowProfileManager until T-006 moves them onto the provider and deletes the class."
     },
     {
       "id": "T-002",
@@ -106,20 +106,22 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "IIssueWorkflowProfile split; IssueGrain, IssueReadModelLoader, IssueMetricsQuerier, EpicGrain, EpicQuerier rewired; projection spec tests updated.",
-      "dependsOn": ["T-004"],
+      "dependsOn": ["T-003"],
       "passes": false,
-      "notes": "MohistDefaultWorkflowProjection already exists as a profile-independent static class; this task only changes how callers reach it."
+      "notes": "MohistDefaultWorkflowProjection already exists as a profile-independent static class; this task only changes how callers reach it. Depends on T-003 because both edit MohistIssueWorkflowProfileBase (T-003 extracts its prompt merge); runs after T-004 by priority but shares no files with it."
     },
     {
       "id": "T-006",
-      "title": "Retire legacy template CRUD and make WorkflowProfileProvider the sole authority",
-      "spec": "specs/workflow-profile-resolution/spec.md#sole-profile-collection-authority",
-      "description": "Switch the Definition resolver and IssueGrain default read off the legacy ProjectWorkflowTemplates table and IssueWorkflowProfile.Template inline column onto IWorkflowProfileProvider exclusively. Then delete the template CRUD methods (ListTemplatesAsync/GetTemplateAsync/CreateTemplateAsync/UpdateTemplateAsync/DeleteTemplateAsync/SetDefaultTemplateAsync/GetDefaultTemplateAsync and the system-template catalog helpers) and the LoadProjectTemplateAsync/LoadTemplateReferenceAsync legacy fallback paths. Remove IssueWorkflowProfileManager's custom-template-YAML handling so Issue selection is a pure Profile-id reference.",
+      "title": "Retire legacy template CRUD, migrate enable toggle, make the provider sole Profile authority",
+      "spec": "specs/workflow-profile-resolution/spec.md#profile-enablement-is-owned-by-the-profile-provider",
+      "description": "Consolidate all Profile authority onto IWorkflowProfileProvider and delete the now-empty ProjectWorkflowProfileManager. (1) Move the system-Profile enable toggle (GetDisabledWorkflowProfileIdsAsync read + SetProfileEnabledAsync write) onto the provider as GetDisabledProfileIdsAsync/SetProfileEnabledAsync, and rewire its six consumers (IssueGrain, IssueQuerier, IssueReadModelLoader, IssueMetricsQuerier). (2) Switch the Definition resolver and IssueGrain default read off the legacy ProjectWorkflowTemplates table and IssueWorkflowProfile.Template column onto the provider exclusively, then delete the template CRUD methods and LoadProjectTemplateAsync/LoadTemplateReferenceAsync fallback paths. (3) Remove IssueWorkflowProfileManager's already-uncalled inline-template-YAML write path so Issue selection is a pure Profile-id reference.",
       "acceptanceCriteria": [
+        "IWorkflowProfileProvider owns the enable toggle: GetDisabledProfileIdsAsync(projectId) and SetProfileEnabledAsync(projectId, profileId, enabled); the six consumers read disabled ids from the provider, not from a Profile/Variable/Prompt manager.",
+        "Disabling the last enabled Profile is still rejected; disabled Profiles are still excluded from the effective-selection fallback for not-yet-existing runs.",
         "No definition resolution reads the legacy ProjectWorkflowTemplates table or the IssueWorkflowProfile.Template column.",
         "IssueGrain reads the project default via DefaultWorkflowProfileId through the provider, not GetDefaultTemplateAsync.",
-        "WorkflowProfileProvider is the only Profile membership/definition/CRUD authority; the template CRUD methods and legacy table read paths are deleted.",
-        "Issue template selection accepts only a Profile id reference (custom YAML inline template is no longer supported).",
+        "The template CRUD methods, the legacy table read paths, and the dead Issue inline-YAML write path are deleted; ProjectWorkflowProfileManager is deleted (empty after variables, prompts, enable toggle, and template CRUD all left).",
+        "Issue template selection accepts only a Profile id reference.",
         "Existing Profile data migration path is unaffected; a project with migrated custom Profiles resolves definitions through the provider.",
         "Server unit + spec + architecture tests are green; WorkflowProfileMigrationSpecs still pass unchanged.",
         "A repo-wide grep for 'Profile' in Workflow/Services and Issue/Services refers only to Workflow Profile, not Variables or Prompts."
@@ -127,10 +129,10 @@
       "priority": 6,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Legacy template CRUD and table read paths deleted; Definition resolver and IssueGrain read exclusively via IWorkflowProfileProvider; migration regression tests green.",
+      "output": "Enable toggle on IWorkflowProfileProvider with consumers rewired; legacy template CRUD, table read paths, and dead inline-YAML write deleted; ProjectWorkflowProfileManager deleted; migration regression tests green.",
       "dependsOn": ["T-004"],
       "passes": false,
-      "notes": "Gated on migration being the sole path: switch all readers to the provider first, then delete. No new EF migration is added (columns left read-only until a separate cleanup)."
+      "notes": "Gated on migration being the sole path: switch the enable-toggle consumers and legacy readers to the provider first, then delete. The enable-toggle write is the documented Settings surface (not dead code), so it is moved not dropped. Runs after T-005 by priority; both touch IssueGrain/IssueQuerier/IssueReadModelLoader on different lines. No new EF migration is added (columns left read-only until a separate cleanup)."
     }
   ]
 }

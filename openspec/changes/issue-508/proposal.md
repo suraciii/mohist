@@ -27,11 +27,16 @@ boundary.
   cascade (bound Profile → effective Profile → stage specs → structure → approval
   config) remains, stripped of variable and prompt concerns, as a single
   definition resolver.
-- **Legacy template CRUD retired.** `WorkflowProfileDataMigrator` already
-  migrates legacy project-templates / Issue-templates / Issue-default-cascade
-  into the Project-scoped Profile collection. Once migration is the sole path,
-  the legacy `ProjectWorkflowTemplate` / `IssueWorkflowProfile.Template` CRUD
-  is deleted. `WorkflowProfileProvider` becomes the only Profile authority.
+- **Legacy template CRUD retired; enable toggle migrates to the Profile
+  authority.** `WorkflowProfileDataMigrator` already migrates legacy
+  project-templates / Issue-templates / Issue-default-cascade into the
+  Project-scoped Profile collection. Once migration is the sole path, the legacy
+  `ProjectWorkflowTemplate` / `IssueWorkflowProfile.Template` CRUD is deleted.
+  The system-Profile enable toggle (`GetDisabledWorkflowProfileIdsAsync` /
+  `SetProfileEnabledAsync`) moves from `ProjectWorkflowProfileManager` onto
+  `IWorkflowProfileProvider` — enablement is a Profile-membership concern, and the
+  provider is already the membership authority. `WorkflowProfileProvider` becomes
+  the only Profile authority for membership, definition, and enablement.
 - **`IIssueWorkflowProfile` split.** Its descriptive face (`Id` / `DisplayName`
   / `Description` / `IsDefault` / `Definition`) reuses `WorkflowProfile`; the two
   `ProjectWorkflowState(...)` overloads become their own state-projection
@@ -64,14 +69,17 @@ boundary.
 
 - **Server (`packages/server`):**
   - `Workflow/Services/ProjectWorkflowProfileManager.cs` — decomposed into a
-    Project Variables Store, a Prompts store/manager, and the enable-toggle home;
-    legacy template CRUD removed.
+    Project Variables Store and a Prompts store/manager; the enable toggle and
+    legacy template CRUD move onto `IWorkflowProfileProvider`, after which the
+    class is deleted.
   - `Workflow/Services/IssueWorkflowProfileManager.cs` — decomposed into an
-    Issue Variables Store and the Issue Profile-selection write endpoint.
+    Issue Variables Store; the (already-uncalled) inline-template write path is
+    removed, leaving Issue Profile selection as a pure Profile-id reference.
   - `Workflow/Services/WorkflowProfileManager.cs` — reduced to a definition
     resolver; variable-merge and prompt logic extracted to their own resolvers.
-  - `Workflow/Services/WorkflowProfileProvider.cs` — remains the sole Profile
-    collection authority after legacy CRUD removal.
+  - `Workflow/Services/WorkflowProfileProvider.cs` (`IWorkflowProfileProvider`)
+    — becomes the sole Profile authority for membership, definition, **and
+    enablement** (gains `GetDisabledProfileIdsAsync` / `SetProfileEnabledAsync`).
   - `Issue/Services/WorkflowProfiles/IIssueWorkflowProfile.cs`,
     `MohistIssueWorkflowProfileBase.cs` — descriptive face reuses `WorkflowProfile`;
     `ProjectWorkflowState` projection separated.
@@ -79,7 +87,9 @@ boundary.
     `Api/IssueRoutes.Crud.cs`, `Api/IssueRoutes.WorkflowProfile.cs`,
     `Issue/Grains/IssueGrain.cs`, `Workflow/Grains/WorkflowGrain.cs` (incl.
     `IWorkflowGrainContext`), `Workflow/Services/WorkflowQuerier.cs`,
-    `Issue/Services/IssueMetricsQuerier.cs`, `Issue/Services/IssueReadModelLoader.cs`.
+    `Issue/Services/IssueQuerier.cs`, `Issue/Services/IssueMetricsQuerier.cs`,
+    `Issue/Services/IssueReadModelLoader.cs` (the last three switch their
+    enable-toggle read to the provider).
   - DI auto-registration relies on the `IScopedService` marker; new split types
     carry it, so `MohistServiceRegistration` needs no manual edits for them.
 - **Persistence:** the legacy `ProjectWorkflowTemplate` table and

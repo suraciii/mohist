@@ -90,39 +90,36 @@ would re-couple resources at the read layer and preserve the naming problem.
 | `ProjectVariableStore` | Store | Project Variables | `ProjectWorkflowProfile.Variables` |
 | `IssueVariableStore` | Store | Issue Variables | `IssueWorkflowProfile.Variables` |
 | `WorkflowRunVariablesStore` (exists) | Store | Run Variables | `WorkflowRunProfileRow.Variables` |
-| `WorkflowVariableResolver` | Resolver* | Project→Issue→Run merge + stage resolve + workspace identity | the three Stores |
+| `WorkflowVariableResolver` | Resolver | Project→Issue→Run merge + stage resolve + workspace identity | the three Stores |
 | `ProjectPromptStore` | Store | system catalog + project prompt CRUD + preview | `ProjectWorkflowProfile.Prompts` + `IPromptLoader` |
-| `WorkflowPromptResolver` | Resolver* | run-scoped effective prompt resolution | `ProjectPromptStore` + `IPromptLoader` |
+| `WorkflowPromptResolver` | Resolver | run-scoped effective prompt resolution | `ProjectPromptStore` + `IPromptLoader` |
 | `WorkflowDefinitionResolver` | Resolver | bound/effective Profile cascade, stage specs, structure, approval | `IWorkflowProfileProvider` |
-| `WorkflowProfileProvider` (exists) | — | sole Profile collection authority | `WorkflowProfileRecordRow` + catalog |
+| `WorkflowProfileProvider` (exists) | — | sole Profile collection **and enablement** authority | `WorkflowProfileRecordRow` + catalog + `ProjectWorkflowProfile.DisabledWorkflowProfileIds` |
 | `MohistDefaultWorkflowProjection` (exists) | — | Issue↔WorkflowRun state projection | none (pure) |
-
-\* Naming tension — see D3.
 
 Each new type implements `IScopedService` so DI picks it up without manual
 registration. Consumers swap the injected concrete type; route handler
 signatures change the parameter type only.
 
-### D3 — Suffix fit for the two merge/resolution units
+### D3 — `Resolver` suffix for the three run-context resolution units
 
 `conventions.md` reserves `Resolver` for "external name → canonical resource"
-(e.g. `ProjectResolver`), `Querier` for single-domain read projection, and
-`Manager` for config/lifecycle policy. The variable merge and prompt resolution
-are "resolve effective X for a run" — closer to read assembly than external-name
-mapping. Two acceptable resolutions, to be confirmed at implementation time:
+(e.g. `ProjectResolver`). The three units that leave `WorkflowProfileManager`
+— Definition cascade, variable merge, and prompt resolution — all do the same
+thing in shape: they resolve a run's context to one canonical effective resource
+(the WorkflowDefinition, the effective VariableBundle, the effective Prompt).
+That is the defining behavior of a `Resolver`, so all three take the `Resolver`
+suffix: `WorkflowDefinitionResolver`, `WorkflowVariableResolver`,
+`WorkflowPromptResolver`.
 
-- Accept `Resolver` for these two because each resolves run context to a
-  canonical effective resource (variables / prompt), and no other suffix fits a
-  cross-store assembly. (Preferred — matches the existing `*Resolver` intent of
-  producing one canonical result.)
-- Alternative: fold each merge back into its resource's `Store` as a read
-  method, avoiding a new type. Rejected because the merge is cross-scope
-  (reads three Stores), so it would re-couple Stores; and the issue explicitly
-  requires the merge to leave `WorkflowProfileManager` as a single-responsibility
-  unit.
-
-The Definition cascade stays a `Resolver` unambiguously: it resolves run context
-to the canonical WorkflowDefinition.
+Alternative considered: fold each merge back into its resource's `Store` as a
+read method. Rejected because the variable merge is cross-scope (reads three
+Stores) and the issue explicitly requires the merge to leave
+`WorkflowProfileManager` as a single-responsibility unit; folding it into a
+single Store would re-couple the Stores. `Querier` (single-domain read
+projection) was also rejected — these units span multiple scopes/stores, not one
+domain. No other conventions suffix fits a cross-store run-context assembly, so
+`Resolver` is the decision, not deferred to implementation.
 
 ### D4 — Dead prompt-override path is dropped, not moved
 
@@ -140,27 +137,50 @@ Alternative considered: move them verbatim to preserve symmetry. Rejected becaus
 they are uncalled and carrying dead code into a freshly-cut component defeats the
 honest-naming goal.
 
-### D5 — Legacy template CRUD retirement is gated on migration completeness
+### D5 — Legacy template CRUD retirement and enable-toggle migration
 
-The Definition cascade still falls back to the legacy `ProjectWorkflowTemplates`
-table (`LoadTemplateReferenceAsync` → `LoadProjectTemplateAsync`) for
-issue-sourced and project-default resolution. `IssueGrain:318` reads the legacy
-`GetDefaultTemplateAsync`. Retirement is sequenced:
+Two Profile-authority concerns leave `ProjectWorkflowProfileManager` together,
+both landing on `IWorkflowProfileProvider` as the sole Profile authority.
+
+**Enable-toggle migration.** `ProjectWorkflowProfileManager` owns the system
+Profile enable toggle: `GetDisabledWorkflowProfileIdsAsync` (read — 6 live
+consumers: `IssueGrain`, `IssueQuerier`, `IssueReadModelLoader`,
+`IssueMetricsQuerier`) and `SetProfileEnabledAsync` (write — currently uncalled
+by any route, but it is the documented Settings management surface, not dead
+code to drop). Enablement is a Profile-membership concern, so it moves onto
+`IWorkflowProfileProvider` (`GetDisabledProfileIdsAsync` /
+`SetProfileEnabledAsync`), which is already the membership authority
+(`ContainsAsync`). It reads `ProjectWorkflowProfile.DisabledWorkflowProfileIds`
+— the same row the variable and prompt Stores read other columns of; multiple
+focused readers of one table are expected and do not couple the concerns. The
+six consumers switch from the manager to the provider.
+
+**Legacy template CRUD retirement.** The Definition cascade still falls back to
+the legacy `ProjectWorkflowTemplates` table (`LoadTemplateReferenceAsync` →
+`LoadProjectTemplateAsync`) for issue-sourced and project-default resolution.
+`IssueGrain:318` reads the legacy `GetDefaultTemplateAsync`. Retirement is
+sequenced:
 
 1. Switch resolution + IssueGrain default read to `IWorkflowProfileProvider`
    (which already carries everything the migrator produced, including
-   `DefaultWorkflowProfileId`).
+   `DefaultWorkflowProfileId`), and switch the six enable-toggle consumers to
+   the provider.
 2. Once no resolution path consults the legacy table, delete the template CRUD
    methods and the `ProjectWorkflowTemplates` read paths.
 3. The `IssueWorkflowProfile.Template` inline column: the migrator already
    converts inline Issue definitions to collection Profiles
-   (`issue-custom:...`); after confirmation, `IssueTemplateUpdateRequest.Template`
-   custom-YAML handling is removed and Issue selection becomes a pure Profile-id
-   reference.
+   (`issue-custom:...`); the inline-YAML write path
+   (`IssueWorkflowProfileManager.UpdateTemplateAsync`) is already uncalled by
+   any source, so removing it is dead-code removal, not a behavior change.
+   Issue selection becomes a pure Profile-id reference.
 
-The legacy tables/columns are left read-only until a separate persistence cleanup
-confirms no consumer remains; this issue does not add an EF migration to drop
-columns (Non-Goal), only removes the code paths.
+The enable toggle and the legacy reads both linger in the shrinking
+`ProjectWorkflowProfileManager` until this step — an acceptable temporary state,
+like the variable merge lingering in `WorkflowProfileManager` until step 2.
+After this step `ProjectWorkflowProfileManager` is empty and deleted. The legacy
+tables/columns are left read-only until a separate persistence cleanup confirms
+no consumer remains; this issue does not add an EF migration to drop columns
+(Non-Goal), only removes the code paths.
 
 ### D6 — `IIssueWorkflowProfile` split via direct projection call
 
@@ -194,7 +214,10 @@ interface would duplicate it exactly as the issue describes.
    reference and the 3-throw assertion target.
 5. **Split `IIssueWorkflowProfile`** — move callers to the projection directly;
    source description from `WorkflowProfile`.
-6. **Retire legacy template CRUD** — D5 sequence; remove code paths.
+6. **Retire legacy template CRUD + migrate enable toggle** — D5 sequence: switch
+   the enable-toggle consumers and legacy readers to `IWorkflowProfileProvider`,
+   then delete the template CRUD methods and the now-empty
+   `ProjectWorkflowProfileManager`.
 
 Earlier steps must not depend on later ones. Each step ends with server unit +
 spec + arch tests green.
@@ -210,10 +233,15 @@ spec + arch tests green.
    lose custom Profiles] -> D5 gates deletion behind switching all readers to the
      Provider first; deletion happens only after no code path consults the
      legacy table. The migrator is idempotent and already runs on startup.
-- [`Resolver` suffix drift from the conventions definition] -> D3 calls out the
-     tension and constrains the choice to two explicit options; the Definition
-     cascade unambiguously fits, and the two merge units are the only ambiguous
-     cases, documented rather than silently chosen.
+- [`Resolver` suffix drift from the conventions definition] -> D3 resolves this:
+      all three run-context resolution units (Definition, variables, prompts)
+      resolve run context to one canonical effective resource — the defining
+      behavior of `Resolver`. Decided, not deferred.
+- [Enable toggle has 6 live consumers across Issue read paths] -> D5 moves
+      enablement onto `IWorkflowProfileProvider` (already the membership
+      authority) in the same step as legacy retirement, so the read path stays
+      single-sourced and `ProjectWorkflowProfileManager` is deleted rather than
+      left holding a stranded concern.
 - [Large touched-file surface (~50 files reference the managers)] -> Most are
      test files that reference type names; they update mechanically. The
      behavior-bearing consumers are the bounded set listed in the proposal
@@ -227,19 +255,18 @@ spec + arch tests green.
 
 This is a code refactor with no data migration. Deployment is the normal server
 release; `WorkflowProfileDataMigrator` runs on startup as today and must remain
-the sole path before step D5 (retirement) lands. Rollback is `git revert` of the
-relevant step, since each step leaves the suite green and introduces no schema or
-behavior change. Steps may land across multiple PRs in D7 order; no step requires
-another to have landed first except D5 step 2 after D5 step 1.
+the sole path before step D5 (retirement + enable-toggle migration) lands.
+Rollback is `git revert` of the relevant step, since each step leaves the suite
+green and introduces no schema or behavior change. Steps may land across
+multiple PRs in D7 order; no step requires another to have landed first except
+D5 step 2 after D5 step 1.
 
 ## Open Questions
 
 - Does `MohistDefaultWorkflowProjection` stay a static class or become a DI
   service? It has no dependencies today, so static is fine; a service is only
-  needed if a later change injects dependencies. Decide at step D6.
+  needed if a later change injects dependencies. Decide at the IIssueWorkflowProfile
+  split step (D6 / landing step 5).
 - Confirm `ProjectPromptTemplates` table (D4) has no external/migration reader
   before dropping the code path; if any startup upgrade reads it, retire the
   table in a follow-up rather than here.
-- Whether the two `Resolver`-suffixed merge units (D3) are acceptable to
-  conventions as written, or need an alternate suffix — confirm against
-  `conventions.md` at implementation.

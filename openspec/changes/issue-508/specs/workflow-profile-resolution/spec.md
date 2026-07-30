@@ -17,6 +17,25 @@
 - **WHEN** a definition is resolved for a run or issue selection
 - **THEN** the resolver MUST obtain it from the Profile provider, and MUST NOT read from the legacy Project template table or the Issue inline template column
 
+### Requirement: Profile enablement is owned by the Profile provider
+
+Which system Profiles are enabled or disabled in a Project is a Profile-membership concern. The enable toggle (reading the disabled set and setting a Profile enabled/disabled) SHALL be owned by `IWorkflowProfileProvider`, the same authority that owns membership. It MUST NOT remain on a Profile/Variable/Prompt-mixed manager class. Disabled Profiles SHALL be excluded from the effective-selection fallback for runs that do not yet exist, preserving today's behavior.
+
+#### Scenario: reading disabled profiles through the provider
+
+- **WHEN** a consumer (run startup, Issue read model, metrics) needs the disabled Profile set for a Project
+- **THEN** it SHALL read it from the Profile provider, not from a Profile/Variable/Prompt manager
+
+#### Scenario: disabling the last profile is rejected
+
+- **WHEN** a request disables a Profile such that no system Profile would remain enabled
+- **THEN** the provider SHALL reject the write, preserving at least one enabled Profile
+
+#### Scenario: disabled profile excluded from new-run fallback
+
+- **WHEN** a run that does not yet exist resolves its effective Profile and the Project has disabled the default
+- **THEN** a disabled Profile SHALL NOT be selected as the effective Profile
+
 ### Requirement: Bound profile resolution takes precedence
 
 When a WorkflowRun has a bound Profile id in its state, resolving the run's Definition SHALL use that bound id through the Profile provider. If the bound profile has no current definition, resolution SHALL fail with a no-current-definition error rather than falling through to a different profile.
