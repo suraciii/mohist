@@ -9,10 +9,13 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 public class WorkflowProfileCatalogSpecs
 {
     private static IssueWorkflowProfileRegistry BuildRegistry() =>
-        new(new FakePromptLoader(), new FakeDbContextFactory());
+        new(new ProjectPromptStore(
+            new FakeDbContextFactory(),
+            new FakePromptLoader(),
+            new PromptTemplateEngine()));
 
     private static ProjectWorkflowProfileManager BuildManager() =>
-        new(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
+        new(new FakeDbContextFactory(), NullActionCatalogSource.Instance);
 
     // ===================== Profile ID constants =====================
 

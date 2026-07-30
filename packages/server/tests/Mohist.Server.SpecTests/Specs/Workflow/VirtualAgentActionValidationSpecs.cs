@@ -434,8 +434,6 @@ public class VirtualAgentActionValidationSpecs : IAsyncLifetime
 
     private ProjectWorkflowProfileManager BuildManagerWithCatalog(ActionCatalog catalog) =>
         new(new TestDbContextFactory(_database.Options),
-            new StubPromptLoader(),
-            new PromptTemplateEngine(),
             new StubActionCatalogSource(catalog));
 
     private sealed class StubPromptLoader : IPromptLoader

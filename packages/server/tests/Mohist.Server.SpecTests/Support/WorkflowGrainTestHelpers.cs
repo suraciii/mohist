@@ -116,8 +116,6 @@ public static class WorkflowGrainTestHelpers
         var runVariablesStore = new WorkflowRunVariablesStore(factory);
         var profileManager = new WorkflowProfileManager(
             factory,
-            promptLoader,
-            new PromptTemplateEngine(),
             CreateEmptyConfigService(),
             new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
         var variableResolver = new WorkflowVariableResolver(

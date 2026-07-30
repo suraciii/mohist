@@ -8,7 +8,6 @@ using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
 
 namespace Mohist.Server.Workflow.Services;
@@ -23,7 +22,6 @@ namespace Mohist.Server.Workflow.Services;
 ///      project default template → first enabled system profile).
 ///
 /// Variables are resolved separately by <see cref="WorkflowVariableResolver"/>.
-/// Prompts are loaded via <see cref="LoadPromptAsync"/> / <see cref="LoadPromptsAsync"/>.
 /// </summary>
 public class WorkflowProfileManager : IScopedService
 {
@@ -31,21 +29,15 @@ public class WorkflowProfileManager : IScopedService
         "No enabled workflow profile is available. Enable a workflow first.";
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IPromptLoader _promptLoader;
-    private readonly PromptTemplateEngine _engine;
     private readonly ConfigService _configService;
     private readonly IWorkflowProfileProvider _profileProvider;
 
     public WorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
-        IPromptLoader promptLoader,
-        PromptTemplateEngine engine,
         ConfigService configService,
         IWorkflowProfileProvider profileProvider)
     {
         _dbFactory = dbFactory;
-        _promptLoader = promptLoader;
-        _engine = engine;
         _configService = configService;
         _profileProvider = profileProvider;
     }
@@ -382,90 +374,6 @@ public class WorkflowProfileManager : IScopedService
         }
 
         return null;
-    }
-
-    // =======================================================================
-    // Prompts
-    // =======================================================================
-
-    public async Task<ResolvedPrompt?> LoadPromptAsync(string runId, string key, string? projectId = null)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var context = await ResolveRunContextAsync(db, runId);
-        var pid = string.IsNullOrWhiteSpace(projectId) ? context.ProjectId : projectId;
-
-        // Project prompts replace builtin bodies by key.
-        if (!string.IsNullOrWhiteSpace(pid))
-        {
-            var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.ProjectId == pid);
-            if (projectProfile is not null)
-            {
-                if (projectProfile.Prompts.TryGetValue(key, out var body))
-                {
-                    var systemTemplates = _promptLoader.LoadAllTemplates();
-                    var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-                    return new ResolvedPrompt(key, key, string.Empty, Array.Empty<string>(), null, body, source);
-                }
-            }
-        }
-
-        var systemTemplatesMap = _promptLoader.LoadAllTemplates();
-        if (systemTemplatesMap.TryGetValue(key, out var sys))
-            return new ResolvedPrompt(key, sys.DisplayName, sys.Description, sys.Tags, sys.Stage, sys.Body, "system");
-
-        return null;
-    }
-
-    public async Task<IReadOnlyList<ResolvedPrompt>> LoadPromptsAsync(string runId, string? stage = null, string? projectId = null)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var context = await ResolveRunContextAsync(db, runId);
-        var pid = string.IsNullOrWhiteSpace(projectId) ? context.ProjectId : projectId;
-
-        var systemTemplates = _promptLoader.LoadAllTemplates();
-        Dictionary<string, string> projectPrompts;
-        if (!string.IsNullOrWhiteSpace(pid))
-        {
-            var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.ProjectId == pid);
-            projectPrompts = projectProfile is not null
-                ? projectProfile.Prompts
-                : new Dictionary<string, string>(StringComparer.Ordinal);
-        }
-        else
-        {
-            projectPrompts = new Dictionary<string, string>(StringComparer.Ordinal);
-        }
-
-        var keys = new SortedSet<string>(systemTemplates.Keys, StringComparer.Ordinal);
-        foreach (var k in projectPrompts.Keys)
-            keys.Add(k);
-
-        var results = new List<ResolvedPrompt>();
-        foreach (var key in keys)
-        {
-            if (projectPrompts.TryGetValue(key, out var body))
-            {
-                var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-                results.Add(new ResolvedPrompt(key, key, string.Empty, Array.Empty<string>(), null, body, source));
-                continue;
-            }
-
-            if (systemTemplates.TryGetValue(key, out var sys))
-                results.Add(new ResolvedPrompt(key, sys.DisplayName, sys.Description, sys.Tags, sys.Stage, sys.Body, "system"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(stage))
-            results = results.Where(r => r.Stage is null || string.Equals(r.Stage, stage, StringComparison.OrdinalIgnoreCase)).ToList();
-
-        return results;
-    }
-
-    public PromptPreviewResult RenderPrompt(string body, JsonElement variables)
-    {
-        var result = _engine.Render(body, variables);
-        return new PromptPreviewResult(result.Rendered, result.MissingVariables, result.Depth, result.Errors);
     }
 
     private static async Task<ResolvedTemplate?> LoadProjectTemplateAsync(

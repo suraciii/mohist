@@ -1,30 +1,23 @@
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
 public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
 {
-    private readonly IPromptLoader _promptLoader;
-    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly ProjectPromptStore _promptStore;
 
     protected MohistIssueWorkflowProfileBase(
-        IPromptLoader promptLoader,
-        IDbContextFactory<MohistDbContext> dbFactory)
+        ProjectPromptStore promptStore)
     {
-        _promptLoader = promptLoader;
-        _dbFactory = dbFactory;
+        _promptStore = promptStore;
     }
 
     public abstract string Id { get; }
@@ -33,21 +26,8 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
     public abstract bool IsDefault { get; }
     public virtual WorkflowDefinition Definition => WorkflowProfileCatalog.Definition;
 
-    public Dictionary<string, string> LoadPrompts() => _promptLoader.LoadAll();
-
     public async Task<Dictionary<string, string>> GetMergedPromptsAsync(string projectId)
-    {
-        var merged = new Dictionary<string, string>(_promptLoader.LoadAll(), StringComparer.Ordinal);
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var profile = await db.ProjectWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        if (profile?.Prompts is { Count: > 0 })
-        {
-            foreach (var (key, body) in profile.Prompts)
-                merged[key] = body;
-        }
-        return merged;
-    }
+        => await _promptStore.GetMergedPromptBodiesAsync(projectId);
 
     public string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, Dictionary<string, object?>? globalAgentConfig = null)
     {

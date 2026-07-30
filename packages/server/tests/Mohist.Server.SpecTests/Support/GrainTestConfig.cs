@@ -247,6 +247,8 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
         siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
+        siloBuilder.Services.AddScoped<ProjectPromptStore>();
+        siloBuilder.Services.AddScoped<WorkflowPromptResolver>();
         siloBuilder.Services.AddSingleton(WorkflowGrainTestHelpers.CreateEmptyConfigService());
         siloBuilder.Services.AddScoped<WorkflowRunVariablesStore>();
         siloBuilder.Services.AddScoped<ProjectVariableStore>();

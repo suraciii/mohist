@@ -113,8 +113,6 @@ public sealed class WorkflowGrainProductionContractSpecs
         var provider = new StubFailingOnStageLoadProfileProvider(exceptionMessage);
         return new WorkflowProfileManager(
             dbFactory,
-            new InertPromptLoader(),
-            new Mohist.Server.Workflow.Services.Prompts.PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
             provider);
     }

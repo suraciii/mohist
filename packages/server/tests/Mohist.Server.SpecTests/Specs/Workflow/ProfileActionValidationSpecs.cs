@@ -33,7 +33,7 @@ public class ProfileActionValidationSpecs : IAsyncLifetime
         _database = TestSqliteDatabase.CreateModelSchema();
         var dbFactory = new TestDbContextFactory(_database.Options);
         _projectManager = new ProjectWorkflowProfileManager(
-            dbFactory, new StubPromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
+            dbFactory, NullActionCatalogSource.Instance);
         _issueManager = new IssueWorkflowProfileManager(dbFactory, NullActionCatalogSource.Instance);
     }
 
@@ -563,8 +563,7 @@ public class ProfileActionValidationSpecs : IAsyncLifetime
         }
 
         var projectManager = new ProjectWorkflowProfileManager(
-            dbFactory, new StubPromptLoader(), new PromptTemplateEngine(),
-            new StubActionCatalogSource(catalog));
+            dbFactory, new StubActionCatalogSource(catalog));
 
         var stored = await projectManager.GetTemplateProfileAsync("proj-runtime", "stored");
 
@@ -578,8 +577,6 @@ public class ProfileActionValidationSpecs : IAsyncLifetime
 
     private ProjectWorkflowProfileManager BuildManagerWithCatalog(ActionCatalog catalog) =>
         new(new TestDbContextFactory(_database.Options),
-            new StubPromptLoader(),
-            new PromptTemplateEngine(),
             new StubActionCatalogSource(catalog));
 
     private static ActionCatalog SimpleCatalog() =>

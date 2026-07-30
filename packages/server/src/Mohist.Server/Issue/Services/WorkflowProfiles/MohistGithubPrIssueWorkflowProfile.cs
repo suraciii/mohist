@@ -1,17 +1,12 @@
-using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
-using Mohist.Server.Workflow.Services.Prompts;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
 public class MohistGithubPrIssueWorkflowProfile : MohistIssueWorkflowProfileBase
 {
-    public MohistGithubPrIssueWorkflowProfile(
-        IPromptLoader promptLoader,
-        IDbContextFactory<MohistDbContext> dbFactory)
-        : base(promptLoader, dbFactory)
+    public MohistGithubPrIssueWorkflowProfile(ProjectPromptStore promptStore)
+        : base(promptStore)
     {
     }
 

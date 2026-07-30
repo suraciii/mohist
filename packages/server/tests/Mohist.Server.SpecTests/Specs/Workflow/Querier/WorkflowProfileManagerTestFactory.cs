@@ -22,8 +22,6 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
         var dbContextFactory = new TestDbContextFactory(Database.Options);
         Manager = new WorkflowProfileManager(
             dbContextFactory,
-            new FilePromptLoader(),
-            new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
             new WorkflowProfileProvider(dbContextFactory, NullActionCatalogSource.Instance));
         Resolver = new WorkflowVariableResolver(
@@ -40,8 +38,6 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
     protected WorkflowProfileManager CreateProfileBackedManager() =>
         new(
             new TestDbContextFactory(Database.Options),
-            new FilePromptLoader(),
-            new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
             new WorkflowProfileProvider(new TestDbContextFactory(Database.Options), NullActionCatalogSource.Instance));
 

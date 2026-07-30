@@ -1,4 +1,6 @@
 using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
 using Mohist.Server.SpecTests.Support;
 
@@ -16,7 +18,10 @@ public class EffectiveWorkflowProfileResolverSpecs
         new(BuildRegistry());
 
     private static IssueWorkflowProfileRegistry BuildRegistry() =>
-        new(new FakePromptLoader(), new FakeDbContextFactory());
+        new(new ProjectPromptStore(
+            new FakeDbContextFactory(),
+            new FakePromptLoader(),
+            new PromptTemplateEngine()));
 
     // ===================== Pure core (existence-only) =====================
 

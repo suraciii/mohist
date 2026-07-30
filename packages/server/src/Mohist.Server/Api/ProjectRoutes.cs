@@ -457,40 +457,40 @@ public static class ProjectRoutes
             }
         });
 
-        byRef.MapGet("/workflow-profile/prompts", async (HttpContext context, ProjectWorkflowProfileManager manager) =>
+        byRef.MapGet("/workflow-profile/prompts", async (HttpContext context, ProjectPromptStore promptStore) =>
         {
             var project = context.GetResolvedProject();
-            var prompts = await manager.ListPromptsAsync(project.Id);
+            var prompts = await promptStore.ListPromptsAsync(project.Id);
             return ApiResults.Ok(prompts);
         });
 
-        byRef.MapGet("/workflow-profile/prompts/{key}", async (HttpContext context, string key, ProjectWorkflowProfileManager manager) =>
+        byRef.MapGet("/workflow-profile/prompts/{key}", async (HttpContext context, string key, ProjectPromptStore promptStore) =>
         {
             var project = context.GetResolvedProject();
-            var prompt = await manager.GetPromptAsync(project.Id, key);
+            var prompt = await promptStore.GetPromptAsync(project.Id, key);
             return prompt is null
                 ? ApiResults.NotFound($"Prompt '{key}' not found")
                 : ApiResults.Ok(prompt);
         });
 
-        byRef.MapPut("/workflow-profile/prompts/{key}", async (HttpContext context, string key, PromptUpsertRequest? req, ProjectWorkflowProfileManager manager) =>
+        byRef.MapPut("/workflow-profile/prompts/{key}", async (HttpContext context, string key, PromptUpsertRequest? req, ProjectPromptStore promptStore) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Body))
                 return ApiResults.BadRequest("body is required");
 
             var project = context.GetResolvedProject();
-            await manager.SetPromptAsync(project.Id, key, req.Body);
+            await promptStore.SetPromptAsync(project.Id, key, req.Body);
             return ApiResults.Ok(new { key, body = req.Body });
         });
 
-        byRef.MapDelete("/workflow-profile/prompts/{key}", async (HttpContext context, string key, ProjectWorkflowProfileManager manager) =>
+        byRef.MapDelete("/workflow-profile/prompts/{key}", async (HttpContext context, string key, ProjectPromptStore promptStore) =>
         {
             var project = context.GetResolvedProject();
-            await manager.DeletePromptAsync(project.Id, key);
+            await promptStore.DeletePromptAsync(project.Id, key);
             return ApiResults.Ok();
         });
 
-        byRef.MapPost("/workflow-profile/prompts/{key}/preview", async (HttpContext context, string key, PromptPreviewRequest? req, ProjectWorkflowProfileManager manager) =>
+        byRef.MapPost("/workflow-profile/prompts/{key}/preview", async (HttpContext context, string key, PromptPreviewRequest? req, ProjectPromptStore promptStore) =>
         {
             JsonElement variables;
             if (req?.Variables is { } raw)
@@ -504,7 +504,7 @@ public static class ProjectRoutes
             try
             {
                 var project = context.GetResolvedProject();
-                var result = await manager.PreviewPromptAsync(project.Id, key, variables);
+                var result = await promptStore.PreviewPromptAsync(project.Id, key, variables);
                 return ApiResults.Ok(result);
             }
             catch (ArgumentException ex)

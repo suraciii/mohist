@@ -1,16 +1,11 @@
-using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Services;
-using Mohist.Server.Workflow.Services.Prompts;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
 public class MohistLocalIssueWorkflowProfile : MohistIssueWorkflowProfileBase
 {
-    public MohistLocalIssueWorkflowProfile(
-        IPromptLoader promptLoader,
-        IDbContextFactory<MohistDbContext> dbFactory)
-        : base(promptLoader, dbFactory)
+    public MohistLocalIssueWorkflowProfile(ProjectPromptStore promptStore)
+        : base(promptStore)
     {
     }
 

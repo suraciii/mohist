@@ -24,34 +24,34 @@ namespace Mohist.Server.Runner.Services;
 /// (variables, prompts, snapshot construction on the way out; runner-format
 /// check parsing + artifact binding on the way in). Template expansion is
 /// owned exclusively by the Runner execution pipeline. The inputs are
-/// sourced from <c>WorkflowProfileManager</c> / persisted projections, not
+/// sourced from workflow resolvers / persisted projections, not
 /// from grain-exclusive memory.
 /// </summary>
 public sealed class WorkflowItemTranslator : IScopedService
 {
-    private readonly WorkflowProfileManager _profileManager;
+    private readonly WorkflowPromptResolver _promptResolver;
     private readonly WorkflowVariableResolver _variableResolver;
     private readonly IWorkflowArtifactBindService _artifactBindService;
     private readonly IAgentExecutionSnapshotResolver? _agentSnapshots;
     private readonly ILogger<WorkflowItemTranslator> _log;
 
     public WorkflowItemTranslator(
-        WorkflowProfileManager profileManager,
+        WorkflowPromptResolver promptResolver,
         WorkflowVariableResolver variableResolver,
         IWorkflowArtifactBindService artifactBindService,
         ILogger<WorkflowItemTranslator> log)
-        : this(profileManager, variableResolver, artifactBindService, log, null)
+        : this(promptResolver, variableResolver, artifactBindService, log, null)
     {
     }
 
     public WorkflowItemTranslator(
-        WorkflowProfileManager profileManager,
+        WorkflowPromptResolver promptResolver,
         WorkflowVariableResolver variableResolver,
         IWorkflowArtifactBindService artifactBindService,
         ILogger<WorkflowItemTranslator> log,
         IAgentExecutionSnapshotResolver? agentSnapshots)
     {
-        _profileManager = profileManager;
+        _promptResolver = promptResolver;
         _variableResolver = variableResolver;
         _artifactBindService = artifactBindService;
         _agentSnapshots = agentSnapshots;
@@ -95,7 +95,7 @@ public sealed class WorkflowItemTranslator : IScopedService
 
         var payload = await BuildPayloadAsync(item.Stage, workId, "task", item.Title ?? string.Empty, attempt, workflowRunId, run);
 
-        var prompts = await _profileManager.LoadPromptsAsync(workflowRunId);
+        var prompts = await _promptResolver.LoadPromptsAsync(workflowRunId);
         if (prompts.Count > 0)
         {
             var promptsMap = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -161,7 +161,7 @@ EpicNumber: ReadEpicNumber(run),
 
         var payload = await BuildPayloadAsync(item.Stage, workId, "checks", "Stage checks", 1, workflowRunId, run);
 
-        var prompts = await _profileManager.LoadPromptsAsync(workflowRunId);
+        var prompts = await _promptResolver.LoadPromptsAsync(workflowRunId);
         if (prompts.Count > 0)
         {
             var promptsMap = new Dictionary<string, object>(StringComparer.Ordinal);

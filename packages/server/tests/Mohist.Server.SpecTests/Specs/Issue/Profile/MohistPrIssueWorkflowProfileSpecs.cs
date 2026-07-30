@@ -13,7 +13,10 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     private static WorkflowDefinition GithubPrDefinition => WorkflowProfileCatalog.GithubPrWorkflowDefinition;
 
     private static IssueWorkflowProfileRegistry BuildRegistry() =>
-        new(new FakePromptLoader(), new FakeDbContextFactory());
+        new(new ProjectPromptStore(
+            new FakeDbContextFactory(),
+            new FakePromptLoader(),
+            new PromptTemplateEngine()));
 
     [Fact]
     public void IssueWorkflowProfiles_ExposesGithubPrIdConstant()
@@ -24,7 +27,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_ExposesCorrectMetadata()
     {
-        var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistGithubPrIssueWorkflowProfile(new ProjectPromptStore(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine()));
 
         Assert.Equal("mohist/github-pr", profile.Id);
         Assert.Equal("Mohist GitHub PR", profile.DisplayName);
@@ -35,7 +38,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_DescriptionSurfacesGhCliPrerequisite()
     {
-        var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistGithubPrIssueWorkflowProfile(new ProjectPromptStore(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine()));
 
         Assert.Contains("gh", profile.Description, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("gh auth login", profile.Description, StringComparison.OrdinalIgnoreCase);
@@ -45,7 +48,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_DescriptionReadsFromGithubPrYaml()
     {
-        var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistGithubPrIssueWorkflowProfile(new ProjectPromptStore(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine()));
 
         Assert.Equal(WorkflowProfileCatalog.GithubPrProfileAsset.Description, profile.Description);
         Assert.EndsWith("`gh` CLI on the runner host and `gh auth login` against the target repository.", profile.Description);
@@ -54,7 +57,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_Definition_ComesFromGithubPrYaml()
     {
-        var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistGithubPrIssueWorkflowProfile(new ProjectPromptStore(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine()));
 
         Assert.Same(GithubPrDefinition, profile.Definition);
         Assert.NotSame(WorkflowProfileCatalog.Definition, profile.Definition);
@@ -654,7 +657,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public async Task ProjectWorkflowProfileManager_SystemTemplates_ExposeGithubPrTemplate()
     {
-        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
+        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), NullActionCatalogSource.Instance);
 
         var templates = await manager.ListSystemTemplatesAsync();
 
@@ -670,7 +673,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     public async Task BothCatalogPaths_AgreeWithProfileInstanceForBothBuiltIns()
     {
         var registry = BuildRegistry();
-        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
+        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), NullActionCatalogSource.Instance);
 
         var templates = await manager.ListSystemTemplatesAsync();
         var described = registry.ListDescribed();

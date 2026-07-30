@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -7,9 +6,6 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
-using Mohist.Server.Workflow.Services.Prompts;
-using Mohist.Server.Workflow.Domain.Prompts;
-using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
 
 namespace Mohist.Server.Workflow.Services;
@@ -21,8 +17,6 @@ namespace Mohist.Server.Workflow.Services;
 public class ProjectWorkflowProfileManager : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IPromptLoader _promptLoader;
-    private readonly PromptTemplateEngine _engine;
     private readonly IActionCatalogSource _catalogSource;
 
     /// <summary>
@@ -49,13 +43,9 @@ public class ProjectWorkflowProfileManager : IScopedService
 
     public ProjectWorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
-        IPromptLoader promptLoader,
-        PromptTemplateEngine engine,
         IActionCatalogSource catalogSource)
     {
         _dbFactory = dbFactory;
-        _promptLoader = promptLoader;
-        _engine = engine;
         _catalogSource = catalogSource;
     }
 
@@ -234,182 +224,6 @@ public class ProjectWorkflowProfileManager : IScopedService
     }
 
     // =======================================================================
-    // Prompts
-    // =======================================================================
-
-    public async Task<IReadOnlyList<SystemTemplate>> ListSystemPromptsAsync()
-    {
-        return _promptLoader.LoadAllTemplates().Values
-            .OrderBy(t => t.Key, StringComparer.Ordinal)
-            .ToList();
-    }
-
-    public async Task<IReadOnlyList<EffectivePrompt>> ListPromptsAsync(string projectId)
-    {
-        var systemTemplates = _promptLoader.LoadAllTemplates();
-        var projectPrompts = await LoadProjectPromptsAsync(projectId);
-
-        var keys = new SortedSet<string>(systemTemplates.Keys, StringComparer.Ordinal);
-        foreach (var k in projectPrompts.Keys)
-            keys.Add(k);
-
-        return keys.Select(key =>
-        {
-            if (projectPrompts.TryGetValue(key, out var body))
-            {
-                var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-                return new EffectivePrompt(key, key, string.Empty, Array.Empty<string>(), null, body, source);
-            }
-
-            var sys = systemTemplates[key];
-            return new EffectivePrompt(key, sys.DisplayName, sys.Description, sys.Tags, sys.Stage, sys.Body, "system");
-        }).ToList();
-    }
-
-    public async Task<EffectivePrompt?> GetPromptAsync(string projectId, string key)
-    {
-        var projectPrompts = await LoadProjectPromptsAsync(projectId);
-        if (projectPrompts.TryGetValue(key, out var body))
-        {
-            var systemTemplates = _promptLoader.LoadAllTemplates();
-            var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-            return new EffectivePrompt(key, key, string.Empty, Array.Empty<string>(), null, body, source);
-        }
-
-        var systemTemplatesMap = _promptLoader.LoadAllTemplates();
-        if (systemTemplatesMap.TryGetValue(key, out var sys))
-            return new EffectivePrompt(key, sys.DisplayName, sys.Description, sys.Tags, sys.Stage, sys.Body, "system");
-
-        return null;
-    }
-
-    public async Task SetPromptAsync(string projectId, string key, string body)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-            throw new ArgumentException("key is required", nameof(key));
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var profile = await db.ProjectWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-
-        if (profile is null)
-        {
-            profile = new ProjectWorkflowProfile
-            {
-                ProjectId = projectId,
-                Variables = VariableBundle.Empty.ToJson(),
-                Prompts = new Dictionary<string, string>(StringComparer.Ordinal) { [key] = body },
-                UpdatedAt = DateTimeOffset.UtcNow,
-            };
-            db.ProjectWorkflowProfiles.Add(profile);
-        }
-        else
-        {
-            var prompts = new Dictionary<string, string>(profile.Prompts, StringComparer.Ordinal)
-            {
-                [key] = body,
-            };
-            profile.Prompts = prompts;
-            profile.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-
-        await db.SaveChangesAsync();
-    }
-
-    public async Task DeletePromptAsync(string projectId, string key)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-            throw new ArgumentException("key is required", nameof(key));
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var profile = await db.ProjectWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        if (profile is null) return;
-
-        var prompts = new Dictionary<string, string>(profile.Prompts, StringComparer.Ordinal);
-        if (!prompts.Remove(key)) return;
-        profile.Prompts = prompts;
-        profile.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync();
-    }
-
-    public async Task<EffectivePrompt?> GetProjectPromptOverrideAsync(string projectId, string key)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectPromptTemplates.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
-        return row is null
-            ? null
-            : new EffectivePrompt(
-                row.Key,
-                string.IsNullOrWhiteSpace(row.DisplayName) ? row.Key : row.DisplayName,
-                row.Description,
-                DeserializeTags(row.TagsJson),
-                row.Stage,
-                row.Body,
-                "project-override");
-    }
-
-    public async Task<EffectivePrompt> SetProjectPromptOverrideAsync(
-        string projectId,
-        string key,
-        string? displayName,
-        string? description,
-        string[]? tags,
-        string? stage,
-        string body)
-    {
-        await SetPromptAsync(projectId, key, body);
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectPromptTemplates
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
-
-        if (row is null)
-        {
-            row = new ProjectPromptTemplateRow { ProjectId = projectId, Key = key };
-            db.ProjectPromptTemplates.Add(row);
-        }
-
-        row.DisplayName = string.IsNullOrWhiteSpace(displayName) ? key : displayName!;
-        row.Description = description ?? string.Empty;
-        row.TagsJson = JSON.Serialize(tags ?? Array.Empty<string>());
-        row.Stage = stage;
-        row.Body = body;
-        row.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
-
-        return new EffectivePrompt(row.Key, row.DisplayName, row.Description, tags ?? Array.Empty<string>(), row.Stage, row.Body, "project-override");
-    }
-
-    public async Task<bool> DeleteProjectPromptOverrideAsync(string projectId, string key)
-    {
-        var existing = await GetProjectPromptOverrideAsync(projectId, key);
-        await DeletePromptAsync(projectId, key);
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectPromptTemplates
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
-        if (row is not null)
-        {
-            db.ProjectPromptTemplates.Remove(row);
-            await db.SaveChangesAsync();
-        }
-
-        return existing is not null;
-    }
-
-    public async Task<PromptPreviewResult> PreviewPromptAsync(
-        string projectId, string key, JsonElement variables)
-    {
-        var effective = await GetPromptAsync(projectId, key)
-            ?? throw new ArgumentException($"Prompt '{key}' not found");
-
-        var result = _engine.Render(effective.Body, variables);
-        return new PromptPreviewResult(result.Rendered, result.MissingVariables, result.Depth, result.Errors);
-    }
-
-    // =======================================================================
     // Disabled workflow profiles
     // =======================================================================
 
@@ -481,28 +295,6 @@ public class ProjectWorkflowProfileManager : IScopedService
     // =======================================================================
     // Helpers
     // =======================================================================
-
-    private async Task<Dictionary<string, string>> LoadProjectPromptsAsync(string projectId)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var profile = await db.ProjectWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        return profile?.Prompts ?? new(StringComparer.Ordinal);
-    }
-
-    private static string[] DeserializeTags(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-            return [];
-        try
-        {
-            return JSON.Deserialize<string[]>(json) ?? [];
-        }
-        catch
-        {
-            return [];
-        }
-    }
 
     private async Task<bool> ProjectTemplateExistsAsync(string projectId, string templateId)
     {

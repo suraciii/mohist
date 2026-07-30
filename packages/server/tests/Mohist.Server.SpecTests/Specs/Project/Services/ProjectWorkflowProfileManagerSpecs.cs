@@ -19,7 +19,7 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
     public ProjectWorkflowProfileManagerSpecs()
     {
         _database = TestSqliteDatabase.CreateModelSchema();
-        _manager = new ProjectWorkflowProfileManager(new TestDbContextFactory(_database.Options), new StubPromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
+        _manager = new ProjectWorkflowProfileManager(new TestDbContextFactory(_database.Options), NullActionCatalogSource.Instance);
     }
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
@@ -159,8 +159,6 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
             []);
         var managerWithCatalog = new ProjectWorkflowProfileManager(
             new TestDbContextFactory(_database.Options),
-            new StubPromptLoader(),
-            new PromptTemplateEngine(),
             new StubActionCatalogSource(catalog));
 
         var exception = await Assert.ThrowsAsync<WorkflowDefinitionValidationException>(() =>

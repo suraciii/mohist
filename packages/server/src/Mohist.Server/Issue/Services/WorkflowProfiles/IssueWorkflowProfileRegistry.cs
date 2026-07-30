@@ -1,8 +1,5 @@
-using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -11,12 +8,10 @@ public class IssueWorkflowProfileRegistry : IScopedService
 {
     private readonly Dictionary<string, IIssueWorkflowProfile> _profiles;
 
-    public IssueWorkflowProfileRegistry(
-        IPromptLoader promptLoader,
-        IDbContextFactory<MohistDbContext> dbFactory)
+    public IssueWorkflowProfileRegistry(ProjectPromptStore promptStore)
     {
-        var defaults = new MohistLocalIssueWorkflowProfile(promptLoader, dbFactory);
-        var githubPr = new MohistGithubPrIssueWorkflowProfile(promptLoader, dbFactory);
+        var defaults = new MohistLocalIssueWorkflowProfile(promptStore);
+        var githubPr = new MohistGithubPrIssueWorkflowProfile(promptStore);
         _profiles = new Dictionary<string, IIssueWorkflowProfile>(IssueWorkflowProfiles.IdComparer)
         {
             [defaults.Id] = defaults,

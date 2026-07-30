@@ -40,6 +40,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IssueRepositoryResolver _repositoryResolver;
     private readonly WorkflowProfileManager _workflowProfileManager;
+    private readonly WorkflowPromptResolver _workflowPromptResolver;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueVariableStore _issueVariableStore;
     private readonly AttachmentService _attachmentService;
@@ -60,6 +61,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IBackgroundTaskLauncher backgroundTasks,
         IssueRepositoryResolver repositoryResolver,
         WorkflowProfileManager workflowProfileManager,
+        WorkflowPromptResolver workflowPromptResolver,
         ProjectWorkflowProfileManager projectProfileManager,
         IssueVariableStore issueVariableStore,
         AttachmentService attachmentService,
@@ -80,6 +82,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _backgroundTasks = backgroundTasks;
         _repositoryResolver = repositoryResolver;
         _workflowProfileManager = workflowProfileManager;
+        _workflowPromptResolver = workflowPromptResolver;
         _projectProfileManager = projectProfileManager;
         _issueVariableStore = issueVariableStore;
         _attachmentService = attachmentService;
@@ -99,6 +102,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IBackgroundTaskLauncher backgroundTasks,
         IssueRepositoryResolver repositoryResolver,
         WorkflowProfileManager workflowProfileManager,
+        WorkflowPromptResolver workflowPromptResolver,
         ProjectWorkflowProfileManager projectProfileManager,
         IssueVariableStore issueVariableStore,
         AttachmentService attachmentService,
@@ -118,6 +122,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _backgroundTasks = backgroundTasks;
         _repositoryResolver = repositoryResolver;
         _workflowProfileManager = workflowProfileManager;
+        _workflowPromptResolver = workflowPromptResolver;
         _projectProfileManager = projectProfileManager;
         _issueVariableStore = issueVariableStore;
         _attachmentService = attachmentService;
@@ -326,7 +331,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (string.IsNullOrWhiteSpace(effectiveProfileId))
             throw new InvalidOperationException(WorkflowProfileManager.NoEnabledWorkflowProfileMessage);
 
-        var availablePrompts = await _workflowProfileManager.LoadPromptsAsync(
+        var availablePrompts = await _workflowPromptResolver.LoadPromptsAsync(
             wrId,
             projectId: issue.ProjectId);
         EnsurePromptsReferencesResolve(
