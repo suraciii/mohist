@@ -129,3 +129,67 @@ run. No work-in-progress on disk; the interrupted turn was investigative only.
 - The existing `HandleTimeoutAsync_DuringAgentJobAssignment...` concurrency
   test and `AgentJobGrainSpecs` capacity test exceed the command timeout in
   isolation; they were not treated as successful verification.
+
+# Issue 531 T-003 Progress
+
+## Codebase Patterns
+
+- `/api/runner/{id}/report` now routes AgentJob reports through
+  `IAgentJobGrain.ReportResultAsync` directly. The grain already returns
+  `Accepted` for the happy path and `Reason="stale"` for late reports on
+  terminal jobs, so the route maps both to the same `RunnerReportResponse`
+  `Tracked=true` ack and stops retrying either branch.
+- `TaskLogService.IsActiveWorkAsync` now consults
+  `IAgentJobStore.ListRunningForRunnerAsync` instead of `RunnerWorkStore`.
+  The store has been removed entirely, so any future regression here shows
+  up as a compile error.
+- `RunnerGrain.GetRuntimeStateAsync` and `CloseoutLostAsync` both project
+  the runner's active agent-job list from `IAgentJobStore.ListRunningForRunnerAsync`
+  and report `runner-lost` via `IAgentJobGrain.ReportResultAsync`. The
+  grain no longer holds any `_worksState` field, so the push-path code
+  is unrepresentable.
+- The drop migration `20260730000000_DropRunnerWorksTable` lives alongside
+  T-001's atomic-ledger migration; deploy them together so the
+  AgentJobs ledger has been writing scheduling columns before the legacy
+  table disappears.
+
+## Decisions (this task)
+
+- Dropped the unused `IAgentJobGrain.MarkUnknownAsync` /
+  `ReconcileRunningAsync` default-only members — T-001 already routes
+  the only call site (`CloseoutLostAsync`) through `ReportResultAsync`
+  and the T-001 design made the timeout terminal, so the Unknown
+  state machine has no production consumer. The corresponding
+  observation spec was removed in lockstep.
+- `RunnerWorkReportResult`, `RunnerWorkAssignmentResult`, and
+  `AgentJobPollState` serializer types were removed alongside the
+  grain methods, so a stale reference would fail compilation rather
+  than silently call a relay that no longer exists.
+- The `RunnerWorks` migration remains an explicit drop table to make
+  rollback obvious: the only safe reverse is to re-run T-001 first,
+  since after this cutover the AgentJobs ledger is the sole owner.
+
+## Status (interrupted 2026-07-30)
+
+T-003 was committed on `mohist/run-wr_961132d1098141959d0d2e92c2609c6d`.
+The working tree builds cleanly for server + SpecTests. Verified focused
+suites:
+
+- `TaskLogServiceSpecs` 2/2.
+- `TaskLogServicePersistThenPublishSpecs` 10/10.
+- `RunnerStatusProjectionSpecs` / `RunnerFailureSpecs` /
+  `RunnerOutstandingWorkSpecs` / `MixedOwnerDispatchSpecs` /
+  `DispatchServiceReconciliationSpecs` 61/61 combined.
+- `AgentJobGrainSpecs`, `AgentJobStoreSpecs`,
+  `AgentJobTerminalDeliverySpecs`,
+  `AgentJobTerminalTranscriptPersistenceSpecs`,
+  `AgentJobWriteThroughMirrorSpecs`, `AgentLaunchObservationRoutesSpecs`,
+  `AgentJobRoutesSpecs` were scheduled in the combined run but exceeded
+  the 10-minute command budget before completing; they were not
+  treated as verified in this turn.
+
+The `DropRunnerWorksTable` migration is staged but uncommitted in the
+working tree (tracked as untracked file). No production code reads or
+writes `RunnerWorks`. `AgentJobWriteThroughMirrorSpecs` was kept (the
+mirror is no longer used but tests still assert it is unused, which is
+the regression contract).
