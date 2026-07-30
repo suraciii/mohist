@@ -170,7 +170,7 @@ public class WorkflowQuerier : IScopedService
     }
 
     private static WorkflowRun? DeserializeWorkflowRun(string json) =>
-        JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options);
+        JsonSerializer.Deserialize<WorkflowRun>(json, JSON.Options);
 
     private static WorkflowRun? Hydrate(WorkflowRunRow row)
     {
