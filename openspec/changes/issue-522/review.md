@@ -2,14 +2,16 @@
 
 ## Findings
 
-### High: A non-launch Turn made Unknown by stop can never reconcile on later Runtime evidence
+### High: Turn control's stale guard is not held through the side effect
 
-The new synchronous unknown transition in `AgentSessionStopRoutes.ExecuteStopAsync` marks a follow-up Turn `Unknown` (`packages/server/src/Mohist.Server/Api/AgentSessionStopRoutes.cs:134-137`). A later authoritative `session.activity` fact with that same `turnId` then enters `DriveTerminalActivityLifecycle`, but its `FindCurrentNonLaunchTurn` lookup excludes `Unknown` Turns (`packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:1592-1606`, `:1639-1654`) and returns without applying the completed/failed observation. This is not an immutable-domain-state restriction: `MarkTurnTerminal` explicitly permits `Unknown → Completed|Failed` (`packages/server/src/Mohist.Server/Sessions/Domain/AgentSession.Transitions.cs:617-647`), but the runtime-fact path cannot reach it.
+`AgentSessionStopRoutes.ExecuteStopAsync` first reads `ResolveTurnControlAsync` (`packages/server/src/Mohist.Server/Api/AgentSessionStopRoutes.cs:64`) and later sends the session-scoped `CancelAgentSession` command (`:116-119`). Nothing revalidates that the same Turn is still executing between those two calls. The Runner receives the supplied `turnId`, but `cancel-handler.ts` only uses it when recording the resulting activity fact (`packages/runner/src/server/cancel-handler.ts:127-133`, `:145-177`); its actual `callCancel` at `:110` aborts the physical Runtime session.
 
-An unconfirmed Pi stop can therefore leave a follow-up Turn and its Session permanently Unknown even after the Runtime later reports completion or failure. That violates the stop spec's requirement that Unknown reconcile on authoritative Runtime evidence. Preserve the stale/current guard, but allow a terminal fact correlated to the same current Unknown non-launch Turn to call `MarkTurnTerminal`; add a lifecycle/API regression for `Executing → Unknown` from an unconfirmed stop followed by a correlated completed and failed Runtime activity fact.
+Consequently, an executing target can finish after the grain read, its terminal fact can make the Session idle, and a later follow-up can begin on that same Runtime session before the delayed stop reaches the Runner. The old request then aborts the later Turn. This is exactly the stale-entry failure the Turn-addressing contract forbids, even though the later activity fact remains correlated to the original Turn. The cancel path has the same TOCTOU shape: it resolves a queued Turn (`AgentSessionCancelRoutes.cs:59`) and separately invokes the void `CancelTurnAsync` (`:92`); if a `session.input` fact promotes it in between, `CancelTurn` no-ops but the route still returns `state: "cancelled"` (`:93`).
+
+Make target eligibility and the control transition/claim atomic in the Session grain, then ensure a stop cannot call the session-scoped Runtime abort once that claim is stale. The operation must return the settled target state rather than allowing the route to fabricate `cancelled`. Add deterministic API/Runner tests that interleave terminal-plus-next-Turn progression between the initial control request and Runner dispatch, and that interleave queued-to-executing before cancellation.
 
 ## Verification
 
-The current branch's recorded validation shows full .NET, Runner, and Web suites passing. This review traced the post-stop correlated Runtime activity path and found the missing Unknown reconciliation transition.
+The branch records passing full .NET, Web, and Runner validation. This review inspected the current control routes, Session-grain transitions, Runner handler, and API regressions; the existing stale tests cover a target already terminal before the request, not this read-to-side-effect interleaving.
 
 <promise>FAIL</promise>
