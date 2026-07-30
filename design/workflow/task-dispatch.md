@@ -112,6 +112,31 @@ Effective Variables 只放在 `vars` 下，不把变量 key 复制成顶层裸�
 不携带。OpenSpec 目录不是 runtime context，由 Profile 与 Prompt 使用
 `openspec/changes/issue-${{ issue.number }}` 明文表达。
 
+## Dispatch 快照的持久化
+
+attempt 快照是"实际下发的契约"，其内容语义见上文；本节规定快照的**存储生命周期**：
+
+- 快照随首次 dispatch 生成后不再变化（首写胜利）；poll redelivery 必须逐字返回首次
+  快照，不重新渲染。
+- 快照只需在 attempt 处于 Running（已派发未上报终态）期间可取。attempt 进入终态
+  （Completed / Failed / Cancelled）或被后续 attempt 取代后，快照立即失效，不再保留。
+- 快照**不随** WorkflowRun State 全量持久化。快照与 run State 分离存放，redelivery
+  路径按需单独加载；run State 只保留裁决所需的运行事实，不复制 dispatch payload。
+  历史 attempt 的快照一律不存在。
+- checks dispatch 不持久化快照，redelivery 走重建（`TranslateToDispatchAsync`）。
+- 快照内容的去重（如 prompts 按 key 引用、`tasks` 输出按需裁剪）属于渲染内容优化，
+  不改变本节的生命周期规则；见 [`variables.md`](variables.md)。
+
+### 现状差距
+
+当前实现把每次 attempt 的完整 `WorkDispatch` 快照写入 `TaskRun.DispatchSnapshot` 并随
+run State 全量落库（`WorkflowRunStore`），终态后不清理。实测一个处于 check 阶段的活跃
+run 的 State 达 3.5 MB，其中 81% 是被取代 attempt 的重复快照（27 KB 全套 prompt
+模板被复制 65 份；`tasks` 输出汇总最多重复 34 份）。每次读（`WorkflowRunQuerier.LoadAsync`、
+`WorkflowQuerier.GetStatusAsync`）与每次状态写（`WorkflowRunStore.SaveAsync`）都全量
+序列化 / 反序列化该 JSON，构成 Server LOH 分配风暴的主要来源（占实测 LOH 分配 95% 以上）。
+迁移路径：先做到"终态置空"，再外置快照存储。
+
 ## 校验时机
 
 Profile 保存/更新时的 catalog 校验只检查常量输入与 Action 契约（未知 `uses`、未知输入键、

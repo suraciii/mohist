@@ -123,6 +123,7 @@
 - [workflow/actions.md](workflow/actions.md) — Action 插件模型：manifest 契约、输入单通道、结构化 output、能力注入、catalog 校验、失败恢复编排。
 - [workflow/builtin-workflows.md](workflow/builtin-workflows.md) — 内置 workflow（local / github-pr）的设计要点；yaml 定义是真源。
 - [workflow/profile.md](workflow/profile.md) — Workflow Profile：Project-scoped collection、默认选择、Issue override 与 Run snapshot。
+- [workflow/run-state.md](workflow/run-state.md) — WorkflowRun State：持久化内容边界、读写成本，以及启动期单向格式迁移规则。
 - [workflow/variables.md](workflow/variables.md) — Workflow Variables：Project / Issue / Run 资源、合并、动态生效与 `setVars` 语义。
 - [workflow/task-dispatch.md](workflow/task-dispatch.md) — task `with` / `expect` 模板求值时机的单一权威：Server dispatch 携带原始声明与 attempt 不可变快照，Runner 在调用 Action 前的执行入口统一渲染。
 - [workflow/recovery.md](workflow/recovery.md) — 失败恢复：recovery 声明、when 匹配、runner 构造恢复任务。
