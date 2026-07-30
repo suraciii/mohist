@@ -247,8 +247,9 @@ Variables 的 `medium`，随后 Issue 的同名值再将其覆盖为 `xhigh`。
 原始声明与 attempt 不可变快照、Runner 执行入口统一渲染、task `setVars` 经 Run
 Variables PATCH 投影。
 
-开放问题：是否需要把 attempt 快照单独持久化以支持审计，还是 attempt 不可变快照只随
-dispatch 流转就足够。
+开放问题已定论：attempt 快照的语义（不可变、重投递逐字重放）与存储生命周期（终态即
+弃、不随 run State 全量持久化）由 [`task-dispatch.md`](task-dispatch.md) 的
+「Dispatch 快照的持久化」一节定义；审计诉求不构成按 attempt 全量保留快照的理由。
 
 ## `WorkflowRunProfile` row/table name: historical misnomer
 
