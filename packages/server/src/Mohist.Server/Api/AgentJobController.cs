@@ -115,6 +115,7 @@ public static class AgentJobController
             ProjectId: body.Workspace?.ProjectId,
             AgentId: body.AgentId!.Trim());
 
+        var waiter = grain.WaitForTerminalAsync();
         try
         {
             await grain.SubmitAsync(input);
@@ -127,7 +128,7 @@ public static class AgentJobController
         AgentJobTerminalResult terminal;
         try
         {
-            terminal = await AwaitTerminalAsync(grain, timeout, timeProvider, ct);
+            terminal = await waiter.WaitAsync(timeout, timeProvider, ct);
         }
         catch (OperationCanceledException)
             when (!ct.IsCancellationRequested)
@@ -190,33 +191,6 @@ public static class AgentJobController
                 return false;
         }
         return true;
-    }
-
-    private static async Task<AgentJobTerminalResult> AwaitTerminalAsync(
-        IAgentJobGrain grain,
-        TimeSpan timeout,
-        TimeProvider timeProvider,
-        CancellationToken requestCt)
-    {
-        var deadline = timeProvider.GetUtcNow() + timeout;
-        var step = TimeSpan.FromMilliseconds(100);
-
-        while (true)
-        {
-            var terminal = await grain.GetTerminalResultAsync();
-            if (terminal.Status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
-                return terminal;
-
-            if (timeProvider.GetUtcNow() + step >= deadline)
-            {
-                terminal = await grain.GetTerminalResultAsync();
-                if (terminal.Status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
-                    return terminal;
-                throw new TimeoutException("Agent job did not reach a terminal state in time.");
-            }
-
-            await Task.Delay(step, timeProvider, requestCt);
-        }
     }
 
     private static IResult BuildTimeoutResponse(string jobKey, TimeSpan timeout)

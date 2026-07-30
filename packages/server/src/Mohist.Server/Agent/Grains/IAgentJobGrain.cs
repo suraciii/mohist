@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
+using Orleans.Concurrency;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -20,6 +21,12 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     Task EnsureSubmittedAsync(AgentJobInput input);
     Task CheckTimeoutsAsync();
     Task<AgentJobTerminalResult> GetTerminalResultAsync();
+    // A suspended waiter must not block runner result reports.
+    [AlwaysInterleave]
+    // TimeSpan.MaxValue leaves the transport without a deadline; the handler's
+    // WaitAsync enforces the configurable JobTimeout instead.
+    [ResponseTimeout("10675199.02:48:05.4775807")]
+    Task<AgentJobTerminalResult> WaitForTerminalAsync();
     Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync();
 
     /// <summary>

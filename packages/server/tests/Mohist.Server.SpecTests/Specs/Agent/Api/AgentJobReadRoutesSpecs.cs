@@ -366,6 +366,7 @@ internal sealed class ReadAgentJobGrain : IAgentJobGrain
         TerminalResultCalls++;
         return Task.FromResult(_terminalResult ?? new AgentJobTerminalResult(_status, null, null, null, null, null));
     }
+    public Task<AgentJobTerminalResult> WaitForTerminalAsync() => GetTerminalResultAsync();
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() =>
         Task.FromResult(new AgentJobRuntimeSnapshot(_status, null, null, null, 0, false, false, _projectId, _executionDefinition));
     public Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan) => Task.FromResult(plan);

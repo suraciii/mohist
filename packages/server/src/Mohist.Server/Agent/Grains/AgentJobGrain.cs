@@ -56,6 +56,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IEventStore _eventStore;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IGrainFactory _grains;
+    private readonly TaskCompletionSource<AgentJobTerminalResult> _terminalCompletion =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IDisposable? _dispatchTimer;
     private IDisposable? _jobTimeoutTimer;
 
@@ -249,6 +251,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         return Task.FromResult(new AgentJobTerminalResult(
             State.Status, null, null, null, State.FailureReason, null));
     }
+
+    public Task<AgentJobTerminalResult> WaitForTerminalAsync() =>
+        IsTerminal
+            ? Task.FromResult(State.TerminalResult!)
+            : _terminalCompletion.Task;
 
     public async Task AssignRunnerAsync(string runnerId, string workId)
     {
@@ -1383,6 +1390,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         // has no durable wake-up after an activation loss.
         await EnsureRecoveryReminderAsync();
         await SaveAsync();
+        _terminalCompletion.TrySetResult(State.TerminalResult!);
 
         _log.LogInformation(
             "AgentJob {Id} terminal: {Status} ({Reason}, category={Category}, deliveryId={DeliveryId})",
