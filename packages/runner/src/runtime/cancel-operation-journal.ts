@@ -17,6 +17,11 @@ export interface CancelOperationJournalStore {
   complete(sessionId: string, payload: CancelAgentSessionPayload, reply: CancelAgentSessionReply): Promise<void>
 }
 
+export interface CancelOperationJournalFileSystem {
+  readText(path: string): Promise<string | null>
+  writeAtomicText(path: string, body: string): Promise<void>
+}
+
 interface JournalFile {
   version: 1
   operations: Record<string, Record<string, CancelOperationJournalEntry>>
@@ -29,14 +34,20 @@ export class CancelOperationJournal implements CancelOperationJournalStore {
   private unavailable = false
   private writeChain = Promise.resolve()
 
-  constructor(runnerRoot: string, filePath = join(runnerRoot, DEFAULT_CANCEL_OPERATION_JOURNAL_FILE)) {
+  constructor(
+    runnerRoot: string,
+    filePath = join(runnerRoot, DEFAULT_CANCEL_OPERATION_JOURNAL_FILE),
+    private readonly fileSystem: CancelOperationJournalFileSystem = new NodeCancelOperationJournalFileSystem(),
+  ) {
     this.filePath = resolve(filePath)
   }
 
   async load(): Promise<void> {
     this.operations = new Map()
     try {
-      const file = parse(await readFile(this.filePath, "utf8"))
+      const raw = await this.fileSystem.readText(this.filePath)
+      if (raw === null) return
+      const file = parse(raw)
       if (!file) {
         this.unavailable = true
         return
@@ -52,8 +63,8 @@ export class CancelOperationJournal implements CancelOperationJournalStore {
         }
         this.operations.set(sessionId, entries)
       }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.unavailable = true
+    } catch {
+      this.unavailable = true
     } finally {
       this.loaded = true
     }
@@ -110,10 +121,25 @@ export class CancelOperationJournal implements CancelOperationJournalStore {
         Object.fromEntries([...entries].map(([operationId, entry]) => [operationId, clone(entry)])),
       ])),
     }
-    await mkdir(dirname(this.filePath), { recursive: true })
-    const temporary = `${this.filePath}.${process.pid}.${Date.now()}.tmp`
-    await writeFile(temporary, JSON.stringify(file))
-    await rename(temporary, this.filePath)
+    await this.fileSystem.writeAtomicText(this.filePath, JSON.stringify(file))
+  }
+}
+
+export class NodeCancelOperationJournalFileSystem implements CancelOperationJournalFileSystem {
+  async readText(path: string): Promise<string | null> {
+    try {
+      return await readFile(path, "utf8")
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+      throw error
+    }
+  }
+
+  async writeAtomicText(path: string, body: string): Promise<void> {
+    await mkdir(dirname(path), { recursive: true })
+    const temporary = `${path}.${process.pid}.${Date.now()}.tmp`
+    await writeFile(temporary, body)
+    await rename(temporary, path)
   }
 }
 
