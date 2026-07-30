@@ -160,9 +160,32 @@ describe('AgentListPage', () => {
 
       const row = await screen.findByTestId('agent-row-offline')
       expect(within(row).getByTestId('agent-readiness-offline')).toHaveTextContent('Readiness: Ready')
-      expect(within(row).getByTestId('agent-availability-offline')).toHaveTextContent('Availability: Waiting (no-online-runner)')
+      expect(within(row).getByTestId('agent-availability-offline')).toHaveTextContent('Availability: Runner offline')
+      expect(within(row).getByTestId('agent-availability-guidance-offline')).toHaveAttribute('data-feedback-kind', 'runner-offline')
+      expect(within(row).getByTestId('agent-availability-guidance-offline')).toHaveTextContent(/connect a runner/i)
       expect(within(row).getByTestId('agent-workload-offline')).toHaveTextContent('Active: 2, Queued: 3')
       expect(within(row).getByTestId('agent-readiness-offline')).not.toHaveTextContent('Needs setup')
+    })
+
+    it.each([
+      ['capacity-full', 'Wait for a runner slot to free up'],
+      ['concurrency-limit', 'Wait for an active run to finish'],
+      ['dispatch-pending', 'Wait for dispatch to complete'],
+    ])('gives an actionable next step for %s Availability', async (waitingReason, nextAction) => {
+      mockAgents([makeAgent({ id: 'waiting', readiness: { conclusion: 'Ready', gaps: [], setup: null } })])
+      mockAvailability([makeAvailability({
+        agentId: 'waiting',
+        canStartNow: false,
+        waitingReason,
+        activeRuns: 1,
+        queuedCount: 1,
+      })])
+      renderPage()
+
+      const row = await screen.findByTestId('agent-row-waiting')
+      const guidance = within(row).getByTestId('agent-availability-guidance-waiting')
+      expect(guidance).toHaveAttribute('data-feedback-kind', 'back-pressure')
+      expect(guidance).toHaveTextContent(nextAction)
     })
 
     it('uses one list Availability request for multiple Agents', async () => {

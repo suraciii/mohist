@@ -61,3 +61,4 @@
 
 - The Availability summary route now reads active Agent definitions without hydrating Readiness, so its five-second refresh does not query each Agent's execution history.
 - `AgentQuerierListDefinitionsSpecs` uses a SQL command recorder to lock that no `AgentJobs` read occurs on the summary definition path.
+- Waiting rows now map Availability reasons to their user-facing explanation and next action for runner offline, capacity, concurrency, and dispatch waits.

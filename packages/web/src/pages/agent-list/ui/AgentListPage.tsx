@@ -1,7 +1,7 @@
 import { useMemo, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PlusIcon, BotIcon, ArchiveIcon, CircleIcon } from 'lucide-react'
-import { useAgentListAvailability, useAgents, readAgentModelAndVariant } from '../../../entities/agent'
+import { getAgentAvailabilityFeedback, useAgentListAvailability, useAgents, readAgentModelAndVariant } from '../../../entities/agent'
 import type { AgentAvailabilitySummaryEntry, AgentInfo } from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
@@ -48,6 +48,9 @@ function AgentRow({
   const lifecycle = useMemo(() => getLifecycleStatus(agent), [agent])
   const isArchived = agent.status === 'archived'
   const readiness = agent.readiness?.conclusion ?? 'Unknown'
+  const availabilityFeedback = !isArchived && availability && !availability.canStartNow
+    ? getAgentAvailabilityFeedback(availability.waitingReason)
+    : null
 
   return (
     <div
@@ -114,21 +117,32 @@ function AgentRow({
         >
           Readiness: {readiness}
         </span>
-        <span
-          data-testid={`agent-availability-${agent.id}`}
-          data-state={isArchived ? 'archived' : availability ? (availability.canStartNow ? 'available' : 'waiting') : 'unknown'}
-          className={availability?.canStartNow ? 'text-emerald-700' : 'text-muted-foreground'}
-        >
-          {isArchived
-            ? 'Availability: Not tracked for archived agents'
-            : availability
-              ? availability.canStartNow
-                ? 'Availability: Can start now'
-                : `Availability: Waiting (${availability.waitingReason ?? 'unknown reason'})`
-              : availabilityLoading
-                ? 'Availability: Loading...'
-                : 'Availability: Unknown'}
-        </span>
+        <div>
+          <span
+            data-testid={`agent-availability-${agent.id}`}
+            data-state={isArchived ? 'archived' : availability ? (availability.canStartNow ? 'available' : 'waiting') : 'unknown'}
+            className={availability?.canStartNow ? 'text-emerald-700' : 'text-muted-foreground'}
+          >
+            {isArchived
+              ? 'Availability: Not tracked for archived agents'
+              : availability
+                ? availability.canStartNow
+                  ? 'Availability: Can start now'
+                  : `Availability: ${availabilityFeedback!.title}`
+                : availabilityLoading
+                  ? 'Availability: Loading...'
+                  : 'Availability: Unknown'}
+          </span>
+          {availabilityFeedback && (
+            <p
+              data-testid={`agent-availability-guidance-${agent.id}`}
+              data-feedback-kind={availabilityFeedback.kind}
+              className="mt-1 text-muted-foreground"
+            >
+              {availabilityFeedback.message} {availabilityFeedback.nextAction}
+            </p>
+          )}
+        </div>
         <span data-testid={`agent-workload-${agent.id}`} className="text-muted-foreground">
           {isArchived
             ? 'Workload: Not tracked'
