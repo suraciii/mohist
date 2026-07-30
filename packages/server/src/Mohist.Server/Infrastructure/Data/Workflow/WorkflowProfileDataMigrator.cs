@@ -341,25 +341,38 @@ public static class WorkflowProfileDataMigrator
                 continue;
 
             var renamed = renames.TryGetValue(selection, out var next) ? next : selection;
-            run.State = binding.Location switch
+            var rewrittenState = run.State;
+            if (binding.Location != WorkflowProfileBindingLocation.None
+                && !string.Equals(binding.ProfileId, renamed, StringComparison.Ordinal))
             {
-                WorkflowProfileBindingLocation.Root => RewriteProperty(run.State, "workflowProfileId", renamed) ?? run.State,
-                WorkflowProfileBindingLocation.LegacyAnnotation => RewriteNestedProperty(run.State, "metadata", "annotations", "workflowProfileId", renamed) ?? run.State,
-                _ => run.State,
-            };
+                rewrittenState = binding.Location switch
+                {
+                    WorkflowProfileBindingLocation.Root => RewriteProperty(run.State, "workflowProfileId", renamed) ?? run.State,
+                    WorkflowProfileBindingLocation.LegacyAnnotation => RewriteNestedProperty(run.State, "metadata", "annotations", "workflowProfileId", renamed) ?? run.State,
+                    _ => run.State,
+                };
+            }
+            var stateChanged = !string.Equals(run.State, rewrittenState, StringComparison.Ordinal);
+            if (stateChanged)
+                run.State = rewrittenState;
+
             var status = ReadRunStatus(run.State);
             var isTerminal = status is "completed" or "done" or "stopped";
-            if (isTerminal)
+            var targetKey = isTerminal || WorkflowProfileCatalog.IsSystemProfile(renamed)
+                ? null
+                : renamed;
+            var keyChanged = !string.Equals(run.WorkflowProfileIdKey, targetKey, StringComparison.Ordinal);
+            if (keyChanged)
+                run.WorkflowProfileIdKey = targetKey;
+
+            if (stateChanged)
             {
-                run.WorkflowProfileIdKey = null;
+                var etag = db.Entry(run).Property<long>("ETag");
+                etag.CurrentValue = etag.OriginalValue + 1;
             }
-            else
-            {
-                run.WorkflowProfileIdKey = WorkflowProfileCatalog.IsSystemProfile(renamed)
-                    ? null
-                    : renamed;
-            }
-            countsMutable.WorkflowRunBindingsRewritten++;
+
+            if (stateChanged || keyChanged)
+                countsMutable.WorkflowRunBindingsRewritten++;
         }
 
         await db.SaveChangesAsync(cancellationToken);

@@ -61,6 +61,9 @@ State 格式变化是数据库升级的一部分，必须在新 Server 接受请
   的前提下迁移；已经是 canonical 格式的行不得改写。
 - data upgrader 必须幂等。写入失败由事务回滚；下次启动从持久数据重新判定并重试，不依赖
   上次进程的内存进度。
+- WorkflowRun State 迁移必须按持久化字节幂等：当前 canonical State 未发生实际改写时不得
+  重新序列化；只有 State 实际改变时才在同一保存事务中将该行 shadow ETag 恰好递增一次。
+  仅 backing key 变化不推进 State ETag，重复执行不得改变 State、ETag 或迁移计数。
 
 破坏性重写生产 State 前必须生成一致的 SQLite 备份并验证可打开。WAL 模式下不得只复制
 主 `.db` 文件；使用 SQLite online backup 或 `VACUUM INTO`，保证备份包含已提交的 WAL

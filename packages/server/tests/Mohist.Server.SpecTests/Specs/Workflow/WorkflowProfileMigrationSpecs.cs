@@ -190,6 +190,46 @@ public class WorkflowProfileMigrationSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Migrate_UnchangedBuiltInRootBindings_PreservesStateAndETag()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        var localState = "{\"status\":\"inProgress\",\"workflowProfileId\":\"mohist/local\",\"createdAt\":\"2026-01-01T00:00:00+00:00\"}";
+        var githubPrState = "{\"status\":\"inProgress\",\"workflowProfileId\":\"mohist/github-pr\",\"createdAt\":\"2026-01-01T00:00:00+00:00\"}";
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            var local = new WorkflowRunRow
+            {
+                WorkflowRunId = "wr_builtin_local",
+                State = localState,
+                Status = "inProgress",
+                MetadataProjectId = projectId,
+                WorkflowProfileIdKey = null,
+            };
+            var githubPr = new WorkflowRunRow
+            {
+                WorkflowRunId = "wr_builtin_github_pr",
+                State = githubPrState,
+                Status = "inProgress",
+                MetadataProjectId = projectId,
+                WorkflowProfileIdKey = null,
+            };
+            db.WorkflowRuns.AddRange(
+                local,
+                githubPr);
+            db.Entry(local).Property<long>("ETag").CurrentValue = 7;
+            db.Entry(githubPr).Property<long>("ETag").CurrentValue = 11;
+            await db.SaveChangesAsync();
+        }
+
+        await using var migrateDb = new MohistDbContext(_database.Options);
+        var result = await WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider);
+
+        Assert.Equal(0, result.Counts.WorkflowRunBindingsRewritten);
+        Assert.Equal((localState, 7L), await ReadRunStateAndETagAsync("wr_builtin_local"));
+        Assert.Equal((githubPrState, 11L), await ReadRunStateAndETagAsync("wr_builtin_github_pr"));
+    }
+
+    [Fact]
     public async Task Migrate_ReservedId_IsIdempotentAfterTheFirstRun()
     {
         var (projectId, _, _) = await SeedProjectAsync();
@@ -290,8 +330,13 @@ public class WorkflowProfileMigrationSpecs : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
+        var initialSnapshots = await ReadRunSnapshotsAsync(
+            "wr_active",
+            "wr_completed",
+            "wr_stopped",
+            "wr_done");
         await using var migrateDb = new MohistDbContext(_database.Options);
-        await WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider);
+        var migration = await WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider);
 
         var active = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_active");
         var completed = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_completed");
@@ -304,6 +349,12 @@ public class WorkflowProfileMigrationSpecs : IAsyncLifetime
         var doneState = JsonDocument.Parse(done.State).RootElement;
         Assert.Equal("legacy-custom", doneState.GetProperty("workflowProfileId").GetString());
         Assert.Equal("legacy-entry", doneState.GetProperty("history")[0].GetString());
+        Assert.Equal(3, migration.Counts.WorkflowRunBindingsRewritten);
+        Assert.Equal(initialSnapshots, await ReadRunSnapshotsAsync(
+            "wr_active",
+            "wr_completed",
+            "wr_stopped",
+            "wr_done"));
     }
 
     [Fact]
@@ -347,8 +398,9 @@ public class WorkflowProfileMigrationSpecs : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
+        var initialSnapshots = await ReadRunSnapshotsAsync("wr_root_active", "wr_root_terminal", "wr_legacy_annotation");
         await using var migrateDb = new MohistDbContext(_database.Options);
-        await WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider);
+        var first = await WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider);
 
         var active = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_root_active");
         var terminal = await migrateDb.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == "wr_root_terminal");
@@ -363,6 +415,33 @@ public class WorkflowProfileMigrationSpecs : IAsyncLifetime
             renamed,
             JsonDocument.Parse(legacy.State).RootElement.GetProperty("metadata").GetProperty("annotations").GetProperty("workflowProfileId").GetString());
         Assert.Equal(renamed, legacy.WorkflowProfileIdKey);
+
+        var firstSnapshots = await ReadRunSnapshotsAsync("wr_root_active", "wr_root_terminal", "wr_legacy_annotation");
+        await using var secondDb = new MohistDbContext(_database.Options);
+        var second = await WorkflowProfileDataMigrator.MigrateAsync(secondDb, _timeProvider);
+        Assert.Equal(3, first.Counts.WorkflowRunBindingsRewritten);
+        Assert.All(firstSnapshots, snapshot =>
+            Assert.Equal(initialSnapshots[snapshot.Key].ETag + 1, snapshot.Value.ETag));
+        Assert.Equal(0, second.Counts.WorkflowRunBindingsRewritten);
+        Assert.Equal(firstSnapshots, await ReadRunSnapshotsAsync("wr_root_active", "wr_root_terminal", "wr_legacy_annotation"));
+    }
+
+    private async Task<Dictionary<string, (string State, long ETag)>> ReadRunSnapshotsAsync(params string[] ids)
+    {
+        var snapshots = new Dictionary<string, (string State, long ETag)>(StringComparer.Ordinal);
+        await using var db = new MohistDbContext(_database.Options);
+        foreach (var id in ids)
+        {
+            var row = await db.WorkflowRuns.SingleAsync(r => r.WorkflowRunId == id);
+            snapshots[id] = (row.State, db.Entry(row).Property<long>("ETag").CurrentValue);
+        }
+        return snapshots;
+    }
+
+    private async Task<(string State, long ETag)> ReadRunStateAndETagAsync(string id)
+    {
+        var snapshots = await ReadRunSnapshotsAsync(id);
+        return snapshots[id];
     }
 
     private async Task<(string ProjectId, int Dummy, bool Initialized)> SeedProjectAsync(string projectId = "proj-1")
