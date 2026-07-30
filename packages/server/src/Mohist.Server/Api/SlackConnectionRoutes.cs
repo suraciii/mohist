@@ -69,6 +69,36 @@ public static class SlackConnectionRoutes
             return connection is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(connection);
         });
 
+        management.MapGet("/{connectionId}/diagnostic", async (
+            HttpContext context,
+            string connectionId,
+            AgentConnectionStore connections,
+            AgentQuerier agents,
+            ISecretStore secrets,
+            ISlackApiClient slack,
+            SlackSetupVerifier verifier,
+            CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null)
+                return ApiResults.NotFound("Slack Connection was not found.");
+
+            var ownerAvailability = await ProbeOwnerAvailabilityAsync(connection, secrets, slack, ct);
+            var agent = await agents.GetByIdAsync(projectId, connection.AgentId);
+            var agentReadiness = agent is null
+                ? connection.AgentReadiness
+                : AgentReadinessDeriver.Derive(agent.AgentConfig);
+            var result = ConnectionDiagnostic.Compute(
+                connection,
+                new DiagnosticInputs(
+                    verifier.IsAdapterOnline(connection),
+                    ownerAvailability,
+                    agentReadiness,
+                    agent?.Name));
+            return ApiResults.Ok(result);
+        });
+
         management.MapPatch("/{connectionId}", async (HttpContext context, string connectionId, SlackConnectionEditBody body, AgentConnectionStore connections, CancellationToken ct) =>
         {
             var fields = new HashSet<string>(StringComparer.Ordinal);
@@ -163,15 +193,21 @@ public static class SlackConnectionRoutes
             await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes(body.BotToken), ct);
 
             string? newHealth = null;
-            var fields = new HashSet<string>(StringComparer.Ordinal) { "healthReason" };
+            var fields = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "healthReason", "verifiedBotName", "verifiedBotIconUrl",
+            };
             if (connection.ConnectionHealth == ConnectionHealthKind.Unhealthy
                 && IsCredentialRelatedHealthReason(connection.HealthReason))
             {
                 fields.Add("connectionHealth");
                 newHealth = ConnectionHealthKind.Healthy;
             }
-            await connections.UpdateAsync(projectId, connectionId, fields, healthReason: null,
+            await connections.UpdateAsync(projectId, connectionId, fields,
+                healthReason: null,
                 connectionHealth: newHealth,
+                verifiedBotName: check.VerifiedBotName,
+                verifiedBotIconUrl: check.VerifiedBotIconUrl,
                 ct: ct);
 
             return ApiResults.Ok(await connections.GetAsync(projectId, connectionId, ct));
@@ -433,6 +469,39 @@ public static class SlackConnectionRoutes
         if (!string.IsNullOrWhiteSpace(botUserId))
             result = result.Replace($"<@{botUserId}>", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
         return result;
+    }
+
+    internal static async Task<string> ProbeOwnerAvailabilityAsync(
+        AgentConnection connection,
+        ISecretStore secrets,
+        ISlackApiClient slack,
+        CancellationToken ct)
+    {
+        if (connection.OwnerSlackUserId is null)
+            return OwnerAvailabilityKind.NotConfigured;
+
+        var token = await secrets.LoadAsync(
+            new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken), ct);
+        if (token is null || token.Length == 0)
+            return OwnerAvailabilityKind.Unknown;
+
+        try
+        {
+            var response = await slack.UsersInfoAsync(
+                connection.OwnerSlackUserId,
+                Encoding.UTF8.GetString(token),
+                ct);
+            return SlackOwnerClaimService.IsEligibleMember(
+                response,
+                connection.WorkspaceTeamId,
+                connection.OwnerSlackUserId)
+                ? OwnerAvailabilityKind.Available
+                : OwnerAvailabilityKind.Unavailable;
+        }
+        catch (HttpRequestException)
+        {
+            return OwnerAvailabilityKind.Unknown;
+        }
     }
 
     private static bool IsCredentialRelatedHealthReason(string? reason)

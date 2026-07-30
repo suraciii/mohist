@@ -290,5 +290,26 @@
   T-001 / T-002 specs in this issue.
 - `AgentJobRow` and `AgentSessionRow` insertions need `State` populated (the
   Status / ProjectId / AgentId / SubmittedAt columns are `json_extract`
-  computed columns). An empty `State` produces NULLs that look like the
-  rows weren't really saved.
+   computed columns). An empty `State` produces NULLs that look like the
+   rows weren't really saved.
+
+## Issue 517 — T-004 (Unified diagnostic with identity drift and owner availability probe)
+
+### Implementation notes
+
+- `VerifiedBotName` and `VerifiedBotIconUrl` are nullable snapshots on both the domain and persistence row. The migration is additive; existing connections remain `not_yet_verified` until a successful verification.
+- `SlackBotInfo` keeps the existing three-argument constructor compatible and parses Slack's `icons` object through `SlackBotIcons`; `IconUrl` chooses `image_1024`, then the next-highest available resolution.
+- `VerifyAsync` persists the snapshots together with the successful setup transition. `VerifyRotationAsync` remains verify-only as required by T-001 and returns the snapshots in `RotationCheckResult`; the rotation route persists them only after identity and credential checks succeed.
+- `ConnectionDiagnostic.Compute` has no I/O, Slack, database, or clock dependency. `DiagnosticInputs` carries adapter liveness, owner availability, derived Agent readiness, and Agent name. Its facts retain setup, desired state, health, credential status, heartbeat, owner, readiness, and concrete identity values independently.
+- The diagnostic route is separate from the raw view route. It loads the Bot token only for the lazy Owner `users.info` probe, applies `SlackOwnerClaimService.IsEligibleMember`, and returns `unknown` for missing credentials or `HttpRequestException`.
+
+### Test coverage
+
+- `ConnectionDiagnosticTests` covers all eight precedence rows, unique next actions, independent facts, all three drift kinds, and the not-yet-verified guard.
+- `ConnectionDiagnosticSpecs` covers active, unavailable, and unreachable Owner probes with a fake Slack client.
+- Existing setup and rotation specs now assert verified Bot name/icon capture.
+
+### Gotchas
+
+- The EF snapshot contains many `UpdatedAt` properties; when editing it manually, the new AgentConnection properties must be inserted in the AgentConnection block, not the first matching entity block.
+- T-001's rotation verifier intentionally does not mutate the store. Snapshot persistence belongs to the successful rotation route so failed or mismatched rotations cannot overwrite the last verified identity.

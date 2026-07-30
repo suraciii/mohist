@@ -459,6 +459,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.BotUserId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.BotName).HasMaxLength(512).IsRequired();
             entity.Property(e => e.AvatarHash).HasMaxLength(512);
+            entity.Property(e => e.VerifiedBotName).HasMaxLength(512);
+            entity.Property(e => e.VerifiedBotIconUrl).HasMaxLength(2048);
             entity.Property(e => e.SetupProgress).HasMaxLength(64).IsRequired();
             entity.Property(e => e.DesiredState).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ConnectionHealth).HasMaxLength(32).IsRequired();

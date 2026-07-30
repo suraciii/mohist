@@ -58,7 +58,28 @@ public sealed record SlackAuthTestResponse(
     [property: JsonPropertyName("bot_id")] string? BotId,
     [property: JsonPropertyName("app_id")] string? AppId);
 public sealed record SlackBotInfoResponse(bool Ok, string? Error, SlackBotInfo? Bot);
-public sealed record SlackBotInfo(string? Id, string? Name, [property: JsonPropertyName("app_id")] string? AppId);
+public sealed record SlackBotInfo(
+    string? Id,
+    string? Name,
+    [property: JsonPropertyName("app_id")] string? AppId,
+    SlackBotIcons? Icons = null)
+{
+    [JsonIgnore]
+    public string? IconUrl => Icons?.HighestResolutionUrl;
+}
+
+public sealed record SlackBotIcons(
+    [property: JsonPropertyName("image_36")] string? Image36 = null,
+    [property: JsonPropertyName("image_48")] string? Image48 = null,
+    [property: JsonPropertyName("image_72")] string? Image72 = null,
+    [property: JsonPropertyName("image_192")] string? Image192 = null,
+    [property: JsonPropertyName("image_512")] string? Image512 = null,
+    [property: JsonPropertyName("image_1024")] string? Image1024 = null)
+{
+    [JsonIgnore]
+    public string? HighestResolutionUrl =>
+        Image1024 ?? Image512 ?? Image192 ?? Image72 ?? Image48 ?? Image36;
+}
 public sealed record SlackPermissionsScopesListResponse(bool Ok, string? Error, IReadOnlyDictionary<string, IReadOnlyList<string>>? Scopes);
 public sealed record SlackUserInfoResponse(bool Ok, string? Error, SlackUserInfo? User);
 public sealed record SlackUserInfo(string? Id, string? TeamId, bool IsBot, bool Deleted, bool IsRestricted, bool IsUltraRestricted, bool IsGuest, IReadOnlyList<string>? TeamIds = null);

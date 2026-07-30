@@ -68,6 +68,8 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
         Assert.Equal("T123", connection.WorkspaceTeamId);
         Assert.Equal("A123", connection.AppId);
         Assert.Equal("U123", connection.BotUserId);
+        Assert.Equal("Mohist", connection.VerifiedBotName);
+        Assert.Equal("https://slack/icon-48.png", connection.VerifiedBotIconUrl);
         Assert.Equal(["auth.test", "bots.info:B123", "apps.permissions.scopes.list"], _slack.Calls);
     }
 
@@ -84,6 +86,18 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
         Assert.Equal(string.Empty, connection.WorkspaceTeamId);
         Assert.Equal(string.Empty, connection.AppId);
         Assert.Equal(string.Empty, connection.BotUserId);
+    }
+
+    [Fact]
+    public void SlackBotInfo_uses_the_highest_resolution_icon()
+    {
+        var bot = new SlackBotInfo(
+            "B123",
+            "Mohist",
+            "A123",
+            new SlackBotIcons(Image48: "48", Image1024: "1024"));
+
+        Assert.Equal("1024", bot.IconUrl);
     }
 
     [Fact]
@@ -116,7 +130,8 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
     {
         public List<string> Calls { get; } = [];
         public SlackAuthTestResponse AuthTest { get; set; } = new(true, null, "T123", "Workspace", "U123", "Mohist", "B123", "A123");
-        public SlackBotInfoResponse BotsInfo { get; set; } = new(true, null, new("B123", "Mohist", "A123"));
+        public SlackBotInfoResponse BotsInfo { get; set; } = new(true, null,
+            new("B123", "Mohist", "A123", new SlackBotIcons(Image48: "https://slack/icon-48.png")));
         public SlackPermissionsScopesListResponse PermissionsScopesList { get; set; } = new(true, null, new Dictionary<string, IReadOnlyList<string>>
         {
             ["im"] = ["chat:write", "im:history"],

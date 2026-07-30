@@ -11,7 +11,9 @@ public sealed record RotationCheckResult(
     string? Reason,
     string? ResolvedTeamId,
     string? ResolvedAppId,
-    string? ResolvedBotUserId);
+    string? ResolvedBotUserId,
+    string? VerifiedBotName,
+    string? VerifiedBotIconUrl);
 
 public sealed class SlackSetupVerifier
 {
@@ -72,7 +74,12 @@ public sealed class SlackSetupVerifier
         {
             return await FailAsync(projectId, connection, ex.Message, ct);
         }
-        await _connections.UpdateAsync(projectId, connectionId, new HashSet<string>(StringComparer.Ordinal) { "setupProgress", "connectionHealth", "healthReason" }, setupProgress: SetupProgressKind.ClaimOwner, connectionHealth: ConnectionHealthKind.Healthy, healthReason: null, ct: ct);
+        var verifiedBot = bot.Bot!;
+        await _connections.UpdateAsync(projectId, connectionId, new HashSet<string>(StringComparer.Ordinal)
+        {
+            "setupProgress", "connectionHealth", "healthReason", "verifiedBotName", "verifiedBotIconUrl",
+        }, setupProgress: SetupProgressKind.ClaimOwner, connectionHealth: ConnectionHealthKind.Healthy,
+            healthReason: null, verifiedBotName: verifiedBot.Name, verifiedBotIconUrl: verifiedBot.IconUrl, ct: ct);
         return new(true, SetupProgressKind.ClaimOwner, null, RequiredScopes);
     }
 
@@ -97,13 +104,13 @@ public sealed class SlackSetupVerifier
         {
             auth = await _slack.AuthTestAsync(botToken, ct);
             if (!auth.Ok || string.IsNullOrWhiteSpace(auth.TeamId) || string.IsNullOrWhiteSpace(auth.AppId) || string.IsNullOrWhiteSpace(auth.UserId) || string.IsNullOrWhiteSpace(auth.BotId))
-                return new(false, $"Slack rejected the Bot token: {auth.Error ?? "invalid_auth"}. Generate a new token.", null, null, null);
+                return new(false, $"Slack rejected the Bot token: {auth.Error ?? "invalid_auth"}. Generate a new token.", null, null, null, null, null);
             bot = await _slack.BotsInfoAsync(auth.BotId, botToken, ct);
             grantedScopes = await _slack.PermissionsScopesListAsync(botToken, ct);
         }
         catch (HttpRequestException)
         {
-            return new(false, "Slack could not be reached. Start mohist-slack and retry verification.", null, null, null);
+            return new(false, "Slack could not be reached. Start mohist-slack and retry verification.", null, null, null, null, null);
         }
 
         var scopes = grantedScopes.Scopes?.Values.SelectMany(scopes => scopes) ?? [];
@@ -114,9 +121,10 @@ public sealed class SlackSetupVerifier
             missing.Length > 0 ? $"Slack is missing required scopes: {string.Join(", ", missing)}. Add the scopes and reinstall the App." : null;
 
         if (reason is not null)
-            return new(false, reason, null, null, null);
+            return new(false, reason, null, null, null, null, null);
 
-        return new(true, null, auth.TeamId, auth.AppId, auth.UserId);
+        var verifiedBot = bot.Bot!;
+        return new(true, null, auth.TeamId, auth.AppId, auth.UserId, verifiedBot.Name, verifiedBot.IconUrl);
     }
 
     public async Task<AgentConnection?> RecordAdapterHeartbeatAsync(string projectId, string connectionId, CancellationToken ct = default)

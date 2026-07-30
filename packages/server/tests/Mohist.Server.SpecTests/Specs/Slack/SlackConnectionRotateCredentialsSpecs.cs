@@ -73,6 +73,8 @@ public sealed class SlackConnectionRotateCredentialsSpecs : IAsyncLifetime
         Assert.Equal("T123", result.ResolvedTeamId);
         Assert.Equal("A123", result.ResolvedAppId);
         Assert.Equal("U123", result.ResolvedBotUserId);
+        Assert.Equal("Mohist", result.VerifiedBotName);
+        Assert.Equal("https://slack/icon-48.png", result.VerifiedBotIconUrl);
     }
 
     [Fact]
@@ -155,6 +157,9 @@ public sealed class SlackConnectionRotateCredentialsSpecs : IAsyncLifetime
         var storedBot = await _secrets.LoadAsync(new SecretStoreAddress("project-1", _connectionId, SecretKind.BotToken));
         Assert.Equal("xapp-new", Encoding.UTF8.GetString(storedApp!));
         Assert.Equal("xoxb-new", Encoding.UTF8.GetString(storedBot!));
+        var connection = await GetConnectionAsync();
+        Assert.Equal("Mohist", connection.VerifiedBotName);
+        Assert.Equal("https://slack/icon-48.png", connection.VerifiedBotIconUrl);
     }
 
     [Fact]
@@ -316,14 +321,19 @@ public sealed class SlackConnectionRotateCredentialsSpecs : IAsyncLifetime
         await _secrets.StoreAsync(new SecretStoreAddress("project-1", _connectionId, SecretKind.AppToken), Encoding.UTF8.GetBytes(appToken));
         await _secrets.StoreAsync(new SecretStoreAddress("project-1", _connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes(botToken));
 
-        var fields = new HashSet<string>(StringComparer.Ordinal) { "healthReason" };
+        var fields = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "healthReason", "verifiedBotName", "verifiedBotIconUrl",
+        };
         if (connection.ConnectionHealth == ConnectionHealthKind.Unhealthy
             && IsCredentialRelatedHealthReason(connection.HealthReason))
         {
             fields.Add("connectionHealth");
         }
         await connections.UpdateAsync("project-1", _connectionId, fields, healthReason: null,
-            connectionHealth: fields.Contains("connectionHealth") ? ConnectionHealthKind.Healthy : null);
+            connectionHealth: fields.Contains("connectionHealth") ? ConnectionHealthKind.Healthy : null,
+            verifiedBotName: check.VerifiedBotName,
+            verifiedBotIconUrl: check.VerifiedBotIconUrl);
 
         return new RotateCredentialsOutcome(true, null, null, await connections.GetAsync("project-1", _connectionId));
     }
@@ -368,7 +378,8 @@ public sealed class SlackConnectionRotateCredentialsSpecs : IAsyncLifetime
     {
         public List<string> Calls { get; } = [];
         public SlackAuthTestResponse AuthTest { get; set; } = new(true, null, "T123", "Workspace", "U123", "Mohist", "B123", "A123");
-        public SlackBotInfoResponse BotsInfo { get; set; } = new(true, null, new("B123", "Mohist", "A123"));
+        public SlackBotInfoResponse BotsInfo { get; set; } = new(true, null,
+            new("B123", "Mohist", "A123", new SlackBotIcons(Image48: "https://slack/icon-48.png")));
         public SlackPermissionsScopesListResponse PermissionsScopesList { get; set; } = new(true, null, new Dictionary<string, IReadOnlyList<string>>
         {
             ["im"] = ["chat:write", "im:history"],

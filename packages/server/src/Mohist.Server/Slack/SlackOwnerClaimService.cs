@@ -231,7 +231,7 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
         return new(SlackInboundDecisionKind.Transferred, null);
     }
 
-    private static bool IsEligibleMember(
+    public static bool IsEligibleMember(
         SlackUserInfoResponse response,
         string workspaceTeamId,
         string senderSlackUserId)
