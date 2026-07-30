@@ -116,18 +116,6 @@ public static class AgentSessionFollowupRoutes
         {
             return Rejected(ex.SessionId, "capacity_exceeded", ex.Message);
         }
-        catch (InvalidOperationException ex)
-        {
-            return Rejected(target.SessionId, "followup_rejected", ex.Message);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            return ApiResults.Ok(new AgentSessionFollowupResult(
-                target.SessionId,
-                Status: "unknown",
-                Error: ex.Message,
-                Code: "followup_acceptance_unknown"));
-        }
         catch (FollowupOperationInProgressException ex)
         {
             return ApiResults.Conflict(ex.Message, "followup_in_progress", new { sessionId = ex.SessionId });
@@ -146,6 +134,18 @@ public static class AgentSessionFollowupRoutes
                 ex.Message,
                 "concurrency_limit",
                 new { sessionId = ex.SessionId, agentId = ex.AgentId });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Rejected(target.SessionId, "followup_rejected", ex.Message);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            return ApiResults.Ok(new AgentSessionFollowupResult(
+                target.SessionId,
+                Status: "unknown",
+                Error: ex.Message,
+                Code: "followup_acceptance_unknown"));
         }
 
         await dispatcher.DispatchNextAsync(projectId, target.SessionId, ct);

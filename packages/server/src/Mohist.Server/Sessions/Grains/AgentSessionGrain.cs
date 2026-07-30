@@ -429,7 +429,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var pending = GetPendingFollowups(session);
         if (pending.Any(lease => !lease.Accepted))
-            throw new FollowupOperationInProgressException(session.Id);
+            throw new InvalidOperationException("A follow-up operation is already in progress.");
         if (session.Status.PendingStop is { } stop)
             throw new StopOperationInProgressException(session.Id, stop.TurnId);
         if (session.Status.Activity == AgentSessionActivity.Unknown)
@@ -527,7 +527,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var pending = GetPendingFollowups(session);
         if (pending.Any(lease => !lease.Accepted))
-            throw new FollowupOperationInProgressException(session.Id);
+            throw new InvalidOperationException("A follow-up operation is already in progress.");
         if (session.Status.PendingStop is { } stop)
             throw new StopOperationInProgressException(session.Id, stop.TurnId);
         if (session.Status.Activity == AgentSessionActivity.Unknown)
@@ -559,8 +559,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 ShouldRedeliver: existingTurn.Status == AgentTurnStatus.Queued);
         }
 
-        if (session.CountQueuedFollowupInputs() >= FollowupMaxQueuedTurns)
-            throw new AgentSessionFollowupCapacityExceededException(session.Id, FollowupMaxQueuedTurns);
+        const int maxQueuedTurns = 16;
+        if (session.CountQueuedFollowupInputs() >= maxQueuedTurns)
+            throw new AgentSessionFollowupCapacityExceededException(session.Id, maxQueuedTurns);
 
         var result = session.AcceptFollowup(
             inputId: Guid.NewGuid().ToString("N"),
@@ -572,6 +573,36 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             now: Now());
         await CommitAsync(session, Array.Empty<AgentSessionEvent>());
         return result;
+    }
+
+    public async Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync()
+    {
+        var session = await GetRequiredAsync();
+        var turns = session.Status.Turns ?? [];
+        if (turns.Any(turn => turn.Status == AgentTurnStatus.Executing)) return null;
+        var leases = GetPendingFollowups(session).ToList();
+        var turn = turns.FirstOrDefault(turn => string.IsNullOrEmpty(turn.JobId) && turn.Status == AgentTurnStatus.Queued);
+        if (turn is null) return null;
+        var index = leases.FindIndex(lease => string.Equals(lease.TurnId, turn.Id, StringComparison.Ordinal));
+        if (index < 0 || leases[index].Dispatching) return null;
+        var inputs = (session.Status.Inputs ?? []).ToDictionary(input => input.Id, StringComparer.Ordinal);
+        var texts = turn.InputIds.Select(id => inputs[id].Text).ToArray();
+        leases[index] = leases[index] with { Dispatching = true, PayloadSealed = true };
+        SetPendingFollowups(session, leases);
+        await CommitAsync(session, []);
+        return new AgentSessionFollowupDispatch(turn.Id, leases[index].OperationId, texts);
+    }
+
+    public async Task ReleaseFollowupDispatchAsync(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId)) return;
+        var session = await GetRequiredAsync();
+        var leases = GetPendingFollowups(session).ToList();
+        var index = leases.FindIndex(lease => string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
+        if (index < 0 || !leases[index].Dispatching) return;
+        leases[index] = leases[index] with { Dispatching = false };
+        SetPendingFollowups(session, leases);
+        await CommitAsync(session, []);
     }
 
     public async Task MarkFollowupTurnExecutingAsync(string operationId)
