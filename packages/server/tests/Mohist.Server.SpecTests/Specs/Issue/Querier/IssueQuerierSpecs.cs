@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -360,6 +361,35 @@ public class IssueQuerierSpecs
     }
 
     [Fact]
+    public async Task ListAsync_ChildIssuesKeepExplicitAndProjectDefaultCustomProfiles()
+    {
+        var project = NewProject("child-custom-profiles");
+        const string explicitProfileId = "custom/child-explicit";
+        const string defaultProfileId = "custom/child-default";
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        db.WorkflowProfileRecords.AddRange(
+            CustomProfile(project.Id, explicitProfileId),
+            CustomProfile(project.Id, defaultProfileId));
+        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+        {
+            ProjectId = project.Id,
+            DefaultWorkflowProfileId = defaultProfileId,
+            DefaultWorkflowProfileIdKey = defaultProfileId,
+        });
+        await SeedIssueAsync(db, project.Id, 1, "Parent");
+        await SeedIssueAsync(db, project.Id, 2, "Explicit custom child", parentIssueNumber: 1, workflowProfileId: explicitProfileId);
+        await SeedIssueAsync(db, project.Id, 3, "Default custom child", parentIssueNumber: 1);
+
+        var issues = await scope.ServiceProvider.GetRequiredService<IssueQuerier>().ListAsync(project.Id, project);
+        var byNumber = issues.ToDictionary(issue => issue.Number);
+
+        Assert.Equal([2, 3], byNumber[1].Children.Select(child => child.Number).ToArray());
+        Assert.Equal(explicitProfileId, byNumber[2].WorkflowProfileId);
+        Assert.Equal(defaultProfileId, byNumber[3].WorkflowProfileId);
+    }
+
+    [Fact]
     public async Task Children_OrdinaryIssueReturnsNoChildRows()
     {
         var project = NewProject("ordinary");
@@ -391,7 +421,8 @@ public class IssueQuerierSpecs
         string? workflowRunId = null,
         int? parentIssueNumber = null,
         string? repositoryRef = null,
-        bool archived = false)
+        bool archived = false,
+        string? workflowProfileId = null)
     {
         var issue = new DomainIssue
         {
@@ -403,6 +434,7 @@ public class IssueQuerierSpecs
             WorkflowRunId = workflowRunId,
             ParentIssueNumber = parentIssueNumber,
             RepositoryRef = repositoryRef,
+            WorkflowProfileId = workflowProfileId,
             ArchivedAt = archived ? TestTime.UtcDateTime : null,
             Labels = label is null
                 ? new Dictionary<string, string>(StringComparer.Ordinal)
@@ -417,6 +449,14 @@ public class IssueQuerierSpecs
         });
         await db.SaveChangesAsync();
     }
+
+    private static WorkflowProfileRecordRow CustomProfile(string projectId, string profileId) => new()
+    {
+        ProjectId = projectId,
+        ProfileId = profileId,
+        Name = profileId,
+        DefinitionSource = "stages: []\n",
+    };
 
     private static async Task DetachChildAsync(
         MohistDbContext db,

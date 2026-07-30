@@ -88,11 +88,35 @@ public class IssueReadModelLoader : IScopedService
 
         var projectDefaultProfileId = await LoadProjectDefaultProfileAsync(db, projectId);
         var disabledIds = await _profileProvider.GetDisabledProfileIdsAsync(projectId);
+        var profiles = await _profileProvider.ListAsync(projectId);
 
         return IssueRowMapper.ByNumber(rows, projectId)
-            .Select(issue => ToReadModel(BuildInfo(issue, project, _effectiveProfileResolver.Resolve(
-                issue.WorkflowProfileId, projectDefaultProfileId, disabledIds))))
+            .Select(issue => ToReadModel(BuildInfo(issue, project, ResolveProfileId(
+                issue.WorkflowProfileId,
+                projectDefaultProfileId,
+                profiles,
+                disabledIds))))
             .ToList();
+    }
+
+    internal static string? ResolveProfileId(
+        string? issueProfileId,
+        string? projectDefaultProfileId,
+        IReadOnlyList<WorkflowProfileCollectionEntry> profiles,
+        IReadOnlySet<string>? disabledIds)
+    {
+        var profileIds = profiles.Select(profile => profile.ProfileId)
+            .ToHashSet(WorkflowProfileCatalog.IdComparer);
+        var systemProfileIds = profiles.Where(profile => profile.IsBuiltIn)
+            .Select(profile => profile.ProfileId)
+            .ToList();
+
+        return EffectiveWorkflowProfileResolver.ResolveCore(
+            issueProfileId,
+            projectDefaultProfileId,
+            profileIds.Contains,
+            disabledIds,
+            systemProfileIds);
     }
 
     /// <summary>

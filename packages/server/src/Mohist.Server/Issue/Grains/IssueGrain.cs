@@ -315,17 +315,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // mohist/local profile, which meant a mohist/github-pr issue would
         // inherit default prompts even though the run used the GitHub PR
         // definition.
-        var projectDefaultProfileId = await _profileProvider.GetDefaultProfileIdAsync(projectContext.Id);
-        var disabledIds = await _profileProvider.GetDisabledProfileIdsAsync(projectContext.Id);
-        var effectiveProfileId = EffectiveWorkflowProfileResolver.ResolveCore(
-            issue.WorkflowProfileId,
-            projectDefaultProfileId,
-            _profiles.Exists,
-            disabledIds,
-            _profiles.List().Select(p => p.Id).ToList());
-        if (string.IsNullOrWhiteSpace(effectiveProfileId))
-            throw new InvalidOperationException(WorkflowDefinitionResolver.NoEnabledWorkflowProfileMessage);
-
         var availablePrompts = await _workflowPromptResolver.LoadPromptsAsync(
             wrId,
             projectId: issue.ProjectId);

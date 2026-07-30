@@ -89,3 +89,10 @@ The route handlers read variables from stores, and T-002 moves the remaining cro
 - `WorkflowProfileCanonicalYamlRenderer` emits the Definition at the YAML root accepted by `WorkflowProfileYamlParser`, so `CanonicalLegacy` records created by migration resolve through `WorkflowProfileProvider`.
 - Resolver fixtures now seed `WorkflowProfileRecordRow` and exercise custom/default resolution, stage hot reload, and disabled fallback without legacy tables. `WorkflowProfileCollectionSpecs` adds provider enablement and default-binding coverage.
 - Verification: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true` passed (3347).
+
+## Review Follow-up
+
+- Issue read projections now resolve Issue selections and Project defaults against the provider's Project collection, so custom Profiles remain visible as the effective Profile instead of falling back to a built-in registry entry. The list path loads the collection once per Project.
+- `IssueGrain` relies on the Definition resolver's provider-backed result and no longer repeats a built-in-only Profile check before startup.
+- Verification: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true` passed (3350).
+- Follow-up: the composite child projection now shares the provider-backed membership resolver; `IssueQuerierSpecs` covers both an explicit custom child Profile and a child inheriting a custom Project default.

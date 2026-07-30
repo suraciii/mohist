@@ -58,7 +58,7 @@ public class IssueQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var issue = await LoadIssueAsync(db, projectId, number);
         if (issue is null) return null;
-        return ToInfo(
+        return await ToInfoAsync(
             issue,
             project,
             await _loader.LoadProjectDefaultProfileAsync(db, projectId),
@@ -414,7 +414,22 @@ public class IssueQuerier : IScopedService
     public async Task<IssueInfo> ToInfoAsync(Domain.Issue issue, ProjectInfo? project, string? projectDefaultProfileId)
     {
         var disabledIds = await _profileProvider.GetDisabledProfileIdsAsync(issue.ProjectId);
-        return ToInfo(issue, project, projectDefaultProfileId, disabledIds);
+        return await ToInfoAsync(issue, project, projectDefaultProfileId, disabledIds);
+    }
+
+    private async Task<IssueInfo> ToInfoAsync(
+        Domain.Issue issue,
+        ProjectInfo? project,
+        string? projectDefaultProfileId,
+        IReadOnlySet<string> disabledIds)
+    {
+        var profiles = await _profileProvider.ListAsync(issue.ProjectId);
+        var resolved = IssueReadModelLoader.ResolveProfileId(
+            issue.WorkflowProfileId,
+            projectDefaultProfileId,
+            profiles,
+            disabledIds);
+        return IssueReadModelLoader.BuildInfo(issue, project, resolved);
     }
 
     /// <summary>
@@ -918,13 +933,15 @@ public class IssueQuerier : IScopedService
         var childModels = new List<IssueReadModel>(childRows.Count);
         var projectDefaultProfileId = await _loader.LoadProjectDefaultProfileAsync(db, projectId);
         var disabledIds = await _profileProvider.GetDisabledProfileIdsAsync(projectId);
+        var profiles = await _profileProvider.ListAsync(projectId);
         foreach (var row in childRows)
         {
             var domain = IssueStore.Deserialize(row.State);
             if (domain is null) continue;
-            var resolvedProfileId = _effectiveProfileResolver.Resolve(
+            var resolvedProfileId = IssueReadModelLoader.ResolveProfileId(
                 domain.WorkflowProfileId,
                 projectDefaultProfileId,
+                profiles,
                 disabledIds);
             var info = IssueReadModelLoader.BuildInfo(domain, project: null, resolvedProfileId);
             childModels.Add(IssueReadModelLoader.ToReadModel(info));
