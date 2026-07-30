@@ -137,6 +137,7 @@ public class AgentJobRoutesSpecs
             CancellationToken.None);
 
         await grain.Submitted;
+        await grain.TerminalWaitStarted;
         Assert.False(responseTask.IsCompleted);
         time.Advance(TimeSpan.FromSeconds(38));
 
@@ -205,6 +206,7 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(_result);
+    public Task<AgentJobTerminalResult> WaitForTerminalAsync() => Task.FromResult(_result);
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_result.Status, null, null, _result.FailureReason));
     public Task FailAsync(string reason, string? agentId = null) => Task.CompletedTask;
     public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
@@ -213,8 +215,11 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
 internal sealed class PendingAgentJobGrain : IAgentJobGrain
 {
     private readonly TaskCompletionSource _submitted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _terminalWaitStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<AgentJobTerminalResult> _terminal = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public int SubmitCount { get; private set; }
     public Task Submitted => _submitted.Task;
+    public Task TerminalWaitStarted => _terminalWaitStarted.Task;
     private string? _failureReason;
 
     public Task<bool> IsWorkRunnableAsync(string runnerId, string workId) => Task.FromResult(false);
@@ -233,6 +238,7 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
     public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(new AgentJobTerminalResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, _failureReason, null, null, _failureReason, null));
+    public Task<AgentJobTerminalResult> WaitForTerminalAsync() { _terminalWaitStarted.TrySetResult(); return _terminal.Task; }
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, null, null, _failureReason));
     public Task FailAsync(string reason, string? agentId = null)
     {
@@ -331,7 +337,6 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                 jobKey,
                 workId,
                 new WorkResult("completed", "ok", JSON.DeserializeElement("{\"hello\":\"world\"}"), 0, ["artifact-a"]));
-            WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -385,7 +390,6 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                 jobKey,
                 workId,
                 new WorkResult("failed", "runner reported failure", JSON.DeserializeElement("{\"error\":\"x\"}"), 1));
-            WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -441,7 +445,6 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     artifactUploadIds = new[] { "artifact-http" },
                 });
             Assert.Equal(HttpStatusCode.OK, reportResponse.StatusCode);
-            WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -496,7 +499,6 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                 jobKey,
                 workId,
                 new WorkResult(Status: "completed", Message: "ok"));
-            WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -557,7 +559,4 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
         Assert.Equal(expectedRunnerId, assignment.RunnerId);
         return assignment.WorkId;
     }
-
-    private void WakeAgentJobValidationAwaiter() =>
-        _fixture.TimeProvider.Advance(TimeSpan.FromMilliseconds(100));
 }
