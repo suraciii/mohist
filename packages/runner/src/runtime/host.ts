@@ -893,9 +893,23 @@ export class RunnerHost {
         return
       } catch (error) {
         console.error(`runner connection failed; retrying in ${this.options.pollIntervalMs}ms`, error)
-        await this.shutdownConnection()
+        await this.disconnectForReconnect()
         await delay(this.options.pollIntervalMs, signal)
       }
+    }
+  }
+
+  private async disconnectForReconnect() {
+    const cleanup = new AbortController()
+    const timeout = setTimeout(() => cleanup.abort(), 5_000)
+    timeout.unref?.()
+    try {
+      await Promise.allSettled([
+        this.connection.disconnect(cleanup.signal),
+        this.signalR.disconnect(),
+      ])
+    } finally {
+      clearTimeout(timeout)
     }
   }
 }
