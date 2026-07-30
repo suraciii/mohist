@@ -24,9 +24,8 @@ namespace Mohist.Cli;
 /// route, delegating to the existing per-source queriers.
 /// </para>
 /// <para>
-/// <c>session cancel</c> requests runtime interruption only; it does not
-/// transition or rewrite the owning AgentJob's lifecycle (the job remains
-/// the sole terminal authority).
+/// <c>session cancel</c> deterministically cancels a queued Turn. Runtime
+/// interruption is exposed separately as <c>session stop</c>.
 /// </para>
 /// </remarks>
 internal static class SessionCommands
@@ -38,7 +37,7 @@ internal static class SessionCommands
             "Manage one AgentSession by its stable Session ID (issue-479). " +
             "Subcommands: list (--agent|--issue|--run), view <session-id>, " +
             "transcript <session-id>, followup <session-id>, " +
-            "compact <session-id>, reset <session-id>, cancel <session-id>.");
+             "compact <session-id>, reset <session-id>, cancel <session-id>, stop <session-id>.");
 
         session.Subcommands.Add(BuildList(api));
         session.Subcommands.Add(BuildView(api));
@@ -47,6 +46,7 @@ internal static class SessionCommands
         session.Subcommands.Add(BuildCompact(api));
         session.Subcommands.Add(BuildReset(api));
         session.Subcommands.Add(BuildCancel(api));
+        session.Subcommands.Add(BuildStop(api));
 
         return session;
     }
@@ -315,35 +315,53 @@ internal static class SessionCommands
         return cmd;
     }
 
-    private static Command BuildCancel(MohistCliApi api)
+    private static Command BuildCancel(MohistCliApi api) => BuildTurnControl(
+        api,
+        "cancel",
+        "Deterministically cancel a queued Turn. Sends a Server-only cancel request; use stop for an executing Turn.");
+
+    private static Command BuildStop(MohistCliApi api) => BuildTurnControl(
+        api,
+        "stop",
+        "Request that the Runtime stop an executing Turn. This is a best-effort request; use cancel for a queued Turn.");
+
+    private static Command BuildTurnControl(MohistCliApi api, string operation, string description)
     {
-        var cmd = new Command(
-            "cancel",
-            "Request interruption of the current Runtime execution only. Sends POST /api/projects/:projectId/agent-sessions/:sessionId/cancel and prints the resulting session state honestly. Does not cancel or rewrite the owning AgentJob lifecycle; the job remains the sole terminal authority.");
+        var cmd = new Command(operation, description);
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
+        var turnIdOpt = new Option<string>("--turn-id")
+        {
+            Arity = ArgumentArity.ExactlyOne,
+            Description = "Stable AgentTurn id to target"
+        };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionCancel)));
 
         cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(turnIdOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var sessionId = ctx.GetValue(sessionIdArg);
+            var turnId = ctx.GetValue(turnIdOpt);
             var project = ctx.GetValue(projectOpt);
             var output = ctx.GetValue(outputOpt);
-            return CancelAsync();
+            return TurnControlAsync();
 
-            async Task<int> CancelAsync()
+            async Task<int> TurnControlAsync()
             {
+                if (string.IsNullOrWhiteSpace(turnId))
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--turn-id is required.");
+
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintPostWithOutputAsync(
-                    ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/cancel"),
-                    new { },
+                    ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/{operation}"),
+                    new { turnId },
                     mode,
                     nameof(MohistCliApi.TableShape.SessionCancel),
                     rawJson: true);

@@ -10,6 +10,8 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     Task<bool> IsWorkRunnableAsync(string runnerId, string workId);
     Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result);
     Task<AgentJobStatus> GetStatusAsync();
+    Task<AgentJobCancelResult> CancelAsync() =>
+        Task.FromResult(new AgentJobCancelResult(AgentJobCancelDisposition.AlreadyEnded, AgentJobStatus.Unknown));
     Task<string?> GetCurrentWorkIdAsync();
     Task AssignRunnerAsync(string runnerId, string workId);
     Task<bool> RecordRuntimeSessionBindingAsync(string runnerId, string workId, string sessionId, string runtimeSessionId) =>
@@ -228,6 +230,7 @@ public enum AgentJobStatus
     Running,
     Completed,
     Failed,
+    Cancelled,
     /// <summary>
     /// Nonterminal, non-dispatchable state. The
     /// AgentJob grain could not confirm whether the original work
@@ -238,6 +241,18 @@ public enum AgentJobStatus
     /// Runner evidence.
     /// </summary>
     Unknown,
+}
+
+[GenerateSerializer]
+public sealed record AgentJobCancelResult(
+    [property: Id(0)] AgentJobCancelDisposition Disposition,
+    [property: Id(1)] AgentJobStatus Status);
+
+public enum AgentJobCancelDisposition
+{
+    Cancelled,
+    AlreadyEnded,
+    Executing,
 }
 
 /// <summary>

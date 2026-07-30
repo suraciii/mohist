@@ -85,6 +85,7 @@ export interface AgentSessionMetadata {
   probeSentAt?: string | null
   probeDeadlineAt?: string | null
   failureReason?: string | null
+  currentTurnId?: string | null
   turnCount?: number
   changedFiles?: FileChangeSummary[]
   metadata: AgentSessionMetadataCounts

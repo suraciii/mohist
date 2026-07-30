@@ -2,7 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollowup, useCancelGenericSession, launchObservationQueryOptions } from '../../../entities/agent'
+import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollowup, useGenericTurnControl, useCancelGenericSession, launchObservationQueryOptions } from '../../../entities/agent'
 import type { AgentLaunchObservationDto } from '../../../entities/agent'
 import { canFollowupSession, deriveSessionStatusKind } from '../../../entities/coder-session'
 import type { SessionTurn, SessionMetadata } from '../../../entities/coder-session'
@@ -18,7 +18,8 @@ export interface GenericSessionDataSourceDependencies {
   useGenericSessionTranscript: typeof useGenericSessionTranscript
   getGenericSessionTranscript?: (...args: [string, string, string?]) => Promise<unknown>
   useGenericFollowup: typeof useGenericFollowup
-  useCancelGenericSession: typeof useCancelGenericSession
+  useGenericTurnControl?: typeof useGenericTurnControl
+  useCancelGenericSession?: typeof useCancelGenericSession
 }
 
 const defaultDependencies: GenericSessionDataSourceDependencies = {
@@ -27,7 +28,7 @@ const defaultDependencies: GenericSessionDataSourceDependencies = {
   useGenericSessionSummary,
   useGenericSessionTranscript,
   useGenericFollowup,
-  useCancelGenericSession,
+  useGenericTurnControl,
 }
 
 export function useGenericSessionDataSource(
@@ -39,8 +40,10 @@ export function useGenericSessionDataSource(
     useGenericSessionSummary: useSummary,
     useGenericSessionTranscript: useTranscriptResponse,
     useGenericFollowup: useFollowup,
-    useCancelGenericSession: useCancel,
   } = dependencies
+  const useCancel = dependencies.useGenericTurnControl
+    ?? dependencies.useCancelGenericSession
+    ?? defaultDependencies.useGenericTurnControl!
   const { sessionId: rawSessionId } = useParams<{ sessionId: string }>()
   const { projectId } = useProject()
   const toProjectPath = useProjectPath()
@@ -142,21 +145,22 @@ export function useGenericSessionDataSource(
     await genericFollowup.mutateAsync({ sessionId, text })
   }, [genericFollowup, sessionId])
 
-  const cancelSession = useCallback((options?: SessionCancelOptions) => {
+  const currentTurnId = summary?.currentTurnId
+  const cancelSession = useCallback((operation: 'cancel' | 'stop' = 'stop', options?: SessionCancelOptions) => {
     cancelGeneric.mutate(
-      { sessionId, agentRef: summary?.agentId },
+      { sessionId, turnId: currentTurnId ?? '', operation, agentRef: summary?.agentId },
       {
         onSuccess: (result) => options?.onSuccess?.({ state: result.state ?? 'not-cancellable' }),
         onSettled: options?.onSettled,
       },
     )
-  }, [cancelGeneric, sessionId, summary?.agentId])
+  }, [cancelGeneric, currentTurnId, sessionId, summary?.agentId])
 
   const cancel = useMemo(
-    () => isRunning && !!summary?.runtimeSessionId && !!summary.runtime
-      ? { mutate: cancelSession, isPending: cancelGeneric.isPending }
+    () => currentTurnId && isRunning && !!summary?.runtimeSessionId && !!summary.runtime
+      ? { turnId: currentTurnId, mutate: cancelSession, isPending: cancelGeneric.isPending }
       : null,
-    [cancelSession, cancelGeneric.isPending, isRunning, summary?.runtime, summary?.runtimeSessionId],
+    [cancelSession, cancelGeneric.isPending, currentTurnId, isRunning, summary?.runtime, summary?.runtimeSessionId],
   )
 
   return {

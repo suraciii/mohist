@@ -216,8 +216,9 @@ async function handleFollowup(
             outbox,
             sessionTarget,
             selectedTarget,
-            payload.operationId,
-            isUncertainFollowupFailure(readErrorKind(result)) ? "unknown" : "idle",
+             payload.operationId,
+             payload.turnId,
+             isUncertainFollowupFailure(readErrorKind(result)) ? "unknown" : "idle",
             message,
           )
           if (readErrorKind(result) === "unavailable-runtime") {
@@ -225,11 +226,11 @@ async function handleFollowup(
           }
           return
         }
-        recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "idle")
+        recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, payload.turnId, "idle")
       },
       (error) => {
         console.error("followup runtime.followup rejected:", error instanceof Error ? error.message : String(error))
-        recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "unknown", error)
+        recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, payload.turnId, "unknown", error)
       },
     )
     if (operationId && operationKey && deps.followupOperationJournal) {
@@ -243,7 +244,7 @@ async function handleFollowup(
     void completion
   } catch (error) {
     console.error("followup runtime.followup threw:", error instanceof Error ? error.message : String(error))
-    recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "unknown", error)
+    recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, payload.turnId, "unknown", error)
     return unavailable()
   }
   return { accepted: true }
@@ -309,8 +310,16 @@ async function enqueueFollowupInput(
   payload: ReceiveFollowupPayload,
   randomId: () => string,
 ): Promise<void> {
+  // Issue-522 T-001 D1: when the server mints a stable inputId and
+  // turnId on the AgentSession grain before dispatching the follow-up,
+  // use them as the durable record id and the canonical correlation
+  // key. The Runner still emits the `session.input` event so the
+  // Server can promote the Queued Turn to Executing (D8), but the
+  // Server does NOT create a duplicate SessionInput/AgentTurn — the
+  // record id is the one the Server already minted.
+  const recordId = payload.inputId ?? randomId()
   const record: RuntimeEventRecord = {
-    id: randomId(),
+    id: recordId,
     producerFamily: sessionTarget.kind === "workflow" ? "workflow-session" : "generic-followup",
     target: sessionTargetToRuntimeTarget(sessionTarget),
     runtimeSessionId: target.runtimeSessionId,
@@ -323,6 +332,8 @@ async function enqueueFollowupInput(
         kind: "followup",
         sentAt: new Date().toISOString(),
         ...(payload.operationId ? { operationId: payload.operationId } : {}),
+        ...(payload.inputId ? { inputId: payload.inputId } : {}),
+        ...(payload.turnId ? { turnId: payload.turnId } : {}),
         runtimeSessionId: target.runtimeSessionId,
         source: "followup",
       },
@@ -337,6 +348,7 @@ function recordFollowupActivity(
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   operationId: string | undefined,
+  turnId: string | undefined,
   activity: "idle" | "unknown",
   error?: unknown,
 ): void {
@@ -356,6 +368,7 @@ function recordFollowupActivity(
         ...(error ? { failureReason: error instanceof Error ? error.message : errorMessage(error) } : {}),
         source: "followup",
         operationId,
+        ...(turnId ? { turnId } : {}),
         runtimeSessionId: target.runtimeSessionId,
         completedAt,
       },

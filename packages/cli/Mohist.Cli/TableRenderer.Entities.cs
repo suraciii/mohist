@@ -149,6 +149,12 @@ internal sealed partial class TableRenderer
         var status = StringOf(data, "status");
         var statusText = string.IsNullOrEmpty(status) ? "(no status returned)" : status;
         _out.WriteLine($"delivery: {statusText}");
+        var inputId = StringOf(data, "inputId");
+        if (!string.IsNullOrEmpty(inputId))
+            _out.WriteLine($"input:    {inputId}");
+        var turnId = StringOf(data, "turnId");
+        if (!string.IsNullOrEmpty(turnId))
+            _out.WriteLine($"turn:     {turnId}");
     }
 
     private void RenderAgentSessionCancel(JsonNode? data)
@@ -162,6 +168,8 @@ internal sealed partial class TableRenderer
         var state = StringOf(data, "state");
         var stateText = string.IsNullOrEmpty(state) ? "(no state returned)" : state;
         _out.WriteLine($"state: {stateText}");
+        if (string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
+            _out.WriteLine("verification: Session view");
     }
 
     private void RenderAgentSessionList(JsonNode? data)
@@ -451,6 +459,12 @@ internal sealed partial class TableRenderer
         var status = StringOf(data, "status");
         var statusText = string.IsNullOrEmpty(status) ? "(no status returned)" : status;
         _out.WriteLine($"delivery: {statusText}");
+        var inputId = StringOf(data, "inputId");
+        if (!string.IsNullOrEmpty(inputId))
+            _out.WriteLine($"input:    {inputId}");
+        var turnId = StringOf(data, "turnId");
+        if (!string.IsNullOrEmpty(turnId))
+            _out.WriteLine($"turn:     {turnId}");
     }
 
     private void RenderSessionCancel(JsonNode? data)
@@ -464,6 +478,8 @@ internal sealed partial class TableRenderer
         var state = StringOf(data, "state");
         var stateText = string.IsNullOrEmpty(state) ? "(no state returned)" : state;
         _out.WriteLine($"state: {stateText}");
+        if (string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
+            _out.WriteLine("verification: Session view");
     }
 
     private static string FormatSessionOwner(JsonObject obj)

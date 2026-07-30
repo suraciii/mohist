@@ -1,0 +1,67 @@
+## Codebase Patterns
+
+- AgentSession child records are persisted in the grain state snapshot; Orleans serialization requires arrays for single-item InputIds values rather than collection-expression read-only lists.
+- Follow-up reservations distinguish joining an active turn from starting an idle turn. Only idle-start follow-ups mint and persist a new input/turn pair before Runner dispatch.
+- Explicit Runner rejection cleans up the pre-dispatch queued follow-up record so existing retry behavior remains intact; uncertain dispatch failures retain the record.
+
+## T-001
+
+- Added durable follow-up AgentTurnRecord/Input linkage, idempotent redispatch handling, turn-id-keyed executing/terminal/cancel transitions, resolver classification, and non-launch lifecycle driving from existing runtime events.
+- Follow-up input and terminal activity facts carry the server-minted turn id. Launch turns remain Job-owned for terminal result authority.
+- AgentJob launch terminal/executing wrappers delegate through InitialTurnId; the existing dispatch fence remains queued until its established lifecycle point.
+
+## T-002
+
+- Added `AgentJobStatus.Cancelled` as a terminal Job verdict and mapped it to the owning launch Turn without creating a failure result.
+- `AgentJob.CancelAsync` decides Pending versus Running inside the Job grain, so cancellation wins before dispatch or is rejected once execution has started.
+- The session-scoped cancel route resolves a Turn first, returns stale/Executing states without Runner contact, delegates launch Turns to the owning Job, and cancels later Turns directly on the Session.
+- Cancelled Job observations and read projections use `cancelled`; `Unknown` remains non-terminal.
+- Focused AgentJob cancellation and T-001 lifecycle tests pass; the API cancellation class still hangs after host startup and needs a follow-up investigation before claiming the full spec suite passes.
+
+## T-003
+
+- Added `POST /api/projects/{projectRef}/agent-sessions/{sessionId}/stop` and the issue-scoped stop alias. The Session grain resolver gates the request to Executing Turns, directs Queued Turns to cancel, and returns terminal stale status without contacting the Runner.
+- Stop reuses `CancelAgentSession` with a Server-minted `turnId` in the payload and mirrors the Runner reply. Runner replies now use `stopped`, `unknown` with `interruptUnconfirmed`, or `stop-requested`; binding-guarded idle/unknown activity outbox behavior remains unchanged and available during snapshot recovery.
+- Runner typecheck and full suite pass (123 files, 1444 tests). Server production and spec projects compile; the focused API spec host still exceeds five minutes during startup, consistent with the T-002 recorded integration fixture hang.
+
+## T-004
+
+- CLI `session cancel` and `session stop` are distinct commands and require `--turn-id`; both post the target Turn and render the Server `state` vocabulary without deriving results from Session activity.
+- The existing Web session action area is now the single Turn control surface. It targets the latest transcript Turn, exposes Cancel and Stop, renders the returned state, and uses `Verification: Session view` for `unknown`.
+- Issue-bound and generic Web clients send `{ turnId }` to their corresponding cancel/stop endpoints. Web typecheck, 389-file Web suite, FSD checks, and the full .NET suite except the long-running Server Spec host pass; the Spec host still does not finish startup within ten minutes.
+
+## verify:fix-ci (round 1)
+
+- Reproduced the host hang by running `Mohist.Server.SpecTests.Specs.Sessions.GenericAgentSessionCancelApiSpecs` directly: the first `Cancel_QueuedTurnWithoutRunner_ReturnsCancelledAndPreservesRecords` test never returned. The hang actually lives at the start of `CreateQueuedSessionForCancelAsync`: `record.OpendAsync` → `Checkpoint` → `RecordFollowupTurnAsync` → `persistence.WaitAsync()`. The probe's `WaitAsync` waits for the next `IAgentSessionPersistenceObserver.Report`, which only fires from `PersistCallback`, which only fires when a persistence timer is registered and `_stateDirty`/`_transcript.HasPending`/`PendingTranscriptEvidence` is non-empty.
+- `RecordFollowupTurn` returns an empty events list for a brand-new input/turn, so the grain took the early-return branch (`_stateStore.SaveAsync(...) ; return;`) without setting dirty or ensuring the persist timer — `persistence.WaitAsync` hung forever. The empty-events path also existed on `CancelTurnAsync`, `MarkTurnExecutingAsync`, `MarkTurnTerminalAsync`, `AbandonFollowupTurnAsync`, and `MarkInitialTurnTerminalAsync`, but only `RecordFollowupTurnAsync` had a test setup that depended on the persistence cycle.
+- Targeted fix: keep the original early-return shape on those six methods (it is the right no-event path), but in `RecordFollowupTurnAsync`'s empty-events branch mark state dirty and `EnsurePersistenceTimer()` so the next `PersistCallback` tick reports the cycle. `AppendEventsAsync` already does this on its event-bearing path; this closes the symmetric no-event path used by the cancel/stop test helper. Filing the dirty/timer on every empty commit (the broader alternative) regressed `AgentSessionRecoveryGrainSpecs.Reset_StaleExpectedBinding_RejectsWithoutMutation` because the persist timer's mandatory re-save raced into the assertion window — a targeted fix avoids coupling unrelated save-count assertions to the persist cycle.
+- The cancel/stop API tests `Stop_ExecutingTurnSendsTurnTargetAndReturnsStopped` and `Stop_UnconfirmedReplySurfacesUnknownAndInterruptFlag` surfaced a second pre-existing test defect once they stopped hanging: `CreateCanonicalSessionForCancelAsync` registered the runner via `IRunnerGrain.RegisterAsync` but never registered a SignalR connection in `RunnerConnectionTracker`, so `connections.GetConnectionId(target.RunnerId)` returned null and the stop route returned 503 `runner_unavailable`. Added `tracker.Register(_runnerId, $"{_runnerId}-conn")` next to the runner registration so the stop-route's `runnerHub.Clients.Client(runnerId)` resolves to the `RecordingRunnerHubContext` proxy and the test-set `SetInvocationResponse` actually routes the reply.
+- Validation: focused class run, all 7 cancel/stop tests pass in ~5s; full Server Spec suite passes 3334/3334 in 77s; UnitTests 1535; CLI 1447; Runner 1444; Web 5155; ArchTests 35. No `.gitignore` or assertion-weakening changes; the only edits are the dirty/timer fix in `RecordFollowupTurnAsync` and the missing `tracker.Register` in `GenericAgentSessionCancelApiTestSupport`.
+
+## Review fixes
+
+- Cancel activity facts carry the requested durable Turn ID. Server activity lifecycle handling rejects activity facts whose Turn is missing, launch-owned, terminal, or no longer current before changing Session activity, preventing delayed follow-up facts from ending newer work.
+- An unconfirmed stop for an executing launch Turn transitions its owning AgentJob to Unknown; the Job's established propagation marks the initial Turn and Session Unknown. The API spec asserts all three persisted states.
+- Session control read models expose `currentTurnId`, the current queued/executing durable AgentTurn identity. Web control mutations use it instead of transcript display IDs, with a workflow page test that makes the two IDs intentionally differ.
+- Idle-start follow-up responses return `inputId` and `turnId`. `mo session followup` renders those IDs, and CLI coverage uses the returned Turn ID in a subsequent stop request.
+- Focused validation passed: Runner cancel activity (9), Web control/source tests (12), CLI follow-up control contract (2), and Server turn/cancel/follow-up specs (50). Full package validation follows this checkpoint.
+- Moved the delayed terminal activity regression into its own spec file to preserve the existing test-file size ratchet. Generic-session page fixtures now include the read-model control Turn ID required by the new control contract.
+- Full validation passed serially: .NET solution (Workflow 175, CLI 1448, Server Unit 1535, Arch 35, Server Spec 3335); Runner typecheck and 1444 tests; Web typecheck, 5155 passing tests with one existing skip, and FSD boundary checks.
+- An unconfirmed stop reply now directly marks a non-launch target Turn and its Session Unknown on the Server. The Runner's correlated best-effort activity fact remains idempotent convergence evidence, so an unavailable outbox cannot leave the control-plane state Executing.
+- Correlated terminal Runtime activity can now reconcile the latest non-launch Turn from Unknown to Completed or Failed. The stale guard still rejects a fact for an earlier Turn after later work exists; stop API coverage exercises both terminal outcomes after an unconfirmed reply.
+- Focused validation passed: Server Spec project build with `SkipWebBuild=true`, plus all 10 `GenericAgentSessionCancelApiSpecs` cases.
+- Full validation passed with `DOTNET_ROOT` configured: .NET definition 175, CLI 1448, Server Unit 1535, Server Arch 35, and Server Spec 3338; Web CI 5155 passed with one existing skip; Runner CI 1444 passed.
+- A stop claim now prevents a terminal fact for the targeted Turn from admitting later work before the session-scoped Runtime abort resolves. The claim is released on every Runner outcome, including an empty reply; the focused cancel/stop API suite passes 12 cases.
+- CLI output catalogs now include the added turn-control fields, and Server source comments no longer carry task references. Server Unit 1610 and Arch 50 both pass.
+- Full validation passed for issue-522 surfaces with `DOTNET_ROOT` configured: .NET definition 175, CLI 1470, Server Unit 1610, Server Arch 50, and Server Spec 3409; Web CI 5155 passed with one existing skip; Runner CI 1445 passed. `npm test` then stopped in untouched `packages/mohist-slack` because `@slack/socket-mode` and `@slack/web-api` are absent from this workspace.
+- An orphaned persisted stop claim now clears when its Turn reaches a terminal state, including after grain reactivation. An active Runner stop request remains registered until its route completes, so its terminal fact cannot admit a later Turn before the old abort is settled. The dedicated recovery Spec and existing stop race Specs pass.
+- Final validation passed after `npm ci` restored lockfile-declared Slack packages: .NET definition 175, CLI 1470, Server Unit 1610, Server Arch 50, Server Spec 3410; Web CI 5155 passed with one existing skip; Runner CI 1445; Slack CI 5.
+- Stop delivery now carries a persisted operation id through the Runner journal and correlated Runtime fact. An incomplete operation retries only when the caller retries it, an Unknown fact settles the stop claim, and the Session rejects follow-up until authoritative Runtime evidence resolves Unknown.
+- Final validation passed: .NET definition 175, CLI 1470, Server Unit 1610, Server Arch 50, Server Spec 3414; Web CI 5155 passed with one existing skip; Runner CI 1450; Slack CI 5.
+
+## Review fixes (follow-up)
+
+- Confirmed launch-Turn stops now settle only the durable stop claim; AgentJob remains the terminal-result authority and can subsequently propagate its failed or cancelled verdict.
+- Stop claims distinguish pre-dispatch from potentially delivered operations. Offline pre-dispatch failures release their claim, while terminal retries replay the persisted operation through the Runner journal before later work is admitted.
+- Normal terminal evidence clears an undispatched claim after a process interruption. Focused Server Specs pass 21/21; full validation is pending.
+- Cancel-operation journal tests now inject a map-backed filesystem port. Runner typecheck and its focused journal Spec pass 3/3.

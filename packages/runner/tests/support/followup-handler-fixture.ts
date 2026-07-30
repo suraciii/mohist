@@ -22,6 +22,7 @@ import type {
 } from "../../src/server/runtime-event-outbox.js"
 import type { AgentSessionRuntimeEventReceipt } from "../../src/server/connection.js"
 import type { FollowupOperationJournalStore } from "../../src/runtime/followup-operation-journal.js"
+import type { CancelOperationJournalStore } from "../../src/runtime/cancel-operation-journal.js"
 import type {
   OpenCodeRuntime,
   RuntimeCancelRequest,
@@ -324,6 +325,7 @@ export function buildClient(opts: {
   openCodeRuntime?: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
   piRuntime?: unknown
   followupOperationJournal?: FollowupOperationJournalStore | null
+  cancelOperationJournal?: CancelOperationJournalStore | null
 }): RunnerSignalRClient {
   builders.length = 0
   const resolver = opts.resolver === undefined ? null : opts.resolver
@@ -340,6 +342,7 @@ export function buildClient(opts: {
       openCodeRuntime: openCodeRuntime as never,
       ...(opts.piRuntime !== undefined ? { piRuntime: opts.piRuntime as never } : {}),
       ...(opts.followupOperationJournal !== undefined ? { followupOperationJournal: opts.followupOperationJournal } : {}),
+      ...(opts.cancelOperationJournal !== undefined ? { cancelOperationJournal: opts.cancelOperationJournal } : {}),
     },
   )
 }

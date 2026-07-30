@@ -92,6 +92,10 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             var data = doc.RootElement.GetProperty("data");
             Assert.Equal(sessionId, data.GetProperty("sessionId").GetString());
             Assert.Equal("sent", data.GetProperty("status").GetString());
+            var inputId = data.GetProperty("inputId").GetString();
+            var turnId = data.GetProperty("turnId").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(inputId));
+            Assert.False(string.IsNullOrWhiteSpace(turnId));
 
             var sent = Assert.Single(runnerHub.SentMessages);
             Assert.Equal("ReceiveFollowup", sent.Method);
@@ -100,6 +104,9 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             var unchanged = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
             Assert.Equal(sessionId, unchanged?.Id);
             Assert.Equal(runtimeSessionId, unchanged?.AgentSessionId);
+            var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
+            Assert.Equal(turnId, turn.Id);
+            Assert.Equal(inputId, Assert.Single(turn.InputIds));
         }
         finally
         {

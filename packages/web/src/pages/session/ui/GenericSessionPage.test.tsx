@@ -74,7 +74,7 @@ function createQueryClient() {
 function baseSummary(overrides: Record<string, any> = {}) {
   return {
     sessionId: 'sess-abc', agentId: 'agent-1', agentName: 'Test Agent',
-    runtimeSessionId: 'rt-abc', runtime: 'opencode', status: 'completed',
+    runtimeSessionId: 'rt-abc', runtime: 'opencode', currentTurnId: 'durable-turn-1', status: 'completed',
     createdAt: '2026-06-15T10:00:00.000Z', lastActivityAt: '2026-06-15T10:30:00.000Z',
     resolvedModel: 'gpt-4', failureCategory: null,
     toolCallCount: 5, toolErrorCount: 0, contextRefs: null, usage: null,

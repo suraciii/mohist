@@ -51,7 +51,8 @@ public sealed record AgentSessionMetadataDto(
     string? CompletedAt,
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
-    [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata);
+    [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata,
+    [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null);
 
 public sealed record AgentSessionMetadataCounts(
     [property: JsonPropertyName("partCount")] int PartCount,
@@ -247,7 +248,8 @@ public sealed record GenericAgentSessionSummaryDto(
     int? ToolErrorCount,
     [property: JsonPropertyName("contextRefs")] GenericAgentSessionSummaryContextRefsDto? ContextRefs,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
-    [property: JsonPropertyName("recoveryAvailable")] bool RecoveryAvailable);
+    [property: JsonPropertyName("recoveryAvailable")] bool RecoveryAvailable,
+    [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null);
 
 /// <summary>
 /// Lightweight association entry returned by the issue/epic agent-session

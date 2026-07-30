@@ -459,7 +459,8 @@ public class AgentSessionQuerier : IScopedService
             summary.ToolErrorCount,
             BuildGenericSessionSummaryContextRefs(record),
             AgentSessionDtoMapper.ToUsageDto(usage),
-            session.Status.Activity == AgentSessionActivity.Idle);
+            session.Status.Activity == AgentSessionActivity.Idle,
+            CurrentTurnId(session));
     }
 
     private static bool IsApplicableToCurrentRuntime(
@@ -694,8 +695,14 @@ public class AgentSessionQuerier : IScopedService
             null,
             AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
             AgentSessionDtoMapper.ToUsageDto(usage),
-            new AgentSessionMetadataCounts(partCount, toolCount));
+            new AgentSessionMetadataCounts(partCount, toolCount),
+            CurrentTurnId(domainSession));
     }
+
+    private static string? CurrentTurnId(AgentSession session) =>
+        session.Status.Turns?
+            .LastOrDefault(turn => turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing)
+            ?.Id;
 
     private async Task<AgentSessionRecord?> FindCurrentSessionAsync(
         MohistDbContext db,

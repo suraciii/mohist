@@ -4,6 +4,7 @@ import { server, useMswServer } from '../../../../tests/support/msw'
 import { toast } from 'sonner'
 import {
   cancelGenericSession,
+  stopGenericSession,
   cancelGenericSessionMutationOptions,
   genericFollowupMutationOptions,
   genericSessionSummaryQueryOptions,
@@ -155,19 +156,35 @@ describe('postGenericFollowup (client fn)', () => {
 
 describe('cancelGenericSession (client fn)', () => {
   it('POSTs to the cancel endpoint', async () => {
-    const captured: { url: string; method: string }[] = []
+    const captured: { url: string; method: string; body: unknown }[] = []
     server.use(
-      http.post('*/api/projects/:projectId/agent-sessions/:sessionId/cancel', ({ request }) => {
-        captured.push({ url: new URL(request.url).pathname, method: request.method })
+      http.post('*/api/projects/:projectId/agent-sessions/:sessionId/cancel', async ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method, body: await request.json() })
         return HttpResponse.json({ success: true, data: { state: 'cancelled' } })
       }),
     )
 
-    await cancelGenericSession('proj-1', 'sess-abc')
+    await cancelGenericSession('proj-1', 'sess-abc', 'turn-1')
 
     expect(captured).toEqual([
-      { url: '/api/projects/proj-1/agent-sessions/sess-abc/cancel', method: 'POST' },
+      { url: '/api/projects/proj-1/agent-sessions/sess-abc/cancel', method: 'POST', body: { turnId: 'turn-1' } },
     ])
+  })
+})
+
+describe('stopGenericSession (client fn)', () => {
+  it('POSTs the targeted Turn to the stop endpoint', async () => {
+    let body: unknown
+    server.use(
+      http.post('*/api/projects/:projectId/agent-sessions/:sessionId/stop', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ success: true, data: { state: 'stop-requested' } })
+      }),
+    )
+
+    await stopGenericSession('proj-1', 'sess-abc', 'turn-2')
+
+    expect(body).toEqual({ turnId: 'turn-2' })
   })
 })
 
@@ -333,9 +350,9 @@ describe('cancelGenericSessionMutationOptions', () => {
     const qc = createInvalidationClient()
     cancelGenericSessionMutationOptions('proj-1', qc).onSuccess(
       { state: 'cancelled' },
-      { sessionId: 'sess-abc', agentRef: 'agent-foo' },
+      { sessionId: 'sess-abc', turnId: 'turn-1', operation: 'cancel', agentRef: 'agent-foo' },
     )
-    expect(toast.success).toHaveBeenCalledWith('Session cancelled')
+    expect(toast.success).toHaveBeenCalledWith('cancelled')
     expect(toast.warning).not.toHaveBeenCalled()
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
@@ -343,14 +360,14 @@ describe('cancelGenericSessionMutationOptions', () => {
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
   })
 
-  it.each(['completed', 'failed', 'stopped'])(
-    'emits a success toast when the runner reports a terminal state (%s)',
+  it.each(['stop-requested', 'stopped', 'unknown'])(
+    'emits a success toast for the shared Turn state (%s)',
     (terminalState) => {
       cancelGenericSessionMutationOptions('proj-1', createInvalidationClient()).onSuccess(
         { state: terminalState },
-        { sessionId: 'sess-abc', agentRef: 'agent-foo' },
+        { sessionId: 'sess-abc', turnId: 'turn-1', operation: 'stop', agentRef: 'agent-foo' },
       )
-      expect(toast.success).toHaveBeenCalledWith('Session cancelled')
+      expect(toast.success).toHaveBeenCalledWith(terminalState)
       expect(toast.warning).not.toHaveBeenCalled()
     },
   )
@@ -359,9 +376,9 @@ describe('cancelGenericSessionMutationOptions', () => {
     const qc = createInvalidationClient()
     cancelGenericSessionMutationOptions('proj-1', qc).onSuccess(
       { state: 'not-cancellable' },
-      { sessionId: 'sess-abc', agentRef: 'agent-foo' },
+      { sessionId: 'sess-abc', turnId: 'turn-1', operation: 'cancel', agentRef: 'agent-foo' },
     )
-    expect(toast.warning).toHaveBeenCalledWith('Session could not be cancelled')
+    expect(toast.warning).toHaveBeenCalledWith('Turn cancel was not applied')
     expect(toast.success).not.toHaveBeenCalled()
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
@@ -371,7 +388,7 @@ describe('cancelGenericSessionMutationOptions', () => {
 
   it('skips agent sessions invalidation when agentRef is omitted', () => {
     const qc = createInvalidationClient()
-    cancelGenericSessionMutationOptions('proj-1', qc).onSuccess({ state: 'cancelled' }, { sessionId: 'sess-abc' })
+    cancelGenericSessionMutationOptions('proj-1', qc).onSuccess({ state: 'cancelled' }, { sessionId: 'sess-abc', turnId: 'turn-1', operation: 'cancel' })
     const agentSessionsCalls = qc.invalidateQueries.mock.calls.filter(
       (c) => (c[0] as { queryKey: string[] }).queryKey[3] === 'sessions',
     )

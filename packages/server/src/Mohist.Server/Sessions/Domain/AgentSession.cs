@@ -143,6 +143,37 @@ public sealed class FollowupOperationInProgressException : InvalidOperationExcep
     public string SessionId { get; }
 }
 
+[Serializable]
+[GenerateSerializer]
+public sealed class StopOperationInProgressException : InvalidOperationException
+{
+    public StopOperationInProgressException(string sessionId, string turnId)
+        : base($"AgentSession {sessionId} is stopping turn {turnId}.")
+    {
+        SessionId = sessionId;
+        TurnId = turnId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string TurnId { get; }
+}
+
+[Serializable]
+[GenerateSerializer]
+public sealed class SessionActivityUnknownException : InvalidOperationException
+{
+    public SessionActivityUnknownException(string sessionId)
+        : base($"AgentSession {sessionId} has an unknown runtime activity state.")
+    {
+        SessionId = sessionId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+}
+
 [GenerateSerializer]
 public sealed record AgentSessionMetadata(
     [property: Id(0)] IReadOnlyDictionary<string, string>? Labels = null,
@@ -278,7 +309,8 @@ public sealed record AgentSessionStatusSnapshot(
     /// AgentSession remains the authority for input acceptance and
     /// turn status, not for the AgentJob's terminal result.
     /// </summary>
-    IReadOnlyList<AgentTurnRecord>? Turns = null)
+    IReadOnlyList<AgentTurnRecord>? Turns = null,
+    AgentSessionStopClaim? PendingStop = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: []);
@@ -384,6 +416,12 @@ public sealed record AgentTurnRecord(
     [property: Id(6)] DateTime? RecordedAt = null,
     [property: Id(7)] DateTime? UpdatedAt = null);
 
+[GenerateSerializer]
+public sealed record AgentSessionStopClaim(
+    [property: Id(0)] string TurnId,
+    [property: Id(1)] string OperationId,
+    [property: Id(2)] bool DispatchStarted = false);
+
 public enum AgentTurnStatus
 {
     Queued,
@@ -401,3 +439,60 @@ public sealed record AgentTurnResult(
     [property: Id(2)] string? FailureReason = null,
     [property: Id(3)] string? FailureCategory = null,
     [property: Id(4)] int? ExitCode = null);
+
+/// <summary>
+/// Shared read-only projection of a single
+/// <see cref="AgentTurnRecord"/> for cancel/stop targeting. Returned
+/// by the Session grain's turn-control resolver so later cancel and
+/// stop operations can classify a Turn without re-reading the full
+/// AgentSession status snapshot. A null result means the id does not
+/// resolve (turn-not-found).
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentTurnControlState(
+    [property: Id(0)] string TurnId,
+    [property: Id(1)] AgentTurnStatus Status,
+    [property: Id(2)] AgentTurnControlClassification Classification,
+    [property: Id(3)] bool IsLaunchTurn,
+    [property: Id(4)] string? JobId = null);
+
+[GenerateSerializer]
+public sealed record AgentTurnCancelResult(
+    [property: Id(0)] AgentTurnControlState? Control,
+    [property: Id(1)] bool Cancelled);
+
+[GenerateSerializer]
+public sealed record AgentTurnStopClaimResult(
+    [property: Id(0)] AgentTurnControlState? Control,
+    [property: Id(1)] bool CanDispatch,
+    [property: Id(2)] string? OperationId);
+
+[GenerateSerializer]
+public enum AgentTurnControlClassification
+{
+    /// <summary>
+    /// No Turn matches the supplied id. The caller treats this as
+    /// turn-not-found and reports the stale entry back to the user
+    /// without touching any Turn.
+    /// </summary>
+    TurnNotFound,
+    /// <summary>
+    /// The Turn is queued (not yet executing). Cancel applies; stop
+    /// is rejected and the caller is directed to cancel.
+    /// </summary>
+    Queued,
+    /// <summary>
+    /// The Turn is executing. Stop applies; cancel is rejected and
+    /// the caller is directed to stop.
+    /// </summary>
+    Executing,
+    /// <summary>
+    /// The Turn already ended
+    /// (<see cref="AgentTurnStatus.Completed"/>,
+    /// <see cref="AgentTurnStatus.Failed"/>,
+    /// <see cref="AgentTurnStatus.Cancelled"/>, or
+    /// <see cref="AgentTurnStatus.Unknown"/>). Both cancel and stop
+    /// report turn-already-ended.
+    /// </summary>
+    Terminal,
+}

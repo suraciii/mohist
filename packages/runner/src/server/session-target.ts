@@ -93,6 +93,25 @@ export interface ReceiveFollowupPayload {
   target?: ReceiveFollowupSessionTarget
   text: string
   operationId?: string
+  /**
+   * Issue-522 T-001: stable SessionInput id minted by the Server
+   * and recorded on the AgentSession grain before the Runner is
+   * invoked. When present the Runner uses it as the canonical id on
+   * the durable `session.input` record so the Server does not have
+   * to mint a duplicate. Absent on legacy callers that did not yet
+   * support the durable Turn identity; the Runner falls back to its
+   * own random id and the Server's existing acceptance path.
+   */
+  inputId?: string
+  /**
+   * Issue-522 T-001: stable AgentTurn id minted by the Server and
+   * recorded on the AgentSession grain before the Runner is
+   * invoked. The Runner does not currently use this id (it has no
+   * Turn-id-keyed state); it is carried on the wire so later stop /
+   * cancel plumbing can target the same Turn. Absent on legacy
+   * callers.
+   */
+  turnId?: string
 }
 
 // Payload delivered by the server-side `ReceiveWorkflowRunStatus` SignalR
@@ -109,7 +128,7 @@ export interface ReceiveWorkflowRunStatusPayload {
  * Payload delivered by the server-side `CancelAgentSession` SignalR
  * invocation. Distinct from
  * `ReceiveFollowup` because cancel needs a reply path (the runner
- * returns `{ state: "cancelled" | "not-cancellable" | <terminal-state> }`)
+ * returns `{ state: "stopped" | "unknown" | "stop-requested" | <terminal-state> }`)
  * while followup is strictly fire-and-forget. The `target` shape is the
  * same `SessionTarget` discriminator; today only
  * generic (non-workflow) sessions are reachable through this method
@@ -118,20 +137,23 @@ export interface ReceiveWorkflowRunStatusPayload {
  */
 export interface CancelAgentSessionPayload {
   target: ReceiveFollowupSessionTarget
+  turnId?: string
+  sessionId?: string
+  operationId?: string
 }
 
 /**
  * Reply shape returned by the runner for the `CancelAgentSession`
  * invocation. The server mirrors this value into the HTTP response so
  * the API can never fake success. Recognised values:
- * `cancelled`, `not-cancellable`, and the terminal-state names
- * (`completed` / `failed` / `stopped`).
+ * `stopped`, `unknown`, `stop-requested`, `not-cancellable`, and terminal
+ * state names.
  *
  * `interruptUnconfirmed` is the honest
  * stop-confirmation flag the API needs to surface when a runtime
  * (currently Pi) could not confirm the turn actually stopped. OpenCode
  * replies never set the flag — the OpenCode abort is authoritative —
- * so confirmed-cancel HTTP responses stay byte-identical to today.
+ * so confirmed-stop replies report `stopped`.
  */
 export interface CancelAgentSessionReply {
   state: string

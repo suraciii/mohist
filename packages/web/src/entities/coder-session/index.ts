@@ -8,6 +8,7 @@ export type { CancelSessionMutationInput } from './model/useCancelSessionMutatio
 export {
   compactSession,
   cancelSession,
+  stopSession,
   compactGenericSession,
   getAgentSessionEvents,
   getAgentSessionMetadata,

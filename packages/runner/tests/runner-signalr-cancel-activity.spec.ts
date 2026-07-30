@@ -70,6 +70,8 @@ afterEach(() => {
 
 function opencodePayload(): CancelAgentSessionPayload {
   return {
+    turnId: "turn-1",
+    operationId: "stop-1",
     target: {
       kind: "generic",
       projectId: "proj-1",
@@ -81,6 +83,8 @@ function opencodePayload(): CancelAgentSessionPayload {
 
 function piPayload(): CancelAgentSessionPayload {
   return {
+    turnId: "turn-1",
+    operationId: "stop-1",
     target: {
       kind: "generic",
       projectId: "proj-1",
@@ -115,7 +119,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
     const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-    expect(reply).toEqual({ state: "cancelled" })
+    expect(reply).toEqual({ state: "stopped" })
     expect(recording.producedFactCalls).toHaveLength(1)
     expect(recording.beforeExecutionCalls).toHaveLength(0)
     expect(recording.producedFactCalls[0]).toMatchObject({
@@ -129,6 +133,8 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
           activity: "idle",
           status: "completed",
           source: "cancel",
+          turnId: "turn-1",
+          stopOperationId: "stop-1",
           stopConfirmed: true,
           runtimeSessionId: "runtime-1",
         }),
@@ -148,7 +154,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
     const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-    expect(reply).toEqual({ state: "cancelled" })
+    expect(reply).toEqual({ state: "stopped" })
     const fact = recording.producedFactCalls[0]
     expect(fact.runtimeSessionId).toBe("runtime-1")
     expect(fact.event.type).toBe("session.activity")
@@ -157,6 +163,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
       status: "completed",
       stopConfirmed: true,
       source: "cancel",
+      turnId: "turn-1",
     })
   })
 
@@ -177,7 +184,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
     const reply = (await emitCancel(builder, piPayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-    expect(reply).toEqual({ state: "cancelled", interruptUnconfirmed: true })
+    expect(reply).toEqual({ state: "unknown", interruptUnconfirmed: true })
     expect(recording.producedFactCalls).toHaveLength(1)
     expect(recording.producedFactCalls[0]).toMatchObject({
       producerFamily: "generic-followup",
@@ -191,6 +198,8 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
           status: "failed",
           stopConfirmed: false,
           source: "cancel",
+          turnId: "turn-1",
+          stopOperationId: "stop-1",
         }),
       },
     })
@@ -215,6 +224,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
     expect(fact.event.payload).toMatchObject({
       activity: "idle",
       stopConfirmed: true,
+      turnId: "turn-1",
     })
   })
 
@@ -293,7 +303,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
     const reply = (await emitCancel(builder, supersededPayload)) as { state: string; interruptUnconfirmed?: boolean }
 
-    expect(reply).toEqual({ state: "cancelled" })
+    expect(reply).toEqual({ state: "stopped" })
     expect(recording.producedFactCalls).toHaveLength(1)
     expect(recording.producedFactCalls[0].runtimeSessionId).toBe("runtime-old")
     expect(recording.producedFactCalls[0].event.payload).toMatchObject({
@@ -314,11 +324,11 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
     const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-    expect(reply).toEqual({ state: "cancelled" })
+    expect(reply).toEqual({ state: "stopped" })
     expect(recording.producedFactCalls).toHaveLength(0)
   })
 
-  it("Cancel_FailedEnqueue_StillReturnsCancelReply", async () => {
+  it("Cancel_FailedEnqueue_LeavesStopRequested", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const failingOutbox: AgentSessionRuntimeEventOutbox = {
       ready: () => true,
@@ -343,8 +353,7 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
 
       const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-      expect(reply).toEqual({ state: "cancelled" })
-      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(reply).toEqual({ state: "stop-requested" })
       expect(errorSpy).toHaveBeenCalledWith(
         "failed to persist cancel activity:",
         expect.any(Error),

@@ -35,7 +35,8 @@ export interface SessionDataSourceResult {
   sendFollowup: (text: string) => Promise<void>
 
   cancel: {
-    mutate: (options?: SessionCancelOptions) => void
+    turnId?: string
+    mutate: (operation?: 'cancel' | 'stop', options?: SessionCancelOptions) => void
     isPending: boolean
   } | null
 

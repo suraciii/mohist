@@ -100,7 +100,7 @@ public static class AgentJobReadRoutes
             return ApiResults.NotFound("Job not found");
 
         var status = await grain.GetStatusAsync();
-        var isTerminal = status is AgentJobStatus.Completed or AgentJobStatus.Failed;
+        var isTerminal = status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled;
         // Unknown is nonterminal; surface it without
         // the terminal-result fields. Callers consume it as a
         // nonterminal, non-dispatchable state — neither successful
@@ -138,6 +138,7 @@ public static class AgentJobReadRoutes
         AgentJobStatus.Running => "running",
         AgentJobStatus.Completed => "completed",
         AgentJobStatus.Failed => "failed",
+        AgentJobStatus.Cancelled => "cancelled",
         AgentJobStatus.Unknown => "unknown",
         _ => "unknown",
     };

@@ -74,7 +74,7 @@ aggregate 是内部实现，不机械决定命令导航。跨 context 的关系�
   AgentTurn；Job 裁定首次 launch execution，Session 承载持续对话，二者不互相冒充状态或结果。
 - `agent connection create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`
   管理一个 Agent 的外部接入关系；它不修改 Agent 定义，也不复制 Slack 专用的根命令组。
-- `session transcript/followup/compact/reset/cancel` 改变或读取 AgentSession；不按 Issue 来源和 Agent 来源复制两套路径。
+- `session transcript/followup/compact/reset/cancel/stop` 改变或读取 AgentSession；`cancel` 确定性取消指定的排队 Turn，`stop` 请求 Runtime 停止指定的执行中 Turn；不按 Issue 来源和 Agent 来源复制两套路径。
 - `epic add/remove` 表达 Epic membership 这一用户意图；Issue 仍是当前 EpicNumber 的唯一
   写入权威，CLI 不暴露跨 aggregate 协调过程。
 - `--issue`、`--run`、`--agent` 是解析或筛选条件，不转移动作所有权。
