@@ -3,6 +3,8 @@
   <PropertyGroup>
     <RootNamespace>Mohist.Server</RootNamespace>
     <OutputType>Exe</OutputType>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>
