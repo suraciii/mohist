@@ -619,6 +619,8 @@ public static partial class AgentSessionExtensions
                 or AgentTurnStatus.Cancelled
                 || turns[index].Status == AgentTurnStatus.Unknown && status == AgentTurnStatus.Unknown)
             {
+                if (string.Equals(session.Status.PendingStop?.TurnId, turnId, StringComparison.Ordinal))
+                    session.Status = session.Status with { PendingStop = null };
                 return [];
             }
 
@@ -644,6 +646,9 @@ public static partial class AgentSessionExtensions
                     ? AgentSessionActivity.Unknown
                     : AgentSessionActivity.Idle,
                 CurrentTurnEndedAt = now,
+                PendingStop = string.Equals(session.Status.PendingStop?.TurnId, turnId, StringComparison.Ordinal)
+                    ? null
+                    : session.Status.PendingStop,
             };
             return [];
         }
