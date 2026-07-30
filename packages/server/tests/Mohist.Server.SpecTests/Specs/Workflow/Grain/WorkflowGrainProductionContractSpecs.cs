@@ -211,6 +211,12 @@ public sealed class WorkflowGrainProductionContractSpecs
 
         public Task<bool> DeleteAsync(string projectId, string profileId, CancellationToken ct = default) =>
             throw new NotSupportedException();
+
+        public Task<IReadOnlySet<string>> GetDisabledProfileIdsAsync(string projectId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task SetProfileEnabledAsync(string projectId, string profileId, bool enabled, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class InertPromptLoader : Mohist.Server.Workflow.Services.Prompts.IPromptLoader
