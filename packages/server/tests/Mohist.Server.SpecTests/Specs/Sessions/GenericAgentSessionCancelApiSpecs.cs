@@ -101,6 +101,49 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
+    public async Task Stop_ConfirmedLaunchLeavesTerminalVerdictToAgentJob()
+    {
+        var (project, sessionId, turnId, jobId) = await CreateExecutingLaunchSessionForStopAsync();
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(AgentTurnStatus.Executing, Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync()).Status);
+
+        await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).FailAsync("job-reported-failure");
+
+        var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
+        Assert.Equal(AgentTurnStatus.Failed, turn.Status);
+        Assert.Equal("job-reported-failure", turn.Result?.FailureReason);
+    }
+
+    [Fact]
+    public async Task Stop_OfflineBeforeDispatchReleasesTurnClaim()
+    {
+        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        tracker.Unregister(_runnerId);
+        try
+        {
+            using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            var reservation = await session.BeginFollowupAsync();
+            Assert.False(reservation.StartsIdleTurn);
+            await session.AbandonFollowupAsync(reservation.OperationId!);
+        }
+        finally
+        {
+            tracker.Register(_runnerId, $"{_runnerId}-conn");
+        }
+    }
+
+    [Fact]
     public async Task Stop_QueuedTurnDirectsCallerToCancelWithoutContactingRunner()
     {
         var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
@@ -266,6 +309,34 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
                 $"{{\"activity\":\"idle\",\"status\":\"completed\",\"turnId\":\"{turnId}\",\"stopOperationId\":\"{operationId}\"}}") },
             runtimeSessionId));
 
+        var reservation = await session.BeginFollowupAsync();
+        Assert.True(reservation.StartsIdleTurn);
+        await session.AbandonFollowupAsync(reservation.OperationId!);
+    }
+
+    [Fact]
+    public async Task Stop_TerminalTurnRetriesPendingOperationAfterReplyLoss()
+    {
+        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+        hub.SetInvocationResponseFactory("CancelAgentSession", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
+
+        using var first = await PostStopAsync(project.Id, sessionId, turnId);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, first.StatusCode);
+
+        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("not-cancellable"));
+        using var retry = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal("not-cancellable", (await ReadDataAsync(retry)).GetProperty("state").GetString());
+        var invocations = hub.Invocations;
+        Assert.Equal(2, invocations.Count);
+        var firstPayload = JsonSerializer.SerializeToElement(invocations[0].Arguments.Single());
+        var retryPayload = JsonSerializer.SerializeToElement(invocations[1].Arguments.Single());
+        Assert.Equal(firstPayload.GetProperty("operationId").GetString(), retryPayload.GetProperty("operationId").GetString());
         var reservation = await session.BeginFollowupAsync();
         Assert.True(reservation.StartsIdleTurn);
         await session.AbandonFollowupAsync(reservation.OperationId!);

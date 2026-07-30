@@ -1550,6 +1550,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var operationId = AgentSessionJsonHelper.GetStringProp(payload, "stopOperationId");
         if (!string.IsNullOrWhiteSpace(operationId))
             session.CompleteTurnStop(turnId, operationId);
+        else
+            session.AbandonUndispatchedTurnStop(turnId, session.Status.PendingStop?.OperationId ?? string.Empty);
     }
 
     private static IReadOnlyList<AgentSessionEvent> DriveNonLaunchTurnLifecycle(
@@ -1912,6 +1914,26 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
         return result;
+    }
+
+    public async Task MarkTurnStopDispatchedAsync(string turnId, string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(turnId) || string.IsNullOrWhiteSpace(operationId))
+            return;
+        var session = await GetRequiredAsync();
+        session.MarkTurnStopDispatched(turnId, operationId);
+        await _stateStore.SaveAsync(SessionId, session);
+        _session = session;
+    }
+
+    public async Task AbandonUndispatchedTurnStopAsync(string turnId, string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(turnId) || string.IsNullOrWhiteSpace(operationId))
+            return;
+        var session = await GetRequiredAsync();
+        session.AbandonUndispatchedTurnStop(turnId, operationId);
+        await _stateStore.SaveAsync(SessionId, session);
+        _session = session;
     }
 
     public async Task CompleteTurnStopAsync(string turnId, string operationId)

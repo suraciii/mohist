@@ -691,10 +691,17 @@ public static partial class AgentSessionExtensions
         public AgentTurnStopClaimResult ClaimTurnStop(string turnId)
         {
             var control = session.ResolveTurnControl(turnId);
+            var pending = session.Status.PendingStop;
+            if (control?.Classification == AgentTurnControlClassification.Terminal
+                && pending is not null
+                && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
+            {
+                return new AgentTurnStopClaimResult(control, true, pending.OperationId);
+            }
+
             if (control?.Classification != AgentTurnControlClassification.Executing)
                 return new AgentTurnStopClaimResult(control, false, null);
 
-            var pending = session.Status.PendingStop;
             if (pending is not null && !string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
                 return new AgentTurnStopClaimResult(control, false, null);
 
@@ -705,6 +712,31 @@ public static partial class AgentSessionExtensions
             }
 
             return new AgentTurnStopClaimResult(control, true, pending.OperationId);
+        }
+
+        public void MarkTurnStopDispatched(string turnId, string operationId)
+        {
+            var pending = session.Status.PendingStop;
+            if (pending is not null
+                && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
+                && string.Equals(pending.OperationId, operationId, StringComparison.Ordinal)
+                && !pending.DispatchStarted)
+            {
+                session.Status = session.Status with
+                {
+                    PendingStop = pending with { DispatchStarted = true },
+                };
+            }
+        }
+
+        public void AbandonUndispatchedTurnStop(string turnId, string operationId)
+        {
+            var pending = session.Status.PendingStop;
+            if (pending is not null
+                && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
+                && string.Equals(pending.OperationId, operationId, StringComparison.Ordinal)
+                && !pending.DispatchStarted)
+                session.Status = session.Status with { PendingStop = null };
         }
 
         public void CompleteTurnStop(string turnId, string operationId)

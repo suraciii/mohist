@@ -58,3 +58,10 @@
 - Final validation passed after `npm ci` restored lockfile-declared Slack packages: .NET definition 175, CLI 1470, Server Unit 1610, Server Arch 50, Server Spec 3410; Web CI 5155 passed with one existing skip; Runner CI 1445; Slack CI 5.
 - Stop delivery now carries a persisted operation id through the Runner journal and correlated Runtime fact. An incomplete operation retries only when the caller retries it, an Unknown fact settles the stop claim, and the Session rejects follow-up until authoritative Runtime evidence resolves Unknown.
 - Final validation passed: .NET definition 175, CLI 1470, Server Unit 1610, Server Arch 50, Server Spec 3414; Web CI 5155 passed with one existing skip; Runner CI 1450; Slack CI 5.
+
+## Review fixes (follow-up)
+
+- Confirmed launch-Turn stops now settle only the durable stop claim; AgentJob remains the terminal-result authority and can subsequently propagate its failed or cancelled verdict.
+- Stop claims distinguish pre-dispatch from potentially delivered operations. Offline pre-dispatch failures release their claim, while terminal retries replay the persisted operation through the Runner journal before later work is admitted.
+- Normal terminal evidence clears an undispatched claim after a process interruption. Focused Server Specs pass 21/21; full validation is pending.
+- Cancel-operation journal tests now inject a map-backed filesystem port. Runner typecheck and its focused journal Spec pass 3/3.

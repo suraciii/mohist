@@ -419,7 +419,8 @@ public sealed record AgentTurnRecord(
 [GenerateSerializer]
 public sealed record AgentSessionStopClaim(
     [property: Id(0)] string TurnId,
-    [property: Id(1)] string OperationId);
+    [property: Id(1)] string OperationId,
+    [property: Id(2)] bool DispatchStarted = false);
 
 public enum AgentTurnStatus
 {

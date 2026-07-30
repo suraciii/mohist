@@ -68,7 +68,7 @@ public static class AgentSessionStopRoutes
             return ApiResults.NotFound($"Turn {request.TurnId} not found");
         }
 
-        if (control.Classification == AgentTurnControlClassification.Terminal)
+        if (control.Classification == AgentTurnControlClassification.Terminal && !claim.CanDispatch)
         {
             return ApiResults.Ok(new
             {
@@ -93,6 +93,7 @@ public static class AgentSessionStopRoutes
             || string.IsNullOrWhiteSpace(target.RuntimeSessionId)
             || string.IsNullOrWhiteSpace(target.WorkDir))
         {
+            await session.AbandonUndispatchedTurnStopAsync(control.TurnId, claim.OperationId);
             return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
         }
 
@@ -119,6 +120,8 @@ public static class AgentSessionStopRoutes
                 sessionId = target.SessionId,
                 binding,
             };
+
+        await session.MarkTurnStopDispatchedAsync(control.TurnId, claim.OperationId);
 
         RunnerStopReply? reply;
         try
@@ -147,7 +150,8 @@ public static class AgentSessionStopRoutes
         }
         else if (string.Equals(reply.State, "stopped", StringComparison.OrdinalIgnoreCase))
         {
-            await session.MarkTurnTerminalAsync(control.TurnId, AgentTurnStatus.Completed, null);
+            if (!control.IsLaunchTurn)
+                await session.MarkTurnTerminalAsync(control.TurnId, AgentTurnStatus.Completed, null);
             await session.CompleteTurnStopAsync(control.TurnId, claim.OperationId);
         }
         else if (string.Equals(reply.State, "not-cancellable", StringComparison.OrdinalIgnoreCase))
