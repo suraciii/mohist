@@ -1,0 +1,73 @@
+## Codebase Patterns
+
+- AgentJobGrain persists lifecycle state through Orleans IPersistentState and mirrors a relational read model; terminal transitions are centralized in EnterTerminalStateAsync.
+- Agent keys use `projectId:agentId` via GrainKey.Agent.
+- Agent definitions are read through AgentQuerier, which returns MaxConcurrentRuns live from the Agent store.
+- Full npm test currently reaches all .NET projects successfully, but workspace JavaScript checks fail because node_modules tooling (`tsx`, `tsc`) is not installed.
+
+## fix-ci
+
+- Root cause of the failing verify: AgentConcurrencyGrain (T-001) requires AgentQuerier (an IScopedService). Production wires this via `AddMohistConventionalServices` (Scrutor assembly scan), but the shared `GrainTestConfig.ConfigureSilo` did not run that scan. On the first AgentJob dispatch, the cross-grain call to `gate.AcquireAsync(...)` threw `InnerException: Unable to resolve service for type 'Mohist.Server.Agent.Services.AgentQuerier' while attempting to activate 'Mohist.Server.Agent.Grains.AgentConcurrencyGrain'. TryDispatchAsync caught it and fell through to backoff — the test then polled forever for a dispatch that never happened.
+- Reproduction (single test, deterministic, 5/5 runs fail): `Mohist.Server.SpecTests.Specs.Runner.Grain.RunnerWorkLedgerSpecs.AgentJobWork_HasItsOnlyHomeInRunnerWorks`. Without the call, the test passes.
+- Fix: register the three IScopedService dependencies needed by AgentConcurrencyGrain on the shared silo (`AgentQuerier`, `AgentJobQuerier`, `AgentReadinessService`). The T-002 follow-up fixture already did this locally for its own cluster; pulling it into the shared config makes every fixture (`AgentJobGrain`, `WorkflowGrain`, `Backlog`) activate AgentConcurrencyGrain with the production DI contract.
+- Two pre-existing test failures (leftover by T-001 which removed the runner-unavailable terminal code path without updating the assertions) updated to the new D4 contract (job stays Pending, no session close, no RunnerUnavailable):
+  - `AgentJobGrainSpecs.SubmitAsync_GenericSession_NoEligibleRunner_ClosesSessionAsFailed` → `..._StaysPendingAndKeepsSessionOpen`
+  - `AgentJobTerminalDeliverySpecs.DispatchExhaustion_PersistsCloseWithRunnerUnavailableCategory` → `..._StaysPendingWithoutTerminalFailure`
+- Verification: full `Mohist.Server.SpecTests` run (3330 tests) passes in ~63s with `-p:SkipWebBuild=true`. 5 consecutive focused runs on `RunnerWorkLedgerSpecs` all pass. Build clean.
+- The T-002 fixture file (`AgentSessionFollowupConcurrencyFixture`) still imports `Mohist.Server.Agent.Services.AgentQuerier` which is now properly registered; its previously-known inability to activate server grains remains a separate follow-up not in scope of issue-520.
+
+## T-001
+
+- Added AgentConcurrencyGrain with persisted active permit tokens and FIFO waiters, live MaxConcurrentRuns reads, release grants, reminder activation/reconciliation hooks, and AgentJob notification API.
+- AgentJobGrain acquires before runner assignment, releases on assignment failure and terminal transition, and no longer fails pending jobs after DispatchRetryBound.
+- Focused spec execution could not complete within the test runner timeout; build succeeds with `dotnet build Mohist.sln -p:SkipWebBuild=true`.
+
+## T-002
+
+- Follow-up reservations on idle AgentSessions now acquire the shared per-agent gate before persistence and runner delivery; busy-session follow-ups remain per-session serial and do not acquire a new permit.
+- Follow-up permits are stored on the pending lease and released when the matching idle `session.activity` clears the lease, or when the reservation is abandoned/expired. A failed persistence or runner delivery also abandons and releases the permit.
+- At the gate limit, follow-up acquisition throws `FollowupConcurrencyLimitException`; the API returns HTTP 409 with code `concurrency_limit`, leaves no input persisted, and remains distinct from HTTP 503 `runner_unavailable`.
+- The focused follow-up spec fixture builds successfully, but the current Orleans 10 in-process test host cannot resolve server grain implementations (`Could not find an implementation for interface ...`), matching the existing session-grain spec baseline. Solution build and unit/architecture tests remain usable.
+
+## T-003
+
+- Added read-side `AgentAvailabilityService`; it combines online runner capacity with the T-001 active concurrency count and returns `CanStartNow` or one of `no-online-runner`, `capacity-full`, and `concurrency-limit`.
+- Added concurrency waiter reads and a per-agent status endpoint at `/api/projects/{projectRef}/agents/{agentRef}/status`; pending AgentJobs are returned as `waiting` items with their server-derived reason.
+- Availability does not consume or mutate Readiness. Focused availability unit tests pass; server build passes with `-p:SkipWebBuild=true`. The repository Web build remains unavailable because `tsc` is not installed.
+
+## T-004
+
+- Added read-side `AgentReadinessService`. It derives `Ready`, `Needs setup`, or `Unknown` from current structural definition checks and the latest matching AgentJob execution history; readiness is not stored on the Agent aggregate.
+- Structural gaps cover malformed model references, variant-without-model, missing instructions, and invalid legacy runtimes. Runner-classified credential/model/runtime failures are converted into actionable setup gaps; successful matching execution is positive evidence.
+- Agent detail reads now include readiness. `AgentLauncher` checks readiness before opening a session or creating/submitting a job across manual, routed, mention, and subscription launch paths. Manual HTTP launch returns `409 agent_needs_setup` with gaps and the single setup entry.
+- Focused readiness unit tests, the full server unit suite (1547 tests), server build, SpecTests build, and the focused no-session/no-job launch spec pass with `-p:SkipWebBuild=true`; Web build remains unavailable because `tsc` is not installed.
+
+## T-005
+
+- Web `AgentInfo` now carries the Server-provided `readiness` field (conclusion, gaps, setup) so the client renders the Server's verdict verbatim — no client-side readiness synthesis.
+- New Web hook `useAgentDetailStatus` consumes `/api/projects/{projectRef}/agents/{agentRef}/status` (added in T-003) and exposes per-agent Availability + waiting-work list. `AgentDetailPage` renders two server-driven cards: a `ReadinessCard` (Ready / Needs setup / Unknown) and an `AvailabilityCard` (Can start now / Waiting — reason, active runs, runner slots, waiting-work list with per-item reasons).
+- `AgentDetailPage` and `AgentSessionComposerPage` block the New Session launch action when Readiness is Needs setup (gap list and setup entry shown inline). Unknown remains launchable with an explicit "will wait for validation" hint.
+- Server 409 `agent_needs_setup` on launch is now surfaced in Web (`error-needs-setup` banner reads the gap list from `error.data.gaps`) and CLI (`mo agent launch` prints the gap list, the action hint, and the setup entry). `mo agent launch` no longer relies on raw envelope rendering for the 409 path.
+- `mo agent view` now does two requests: the agent (which now includes readiness) and the per-agent status endpoint, then renders a Readiness section, the Availability conclusion, and the waiting-work list. Clients no longer derive any second readiness/availability verdict.
+- Server `AgentQuerier.GetByNameAsync` and `ListAsync` now hydrate readiness on every read (matching `GetByIdAsync`) so list/get-by-name paths also expose the Server's Readiness verdict.
+- New CLI tests cover `mo agent view` readiness gap + setup rendering, availability + waiting-work rendering, and `mo agent launch` 409 needs-setup gap output. Existing CLI agent suite (1446 tests) and the full web suite (5164 tests) continue to pass with `-p:SkipWebBuild=true`.
+
+## Review Fixes
+
+- Concurrency permits now retain their Job or follow-up Session owner. Reconciliation verifies each persisted permit against the mirrored AgentJob state or the persisted Session lease before pruning it, so a running execution is no longer discarded as an orphan.
+- A launch that cannot obtain a Runner or slot now releases its permit before entering dispatch backoff. Pending work therefore does not inflate `activeRuns` or turn a runner/capacity wait into a per-Agent concurrency wait.
+- Added Spec coverage for a running Job and an active follow-up lease surviving reconciliation, plus a no-Runner launch under a finite per-Agent limit leaving no active permit.
+- Focused SpecTests command did not accept the legacy VSTest filter under Microsoft.Testing.Platform and ran the full collection; a repeat full SpecTests run passed (3333 tests).
+- Readiness setup responses now return the concrete Agent detail path (`/agents/{agentId}`), which is the existing profile edit surface. Both Web entry points render that path as a project-scoped link; the readiness unit test asserts the concrete response.
+- Split Agent detail readiness/availability coverage into its own 5-test file. The original file is below the 500-line budget, `check:test-boundaries` passes, and the Web suite passes (5162 passed, 1 skipped).
+- Updated `GenericFollowupEndpoint_TerminalActivityStaysFollowable` to complete its owning AgentJob through the Runner rather than only injecting a Session idle event. A terminal Session no longer escapes a still-running Job's concurrency permit; the corrected focused spec passes.
+
+## Review Fixes Follow-up
+
+- Fresh gate grants now persist their grant time. Reconciliation keeps an unconfirmed permit for one minute, allowing the Job `ConcurrencyPermitHeld` flag or Session follow-up lease to become durable before it is eligible for orphan reclamation. Once the retention window passes, an unclaimed grant is pruned as before.
+- Pending AgentJobs now persist their server-decided waiting reason. The availability read model projects that reason instead of deriving a replacement from the current aggregate availability, so a capacity recovery during dispatch backoff does not turn an existing capacity wait into `no-online-runner`.
+- Added deterministic reconciliation coverage for an unclaimed Job permit and an unclaimed follow-up permit, plus a unit test for a persisted capacity wait after availability becomes ready.
+- Verification: `dotnet build Mohist.sln -p:SkipWebBuild=true`, `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj -p:SkipWebBuild=true` (1548 passed), and `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true` (3335 passed).
+- Full `npm test` passed: 175 workflow-definition tests, 1446 CLI tests, 35 architecture tests, 1548 Server unit tests, 3335 Server SpecTests, 5162 Web tests (1 skipped), and 1443 Runner tests.
+- `dispatch-pending` is now an explicit waiting-work state: Availability still reports whether a new execution can start, while a prior Pending Job remains visibly awaiting its durable retry after resource recovery. The Issue spec, Agent API design, and Agent user guide define this distinction for all clients.
+- Verification after the contract update: `npm test` passed the workflow-definition (175), CLI (1473), Server architecture (50), Server unit (1623), Server SpecTests (3434), Web (5164 passed, 1 skipped), and Runner (1450) suites. It then stopped in the unrelated `mohist-slack` workspace because its installed dependencies do not contain `@slack/socket-mode` or `@slack/web-api`; no dependency installation or lockfile change was attempted.

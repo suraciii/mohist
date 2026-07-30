@@ -3,7 +3,11 @@ import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
-import type { AgentInfo, AgentSessionListItemDto } from '../../../entities/agent'
+import type {
+  AgentInfo,
+  AgentSessionListItemDto,
+  AgentStatusDetailResponse,
+} from '../../../entities/agent'
 import {
   AgentDetailPage,
   type AgentDetailPageComponents,
@@ -16,12 +20,16 @@ const state: {
   sessions: AgentSessionListItemDto[]
   archiveCalls: string[]
   unarchiveCalls: string[]
+  detailStatus: AgentStatusDetailResponse | undefined
+  detailStatusLoading: boolean
 } = {
   agent: undefined,
   agentState: 'loading',
   sessions: [],
   archiveCalls: [] as string[],
   unarchiveCalls: [] as string[],
+  detailStatus: undefined,
+  detailStatusLoading: false,
 }
 
 const components: AgentDetailPageComponents = {
@@ -59,6 +67,8 @@ const dataHook: AgentDetailPageDataHook = () => {
     sessionsLoading: false,
     archiveAgent,
     unarchiveAgent,
+    detailStatus: state.detailStatus,
+    detailStatusLoading: state.detailStatusLoading,
   }
 }
 
@@ -142,6 +152,8 @@ describe('AgentDetailPage', () => {
     state.sessions = []
     state.archiveCalls.length = 0
     state.unarchiveCalls.length = 0
+    state.detailStatus = undefined
+    state.detailStatusLoading = false
   })
 
   afterEach(() => {
@@ -382,4 +394,5 @@ describe('AgentDetailPage', () => {
       expect(section).toHaveAttribute('data-agent-status', 'archived')
     })
   })
+
 })

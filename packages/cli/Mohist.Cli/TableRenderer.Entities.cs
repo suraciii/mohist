@@ -116,7 +116,111 @@ internal sealed partial class TableRenderer
         var instructions = StringOf(data, "instructions");
         if (!string.IsNullOrEmpty(instructions))
             _out.WriteLine($"instructions:        {Truncate(instructions, BodySoftCap)}");
+
+        // Server-authoritative Readiness (T-005): present the Server's
+        // conclusion verbatim, list gaps, and surface the single setup
+        // entry. Clients do not derive a second Readiness verdict here.
+        if (data["readiness"] is JsonObject readiness)
+        {
+            var conclusion = StringOf(readiness, "conclusion");
+            if (!string.IsNullOrWhiteSpace(conclusion))
+                _out.WriteLine($"readiness:           {conclusion}");
+            if (readiness["gaps"] is JsonArray gapArray && gapArray.Count > 0)
+            {
+                _out.WriteLine("readiness gaps:");
+                foreach (var gapNode in gapArray.OfType<JsonObject>())
+                {
+                    var message = StringOf(gapNode, "message");
+                    var action = StringOf(gapNode, "action");
+                    var first = !string.IsNullOrWhiteSpace(message) ? message : "(missing message)";
+                    var line = $"  - {first}";
+                    if (!string.IsNullOrWhiteSpace(action))
+                        line += $" — {action}";
+                    _out.WriteLine(line);
+                }
+            }
+            if (readiness["setup"] is JsonObject setup)
+            {
+                var label = StringOf(setup, "label");
+                var path = StringOf(setup, "path");
+                if (!string.IsNullOrWhiteSpace(label) || !string.IsNullOrWhiteSpace(path))
+                    _out.WriteLine($"readiness setup:     {label} ({path})");
+            }
+        }
     }
+
+    /// <summary>
+    /// Renders the Server-authoritative Availability conclusion, waiting reason,
+    /// and waiting-work list. Drives off the payload of
+    /// <c>GET /api/projects/{ref}/agents/{id}/status</c>; the renderer does not
+    /// synthesize availability from raw runner or capacity data.
+    /// </summary>
+    public void RenderAgentShowStatus(JsonNode? data)
+    {
+        if (data is null)
+        {
+            return;
+        }
+
+        var availability = data["availability"] as JsonObject;
+        if (availability is null)
+        {
+            return;
+        }
+
+        var canStartNow = BoolOf(availability, "canStartNow");
+        var waitingReason = StringOf(availability, "waitingReason");
+        var activeRuns = NumberOf(availability, "activeRuns");
+        var maxConcurrentRuns = NumberOf(availability, "maxConcurrentRuns");
+        var capacity = availability["capacity"] as JsonObject;
+        var usedSlots = NumberOf(capacity, "usedSlots");
+        var totalSlots = NumberOf(capacity, "totalSlots");
+
+        var header = canStartNow
+            ? "availability:        Can start now"
+            : $"availability:        Waiting — {DescribeAgentWaitingReason(waitingReason)}";
+
+        _out.WriteLine(header);
+        var detailParts = new List<string>();
+        if (!string.IsNullOrEmpty(activeRuns))
+        {
+            detailParts.Add($"active runs {activeRuns}");
+            if (!string.IsNullOrEmpty(maxConcurrentRuns))
+                detailParts.Add($"of {maxConcurrentRuns}");
+        }
+        if (!string.IsNullOrEmpty(usedSlots) && !string.IsNullOrEmpty(totalSlots))
+        {
+            detailParts.Add($"runner slots {usedSlots}/{totalSlots}");
+        }
+        if (detailParts.Count > 0)
+            _out.WriteLine($"availability detail: {string.Join(", ", detailParts)}");
+
+        if (data["waitingWork"] is JsonArray waiting && waiting.Count > 0)
+        {
+            _out.WriteLine($"waiting work ({waiting.Count}):");
+            foreach (var item in waiting.OfType<JsonObject>())
+            {
+                var jobId = StringOf(item, "jobId");
+                var reason = StringOf(item, "waitingReason");
+                var submittedAt = StringOf(item, "submittedAt");
+                var reasonText = DescribeAgentWaitingReason(reason);
+                var line = $"  - {jobId}: {reasonText}";
+                if (!string.IsNullOrWhiteSpace(submittedAt))
+                    line += $" (submitted {submittedAt})";
+                _out.WriteLine(line);
+            }
+        }
+    }
+
+    private static string DescribeAgentWaitingReason(string? reason) => reason switch
+    {
+        "no-online-runner" => "no online runner",
+        "capacity-full" => "runner slots are full",
+        "concurrency-limit" => "agent is at its concurrency limit",
+        "dispatch-pending" => "waiting for dispatch",
+        null or "" => "waiting",
+        _ => reason,
+    };
 
     private void RenderAgentSessionLaunch(JsonNode? data)
     {

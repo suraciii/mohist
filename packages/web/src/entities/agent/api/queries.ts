@@ -8,6 +8,7 @@ import {
   createAgent,
   getAgent,
   getAgentActivity,
+  getAgentDetailStatus,
   getAgentSessions as getGlobalAgentSessions,
   getAgentStatus,
   listAgents,
@@ -17,6 +18,7 @@ import {
 import type {
   AgentCreateRequest,
   AgentInfo,
+  AgentStatusDetailResponse,
   AgentUpdateRequest,
 } from './client'
 import { getAgentSessions as getAgentScopedSessions } from './agent-sessions'
@@ -173,4 +175,23 @@ export function agentSessionsQueryOptions(projectId: string | null | undefined, 
 export function useAgentSessions({ agentRef }: { agentRef: string }) {
   const { projectId } = useProject()
   return useQuery<AgentSessionListItemDto[]>(agentSessionsQueryOptions(projectId, agentRef))
+}
+
+/* ── Per-agent server-side status (Readiness/Availability/waiting) ── */
+
+export function agentDetailStatusQueryOptions(
+  projectId: string | null | undefined,
+  agentRef: string,
+) {
+  return {
+    queryKey: ['agents', projectId, agentRef, 'status'],
+    queryFn: () => getAgentDetailStatus(projectId!, agentRef),
+    enabled: !!projectId && !!agentRef,
+    refetchInterval: 5000,
+  }
+}
+
+export function useAgentDetailStatus(agentRef: string) {
+  const { projectId } = useProject()
+  return useQuery<AgentStatusDetailResponse>(agentDetailStatusQueryOptions(projectId, agentRef))
 }

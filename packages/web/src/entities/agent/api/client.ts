@@ -4,6 +4,23 @@ import type { AgentActivity, AgentSessionInfo, AgentStatus } from '../model/type
 type AgentRuntime = 'opencode' | 'pi'
 const DEFAULT_AGENT_RUNTIME: AgentRuntime = 'opencode'
 
+export interface AgentReadinessGap {
+  code: string
+  message: string
+  action: string
+}
+
+export interface AgentReadinessSetup {
+  label: string
+  path: string
+}
+
+export interface AgentReadinessResult {
+  conclusion: 'Ready' | 'Needs setup' | 'Unknown'
+  gaps: AgentReadinessGap[]
+  setup: AgentReadinessSetup | null
+}
+
 export interface AgentInfo {
   id: string
   projectId: string
@@ -16,6 +33,7 @@ export interface AgentInfo {
   status: string
   createdAt: string
   updatedAt: string
+  readiness?: AgentReadinessResult | null
 }
 
 export interface AgentCreateRequest {
@@ -36,8 +54,42 @@ export interface AgentUpdateRequest {
   maxConcurrentRuns?: number | null
 }
 
+export interface AgentAvailabilityCapacity {
+  usedSlots: number
+  totalSlots: number
+}
+
+export interface AgentAvailabilityResponse {
+  canStartNow: boolean
+  waitingReason: string | null
+  activeRuns: number
+  maxConcurrentRuns: number | null
+  capacity: AgentAvailabilityCapacity
+  observedAt: string
+}
+
+export interface AgentWaitingWorkItem {
+  jobId: string
+  status: string
+  waitingReason: string
+  submittedAt: string | null
+}
+
+export interface AgentStatusDetailResponse {
+  agentId: string
+  agentName: string
+  availability: AgentAvailabilityResponse
+  waitingWork: AgentWaitingWorkItem[]
+}
+
 export function getAgentStatus(projectId?: string | null) {
   return request<AgentStatus>(projectApiPath(projectId, '/agent/status'))
+}
+
+export function getAgentDetailStatus(projectId: string, agentRef: string) {
+  return request<AgentStatusDetailResponse>(
+    projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/status`),
+  )
 }
 
 export function getAgentSessions(params?: { status?: string; limit?: number; projectId?: string | null }) {

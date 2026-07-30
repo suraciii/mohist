@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Api;
@@ -34,6 +35,36 @@ public static class AgentJobReadRoutes
             AgentJobQuerier jobs,
             CancellationToken ct) =>
             HandleListAsync(context.GetResolvedProject(), agentRef, status, limit, agentQuerier, jobs, ct));
+
+        group.MapGet("/agents/{agentRef}/status", async (
+            HttpContext context,
+            string agentRef,
+            AgentQuerier agentQuerier,
+            AgentAvailabilityService availability,
+            CancellationToken ct) =>
+        {
+            var project = context.GetResolvedProject();
+            var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
+            if (agent is null)
+                return ApiResults.NotFound($"Agent '{agentRef}' not found");
+
+            var conclusion = await availability.GetAsync(project.Id, agent, ct);
+            if (conclusion is null)
+                return ApiResults.NotFound($"Agent '{agentRef}' not found");
+
+            var waiting = await availability.GetWaitingWorkAsync(project.Id, agent, conclusion, ct);
+            return ApiResults.Ok(new AgentStatusDetailResponse(
+                agent.Id,
+                agent.Name,
+                new AgentAvailabilityResponse(
+                    conclusion.CanStartNow,
+                    conclusion.WaitingReason,
+                    conclusion.ActiveRuns,
+                    conclusion.MaxConcurrentRuns,
+                    conclusion.Capacity,
+                    conclusion.ObservedAt.ToString("o")),
+                waiting));
+        });
 
         group.MapGet("/agent-jobs/{jobId}", (
             HttpContext context,
@@ -157,6 +188,20 @@ public sealed record AgentJobListItemDto(
     string? Status,
     string? SubmittedAt,
     string? TerminalAt);
+
+public sealed record AgentStatusDetailResponse(
+    string AgentId,
+    string AgentName,
+    AgentAvailabilityResponse Availability,
+    IReadOnlyList<AgentWaitingWork> WaitingWork);
+
+public sealed record AgentAvailabilityResponse(
+    bool CanStartNow,
+    string? WaitingReason,
+    int ActiveRuns,
+    int? MaxConcurrentRuns,
+    RunnerCapacityView Capacity,
+    string ObservedAt);
 
 /// <summary>
 /// Authoritative read shape for a single AgentJob

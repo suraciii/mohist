@@ -30,4 +30,7 @@ public sealed class AgentJobState
     /// </summary>
     [Id(18)] public PrepareManualLaunchCommand? ManualPlan { get; set; }
     [Id(19)] public PendingTerminalDeliveryEvent? PendingTerminalDeliveryEvent { get; set; }
+    [Id(20)] public string? ConcurrencyPermitToken { get; set; }
+    [Id(21)] public bool ConcurrencyPermitHeld { get; set; }
+    [Id(22)] public string? WaitingReason { get; set; }
 }

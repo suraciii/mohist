@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.SignalR;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Api;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -279,7 +281,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     [Fact]
     public async Task GenericFollowupEndpoint_TerminalActivityStaysFollowable()
     {
-        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-lifecycle");
+        var (project, agent, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-lifecycle");
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         var activePersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
@@ -301,14 +303,15 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             using var activeResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "while alive" });
             Assert.Equal(HttpStatusCode.OK, activeResponse.StatusCode);
 
-            var terminalPersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
-            await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
-            {
-                new AgentSessionRuntimeEventInput(
-                    Type: RuntimeEventTypes.SessionActivity,
-                    PayloadJson: "{\"activity\":\"idle\",\"status\":\"completed\",\"operationId\":\"terminal-delivery\"}"),
-            }, sessionId));
-            await terminalPersistence.WaitAsync();
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var jobs = scope.ServiceProvider.GetRequiredService<AgentJobQuerier>();
+            var jobId = Assert.Single(await jobs.ListByAgentAsync(project.Id, agent.Id)).JobKey;
+            var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+            var snapshot = await job.GetRuntimeSnapshotAsync();
+            await _fixture.Grains.GetGrain<IRunnerGrain>(snapshot.RunnerId!).ReportAgentJobResultAsync(
+                jobId,
+                snapshot.CurrentWorkId!,
+                new WorkResult("completed"));
 
             using var terminalResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "after close" });
             Assert.Equal(HttpStatusCode.OK, terminalResponse.StatusCode);

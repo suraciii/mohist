@@ -2,11 +2,13 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Agent.Grains;
+using Orleans;
 
 namespace Mohist.Server.Sessions.Grains;
 
@@ -25,6 +27,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TimeProvider _timeProvider;
     private readonly IAgentSessionConnectionRegistry _connections;
+    private readonly IGrainFactory _grains;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
     private bool _sessionReloadRequired;
@@ -44,6 +47,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IAgentSessionPersistenceObserver persistenceObserver,
         TimeProvider timeProvider,
         IAgentSessionConnectionRegistry connections,
+        IGrainFactory grains,
         ILogger<AgentSessionGrain> log)
     {
         _stateStore = stateStore;
@@ -53,6 +57,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _persistenceObserver = persistenceObserver;
         _timeProvider = timeProvider;
         _connections = connections;
+        _grains = grains;
         _log = log;
     }
 
@@ -431,13 +436,49 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             throw new SessionActivityUnknownException(session.Id);
 
         var startsIdleTurn = session.Status.Activity == AgentSessionActivity.Idle;
+        var operationId = Guid.NewGuid().ToString("N");
+        var concurrency = await AcquireFollowupConcurrencyPermitAsync(session, operationId);
         var lease = new AgentSessionFollowupLease(
-            Guid.NewGuid().ToString("N"),
+            operationId,
             session.Status.AgentRuntimeSessionId!,
-            StartedAt: Now());
+            StartedAt: Now(),
+            ConcurrencyToken: concurrency?.Token,
+            ConcurrencyAgentId: concurrency?.AgentId);
+
         SetPendingFollowups(session, pending.Append(lease).ToArray());
-        await CommitAsync(session, []);
-        return new AgentSessionFollowupReservation(lease.OperationId, startsIdleTurn);
+        var leasePersisted = false;
+        try
+        {
+            await CommitAsync(session, []);
+            leasePersisted = true;
+            if (concurrency is not null && !await ConfirmFollowupConcurrencyPermitAsync(session, concurrency))
+                throw new FollowupConcurrencyLimitException(session.Id, concurrency.AgentId);
+        }
+        catch
+        {
+            if (leasePersisted)
+            {
+                SetPendingFollowups(session, GetPendingFollowups(session)
+                    .Where(candidate => !string.Equals(candidate.OperationId, lease.OperationId, StringComparison.Ordinal))
+                    .ToArray());
+                try
+                {
+                    await CommitAsync(session, []);
+                }
+                catch
+                {
+                }
+            }
+            await ReleaseFollowupConcurrencyPermitAsync(
+                session,
+                concurrency?.Token,
+                concurrency?.AgentId);
+            throw;
+        }
+        return new AgentSessionFollowupReservation(
+            lease.OperationId,
+            StartsIdleTurn: startsIdleTurn,
+            ConcurrencyPermitHeld: concurrency is not null);
     }
 
     public async Task ConfirmFollowupAsync(string operationId)
@@ -464,6 +505,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         SetPendingFollowups(session, pending.Where(candidate => !string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal)).ToArray());
         await CommitAsync(session, []);
+        await ReleaseFollowupConcurrencyPermitAsync(session, lease.ConcurrencyToken, lease.ConcurrencyAgentId);
     }
 
     private static SessionCommandRequest BuildSessionCommandRequest(
@@ -481,6 +523,86 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             OperationId: reservation?.OperationId
                 ?? throw new InvalidOperationException("Session command requires a persisted operation id."),
             ProjectId: session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId));
+
+    private async Task<FollowupConcurrencyPermit?> AcquireFollowupConcurrencyPermitAsync(
+        AgentSession session,
+        string operationId)
+    {
+        if (session.Status.Activity != AgentSessionActivity.Idle)
+            return null;
+
+        var projectId = session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId);
+        var agentId = session.Metadata?.Label(GenericAgentSessionMetadata.AgentId);
+        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
+            return null;
+
+        var token = $"followup:{session.Id}:{operationId}";
+        var gate = _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
+        var result = await gate.AcquireAsync(
+            projectId,
+            agentId,
+            token,
+            session.Id,
+            AgentConcurrencyPermitOwnerKind.Followup);
+        if (result == AgentConcurrencyAcquireResult.Waiting)
+        {
+            try
+            {
+                await gate.ReleaseAsync(projectId, agentId, token);
+            }
+            catch
+            {
+            }
+            throw new FollowupConcurrencyLimitException(session.Id, agentId);
+        }
+
+        return new FollowupConcurrencyPermit(projectId, agentId, token);
+    }
+
+    private async Task<bool> ConfirmFollowupConcurrencyPermitAsync(
+        AgentSession session,
+        FollowupConcurrencyPermit permit)
+    {
+        var result = await _grains
+            .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(permit.ProjectId, permit.AgentId))
+            .AcquireAsync(
+                permit.ProjectId,
+                permit.AgentId,
+                permit.Token,
+                session.Id,
+                AgentConcurrencyPermitOwnerKind.Followup);
+        return result == AgentConcurrencyAcquireResult.Granted;
+    }
+
+    private async Task ReleaseFollowupConcurrencyPermitAsync(
+        AgentSession session,
+        string? token,
+        string? agentId)
+    {
+        if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(agentId))
+            return;
+        var projectId = session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId);
+        if (string.IsNullOrWhiteSpace(projectId))
+            return;
+
+        try
+        {
+            await _grains
+                .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId))
+                .ReleaseAsync(projectId, agentId, token);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentSession {SessionId} could not release concurrency permit {Token} for agent {AgentId}",
+                session.Id, token, agentId);
+        }
+    }
+
+    private sealed record FollowupConcurrencyPermit(
+        string ProjectId,
+        string AgentId,
+        string Token);
 
     private static IReadOnlyList<AgentSessionFollowupLease> GetPendingFollowups(AgentSession session)
     {
@@ -536,8 +658,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 && now - timestamp <= FollowupLeaseWindow;
         }).ToArray();
         if (remaining.Length == pending.Count) return;
+        var expired = pending.Where(lease => !remaining.Contains(lease)).ToArray();
         SetPendingFollowups(session, remaining);
         await CommitAsync(session, []);
+        foreach (var lease in expired)
+            await ReleaseFollowupConcurrencyPermitAsync(session, lease.ConcurrencyToken, lease.ConcurrencyAgentId);
     }
 
     private static AgentSessionResetReservation RequireReservation(
@@ -922,6 +1047,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var entries = new List<RuntimeEventEnvelope>();
         var supplementaryEntries = new List<RuntimeEventEnvelope>();
+        var pendingConcurrencyReleases = new List<(string Token, string AgentId)>();
         foreach (var e in runtimeEvents)
         {
             var domainEvents = ApplyRuntimeEventToDomain(session, e, now);
@@ -937,6 +1063,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                     if (!string.IsNullOrWhiteSpace(operationId))
                     {
                         var pending = GetPendingFollowups(session);
+                        var clearing = pending.FirstOrDefault(lease =>
+                            string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
+                        if (clearing?.ConcurrencyToken is not null && clearing.ConcurrencyAgentId is not null)
+                            pendingConcurrencyReleases.Add((clearing.ConcurrencyToken, clearing.ConcurrencyAgentId));
                         SetPendingFollowups(session, pending.Where(lease =>
                             !string.Equals(lease.OperationId, operationId, StringComparison.Ordinal)).ToArray());
                     }
@@ -996,6 +1126,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             session,
             allEntries,
             events);
+
+        foreach (var (token, agentId) in pendingConcurrencyReleases)
+            await ReleaseFollowupConcurrencyPermitAsync(session, token, agentId);
 
         return entries.Select(e => ToEventInfo(e)).ToList();
     }

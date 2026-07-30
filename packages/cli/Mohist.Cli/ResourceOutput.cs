@@ -16,7 +16,7 @@ internal sealed record ResourceDescriptor(
 internal static class ResourceOutputCatalog
 {
     private static readonly IReadOnlyList<string> AgentFields =
-        ["id", "projectId", "name", "description", "instructions", "agentConfig", "skills", "maxConcurrentRuns", "status", "createdAt", "updatedAt"];
+        ["id", "projectId", "name", "description", "instructions", "agentConfig", "skills", "maxConcurrentRuns", "status", "createdAt", "updatedAt", "readiness"];
 
     public static ResourceDescriptor For(string? tableShape)
     {

@@ -1096,6 +1096,26 @@ internal sealed class MohistCliApi
         return 0;
     }
 
+    /// <summary>
+    /// Renders the Server-authoritative Availability + waiting-work block for
+    /// <c>mo agent view</c> on top of <see cref="RenderTableAsync"/>. The
+    /// renderer consumes the AgentStatusDetailResponse payload and does not
+    /// synthesize availability from raw runner data.
+    /// </summary>
+    public async Task RenderAgentShowAvailabilityAsync(JsonNode? data)
+    {
+        var activeProjectId = await TryReadActiveProjectIdAsync();
+        var renderer = new TableRenderer(_out, activeProjectId);
+        renderer.RenderAgentShowStatus(data);
+    }
+
+    public async Task RenderAgentShowAsync(JsonNode? data)
+    {
+        var activeProjectId = await TryReadActiveProjectIdAsync();
+        var renderer = new TableRenderer(_out, activeProjectId);
+        renderer.Render(data, TableShape.AgentShow);
+    }
+
     public async Task<JsonNode?> PostDataAsync(string path, object body)
     {
         using var response = await SendAsync(HttpMethod.Post, path, body, printServerUnavailable: false);
@@ -1274,6 +1294,13 @@ internal sealed class MohistCliApi
         return 0;
     }
 
+    /// <summary>
+    /// Public entry point so commands can print the body of a Server response
+    /// (success or failure) without exposing the full private surface.
+    /// </summary>
+    public Task<int> PrintServerResponseAsync(HttpResponseMessage response, JsonNode? successDataFallback = null) =>
+        PrintResponseAsync(response, successDataFallback);
+
     private async Task<int> PrintRawResponseAsync(HttpResponseMessage response)
     {
         await using var stream = await response.Content.ReadAsStreamAsync();
@@ -1295,6 +1322,15 @@ internal sealed class MohistCliApi
         _out.WriteLine(node.ToJsonString(JsonOptions));
         return 0;
     }
+
+    /// <summary>
+    /// Public entry point for the raw-response path so commands can stream
+    /// the unmodified Server envelope to stdout (used by launch, which needs
+    /// to inspect the envelope for 409 needs-setup before deciding how to
+    /// format it).
+    /// </summary>
+    public Task<int> PrintRawServerResponseAsync(HttpResponseMessage response) =>
+        PrintRawResponseAsync(response);
 
     public sealed record PostResult(int ExitCode, JsonNode? Data, string? Error, string? Code);
 
