@@ -69,6 +69,28 @@ public class AgentQuerier : IScopedService
         bool all = false,
         CancellationToken ct = default)
     {
+        var infos = await ListDefinitionsAsync(projectId, status, all, ct);
+        if (_readiness is null)
+            return infos;
+        var hydrated = new List<AgentInfo>(infos.Count);
+        foreach (var info in infos)
+        {
+            hydrated.Add(info with { Readiness = await _readiness.GetAsync(projectId, info, ct) });
+        }
+        return hydrated;
+    }
+
+    public Task<IReadOnlyList<AgentInfo>> ListActiveDefinitionsAsync(
+        string projectId,
+        CancellationToken ct = default) =>
+        ListDefinitionsAsync(projectId, AgentStatus.Active, all: false, ct);
+
+    private async Task<IReadOnlyList<AgentInfo>> ListDefinitionsAsync(
+        string projectId,
+        string? status,
+        bool all,
+        CancellationToken ct)
+    {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.Agents.AsNoTracking().Where(agent => agent.ProjectId == projectId);
 
@@ -85,14 +107,7 @@ public class AgentQuerier : IScopedService
             .OrderByDescending(agent => agent.UpdatedAt)
             .Select(ToInfo)
             .ToList();
-        if (_readiness is null)
-            return infos;
-        var hydrated = new List<AgentInfo>(infos.Count);
-        foreach (var info in infos)
-        {
-            hydrated.Add(info with { Readiness = await _readiness.GetAsync(projectId, info) });
-        }
-        return hydrated;
+        return infos;
     }
 
     public static AgentInfo ToInfo(Domain.Agent agent) => new(

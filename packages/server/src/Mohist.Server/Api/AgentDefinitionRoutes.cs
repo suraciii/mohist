@@ -62,7 +62,7 @@ public static class AgentDefinitionRoutes
             CancellationToken ct) =>
         {
             var projectId = context.GetResolvedProject().Id;
-            var agents = await query.ListAsync(projectId, AgentStatus.Active, all: false, ct);
+            var agents = await query.ListActiveDefinitionsAsync(projectId, ct);
 
             var entries = await availability.GetListSummaryAsync(projectId, agents, ct);
             var summaries = agents
