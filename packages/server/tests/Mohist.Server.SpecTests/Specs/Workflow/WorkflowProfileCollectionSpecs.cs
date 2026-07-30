@@ -207,6 +207,40 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Enablement_ReadsAndWritesDisabledProfilesThroughProvider()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+
+        await _provider.SetProfileEnabledAsync(projectId, "mohist/github-pr", enabled: false);
+
+        Assert.Contains("mohist/github-pr", await _provider.GetDisabledProfileIdsAsync(projectId));
+
+        await _provider.SetProfileEnabledAsync(projectId, "mohist/github-pr", enabled: true);
+
+        Assert.DoesNotContain("mohist/github-pr", await _provider.GetDisabledProfileIdsAsync(projectId));
+    }
+
+    [Fact]
+    public async Task Enablement_RejectsDisablingTheLastBuiltInProfile()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        await _provider.SetProfileEnabledAsync(projectId, "mohist/github-pr", enabled: false);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _provider.SetProfileEnabledAsync(projectId, "mohist/local", enabled: false));
+    }
+
+    [Fact]
+    public async Task DefaultProfile_ReadsTheProfileBindingRatherThanLegacyTemplateColumn()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+
+        var profileId = await _provider.GetDefaultProfileIdAsync(projectId);
+
+        Assert.Equal("mohist/local", profileId);
+    }
+
+    [Fact]
     public async Task Update_PreservesVerbatimSource()
     {
         var (projectId, _, _) = await SeedProjectAsync();

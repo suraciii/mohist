@@ -85,6 +85,29 @@ public interface IWorkflowProfileProvider
     /// query. Returns <c>true</c> for any built-in ID or any custom row.
     /// </summary>
     Task<bool> ContainsAsync(string projectId, string profileId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the Project's configured default Profile id. This is the
+    /// default binding used after an Issue has no explicit Profile selection.
+    /// </summary>
+    Task<string?> GetDefaultProfileIdAsync(string projectId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the disabled Profile IDs for the Project. The set is
+    /// authoritative for the effective-selection fallback used by runs
+    /// that do not yet exist; older runs ignore this set so historical
+    /// execution is unaffected. Built-in IDs are valid; custom IDs are
+    /// permitted but the cascade ignores them.
+    /// </summary>
+    Task<IReadOnlySet<string>> GetDisabledProfileIdsAsync(string projectId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Toggles a built-in Profile's enabled state for the Project. The
+    /// write rejects disabling the last enabled built-in Profile so the
+    /// system always has at least one enabled Profile to fall back to.
+    /// Throws <see cref="ArgumentException"/> for an unknown Profile id.
+    /// </summary>
+    Task SetProfileEnabledAsync(string projectId, string profileId, bool enabled, CancellationToken ct = default);
 }
 
 /// <summary>

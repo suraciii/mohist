@@ -25,7 +25,7 @@ public class IssueQuerier : IScopedService
     private readonly ProjectQuerier _projects;
     private readonly ConfigService _configService;
     private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
-    private readonly ProjectWorkflowProfileManager _projectProfileManager;
+    private readonly IWorkflowProfileProvider _profileProvider;
     private readonly IssueReadModelLoader _loader;
 
     public IssueQuerier(
@@ -33,14 +33,14 @@ public class IssueQuerier : IScopedService
         ProjectQuerier projects,
         ConfigService configService,
         EffectiveWorkflowProfileResolver effectiveProfileResolver,
-        ProjectWorkflowProfileManager projectProfileManager,
+        IWorkflowProfileProvider profileProvider,
         IssueReadModelLoader loader)
     {
         _dbFactory = dbFactory;
         _projects = projects;
         _configService = configService;
         _effectiveProfileResolver = effectiveProfileResolver;
-        _projectProfileManager = projectProfileManager;
+        _profileProvider = profileProvider;
         _loader = loader;
     }
 
@@ -58,11 +58,11 @@ public class IssueQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var issue = await LoadIssueAsync(db, projectId, number);
         if (issue is null) return null;
-        return ToInfo(
+        return await ToInfoAsync(
             issue,
             project,
-            await _loader.LoadProjectDefaultTemplateAsync(db, projectId),
-            await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId));
+            await _loader.LoadProjectDefaultProfileAsync(db, projectId),
+            await _profileProvider.GetDisabledProfileIdsAsync(projectId));
     }
 
     public async Task<Domain.Issue?> GetDomainAsync(string projectId, int number)
@@ -405,16 +405,31 @@ public class IssueQuerier : IScopedService
 
     private async Task<IssueReadModel> ToReadModelAsync(MohistDbContext db, Domain.Issue issue, ProjectInfo? project = null)
     {
-        var projectDefaultTemplateId = await _loader.LoadProjectDefaultTemplateAsync(db, issue.ProjectId);
-        var model = IssueReadModelLoader.ToReadModel(await ToInfoAsync(issue, project, projectDefaultTemplateId));
+        var projectDefaultProfileId = await _loader.LoadProjectDefaultProfileAsync(db, issue.ProjectId);
+        var model = IssueReadModelLoader.ToReadModel(await ToInfoAsync(issue, project, projectDefaultProfileId));
         await _loader.ApplyProjectionsToSingleAsync(db, model);
         return model;
     }
 
-    public async Task<IssueInfo> ToInfoAsync(Domain.Issue issue, ProjectInfo? project, string? projectDefaultTemplateId)
+    public async Task<IssueInfo> ToInfoAsync(Domain.Issue issue, ProjectInfo? project, string? projectDefaultProfileId)
     {
-        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(issue.ProjectId);
-        return ToInfo(issue, project, projectDefaultTemplateId, disabledIds);
+        var disabledIds = await _profileProvider.GetDisabledProfileIdsAsync(issue.ProjectId);
+        return await ToInfoAsync(issue, project, projectDefaultProfileId, disabledIds);
+    }
+
+    private async Task<IssueInfo> ToInfoAsync(
+        Domain.Issue issue,
+        ProjectInfo? project,
+        string? projectDefaultProfileId,
+        IReadOnlySet<string> disabledIds)
+    {
+        var profiles = await _profileProvider.ListAsync(issue.ProjectId);
+        var resolved = IssueReadModelLoader.ResolveProfileId(
+            issue.WorkflowProfileId,
+            projectDefaultProfileId,
+            profiles,
+            disabledIds);
+        return IssueReadModelLoader.BuildInfo(issue, project, resolved);
     }
 
     /// <summary>
@@ -423,12 +438,12 @@ public class IssueQuerier : IScopedService
     /// that has access to the scoped <see cref="IssueQuerier"/> so the
     /// profile id agrees across every read surface.
     /// </summary>
-    public IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project, string? projectDefaultTemplateId) =>
-        ToInfo(issue, project, projectDefaultTemplateId, null);
+    public IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project, string? projectDefaultProfileId) =>
+        ToInfo(issue, project, projectDefaultProfileId, null);
 
-    public IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project, string? projectDefaultTemplateId, IReadOnlySet<string>? disabledIds)
+    public IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project, string? projectDefaultProfileId, IReadOnlySet<string>? disabledIds)
     {
-        var resolved = _effectiveProfileResolver.Resolve(issue.WorkflowProfileId, projectDefaultTemplateId, disabledIds);
+        var resolved = _effectiveProfileResolver.Resolve(issue.WorkflowProfileId, projectDefaultProfileId, disabledIds);
         return IssueReadModelLoader.BuildInfo(issue, project, resolved);
     }
 
@@ -616,7 +631,7 @@ public class IssueQuerier : IScopedService
         // global + project layers with each issue's snapshot (which now holds
         // only built-in context + explicit issue overrides). This keeps the
         // displayed model/agent in sync with project edits; see
-        // WorkflowProfileManager.LoadVariablesAsync for the dispatch equivalent.
+        // WorkflowVariableResolver provides the dispatch equivalent.
         var globalBundle = await _configService.GetVariables();
         VariableBundle? projectBundle = null;
         if (!string.IsNullOrWhiteSpace(projectId))
@@ -916,15 +931,17 @@ public class IssueQuerier : IScopedService
         }
 
         var childModels = new List<IssueReadModel>(childRows.Count);
-        var projectDefaultTemplateId = await _loader.LoadProjectDefaultTemplateAsync(db, projectId);
-        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
+        var projectDefaultProfileId = await _loader.LoadProjectDefaultProfileAsync(db, projectId);
+        var disabledIds = await _profileProvider.GetDisabledProfileIdsAsync(projectId);
+        var profiles = await _profileProvider.ListAsync(projectId);
         foreach (var row in childRows)
         {
             var domain = IssueStore.Deserialize(row.State);
             if (domain is null) continue;
-            var resolvedProfileId = _effectiveProfileResolver.Resolve(
+            var resolvedProfileId = IssueReadModelLoader.ResolveProfileId(
                 domain.WorkflowProfileId,
-                projectDefaultTemplateId,
+                projectDefaultProfileId,
+                profiles,
                 disabledIds);
             var info = IssueReadModelLoader.BuildInfo(domain, project: null, resolvedProfileId);
             childModels.Add(IssueReadModelLoader.ToReadModel(info));

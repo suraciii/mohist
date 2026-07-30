@@ -79,19 +79,30 @@ public sealed class WorkflowGrainContractRules
     }
 
     [Fact]
-    public void WorkflowProfileManager_ResolutionFailureSites_ThrowTypedException()
+    public void WorkflowDefinitionResolver_ResolutionFailureSites_ThrowTypedException()
     {
-        var profileManager = ReadEmbeddedFile(WorkflowServicesDir + "WorkflowProfileManager.cs");
+        var definitionResolver = ReadEmbeddedFile(WorkflowServicesDir + "WorkflowDefinitionResolver.cs");
 
         var typedThrows = Regex.Matches(
-            profileManager,
+            definitionResolver,
             @"throw new WorkflowDefinitionResolutionException\(",
             RegexOptions.ExplicitCapture).Count;
 
         Assert.True(
             typedThrows >= 3,
-            $"WorkflowProfileManager must throw WorkflowDefinitionResolutionException at all three "
+            $"WorkflowDefinitionResolver must throw WorkflowDefinitionResolutionException at all three "
             + $"resolution-failure sites; found {typedThrows}.");
+    }
+
+    [Fact]
+    public void WorkflowDefinitionResolver_HasNoVariableOrPromptResponsibility()
+    {
+        var definitionResolver = ReadEmbeddedFile(WorkflowServicesDir + "WorkflowDefinitionResolver.cs");
+
+        Assert.DoesNotContain("WorkflowVariableResolver", definitionResolver, StringComparison.Ordinal);
+        Assert.DoesNotContain("VariableBundle", definitionResolver, StringComparison.Ordinal);
+        Assert.DoesNotContain("Prompt", definitionResolver, StringComparison.Ordinal);
+        Assert.DoesNotContain("Render", definitionResolver, StringComparison.Ordinal);
     }
 
     [Fact]

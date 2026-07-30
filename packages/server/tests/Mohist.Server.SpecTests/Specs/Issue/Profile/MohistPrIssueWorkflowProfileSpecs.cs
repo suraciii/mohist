@@ -3,7 +3,6 @@ using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
-using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
@@ -13,7 +12,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     private static WorkflowDefinition GithubPrDefinition => WorkflowProfileCatalog.GithubPrWorkflowDefinition;
 
     private static IssueWorkflowProfileRegistry BuildRegistry() =>
-        new(new FakePromptLoader(), new FakeDbContextFactory());
+        new();
 
     [Fact]
     public void IssueWorkflowProfiles_ExposesGithubPrIdConstant()
@@ -24,18 +23,17 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_ExposesCorrectMetadata()
     {
-        var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistGithubPrIssueWorkflowProfile().Profile;
 
         Assert.Equal("mohist/github-pr", profile.Id);
-        Assert.Equal("Mohist GitHub PR", profile.DisplayName);
-        Assert.False(profile.IsDefault);
+        Assert.Equal("Mohist GitHub PR", profile.Name);
         Assert.False(string.IsNullOrWhiteSpace(profile.Description));
     }
 
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_DescriptionSurfacesGhCliPrerequisite()
     {
-        var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistGithubPrIssueWorkflowProfile().Profile;
 
         Assert.Contains("gh", profile.Description, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("gh auth login", profile.Description, StringComparison.OrdinalIgnoreCase);
@@ -45,7 +43,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_DescriptionReadsFromGithubPrYaml()
     {
-        var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistGithubPrIssueWorkflowProfile().Profile;
 
         Assert.Equal(WorkflowProfileCatalog.GithubPrProfileAsset.Description, profile.Description);
         Assert.EndsWith("`gh` CLI on the runner host and `gh auth login` against the target repository.", profile.Description);
@@ -54,7 +52,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_Definition_ComesFromGithubPrYaml()
     {
-        var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistGithubPrIssueWorkflowProfile().Profile;
 
         Assert.Same(GithubPrDefinition, profile.Definition);
         Assert.NotSame(WorkflowProfileCatalog.Definition, profile.Definition);
@@ -69,7 +67,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var profile = registry.Get("mohist/github-pr");
 
         Assert.Equal("mohist/github-pr", profile.Id);
-        Assert.False(profile.IsDefault);
         Assert.Same(GithubPrDefinition, profile.Definition);
     }
 
@@ -81,7 +78,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var profile = registry.Get("mohist/local");
 
         Assert.Equal("mohist/local", profile.Id);
-        Assert.True(profile.IsDefault);
+        Assert.NotNull(profile.Definition);
     }
 
     [Fact]
@@ -622,68 +619,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal(
             definition.Stages.SelectMany(s => s.Tasks).Select(t => t.Id),
             reparsed.Stages.SelectMany(s => s.Tasks).Select(t => t.Id));
-    }
-
-    [Fact]
-    public void ProjectWorkflowProfileManager_GetSystemTemplateInfo_GithubPr_ReturnsFriendlyDisplayName()
-    {
-        var info = ProjectWorkflowProfileManager.GetSystemTemplateInfo("mohist/github-pr");
-
-        Assert.NotNull(info);
-        Assert.Equal("Mohist GitHub PR", info!.Name);
-        Assert.False(info.IsDefault);
-        Assert.Contains("gh auth login", info.Description, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void ProjectWorkflowProfileManager_GetSystemTemplateDefinition_GithubPr_ReturnsGithubPrDefinition()
-    {
-        var def = ProjectWorkflowProfileManager.GetSystemTemplateDefinition("mohist/github-pr");
-
-        Assert.NotNull(def);
-        Assert.Same(GithubPrDefinition, def);
-    }
-
-    [Fact]
-    public void ProjectWorkflowProfileManager_GetSystemTemplateInfo_LegacyPrId_ReturnsNull()
-    {
-        Assert.Null(ProjectWorkflowProfileManager.GetSystemTemplateInfo("mohist/pr"));
-        Assert.Null(ProjectWorkflowProfileManager.GetSystemTemplateDefinition("mohist/pr"));
-    }
-
-    [Fact]
-    public async Task ProjectWorkflowProfileManager_SystemTemplates_ExposeGithubPrTemplate()
-    {
-        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
-
-        var templates = await manager.ListSystemTemplatesAsync();
-
-        var prTemplate = Assert.Single(templates, t => t.Id == "mohist/github-pr");
-        Assert.Equal("Mohist GitHub PR", prTemplate.Name);
-        Assert.False(prTemplate.IsDefault);
-        Assert.Contains("gh auth login", prTemplate.Description, StringComparison.OrdinalIgnoreCase);
-
-        Assert.DoesNotContain(templates, t => t.Id == "mohist/pr");
-    }
-
-    [Fact]
-    public async Task BothCatalogPaths_AgreeWithProfileInstanceForBothBuiltIns()
-    {
-        var registry = BuildRegistry();
-        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine(), NullActionCatalogSource.Instance);
-
-        var templates = await manager.ListSystemTemplatesAsync();
-        var described = registry.ListDescribed();
-
-        foreach (var profileId in new[] { IssueWorkflowProfiles.LocalId, IssueWorkflowProfiles.GithubPrId })
-        {
-            var profile = registry.Get(profileId);
-            var template = Assert.Single(templates, t => t.Id == profileId);
-            var describedEntry = Assert.Single(described, d => d.Id == profileId);
-
-            Assert.Equal(profile.Description, template.Description);
-            Assert.Equal(profile.Description, describedEntry.Description);
-        }
     }
 
     private static void AssertAgentTask(TaskDefinition task, string session, string prompt) => Assert.Equal(("mohist/opencode", session, prompt, "${{ vars.agent }}"), (task.Uses, ReadStringWith(task, "session"), ReadStringWith(task, "prompt"), ReadStringWith(task, "options")));

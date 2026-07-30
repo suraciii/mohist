@@ -10,7 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
-public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
+public class WorkflowStageSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]
     public async Task LoadStageSpecsAsync_ReturnsTasksAndChecksForStage_FromProjectTemplate()
@@ -35,7 +35,7 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
 
         await SeedProjectTemplateAsync("specs_proj", runId, "specs-template", templateJson);
 
-        var build = await Manager.LoadStageSpecsAsync(runId, "build");
+        var build = await DefinitionResolver.LoadStageSpecsAsync(runId, "build");
 
         Assert.Equal("build", build.Stage);
         Assert.Equal(new[] { "compile", "test" }, build.Tasks.Select(t => t.Id).ToArray());
@@ -69,7 +69,7 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
             projectDefaultTemplateId: "project-tmpl",
             projectTemplateJson: projectJson);
 
-        var build = await Manager.LoadStageSpecsAsync(runId, "build");
+        var build = await DefinitionResolver.LoadStageSpecsAsync(runId, "build");
 
         Assert.Equal(new[] { "replacement-task" }, build.Tasks.Select(t => t.Id).ToArray());
     }
@@ -88,7 +88,7 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
 
         await SeedProjectTemplateAsync("hot_proj", runId, "hot-template", templateJson);
 
-        var before = await Manager.LoadStageSpecsAsync(runId, "build");
+        var before = await DefinitionResolver.LoadStageSpecsAsync(runId, "build");
         Assert.Equal(new[] { "original-task" }, before.Tasks.Select(t => t.Id).ToArray());
 
         // Mutate the project template to a new task — next call must see it.
@@ -100,7 +100,7 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
             }, Array.Empty<CheckDefinition>(), requiresApproval: false));
         await UpdateProjectTemplateAsync("hot_proj", "hot-template", updatedJson);
 
-        var after = await Manager.LoadStageSpecsAsync(runId, "build");
+        var after = await DefinitionResolver.LoadStageSpecsAsync(runId, "build");
         Assert.Equal(new[] { "replacement-task", "follow-up-task" }, after.Tasks.Select(t => t.Id).ToArray());
     }
 
@@ -117,7 +117,7 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
         await SeedProjectTemplateAsync("missing_proj", runId, "missing-template", templateJson);
 
         var ex = await Assert.ThrowsAsync<WorkflowDefinitionResolutionException>(
-            () => Manager.LoadStageSpecsAsync(runId, "no-such-stage"));
+            () => DefinitionResolver.LoadStageSpecsAsync(runId, "no-such-stage"));
 
         Assert.Equal(
             WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
@@ -136,7 +136,7 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => Manager.LoadStageSpecsAsync(runId, "plan", "proj-all-disabled-stage-specs", 1));
+            () => DefinitionResolver.LoadStageSpecsAsync(runId, "plan", "proj-all-disabled-stage-specs", 1));
 
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -152,7 +152,7 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
             issueWorkflowProfileId: "mohist/local",
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
-        var integrate = await Manager.LoadStageSpecsAsync(runId, "integrate");
+        var integrate = await DefinitionResolver.LoadStageSpecsAsync(runId, "integrate");
 
         Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
@@ -186,7 +186,7 @@ public class WorkflowStageSpecs : WorkflowProfileManagerTestFactory
             await db.SaveChangesAsync();
         }
 
-        var integrate = await CreateProfileBackedManager().LoadStageSpecsAsync(
+        var integrate = await CreateDefinitionResolver().LoadStageSpecsAsync(
             runId, "integrate", "proj-legacy-profile-live-resolution", 1);
 
         Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");

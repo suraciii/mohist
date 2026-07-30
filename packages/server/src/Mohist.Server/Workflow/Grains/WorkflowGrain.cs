@@ -25,7 +25,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private bool _runDirty;
     private bool _runReloadRequired;
     private readonly IWorkflowRunStore _runStore;
-    private readonly WorkflowProfileManager _profileManager;
+    private readonly WorkflowDefinitionResolver _definitionResolver;
+    private readonly WorkflowVariableResolver _variableResolver;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WorkflowGrain> _log;
     private readonly WorkflowReadModel _readModel;
@@ -37,13 +38,15 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         Orleans.Runtime.IGrainContext context,
         Orleans.Runtime.IGrainRuntime runtime,
         IWorkflowRunStore runStore,
-        WorkflowProfileManager profileManager,
+        WorkflowDefinitionResolver definitionResolver,
+        WorkflowVariableResolver variableResolver,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
         : base(context, runtime)
     {
         _runStore = runStore;
-        _profileManager = profileManager;
+        _definitionResolver = definitionResolver;
+        _variableResolver = variableResolver;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -56,12 +59,14 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
-        WorkflowProfileManager profileManager,
+        WorkflowDefinitionResolver definitionResolver,
+        WorkflowVariableResolver variableResolver,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
-        _profileManager = profileManager;
+        _definitionResolver = definitionResolver;
+        _variableResolver = variableResolver;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -73,7 +78,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     WorkflowRun? IWorkflowGrainContext.RunOrNull => _run;
     string IWorkflowGrainContext.GrainKey => GrainKey;
     string? IWorkflowGrainContext.GetWorkflowProfileId() => _run?.WorkflowProfileId;
-    WorkflowProfileManager IWorkflowGrainContext.ProfileManager => _profileManager;
+    WorkflowDefinitionResolver IWorkflowGrainContext.DefinitionResolver => _definitionResolver;
+    WorkflowVariableResolver IWorkflowGrainContext.VariableResolver => _variableResolver;
     IGrainFactory IWorkflowGrainContext.Grains => GrainFactory;
     ILogger IWorkflowGrainContext.Log => _log;
     DateTimeOffset IWorkflowGrainContext.Now() => Now();
@@ -229,7 +235,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         RequireProjectOwnership(metadata);
         var projectId = metadata?.ProjectId;
         var issueNumber = metadata?.IssueNumber;
-        var structure = await _profileManager.LoadStartupStructureAsync(GrainKey, projectId, issueNumber);
+        var structure = await _definitionResolver.LoadStartupStructureAsync(GrainKey, projectId, issueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
         if (!string.IsNullOrWhiteSpace(structure.Id))
             await PersistProfileBindingAsync(projectId!, structure.Id);
@@ -243,11 +249,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             context.IssueNumber,
             context.EpicNumber,
             new WorkflowRunMetadata(null, Now()));
-        var structure = await _profileManager.LoadStartupStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
+        var structure = await _definitionResolver.LoadStartupStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
         if (!string.IsNullOrWhiteSpace(structure.Id))
             await PersistProfileBindingAsync(context.ProjectId, structure.Id);
-        _run.Workspace = await _profileManager.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
+        _run.Workspace = await _variableResolver.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
     }
 
     public async Task ResumeAsync()
@@ -296,7 +302,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         EnsureRun();
         var normalizedOperator = ApprovalOperatorValidation.Normalize(decidedBy);
         var stage = _run.CurrentStage();
-        var approval = await _profileManager.LoadApprovalConfigAsync(GrainKey);
+        var approval = await _definitionResolver.LoadApprovalConfigAsync(GrainKey);
         var feedbackTasks = WorkflowRunExtensions.ResolveFeedbackTasks(approval?.Feedback?.Tasks, stage.Id);
         var feedbackId = CreateFeedbackId();
         var events = _run.RequestChanges(body, feedbackId, Now(), normalizedOperator, feedbackTasks);

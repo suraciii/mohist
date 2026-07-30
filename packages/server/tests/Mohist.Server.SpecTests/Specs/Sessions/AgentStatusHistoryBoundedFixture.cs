@@ -100,7 +100,8 @@ public sealed class AgentStatusHistoryBoundedFixture : IAsyncLifetime
                     return CountingWorkflowQuerier ??=
                         new CountingWorkflowQuerier(
                             provider.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
-                            provider.GetRequiredService<Mohist.Server.Workflow.Services.WorkflowProfileManager>(),
+                            provider.GetRequiredService<Mohist.Server.Workflow.Services.WorkflowDefinitionResolver>(),
+                            provider.GetRequiredService<Mohist.Server.Workflow.Services.WorkflowVariableResolver>(),
                             provider.GetRequiredService<IWorkflowArtifactQuerier>());
                 });
                 services.AddScoped<WorkflowQuerier>(provider =>
@@ -128,9 +129,10 @@ public sealed class CountingWorkflowQuerier : WorkflowQuerier
 
     public CountingWorkflowQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
-        Mohist.Server.Workflow.Services.WorkflowProfileManager profileManager,
+        Mohist.Server.Workflow.Services.WorkflowDefinitionResolver definitionResolver,
+        Mohist.Server.Workflow.Services.WorkflowVariableResolver variableResolver,
         IWorkflowArtifactQuerier artifactQuerier)
-        : base(dbFactory, profileManager, artifactQuerier)
+        : base(dbFactory, definitionResolver, variableResolver, artifactQuerier)
     {
     }
 

@@ -334,7 +334,6 @@ internal static class RoutingDispatchTestSupport
                 services.AddScoped<RoutedAgentLaunchContextResolver>();
                 services.AddScoped<WorkflowRunQuerier>();
                 services.AddSingleton<IActionCatalogSource>(NullActionCatalogSource.Instance);
-                services.AddScoped<IssueWorkflowProfileManager>();
                 services.AddScoped<RoutingTableEvaluator>();
                 configure?.Invoke(services);
                 return services.BuildServiceProvider();

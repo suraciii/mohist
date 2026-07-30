@@ -28,7 +28,8 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database;
-    private readonly WorkflowProfileManager _profileManager;
+    private readonly WorkflowPromptResolver _promptResolver;
+    private readonly WorkflowVariableResolver _variableResolver;
     private readonly WorkflowItemTranslator _translator;
     private readonly IWorkflowArtifactBindService _bindService;
     private readonly FakeAgentExecutionSnapshotResolver _agentResolver;
@@ -40,14 +41,18 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var factory = new TestDbContextFactory(_database.Options);
         var runVariablesStore = new WorkflowRunVariablesStore(factory);
         var promptLoader = new EmptyPromptLoader();
-        _profileManager = new WorkflowProfileManager(
-            factory, promptLoader, new PromptTemplateEngine(),
-            WorkflowGrainTestHelpers.CreateEmptyConfigService(), runVariablesStore,
-            new WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
+        _promptResolver = new WorkflowPromptResolver(
+            factory,
+            new ProjectPromptStore(factory, promptLoader, new PromptTemplateEngine()));
+        _variableResolver = new WorkflowVariableResolver(
+            factory,
+            new ProjectVariableStore(factory),
+            new IssueVariableStore(factory),
+            runVariablesStore);
         _bindService = new WorkflowArtifactBindService(
             factory, BindNullLogger, new FakeTimeProvider(TestTime.UtcNow));
         _agentResolver = new FakeAgentExecutionSnapshotResolver();
-        _translator = new WorkflowItemTranslator(_profileManager, _bindService, TranslatorNullLogger, _agentResolver);
+        _translator = new WorkflowItemTranslator(_promptResolver, _variableResolver, _bindService, TranslatorNullLogger, _agentResolver);
     }
 
     private static Microsoft.Extensions.Logging.ILogger<WorkflowItemTranslator> TranslatorNullLogger =>

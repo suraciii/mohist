@@ -39,9 +39,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly IGrainFactory _grainFactory;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IssueRepositoryResolver _repositoryResolver;
-    private readonly WorkflowProfileManager _workflowProfileManager;
-    private readonly ProjectWorkflowProfileManager _projectProfileManager;
-    private readonly IssueWorkflowProfileManager _issueProfileManager;
+    private readonly WorkflowDefinitionResolver _workflowDefinitionResolver;
+    private readonly WorkflowPromptResolver _workflowPromptResolver;
+    private readonly IssueVariableStore _issueVariableStore;
     private readonly AttachmentService _attachmentService;
     private readonly IConfiguration _configuration;
     private readonly IEnvironmentVariableProvider _environment;
@@ -59,9 +59,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IGrainFactory grainFactory,
         IBackgroundTaskLauncher backgroundTasks,
         IssueRepositoryResolver repositoryResolver,
-        WorkflowProfileManager workflowProfileManager,
-        ProjectWorkflowProfileManager projectProfileManager,
-        IssueWorkflowProfileManager issueProfileManager,
+        WorkflowDefinitionResolver workflowDefinitionResolver,
+        WorkflowPromptResolver workflowPromptResolver,
+        IssueVariableStore issueVariableStore,
         AttachmentService attachmentService,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
@@ -79,9 +79,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _grainFactory = grainFactory;
         _backgroundTasks = backgroundTasks;
         _repositoryResolver = repositoryResolver;
-        _workflowProfileManager = workflowProfileManager;
-        _projectProfileManager = projectProfileManager;
-        _issueProfileManager = issueProfileManager;
+        _workflowDefinitionResolver = workflowDefinitionResolver;
+        _workflowPromptResolver = workflowPromptResolver;
+        _issueVariableStore = issueVariableStore;
         _attachmentService = attachmentService;
         _configuration = configuration;
         _environment = environment;
@@ -98,9 +98,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IGrainFactory grainFactory,
         IBackgroundTaskLauncher backgroundTasks,
         IssueRepositoryResolver repositoryResolver,
-        WorkflowProfileManager workflowProfileManager,
-        ProjectWorkflowProfileManager projectProfileManager,
-        IssueWorkflowProfileManager issueProfileManager,
+        WorkflowDefinitionResolver workflowDefinitionResolver,
+        WorkflowPromptResolver workflowPromptResolver,
+        IssueVariableStore issueVariableStore,
         AttachmentService attachmentService,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
@@ -117,9 +117,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _grainFactory = grainFactory;
         _backgroundTasks = backgroundTasks;
         _repositoryResolver = repositoryResolver;
-        _workflowProfileManager = workflowProfileManager;
-        _projectProfileManager = projectProfileManager;
-        _issueProfileManager = issueProfileManager;
+        _workflowDefinitionResolver = workflowDefinitionResolver;
+        _workflowPromptResolver = workflowPromptResolver;
+        _issueVariableStore = issueVariableStore;
         _attachmentService = attachmentService;
         _configuration = configuration;
         _environment = environment;
@@ -305,9 +305,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // mohist/local), so the resolver's own fallback handles projects
         // without a configured default.
 
-        var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issue.Number);
+        var resolvedTemplate = await _workflowDefinitionResolver.LoadTemplateAsync(wrId, projectContext.Id, issue.Number);
         var definition = resolvedTemplate.Structure
-            ?? throw new InvalidOperationException(WorkflowProfileManager.NoEnabledWorkflowProfileMessage);
+            ?? throw new InvalidOperationException(WorkflowDefinitionResolver.NoEnabledWorkflowProfileMessage);
 
         // Resolve the effective profile (issue selection → project default →
         // system default) so prompts are merged from the same profile that
@@ -315,18 +315,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // mohist/local profile, which meant a mohist/github-pr issue would
         // inherit default prompts even though the run used the GitHub PR
         // definition.
-        var projectDefaultTemplateId = await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id);
-        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectContext.Id);
-        var effectiveProfileId = EffectiveWorkflowProfileResolver.ResolveCore(
-            issue.WorkflowProfileId,
-            projectDefaultTemplateId,
-            _profiles.Exists,
-            disabledIds,
-            _profiles.List().Select(p => p.Id).ToList());
-        if (string.IsNullOrWhiteSpace(effectiveProfileId))
-            throw new InvalidOperationException(WorkflowProfileManager.NoEnabledWorkflowProfileMessage);
-
-        var availablePrompts = await _workflowProfileManager.LoadPromptsAsync(
+        var availablePrompts = await _workflowPromptResolver.LoadPromptsAsync(
             wrId,
             projectId: issue.ProjectId);
         EnsurePromptsReferencesResolve(
@@ -350,7 +339,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // agent block) are preserved by passing the existing bundle into
         // the builder — the seed only fires when the issue would otherwise
         // expose `vars.agent` as undefined.
-        var existingVariables = await _issueProfileManager.GetVariablesAsync(issue.ProjectId, issue.Number);
+        var existingVariables = await _issueVariableStore.GetVariablesAsync(issue.ProjectId, issue.Number);
         var issueBundle = IssueVariableBuilder.BuildContextBundle(
             wrId,
             issue,
@@ -358,7 +347,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             workspace,
             existingVariables);
         var mergedVariables = VariableBundle.Patch(existingVariables, issueBundle);
-        await _issueProfileManager.SetVariablesAsync(issue.ProjectId, issue.Number, mergedVariables);
+        await _issueVariableStore.SetVariablesAsync(issue.ProjectId, issue.Number, mergedVariables);
 
         return (repositoryContext, workspace, new IssueWorkStartedContext(
             issue.ProjectId,
@@ -1152,8 +1141,11 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 
         var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
 
-        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.LocalId);
-        var projection = defaultProfile.ProjectWorkflowState(_issue, wfStatus);
+        var projection = MohistDefaultWorkflowProjection.ProjectWorkflowState(
+            _issue.Number,
+            _issue.Title,
+            _issue.Status,
+            wfStatus);
 
         return new IssueWorkflowStatus(
             _issue.Number,

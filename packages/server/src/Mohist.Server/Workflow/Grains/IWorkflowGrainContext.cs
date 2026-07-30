@@ -11,7 +11,8 @@ internal interface IWorkflowGrainContext
     WorkflowRun? RunOrNull { get; }
     string GrainKey { get; }
     string? GetWorkflowProfileId();
-    WorkflowProfileManager ProfileManager { get; }
+    WorkflowDefinitionResolver DefinitionResolver { get; }
+    WorkflowVariableResolver VariableResolver { get; }
     IGrainFactory Grains { get; }
     ILogger Log { get; }
     DateTimeOffset Now();

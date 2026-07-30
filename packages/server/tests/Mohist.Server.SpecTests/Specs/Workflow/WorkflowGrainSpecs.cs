@@ -60,15 +60,20 @@ public abstract class WorkflowGrainSpecs
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var promptLoader = new Mohist.Server.Workflow.Services.Prompts.FilePromptLoader();
+        var runVariablesStore = new Mohist.Server.Workflow.Services.WorkflowRunVariablesStore(factory);
+        var definitionResolver = new Mohist.Server.Workflow.Services.WorkflowDefinitionResolver(
+            factory,
+            WorkflowGrainTestHelpers.CreateEmptyConfigService(),
+            new Mohist.Server.Workflow.Services.WorkflowProfileProvider(factory, NullActionCatalogSource.Instance));
+        var variableResolver = new Mohist.Server.Workflow.Services.WorkflowVariableResolver(
+            factory,
+            new Mohist.Server.Workflow.Services.ProjectVariableStore(factory),
+            new Mohist.Server.Workflow.Services.IssueVariableStore(factory),
+            runVariablesStore);
         return new WorkflowQuerier(
             factory,
-            new Mohist.Server.Workflow.Services.WorkflowProfileManager(
-                factory,
-                promptLoader,
-                new PromptTemplateEngine(),
-                WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-                new Mohist.Server.Workflow.Services.WorkflowRunVariablesStore(factory),
-                new Mohist.Server.Workflow.Services.WorkflowProfileProvider(factory, NullActionCatalogSource.Instance)),
+            definitionResolver,
+            variableResolver,
             new WorkflowArtifactQuerier(factory));
     }
 
@@ -346,8 +351,8 @@ public abstract class WorkflowGrainSpecs
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine(), NullActionCatalogSource.Instance);
-        await manager.PatchVariablesAsync(projectId, patch);
+        var store = new ProjectVariableStore(factory);
+        await store.PatchVariablesAsync(projectId, patch);
     }
 
     protected async Task PatchIssueVariablesAsync(int issueNumber, VariableBundle patch)
@@ -374,8 +379,8 @@ public abstract class WorkflowGrainSpecs
             }
         }
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new IssueWorkflowProfileManager(factory, NullActionCatalogSource.Instance);
-        await manager.PatchVariablesAsync(projectId, issueNumber, patch);
+        var store = new IssueVariableStore(factory);
+        await store.PatchVariablesAsync(projectId, issueNumber, patch);
     }
 
     protected static WorkflowDefinition TwoStages()

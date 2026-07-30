@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
-public sealed class WorkflowVariableResolutionThreeScopesSpecs : WorkflowProfileManagerTestFactory
+public sealed class WorkflowVariableResolutionThreeScopesSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]
     public async Task EffectiveVariables_MergeProjectIssueAndRunWithStagePrecedence()
@@ -45,8 +45,8 @@ public sealed class WorkflowVariableResolutionThreeScopesSpecs : WorkflowProfile
             issue: issue,
             runtime: run);
 
-        var topResult = await Manager.ResolveEffectiveVariablesAsync(runId, null);
-        var stageResult = await Manager.ResolveEffectiveVariablesAsync(runId, "build");
+        var topResult = await Resolver.ResolveEffectiveVariablesAsync(runId, null);
+        var stageResult = await Resolver.ResolveEffectiveVariablesAsync(runId, "build");
 
         Assert.Equal("run", topResult.GetProperty("shared").GetString());
         Assert.Equal("issue-model", topResult.GetProperty("agent").GetProperty("model").GetString());
@@ -66,7 +66,7 @@ public sealed class WorkflowVariableResolutionThreeScopesSpecs : WorkflowProfile
             project: VariableBundle.Empty,
             issue: VariableBundle.Empty);
 
-        var result = await Manager.ResolveEffectiveVariablesAsync(runId, null);
+        var result = await Resolver.ResolveEffectiveVariablesAsync(runId, null);
 
         Assert.False(result.ValueKind == JsonValueKind.Object && result.TryGetProperty("archive", out _));
     }
@@ -82,7 +82,7 @@ public sealed class WorkflowVariableResolutionThreeScopesSpecs : WorkflowProfile
         var store = new WorkflowRunVariablesStore(new TestDbContextFactory(Database.Options));
 
         await store.SetVariablesAsync(runId, Bundle(new { archive = "/run/archive" }));
-        var result = await Manager.ResolveEffectiveVariablesAsync(runId, null);
+        var result = await Resolver.ResolveEffectiveVariablesAsync(runId, null);
 
         Assert.Equal("/run/archive", result.GetProperty("archive").GetString());
     }
