@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon } from 'lucide-react'
+import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon, InfoIcon } from 'lucide-react'
 import { useAgents, useLaunchAgentSession } from '../../../entities/agent'
-import type { AgentInfo, AgentSessionLaunchContext } from '../../../entities/agent'
+import type { AgentInfo, AgentReadinessResult, AgentSessionLaunchContext } from '../../../entities/agent'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { AttachmentComposer as DefaultAttachmentComposer } from '../../../shared/ui/attachment-composer'
@@ -220,11 +220,20 @@ export function AgentSessionComposerPage({
     [agents, selectedAgentRef],
   )
   const isArchived = selectedAgent?.status === 'archived'
+  const selectedReadiness: AgentReadinessResult | null | undefined = selectedAgent?.readiness
+  const readinessConclusion = selectedReadiness?.conclusion ?? 'Unknown'
+  const isNeedsSetup = readinessConclusion === 'Needs setup'
+  const isUnknownReadiness = readinessConclusion === 'Unknown'
+  const launchBlockedByReadiness = isNeedsSetup
 
   const promptEmpty = !prompt.trim()
   const showPromptError = promptTouched && promptEmpty
 
-  const canLaunch = !promptEmpty && !!selectedAgentRef && !isArchived && !launchMutation.isPending
+  const canLaunch = !promptEmpty
+    && !!selectedAgentRef
+    && !isArchived
+    && !launchBlockedByReadiness
+    && !launchMutation.isPending
 
   const removeRef = useCallback((index: number) => {
     setContextRefs((prev) => prev.filter((_, i) => i !== index))
@@ -267,6 +276,12 @@ export function AgentSessionComposerPage({
   const errorMessage = launchError?.message ?? ''
   const isNoRunnerError = errorCode === 'NO_AVAILABLE_RUNNER' || errorMessage.toLowerCase().includes('no available runner')
   const isExternalAgentUnavailable = errorCode === 'EXTERNAL_AGENT_UNAVAILABLE' || errorMessage.toLowerCase().includes('external agent unavailable') || errorMessage.toLowerCase().includes('external agent is unavailable')
+  const isNeedsSetupError = errorCode === 'agent_needs_setup' || isNeedsSetup
+  const gapsFromError = isNeedsSetupError
+    ? (launchError && 'data' in launchError
+      ? (launchError as { data?: { gaps?: Array<{ message?: string; action?: string }> } }).data?.gaps
+      : undefined) ?? selectedReadiness?.gaps
+    : undefined
 
   return (
     <div data-testid="agent-session-composer-page" className="flex-1 overflow-y-auto bg-background">
@@ -302,6 +317,26 @@ export function AgentSessionComposerPage({
           </div>
         )}
 
+        {launchError && isNeedsSetupError && (gapsFromError?.length ?? 0) > 0 && (
+          <div
+            data-testid="error-needs-setup"
+            className="flex flex-col gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800"
+          >
+            <div className="flex items-start gap-2">
+              <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-red-500" />
+              <span className="font-medium">Launch blocked — the server reports this Agent needs setup.</span>
+            </div>
+            <ul className="ml-6 list-disc space-y-0.5">
+              {gapsFromError!.map((gap) => (
+                <li key={`${gap.message}-${gap.action}`} className="text-xs text-red-900">
+                  <span className="font-medium">{gap.message}</span>
+                  {gap.action && <span className="text-red-700/80"> — {gap.action}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <Label htmlFor="agent-select">Agent</Label>
           <AgentSelector
@@ -313,6 +348,47 @@ export function AgentSessionComposerPage({
           {isArchived && (
             <p data-testid="archived-warning" className="text-xs text-muted-foreground">
               This agent is archived and cannot be used to launch new sessions.
+            </p>
+          )}
+          {selectedAgent && readinessConclusion === 'Ready' && (
+            <p data-testid="agent-readiness-ready" className="text-xs text-emerald-700">
+              Readiness: Ready — the server confirms this Agent can execute.
+            </p>
+          )}
+          {selectedAgent && isNeedsSetup && (
+            <div
+              data-testid="agent-readiness-needs-setup"
+              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 space-y-1"
+            >
+              <p className="font-medium">
+                Readiness: Needs setup — launch is blocked until the gaps below are fixed.
+              </p>
+              {selectedReadiness?.gaps?.length ? (
+                <ul className="space-y-1">
+                  {selectedReadiness.gaps.map((gap) => (
+                    <li key={gap.code} data-testid={`agent-readiness-gap-${gap.code}`}>
+                      <p className="font-medium">{gap.message}</p>
+                      <p className="text-red-700/80">{gap.action}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {selectedReadiness?.setup && (
+                <p className="text-red-700/80">
+                  Fix in <a className="font-semibold underline" href={toProjectPath(selectedReadiness.setup.path)}>{selectedReadiness.setup.label}</a>.
+                </p>
+              )}
+            </div>
+          )}
+          {selectedAgent && isUnknownReadiness && (
+            <p
+              data-testid="agent-readiness-unknown-hint"
+              className="flex items-start gap-1.5 text-xs text-amber-700"
+            >
+              <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                Readiness: Unknown — launch will proceed and will wait for the server to validate execution.
+              </span>
             </p>
           )}
         </div>
@@ -357,6 +433,7 @@ export function AgentSessionComposerPage({
             data-testid="launch-button"
             onClick={handleLaunch}
             disabled={!canLaunch}
+            title={launchBlockedByReadiness ? 'Readiness is Needs setup — fix the gaps first.' : undefined}
           >
             {launchMutation.isPending ? 'Launching...' : 'Launch Session'}
           </Button>

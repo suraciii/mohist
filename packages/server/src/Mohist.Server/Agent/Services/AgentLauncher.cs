@@ -42,15 +42,18 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
     private readonly AgentSessionResolver _sessions;
     private readonly IGrainFactory _grains;
     private readonly TimeProvider _timeProvider;
+    private readonly AgentReadinessService _readiness;
 
     public AgentLauncher(
         AgentSessionResolver sessions,
         IGrainFactory grains,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        AgentReadinessService readiness)
     {
         _sessions = sessions;
         _grains = grains;
         _timeProvider = timeProvider;
+        _readiness = readiness;
     }
 
     public async Task<AgentLaunchResult> LaunchAsync(
@@ -71,6 +74,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 "Prompt must not be empty or whitespace.",
                 nameof(prompt));
         }
+
+        await EnsureLaunchableAsync(agent, ct);
 
         var (sessionId, jobKey) = ResolveSessionAndJobKeys(context.ProjectId, triggerLabels);
         var sessionContext = BuildContext(context, agent);
@@ -144,6 +149,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 "Prompt must not be empty or whitespace.",
                 nameof(prompt));
         }
+
+        await EnsureLaunchableAsync(agent, ct);
 
         var resolvedRuntime = ResolveRuntime(agent.AgentConfig);
         var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
@@ -304,6 +311,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(prompt));
         }
 
+        await EnsureLaunchableAsync(agent, ct);
+
         var sessionId = _sessions.StableSessionId(executionContext.ProjectId, triggeringEvent.Id, ruleId);
         var jobKey = _sessions.StableJobKey(executionContext.ProjectId, triggeringEvent.Id, ruleId);
 
@@ -384,6 +393,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(prompt));
         }
 
+        await EnsureLaunchableAsync(agent, ct);
+
         var sessionId = _sessions.CommentSessionId(context.ProjectId, commentId, agent.Id);
         var jobKey = _sessions.CommentJobKey(context.ProjectId, commentId, agent.Id);
 
@@ -443,6 +454,13 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Repository: context.Repository,
             WorkspacePath: context.WorkspacePath,
             Title: context.Title);
+
+    private async Task EnsureLaunchableAsync(AgentInfo agent, CancellationToken ct)
+    {
+        var readiness = await _readiness.GetAsync(agent.ProjectId, agent, ct);
+        if (readiness.Conclusion == AgentReadinessConclusions.NeedsSetup)
+            throw new AgentReadinessException(readiness);
+    }
 
     private static string? BuildTriggerIdentity(
         string projectId,

@@ -9,17 +9,27 @@ import {
   XCircleIcon,
   CheckCircleIcon,
   AlertCircleIcon,
+  AlertTriangleIcon,
   Loader2Icon,
   RotateCcwIcon,
+  HourglassIcon,
 } from 'lucide-react'
 import {
   useAgent,
+  useAgentDetailStatus,
   useAgentSessions,
   useArchiveAgent,
   useUnarchiveAgent,
   readAgentModelAndVariant,
 } from '../../../entities/agent'
-import type { AgentInfo, AgentSessionListItemDto } from '../../../entities/agent'
+import type {
+  AgentAvailabilityResponse,
+  AgentInfo,
+  AgentReadinessResult,
+  AgentSessionListItemDto,
+  AgentStatusDetailResponse,
+  AgentWaitingWorkItem,
+} from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { Button } from '@/shared/ui/components/button'
@@ -41,6 +51,8 @@ export interface AgentDetailPageData {
   sessionsLoading: boolean
   archiveAgent: Pick<ReturnType<typeof useArchiveAgent>, 'mutate' | 'isPending'>
   unarchiveAgent: Pick<ReturnType<typeof useUnarchiveAgent>, 'mutate' | 'isPending'>
+  detailStatus: AgentStatusDetailResponse | undefined
+  detailStatusLoading: boolean
 }
 
 export type AgentDetailPageDataHook = (agentId: string) => AgentDetailPageData
@@ -48,6 +60,7 @@ export type AgentDetailPageDataHook = (agentId: string) => AgentDetailPageData
 const useDefaultData: AgentDetailPageDataHook = (agentId) => {
   const { data: agent, isLoading, isError } = useAgent(agentId)
   const { data: sessions = [], isLoading: sessionsLoading } = useAgentSessions({ agentRef: agentId })
+  const { data: detailStatus, isLoading: detailStatusLoading } = useAgentDetailStatus(agentId)
   return {
     agent,
     isLoading,
@@ -56,6 +69,8 @@ const useDefaultData: AgentDetailPageDataHook = (agentId) => {
     sessionsLoading,
     archiveAgent: useArchiveAgent(),
     unarchiveAgent: useUnarchiveAgent(),
+    detailStatus,
+    detailStatusLoading,
   }
 }
 
@@ -90,6 +105,166 @@ function statusIcon(activity: string) {
     default:
       return <AlertCircleIcon className="size-3.5 text-muted-foreground" />
   }
+}
+
+function describeWaitingReason(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'no-online-runner':
+      return 'No runner is online'
+    case 'capacity-full':
+      return 'Runner slots are full'
+    case 'concurrency-limit':
+      return 'Agent is at its concurrency limit'
+    case 'dispatch-pending':
+      return 'Waiting for dispatch'
+    default:
+      return 'Waiting'
+  }
+}
+
+function ReadinessCard({
+  readiness,
+  toProjectPath,
+}: {
+  readiness: AgentReadinessResult | undefined
+  toProjectPath: (path: string) => string
+}) {
+  const conclusion = readiness?.conclusion ?? 'Unknown'
+  const gaps = readiness?.gaps ?? []
+  const setup = readiness?.setup ?? null
+
+  const tone =
+    conclusion === 'Ready'
+      ? { borderClass: 'border-emerald-200', iconBg: 'bg-emerald-100', iconClass: 'text-emerald-600', icon: <CheckCircleIcon className="size-4" />, labelClass: 'text-emerald-700' }
+      : conclusion === 'Needs setup'
+        ? { borderClass: 'border-red-200', iconBg: 'bg-red-100', iconClass: 'text-red-600', icon: <AlertTriangleIcon className="size-4" />, labelClass: 'text-red-700' }
+        : { borderClass: 'border-amber-200', iconBg: 'bg-amber-100', iconClass: 'text-amber-600', icon: <AlertCircleIcon className="size-4" />, labelClass: 'text-amber-700' }
+
+  return (
+    <div
+      data-testid="agent-detail-readiness"
+      data-conclusion={conclusion}
+      className={`rounded-lg border ${tone.borderClass} bg-card p-4 space-y-2`}
+    >
+      <div className="flex items-center gap-2">
+        <span className={`inline-flex items-center justify-center size-6 rounded-full ${tone.iconBg} ${tone.iconClass}`}>
+          {tone.icon}
+        </span>
+        <div className="flex flex-col">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Readiness</span>
+          <span data-testid="agent-detail-readiness-conclusion" className={`text-sm font-semibold ${tone.labelClass}`}>
+            {conclusion}
+          </span>
+        </div>
+      </div>
+      {conclusion === 'Needs setup' && gaps.length > 0 && (
+        <ul data-testid="agent-detail-readiness-gaps" className="space-y-1">
+          {gaps.map((gap) => (
+            <li
+              key={gap.code}
+              data-testid={`agent-detail-readiness-gap-${gap.code}`}
+              className="rounded-md border border-red-100 bg-red-50/50 px-2 py-1.5 text-xs text-red-900"
+            >
+              <p className="font-medium">{gap.message}</p>
+              <p className="text-red-700/80 mt-0.5">{gap.action}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      {conclusion === 'Needs setup' && setup && (
+        <p data-testid="agent-detail-readiness-setup" className="text-xs text-muted-foreground">
+          Fix in <a className="font-medium text-foreground underline" href={toProjectPath(setup.path)}>{setup.label}</a>.
+        </p>
+      )}
+      {conclusion === 'Unknown' && (
+        <p data-testid="agent-detail-readiness-hint" className="text-xs text-muted-foreground">
+          The server has not yet confirmed this Agent. New work will wait for validation.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function AvailabilityCard({
+  availability,
+  waitingWork,
+  loading,
+}: {
+  availability: AgentAvailabilityResponse | undefined
+  waitingWork: AgentWaitingWorkItem[]
+  loading: boolean
+}) {
+  if (loading && !availability) {
+    return (
+      <div
+        data-testid="agent-detail-availability"
+        data-state="loading"
+        className="rounded-lg border border-border bg-card p-4 text-xs text-muted-foreground"
+      >
+        Loading availability…
+      </div>
+    )
+  }
+  if (!availability) {
+    return (
+      <div
+        data-testid="agent-detail-availability"
+        data-state="unavailable"
+        className="rounded-lg border border-border bg-card p-4 text-xs text-muted-foreground"
+      >
+        Availability not yet reported by the server.
+      </div>
+    )
+  }
+  const canStartNow = availability.canStartNow
+  const reasonText = describeWaitingReason(availability.waitingReason)
+  return (
+    <div
+      data-testid="agent-detail-availability"
+      data-state={canStartNow ? 'ready' : 'waiting'}
+      data-waiting-reason={availability.waitingReason ?? ''}
+      className={`rounded-lg border ${canStartNow ? 'border-emerald-200' : 'border-amber-200'} bg-card p-4 space-y-2`}
+    >
+      <div className="flex items-center gap-2">
+        <span className={`inline-flex items-center justify-center size-6 rounded-full ${canStartNow ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+          {canStartNow ? <CheckCircleIcon className="size-4" /> : <HourglassIcon className="size-4" />}
+        </span>
+        <div className="flex flex-col">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Availability</span>
+          <span data-testid="agent-detail-availability-conclusion" className="text-sm font-semibold text-foreground">
+            {canStartNow ? 'Can start now' : `Waiting — ${reasonText}`}
+          </span>
+        </div>
+      </div>
+      <p data-testid="agent-detail-availability-detail" className="text-xs text-muted-foreground">
+        Active runs: {availability.activeRuns}
+        {availability.maxConcurrentRuns != null && ` / ${availability.maxConcurrentRuns}`}
+        {' · '}
+        Runner slots: {availability.capacity.usedSlots}/{availability.capacity.totalSlots}
+      </p>
+      {waitingWork.length > 0 && (
+        <div data-testid="agent-detail-waiting-work" className="space-y-1 pt-1">
+          <h4 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Waiting work ({waitingWork.length})
+          </h4>
+          <ul className="space-y-1">
+            {waitingWork.map((item) => (
+              <li
+                key={item.jobId}
+                data-testid={`agent-detail-waiting-work-${item.jobId}`}
+                data-waiting-reason={item.waitingReason}
+                className="flex items-center gap-2 rounded-md border border-amber-100 bg-amber-50/50 px-2 py-1.5 text-xs"
+              >
+                <HourglassIcon className="size-3 text-amber-600 shrink-0" />
+                <span className="font-medium text-amber-900 truncate min-w-0 flex-1">{item.jobId}</span>
+                <span className="text-amber-700/80 shrink-0">{describeWaitingReason(item.waitingReason)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function SessionSection({
@@ -147,6 +322,8 @@ export function AgentDetailPage({
     sessionsLoading,
     archiveAgent,
     unarchiveAgent,
+    detailStatus,
+    detailStatusLoading,
   } = dataHook(agentId ?? '')
   const [editorOpen, setEditorOpen] = useState(false)
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
@@ -155,6 +332,11 @@ export function AgentDetailPage({
 
   const { model, variant } = useMemo(() => readAgentModelAndVariant(agent), [agent])
   const isArchived = agent?.status === 'archived'
+  const readiness = agent?.readiness
+  const readinessConclusion = readiness?.conclusion ?? 'Unknown'
+  const isNeedsSetup = readinessConclusion === 'Needs setup'
+  const isUnknownReadiness = readinessConclusion === 'Unknown'
+  const launchBlockedByReadiness = isNeedsSetup
 
   const runningSessions = useMemo(
     () => allSessions.filter((s) => s.activity === 'active'),
@@ -253,6 +435,8 @@ export function AgentDetailPage({
                 size="sm"
                 onClick={() => navigate(toProjectPath(`/agent-sessions/new?agent=${encodeURIComponent(agent.id)}`))}
                 data-testid="agent-detail-new-session"
+                disabled={launchBlockedByReadiness}
+                title={launchBlockedByReadiness ? 'Readiness is Needs setup — fix the gaps first.' : undefined}
               >
                 <PlayIcon />
                 New Session
@@ -274,6 +458,17 @@ export function AgentDetailPage({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-6">
+            <ReadinessCard readiness={readiness ?? undefined} toProjectPath={toProjectPath} />
+
+            {!launchBlockedByReadiness && isUnknownReadiness && (
+              <p
+                data-testid="agent-detail-unknown-launch-hint"
+                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+              >
+                Readiness is <span className="font-semibold">Unknown</span> — the launch will proceed and will wait for the server to validate execution.
+              </p>
+            )}
+
             <div className="rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-medium text-foreground mb-3">Instructions</h3>
               <div
@@ -314,6 +509,12 @@ export function AgentDetailPage({
           </div>
 
           <div className="space-y-4">
+            <AvailabilityCard
+              availability={detailStatus?.availability}
+              waitingWork={detailStatus?.waitingWork ?? []}
+              loading={detailStatusLoading}
+            />
+
             <div className="rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-medium text-foreground mb-3">Agent Config</h3>
               <div className="space-y-2" data-testid="agent-detail-config">

@@ -127,6 +127,13 @@ public static class AgentSessionFollowupRoutes
         {
             return ApiResults.Conflict(ex.Message, "session_activity_unknown", new { sessionId = ex.SessionId });
         }
+        catch (FollowupConcurrencyLimitException ex)
+        {
+            return ApiResults.Conflict(
+                ex.Message,
+                "concurrency_limit",
+                new { sessionId = ex.SessionId, agentId = ex.AgentId });
+        }
 
         if (string.IsNullOrWhiteSpace(target.RunnerId))
         {

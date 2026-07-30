@@ -162,6 +162,23 @@ public sealed class StopOperationInProgressException : InvalidOperationException
 
 [Serializable]
 [GenerateSerializer]
+public sealed class FollowupConcurrencyLimitException : InvalidOperationException
+{
+    public FollowupConcurrencyLimitException(string sessionId, string agentId)
+        : base($"AgentSession {sessionId} cannot start a follow-up; Agent '{agentId}' is at its MaxConcurrentRuns limit.")
+    {
+        SessionId = sessionId;
+        AgentId = agentId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string AgentId { get; }
+}
+
+[Serializable]
+[GenerateSerializer]
 public sealed class SessionActivityUnknownException : InvalidOperationException
 {
     public SessionActivityUnknownException(string sessionId)
@@ -366,7 +383,24 @@ public sealed record AgentSessionFollowupLease(
     [property: Id(1)] string RuntimeSessionId,
     [property: Id(2)] bool Accepted = false,
     [property: Id(3)] DateTime? AcceptedAt = null,
-    [property: Id(4)] DateTime? StartedAt = null);
+    [property: Id(4)] DateTime? StartedAt = null,
+    /// <summary>
+    /// When non-null, this follow-up lease occupies a per-agent
+    /// concurrency permit acquired at <c>BeginFollowupAsync</c>. The
+    /// permit is released when the lease is cleared by an idle
+    /// activity event, the lease-expiration sweep, or an explicit
+    /// abandon. Null on leases created for follow-ups that join an
+    /// already-active session (per-session serial, no new permit).
+    /// Append-only Orleans field id.
+    /// </summary>
+    [property: Id(5)] string? ConcurrencyToken = null,
+    /// <summary>
+    /// Agent identity stamped on the lease when the concurrency
+    /// permit is acquired, so the lease-clearing release path can
+    /// route back to the same per-agent gate as the launch path.
+    /// Null when <see cref="ConcurrencyToken"/> is null.
+    /// </summary>
+    [property: Id(6)] string? ConcurrencyAgentId = null);
 
 public sealed record AgentSessionTranscriptEvidence(
     string Id,

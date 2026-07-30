@@ -831,6 +831,51 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
+    public async Task AgentLaunch_NeedsSetupConflictPrintsGapsAndSetupEntry()
+    {
+        var handler = new RecordingHttpHandler((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = false,
+                error = "This Agent needs setup before it can accept new work.",
+                code = "agent_needs_setup",
+                details = new
+                {
+                    conclusion = "Needs setup",
+                    gaps = new[]
+                    {
+                        new
+                        {
+                            code = "instructions-missing",
+                            message = "Instructions are missing.",
+                            action = "Add instructions in Agent settings.",
+                        },
+                    },
+                    setup = new { label = "Agent settings", path = "/agents/agent_x/settings" },
+                },
+            }, HttpStatusCode.Conflict)));
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "launch", "reviewer", "--prompt", "Inspect"],
+            output: output,
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.NotEqual(0, exitCode);
+        var errorText = error.ToString();
+        Assert.Contains("needs setup", errorText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("agent_needs_setup", errorText, StringComparison.Ordinal);
+        Assert.Contains("Instructions are missing", errorText, StringComparison.Ordinal);
+        Assert.Contains("Add instructions in Agent settings", errorText, StringComparison.Ordinal);
+        Assert.Contains("Agent settings", errorText, StringComparison.Ordinal);
+        Assert.Contains("/agents/agent_x/settings", errorText, StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public async Task AgentUpdate_MissingInstructionsFileFailsWithScopedUsageBeforeHttp()
     {
         var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
@@ -922,6 +967,135 @@ public class CliAgentCommandSpecs
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("Agent 'missing' not found", error.ToString());
+    }
+
+    [Fact]
+    public async Task AgentView_PrintsServerReadinessConclusionAndGapsForNeedsSetup()
+    {
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new[] { Agent("agent_123", "reviewer") } }));
+            if (path.EndsWith("/agents/agent_123", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        id = "agent_123",
+                        name = "reviewer",
+                        status = "active",
+                        description = "desc",
+                        instructions = "prompt",
+                        agentConfig = new { model = "openai/gpt-5.5" },
+                        skills = new[] { "mohist" },
+                        maxConcurrentRuns = 2,
+                        createdAt = "2026-06-18T01:00:00Z",
+                        updatedAt = "2026-06-18T01:00:00Z",
+                        readiness = new
+                        {
+                            conclusion = "Needs setup",
+                            gaps = new[]
+                            {
+                                new { code = "instructions-missing", message = "Instructions are missing.", action = "Add instructions in Agent settings." },
+                            },
+                            setup = new { label = "Agent settings", path = "/agents/agent_123/settings" },
+                        },
+                    },
+                }));
+            return Task.FromResult(RecordingHttpHandler.JsonError("not found", statusCode: HttpStatusCode.NotFound));
+        });
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "view", "reviewer"], output: output, fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("readiness:           Needs setup", text, StringComparison.Ordinal);
+        Assert.Contains("Instructions are missing", text, StringComparison.Ordinal);
+        Assert.Contains("Add instructions in Agent settings", text, StringComparison.Ordinal);
+        Assert.Contains("readiness setup:     Agent settings (/agents/agent_123/settings)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AgentView_PrintsServerAvailabilityAndWaitingWork()
+    {
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new[] { Agent("agent_123", "reviewer") } }));
+            if (path.EndsWith("/agents/agent_123", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        id = "agent_123",
+                        name = "reviewer",
+                        status = "active",
+                        description = "desc",
+                        instructions = "prompt",
+                        agentConfig = new { model = "openai/gpt-5.5" },
+                        skills = new[] { "mohist" },
+                        maxConcurrentRuns = 2,
+                        createdAt = "2026-06-18T01:00:00Z",
+                        updatedAt = "2026-06-18T01:00:00Z",
+                        readiness = new { conclusion = "Ready", gaps = Array.Empty<object>(), setup = (object?)null },
+                    },
+                }));
+            if (path.EndsWith("/agents/agent_123/status", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        agentId = "agent_123",
+                        agentName = "reviewer",
+                        availability = new
+                        {
+                            canStartNow = false,
+                            waitingReason = "capacity-full",
+                            activeRuns = 2,
+                            maxConcurrentRuns = 2,
+                            capacity = new { usedSlots = 2, totalSlots = 2 },
+                            observedAt = "2026-07-29T00:00:00Z",
+                        },
+                        waitingWork = new[]
+                        {
+                            new
+                            {
+                                jobId = "job-waiting-1",
+                                status = "waiting",
+                                waitingReason = "capacity-full",
+                                submittedAt = "2026-07-29T00:00:00Z",
+                            },
+                            new
+                            {
+                                jobId = "job-waiting-2",
+                                status = "waiting",
+                                waitingReason = "concurrency-limit",
+                                submittedAt = "2026-07-29T00:00:00Z",
+                            },
+                        },
+                    },
+                }));
+            return Task.FromResult(RecordingHttpHandler.JsonError("not found", statusCode: HttpStatusCode.NotFound));
+        });
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "view", "reviewer"], output: output, fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("availability:        Waiting", text, StringComparison.Ordinal);
+        Assert.Contains("runner slots are full", text, StringComparison.Ordinal);
+        Assert.Contains("waiting work (2):", text, StringComparison.Ordinal);
+        Assert.Contains("job-waiting-1", text, StringComparison.Ordinal);
+        Assert.Contains("runner slots are full", text, StringComparison.Ordinal);
+        Assert.Contains("agent is at its concurrency limit", text, StringComparison.Ordinal);
+        Assert.Contains("readiness:           Ready", text, StringComparison.Ordinal);
     }
 
     [Fact]

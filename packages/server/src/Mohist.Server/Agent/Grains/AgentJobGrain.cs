@@ -6,7 +6,9 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -258,6 +260,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         State.RunnerAccepted = true;
         State.Status = AgentJobStatus.Running;
         State.RunningSince = _timeProvider.GetUtcNow();
+        State.WaitingReason = null;
         await SaveAsync();
         ArmJobTimeout();
         await MarkInitialTurnExecutingAsync();
@@ -961,23 +964,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     public async Task CheckTimeoutsAsync()
     {
-        if (State.Status == AgentJobStatus.Pending
-            && State.RunnerId is null
-            && DispatchRetryBoundExceeded())
-        {
-            await EnterTerminalStateAsync(
-                AgentJobStatus.Failed,
-                null,
-                AgentJobFailureReasons.RunnerUnavailable,
-                AgentJobFailureReasons.RunnerUnavailable,
-                AgentJobFailureReasons.RunnerUnavailable,
-                "dispatch retry bound exceeded without acquiring a runner slot",
-                null,
-                null,
-                null);
-            return;
-        }
-
         if (State.Status == AgentJobStatus.Pending)
         {
             if (State.RunnerId is not null && JobTimeoutExceeded())
@@ -1013,21 +999,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (State.Status != AgentJobStatus.Pending || State.Input is null || State.SubmittedAt is null)
             return;
 
-        if (State.RunnerId is null && DispatchRetryBoundExceeded())
-        {
-            await EnterTerminalStateAsync(
-                AgentJobStatus.Failed,
-                null,
-                AgentJobFailureReasons.RunnerUnavailable,
-                AgentJobFailureReasons.RunnerUnavailable,
-                AgentJobFailureReasons.RunnerUnavailable,
-                "dispatch retry bound exceeded without acquiring a runner slot",
-                null,
-                null,
-                null);
+        if (!await AcquireConcurrencyPermitAsync())
             return;
-        }
 
+        State.WaitingReason = null;
         State.DispatchAttempts++;
         await SaveAsync();
 
@@ -1037,6 +1012,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 return;
             if (State.RunnerId is not null)
             {
+                State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
+                await ReleaseConcurrencyPermitAsync();
                 await ScheduleNextDispatchAsync();
                 return;
             }
@@ -1047,6 +1024,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var runners = await registry.ListEligibleRunnersAsync(projectId);
         if (runners.Count == 0)
         {
+            State.WaitingReason = AgentAvailabilityWaitReasons.NoOnlineRunner;
+            await ReleaseConcurrencyPermitAsync();
             await ScheduleNextDispatchAsync();
             return;
         }
@@ -1059,7 +1038,75 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 return;
         }
 
+        State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
+        await ReleaseConcurrencyPermitAsync();
         await ScheduleNextDispatchAsync();
+    }
+
+    private async Task<bool> AcquireConcurrencyPermitAsync()
+    {
+        if (State.Input is null)
+            return false;
+        var projectId = State.Input.ProjectId;
+        var agentId = State.Input.AgentId;
+        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
+            return true;
+
+        var token = State.ConcurrencyPermitToken ??= $"{Key}:execution";
+        var gate = _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
+        var result = await gate.AcquireAsync(
+            projectId,
+            agentId,
+            token,
+            Key,
+            AgentConcurrencyPermitOwnerKind.Job);
+        if (result == AgentConcurrencyAcquireResult.Waiting)
+        {
+            State.ConcurrencyPermitHeld = false;
+            State.WaitingReason = AgentAvailabilityWaitReasons.ConcurrencyLimit;
+            await SaveAsync();
+            return false;
+        }
+
+        State.ConcurrencyPermitHeld = true;
+        await SaveAsync();
+
+        var confirmation = await gate.AcquireAsync(
+            projectId,
+            agentId,
+            token,
+            Key,
+            AgentConcurrencyPermitOwnerKind.Job);
+        if (confirmation == AgentConcurrencyAcquireResult.Granted)
+            return true;
+
+        State.ConcurrencyPermitHeld = false;
+        State.WaitingReason = AgentAvailabilityWaitReasons.ConcurrencyLimit;
+        await SaveAsync();
+        return false;
+    }
+
+    public async Task ConcurrencyPermitGrantedAsync()
+    {
+        if (State.Status == AgentJobStatus.Pending)
+            await TryDispatchAsync();
+    }
+
+    private async Task ReleaseConcurrencyPermitAsync()
+    {
+        if (!State.ConcurrencyPermitHeld || State.Input is null)
+            return;
+        var projectId = State.Input.ProjectId;
+        var agentId = State.Input.AgentId;
+        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
+            return;
+        var token = State.ConcurrencyPermitToken;
+        if (string.IsNullOrWhiteSpace(token))
+            return;
+        State.ConcurrencyPermitHeld = false;
+        await SaveAsync();
+        await _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId))
+            .ReleaseAsync(projectId, agentId, token);
     }
 
     private async Task<bool> TryAssignToRunnerAsync(string runnerId)
@@ -1107,6 +1154,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.RunnerAccepted = false;
             State.RunningSince = null;
             await SaveAsync();
+            await ReleaseConcurrencyPermitAsync();
             return false;
         }
 
@@ -1183,26 +1231,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     {
         if (State.Status != AgentJobStatus.Pending || State.Input is null || State.SubmittedAt is null)
             return;
-
-        if (State.RunnerId is null && DispatchRetryBoundExceeded())
-        {
-            await EnterTerminalStateAsync(
-                AgentJobStatus.Failed,
-                null,
-                AgentJobFailureReasons.RunnerUnavailable,
-                AgentJobFailureReasons.RunnerUnavailable,
-                AgentJobFailureReasons.RunnerUnavailable,
-                "dispatch retry bound exceeded without acquiring a runner slot",
-                null,
-                null,
-                null);
-            return;
-        }
-        if (State.RunnerId is not null && JobTimeoutExceeded())
-        {
-            await OnJobTimeoutAsync();
-            return;
-        }
 
         State.NextDispatchDelay = _backoff.NextDelay(State.NextDispatchDelay);
         await SaveAsync();
@@ -1330,6 +1358,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             failureCategory,
             artifactUploadIds,
             terminalExitCode ?? exitCode);
+        await ReleaseConcurrencyPermitAsync();
 
         if (terminalStatus == AgentJobStatus.Failed)
         {

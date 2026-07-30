@@ -199,7 +199,8 @@ public sealed record CompleteCompactAgentSessionCommand(
 [GenerateSerializer]
 public sealed record AgentSessionFollowupReservation(
     [property: Id(0)] string? OperationId,
-    [property: Id(1)] bool StartsIdleTurn = false);
+    [property: Id(1)] bool StartsIdleTurn = false,
+    [property: Id(2)] bool ConcurrencyPermitHeld = false);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

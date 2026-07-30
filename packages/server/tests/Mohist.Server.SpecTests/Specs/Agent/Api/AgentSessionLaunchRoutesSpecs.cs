@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
@@ -20,6 +21,44 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture)
     {
+    }
+
+    [Fact]
+    public async Task Launch_NeedsSetup_ReturnsGapsBeforeCreatingSessionOrJob()
+    {
+        var projectId = await CreateProjectAsync("launch-readiness-gate");
+        using var created = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents",
+            new
+            {
+                name = "malformed-model-agent",
+                instructions = "run the task",
+                agentConfig = new { model = "malformed" },
+            });
+        created.EnsureSuccessStatusCode();
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var agentId = createdBody.GetProperty("data").GetProperty("id").GetString()!;
+
+        using var view = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/{agentId}");
+        var viewBody = await view.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Needs setup", viewBody.GetProperty("data").GetProperty("readiness").GetProperty("conclusion").GetString());
+
+        var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
+        var jobsBefore = await CountJobsAsync(projectId, agentId);
+        using var launch = await LaunchAsync(projectId, agentId, new { prompt = "do it" });
+        Assert.Equal(HttpStatusCode.Conflict, launch.StatusCode);
+        var launchBody = await launch.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("agent_needs_setup", launchBody.GetProperty("code").GetString());
+        Assert.Contains("model-reference-malformed", launchBody.GetProperty("details").GetProperty("gaps").EnumerateArray().Select(g => g.GetProperty("code").GetString()));
+        Assert.Equal(sessionsBefore, await CountAgentLaunchSessionsAsync(projectId));
+        Assert.Equal(jobsBefore, await CountJobsAsync(projectId, agentId));
+    }
+
+    private async Task<int> CountJobsAsync(string projectId, string agentId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var jobs = scope.ServiceProvider.GetRequiredService<AgentJobQuerier>();
+        return (await jobs.ListByAgentAsync(projectId, agentId, limit: 200)).Count;
     }
 
     [Fact]

@@ -128,6 +128,9 @@ Runner 暂时离线或没有空闲容量属于 Availability，不把 Ready Agent
 可以被接受并排队。Web、CLI 和 Agent 接入只呈现 Mohist 给出的统一结论，不各自维护一套
 Runtime 判断规则。
 
+Availability 说明现在能否开始一项新的执行。已经排队的 AgentJob 在 Runner 或容量恢复后，可能会
+短暂显示为“等待调度”，直到它的下一次调度尝试开始；这不是新的配置缺口，也不表示 Runner 再次离线。
+
 ### 在 Web UI 中配置和测试
 
 1. 在 **Agents** 中创建或打开 Agent，填写名称、头像、描述和 Instructions。

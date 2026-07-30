@@ -25,4 +25,6 @@ public sealed record AgentInfo(
     [property: Id(9)]
     string CreatedAt,
     [property: Id(10)]
-    string UpdatedAt);
+    string UpdatedAt,
+    [property: Id(11)]
+    AgentReadinessResult? Readiness = null);

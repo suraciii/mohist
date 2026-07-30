@@ -3,7 +3,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
@@ -12,6 +16,7 @@ using Orleans;
 using Orleans.Runtime;
 using Orleans.TestingHost;
 using Xunit;
+using AgentDomain = Mohist.Server.Agent.Domain.Agent;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
 
@@ -110,6 +115,46 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
             if (await job.GetStatusAsync() is not (AgentJobStatus.Completed or AgentJobStatus.Failed))
                 await job.FailAsync("test-cleanup", "test-cleanup-agent");
         }
+    }
+
+    public async Task SeedAgentAsync(string projectId, string agentId, int? maxConcurrentRuns)
+    {
+        var agent = new AgentDomain
+        {
+            Id = agentId,
+            ProjectId = projectId,
+            Name = agentId,
+            Description = "spec",
+            Instructions = "spec",
+            Skills = [],
+            MaxConcurrentRuns = maxConcurrentRuns,
+            Status = AgentStatus.Active,
+            CreatedAt = TimeProvider.GetUtcNow().UtcDateTime,
+            UpdatedAt = TimeProvider.GetUtcNow().UtcDateTime,
+        };
+        var id = GrainKey.Agent(projectId, agentId);
+        var factory = Cluster.GetSiloServiceProvider(null).GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.Agents.FindAsync(id);
+        if (row is null)
+        {
+            db.Agents.Add(new AgentRow
+            {
+                Id = id,
+                ProjectId = projectId,
+                Name = agent.Name,
+                Status = agent.Status,
+                State = AgentStore.Serialize(agent),
+            });
+        }
+        else
+        {
+            row.ProjectId = projectId;
+            row.Name = agent.Name;
+            row.Status = agent.Status;
+            row.State = AgentStore.Serialize(agent);
+        }
+        await db.SaveChangesAsync();
     }
 }
 

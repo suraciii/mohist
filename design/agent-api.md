@@ -101,6 +101,11 @@ AgentJob 改成失败。
 `Unknown` 是正式状态，不等同于 Ready 或 Failed。Mohist 无法确定输入是否已交给 Runtime 时，
 应继续核对原输入，而不是复制一条新输入来“保险重试”。
 
+Availability 回答现在能否开始一项新的执行；它不替代已有 AgentJob 的调度状态。Runner 或容量在
+一个 Pending Job 的退避期间恢复时，Availability 可以显示可启动，而该 Job 仍显示为等待调度，
+直到下一次持久化 dispatch retry 实际开始它。客户端必须呈现这两个 Server 结论，不能把等待调度
+误报为 Runner 离线或容量已满。
+
 ## 可靠性契约
 
 所有客户端共享以下保证：

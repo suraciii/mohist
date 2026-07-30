@@ -9,9 +9,11 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Orleans;
+using Orleans.Runtime;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
@@ -188,6 +190,45 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task SubmitAsync_NoEligibleRunner_DoesNotCountPendingJobAgainstConcurrencyLimit()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+        var projectId = $"agent-job-missing-project-{Guid.NewGuid():N}";
+        await _fixture.SeedAgentAsync(projectId, "agent-test", maxConcurrentRuns: 1);
+        var job = JobGrain($"agent-job-no-runner-limit-{Guid.NewGuid():N}");
+
+        await job.SubmitAsync(MakeInput("no runner", projectId));
+
+        var gate = Grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, "agent-test"));
+        Assert.Equal(0, await gate.GetActiveCountAsync());
+    }
+
+    [Fact]
+    public async Task RunningJob_PermitSurvivesConcurrencyReconciliation()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-reconcile-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-test", maxConcurrentRuns: 1);
+        var jobKey = $"agent-job-reconcile-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        await job.SubmitAsync(MakeInput("running", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        var gate = Grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, "agent-test"));
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        await gate.ReceiveReminder(
+            "agent-concurrency-reconciliation",
+            new TickStatus(now, TimeSpan.FromSeconds(30), now));
+
+        Assert.Equal(1, await gate.GetActiveCountAsync());
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        await Grains.GetGrain<IRunnerGrain>(runnerId).ReportAgentJobResultAsync(
+            jobKey,
+            snapshot.CurrentWorkId!,
+            new WorkResult("completed"));
+    }
+
+    [Fact]
     public async Task SubmitAsync_RunnerAtPersistedSlots_LeavesSecondAgentJobPending()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-capacity-runner-{Guid.NewGuid():N}");
@@ -221,25 +262,23 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task SubmitAsync_BoundExceeded_TransitionsToFailedWithRunnerUnavailable()
+    public async Task SubmitAsync_BoundExceeded_StaysPendingWithoutRunnerUnavailableFailure()
     {
         await ClearGlobalRunnerRegistryAsync();
 
-        var jobKey = $"agent-job-bound-{Guid.NewGuid():N}";
-        var job = JobGrain(jobKey);
-
+        var job = JobGrain($"agent-job-bound-{Guid.NewGuid():N}");
         await job.SubmitAsync(MakeInput("no runner ever", $"agent-job-missing-project-bound-{Guid.NewGuid():N}", "/tmp/agent-job-bound"));
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
         await job.CheckTimeoutsAsync();
 
         var terminal = await job.GetTerminalResultAsync();
-        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
-        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
+        Assert.Equal(AgentJobStatus.Pending, terminal.Status);
+        Assert.NotEqual(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
     }
 
     [Fact]
-    public async Task SubmitAsync_GenericSession_NoEligibleRunner_ClosesSessionAsFailed()
+    public async Task SubmitAsync_GenericSession_NoEligibleRunner_StaysPendingAndKeepsSessionOpen()
     {
         await ClearGlobalRunnerRegistryAsync();
 
@@ -271,34 +310,13 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
         await job.CheckTimeoutsAsync();
 
+        // Issue-520 D4: a job with no eligible runner now stays Pending —
+        // the dispatch retry bound no longer drives the job into terminal
+        // Failed(runner-unavailable). The session keeps its open state
+        // and the agent may still receive a runner later.
         var terminal = await job.GetTerminalResultAsync();
-        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
-        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
-        var closedPayload = await WaitForAsync(
-            async () =>
-            {
-                await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
-                var turnIds = await db.AgentSessionTranscriptTurns
-                    .Where(t => t.SessionId == sessionId)
-                    .Select(t => t.Id)
-                    .ToListAsync();
-                if (turnIds.Count == 0) return null;
-                return await db.AgentSessionTranscriptParts
-                    .Where(p => turnIds.Contains(p.TurnId) && p.Type == TranscriptPartTypes.SessionActivity)
-                    .Select(p => p.PayloadJson)
-                    .FirstOrDefaultAsync();
-            },
-            payload => !string.IsNullOrWhiteSpace(payload),
-            TimeSpan.FromSeconds(2),
-            TimeSpan.FromMilliseconds(50),
-            "generic session terminal activity transcript event")!;
-        using var payload = JsonDocument.Parse(closedPayload!);
-        // Issue 484: terminal delivery now writes a session.activity
-        // (activity=idle) part. The work result status remains on the
-        // payload; the failureCategory is the AgentJob's own verdict
-        // (asserted above via terminal.FailureReason) and is no longer
-        // mirrored onto the session transcript.
-        Assert.Equal("failed", payload.RootElement.GetProperty("status").GetString());
+        Assert.Equal(AgentJobStatus.Pending, terminal.Status);
+        Assert.NotEqual(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
     }
 
     [Fact]

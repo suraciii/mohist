@@ -370,7 +370,7 @@ internal static class AgentCommands
 
     private static Command BuildView(MohistCliApi api)
     {
-        var cmd = new Command("view", "Show agent details");
+        var cmd = new Command("view", "Show agent details (Server-authoritative Readiness, Availability, and waiting work)");
         var nameOrIdArg = NameOrIdArg();
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(AgentDescriptor);
@@ -399,10 +399,57 @@ internal static class AgentCommands
                 var agent = await ResolveAgentAsync(api, resolvedProjectId, nameOrId!);
                 if (agent is null)
                     return 1;
-                return await api.PrintWithOutputAsync(
-                    ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}"),
-                    mode,
-                    nameof(MohistCliApi.TableShape.AgentShow));
+                var agentPath = ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}");
+                var statusPath = ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}/status");
+
+                using var agentResponse = await api.SendAsync(HttpMethod.Get, agentPath, body: null, printServerUnavailable: false);
+                if (agentResponse is null)
+                    return MohistCliApi.FailureExitCode(HttpStatusCode.ServiceUnavailable);
+                if (!agentResponse.IsSuccessStatusCode)
+                {
+                    await api.PrintServerResponseAsync(agentResponse);
+                    return MohistCliApi.FailureExitCode(agentResponse);
+                }
+
+                await using var agentStream = await agentResponse.Content.ReadAsStreamAsync();
+                var agentNode = agentStream.Length == 0 ? null : await JsonNode.ParseAsync(agentStream);
+                if (agentNode is null)
+                {
+                    api.Output.WriteLine($"Server returned an empty agent response.");
+                    return 1;
+                }
+                var agentData = (agentNode as JsonObject)?["data"] as JsonNode ?? agentNode;
+
+                JsonNode? statusData = null;
+                using var statusResponse = await api.SendAsync(HttpMethod.Get, statusPath, body: null, printServerUnavailable: false);
+                if (statusResponse is { IsSuccessStatusCode: true })
+                {
+                    await using var statusStream = await statusResponse.Content.ReadAsStreamAsync();
+                    var statusNode = statusStream.Length == 0 ? null : await JsonNode.ParseAsync(statusStream);
+                    if ((statusNode as JsonObject)?["data"] is JsonNode dataNode)
+                    {
+                        statusData = dataNode;
+                    }
+                }
+
+                if (string.Equals(mode, "json", StringComparison.Ordinal)
+                    || mode.StartsWith("json:", StringComparison.Ordinal))
+                {
+                    var envelope = new JsonObject
+                    {
+                        ["success"] = true,
+                        ["data"] = agentData.DeepClone(),
+                    };
+                    if (statusData is not null)
+                        envelope["status"] = statusData.DeepClone();
+                    api.Output.WriteLine(envelope.ToJsonString(JsonOptions));
+                    return 0;
+                }
+
+                await api.RenderAgentShowAsync(agentData);
+                if (statusData is not null)
+                    await api.RenderAgentShowAvailabilityAsync(statusData);
+                return 0;
             }
         });
         return cmd;
@@ -648,17 +695,67 @@ internal static class AgentCommands
                 object body = contextRefs is null
                     ? new { prompt = promptText }
                     : new { prompt = promptText, context = contextRefs };
-                return await api.PrintPostWithOutputAsync(
+
+                using var response = await api.SendAsync(
+                    HttpMethod.Post,
                     ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agentRef!)}/sessions"),
                     body,
-                    mode,
-                    nameof(MohistCliApi.TableShape.AgentSessionLaunch),
-                    rawJson: true,
+                    printServerUnavailable: false,
                     headers: new Dictionary<string, string> { ["Idempotency-Key"] = idempotencyKey! },
                     retries: 1);
+                if (response is null)
+                    return MohistCliApi.FailureExitCode(HttpStatusCode.ServiceUnavailable);
+
+                if (response.StatusCode == HttpStatusCode.Conflict)
+                {
+                    await using var stream = await response.Content.ReadAsStreamAsync();
+                    var node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+                    if (node is JsonObject envelope
+                        && string.Equals(envelope["code"]?.GetValue<string>(), "agent_needs_setup", StringComparison.Ordinal))
+                    {
+                        await RenderNeedsSetupAsync(api, envelope);
+                        return MohistCliApi.FailureExitCode(response);
+                    }
+                }
+
+                if (string.Equals(mode, "json", StringComparison.Ordinal))
+                    return await api.PrintRawServerResponseAsync(response);
+                return await api.PrintServerResponseAsync(response);
             }
         });
         return cmd;
+    }
+
+    private static async Task RenderNeedsSetupAsync(MohistCliApi api, JsonObject envelope)
+    {
+        var error = envelope["error"]?.GetValue<string>()
+            ?? "This Agent needs setup before it can accept new work.";
+        api.Error.WriteLine($"{error} (code=agent_needs_setup)");
+        if (envelope["details"] is JsonObject details
+            && details["gaps"] is JsonArray gaps
+            && gaps.Count > 0)
+        {
+            api.Error.WriteLine("gaps:");
+            foreach (var gapNode in gaps.OfType<JsonObject>())
+            {
+                var message = gapNode["message"]?.GetValue<string>() ?? "";
+                var action = gapNode["action"]?.GetValue<string>() ?? "";
+                var first = !string.IsNullOrWhiteSpace(message) ? message : "(missing message)";
+                var line = $"  - {first}";
+                if (!string.IsNullOrWhiteSpace(action))
+                    line += $" — {action}";
+                api.Error.WriteLine(line);
+            }
+        }
+        if (envelope["details"] is JsonObject setupDetails
+            && setupDetails["setup"] is JsonObject setup)
+        {
+            var label = setup["label"]?.GetValue<string>() ?? "";
+            var path = setup["path"]?.GetValue<string>() ?? "";
+            if (!string.IsNullOrWhiteSpace(label) || !string.IsNullOrWhiteSpace(path))
+                api.Error.WriteLine($"Fix in: {label} ({path})");
+        }
+        await Task.CompletedTask;
     }
 
     private static object? BuildLaunchContext(int? issue, string? epic, string? repository, string? workspacePath)

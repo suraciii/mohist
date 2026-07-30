@@ -121,6 +121,10 @@ public static class AgentSessionLaunchRoutes
             {
                 return LaunchSetupPending(ex);
             }
+            catch (AgentReadinessException ex)
+            {
+                return ReadinessRejected(ex);
+            }
 
             if (string.IsNullOrWhiteSpace(prompt))
             {
@@ -178,6 +182,10 @@ public static class AgentSessionLaunchRoutes
             {
                 return LaunchSetupPending(ex);
             }
+            catch (AgentReadinessException ex)
+            {
+                return ReadinessRejected(ex);
+            }
 
             return AcceptedLaunch(project.Id, result);
         });
@@ -210,6 +218,13 @@ public static class AgentSessionLaunchRoutes
             StatusCodes.Status503ServiceUnavailable,
             "launch_setup_pending",
             new { idempotencyKey = exception.IdempotencyKey });
+
+    private static IResult ReadinessRejected(AgentReadinessException exception) =>
+        ApiResults.Fail(
+            exception.Message,
+            StatusCodes.Status409Conflict,
+            "agent_needs_setup",
+            exception.Result);
 
     private static async Task<IResult?> ValidateContextAsync(
         AgentSessionLaunchContextRef? context,

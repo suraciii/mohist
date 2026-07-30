@@ -9,10 +9,12 @@ namespace Mohist.Server.Agent.Services;
 public class AgentQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly AgentReadinessService? _readiness;
 
-    public AgentQuerier(IDbContextFactory<MohistDbContext> dbFactory)
+    public AgentQuerier(IDbContextFactory<MohistDbContext> dbFactory, AgentReadinessService? readiness = null)
     {
         _dbFactory = dbFactory;
+        _readiness = readiness;
     }
 
     public async Task<AgentInfo?> GetByIdAsync(string projectId, string id)
@@ -21,13 +23,16 @@ public class AgentQuerier : IScopedService
         var rows = await db.Agents.AsNoTracking()
             .Where(agent => agent.ProjectId == projectId)
             .ToListAsync();
-        return rows
+        var agent = rows
             .Select(row => AgentStore.Deserialize(row.State))
             .Where(agent => agent is not null)
             .Cast<Domain.Agent>()
             .Where(agent => agent.ProjectId == projectId && agent.Id == id)
             .Select(ToInfo)
             .FirstOrDefault();
+        return agent is null || _readiness is null
+            ? agent
+            : agent with { Readiness = await _readiness.GetAsync(projectId, agent) };
     }
 
     /// <summary>
@@ -45,7 +50,7 @@ public class AgentQuerier : IScopedService
         var rows = await db.Agents.AsNoTracking()
             .Where(agent => agent.ProjectId == projectId)
             .ToListAsync();
-        return rows
+        var agent = rows
             .Select(row => AgentStore.Deserialize(row.State))
             .Where(agent => agent is not null)
             .Cast<Domain.Agent>()
@@ -53,6 +58,9 @@ public class AgentQuerier : IScopedService
                 && string.Equals(agent.Name, name, StringComparison.OrdinalIgnoreCase))
             .Select(ToInfo)
             .FirstOrDefault();
+        return agent is null || _readiness is null
+            ? agent
+            : agent with { Readiness = await _readiness.GetAsync(projectId, agent) };
     }
 
     public async Task<IReadOnlyList<AgentInfo>> ListAsync(string projectId, string? status = null, bool all = false)
@@ -66,13 +74,21 @@ public class AgentQuerier : IScopedService
             query = query.Where(agent => agent.Status == status);
 
         var rows = await query.ToListAsync();
-        return rows
+        var infos = rows
             .Select(row => AgentStore.Deserialize(row.State))
             .Where(agent => agent is not null)
             .Cast<Domain.Agent>()
             .OrderByDescending(agent => agent.UpdatedAt)
             .Select(ToInfo)
             .ToList();
+        if (_readiness is null)
+            return infos;
+        var hydrated = new List<AgentInfo>(infos.Count);
+        foreach (var info in infos)
+        {
+            hydrated.Add(info with { Readiness = await _readiness.GetAsync(projectId, info) });
+        }
+        return hydrated;
     }
 
     public static AgentInfo ToInfo(Domain.Agent agent) => new(

@@ -9,6 +9,7 @@ export {
   useArchiveAgent,
   useUnarchiveAgent,
   useAgentSessions,
+  useAgentDetailStatus,
 } from './api/queries'
 export {
   agentSubscriptionsQueryKey,
@@ -31,6 +32,7 @@ export {
   createAgent,
   getAgent,
   getAgentActivity,
+  getAgentDetailStatus,
   getAgentSessions,
   getAgentStatus,
   listAgents,
@@ -42,6 +44,13 @@ export {
 export type {
   AgentCreateRequest,
   AgentInfo,
+  AgentReadinessGap,
+  AgentReadinessResult,
+  AgentReadinessSetup,
+  AgentStatusDetailResponse,
+  AgentAvailabilityResponse,
+  AgentAvailabilityCapacity,
+  AgentWaitingWorkItem,
   AgentUpdateRequest,
 } from './api/client'
 export {

@@ -366,4 +366,73 @@ describe('AgentSessionComposerPage', () => {
     fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Hello' } })
     expect(screen.getByTestId('error-no-runner')).toBeInTheDocument()
   })
+
+  /* ── Readiness gating (server-conclusion driven, client does not synthesize) ── */
+
+  it('blocks the launch button and lists gaps when Readiness is Needs setup', async () => {
+    state.agentsData = [
+      makeAgent('agent-1', {
+        readiness: {
+          conclusion: 'Needs setup',
+          gaps: [
+            { code: 'instructions-missing', message: 'Instructions are missing.', action: 'Add instructions in Agent settings.' },
+          ],
+          setup: { label: 'Agent settings', path: '/agents/agent-1/settings' },
+        },
+      }),
+    ]
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const banner = await screen.findByTestId('agent-readiness-needs-setup')
+    expect(banner).toHaveTextContent(/needs setup/i)
+    expect(screen.getByTestId('agent-readiness-gap-instructions-missing')).toHaveTextContent(/Instructions are missing/i)
+    const button = screen.getByTestId('launch-button')
+    expect(button).toBeDisabled()
+  })
+
+  it('marks the launch button as Ready when Readiness is Ready (no client synthesis)', async () => {
+    state.agentsData = [
+      makeAgent('agent-1', {
+        readiness: { conclusion: 'Ready', gaps: [], setup: null },
+      }),
+    ]
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    await screen.findByTestId('agent-readiness-ready')
+    const textarea = screen.getByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Hello' } })
+    expect(screen.getByTestId('launch-button')).not.toBeDisabled()
+  })
+
+  it('keeps Unknown launchable and shows a will-wait-for-validation hint', async () => {
+    state.agentsData = [makeAgent('agent-1', { readiness: { conclusion: 'Unknown', gaps: [], setup: null } })]
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const hint = await screen.findByTestId('agent-readiness-unknown-hint')
+    expect(hint).toHaveTextContent(/Readiness: Unknown/i)
+    expect(hint).toHaveTextContent(/wait/i)
+    const textarea = screen.getByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Hello' } })
+    expect(screen.getByTestId('launch-button')).not.toBeDisabled()
+  })
+
+  it('surfaces 409 agent_needs_setup gaps as an error banner', async () => {
+    state.agentsData = [makeAgent('agent-1', {
+      readiness: {
+        conclusion: 'Unknown',
+        gaps: [
+          { code: 'instructions-missing', message: 'Instructions are missing.', action: 'Add instructions in Agent settings.' },
+        ],
+        setup: { label: 'Agent settings', path: '/agents/agent-1/settings' },
+      },
+    })]
+    state.launchError = {
+      error: 'This Agent needs setup before it can accept new work.',
+      code: 'agent_needs_setup',
+    }
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Hello' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+    await waitFor(() => {
+      expect(screen.getByTestId('error-needs-setup')).toBeInTheDocument()
+    })
+  })
 })

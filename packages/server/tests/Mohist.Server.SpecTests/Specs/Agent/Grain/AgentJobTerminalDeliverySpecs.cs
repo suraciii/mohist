@@ -257,7 +257,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task DispatchExhaustion_PersistsCloseWithRunnerUnavailableCategory()
+    public async Task DispatchExhaustion_StaysPendingWithoutTerminalFailure()
     {
         await ClearGlobalRunnerRegistryAsync();
         var projectId = $"agent-job-exhaust-{Guid.NewGuid():N}";
@@ -275,13 +275,12 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
         await job.CheckTimeoutsAsync();
 
-        await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
-
-        var closed = await GetSingleClosedAsync(sessionId);
-        Assert.Equal("failed", closed.GetProperty("status").GetString());
-        // Issue 484: the runner-unavailable category is the AgentJob's
-        // own verdict and is no longer mirrored onto the session.activity
-        // part; the job's Failed status is still observable here.
+        // Issue-520 D4: dispatch retry bound exceeded no longer drives the
+        // job into terminal Failed(runner-unavailable). The job keeps
+        // Pending and resumes dispatch when a runner registers.
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Pending, terminal.Status);
+        Assert.NotEqual(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
     }
 
     [Fact]
