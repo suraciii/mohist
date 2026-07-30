@@ -221,8 +221,8 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
 
         Assert.Equal(1, await gate.GetActiveCountAsync());
         var snapshot = await job.GetRuntimeSnapshotAsync();
-        await Grains.GetGrain<IRunnerGrain>(runnerId).ReportAgentJobResultAsync(
-            jobKey,
+        await job.ReportResultAsync(
+            runnerId,
             snapshot.CurrentWorkId!,
             new WorkResult("completed"));
     }
@@ -373,6 +373,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
                 })));
         await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-a"));
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(10));
+        await Grains.GetGrain<IRunnerGrain>("runner-a").TouchPresenceAsync();
 
         var job = JobGrain($"agent-job-reset-{Guid.NewGuid():N}");
         await job.SubmitAsync(new AgentJobInput("delayed failure", ProjectId: projectId, AgentSessionId: sessionId, AgentId: "agent-test"));

@@ -81,7 +81,6 @@ public sealed class AgentJobGrainPersistenceSpecs
         _fixture.DispatchObserver.FailRunnerAccepted = true;
 
         await job.SubmitAsync(input);
-        await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
 
         var prepared = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(AgentJobStatus.Pending, prepared.Status);

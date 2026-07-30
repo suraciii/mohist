@@ -314,8 +314,8 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             var jobId = Assert.Single(await jobs.ListByAgentAsync(project.Id, agent.Id)).JobKey;
             var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
             var snapshot = await job.GetRuntimeSnapshotAsync();
-            await _fixture.Grains.GetGrain<IRunnerGrain>(snapshot.RunnerId!).ReportAgentJobResultAsync(
-                jobId,
+            await job.ReportResultAsync(
+                snapshot.RunnerId!,
                 snapshot.CurrentWorkId!,
                 new WorkResult("completed"));
 

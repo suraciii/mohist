@@ -2,10 +2,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
@@ -58,6 +60,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IGrainFactory _grains;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
+    private readonly TaskCompletionSource<AgentJobTerminalResult> _terminalCompletion =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IDisposable? _jobTimeoutTimer;
 
     private AgentJobState? _state;
@@ -87,6 +91,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         await HydrateAsync();
+
+        if (IsTerminal && State.TerminalResult is not null)
+            _terminalCompletion.TrySetResult(State.TerminalResult);
 
         _log.LogInformation("AgentJob {Id} OnActivateAsync: status={Status}, input={Input}, routedPlan={RoutedPlan}",
             Key, State.Status, State.Input is not null, State.RoutedPlan is not null);
@@ -145,7 +152,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private string Key => this.GetPrimaryKeyString();
     private AgentJobState State => _state ?? throw new InvalidOperationException(
         $"AgentJob '{Key}' state accessed before hydration");
-    private bool IsTerminal => State.Status is AgentJobStatus.Completed or AgentJobStatus.Failed;
+    private bool IsTerminal => State.Status is AgentJobStatus.Completed
+        or AgentJobStatus.Failed
+        or AgentJobStatus.Cancelled;
 
     private bool IsDispatchable => State.Status is AgentJobStatus.Pending;
 
@@ -154,6 +163,32 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         or AgentJobStatus.Unknown;
 
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(State.Status);
+
+    public async Task<AgentJobCancelResult> CancelAsync()
+    {
+        await HydrateAsync();
+
+        if (State.Status == AgentJobStatus.Pending)
+        {
+            await EnterTerminalStateAsync(
+                AgentJobStatus.Cancelled,
+                null,
+                null,
+                null,
+                null,
+                "cancelled",
+                null,
+                null,
+                null);
+            return new AgentJobCancelResult(AgentJobCancelDisposition.Cancelled, State.Status);
+        }
+
+        return new AgentJobCancelResult(
+            State.Status == AgentJobStatus.Running
+                ? AgentJobCancelDisposition.Executing
+                : AgentJobCancelDisposition.AlreadyEnded,
+            State.Status);
+    }
 
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult(State.WorkId);
 
@@ -180,6 +215,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.Status, null, null, null, State.FailureReason, null));
     }
 
+    public Task<AgentJobTerminalResult> WaitForTerminalAsync() =>
+        IsTerminal
+            ? Task.FromResult(State.TerminalResult!)
+            : _terminalCompletion.Task;
+
     public async Task<ClaimResult?> ClaimNextAsync(string runnerId)
     {
         await HydrateAsync();
@@ -205,7 +245,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             ?? throw new AgentJobLedgerReconstructionException(
                 $"AgentJob '{Key}' claim returned a row without a parseable dispatch snapshot");
 
-        await _dispatchObserver.RunnerAcceptedAsync(Key, runnerId, State.WorkId!);
+        await SafeRunnerAcceptedAsync(runnerId, State.WorkId!);
 
         return new ClaimResult(Key, runnerId, State.WorkId!, dispatch);
     }
@@ -814,24 +854,19 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
+        if (!await AcquireConcurrencyPermitAsync())
+            return;
+
+        State.WaitingReason = null;
+        await PersistAsync();
+
         var projectId = State.Input.ProjectId ?? string.Empty;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var runners = await registry.ListEligibleRunnersAsync(projectId);
         if (runners.Count == 0)
         {
-            // No eligible runner at all. Per the design, terminal
-            // runner-unavailable is the only correct outcome and the
-            // launch must not create pending dispatch.
-            await EnterTerminalStateAsync(
-                AgentJobStatus.Failed,
-                null,
-                AgentJobFailureReasons.RunnerUnavailable,
-                AgentJobFailureReasons.RunnerUnavailable,
-                AgentJobFailureReasons.RunnerUnavailable,
-                "no eligible runner on admission",
-                null,
-                null,
-                null);
+            State.WaitingReason = AgentAvailabilityWaitReasons.NoOnlineRunner;
+            await ReleaseConcurrencyPermitAsync();
             return;
         }
 
@@ -841,20 +876,80 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 return;
         }
 
-        // Every eligible runner was full at admission. Per the design
-        // this is the runner-unavailable terminal outcome with no
-        // pending dispatch — only a later claim race can leave an
-        // admitted job pending for the readiness timeout.
-        await EnterTerminalStateAsync(
-            AgentJobStatus.Failed,
-            null,
-            AgentJobFailureReasons.RunnerUnavailable,
-            AgentJobFailureReasons.RunnerUnavailable,
-            AgentJobFailureReasons.RunnerUnavailable,
-            "every eligible runner at capacity on admission",
-            null,
-            null,
-            null);
+        State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
+        await ReleaseConcurrencyPermitAsync();
+    }
+
+    private async Task<bool> AcquireConcurrencyPermitAsync()
+    {
+        if (State.Input is null)
+            return false;
+
+        var projectId = State.Input.ProjectId;
+        var agentId = State.Input.AgentId;
+        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
+            return true;
+
+        var token = State.ConcurrencyPermitToken ??= $"{Key}:execution";
+        var gate = _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
+        var result = await gate.AcquireAsync(
+            projectId,
+            agentId,
+            token,
+            Key,
+            AgentConcurrencyPermitOwnerKind.Job);
+        if (result == AgentConcurrencyAcquireResult.Waiting)
+        {
+            State.ConcurrencyPermitHeld = false;
+            State.WaitingReason = AgentAvailabilityWaitReasons.ConcurrencyLimit;
+            await PersistAsync();
+            return false;
+        }
+
+        State.ConcurrencyPermitHeld = true;
+        await PersistAsync();
+
+        var confirmation = await gate.AcquireAsync(
+            projectId,
+            agentId,
+            token,
+            Key,
+            AgentConcurrencyPermitOwnerKind.Job);
+        if (confirmation == AgentConcurrencyAcquireResult.Granted)
+            return true;
+
+        State.ConcurrencyPermitHeld = false;
+        State.WaitingReason = AgentAvailabilityWaitReasons.ConcurrencyLimit;
+        await PersistAsync();
+        return false;
+    }
+
+    public async Task ConcurrencyPermitGrantedAsync()
+    {
+        await HydrateAsync();
+        if (State.Status == AgentJobStatus.Pending)
+            await TryAdmitAsync();
+    }
+
+    private async Task ReleaseConcurrencyPermitAsync()
+    {
+        if (!State.ConcurrencyPermitHeld || State.Input is null)
+            return;
+
+        var projectId = State.Input.ProjectId;
+        var agentId = State.Input.AgentId;
+        var token = State.ConcurrencyPermitToken;
+        if (string.IsNullOrWhiteSpace(projectId)
+            || string.IsNullOrWhiteSpace(agentId)
+            || string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+
+        State.ConcurrencyPermitHeld = false;
+        await PersistAsync();
+        await _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId))
+            .ReleaseAsync(projectId, agentId, token);
     }
 
     private async Task<bool> TryAdmitOnRunnerAsync(string runnerId)
@@ -919,9 +1014,37 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             "AgentJob {Id} admitted to runner {Runner} as work {Work} (readySince={ReadySince})",
             Key, runnerId, workId, now);
 
-        await _dispatchObserver.AssignmentPreparedAsync(Key, runnerId, workId);
+        await SafeAssignmentPreparedAsync(runnerId, workId);
 
         return true;
+    }
+
+    private async Task SafeAssignmentPreparedAsync(string runnerId, string workId)
+    {
+        try
+        {
+            await _dispatchObserver.AssignmentPreparedAsync(Key, runnerId, workId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} dispatch observer AssignmentPrepared threw; ledger row remains authoritative",
+                Key);
+        }
+    }
+
+    private async Task SafeRunnerAcceptedAsync(string runnerId, string workId)
+    {
+        try
+        {
+            await _dispatchObserver.RunnerAcceptedAsync(Key, runnerId, workId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} dispatch observer RunnerAccepted threw; claim remains authoritative",
+                Key);
+        }
     }
 
     private WorkDispatch BuildDispatch(string workId)
@@ -1083,8 +1206,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         DisposeJobTimeoutTimer();
 
+        await ReleaseConcurrencyPermitAsync();
         await EnsureRecoveryReminderAsync();
         await PersistAsync();
+        _terminalCompletion.TrySetResult(State.TerminalResult);
 
         _log.LogInformation(
             "AgentJob {Id} terminal: {Status} ({Reason}, category={Category}, deliveryId={DeliveryId})",
@@ -1104,7 +1229,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(State.Input?.InitialTurnId))
             return;
 
-        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkInitialTurnExecutingAsync(Key);
+        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkTurnExecutingAsync(State.Input!.InitialTurnId!);
     }
 
     private async Task MarkInitialTurnTerminalAsync(
@@ -1119,9 +1244,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(State.Input?.InitialTurnId))
             return;
 
-        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkInitialTurnTerminalAsync(
-            Key,
-            status == AgentJobStatus.Completed ? AgentTurnStatus.Completed : AgentTurnStatus.Failed,
+        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkTurnTerminalAsync(
+            State.Input!.InitialTurnId!,
+            status switch
+            {
+                AgentJobStatus.Completed => AgentTurnStatus.Completed,
+                AgentJobStatus.Cancelled => AgentTurnStatus.Cancelled,
+                _ => AgentTurnStatus.Failed,
+            },
             new AgentTurnResult(message, output, failureReason, failureCategory, exitCode));
     }
 
@@ -1197,7 +1327,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (State.PendingSessionClose is { } existing)
             return existing;
 
-        var statusText = terminalStatus == AgentJobStatus.Completed ? "completed" : "failed";
+        var statusText = terminalStatus switch
+        {
+            AgentJobStatus.Completed => "completed",
+            AgentJobStatus.Cancelled => "cancelled",
+            _ => "failed",
+        };
         return new PendingSessionClose(
             DeliveryId: AgentJobSessionDeliveryIds.TerminalDeliveryId(Key),
             Status: statusText,
