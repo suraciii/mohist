@@ -6,6 +6,13 @@ namespace Mohist.Server.Slack;
 
 public sealed record SlackSetupVerificationResult(bool Verified, string SetupProgress, string? Reason, IReadOnlyList<string> RequiredScopes);
 
+public sealed record RotationCheckResult(
+    bool Verified,
+    string? Reason,
+    string? ResolvedTeamId,
+    string? ResolvedAppId,
+    string? ResolvedBotUserId);
+
 public sealed class SlackSetupVerifier
 {
     private static readonly string[] RequiredScopes = ["chat:write", "users:read", "im:history"];
@@ -67,6 +74,49 @@ public sealed class SlackSetupVerifier
         }
         await _connections.UpdateAsync(projectId, connectionId, new HashSet<string>(StringComparer.Ordinal) { "setupProgress", "connectionHealth", "healthReason" }, setupProgress: SetupProgressKind.ClaimOwner, connectionHealth: ConnectionHealthKind.Healthy, healthReason: null, ct: ct);
         return new(true, SetupProgressKind.ClaimOwner, null, RequiredScopes);
+    }
+
+    public async Task<RotationCheckResult> VerifyRotationAsync(
+        string projectId,
+        string connectionId,
+        string appToken,
+        string botToken,
+        CancellationToken ct = default)
+    {
+        var connection = await _connections.GetAsync(projectId, connectionId, ct)
+            ?? throw new InvalidOperationException("Connection was not found.");
+        return await RunVerificationAsync(connection, botToken, ct);
+    }
+
+    private async Task<RotationCheckResult> RunVerificationAsync(AgentConnection connection, string botToken, CancellationToken ct)
+    {
+        SlackAuthTestResponse auth;
+        SlackBotInfoResponse bot;
+        SlackPermissionsScopesListResponse grantedScopes;
+        try
+        {
+            auth = await _slack.AuthTestAsync(botToken, ct);
+            if (!auth.Ok || string.IsNullOrWhiteSpace(auth.TeamId) || string.IsNullOrWhiteSpace(auth.AppId) || string.IsNullOrWhiteSpace(auth.UserId) || string.IsNullOrWhiteSpace(auth.BotId))
+                return new(false, $"Slack rejected the Bot token: {auth.Error ?? "invalid_auth"}. Generate a new token.", null, null, null);
+            bot = await _slack.BotsInfoAsync(auth.BotId, botToken, ct);
+            grantedScopes = await _slack.PermissionsScopesListAsync(botToken, ct);
+        }
+        catch (HttpRequestException)
+        {
+            return new(false, "Slack could not be reached. Start mohist-slack and retry verification.", null, null, null);
+        }
+
+        var scopes = grantedScopes.Scopes?.Values.SelectMany(scopes => scopes) ?? [];
+        var missing = RequiredScopes.Where(scope => !scopes.Contains(scope, StringComparer.Ordinal)).ToArray();
+        var reason = !bot.Ok || bot.Bot is null ? $"Slack could not resolve the configured Bot: {bot.Error ?? "bots.info failed"}. Check the App and Bot installation." :
+            !string.Equals(bot.Bot.Id, auth.BotId, StringComparison.Ordinal) || !string.Equals(bot.Bot.AppId, auth.AppId, StringComparison.Ordinal) ? "The App and Bot belong to different Slack installs. Reinstall the matching App and Bot." :
+            !grantedScopes.Ok || grantedScopes.Scopes is null ? $"Slack could not list the App's granted scopes: {grantedScopes.Error ?? "apps.permissions.scopes.list failed"}. Reinstall the App and retry verification." :
+            missing.Length > 0 ? $"Slack is missing required scopes: {string.Join(", ", missing)}. Add the scopes and reinstall the App." : null;
+
+        if (reason is not null)
+            return new(false, reason, null, null, null);
+
+        return new(true, null, auth.TeamId, auth.AppId, auth.UserId);
     }
 
     public async Task<AgentConnection?> RecordAdapterHeartbeatAsync(string projectId, string connectionId, CancellationToken ct = default)

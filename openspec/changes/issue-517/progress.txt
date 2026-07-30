@@ -1,0 +1,89 @@
+## Issue 517 — T-001 (Credential rotation with synchronous verification)
+
+### Implementation notes
+
+- **`AgentConnectionStore.HasBoundIdentity`** — was a `private static bool
+  HasBoundIdentity(AgentConnectionRow)`. Promoted to `public static`, added an
+  overload accepting `AgentConnection` (the domain object the route already
+  holds), so the rotate-credentials and configure routes can check without
+  reaching into the row. Both overloads kept so `BindSlackIdentityAsync` keeps
+  its row-based call.
+
+- **`SlackSetupVerifier.VerifyRotationAsync`** — new method that takes
+  `appToken, botToken` explicitly and runs the same Slack calls as `VerifyAsync`
+  (auth.test → bots.info → apps.permissions.scopes.list) via a shared
+  `RunVerificationAsync(connection, botToken)` helper that returns a
+  `RotationCheckResult { Verified, Reason, ResolvedTeamId, ResolvedAppId,
+  ResolvedBotUserId }`. Crucially it does NOT read from or write to the secret
+  store, and does NOT call `BindSlackIdentityAsync` — rotation must not rebind
+  (the route handles store-on-success, and the binding is already set). The
+  three scope checks (auth rejection, missing scope, App/Bot identity mismatch,
+  Slack unreachable) all return `Verified = false` with the concrete reason
+  string already produced by `VerifyAsync`, so messages stay consistent.
+
+- **`POST /{connectionId}/rotate-credentials` route** — guards on
+  `HasBoundIdentity(connection)` (must be bound; otherwise `identity_not_bound`
+  — points operator to `configure`). Runs `VerifyRotationAsync`. On
+  `!Verified` → `400 credential_verification_failed` with the concrete reason.
+  On `Verified` but binding mismatch (team/app/bot ≠ bound) → `400
+  credential_binding_mismatch` with a message naming the conflicting ids. Only
+  on full success: stores both tokens via `ISecretStore`, clears `HealthReason`,
+  and if the connection was `Unhealthy` with a credential-related reason
+  (`IsCredentialRelatedHealthReason` keyword check on token/scope/credential/
+  "App and Bot"), also flips `ConnectionHealth → Healthy`. Touches nothing
+  else: `SetupProgress`, `OwnerSlackUserId`, `WorkspaceTeamId`, `AppId`,
+  `BotUserId` are all left untouched.
+
+- **`POST /{connectionId}/configure` guard** — added before the store calls:
+  if `HasBoundIdentity(connection)` → `409 use_rotate_credentials` pointing
+  operator to rotate-credentials. This closes the silent-overwrite regression
+  (configure had been resetting `SetupProgress → WaitingForSlackService` and
+  deferring verification to the next heartbeat, hiding failures). Connections
+  without a bound identity still go through the original store-then-set path.
+
+### Codebase patterns
+
+- The `MohistIntegrationFixture` registers the real `SlackApiClient` and there
+  is no `ISlackApiClient` override hook in the fixture. The simpler pattern is
+  the one used by `SlackSetupVerifierSpecs` / `SlackOwnerClaimSpecs` — direct
+  object construction with a `RecordingSlackApiClient` and an in-memory
+  `TestSqliteDatabase`. The new `SlackConnectionRotateCredentialsSpecs` follows
+  this pattern; the route logic is re-exercised by inline `RunRotateCredentialsAsync`
+  / `RunConfigureAsync` helpers that mirror the lambda body, which avoids
+  needing to re-stand-up a Web host and keeps the test under 2 seconds.
+
+- `AgentConnectionStore.UpdateAsync` semantics: when a field name is in the
+  `fields` set but the corresponding parameter is null, the row keeps its
+  existing value (e.g. `connectionHealth: null` with `"connectionHealth"` in
+  fields → no change). The rotation code passes the new health value
+  conditionally and only adds `"connectionHealth"` to the fields set when it
+  actually wants to clear the Unhealthy status — otherwise passing `null`
+  would silently preserve it.
+
+### Test coverage (14 new tests)
+
+`SlackConnectionRotateCredentialsSpecs`:
+- Verifier-level (6): valid rotation returns resolved identity; invalid token
+  rejected with reason; missing scope rejected; different workspace resolves
+  to different identity (verifier does not auto-rebind); verifier does not
+  mutate store (Owner/setup preserved); FixSlackSetup connection with bound
+  identity still accepts rotation.
+- Route-level (8): success stores new tokens; binding-mismatch keeps old
+  credentials; invalid-token rejected with reason; FixSlackSetup rotation
+  clears HealthReason + flips to Healthy but leaves SetupProgress alone;
+  Owner/setup preservation; unbound connection rejected with
+  `identity_not_bound`; configure guard returns `409 use_rotate_credentials`
+  on bound connection without regressing SetupProgress; configure succeeds
+  on unbound connection.
+
+### Gotchas
+
+- When setting up "different identity" tests, must override BOTH
+  `AuthTest` and `BotsInfo` on the fake — otherwise the `!bot.Bot.Id ==
+  auth.BotId` check fires before the route reaches the binding-mismatch
+  branch and the wrong error code surfaces. Caught two of these on the first
+  run; both fixed.
+- The verifier's `binding` check (App/Bot match between auth.test and
+  bots.info) is internal to verification — it is a different signal from the
+  route-level binding-mismatch check (auth result vs the connection's stored
+  binding). The fake needs to keep them in sync to exercise the right branch.

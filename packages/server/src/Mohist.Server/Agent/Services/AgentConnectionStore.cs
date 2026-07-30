@@ -233,7 +233,12 @@ public sealed class AgentConnectionStore : IScopedService
             throw new AgentConnectionValidationException($"Agent '{agentId}' is archived.", "agent_archived");
     }
 
-    private static bool HasBoundIdentity(AgentConnectionRow row) =>
+    public static bool HasBoundIdentity(AgentConnection connection) =>
+        !string.IsNullOrWhiteSpace(connection.WorkspaceTeamId)
+        || !string.IsNullOrWhiteSpace(connection.AppId)
+        || !string.IsNullOrWhiteSpace(connection.BotUserId);
+
+    public static bool HasBoundIdentity(AgentConnectionRow row) =>
         !string.IsNullOrWhiteSpace(row.WorkspaceTeamId)
         || !string.IsNullOrWhiteSpace(row.AppId)
         || !string.IsNullOrWhiteSpace(row.BotUserId);
