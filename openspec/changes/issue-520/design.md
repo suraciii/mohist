@@ -50,6 +50,7 @@
 - `CanStartNow = true` 当存在在线 Runner 且有空闲 slot，且该 Agent 未达并发限制。
 - 等待原因三选一：`no-online-runner` / `capacity-full` / `concurrency-limit`。
 - 经 agent status API 暴露（扩展 `AgentStatusResponse` 或新增 per-agent 字段）+ 等待工作列表（沿用 `ActivityWaitingCardDto` 的 per-run surfacing 模式，区别于今天的聚合看板）。
+- Availability 表示当前新执行能否开始；已有 Pending Job 的等待原因是独立读侧事实。Runner 或容量在 Job 的退避期间恢复时，Availability 可为 `CanStartNow`，该 Job 以 `dispatch-pending` 保持可见，直到下一次 durable dispatch retry。
 - Web/CLI 只呈现 Server 结论，删除客户端自合成的「Runner at capacity」等文案。
 
 Availability 不读 Readiness，反之亦然——两者互不折叠（满足 spec 的独立性）。Availability 是提交前的**提示性**结论，不是派发预留：Runner 容量全局共享，两个 Agent 可能同时读到 `CanStartNow` 并在 dispatch 时争用同一 slot；最终能否开始仍由 dispatch 时的 runner/capacity/concurrency 闸门裁定。

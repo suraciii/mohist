@@ -40,11 +40,15 @@ Submitted work that cannot start because no runner is available or runner capaci
 
 ### Requirement: Waiting work and its reason are visible
 
-A submitted work item that is waiting to start SHALL be visible to the user and SHALL state what it is waiting for (no online runner, capacity full, or concurrency limit). The waiting state SHALL be distinguishable from executing and from terminal.
+A submitted work item that is waiting to start SHALL be visible to the user and SHALL state what it is waiting for. The waiting state SHALL be distinguishable from executing and from terminal. A work item may report `dispatch-pending` when its prior runner/capacity block has cleared but its durable dispatch retry has not yet run; this does not make the Agent Availability conclusion unavailable.
 
 #### Scenario: User sees a waiting job and its reason
 - **WHEN** a submitted work item is waiting because no runner has a free slot
 - **THEN** the user SHALL be able to see that the work item is waiting and that the reason is capacity full
+
+#### Scenario: Resource recovery leaves a job awaiting dispatch
+- **WHEN** a Pending AgentJob's runner or capacity block has cleared before its scheduled dispatch retry
+- **THEN** Agent Availability SHALL report that a new execution can start now, while the existing work item SHALL remain visible with the `dispatch-pending` reason until its retry dispatches it
 
 ### Requirement: Availability is the Server's unified conclusion
 
