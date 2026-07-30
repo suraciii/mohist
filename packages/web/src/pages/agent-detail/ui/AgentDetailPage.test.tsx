@@ -243,15 +243,26 @@ describe('AgentDetailPage', () => {
   })
 
   describe('profile summary', () => {
-    it('renders agent name, instructions, and config', async () => {
+    it('renders the active Agent definition identity, instructions, and config', async () => {
       mockAgent(makeAgent())
       renderPage()
       await screen.findByTestId('agent-detail-page')
       expect(screen.getByText('Test Agent')).toBeInTheDocument()
+      expect(screen.getByTestId('agent-detail-purpose')).toHaveTextContent('A test agent')
+      expect(screen.getByTestId('agent-detail-lifecycle')).toHaveTextContent('Active')
       expect(screen.getByTestId('agent-detail-instructions')).toHaveTextContent('You are a helpful assistant.')
       expect(screen.getByTestId('agent-detail-config')).toBeInTheDocument()
       expect(screen.getByText('gpt-4')).toBeInTheDocument()
       expect(screen.getByText('high')).toBeInTheDocument()
+    })
+
+    it('renders the archived Agent definition identity and lifecycle', async () => {
+      mockAgent(makeAgent({ description: 'Retained for audit', status: 'archived' }))
+      renderPage()
+
+      await screen.findByTestId('agent-detail-page')
+      expect(screen.getByTestId('agent-detail-purpose')).toHaveTextContent('Retained for audit')
+      expect(screen.getByTestId('agent-detail-lifecycle')).toHaveTextContent('Archived')
     })
 
     it('renders runtime, max concurrent runs, and edit timing in the definition summary', async () => {

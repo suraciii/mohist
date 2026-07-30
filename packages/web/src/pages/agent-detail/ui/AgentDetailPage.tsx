@@ -418,13 +418,24 @@ export function AgentDetailPage({
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-semibold text-foreground truncate">{agent.name}</h1>
-                {isArchived && (
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30">
-                    <ArchiveIcon className="size-3 mr-0.5" />
-                    Archived
-                  </Badge>
-                )}
+                <Badge
+                  data-testid="agent-detail-lifecycle"
+                  variant="outline"
+                  className={isArchived
+                    ? 'text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30'
+                    : 'text-[10px] px-1.5 py-0 h-4 text-emerald-700 border-emerald-300'}
+                >
+                  {isArchived ? (
+                    <>
+                      <ArchiveIcon className="size-3 mr-0.5" />
+                      Archived
+                    </>
+                  ) : 'Active'}
+                </Badge>
               </div>
+              <p data-testid="agent-detail-purpose" className="mt-0.5 text-xs text-muted-foreground">
+                {agent.description?.trim() || 'No purpose set'}
+              </p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {model ? `Model · ${model}` : 'Model · Default'}
                 {variant && ` · ${variant}`}
