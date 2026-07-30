@@ -90,3 +90,8 @@ Fixing F1-F5 from self-review.md in plan artifacts (not editing self-review.md):
 - Follow-up composer outcomes are visible: confirmed rejection uses the destructive tone and unknown outcome uses the warning tone.
 - Generated idempotency keys remain available in table output, but no longer precede machine-readable `--json` output for follow-up or agent launch.
 - Verification passed: Web typecheck; Web tests (5163 passed, 1 skipped); Web FSD check; CLI tests (1446 passed); Server SpecTests (3359 passed).
+
+## Review fix pass 5
+- A Runner dispatch claim now seals the queued turn input list. A follow-up accepted while that claim is awaiting the Runner result starts the next queued turn instead of mutating an already-snapshotted payload.
+- Updated the issue design and call spec with the claim boundary. The integration regression holds the first `ReceiveFollowup`, accepts a second idempotency key, then verifies distinct turns and delivery of the second payload after the first turn becomes terminal.
+- Verification passed: `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true`; direct Server Spec execution for `AgentSessionFollowupGrainSpecs` and `GenericAgentSessionCanonicalFollowupApiSpecs` (44 passed).
