@@ -415,12 +415,112 @@ public static partial class AgentSessionExtensions
                 turns.Add(new AgentTurnRecord(
                     Id: turnId,
                     Sequence: turns.Count + 1,
-                    InputIds: [inputId],
+                    InputIds: new[] { inputId },
                     Status: AgentTurnStatus.Queued,
                     JobId: jobId,
                     RecordedAt: now,
                     UpdatedAt: now));
             }
+
+            session.Status = session.Status with
+            {
+                Inputs = inputs,
+                Turns = turns,
+                Activity = AgentSessionActivity.Active,
+                LastDataAt = now,
+                CurrentTurnEndedAt = null,
+            };
+
+            return [];
+        }
+
+        public IReadOnlyList<AgentSessionEvent> RecordFollowupTurn(
+            string inputId,
+            string turnId,
+            string prompt,
+            string source,
+            DateTime now)
+        {
+            if (string.IsNullOrWhiteSpace(inputId))
+                throw new ArgumentException("Input id is required.", nameof(inputId));
+            if (string.IsNullOrWhiteSpace(turnId))
+                throw new ArgumentException("Turn id is required.", nameof(turnId));
+            if (string.IsNullOrWhiteSpace(prompt))
+                throw new ArgumentException("Prompt is required.", nameof(prompt));
+            if (string.IsNullOrWhiteSpace(source))
+                throw new ArgumentException("Source is required.", nameof(source));
+
+            var inputs = (session.Status.Inputs ?? []).ToList();
+            var turns = (session.Status.Turns ?? []).ToList();
+            var inputIndex = inputs.FindIndex(candidate =>
+                string.Equals(candidate.Id, inputId, StringComparison.Ordinal));
+            var turnIndex = turns.FindIndex(candidate =>
+                string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
+
+            if (inputIndex >= 0)
+            {
+                var existing = inputs[inputIndex];
+                if (!string.Equals(existing.Text, prompt, StringComparison.Ordinal)
+                    || !string.Equals(existing.Source, source, StringComparison.Ordinal)
+                    || !string.IsNullOrWhiteSpace(existing.JobId))
+                {
+                    throw new InvalidOperationException(
+                        $"AgentSession {session.Id} already has input '{inputId}' with different content/source/job linkage.");
+                }
+            }
+
+            if (turnIndex >= 0)
+            {
+                var existing = turns[turnIndex];
+                if (!string.IsNullOrWhiteSpace(existing.JobId)
+                    || !existing.InputIds.Contains(inputId, StringComparer.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"AgentSession {session.Id} already has turn '{turnId}' with different job/input linkage.");
+                }
+            }
+
+            if (inputIndex >= 0 || turnIndex >= 0)
+            {
+                if (inputIndex < 0 || turnIndex < 0)
+                {
+                    throw new InvalidOperationException(
+                        $"AgentSession {session.Id} has incomplete input/turn linkage for '{inputId}' and '{turnId}'.");
+                }
+                return [];
+            }
+
+            if (turns.Any(candidate => candidate.InputIds.Contains(inputId, StringComparer.Ordinal)))
+            {
+                throw new InvalidOperationException(
+                    $"AgentSession {session.Id} already links input '{inputId}' to another turn.");
+            }
+
+            if (session.Status.Activity != AgentSessionActivity.Idle
+                || turns.Any(candidate => string.IsNullOrWhiteSpace(candidate.JobId)
+                    && (candidate.Status is AgentTurnStatus.Queued
+                        or AgentTurnStatus.Executing
+                        or AgentTurnStatus.Unknown)))
+            {
+                throw new InvalidOperationException(
+                    $"AgentSession {session.Id} cannot start another turn while work is active.");
+            }
+
+            inputs.Add(new AgentSessionInputRecord(
+                Id: inputId,
+                Sequence: inputs.Count + 1,
+                Text: prompt,
+                Source: source,
+                Acceptance: AgentSessionInputAcceptance.Accepted,
+                RecordedAt: now));
+            turns.Add(new AgentTurnRecord(
+                Id: turnId,
+                Sequence: turns.Count + 1,
+                InputIds: new[] { inputId },
+                Status: AgentTurnStatus.Queued,
+                JobId: null,
+                RecordedAt: now,
+                UpdatedAt: now));
 
             session.Status = session.Status with
             {
@@ -443,9 +543,18 @@ public static partial class AgentSessionExtensions
         /// </summary>
         public IReadOnlyList<AgentSessionEvent> MarkInitialTurnExecuting(string jobId, DateTime now)
         {
+            var turns = session.Status.Turns ?? [];
+            var index = FindTurnIndexByJobId(turns, jobId);
+            if (index < 0)
+                return [];
+            return session.MarkTurnExecuting(turns[index].Id, now);
+        }
+
+        public IReadOnlyList<AgentSessionEvent> MarkTurnExecuting(string turnId, DateTime now)
+        {
             var turns = (session.Status.Turns ?? []).ToList();
             var index = turns.FindIndex(candidate =>
-                string.Equals(candidate.JobId, jobId, StringComparison.Ordinal));
+                string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
             if (index < 0)
                 return [];
             if (turns[index].Status is AgentTurnStatus.Executing
@@ -484,17 +593,35 @@ public static partial class AgentSessionExtensions
             AgentTurnResult? result,
             DateTime now)
         {
+            var turns = session.Status.Turns ?? [];
+            var index = FindTurnIndexByJobId(turns, jobId);
+            if (index < 0)
+                return [];
+            return session.MarkTurnTerminal(turns[index].Id, status, result, now);
+        }
+
+        public IReadOnlyList<AgentSessionEvent> MarkTurnTerminal(
+            string turnId,
+            AgentTurnStatus status,
+            AgentTurnResult? result,
+            DateTime now)
+        {
+            if (status is AgentTurnStatus.Queued or AgentTurnStatus.Executing)
+                throw new ArgumentOutOfRangeException(nameof(status), status, "Turn terminal status is required.");
+
             var turns = (session.Status.Turns ?? []).ToList();
             var index = turns.FindIndex(candidate =>
-                string.Equals(candidate.JobId, jobId, StringComparison.Ordinal));
+                string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
             if (index < 0)
                 return [];
             if (turns[index].Status is AgentTurnStatus.Completed
                 or AgentTurnStatus.Failed
-                or AgentTurnStatus.Cancelled)
+                or AgentTurnStatus.Cancelled
+                || turns[index].Status == AgentTurnStatus.Unknown && status == AgentTurnStatus.Unknown)
             {
                 return [];
             }
+
             turns[index] = turns[index] with
             {
                 Status = status,
@@ -504,27 +631,187 @@ public static partial class AgentSessionExtensions
             var inputIds = turns[index].InputIds;
             var inputs = session.Status.Inputs ?? [];
             var updatedInputs = inputs
-                .Select(candidate => candidate with { Acceptance = AgentSessionInputAcceptance.Accepted })
+                .Select(candidate => inputIds.Contains(candidate.Id, StringComparer.Ordinal)
+                    ? candidate with { Acceptance = AgentSessionInputAcceptance.Accepted }
+                    : candidate)
                 .ToList();
             session.Status = session.Status with
             {
                 Turns = turns,
                 Inputs = updatedInputs,
                 LastDataAt = now,
-                Activity = status switch
-                {
-                    AgentTurnStatus.Queued => session.Status.Activity,
-                    AgentTurnStatus.Unknown => AgentSessionActivity.Unknown,
-                    _ => AgentSessionActivity.Idle,
-                },
-                CurrentTurnEndedAt = status is AgentTurnStatus.Completed
-                    or AgentTurnStatus.Failed
-                    or AgentTurnStatus.Cancelled
-                    or AgentTurnStatus.Unknown
-                    ? now
-                    : session.Status.CurrentTurnEndedAt,
+                Activity = status == AgentTurnStatus.Unknown
+                    ? AgentSessionActivity.Unknown
+                    : AgentSessionActivity.Idle,
+                CurrentTurnEndedAt = now,
             };
             return [];
+        }
+
+        public IReadOnlyList<AgentSessionEvent> CancelTurn(string turnId, DateTime now)
+        {
+            var turns = (session.Status.Turns ?? []).ToList();
+            var index = turns.FindIndex(candidate =>
+                string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
+            if (index < 0)
+                return [];
+            if (turns[index].Status is AgentTurnStatus.Executing
+                or AgentTurnStatus.Completed
+                or AgentTurnStatus.Failed
+                or AgentTurnStatus.Cancelled
+                or AgentTurnStatus.Unknown)
+            {
+                return [];
+            }
+            turns[index] = turns[index] with
+            {
+                Status = AgentTurnStatus.Cancelled,
+                UpdatedAt = now,
+            };
+            session.Status = session.Status with
+            {
+                Turns = turns,
+                LastDataAt = now,
+                Activity = AgentSessionActivity.Idle,
+                CurrentTurnEndedAt = now,
+            };
+            return [];
+        }
+
+        public AgentTurnCancelResult CancelQueuedTurn(string turnId, DateTime now)
+        {
+            var control = session.ResolveTurnControl(turnId);
+            if (control?.Classification != AgentTurnControlClassification.Queued || control.IsLaunchTurn)
+                return new AgentTurnCancelResult(control, false);
+
+            _ = session.CancelTurn(turnId, now);
+            return new AgentTurnCancelResult(session.ResolveTurnControl(turnId), true);
+        }
+
+        public AgentTurnStopClaimResult ClaimTurnStop(string turnId)
+        {
+            var control = session.ResolveTurnControl(turnId);
+            var pending = session.Status.PendingStop;
+            if (control?.Classification == AgentTurnControlClassification.Terminal
+                && pending is not null
+                && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
+            {
+                return new AgentTurnStopClaimResult(control, true, pending.OperationId);
+            }
+
+            if (control?.Classification != AgentTurnControlClassification.Executing)
+                return new AgentTurnStopClaimResult(control, false, null);
+
+            if (pending is not null && !string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
+                return new AgentTurnStopClaimResult(control, false, null);
+
+            if (pending is null)
+            {
+                pending = new AgentSessionStopClaim(turnId, Guid.NewGuid().ToString("N"));
+                session.Status = session.Status with { PendingStop = pending };
+            }
+
+            return new AgentTurnStopClaimResult(control, true, pending.OperationId);
+        }
+
+        public void MarkTurnStopDispatched(string turnId, string operationId)
+        {
+            var pending = session.Status.PendingStop;
+            if (pending is not null
+                && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
+                && string.Equals(pending.OperationId, operationId, StringComparison.Ordinal)
+                && !pending.DispatchStarted)
+            {
+                session.Status = session.Status with
+                {
+                    PendingStop = pending with { DispatchStarted = true },
+                };
+            }
+        }
+
+        public void AbandonUndispatchedTurnStop(string turnId, string operationId)
+        {
+            var pending = session.Status.PendingStop;
+            if (pending is not null
+                && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
+                && string.Equals(pending.OperationId, operationId, StringComparison.Ordinal)
+                && !pending.DispatchStarted)
+                session.Status = session.Status with { PendingStop = null };
+        }
+
+        public void CompleteTurnStop(string turnId, string operationId)
+        {
+            if (string.Equals(session.Status.PendingStop?.TurnId, turnId, StringComparison.Ordinal)
+                && string.Equals(session.Status.PendingStop?.OperationId, operationId, StringComparison.Ordinal))
+                session.Status = session.Status with { PendingStop = null };
+        }
+
+        public IReadOnlyList<AgentSessionEvent> AbandonFollowupTurn(string inputId, string turnId, DateTime now)
+        {
+            var turns = (session.Status.Turns ?? []).ToList();
+            var turnIndex = turns.FindIndex(candidate =>
+                string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
+            if (turnIndex < 0 || turns[turnIndex].JobId is not null
+                || turns[turnIndex].Status != AgentTurnStatus.Queued
+                || !turns[turnIndex].InputIds.Contains(inputId, StringComparer.Ordinal))
+                return [];
+
+            turns.RemoveAt(turnIndex);
+            var inputs = (session.Status.Inputs ?? []).Where(candidate =>
+                !string.Equals(candidate.Id, inputId, StringComparison.Ordinal)).ToList();
+            session.Status = session.Status with
+            {
+                Turns = turns,
+                Inputs = inputs,
+                Activity = AgentSessionActivity.Idle,
+                LastDataAt = now,
+                CurrentTurnEndedAt = now,
+            };
+            return [];
+        }
+
+        /// <summary>
+        /// Resolves a Turn by id and classifies it for control-plane
+        /// targeting (cancel / stop). Returns <c>null</c> when no Turn
+        /// matches; the caller treats that as <c>turn-not-found</c>.
+        /// </summary>
+        public AgentTurnControlState? ResolveTurnControl(string turnId)
+        {
+            var turns = session.Status.Turns ?? [];
+            var match = turns.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
+            if (match is null)
+                return null;
+            return new AgentTurnControlState(
+                TurnId: match.Id,
+                Status: match.Status,
+                Classification: ClassifyTurn(match.Status),
+                IsLaunchTurn: !string.IsNullOrWhiteSpace(match.JobId),
+                JobId: match.JobId);
+        }
+
+        private static AgentTurnControlClassification ClassifyTurn(AgentTurnStatus status) =>
+            status switch
+            {
+                AgentTurnStatus.Queued => AgentTurnControlClassification.Queued,
+                AgentTurnStatus.Executing => AgentTurnControlClassification.Executing,
+                AgentTurnStatus.Completed
+                    or AgentTurnStatus.Failed
+                    or AgentTurnStatus.Cancelled
+                    or AgentTurnStatus.Unknown => AgentTurnControlClassification.Terminal,
+                _ => AgentTurnControlClassification.Terminal,
+            };
+
+        private static int FindTurnIndexByJobId(IReadOnlyList<AgentTurnRecord>? turns, string jobId)
+        {
+            if (string.IsNullOrWhiteSpace(jobId) || turns is null)
+                return -1;
+            for (var index = 0; index < turns.Count; index++)
+            {
+                if (string.Equals(turns[index].JobId, jobId, StringComparison.Ordinal))
+                    return index;
+            }
+            return -1;
         }
 
         /// <summary>

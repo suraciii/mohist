@@ -111,6 +111,10 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
             using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "start an idle turn" });
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var data = body.RootElement.GetProperty("data");
+            Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("inputId").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("turnId").GetString()));
             Assert.Equal("ReceiveFollowup", Assert.Single(runnerHub.SentMessages).Method);
             Assert.Equal(tasksBefore, await GetWorkflowTaskSnapshotAsync(project.Id, issue.Number));
         }

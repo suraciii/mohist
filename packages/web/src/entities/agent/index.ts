@@ -59,6 +59,7 @@ export type {
 } from './api/subscriptions'
 export {
   cancelGenericSession,
+  stopGenericSession,
   getAgentSessions as getAgentScopedSessions,
   getGenericSessionSummary,
   getGenericSessionTranscript,
@@ -68,6 +69,7 @@ export {
   launchAgentSession,
   postGenericFollowup,
   useCancelGenericSession,
+  useGenericTurnControl,
   useGenericFollowup,
   useGenericSessionSummary,
   useGenericSessionTranscript,
@@ -83,6 +85,8 @@ export type {
   AgentSessionListItemDto,
   GenericAgentSessionSummaryDto,
   GenericFollowupInput,
+  TurnControlResult,
+  TurnControlState,
 } from './api/agent-sessions'
 export { AGENT_DETAIL_EVENTS, dispatchAgentEvent, onAgentEvent } from './model/events'
 export * from './model/types'

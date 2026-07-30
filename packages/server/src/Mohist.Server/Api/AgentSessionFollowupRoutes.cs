@@ -119,6 +119,14 @@ public static class AgentSessionFollowupRoutes
         {
             return ApiResults.Conflict(ex.Message, "followup_in_progress", new { sessionId = ex.SessionId });
         }
+        catch (StopOperationInProgressException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "stop_in_progress", new { sessionId = ex.SessionId, turnId = ex.TurnId });
+        }
+        catch (SessionActivityUnknownException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "session_activity_unknown", new { sessionId = ex.SessionId });
+        }
 
         if (string.IsNullOrWhiteSpace(target.RunnerId))
         {
@@ -139,6 +147,30 @@ public static class AgentSessionFollowupRoutes
             await AbandonReservationAsync(grain, reservation);
             var missing = new RuntimeSessionMissingException(target.SessionId, target.RuntimeSessionId, target.Runtime);
             return ApiResults.Conflict(missing.Message, "runtime_session_missing", new { sessionId = missing.SessionId });
+        }
+
+        string? inputId = null;
+        string? turnId = null;
+        if (reservation.StartsIdleTurn)
+        {
+            inputId = Guid.NewGuid().ToString("N");
+            turnId = Guid.NewGuid().ToString("N");
+            var source = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
+                ? "workflow-followup"
+                : "generic-followup";
+            try
+            {
+                await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+                    InputId: inputId,
+                    TurnId: turnId,
+                    Prompt: text,
+                    Source: source));
+            }
+            catch (InvalidOperationException ex)
+            {
+                await AbandonReservationAsync(grain, reservation);
+                return ApiResults.Conflict(ex.Message, "followup_turn_conflict", new { sessionId = target.SessionId });
+            }
         }
 
         object binding = new
@@ -165,7 +197,14 @@ public static class AgentSessionFollowupRoutes
                 definition = target.Definition,
                 binding,
             };
-        object payload = new { target = wireTarget, text, operationId = reservation.OperationId };
+        object payload = new
+        {
+            target = wireTarget,
+            text,
+            operationId = reservation.OperationId,
+            inputId,
+            turnId,
+        };
 
         RunnerFollowupDeliveryResult? delivery;
         try
@@ -185,18 +224,22 @@ public static class AgentSessionFollowupRoutes
         {
             if (reservation.OperationId is not null)
                 await grain.ConfirmFollowupAsync(reservation.OperationId);
-            return ApiResults.Ok(new AgentSessionFollowupResult(target.SessionId));
+            return ApiResults.Ok(new AgentSessionFollowupResult(target.SessionId, InputId: inputId, TurnId: turnId));
         }
 
         await AbandonReservationAsync(grain, reservation);
         if (string.Equals(delivery?.Error, "missing", StringComparison.Ordinal))
         {
+            if (inputId is not null && turnId is not null)
+                await grain.AbandonFollowupTurnAsync(inputId, turnId);
             return ApiResults.Conflict(
                 $"Runtime session missing for AgentSession {target.SessionId}.",
                 "runtime_session_missing",
                 new { sessionId = target.SessionId });
         }
 
+        if (inputId is not null && turnId is not null)
+            await grain.AbandonFollowupTurnAsync(inputId, turnId);
         return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
     }
 
@@ -212,6 +255,10 @@ public static class AgentSessionFollowupRoutes
 /// </summary>
 public sealed record GenericFollowupRequest(string? Text = null);
 
-public sealed record AgentSessionFollowupResult(string SessionId, string Status = "sent");
+public sealed record AgentSessionFollowupResult(
+    string SessionId,
+    string Status = "sent",
+    string? InputId = null,
+    string? TurnId = null);
 
 public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);

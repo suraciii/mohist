@@ -249,17 +249,18 @@ export function useIssueSessionDataSource(
   const sendFollowup = useCallback(async (text: string) => {
     await followup.mutateAsync({ issueNumber, sessionName: recoverySessionName, text })
   }, [followup, issueNumber, recoverySessionName])
-  const cancelSession = useCallback((options?: SessionCancelOptions) => {
+  const currentTurnId = metadata?.currentTurnId
+  const cancelSession = useCallback((operation: 'cancel' | 'stop' = 'stop', options?: SessionCancelOptions) => {
     cancelMutation.mutate(
-      { issueNumber, sessionName: recoverySessionName },
-      { onSuccess: options?.onSuccess, onSettled: options?.onSettled },
+      { issueNumber, sessionName: recoverySessionName, turnId: currentTurnId ?? '', operation },
+      { onSuccess: (result) => options?.onSuccess?.(result), onSettled: options?.onSettled },
     )
-  }, [cancelMutation, issueNumber, recoverySessionName])
+  }, [cancelMutation, currentTurnId, issueNumber, recoverySessionName])
   const cancel = useMemo(
-    () => isRunning && runtimeSessionId && detail?.runtime && recoverySessionName
-      ? { mutate: cancelSession, isPending: cancelMutation.isPending }
+    () => currentTurnId && isRunning && runtimeSessionId && detail?.runtime && recoverySessionName
+      ? { turnId: currentTurnId, mutate: cancelSession, isPending: cancelMutation.isPending }
       : null,
-    [cancelMutation.isPending, cancelSession, detail?.runtime, isRunning, recoverySessionName, runtimeSessionId],
+    [cancelMutation.isPending, cancelSession, currentTurnId, detail?.runtime, isRunning, recoverySessionName, runtimeSessionId],
   )
 
   const fromActivity = searchParams.get('from') === 'activity'

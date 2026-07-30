@@ -136,7 +136,7 @@ export function callCancel(
  */
 export interface CancelCallFacts {
   readonly cancelled: boolean
-  readonly stopConfirmed: boolean
+  readonly stopConfirmed?: boolean
 }
 
 export function readCancelFacts(result: CancelCallResult): CancelCallFacts | null {
@@ -145,14 +145,14 @@ export function readCancelFacts(result: CancelCallResult): CancelCallFacts | nul
   if (typeof value.cancelled === "boolean") {
     return {
       cancelled: value.cancelled,
-      stopConfirmed: typeof value.stopConfirmed === "boolean" ? value.stopConfirmed : true,
+      ...(typeof value.stopConfirmed === "boolean" ? { stopConfirmed: value.stopConfirmed } : {}),
     }
   }
   const facts = value.facts
   if (facts && typeof facts.cancelled === "boolean") {
     return {
       cancelled: facts.cancelled,
-      stopConfirmed: typeof facts.stopConfirmed === "boolean" ? facts.stopConfirmed : true,
+      ...(typeof facts.stopConfirmed === "boolean" ? { stopConfirmed: facts.stopConfirmed } : {}),
     }
   }
   return null

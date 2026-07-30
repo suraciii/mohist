@@ -8,7 +8,7 @@ describe('cancelSessionMutationOptions', () => {
 
     cancelSessionMutationOptions('proj-1', queryClient).onSuccess(
       { state: 'not-cancellable' },
-      { issueNumber: 42, sessionName: 'build' },
+      { issueNumber: 42, sessionName: 'build', turnId: 'turn-1', operation: 'cancel' },
     )
 
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({

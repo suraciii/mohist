@@ -32,5 +32,6 @@
   "Mohist.Server.UnitTests/Foundation/VariableBundleTests.cs": 27944,
   "Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs": 43029,
   "Mohist.Server.UnitTests/Workflow/Services/ActionContractValidatorTests.cs": 29000,
-  "Mohist.Server.SpecTests/Specs/Workflow/ProfileActionValidationSpecs.cs": 26000
+  "Mohist.Server.SpecTests/Specs/Workflow/ProfileActionValidationSpecs.cs": 26000,
+  "Mohist.Server.SpecTests/Specs/Agent/Grain/AgentTurnLifecycleT001Specs.cs": 25853
 }

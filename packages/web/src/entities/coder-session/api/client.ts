@@ -119,15 +119,29 @@ export function postFollowup(
 
 export interface SessionCancelResult {
   state: string
+  interruptUnconfirmed?: boolean | null
 }
 
 export function cancelSession(
   number: number,
   name: string,
+  turnId: string,
   projectId?: string | null,
 ): Promise<SessionCancelResult> {
   return request<SessionCancelResult>(
     projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/cancel`),
-    { method: 'POST' },
+    { method: 'POST', body: JSON.stringify({ turnId }) },
+  )
+}
+
+export function stopSession(
+  number: number,
+  name: string,
+  turnId: string,
+  projectId?: string | null,
+): Promise<SessionCancelResult> {
+  return request<SessionCancelResult>(
+    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/stop`),
+    { method: 'POST', body: JSON.stringify({ turnId }) },
   )
 }

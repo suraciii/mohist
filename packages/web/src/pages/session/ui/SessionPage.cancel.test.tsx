@@ -181,6 +181,7 @@ function baseRunningMetadata(overrides: Partial<AgentSessionMetadata> = {}): Age
     completedAt: null,
     lastActivityAt: '2026-06-15T10:00:30.000Z',
     lastDataAt: '2026-06-15T10:00:30.000Z',
+    currentTurnId: 'durable-turn-3',
     changedFiles: [],
     metadata: { partCount: 2, toolCount: 1 },
     usage: {
@@ -224,8 +225,9 @@ describe('SessionPage workflow cancel control', () => {
     const secondaryActions = container.querySelector('[data-testid="session-header-secondary-actions"]')!
     const triggerClasses = trigger.className.split(/\s+/)
 
-    expect(trigger).toHaveAttribute('aria-label', 'Cancel session')
-    expect(trigger).toHaveTextContent('Cancel session')
+    expect(trigger).toHaveAttribute('aria-label', 'Cancel Turn')
+    expect(trigger).toHaveTextContent('Cancel Turn')
+    expect(container.querySelector('[data-testid="session-stop-trigger"]')).toBeInTheDocument()
     expect(triggerClasses).toContain('hover:bg-muted')
     expect(triggerClasses).not.toContain('bg-destructive/10')
     expect(triggerClasses).not.toContain('text-destructive')
@@ -256,16 +258,38 @@ describe('SessionPage workflow cancel control', () => {
     await user.click(document.querySelector('[data-testid="session-cancel-alert-confirm"]')!)
 
     expect(cancelMutate).toHaveBeenCalledWith(
-      { issueNumber: 123, sessionName: 'session-1' },
+      { issueNumber: 123, sessionName: 'session-1', turnId: 'durable-turn-3', operation: 'cancel' },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
 
     await act(async () => {
       const options = cancelMutate.mock.calls[0]?.[1] as { onSuccess: (result: { state: string }) => void }
-      options.onSuccess({ state: 'not-cancellable' })
+       options.onSuccess({ state: 'cancelled' })
     })
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="session-cancel-result"]')).toHaveTextContent('not-cancellable')
+      expect(container.querySelector('[data-testid="session-cancel-result"]')).toHaveTextContent('cancelled')
+    })
+  })
+
+  it('targets the durable current Turn rather than the transcript display ID when stopping', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderIssueSessionPage()
+
+    await user.click(container.querySelector<HTMLButtonElement>('[data-testid="session-stop-trigger"]')!)
+    await user.click(document.querySelector('[data-testid="session-cancel-alert-confirm"]')!)
+
+    expect(cancelMutate).toHaveBeenCalledWith(
+      { issueNumber: 123, sessionName: 'session-1', turnId: 'durable-turn-3', operation: 'stop' },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    )
+
+    await act(async () => {
+      const options = cancelMutate.mock.calls[0]?.[1] as { onSuccess: (result: { state: string }) => void }
+      options.onSuccess({ state: 'unknown' })
+    })
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="session-cancel-result"]')).toHaveTextContent('unknown')
+      expect(container.querySelector('[data-testid="session-cancel-result"]')).toHaveTextContent('Verification: Session view')
     })
   })
 

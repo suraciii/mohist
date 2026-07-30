@@ -38,6 +38,24 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionFollowupReservation> BeginFollowupAsync();
     Task ConfirmFollowupAsync(string operationId);
     Task AbandonFollowupAsync(string operationId);
+
+    Task RecordFollowupTurnAsync(RecordFollowupTurnCommand command);
+    Task AbandonFollowupTurnAsync(string inputId, string turnId);
+
+    Task MarkTurnExecutingAsync(string turnId);
+
+    Task MarkTurnTerminalAsync(string turnId, AgentTurnStatus status, AgentTurnResult? result);
+
+    Task<AgentTurnCancelResult> CancelQueuedTurnAsync(string turnId);
+    Task CancelTurnAsync(string turnId);
+
+    Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId);
+    Task MarkTurnStopDispatchedAsync(string turnId, string operationId);
+    Task AbandonUndispatchedTurnStopAsync(string turnId, string operationId);
+    Task CompleteTurnStopAsync(string turnId, string operationId);
+
+    Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId);
+
     Task<AgentSessionInfo?> GetAsync();
     Task EnsureRuntimeSessionPresentAsync();
     Task RunnerDisconnectedAsync();
@@ -73,6 +91,8 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     /// shape into the canonical Job+Session+Input+Turn snapshot.
     /// </summary>
     Task<AgentInitialLaunchSnapshot?> GetInitialLaunchAsync();
+
+    Task<IReadOnlyList<AgentTurnRecord>> ListTurnsAsync();
 
 }
 
@@ -267,3 +287,18 @@ public sealed record AgentInitialLaunchSnapshot(
     [property: Id(0)] string SessionId,
     [property: Id(1)] AgentSessionInputRecord? Input,
     [property: Id(2)] AgentTurnRecord? Turn);
+
+/// <summary>
+/// Command body for <see cref="IAgentSessionGrain.RecordFollowupTurnAsync"/>.
+/// The follow-up route mints a stable <see cref="InputId"/> and
+/// <see cref="TurnId"/> and passes them to the Session grain so the
+/// durable Turn identity is committed ahead of any Runner dispatch.
+/// <see cref="Source"/> identifies the follow-up origin (e.g.
+/// <c>generic-followup</c>, <c>workflow-followup</c>).
+/// </summary>
+[GenerateSerializer]
+public sealed record RecordFollowupTurnCommand(
+    [property: Id(0)] string InputId,
+    [property: Id(1)] string TurnId,
+    [property: Id(2)] string Prompt,
+    [property: Id(3)] string Source);
