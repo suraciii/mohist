@@ -186,6 +186,20 @@ describe('AgentDetailPage', () => {
       expect(screen.getByText('high')).toBeInTheDocument()
     })
 
+    it('renders runtime, max concurrent runs, and edit timing in the definition summary', async () => {
+      mockAgent(makeAgent({
+        agentConfig: { runtime: 'pi', model: 'gpt-4', variant: 'high' },
+        maxConcurrentRuns: 3,
+      }))
+      renderPage()
+
+      await screen.findByTestId('agent-detail-page')
+      expect(screen.getByTestId('agent-detail-runtime')).toHaveTextContent('Pi')
+      expect(screen.getByTestId('agent-detail-max-concurrent-runs')).toHaveTextContent('3')
+      expect(screen.getByTestId('agent-detail-edit-timing')).toHaveTextContent(/Jobs created after saving/i)
+      expect(screen.getByTestId('agent-detail-edit-timing')).toHaveTextContent(/already in progress/i)
+    })
+
     it('does not render an agent-type field (no "opencode" string anywhere on the surface)', async () => {
       // Per #410 T-002 design D5: the agent-detail page must not read or
       // display the legacy `type` key from agentConfig. Earlier behaviour

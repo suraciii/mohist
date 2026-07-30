@@ -16,3 +16,14 @@
 
 - Targeted route, service, and Unit tests pass; Web typecheck, FSD checks, Web tests, and repository build pass.
 - Full Server SpecTests had one transient timeout in the unrelated Agent launch-observation class; rerunning that class passed all 10 tests.
+
+## T-002
+
+- Agent detail now renders the derived Runtime and Agent max-concurrency limit in the definition summary; null max concurrency is shown as Unlimited.
+- Future-job timing is stated both in the detail definition summary and in the edit dialog: Instructions, Runtime, Model, Variant, and Skills changes do not reconfigure executions already in progress or existing Sessions.
+- Readiness and Availability remain separate; the existing server conclusion, gap/setup rendering, Unknown wait hint, launch gating, and server-provided Availability/capacity display were preserved.
+
+## T-002 Verification
+
+- Focused Agent detail, Readiness/Availability, and editor tests pass: 48 tests.
+- Web typecheck, full Web tests (392 files, 5,182 passing and 1 skipped), and FSD boundary checks pass.

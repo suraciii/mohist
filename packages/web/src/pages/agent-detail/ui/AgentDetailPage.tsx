@@ -330,7 +330,7 @@ export function AgentDetailPage({
 
   useDocumentTitle(agent ? `${agent.name} — Mohist` : 'Agent — Mohist')
 
-  const { model, variant } = useMemo(() => readAgentModelAndVariant(agent), [agent])
+  const { model, variant, runtime } = useMemo(() => readAgentModelAndVariant(agent), [agent])
   const isArchived = agent?.status === 'archived'
   const readiness = agent?.readiness
   const readinessConclusion = readiness?.conclusion ?? 'Unknown'
@@ -519,6 +519,12 @@ export function AgentDetailPage({
               <h3 className="text-sm font-medium text-foreground mb-3">Agent Config</h3>
               <div className="space-y-2" data-testid="agent-detail-config">
                 <div className="flex justify-between items-center">
+                  <span className="text-xs text-muted-foreground">Runtime</span>
+                  <span data-testid="agent-detail-runtime" className="text-xs font-medium text-foreground">
+                    {runtime === 'opencode' ? 'OpenCode' : 'Pi'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Model</span>
                   <span className="text-xs font-medium text-foreground">{model ?? 'Default'}</span>
                 </div>
@@ -526,6 +532,15 @@ export function AgentDetailPage({
                   <span className="text-xs text-muted-foreground">Variant</span>
                   <span className="text-xs font-medium text-foreground">{variant ?? 'Default'}</span>
                 </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-muted-foreground">Max concurrent runs</span>
+                  <span data-testid="agent-detail-max-concurrent-runs" className="text-xs font-medium text-foreground">
+                    {agent.maxConcurrentRuns ?? 'Unlimited'}
+                  </span>
+                </div>
+                <p data-testid="agent-detail-edit-timing" className="border-t border-border pt-2 text-[10px] leading-relaxed text-muted-foreground">
+                  Instructions, Runtime, Model, Variant, and Skills edits apply only to Jobs created after saving. Executions already in progress keep the configuration from launch.
+                </p>
               </div>
             </div>
 
