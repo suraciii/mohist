@@ -52,7 +52,9 @@ public sealed record AgentSessionMetadataDto(
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
     [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata,
-    [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null);
+    [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null,
+    [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
+    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null);
 
 public sealed record AgentSessionMetadataCounts(
     [property: JsonPropertyName("partCount")] int PartCount,

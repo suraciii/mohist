@@ -700,7 +700,9 @@ public class AgentSessionQuerier : IScopedService
             AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
             AgentSessionDtoMapper.ToUsageDto(usage),
             new AgentSessionMetadataCounts(partCount, toolCount),
-            CurrentTurnId(domainSession));
+            CurrentTurnId(domainSession),
+            AgentSessionObservationMapper.Inputs(domainSession.Status),
+            AgentSessionObservationMapper.Turns(domainSession.Status));
     }
 
     private static string? CurrentTurnId(AgentSession session) =>
