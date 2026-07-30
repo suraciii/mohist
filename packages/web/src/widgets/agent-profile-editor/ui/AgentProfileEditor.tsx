@@ -165,7 +165,7 @@ export function AgentProfileEditor({
             </DialogTitle>
             <DialogDescription>
               {isEditing
-                ? 'Update the agent profile configuration.'
+                ? 'Changes to Instructions, Runtime, Model, Variant, and Skills apply only to Jobs created after saving. Executions already in progress and existing Sessions keep the configuration from launch.'
                 : 'Create a new agent profile with instructions, model, and skills.'}
             </DialogDescription>
           </DialogHeader>

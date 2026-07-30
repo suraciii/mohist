@@ -39,6 +39,7 @@ export default defineConfig({
     globals: true,
     // 根配置与 inline projects 必须一致，确保 setup 和测试共享同一组进程级单例。
     isolate: false,
+    maxWorkers: 4,
     testTimeout: 10_000,
     hookTimeout: 10_000,
     // mock/stub 的恢复交给机器而不是各文件的自觉——isolate:false 终局下

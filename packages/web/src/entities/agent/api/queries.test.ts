@@ -4,6 +4,8 @@ import { server, useMswServer } from '../../../../tests/support/msw'
 import { toast } from 'sonner'
 import {
   agentQueryOptions,
+  agentListAvailabilityQueryKey,
+  agentListAvailabilityQueryOptions,
   agentSessionsQueryOptions,
   agentsQueryOptions,
   archiveAgentMutationOptions,
@@ -17,6 +19,32 @@ useMswServer()
 function createInvalidationClient() {
   return { invalidateQueries: vi.fn() }
 }
+
+describe('agentListAvailabilityQueryOptions', () => {
+  it('uses a project-scoped query key and polls every five seconds', () => {
+    expect(agentListAvailabilityQueryKey('proj-1')).toEqual(['agent-availability', 'proj-1'])
+    expect(agentListAvailabilityQueryOptions('proj-1')).toMatchObject({
+      queryKey: ['agent-availability', 'proj-1'],
+      enabled: true,
+      refetchInterval: 5000,
+    })
+    expect(agentListAvailabilityQueryOptions(null).enabled).toBe(false)
+  })
+
+  it('requests the list summary endpoint once and returns all entries', async () => {
+    const requests: Request[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents/availability', ({ request }) => {
+        requests.push(request)
+        return HttpResponse.json({ success: true, data: [{ agentId: 'a1', queuedCount: 2 }] })
+      }),
+    )
+
+    await expect(agentListAvailabilityQueryOptions('proj-1').queryFn()).resolves.toEqual([{ agentId: 'a1', queuedCount: 2 }])
+    expect(requests).toHaveLength(1)
+    expect(new URL(requests[0].url).pathname).toBe('/api/projects/proj-1/agents/availability')
+  })
+})
 
 /* ── agentsQueryOptions ─────────────────────────────────── */
 describe('agentsQueryOptions', () => {

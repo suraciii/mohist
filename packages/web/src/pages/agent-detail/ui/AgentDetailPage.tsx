@@ -21,6 +21,7 @@ import {
   useArchiveAgent,
   useUnarchiveAgent,
   readAgentModelAndVariant,
+  getAgentAvailabilityFeedback,
 } from '../../../entities/agent'
 import type {
   AgentAvailabilityResponse,
@@ -218,6 +219,7 @@ function AvailabilityCard({
   }
   const canStartNow = availability.canStartNow
   const reasonText = describeWaitingReason(availability.waitingReason)
+  const feedback = canStartNow ? null : getAgentAvailabilityFeedback(availability.waitingReason)
   return (
     <div
       data-testid="agent-detail-availability"
@@ -242,6 +244,15 @@ function AvailabilityCard({
         {' · '}
         Runner slots: {availability.capacity.usedSlots}/{availability.capacity.totalSlots}
       </p>
+      {feedback && (
+        <p
+          data-testid="agent-detail-availability-feedback"
+          data-feedback-kind={feedback.kind}
+          className="text-xs text-amber-800"
+        >
+          <span className="font-medium">{feedback.title}.</span> {feedback.message} {feedback.nextAction}
+        </p>
+      )}
       {waitingWork.length > 0 && (
         <div data-testid="agent-detail-waiting-work" className="space-y-1 pt-1">
           <h4 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -330,7 +341,7 @@ export function AgentDetailPage({
 
   useDocumentTitle(agent ? `${agent.name} — Mohist` : 'Agent — Mohist')
 
-  const { model, variant } = useMemo(() => readAgentModelAndVariant(agent), [agent])
+  const { model, variant, runtime } = useMemo(() => readAgentModelAndVariant(agent), [agent])
   const isArchived = agent?.status === 'archived'
   const readiness = agent?.readiness
   const readinessConclusion = readiness?.conclusion ?? 'Unknown'
@@ -407,13 +418,24 @@ export function AgentDetailPage({
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-semibold text-foreground truncate">{agent.name}</h1>
-                {isArchived && (
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30">
-                    <ArchiveIcon className="size-3 mr-0.5" />
-                    Archived
-                  </Badge>
-                )}
+                <Badge
+                  data-testid="agent-detail-lifecycle"
+                  variant="outline"
+                  className={isArchived
+                    ? 'text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30'
+                    : 'text-[10px] px-1.5 py-0 h-4 text-emerald-700 border-emerald-300'}
+                >
+                  {isArchived ? (
+                    <>
+                      <ArchiveIcon className="size-3 mr-0.5" />
+                      Archived
+                    </>
+                  ) : 'Active'}
+                </Badge>
               </div>
+              <p data-testid="agent-detail-purpose" className="mt-0.5 text-xs text-muted-foreground">
+                {agent.description?.trim() || 'No purpose set'}
+              </p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {model ? `Model · ${model}` : 'Model · Default'}
                 {variant && ` · ${variant}`}
@@ -519,6 +541,12 @@ export function AgentDetailPage({
               <h3 className="text-sm font-medium text-foreground mb-3">Agent Config</h3>
               <div className="space-y-2" data-testid="agent-detail-config">
                 <div className="flex justify-between items-center">
+                  <span className="text-xs text-muted-foreground">Runtime</span>
+                  <span data-testid="agent-detail-runtime" className="text-xs font-medium text-foreground">
+                    {runtime === 'opencode' ? 'OpenCode' : 'Pi'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Model</span>
                   <span className="text-xs font-medium text-foreground">{model ?? 'Default'}</span>
                 </div>
@@ -526,6 +554,15 @@ export function AgentDetailPage({
                   <span className="text-xs text-muted-foreground">Variant</span>
                   <span className="text-xs font-medium text-foreground">{variant ?? 'Default'}</span>
                 </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-muted-foreground">Max concurrent runs</span>
+                  <span data-testid="agent-detail-max-concurrent-runs" className="text-xs font-medium text-foreground">
+                    {agent.maxConcurrentRuns ?? 'Unlimited'}
+                  </span>
+                </div>
+                <p data-testid="agent-detail-edit-timing" className="border-t border-border pt-2 text-[10px] leading-relaxed text-muted-foreground">
+                  Instructions, Runtime, Model, Variant, and Skills edits apply only to Jobs created after saving. Executions already in progress keep the configuration from launch.
+                </p>
               </div>
             </div>
 

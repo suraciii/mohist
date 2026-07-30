@@ -9,6 +9,7 @@ import {
   getAgent,
   getAgentActivity,
   getAgentDetailStatus,
+  getAgentListAvailability,
   getAgentSessions as getGlobalAgentSessions,
   getAgentStatus,
   listAgents,
@@ -17,6 +18,7 @@ import {
 } from './client'
 import type {
   AgentCreateRequest,
+  AgentAvailabilitySummaryEntry,
   AgentInfo,
   AgentStatusDetailResponse,
   AgentUpdateRequest,
@@ -68,6 +70,24 @@ export function agentsQueryOptions(projectId: string | null | undefined) {
 export function useAgents() {
   const { projectId } = useProject()
   return useQuery<AgentInfo[]>(agentsQueryOptions(projectId))
+}
+
+export function agentListAvailabilityQueryKey(projectId: string | null | undefined) {
+  return ['agent-availability', projectId] as const
+}
+
+export function agentListAvailabilityQueryOptions(projectId: string | null | undefined) {
+  return {
+    queryKey: agentListAvailabilityQueryKey(projectId),
+    queryFn: () => getAgentListAvailability(projectId!),
+    enabled: !!projectId,
+    refetchInterval: 5000,
+  }
+}
+
+export function useAgentListAvailability() {
+  const { projectId } = useProject()
+  return useQuery<AgentAvailabilitySummaryEntry[]>(agentListAvailabilityQueryOptions(projectId))
 }
 
 export function agentQueryOptions(projectId: string | null | undefined, agentRef: string) {

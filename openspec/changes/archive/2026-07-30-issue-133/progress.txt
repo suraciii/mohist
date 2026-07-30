@@ -1,0 +1,67 @@
+## Codebase Patterns
+
+- `AgentQuerier.ListAsync` hydrates the server-owned Readiness result on the Agent list response.
+- `AgentAvailabilityService` owns Availability calculation; runner capacity is supplied once to each per-Agent calculation.
+- Pending AgentJobs are persisted with lowercase status values and can be counted with one grouped query.
+- Runner status is registered as a concrete scoped service; `IRunnerStatusSource` is the injectable seam used by list availability tests.
+
+## T-001
+
+- The new project-scoped availability route reads active Agents only, so archived Agents are omitted without a live availability lookup.
+- `GetListSummaryAsync` makes one online-runner read, one grouped pending-job query, and one active-count grain read per active Agent.
+- Runner offline is represented by `waitingReason=no-online-runner` in Availability; Readiness remains owned by the existing Agent list query.
+- The route returns the existing `{ success, data }` envelope with one `AgentAvailabilitySummaryEntry` per active Agent.
+
+## Verification
+
+- Targeted route, service, and Unit tests pass; Web typecheck, FSD checks, Web tests, and repository build pass.
+- Full Server SpecTests had one transient timeout in the unrelated Agent launch-observation class; rerunning that class passed all 10 tests.
+
+## T-002
+
+- Agent detail now renders the derived Runtime and Agent max-concurrency limit in the definition summary; null max concurrency is shown as Unlimited.
+- Future-job timing is stated both in the detail definition summary and in the edit dialog: Instructions, Runtime, Model, Variant, and Skills changes do not reconfigure executions already in progress or existing Sessions.
+- Readiness and Availability remain separate; the existing server conclusion, gap/setup rendering, Unknown wait hint, launch gating, and server-provided Availability/capacity display were preserved.
+
+## T-002 Verification
+
+- Focused Agent detail, Readiness/Availability, and editor tests pass: 48 tests.
+- Web typecheck, full Web tests (392 files, 5,182 passing and 1 skipped), and FSD boundary checks pass.
+
+## T-003
+
+- The Web list uses `GET /agents/availability` through a project-scoped `useAgentListAvailability` query with a 5-second refresh and joins summary entries by `agentId`; archived rows remain lifecycle-only for live availability/workload.
+- List rows render the server Readiness conclusion independently from lifecycle and Availability. Missing descriptions show `No purpose set`; unresolved summaries show Availability loading/unknown and unknown workload values rather than a synthesized setup gap.
+- Launch success invalidates the project-scoped list Availability query so active and queued counts refresh after a new session.
+
+## T-003 Verification
+
+- Focused Agent list, availability query, and launch mutation tests pass: 88 tests.
+- Web typecheck, full Web tests (392 files, 5,188 passing and 1 skipped), and FSD boundary checks pass.
+
+## T-004
+
+- The launch composer now joins the project-scoped Availability summary for its selected Agent and presents waiting states as Availability feedback without disabling launch; the server remains the authoritative launch gate.
+- Launch error feedback is normalized by obstruction class: runner offline, capacity/concurrency/dispatch back-pressure, Needs setup with returned gaps and setup link, and execution backend unavailability each include a distinct next action.
+- The same Availability feedback mapping is used by the Agent detail card. Created sessions label runtime/execution unavailability separately and tell the user to wait for recovery and retry the launch.
+- The detail-to-composer test uses injected page data hooks and verifies the Agent stays pre-bound through navigation and that success lands on the created session. Composer tests cover all context refs without execution overrides, gating, idempotent retry, and each launch feedback class.
+
+## T-004 Verification
+
+- Focused launch, detail, and session suites pass: 80 tests and 1 skipped.
+- A full Web run passed earlier at 392 files, 5,194 passing and 1 skipped. A later full run became resource-sensitive in unrelated `App.test.tsx` routing cases and exceeded the 120-second command limit; `App.test.tsx` passes independently at 15/15.
+- Web typecheck, FSD boundary checks, test-boundary checks, and `git diff --check` pass.
+
+## Verification Repair
+
+- The failed default Web run was caused by Vitest starting one worker per available CPU on this 32-core workspace; concurrent jsdom initialization delayed lazy settings routes beyond the 10-second test timeout and left the run incomplete. The affected `App.test.tsx` passes independently at 15/15, and the failure is not caused by T-004 behavior.
+- Capping Web Vitest at four workers in `vite.config.ts` preserves the full suite and makes the resource limit explicit. The full Web suite then passed at 392 files, 5,193 passing and 1 skipped.
+
+## Review Fixes
+
+- The Availability summary route now reads active Agent definitions without hydrating Readiness, so its five-second refresh does not query each Agent's execution history.
+- `AgentQuerierListDefinitionsSpecs` uses a SQL command recorder to lock that no `AgentJobs` read occurs on the summary definition path.
+- Waiting rows now map Availability reasons to their user-facing explanation and next action for runner offline, capacity, concurrency, and dispatch waits.
+- The Agent detail header now shows the configured purpose and a lifecycle label for both Active and Archived definitions.
+- The Agent detail test remains below the Web test-file size budget after adding definition-summary coverage.
+- PR 244 Node CI repair: `npm run test:ci -w packages/web` and `npm run build -w packages/web` pass.
