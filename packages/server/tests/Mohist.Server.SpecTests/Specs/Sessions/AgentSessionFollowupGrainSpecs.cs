@@ -308,9 +308,11 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
             Source: "agent-session-followup",
             IdempotencyKey: "exec-identity-key"));
 
-        var dispatch = await grain.BeginNextFollowupDispatchAsync();
-        Assert.NotNull(dispatch);
-        Assert.Equal(first.OperationId, dispatch!.OperationId);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionInput,
+                $$"""{"text":"identity only","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}"}""") },
+            "runtime-identity-executing"));
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "identity only",
@@ -322,12 +324,6 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal(first.InputId, second.InputId);
         Assert.Equal(first.TurnId, second.TurnId);
 
-        await grain.ReleaseFollowupDispatchAsync(first.OperationId);
-        var retry = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
-            Text: "identity only",
-            Source: "agent-session-followup",
-            IdempotencyKey: "exec-identity-key"));
-        Assert.True(retry.ShouldRedeliver);
     }
 
     [Fact]
@@ -644,9 +640,11 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
             Source: "agent-session-followup",
             IdempotencyKey: "cone-key-1"));
 
-        var dispatch = await grain.BeginNextFollowupDispatchAsync();
-        Assert.NotNull(dispatch);
-        Assert.Equal(first.OperationId, dispatch!.OperationId);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionInput,
+                $$"""{"text":"first exec","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}"}""") },
+            "runtime-concurrent-executing"));
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "second exec",
@@ -760,6 +758,78 @@ public sealed class AgentSessionFollowupGrainSpecs : IClassFixture<AgentSessionG
         var stateAfter = await _fixture.StateStore.LoadAsync(sessionId);
         Assert.NotNull(stateAfter);
         Assert.Equal(AgentTurnStatus.Executing, stateAfter!.Status.Turns![0].Status);
+    }
+
+    [Fact]
+    public async Task BeginNextFollowupDispatch_StaysQueuedUntilRuntimeInput()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-claim-stays-queued");
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "wait for runtime input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "claim-stays-queued"));
+
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+
+        Assert.NotNull(dispatch);
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Equal(AgentTurnStatus.Queued, Assert.Single(state!.Status.Turns!).Status);
+        Assert.True(Assert.Single(state.Status.PendingFollowups!).Dispatching);
+        Assert.Equal(accepted.OperationId, dispatch!.OperationId);
+    }
+
+    [Fact]
+    public async Task Activate_ReclaimsQueuedDispatchForSameKeyRetry()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-reclaim-dispatch");
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "reclaim delivery",
+            Source: "agent-session-followup",
+            IdempotencyKey: "reclaim-dispatch"));
+        await grain.BeginNextFollowupDispatchAsync();
+
+        var management = grain.AsReference<IGrainManagementExtension>();
+        await management.DeactivateOnIdle();
+        var reactivated = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await reactivated.GetAsync();
+
+        var retry = await reactivated.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "reclaim delivery",
+            Source: "agent-session-followup",
+            IdempotencyKey: "reclaim-dispatch"));
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Equal(AgentTurnStatus.Queued, Assert.Single(state!.Status.Turns!).Status);
+        Assert.False(Assert.Single(state.Status.PendingFollowups!).Dispatching);
+        Assert.True(retry.ShouldRedeliver);
+        Assert.Equal(accepted.InputId, retry.InputId);
+    }
+
+    [Fact]
+    public async Task InitialTurnTerminal_DispatchesQueuedFollowup()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-initial-terminal-dispatch");
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "initial-input",
+            TurnId: "initial-turn",
+            Prompt: "initial prompt",
+            Source: "agent-launch",
+            JobId: "initial-job"));
+        await grain.MarkInitialTurnExecutingAsync("initial-job");
+        await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "queued after launch",
+            Source: "agent-session-followup",
+            IdempotencyKey: "after-launch"));
+        await grain.MarkInitialTurnTerminalAsync("initial-job", AgentTurnStatus.Completed, null);
+
+        var request = Assert.Single(_fixture.FollowupDispatch.Requests);
+        Assert.Equal("project-1", request.ProjectId);
+        Assert.Equal(sessionId, request.SessionId);
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Equal(AgentTurnStatus.Completed, state!.Status.Turns![0].Status);
+        Assert.Equal(AgentTurnStatus.Queued, state.Status.Turns[1].Status);
     }
 
     [Fact]

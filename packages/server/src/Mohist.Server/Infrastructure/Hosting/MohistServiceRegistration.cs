@@ -115,6 +115,8 @@ public static class MohistServiceRegistration
         services.AddScoped<AgentSessionReconcileQuerier>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
+        services.AddScoped<IFollowupDeliveryDispatcher, RunnerFollowupDeliveryDispatcher>();
+        services.AddSingleton<IFollowupDispatchScheduler>(sp => sp.GetRequiredService<Mohist.Server.Api.FollowupDispatchScheduler>());
         services.AddScoped<IAgentJobStore, AgentJobStore>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<IEventStore, EventStore>();

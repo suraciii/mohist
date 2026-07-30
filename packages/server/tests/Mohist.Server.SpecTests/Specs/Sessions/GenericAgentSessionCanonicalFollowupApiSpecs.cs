@@ -75,6 +75,97 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
     }
 
     [Fact]
+    public async Task IssueSessionMetadata_ExposesFollowupInputAndTurnStatus()
+    {
+        var (project, issue, _, sessionName, sessionId) = await CreateWorkflowSessionAsync("issue-followup-observation");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        tracker.Register(_runnerId, "conn-issue-followup-observation");
+        try
+        {
+            using var followup = await _client.PostAsJsonAsync(
+                $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}/followup",
+                new { text = "show follow-up status" });
+            var followupData = (await followup.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            var inputId = followupData.GetProperty("inputId").GetString();
+            var turnId = followupData.GetProperty("turnId").GetString();
+            var payload = JsonSerializer.SerializeToElement(Assert.Single(runnerHub.Invocations).Arguments.Single());
+            var operationId = payload.GetProperty("operationId").GetString();
+
+            using var queued = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}");
+            var queuedData = (await queued.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.Equal("accepted", queuedData.GetProperty("inputs")[0].GetProperty("acceptance").GetString());
+            Assert.Equal("queued", queuedData.GetProperty("turns")[0].GetProperty("status").GetString());
+
+            var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
+            await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+                new[] { new AgentSessionRuntimeEventInput(
+                    RuntimeEventTypes.SessionInput,
+                    $$"""{"text":"show follow-up status","kind":"followup","source":"agent-session-followup","operationId":"{{operationId}}"}""") },
+                sessionId));
+            await persistence.WaitAsync();
+
+            using var executing = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}");
+            var executingData = (await executing.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.Equal(inputId, executingData.GetProperty("inputs")[0].GetProperty("id").GetString());
+            Assert.Equal(turnId, executingData.GetProperty("turns")[0].GetProperty("id").GetString());
+            Assert.Equal("executing", executingData.GetProperty("turns")[0].GetProperty("status").GetString());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Fact]
+    public async Task InitialTurnTerminal_SchedulesQueuedWorkflowFollowup()
+    {
+        var (project, _, _, sessionName, sessionId) = await CreateWorkflowSessionAsync("initial-terminal-followup");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponseFactory("ReceiveFollowup", _ =>
+        {
+            started.TrySetResult();
+            return new RunnerFollowupDeliveryResult(true);
+        });
+        tracker.Register(_runnerId, "conn-initial-terminal-followup");
+        try
+        {
+            var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+                InputId: "initial-input",
+                TurnId: "initial-turn",
+                Prompt: "initial prompt",
+                Source: "agent-launch",
+                JobId: "initial-job"));
+            await grain.MarkInitialTurnExecutingAsync("initial-job");
+            var followup = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+                Text: "continue after launch",
+                Source: "agent-session-followup",
+                IdempotencyKey: "initial-terminal-followup"));
+
+            await grain.MarkInitialTurnTerminalAsync("initial-job", AgentTurnStatus.Completed, null);
+            await started.Task;
+
+            var payload = JsonSerializer.SerializeToElement(Assert.Single(runnerHub.Invocations).Arguments.Single());
+            Assert.Equal(followup.OperationId, payload.GetProperty("operationId").GetString());
+            Assert.Equal("continue after launch", payload.GetProperty("text").GetString());
+            Assert.Equal(sessionName, payload.GetProperty("target").GetProperty("sessionName").GetString());
+            Assert.Equal(project.Id, payload.GetProperty("target").GetProperty("projectId").GetString());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Fact]
     public async Task CanonicalFollowupRoute_WorkflowSession_UsesWorkflowTarget()
     {
         var (project, _, workflowRunId, sessionName, sessionId) = await CreateWorkflowSessionAsync("canonical-workflow-shape");
@@ -151,7 +242,6 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
             tracker.Unregister(_runnerId);
         }
     }
-
     [Fact]
     public async Task IdleFollowupReservation_BlocksRecoveryUntilDeliveryCompletes()
     {

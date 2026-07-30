@@ -184,5 +184,3 @@ public sealed record AgentSessionFollowupResult(
     string? Code = null,
     string? InputAcceptance = null,
     string? TurnStatus = null);
-
-public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);

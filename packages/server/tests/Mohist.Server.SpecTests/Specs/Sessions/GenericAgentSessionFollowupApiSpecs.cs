@@ -53,6 +53,8 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             Assert.Equal("accepted", data.GetProperty("status").GetString());
             Assert.False(string.IsNullOrEmpty(data.GetProperty("inputId").GetString()));
             Assert.False(string.IsNullOrEmpty(data.GetProperty("turnId").GetString()));
+            Assert.Equal("accepted", data.GetProperty("inputAcceptance").GetString());
+            Assert.Equal("queued", data.GetProperty("turnStatus").GetString());
 
             var sent = Assert.Single(runnerHub.SentMessages);
             Assert.Equal("conn-gen-followup-1", sent.ConnectionId);
@@ -65,6 +67,10 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             Assert.Equal(project.Id, target.GetProperty("projectId").GetString());
             Assert.Equal(sessionId, target.GetProperty("sessionId").GetString());
             Assert.Equal(activeWorksBefore, await GetActiveWorkSnapshotAsync(runner));
+
+            using var summary = await _client.GetAsync($"/api/projects/{project.Id}/agent-sessions/{sessionId}");
+            var summaryData = (await summary.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.Equal("queued", summaryData.GetProperty("turns")[0].GetProperty("status").GetString());
         }
         finally
         {

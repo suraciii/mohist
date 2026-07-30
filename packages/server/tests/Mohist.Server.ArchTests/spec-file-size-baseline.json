@@ -19,7 +19,7 @@
   "Mohist.Server.SpecTests/Specs/Project/Api/ProjectApiSpecs.cs": 30791,
   "Mohist.Server.SpecTests/Specs/Runner/Grain/RunnerStatusProjectionSpecs.cs": 30462,
   "Mohist.Server.SpecTests/Specs/Sessions/AgentSessionRecoveryApiSpecs.cs": 24769,
-  "Mohist.Server.SpecTests/Specs/Sessions/AgentSessionFollowupGrainSpecs.cs": 34022,
+  "Mohist.Server.SpecTests/Specs/Sessions/AgentSessionFollowupGrainSpecs.cs": 37435,
   "Mohist.Server.SpecTests/Specs/Sessions/AgentSessionRecoveryGrainSpecs.cs": 27135,
   "Mohist.Server.SpecTests/Specs/Sessions/AgentStatusHistoryBoundedSelectionSpecs.cs": 28635,
   "Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionSummarySpecs.cs": 27070,
