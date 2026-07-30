@@ -198,9 +198,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var record = await _jobStore.ClaimAsync(Key, runnerId, _timeProvider.GetUtcNow());
         // Reload from the durable row so the in-memory state reflects
         // the claim.
+        _hydrated = false;
         await HydrateAsync();
         var dispatch = DeserializeDispatch(record.DispatchJson)
-            ?? throw new InvalidOperationException(
+            ?? throw new AgentJobLedgerReconstructionException(
                 $"AgentJob '{Key}' claim returned a row without a parseable dispatch snapshot");
 
         return new ClaimResult(Key, runnerId, State.WorkId!, dispatch);

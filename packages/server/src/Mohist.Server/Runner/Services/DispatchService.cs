@@ -1,6 +1,7 @@
-using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
@@ -10,14 +11,11 @@ using Orleans;
 
 namespace Mohist.Server.Runner.Services;
 
-/// <summary>
-/// Poll-based workflow and Agent-job reconciler. Workflow runs remain their
-/// dispatch ledger; Agent jobs retain a stable snapshot in the Runner grain.
-/// </summary>
 public sealed class DispatchService : IScopedService
 {
     private readonly IGrainFactory _grains;
     private readonly WorkflowRunQuerier _workflowRuns;
+    private readonly IAgentJobStore _agentJobs;
     private readonly WorkflowItemTranslator _translator;
     private readonly ILogger<DispatchService> _log;
     private readonly IDispatchPollObserver _pollObserver;
@@ -25,12 +23,14 @@ public sealed class DispatchService : IScopedService
     public DispatchService(
         IGrainFactory grains,
         WorkflowRunQuerier workflowRuns,
+        IAgentJobStore agentJobs,
         WorkflowItemTranslator translator,
         ILogger<DispatchService> log,
         IDispatchPollObserver? pollObserver = null)
     {
         _grains = grains;
         _workflowRuns = workflowRuns;
+        _agentJobs = agentJobs;
         _translator = translator;
         _log = log;
         _pollObserver = pollObserver ?? NoopDispatchPollObserver.Instance;
@@ -63,10 +63,8 @@ public sealed class DispatchService : IScopedService
         int slots,
         CancellationToken ct)
     {
-        var workerId = runnerId;
         await runner.TouchPresenceAsync();
         var info = await runner.GetInfoAsync();
-
         if (info is null)
             return new RunnerPollResponse([]);
 
@@ -74,20 +72,34 @@ public sealed class DispatchService : IScopedService
 
         var dispatches = new List<WorkDispatch>();
         var reportedWorkKeys = ReportedWorkKeys(req);
-        var agentJobs = await runner.ReconcileAgentJobsAsync(reportedWorkKeys.ToList());
-        if (agentJobs.Dispatch is not null)
-            dispatches.Add(agentJobs.Dispatch);
-
-        var activeWorkKeys = await AddMissingRedeliveriesAsync(runnerId, workerId, reportedWorkKeys, dispatches, ct);
-        var spare = slots - activeWorkKeys.Count - agentJobs.ActiveCount;
+        var activeWorkKeys = await AddMissingRedeliveriesAsync(
+            runnerId,
+            reportedWorkKeys,
+            dispatches,
+            ct);
+        var spare = slots - activeWorkKeys.Count;
         if (spare <= 0)
             return new RunnerPollResponse(dispatches);
 
-        spare = await AddAssignedReadyDispatchesAsync(runner, info.ProjectId, runnerId, workerId, spare, dispatches, ct);
-        if (spare <= 0)
-            return new RunnerPollResponse(dispatches);
-
-        await AddAssignablePendingDispatchesAsync(runner, info.ProjectId, runnerId, workerId, spare, dispatches, ct);
+        spare = await AddPendingDispatchesAsync(
+            runner,
+            info.ProjectId,
+            runnerId,
+            assigned: true,
+            spare,
+            dispatches,
+            ct);
+        if (spare > 0)
+        {
+            await AddPendingDispatchesAsync(
+                runner,
+                info.ProjectId,
+                runnerId,
+                assigned: false,
+                spare,
+                dispatches,
+                ct);
+        }
 
         return new RunnerPollResponse(dispatches);
     }
@@ -97,42 +109,109 @@ public sealed class DispatchService : IScopedService
 
     private async Task<HashSet<string>> AddMissingRedeliveriesAsync(
         string runnerId,
-        string workerId,
         IReadOnlySet<string> reportedWorkKeys,
         List<WorkDispatch> dispatches,
         CancellationToken ct)
     {
         var activeWorkKeys = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(workerId, ct))
+        foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(runnerId, ct))
         {
-            var (workKey, dispatch) = await RenderActiveWorkAsync(workflowRunId, runnerId, workerId, ct);
-            if (workKey is null) continue;
+            var (workKey, dispatch) = await RenderActiveWorkflowAsync(
+                workflowRunId,
+                runnerId,
+                reportedWorkKeys,
+                ct);
+            if (workKey is null)
+                continue;
+
             activeWorkKeys.Add(workKey);
-            if (!reportedWorkKeys.Contains(workKey) && dispatch is not null)
+            if (dispatch is not null)
+                dispatches.Add(dispatch);
+        }
+
+        foreach (var record in await _agentJobs.ListRunningForRunnerAsync(runnerId, ct))
+        {
+            var workKey = AgentJobWorkKey(record.JobKey, record.WorkId);
+            activeWorkKeys.Add(workKey);
+            if (reportedWorkKeys.Contains(workKey))
+                continue;
+
+            var dispatch = DeserializeAgentDispatch(record);
+            if (dispatch is not null)
                 dispatches.Add(dispatch);
         }
 
         return activeWorkKeys;
     }
 
-    private async Task<int> AddAssignedReadyDispatchesAsync(
+    private async Task<int> AddPendingDispatchesAsync(
         IRunnerGrain runner,
         string? projectId,
         string runnerId,
-        string workerId,
+        bool assigned,
         int availableSlots,
         List<WorkDispatch> dispatches,
         CancellationToken ct)
     {
-        var remainingSlots = availableSlots;
+        var candidateLimit = Math.Max(availableSlots, 20);
+        var workflowCandidates = assigned
+            ? (await _workflowRuns.FindAssignedCandidatesAsync(runnerId, candidateLimit, ct))
+                .Select(candidate => new PendingCandidate(
+                    candidate.ReadySince,
+                    WorkDispatchOwnerKinds.Workflow,
+                    candidate.WorkflowRunId))
+            : (await _workflowRuns.FindAssignableCandidatesAsync(projectId, candidateLimit, ct))
+                .Select(candidate => new PendingCandidate(
+                    candidate.ReadySince,
+                    WorkDispatchOwnerKinds.Workflow,
+                    candidate.WorkflowRunId));
 
-        foreach (var workflowRunId in await _workflowRuns.FindAssignedToAsync(workerId, ct))
+        var agentCandidates = assigned
+            ? (await _agentJobs.ListAssignedPendingForRunnerAsync(runnerId, ct))
+                .Take(candidateLimit)
+                .Select(record => new PendingCandidate(
+                    record.ReadySince ?? DateTimeOffset.MinValue,
+                    WorkDispatchOwnerKinds.AgentJob,
+                    record.JobKey))
+            : (await _agentJobs.ListEligiblePendingAsync(projectId, candidateLimit, ct))
+                .Select(record => new PendingCandidate(
+                    record.ReadySince ?? DateTimeOffset.MinValue,
+                    WorkDispatchOwnerKinds.AgentJob,
+                    record.JobKey));
+
+        var candidates = workflowCandidates
+            .Concat(agentCandidates)
+            .OrderBy(candidate => candidate.ReadySince)
+            .ThenBy(candidate => candidate.OwnerKind, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.OwnerId, StringComparer.Ordinal);
+
+        var remainingSlots = availableSlots;
+        foreach (var candidate in candidates)
         {
-            if (remainingSlots <= 0) break;
-            var dispatch = await ClaimAndRenderAsync(
-                runner, workflowRunId, projectId, runnerId, workerId, assignWorker: false, ct);
-            if (dispatch is null) continue;
+            if (remainingSlots <= 0)
+                break;
+
+            WorkDispatch? dispatch;
+            if (candidate.OwnerKind == WorkDispatchOwnerKinds.AgentJob)
+            {
+                var claim = await runner.TryClaimAgentJobAsync(candidate.OwnerId, projectId);
+                dispatch = claim?.Dispatch;
+            }
+            else
+            {
+                dispatch = await ClaimAndRenderWorkflowAsync(
+                    runner,
+                    candidate.OwnerId,
+                    projectId,
+                    runnerId,
+                    assignWorker: !assigned,
+                    ct);
+            }
+
+            if (dispatch is null)
+                continue;
+
             dispatches.Add(dispatch);
             remainingSlots--;
         }
@@ -140,41 +219,25 @@ public sealed class DispatchService : IScopedService
         return remainingSlots;
     }
 
-    private async Task<int> AddAssignablePendingDispatchesAsync(
-        IRunnerGrain runner,
-        string? projectId,
+    private async Task<(string? WorkKey, WorkDispatch? Dispatch)> RenderActiveWorkflowAsync(
+        string workflowRunId,
         string runnerId,
-        string workerId,
-        int availableSlots,
-        List<WorkDispatch> dispatches,
+        IReadOnlySet<string> reportedWorkKeys,
         CancellationToken ct)
-    {
-        var remainingSlots = availableSlots;
-
-        foreach (var workflowRunId in await _workflowRuns.FindAssignableAsync(projectId, ct: ct))
-        {
-            if (remainingSlots <= 0) break;
-            var dispatch = await ClaimAndRenderAsync(
-                runner, workflowRunId, projectId, runnerId, workerId, assignWorker: true, ct);
-            if (dispatch is null) continue;
-            dispatches.Add(dispatch);
-            remainingSlots--;
-        }
-
-        return remainingSlots;
-    }
-
-    private async Task<(string? WorkKey, WorkDispatch? Dispatch)> RenderActiveWorkAsync(
-        string workflowRunId, string runnerId, string workerId, CancellationToken ct)
     {
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
-        if (run is null) return (null, null);
+        if (run is null)
+            return (WorkflowOwnerKey(workflowRunId), null);
 
-        var activeWork = run.CurrentActiveWorkFor(workerId);
-        if (activeWork is null) return (null, null);
+        var activeWork = run.CurrentActiveWorkFor(runnerId);
+        if (activeWork is null)
+            return (WorkflowOwnerKey(workflowRunId), null);
 
         var workId = activeWork.WorkId;
-        var workKey = $"{WorkDispatchOwnerKinds.Workflow}:{workflowRunId}:{workId}";
+        var workKey = WorkflowWorkKey(workflowRunId, workId);
+        if (reportedWorkKeys.Contains(workKey))
+            return (workKey, null);
+
         try
         {
             if (activeWork.DispatchSnapshot is not null)
@@ -184,39 +247,52 @@ public sealed class DispatchService : IScopedService
             var concrete = WithIssueFromRun(dispatch, run);
             if (activeWork.IsChecks)
                 return (workKey, concrete);
-            var stored = await StoreDispatchAsync(workflowRunId, workerId, workId, concrete);
+
+            var stored = await StoreDispatchAsync(workflowRunId, runnerId, workId, concrete);
             return (workKey, stored);
         }
         catch (WorkflowDispatchRejectedException ex)
         {
-            await RejectDispatchAsync(workflowRunId, workerId, workId, ex);
+            await RejectWorkflowDispatchAsync(workflowRunId, runnerId, workId, ex);
             return (null, null);
         }
         catch (Exception ex)
         {
             _log.LogWarning(ex,
                 "DispatchService failed to render redelivery dispatch for workflow {WorkflowId} work {WorkId}",
-                workflowRunId, workId);
-            // Render failed after claim — the work is Running and unreported,
-            // so the next poll retries the render (spec §Poll Reconciliation).
+                workflowRunId,
+                workId);
             return (workKey, null);
         }
     }
 
-    private async Task<WorkDispatch?> ClaimAndRenderAsync(
+    private async Task<WorkDispatch?> ClaimAndRenderWorkflowAsync(
         IRunnerGrain runner,
         string workflowRunId,
         string? projectId,
         string runnerId,
-        string workerId,
         bool assignWorker,
         CancellationToken ct)
     {
-        var item = await runner.TryClaimWorkflowAsync(workflowRunId, projectId, assignWorker);
-        if (item is null) return null;
+        WorkItem? item;
+        try
+        {
+            item = await runner.TryClaimWorkflowAsync(workflowRunId, projectId, assignWorker);
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex,
+                "DispatchService skipped workflow claim for {WorkflowId}",
+                workflowRunId);
+            return null;
+        }
+
+        if (item is null)
+            return null;
 
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
-        if (run is null) return null;
+        if (run is null)
+            return null;
 
         try
         {
@@ -224,15 +300,12 @@ public sealed class DispatchService : IScopedService
             var concrete = WithIssueFromRun(dispatch, run);
             if (item.IsChecks)
                 return concrete;
-            return await StoreDispatchAsync(
-                workflowRunId,
-                workerId,
-                item.Id!,
-                concrete);
+
+            return await StoreDispatchAsync(workflowRunId, runnerId, item.Id!, concrete);
         }
         catch (WorkflowDispatchRejectedException ex)
         {
-            await RejectDispatchAsync(workflowRunId, workerId, item.Id!, ex);
+            await RejectWorkflowDispatchAsync(workflowRunId, runnerId, item.Id!, ex);
             return null;
         }
         catch (Exception ex)
@@ -240,41 +313,70 @@ public sealed class DispatchService : IScopedService
             _log.LogWarning(ex,
                 "DispatchService failed to render dispatch for workflow {WorkflowId} after claim",
                 workflowRunId);
-            // Claimed but render failed — work is Running and unreported, so
-            // the next poll redelivers it via poll reconciliation.
+            return null;
+        }
+    }
+
+    private static WorkDispatch? DeserializeAgentDispatch(AgentJobLedgerRecord record)
+    {
+        if (string.IsNullOrWhiteSpace(record.DispatchJson))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<WorkDispatch>(record.DispatchJson, JSON.Options);
+        }
+        catch
+        {
             return null;
         }
     }
 
     private async Task<WorkDispatch?> StoreDispatchAsync(
         string workflowRunId,
-        string workerId,
+        string runnerId,
         string workId,
-        WorkDispatch dispatch)
-    {
-        return await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
-            .StoreActiveWorkDispatchAsync(workerId, workId, dispatch);
-    }
+        WorkDispatch dispatch) =>
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
+            .StoreActiveWorkDispatchAsync(runnerId, workId, dispatch);
 
-    private async Task RejectDispatchAsync(
+    private async Task RejectWorkflowDispatchAsync(
         string workflowRunId,
-        string workerId,
+        string runnerId,
         string workId,
         WorkflowDispatchRejectedException exception)
     {
         _log.LogWarning(exception,
             "DispatchService rejected dispatch for workflow {WorkflowId} work {WorkId}: {Code} {Message}",
-            workflowRunId, workId, exception.Error.Code, exception.Error.Message);
+            workflowRunId,
+            workId,
+            exception.Error.Code,
+            exception.Error.Message);
         await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
-            .RejectActiveWorkDispatchAsync(workerId, workId, exception.Error);
+            .RejectActiveWorkDispatchAsync(runnerId, workId, exception.Error);
     }
+
+    private static string WorkflowWorkKey(string workflowRunId, string workId) =>
+        $"{WorkDispatchOwnerKinds.Workflow}:{workflowRunId}:{workId}";
+
+    private static string WorkflowOwnerKey(string workflowRunId) =>
+        $"{WorkDispatchOwnerKinds.Workflow}:{workflowRunId}";
+
+    private static string AgentJobWorkKey(string agentJobId, string? workId) =>
+        $"{WorkDispatchOwnerKinds.AgentJob}:{agentJobId}:{workId}";
 
     private static WorkDispatch WithIssueFromRun(WorkDispatch dispatch, WorkflowRun run)
     {
-        if (dispatch.Issue is not null) return dispatch;
+        if (dispatch.Issue is not null)
+            return dispatch;
         if (string.IsNullOrWhiteSpace(run.Metadata.ProjectId)
             || run.Metadata.IssueNumber is not > 0)
             return dispatch;
         return dispatch with { Issue = new WorkIssueRef(run.Metadata.ProjectId, run.Metadata.IssueNumber.Value) };
     }
+
+    private sealed record PendingCandidate(
+        DateTimeOffset ReadySince,
+        string OwnerKind,
+        string OwnerId);
 }

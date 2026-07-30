@@ -85,4 +85,47 @@ run. No work-in-progress on disk; the interrupted turn was investigative only.
      across N terminal + 1 active rows)
 3. If those need new specs, add them under
    `packages/server/tests/Mohist.Server.SpecTests/Specs/Agent/...` per the
-   patterns already used in `AgentJobStoreSpecs` and the grain fixtures.
+    patterns already used in `AgentJobStoreSpecs` and the grain fixtures.
+
+# Issue 531 T-002 Progress
+
+## Codebase Patterns
+
+- `DispatchService` is the poll assembler; `RunnerGrain.TryBeginPollAsync` and
+  the lifecycle gate serialize poll admission, capacity checks, and owner
+  claims.
+- Workflow scheduling rows expose `ReadySince` as a computed DateTime, while
+  AgentJob scheduling rows expose the indexed timestamp as an optional
+  DateTimeOffset. Mixed-owner ordering needs a small query candidate record;
+  it does not need a persisted scheduler object.
+- AgentJob owner claims update the durable row through `AgentJobStore.ClaimAsync`.
+  A grain activation must clear its hydration flag before reloading after that
+  write, or the durable Running transition remains hidden behind cached Pending
+  state.
+
+## Decisions (this task)
+
+- Added a runner-gated `TryClaimAgentJobAsync` that counts running WorkflowRun
+  rows and running AgentJob ledger rows together before calling the owner grain.
+  Revision and reconstruction conflicts are skipped; malformed dispatch data
+  fails only the exact AgentJob owner.
+- `DispatchService` now reads running and pending AgentJob projections directly,
+  emits all missing running work before pending claims, then merges assigned and
+  unassigned WorkflowRun and AgentJob candidates by readiness time.
+- Legacy Runner work staging and relay methods remain temporarily available for
+  the later T-003 removal, but the poll path no longer reads or writes them.
+- The focused mixed-owner specs use unique projects and clear the shared runner
+  registry before each scenario because the current registry returns all
+  runners regardless of project.
+
+## Verification
+
+- `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore` passes.
+- `MixedOwnerDispatchSpecs` passes 5/5.
+- `DispatchServiceReconciliationSpecs` passes 11/11.
+- `RunnerPollSchedulingSpecs` passes 3/3 before the combined run reached an
+  existing long-running RunnerGrain concurrency test.
+- `AgentJobStoreSpecs` passes 23/23.
+- The existing `HandleTimeoutAsync_DuringAgentJobAssignment...` concurrency
+  test and `AgentJobGrainSpecs` capacity test exceed the command timeout in
+  isolation; they were not treated as successful verification.

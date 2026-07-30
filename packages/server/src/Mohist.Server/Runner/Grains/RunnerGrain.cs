@@ -1,3 +1,5 @@
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -23,7 +25,7 @@ namespace Mohist.Server.Runner.Grains;
 /// <list type="bullet">
 ///   <item><description>presence: lastSeen — poll IS the heartbeat (online/offline).</description></item>
 ///   <item><description>slots: capacity configuration (control-plane owned).</description></item>
-///   <item><description>agent-job push dispatch + ledger (agent-jobs have no run to re-render from; they stay push-based).</description></item>
+///   <item><description>legacy AgentJob staging retained for the removal task; poll delivery reads the owner ledger.</description></item>
 ///   <item><description>closeout: on presence loss, fail active workflow work and the runner's outstanding agent-job works.</description></item>
 /// </list>
 /// No work-completion wall clock — work liveness is the runner process's
@@ -52,6 +54,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly WorkflowRunQuerier _workflowRuns;
     private readonly RunnerDefinitionStore _definitions;
     private readonly RunnerWorkStore _runnerWorks;
+    private readonly IAgentJobStore _agentJobStore;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RunnerGrain> _log;
     private readonly IRunnerGrainAssignmentObserver _assignmentObserver;
@@ -66,6 +69,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         WorkflowRunQuerier workflowRuns,
         RunnerDefinitionStore definitions,
         RunnerWorkStore runnerWorks,
+        IAgentJobStore agentJobStore,
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
         [PersistentState("runner-works")] IPersistentState<RunnerWorksState> worksState,
@@ -76,6 +80,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _workflowRuns = workflowRuns;
         _definitions = definitions;
         _runnerWorks = runnerWorks;
+        _agentJobStore = agentJobStore;
         _log = log;
         _timeProvider = timeProvider;
         _worksState = worksState;
@@ -357,6 +362,47 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             }
 
             return await workflow.ClaimNextAsync(RunnerId);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    public async Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId)
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (_status != RunnerStatus.Online
+                || _info is null
+                || !string.Equals(_info.ProjectId, projectId, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var activeWorkflowCount = await _workflowRuns.CountRunningAssignedToAsync(RunnerId);
+            var activeAgentJobCount = (await _agentJobStore.ListRunningForRunnerAsync(RunnerId))
+                .Select(record => record.JobKey)
+                .Distinct(StringComparer.Ordinal)
+                .Count();
+            if (activeWorkflowCount + activeAgentJobCount >= MaxWorkflowSlots)
+                return null;
+
+            return await GrainFactory.GetGrain<IAgentJobGrain>(agentJobId).ClaimNextAsync(RunnerId);
+        }
+        catch (AgentJobLedgerConflictException)
+        {
+            return null;
+        }
+        catch (AgentJobLedgerReconstructionException ex)
+        {
+            _log.LogWarning(ex,
+                "Runner {RunnerId} rejected malformed AgentJob dispatch for {AgentJobId}",
+                RunnerId,
+                agentJobId);
+            await GrainFactory.GetGrain<IAgentJobGrain>(agentJobId).FailAsync("invalid-dispatch");
+            return null;
         }
         finally
         {

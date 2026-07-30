@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -16,9 +17,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// <summary>Refreshes runner information. Does not refresh presence.</summary>
     Task HeartbeatRepairAsync(RunnerInfo info);
     /// <summary>
-    /// Agent-job assignment stays push-based because the job grain owns the
-    /// dispatch snapshot. Poll delivery reconciles that stable work against the
-    /// runner's process-lifetime reported set.
+    /// Legacy push assignment retained until Runner work staging is removed.
     /// </summary>
     [AlwaysInterleave]
     Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work);
@@ -34,7 +33,8 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// workflow claims.
     /// </summary>
     Task<WorkItem?> TryClaimWorkflowAsync(string workflowRunId, string? projectId, bool assignWorker);
-    /// <summary>Returns active Agent capacity and at most one missing stable dispatch.</summary>
+    /// <summary>Claims one AgentJob from its owner ledger during a poll.</summary>
+    Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId);
     Task<AgentJobPollState> ReconcileAgentJobsAsync(List<string> reportedWorkKeys);
     /// <summary>
     /// Marks the runner present. Poll IS the heartbeat under the
