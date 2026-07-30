@@ -26,6 +26,7 @@ public static class AgentSessionStopRoutes
             IGrainFactory grains,
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections,
+            IAgentSessionStopClaimRegistry stopClaims,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
@@ -37,6 +38,7 @@ public static class AgentSessionStopRoutes
                 grains,
                 runnerHub,
                 connections,
+                stopClaims,
                 ct);
         });
 
@@ -51,6 +53,7 @@ public static class AgentSessionStopRoutes
         IGrainFactory grains,
         IHubContext<RunnerHub> runnerHub,
         RunnerConnectionTracker connections,
+        IAgentSessionStopClaimRegistry stopClaims,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request?.TurnId))
@@ -81,6 +84,7 @@ public static class AgentSessionStopRoutes
         if (!claim.CanDispatch)
             return ApiResults.Ok(new { state = "stop-requested" });
 
+        var inFlight = stopClaims.Register(target.SessionId, control.TurnId);
         try
         {
             var runnerId = connections.GetConnectionId(target.RunnerId);
@@ -150,6 +154,7 @@ public static class AgentSessionStopRoutes
         }
         finally
         {
+            inFlight.Dispose();
             await session.CompleteTurnStopAsync(control.TurnId);
         }
     }

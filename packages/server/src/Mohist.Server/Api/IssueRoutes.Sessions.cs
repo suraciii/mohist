@@ -151,6 +151,7 @@ public static partial class IssueRoutes
             IGrainFactory grains,
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections,
+            IAgentSessionStopClaimRegistry stopClaims,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
@@ -165,6 +166,7 @@ public static partial class IssueRoutes
                 grains,
                 runnerHub,
                 connections,
+                stopClaims,
                 ct);
         });
     }

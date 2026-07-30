@@ -66,9 +66,10 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
              siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
              siloBuilder.Services.AddSingleton<RunnerConnectionTracker>();
-             siloBuilder.Services.AddSingleton<IAgentSessionConnectionRegistry>(sp =>
-                 sp.GetRequiredService<RunnerConnectionTracker>());
-            siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
+              siloBuilder.Services.AddSingleton<IAgentSessionConnectionRegistry>(sp =>
+                  sp.GetRequiredService<RunnerConnectionTracker>());
+             siloBuilder.Services.AddSingleton<IAgentSessionStopClaimRegistry, AgentSessionStopClaimRegistry>();
+             siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
         });
         Cluster = builder.Build();
         return new ValueTask(Cluster.DeployAsync());

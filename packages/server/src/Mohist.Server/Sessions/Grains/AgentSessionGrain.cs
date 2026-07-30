@@ -25,6 +25,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TimeProvider _timeProvider;
     private readonly IAgentSessionConnectionRegistry _connections;
+    private readonly IAgentSessionStopClaimRegistry _stopClaims;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
     private bool _sessionReloadRequired;
@@ -44,6 +45,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IAgentSessionPersistenceObserver persistenceObserver,
         TimeProvider timeProvider,
         IAgentSessionConnectionRegistry connections,
+        IAgentSessionStopClaimRegistry stopClaims,
         ILogger<AgentSessionGrain> log)
     {
         _stateStore = stateStore;
@@ -53,6 +55,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _persistenceObserver = persistenceObserver;
         _timeProvider = timeProvider;
         _connections = connections;
+        _stopClaims = stopClaims;
         _log = log;
     }
 
@@ -1857,6 +1860,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return;
         var session = await GetRequiredAsync();
         var events = session.MarkTurnTerminal(turnId, status, result, Now());
+        if (string.Equals(session.Status.PendingStop?.TurnId, turnId, StringComparison.Ordinal)
+            && !_stopClaims.IsActive(SessionId, turnId))
+        {
+            session.CompleteTurnStop(turnId);
+        }
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);
@@ -1893,6 +1901,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public async Task CompleteTurnStopAsync(string turnId)
     {
+        if (_stopClaims.IsActive(SessionId, turnId))
+            return;
         var session = await GetRequiredAsync();
         session.CompleteTurnStop(turnId);
         await _stateStore.SaveAsync(SessionId, session);
