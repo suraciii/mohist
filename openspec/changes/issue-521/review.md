@@ -1,11 +1,5 @@
 # Review: issue-521
 
-## Findings
+No merge blockers found in the current change.
 
-### F1. An input joined after the dispatch snapshot is never sent to the Runner
-
-`BeginNextFollowupDispatchAsync` snapshots a queued turn's current `InputIds` into `InputTexts` before persisting its delivery claim ([AgentSessionGrain.cs:514](/home/szf/.mohist/projects/workspaces/wr_523a0d94be64409990d59c564f3f550a/packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:514)). The revised assignment rule then appends a later input to that same still-queued turn ([AgentSession.Transitions.cs:706](/home/szf/.mohist/projects/workspaces/wr_523a0d94be64409990d59c564f3f550a/packages/server/src/Mohist.Server/Sessions/Domain/AgentSession.Transitions.cs:706)), but cannot alter the already-created delivery request. The dispatcher sends the stale `InputTexts` snapshot ([AgentSessionFollowupDispatcher.cs:39](/home/szf/.mohist/projects/workspaces/wr_523a0d94be64409990d59c564f3f550a/packages/server/src/Mohist.Server/Api/AgentSessionFollowupDispatcher.cs:39)), and the Runner receives only that joined prompt text ([RunnerFollowupDeliveryDispatcher.cs:60](/home/szf/.mohist/projects/workspaces/wr_523a0d94be64409990d59c564f3f550a/packages/server/src/Mohist.Server/Runner/Services/SignalR/RunnerFollowupDeliveryDispatcher.cs:60)). Its subsequent `session.input` marks the shared turn executing, so a second dispatch is prevented ([AgentSessionGrain.cs:501](/home/szf/.mohist/projects/workspaces/wr_523a0d94be64409990d59c564f3f550a/packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:501)).
-
-Reproduce by holding the first `ReceiveFollowup` call after it has captured its payload, accepting a distinct second key, then releasing the first call and emitting its input/terminal runtime events. Both inputs are persisted on one turn, but only the first is delivered; terminalizing the turn leaves no queued work to deliver the second. This violates D3 and the accepted-input no-drop requirement. Preserve the queued-turn rule only with a delivery mechanism that includes every joined input exactly once, and add an integration test asserting the Runner payload and eventual execution for this interleaving. The current regression test only asserts the persisted turn linkage.
-
-<promise>FAIL</promise>
+<promise>PASS</promise>
