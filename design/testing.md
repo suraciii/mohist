@@ -65,7 +65,7 @@ Fake clock not advancing = time logic never fires.
 - C# tests use fixed timestamp constants or `FakeTimeProvider`. Direct wall-clock reads are forbidden even for seed data and tolerance assertions.
 - No wall-clock waits: no `while(now<deadline)`, no `Delay`/`setTimeout`/`Sleep`, no `elapsed < N` asserts.
 - C# tests never call `Task.Delay`, `Thread.Sleep`, `Task.Yield`, `SpinWait` or timer APIs. `Task.Yield` is a scheduler hint, not an awaitable completion condition or duration.
-- Wait for an awaitable signal (`TaskCompletionSource` with `RunContinuationsAsynchronously`, callback, observer, channel) or advance fake time. If no signal exists, add one at the async boundary instead of polling harder.
+- Wait for an awaitable signal (`TaskCompletionSource` with `RunContinuationsAsynchronously`, callback, observer, channel). Advance fake time only to drive product time semantics such as backoff retries, timeouts, and expiry; do not use it to release product-side polling waits. Those waits must use a signal at the async boundary. `TestWait` is migration debt for existing code, not an option for new code.
 
 ### 3. Deterministic (no flaky)
 
@@ -136,6 +136,7 @@ Planned:
 - UnitTests csproj backstop: ban heavy fixtures (WebApplicationFactory, Orleans.TestingHost).
 - C# product deny-list expansion after direct `DateTime.UtcNow` / `DateTimeOffset.UtcNow` reads are migrated to `TimeProvider`.
 - ESLint: ban `child_process`, real `@microsoft/signalr` import in tests.
+- Migrate the remaining `TestWait` polling points (currently 28) to boundary signals incrementally.
 
 ## Fake quick reference
 
