@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Domain;
+using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
@@ -89,6 +91,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var health = new RecordingHealthBackpressurer();
+        await SeedEnabledConnectionAsync(database);
         var firstStore = NewOutbox(database, health, capacity: 1);
 
         var first = await firstStore.EnqueueRequiredAsync(OutboxDraft(SlackOutboxKinds.UserAction, "accepted"));
@@ -105,6 +108,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var health = new RecordingHealthBackpressurer();
+        await SeedEnabledConnectionAsync(database);
         var store = NewOutbox(database, health, capacity: 1);
 
         await store.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "prior"));
@@ -148,6 +152,29 @@ public sealed class SlackProviderReliabilityStoreSpecs
             health,
             time ?? new FakeTimeProvider(Start),
             Options.Create(new SlackProviderOptions { OutboxCapacityPerConnection = capacity }));
+
+    private static async Task SeedEnabledConnectionAsync(TestSqliteDatabase database)
+    {
+        await using var db = database.CreateContext();
+        db.AgentConnections.Add(new AgentConnectionRow
+        {
+            Id = "conn_1",
+            ProjectId = "proj_a",
+            AgentId = "agent_1",
+            ProviderKind = ConnectionProviderKind.Slack,
+            WorkspaceTeamId = "team-1",
+            AppId = "app-1",
+            BotUserId = "bot-1",
+            BotName = "Mohist",
+            SetupProgress = SetupProgressKind.Complete,
+            DesiredState = DesiredStateKind.Enabled,
+            ConnectionHealth = ConnectionHealthKind.Healthy,
+            AgentReadiness = AgentReadinessKind.Ready,
+            CreatedAt = Start,
+            UpdatedAt = Start,
+        });
+        await db.SaveChangesAsync();
+    }
 
     private sealed class RecordingHealthBackpressurer : ISlackConnectionHealthBackpressurer
     {

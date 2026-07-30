@@ -127,6 +127,11 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (!await IsEnabledConnectionAsync(db, draft.ProjectId, draft.ConnectionId, ct))
+        {
+            await transaction.CommitAsync(ct);
+            return new SlackOutboxEnqueueResult(string.Empty, MergedIntoExisting: false, Suppressed: true);
+        }
         var existing = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == draft.ConnectionId
                 && row.Kind == draft.Kind
@@ -168,6 +173,18 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
                 draft.ProjectId, draft.ConnectionId, SlackProviderBackpressureReasons.OutboxOverflow, ct);
         return new SlackOutboxEnqueueResult(row.Id, MergedIntoExisting: false);
     }
+
+    private static Task<bool> IsEnabledConnectionAsync(
+        MohistDbContext db,
+        string projectId,
+        string connectionId,
+        CancellationToken ct) =>
+        db.AgentConnections.AnyAsync(connection =>
+            connection.ProjectId == projectId
+            && connection.Id == connectionId
+            && connection.DeletedAt == null
+            && connection.DesiredState == DesiredStateKind.Enabled,
+            ct);
 
     private async Task<SlackOutboxEnqueueResult?> TryMergeReplaceableAsync(
         MohistDbContext db,
@@ -212,7 +229,12 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         var candidates = await db.SlackOutboxRows
             .Where(row => row.ProjectId == projectId
                 && row.ConnectionId == connectionId
-                && row.State == SlackOutboxStates.Pending)
+                && row.State == SlackOutboxStates.Pending
+                && db.AgentConnections.Any(connection =>
+                    connection.ProjectId == projectId
+                    && connection.Id == connectionId
+                    && connection.DeletedAt == null
+                    && connection.DesiredState == DesiredStateKind.Enabled))
             .OrderBy(row => row.Id)
             .ToListAsync(ct);
         var candidate = candidates.FirstOrDefault(row =>
@@ -220,18 +242,27 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         if (candidate is null)
             return null;
 
+        var changed = await db.SlackOutboxRows
+            .Where(row => row.Id == candidate.Id
+                && row.ProjectId == projectId
+                && row.ConnectionId == connectionId
+                && row.State == SlackOutboxStates.Pending
+                && db.AgentConnections.Any(connection =>
+                    connection.ProjectId == projectId
+                    && connection.Id == connectionId
+                    && connection.DeletedAt == null
+                    && connection.DesiredState == DesiredStateKind.Enabled))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.State, SlackOutboxStates.Claimed)
+                .SetProperty(row => row.ClaimedAt, now)
+                .SetProperty(row => row.ClaimedByAdapterId, adapterId)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+        if (changed == 0)
+            return null;
         candidate.State = SlackOutboxStates.Claimed;
         candidate.ClaimedAt = now;
         candidate.ClaimedByAdapterId = adapterId;
         candidate.UpdatedAt = now;
-        try
-        {
-            await db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            return null;
-        }
         return ToEntry(candidate);
     }
 

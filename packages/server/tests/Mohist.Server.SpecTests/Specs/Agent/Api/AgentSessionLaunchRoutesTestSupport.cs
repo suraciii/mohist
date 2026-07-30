@@ -38,31 +38,18 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             $"Agent job to reach {expected}",
             advance);
 
-    /// <summary>
-    /// A job whose first dispatch attempt found no runner waits on a backoff
-    /// timer that a frozen fake clock never releases, so polling alone can
-    /// never observe it; each miss releases one retry. The happy path matches
-    /// on the first poll and leaves the clock untouched. The registry
-    /// snapshot on timeout distinguishes a job that was never dispatched from
-    /// one that landed on a different runner.
-    /// </summary>
-    protected async Task<PollSnapshot> PollDispatchForSessionAsync(string runnerId, string expectedSessionId)
+    protected async Task<PollSnapshot> PollDispatchForSessionAsync(
+        string agentJobId,
+        string runnerId,
+        string expectedSessionId)
     {
-        try
-        {
-            return (await TestWait.ForAsync(
-                () => PollDispatchOnceAsync(runnerId, expectedSessionId),
-                found => found is not null,
-                TimeSpan.FromSeconds(1),
-                TimeSpan.FromMilliseconds(100),
-                $"a polled dispatch on runner '{runnerId}' carrying AgentSessionId='{expectedSessionId}'",
-                _fixture.ReleaseDispatchBackoffAsync))!;
-        }
-        catch (XunitException failure)
-        {
-            throw new XunitException(
-                $"{failure.Message}\nRunner registry at timeout:\n{await _fixture.DescribeRunnerRegistryAsync()}");
-        }
+        var assignment = await _fixture.AgentJobDispatches.WaitForRunnerAcceptedAsync(agentJobId);
+        Assert.Equal(runnerId, assignment.RunnerId);
+
+        var dispatch = await PollDispatchOnceAsync(runnerId, expectedSessionId);
+        return dispatch ?? throw new XunitException(
+            $"Runner '{runnerId}' accepted AgentJob '{agentJobId}' but did not return its dispatch for AgentSessionId '{expectedSessionId}'.\n" +
+            $"Runner registry:\n{await _fixture.DescribeRunnerRegistryAsync()}");
     }
 
     private async Task<PollSnapshot?> PollDispatchOnceAsync(string runnerId, string expectedSessionId)

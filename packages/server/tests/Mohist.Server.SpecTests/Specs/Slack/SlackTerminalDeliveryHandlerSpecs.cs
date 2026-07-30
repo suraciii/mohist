@@ -3,6 +3,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Domain;
+using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Slack;
@@ -25,6 +27,27 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
+        await using (var db = database.CreateContext())
+        {
+            db.AgentConnections.Add(new AgentConnectionRow
+            {
+                Id = "conn-1",
+                ProjectId = "proj-1",
+                AgentId = "agent-1",
+                ProviderKind = ConnectionProviderKind.Slack,
+                WorkspaceTeamId = "team-1",
+                AppId = "app-1",
+                BotUserId = "bot-1",
+                BotName = "Mohist",
+                SetupProgress = SetupProgressKind.Complete,
+                DesiredState = DesiredStateKind.Enabled,
+                ConnectionHealth = ConnectionHealthKind.Healthy,
+                AgentReadiness = AgentReadinessKind.Ready,
+                CreatedAt = time.GetUtcNow(),
+                UpdatedAt = time.GetUtcNow(),
+            });
+            await db.SaveChangesAsync();
+        }
         var services = new ServiceCollection();
         services.AddScoped<SlackOutboxStore>(_ => new SlackOutboxStore(
             new TestDbContextFactory(database.Options),
