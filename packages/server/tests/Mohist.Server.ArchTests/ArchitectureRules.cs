@@ -586,10 +586,16 @@ public class ArchitectureRules
     }
 
 
+    /// <summary>
+    /// Freezes the test files that are already oversized while failing new
+    /// bloat. An allowance is the file's size rounded up to the next
+    /// <see cref="AllowanceBucketBytes"/> bucket, so ordinary edits leave the
+    /// baseline alone and a file that shrinks hands its slack back instead of
+    /// banking it for later growth.
+    /// </summary>
     [Fact]
     public void CSharpTestFiles_MustStayWithinSizeRatchet()
     {
-        const int absoluteBudgetBytes = 24_000;
         var sources = EmbeddedSources("TestSources/");
         Assert.NotEmpty(sources);
 
@@ -608,41 +614,44 @@ public class ArchitectureRules
         var sourceByPath = sources.ToDictionary(source => source.Path, StringComparer.Ordinal);
         var violations = new List<string>();
 
-        foreach (var source in sources.Where(source => source.ByteLength > absoluteBudgetBytes))
+        foreach (var source in sources.Where(source => source.ByteLength > AbsoluteBudgetBytes))
         {
+            var allowance = AllowanceFor(source.ByteLength);
             if (!baseline.TryGetValue(source.Path, out var allowedBytes))
             {
-                violations.Add($"{source.Path} is {source.ByteLength} bytes and has no baseline allowance");
+                violations.Add($"{source.Path} is {source.ByteLength} bytes with no baseline allowance; split it, or record an allowance of {allowance}");
                 continue;
             }
 
-            if (source.ByteLength > allowedBytes)
-                violations.Add($"{source.Path} grew from its {allowedBytes}-byte allowance to {source.ByteLength} bytes");
+            if (allowedBytes != allowance)
+                violations.Add($"{source.Path} is {source.ByteLength} bytes; change its {allowedBytes}-byte allowance to {allowance}");
         }
 
         foreach (var (path, allowedBytes) in baseline)
         {
-            if (allowedBytes <= absoluteBudgetBytes)
-            {
-                violations.Add($"{path} has an invalid {allowedBytes}-byte baseline allowance");
-                continue;
-            }
-
             if (!sourceByPath.TryGetValue(path, out var source))
             {
-                violations.Add($"{path} is in the baseline but its source file is missing");
+                violations.Add($"{path} has a {allowedBytes}-byte allowance but its source file is missing");
                 continue;
             }
 
-            if (source.ByteLength <= absoluteBudgetBytes)
+            if (source.ByteLength <= AbsoluteBudgetBytes)
                 violations.Add($"{path} is now {source.ByteLength} bytes and must be removed from the baseline");
         }
 
         Assert.True(
             violations.Count == 0,
-            "C# test files must stay within the 24,000-byte ratchet. Violations: "
+            $"C# test files must stay within the {AbsoluteBudgetBytes:N0}-byte ratchet. Split an oversized file along "
+            + "the behavior it specifies; never compress formatting to fit. Raise an allowance only when the growth "
+            + "is unavoidable, and do it in the same commit. Violations: "
             + string.Join("; ", violations.OrderBy(violation => violation, StringComparer.Ordinal)));
     }
+
+    private const int AbsoluteBudgetBytes = 24_000;
+    private const int AllowanceBucketBytes = 1_000;
+
+    private static int AllowanceFor(int byteLength) =>
+        (byteLength + AllowanceBucketBytes - 1) / AllowanceBucketBytes * AllowanceBucketBytes;
 
     /// <summary>
     /// Spec files in <c>Specs/</c> must end with <c>Specs</c> or
