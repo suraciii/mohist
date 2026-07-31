@@ -50,8 +50,8 @@ export function setProcessKillerForTest(killer: ProcessKiller | null) {
  * dimension. The emitter guarantees no line is lost:
  *
  *   1. A trailing partial line (a final write without `\n`) is flushed
- *      once the process closes.
- *   2. A post-exit drain emits any buffered tail once after `close`,
+ *      when the direct child exits.
+ *   2. A post-exit drain emits any buffered tail once after `exit`,
  *      so any data already buffered at the moment the child exits is
  *      delivered before the promise resolves.
  *
@@ -122,7 +122,7 @@ export async function runCommand(
     // so on timeout / parent-abort we can signal the whole group via
     // process.kill(-pid) and reap helper processes (git-remote-http, ...)
     // alongside the direct child. We do NOT unref(): the parent still
-    // awaits close, otherwise we'd race the spawn-error path.
+    // awaits the direct child's exit, otherwise we'd race the spawn-error path.
     const child = processSpawner(command, args, { cwd, env: { ...process.env, ...env }, signal: effectiveSignal, shell: false, detached: true })
     if (usesExternalProcessSpawner) registerExternalProcess(child)
     const stdout: Buffer[] = []
@@ -164,7 +164,10 @@ export async function runCommand(
     // child. Node's `signal` option only kills the direct child, so an
     // explicit process-group kill is required on both abort paths.
     effectiveSignal.addEventListener("abort", onAbort, { once: true })
-    child.on("close", (code) => {
+    let completed = false
+    const complete = (code: number | null) => {
+      if (completed) return
+      completed = true
       const exitCode = code ?? 1
       const timedOut = wasTimeout()
       cleanup()
@@ -179,6 +182,8 @@ export async function runCommand(
       if (onClose) onClose(exitCode)
       const stdoutText = Buffer.concat(stdout).toString("utf8")
       const stderrText = Buffer.concat(stderr).toString("utf8")
+      child.stdout.destroy?.()
+      child.stderr.destroy?.()
       if (timedOut) {
         // Structured timeout result. The sentinel `Command timed out after Ns`
         // matches the unchanged `looksLikeRetrySafe` arm in
@@ -195,7 +200,9 @@ export async function runCommand(
         return
       }
       resolve({ exitCode, stdout: stdoutText, stderr: stderrText })
-    })
+    }
+    child.once("exit", complete)
+    child.once("close", complete)
   })
 }
 

@@ -29,11 +29,22 @@ describe("runCommand cancellation", () => {
 
     const result = runCommand("bash", ["script.sh"], ".", new AbortController().signal, undefined, { timeoutMs: 1 })
     await vi.advanceTimersByTimeAsync(1)
-    child.emit("close", null)
+    child.emit("exit", null)
 
     await expect(result).resolves.toMatchObject({ status: "timeout", timeoutMs: 1 })
     await vi.advanceTimersByTimeAsync(5_000)
 
     expect(signals).toEqual([[-4242, "SIGTERM"], [-4242, "SIGKILL"]])
+  })
+
+  it("settles when the direct child exits even if inherited pipes stay open", async () => {
+    const child = fakeChild(4343)
+    setProcessSpawnerForTest(() => child)
+
+    const result = runCommand("bash", ["script.sh"], ".", new AbortController().signal)
+    child.stdout.write("done\n")
+    child.emit("exit", 0)
+
+    await expect(result).resolves.toEqual({ exitCode: 0, stdout: "done\n", stderr: "" })
   })
 })
