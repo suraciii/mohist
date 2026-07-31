@@ -1,0 +1,11 @@
+## Codebase Patterns
+
+- `OtelQueryRoutesIntegrationSpecs` runs reliably through the built xUnit v3 assembly with `-class`; the project-level `dotnet test --filter` option is ignored by Microsoft Testing Platform in this environment.
+- `TraceQuerier.ExecuteBoundedQuery` collects reader field names before materializing rows, so the same `fieldNames` array can be returned for every result path.
+
+## T-001
+
+- Baseline `OtelQueryRoutesIntegrationSpecs` passed all 36 tests before the change.
+- Added `QueryResult.Columns` serialized as `columns` and passed `fieldNames` through normal, row-limit, and byte-limit returns.
+- Updated the blocked-query fake constructor and added route assertions for normal, empty, row-limit, and byte-limit results.
+- Post-change focused integration run passed all 37 tests.

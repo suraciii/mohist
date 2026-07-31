@@ -192,11 +192,35 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.True(doc.RootElement.GetProperty("success").GetBoolean());
         var data = doc.RootElement.GetProperty("data");
+        var columns = data.GetProperty("columns");
+        Assert.Equal(1, columns.GetArrayLength());
+        Assert.Equal("total", columns[0].GetString());
         var rows = data.GetProperty("rows");
         Assert.Equal(1, rows.GetArrayLength());
         Assert.Equal(2L, rows[0].GetProperty("total").GetInt64());
         Assert.False(data.GetProperty("truncated").GetBoolean());
         Assert.False(data.TryGetProperty("truncate_reason", out _));
+    }
+
+    [Fact]
+    public async Task PostQuery_EmptyResult_ReturnsColumns()
+    {
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"SELECT service_name, span_count FROM traces\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Empty(data.GetProperty("rows").EnumerateArray());
+        var columns = data.GetProperty("columns");
+        Assert.Equal(2, columns.GetArrayLength());
+        Assert.Equal("service_name", columns[0].GetString());
+        Assert.Equal("span_count", columns[1].GetString());
     }
 
     [Fact]
@@ -419,6 +443,9 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         var data = doc.RootElement.GetProperty("data");
         var rows = data.GetProperty("rows");
         Assert.Equal(TraceQuerier.MaxQueryResponseRows, rows.GetArrayLength());
+        var columns = data.GetProperty("columns");
+        Assert.Equal(1, columns.GetArrayLength());
+        Assert.Equal("x", columns[0].GetString());
         Assert.True(data.GetProperty("truncated").GetBoolean());
         Assert.Equal("row_limit", data.GetProperty("truncate_reason").GetString());
     }
@@ -445,6 +472,9 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var doc = JsonDocument.Parse(responseBody);
         var data = doc.RootElement.GetProperty("data");
         Assert.Equal(0, data.GetProperty("rows").GetArrayLength());
+        var columns = data.GetProperty("columns");
+        Assert.Equal(1, columns.GetArrayLength());
+        Assert.Equal("big", columns[0].GetString());
         Assert.True(data.GetProperty("truncated").GetBoolean());
         Assert.Equal("byte_limit", data.GetProperty("truncate_reason").GetString());
     }
@@ -474,6 +504,9 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         var rows = data.GetProperty("rows");
         Assert.True(rows.GetArrayLength() < TraceQuerier.MaxQueryResponseRows);
         Assert.True(rows.GetArrayLength() > 0);
+        var columns = data.GetProperty("columns");
+        Assert.Equal(1, columns.GetArrayLength());
+        Assert.Equal("payload", columns[0].GetString());
         Assert.True(data.GetProperty("truncated").GetBoolean());
         Assert.Equal("byte_limit", data.GetProperty("truncate_reason").GetString());
     }
@@ -499,6 +532,9 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         var data = doc.RootElement.GetProperty("data");
         var rows = data.GetProperty("rows");
         Assert.Equal(TraceQuerier.MaxQueryResponseRows, rows.GetArrayLength());
+        var columns = data.GetProperty("columns");
+        Assert.Equal(1, columns.GetArrayLength());
+        Assert.Equal("x", columns[0].GetString());
         Assert.True(data.GetProperty("truncated").GetBoolean());
         Assert.Equal("row_limit", data.GetProperty("truncate_reason").GetString());
     }
@@ -519,6 +555,9 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var data = doc.RootElement.GetProperty("data");
+        var columns = data.GetProperty("columns");
+        Assert.Equal(1, columns.GetArrayLength());
+        Assert.Equal("service_name", columns[0].GetString());
         Assert.False(data.GetProperty("truncated").GetBoolean());
         Assert.False(data.TryGetProperty("truncate_reason", out var reason) && reason.ValueKind != JsonValueKind.Null);
     }
