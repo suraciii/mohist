@@ -3,23 +3,6 @@ using System.CommandLine.Parsing;
 
 namespace Mohist.Cli;
 
-// `mo run` is the single command tree for WorkflowRun navigation and
-// control. Every state-changing verb (approve / reject / retry / rerun /
-// pause / resume / stop) and the run-scoped reads live under it; the
-// issue-scoped and legacy `workflow` entry points are removed in T-004.
-//
-// Target resolution (D2): every command targeting a specific Run accepts
-// exactly one of a positional `<run-id>` argument or `--issue <number>`
-// (with optional `--project`). Mutual exclusion and missing target are
-// enforced locally before any HTTP call. When `--issue` is used the
-// resolver reads the issue's bound `workflowRunId` via a one-shot GET
-// to `/api/projects/{projectId}/issues/{number}` and fails with a
-// diagnostic naming the issue when the issue has no bound run.
-//
-// `--yes` confirmation (D5): the irreversible `stop` verb requires
-// `--yes` in non-interactive contexts (MOHIST_PROMPT_DISABLED=1 or
-// redirected stdin). In interactive mode a confirmation prompt is shown;
-// `--yes` bypasses it.
 internal static partial class RunCommands
 {
     internal static readonly ResourceDescriptor RunControlDescriptor = new(
@@ -52,9 +35,6 @@ internal static partial class RunCommands
         run.Subcommands.Add(BuildResume(api));
         run.Subcommands.Add(BuildStop(api));
 
-        // Reads live in `MohistCliCommands.Run.Reads.cs` to keep each
-        // partial focused on one concern (control verbs vs. reads vs.
-        // feedback — see design D1).
         RegisterReads(run, api);
         RegisterFeedback(run, api);
         run.Subcommands.Add(VariableCommands.BuildVariableGroup(api, VariableScopeKind.Run));
@@ -62,31 +42,6 @@ internal static partial class RunCommands
         return run;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  Shared target resolution
-    // ────────────────────────────────────────────────────────────────────
-
-    // Resolve the Run ID targeted by a `mo run <verb>` invocation.
-    //
-    // Inputs:
-    //   runId        — positional `<run-id>` argument, or null.
-    //   issueNumber  — value of the `--issue` option, or null.
-    //   project      — value of the `--project` option, or null. Only used
-    //                  when `--issue` is provided.
-    //
-    // Returns:
-    //   (runId, 0)               — caller may proceed with the run-scoped call.
-    //   (null, 2)                — usage failure (both or neither provided).
-    //                              No HTTP request has been issued.
-    //   (null, non-zero)         — operation failure (project resolve, issue
-    //                              GET, missing workflowRunId). The error has
-    //                              already been written to api.Error.
-    //
-    // When `runId` is provided the resolver performs no HTTP call and no
-    // project resolution — the run-scoped endpoint accepts the run id
-    // directly. When `--issue` is provided the resolver performs exactly
-    // one HTTP GET to fetch the issue resource and read its
-    // `workflowRunId` field.
     internal static async Task<(string? RunId, int Exit)> ResolveRunTargetAsync(
         MohistCliApi api,
         string? runId,
@@ -147,9 +102,6 @@ internal static partial class RunCommands
         return 0;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  Shared option / argument factories
-    // ────────────────────────────────────────────────────────────────────
 
     private static Argument<string?> RunIdArg() => new("run-id")
     {
@@ -169,9 +121,6 @@ internal static partial class RunCommands
     private static string WorkflowRunPath(string runId, string suffix) =>
         $"/api/workflow-runs/{MohistCliCommands.Escape(runId)}{suffix}";
 
-    // ────────────────────────────────────────────────────────────────────
-    //  approve
-    // ────────────────────────────────────────────────────────────────────
 
     private static Command BuildApprove(MohistCliApi api)
     {
@@ -229,9 +178,6 @@ internal static partial class RunCommands
         return cmd;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  reject — requires --message
-    // ────────────────────────────────────────────────────────────────────
 
     private static Command BuildReject(MohistCliApi api)
     {
@@ -305,9 +251,6 @@ internal static partial class RunCommands
         return cmd;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  retry
-    // ────────────────────────────────────────────────────────────────────
 
     private static Command BuildRetry(MohistCliApi api)
     {
@@ -352,9 +295,6 @@ internal static partial class RunCommands
         return cmd;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  rerun (with --from-stage)
-    // ────────────────────────────────────────────────────────────────────
 
     private static Command BuildRerun(MohistCliApi api)
     {
@@ -417,9 +357,6 @@ internal static partial class RunCommands
         return cmd;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  pause — reversible, no confirmation
-    // ────────────────────────────────────────────────────────────────────
 
     private static Command BuildPause(MohistCliApi api)
     {
@@ -466,9 +403,6 @@ internal static partial class RunCommands
         return cmd;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  resume
-    // ────────────────────────────────────────────────────────────────────
 
     private static Command BuildResume(MohistCliApi api)
     {
@@ -513,9 +447,6 @@ internal static partial class RunCommands
         return cmd;
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    //  stop — irreversible, requires --yes in non-interactive mode
-    // ────────────────────────────────────────────────────────────────────
 
     private static Command BuildStop(MohistCliApi api)
     {

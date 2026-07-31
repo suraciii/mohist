@@ -196,7 +196,6 @@ public class IssueTemplateRegistry : IScopedService
             }
             catch
             {
-                // Invalid template — skip
             }
         }
         return result;
@@ -219,9 +218,6 @@ public class IssueTemplateRegistry : IScopedService
         return new DeserializedIssueTemplate(dto.Id, dto.Name, DeserializedDescription(dto), body);
     }
 
-    // Custom templates are stored as legacy JSON with a Sections array. Compose a raw markdown
-    // body (## {title}\n{placeholder}) so the model is uniformly Body. Guidance is dropped — it
-    // was a dead field with no consumer. TODO: when custom-template CRUD lands, store {body:"..."}.
     private static string ComposeBodyFromSections(IssueTemplateDto dto)
     {
         if (dto.Sections is null || dto.Sections.Count == 0) return string.Empty;
@@ -260,9 +256,6 @@ public class IssueTemplateMetadataDto
     public string Description { get; set; } = string.Empty;
 }
 
-// Legacy custom-template storage DTO. Only Sections is persisted today (the table is write-only from
-// tests). Kept so存量 JSON rows still deserialize; ComposeBodyFromSections flattens it to Body.
-// TODO: when custom-template CRUD lands, replace Sections with a single Body string.
 public class IssueTemplateDto : IssueTemplateMetadataDto
 {
     public bool IsDefault { get; set; }
