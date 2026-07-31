@@ -269,3 +269,85 @@ The actual failure that consumed the verification budget was the
   `AgentJobWriteThroughMirrorSpecs`, and the AgentJob routes specs
   — they all use the same observer-driven wait pattern and have
   not yet been re-run.
+
+### Fix #2: agent-job dispatch observer must catch throwables, and
+`WaitForRunningAsync` (test-local variant) must drive a poll
+
+Re-ran the `AgentJobGrainPersistenceSpecs` collection after the
+first fix landed. Two issues surfaced:
+
+- `AgentJobGrainPersistenceSpecs.RunnerAcceptanceCrash_ReactivationReusesSameWork`
+  hung at `[STARTING]`. Under the post-T-001 design only the
+  poll path calls `RunnerAcceptedAsync`; the test was waiting on
+  it directly after `SubmitAsync` (no poll in between). Removed
+  the obsolete wait, kept the assertion shape (state is admitted
+  + Pending with the original work id preserved across
+  reactivation).
+- `AgentJobGrainPersistenceSpecs` carries its own private
+  `WaitForRunningAsync` / `RegisterRunnerAsync` /
+  `ClearRunnerRegistryAsync` (it does not derive from
+  `AgentJobGrainTestSupport`). The local `WaitForRunningAsync`
+  was the old observer-only waiter; replaced it with the same
+  poll-driving logic the support helper uses, including a
+  `WaitForAssignedRunnerAsync` helper. Updated `SubmitAsync_PersistsInputAcrossDeactivation_AndReplayResumesSameJob`
+  passed.
+
+### Fix #3: `AgentJobGrain.TryAdmitOnRunnerAsync` / `ClaimNextAsync`
+must catch observer throws (replaces the OLD `TryDispatchAsync`
+try/catch)
+
+In the OLD push path `TryDispatchAsync` wrapped the dispatch in
+a try/catch and logged / rescheduled on throw. The new
+owner-ledger path has no equivalent catch, so a misbehaving
+observer would surface as a failed `SubmitAsync` /
+`EnsureSubmittedAsync`. Added
+`SafeAssignmentPreparedAsync` / `SafeRunnerAcceptedAsync`
+helpers that swallow the throw and log a warning, so the
+ledger row / claim remain authoritative and the runner-side
+polling can retry.
+
+### Final summary
+
+- **Root cause:** T-001 (`912f34974`) replaced the push-style
+  AgentJob→Runner assignment with a poll-driven ledger model but
+  did not reinstate the `IAgentJobDispatchObserver` hooks the
+  tests relied on for synchronization, and the test support
+  never drove the runner poll that triggers `ClaimNextAsync`.
+  One `AgentJobGrainSpecs` test asserted the obsolete push-retry
+  behavior; two more were rewritten to match the new spec.
+- **Server fixes:** `AgentJobGrain` now injects the dispatch
+  observer, fires `AssignmentPreparedAsync` after a successful
+  admission row write, and `RunnerAcceptedAsync` after
+  `ClaimAsync` flips the row to Running. Both observer calls are
+  wrapped in `Safe{AssignmentPrepared,RunnerAccepted}Async`
+  helpers that mirror the OLD `TryDispatchAsync` try/catch — a
+  misbehaving observer cannot poison the ledger row or the
+  claim, and the next poll can retry.
+- **Spec fixes:** `AgentJobGrainTestSupport.WaitForRunningAsync`
+  resolves the runner id from the job snapshot, drives a
+  `DispatchService.PollAsync` against the test silo service
+  provider, then awaits the observer signal. `AgentJobGrainPersistenceSpecs`
+  has its own private `WaitForRunningAsync` (the class doesn't
+  derive from the support class) — that helper was upgraded in
+  place. Three obsolete assertions in `AgentJobGrainSpecs`
+  (`SubmitAsync_RunnerAtPersistedSlots_…`,
+  `SubmitAsync_NoEligibleRunner_StaysPendingAndRetriesWithBackoff`,
+  `DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime`'s
+  presence-timer interaction) were brought in line with the
+  T-001 spec.
+- **Verification:** `AgentJobGrainSpecs` runs in ~3 s with
+  **16/16 passing**. `AgentJobGrainPersistenceSpecs.RunnerAcceptanceCrash_ReactivationReusesSameWork`
+  passes (0.55 s), `…SubmitAsync_PersistsInputAcrossDeactivation_…`
+  passes (0.60 s). The full `dotnet build` of
+  `Mohist.Server.SpecTests` is clean.
+- **One remaining failure (`PreparedAssignment_OfflineBeforeAcceptance_ReassignsStableWorkToHealthyRunner`)
+  is a real spec gap, not a test defect.** When an AgentJob is
+  admitted to a runner that later unregisters, the new
+  owner-ledger model leaves `AssignedRunnerId` pointing at the
+  dead runner and `TryAdmitAsync` short-circuits before
+  re-evaluating against the replacement. `CloseoutLostAsync`
+  only covers running jobs; assigned-pending jobs need an
+  analogous recovery. The fix lives in `AgentJobGrain.TryAdmitAsync`
+  (and/or `RunnerGrain.CloseoutLostAsync`) and is a separate
+  follow-up — its evidence (`/tmp/opencode/persist3.log`) is
+  left in place.

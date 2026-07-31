@@ -1,6 +1,8 @@
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using Orleans.Core.Internal;
@@ -166,7 +168,35 @@ public sealed class AgentJobGrainPersistenceSpecs
 
     private async Task WaitForRunningAsync(IAgentJobGrain job)
     {
+        var runnerId = await WaitForAssignedRunnerAsync(job);
+        var dispatch = _fixture.Cluster
+            .GetSiloServiceProvider(null)
+            .GetRequiredService<IServiceScopeFactory>()
+            .CreateScope()
+            .ServiceProvider
+            .GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
+        await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
         await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+    }
+
+    private async Task<string> WaitForAssignedRunnerAsync(IAgentJobGrain job)
+    {
+        var snapshot = await TestWait.ForAsync(
+            () => job.GetRuntimeSnapshotAsync(),
+            s => !string.IsNullOrWhiteSpace(s.RunnerId)
+                || s.Status is AgentJobStatus.Completed
+                    or AgentJobStatus.Failed
+                    or AgentJobStatus.Unknown
+                    or AgentJobStatus.Cancelled,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            "AgentJob receives a runner assignment or terminates");
+        if (string.IsNullOrWhiteSpace(snapshot.RunnerId))
+        {
+            throw new InvalidOperationException(
+                $"AgentJob {job.GetPrimaryKeyString()} never received a runner assignment before running (status={snapshot.Status})");
+        }
+        return snapshot.RunnerId!;
     }
 }
