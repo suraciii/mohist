@@ -356,6 +356,14 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         return records.Count;
     }
 
+    protected async Task<int> CountAgentJobsAsync(string projectId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.AgentJobs.CountAsync(job => job.ProjectId == projectId);
+    }
+
     protected static async Task<IReadOnlyList<JsonElement>> LoadSessionClosedPayloadsAsync(
         IDbContextFactory<MohistDbContext> dbFactory,
         string sessionId)
