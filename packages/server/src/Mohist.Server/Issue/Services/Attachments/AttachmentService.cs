@@ -459,37 +459,48 @@ public sealed class AttachmentService : IScopedService
 
         if (accepted.Count > 0)
         {
-            foreach (var candidate in accepted)
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                var claimed = await db.Attachments
-                    .Where(row => row.ProjectId == projectId
-                        && row.Id == candidate.Row.Id
-                        && row.OwnerKind == null)
-                    .ExecuteUpdateAsync(setters => setters
-                        .SetProperty(row => row.OwnerKind, OwnerKindAgentInput)
-                        .SetProperty(row => row.OwnerId, ownerId)
-                        .SetProperty(row => row.OwnerIssueNumber, (int?)null)
-                        .SetProperty(row => row.ExpiresAt, (DateTimeOffset?)null),
-                        cancellationToken).ConfigureAwait(false);
-                if (claimed == 1)
+                foreach (var candidate in accepted)
                 {
-                    newlyBoundIds.Add(candidate.Row.Id);
-                    continue;
+                    var claimed = await db.Attachments
+                        .Where(row => row.ProjectId == projectId
+                            && row.Id == candidate.Row.Id
+                            && row.OwnerKind == null)
+                        .ExecuteUpdateAsync(setters => setters
+                            .SetProperty(row => row.OwnerKind, OwnerKindAgentInput)
+                            .SetProperty(row => row.OwnerId, ownerId)
+                            .SetProperty(row => row.OwnerIssueNumber, (int?)null)
+                            .SetProperty(row => row.ExpiresAt, (DateTimeOffset?)null),
+                            cancellationToken).ConfigureAwait(false);
+                    if (claimed == 1)
+                    {
+                        newlyBoundIds.Add(candidate.Row.Id);
+                        continue;
+                    }
+
+                    var isOwnedByThisInput = await db.Attachments.AsNoTracking().AnyAsync(row =>
+                        row.ProjectId == projectId
+                        && row.Id == candidate.Row.Id
+                        && row.OwnerKind == OwnerKindAgentInput
+                        && row.OwnerId == ownerId,
+                        cancellationToken).ConfigureAwait(false);
+                    if (isOwnedByThisInput) continue;
+
+                    results[candidate.ResultIndex] = new AgentInputAttachmentAcceptance(
+                        candidate.Row.Id,
+                        null,
+                        AgentInputAttachmentRejectionReason.AlreadyBound,
+                        "Attachment is already bound to another owner.");
                 }
 
-                var isOwnedByThisInput = await db.Attachments.AsNoTracking().AnyAsync(row =>
-                    row.ProjectId == projectId
-                    && row.Id == candidate.Row.Id
-                    && row.OwnerKind == OwnerKindAgentInput
-                    && row.OwnerId == ownerId,
-                    cancellationToken).ConfigureAwait(false);
-                if (isOwnedByThisInput) continue;
-
-                results[candidate.ResultIndex] = new AgentInputAttachmentAcceptance(
-                    candidate.Row.Id,
-                    null,
-                    AgentInputAttachmentRejectionReason.AlreadyBound,
-                    "Attachment is already bound to another owner.");
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                throw;
             }
         }
 

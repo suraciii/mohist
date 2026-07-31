@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -65,6 +66,36 @@ public sealed class AttachmentServiceValidateAndBindAgentInputTests
         Assert.Null(row.OwnerKind);
         Assert.Null(row.OwnerId);
         Assert.Equal(time.GetUtcNow().Add(AttachmentService.PendingTtl), row.ExpiresAt);
+    }
+
+    [Fact]
+    public async Task ValidateAndBindAgentInput_CancellationAfterFirstClaimRollsBackWholeBatch()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var interceptor = new CancelAfterFirstAgentInputBindCommandInterceptor(cancellation);
+        var database = NewDatabase(interceptor);
+        var storage = new FakeAttachmentStorage();
+        var time = new FakeTimeProvider(_frozenNow);
+        var service = new AttachmentService(database.Factory, storage, new AttachmentStorageOptions(), time);
+        var projectId = "proj-cancelled-batch";
+        var first = await service.UploadAsync(projectId, NewFormFile("first.txt", "text/plain", "first"u8.ToArray()));
+        var second = await service.UploadAsync(projectId, NewFormFile("second.txt", "text/plain", "second"u8.ToArray()));
+
+        interceptor.Arm();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            service.ValidateAndBindAgentInputAsync(projectId, "session-1", "input-1", [first.Id, second.Id], cancellation.Token));
+
+        Assert.True(interceptor.Cancelled);
+        await using var db = database.CreateContext();
+        var rows = await db.Attachments.AsNoTracking().Where(row => row.ProjectId == projectId).OrderBy(row => row.Id).ToListAsync();
+        Assert.All(rows, row =>
+        {
+            Assert.Null(row.OwnerKind);
+            Assert.Null(row.OwnerId);
+            Assert.Equal(_frozenNow.Add(AttachmentService.PendingTtl), row.ExpiresAt);
+        });
+        Assert.Null(await service.OpenAgentInputContentAsync(projectId, "session-1", "input-1", first.Id));
+        Assert.Null(await service.OpenAgentInputContentAsync(projectId, "session-1", "input-1", second.Id));
     }
 
     [Fact]
@@ -409,13 +440,15 @@ public sealed class AttachmentServiceValidateAndBindAgentInputTests
         return (service, time, database);
     }
 
-    private static TestDatabase NewDatabase()
+    private static TestDatabase NewDatabase(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+            optionsBuilder.AddInterceptors(interceptor);
+        var options = optionsBuilder.Options;
         using (var db = new MohistDbContext(options))
         {
             db.Database.EnsureCreated();
@@ -454,6 +487,34 @@ public sealed class AttachmentServiceValidateAndBindAgentInputTests
         public MohistDbContext CreateDbContext() => new(_options);
         public Task<MohistDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(new MohistDbContext(_options));
+    }
+
+    private sealed class CancelAfterFirstAgentInputBindCommandInterceptor(CancellationTokenSource cancellation) : DbCommandInterceptor
+    {
+        private readonly CancellationTokenSource _cancellation = cancellation;
+
+        public bool Cancelled { get; private set; }
+        public bool Armed { get; private set; }
+
+        public void Arm() => Armed = true;
+
+        public override ValueTask<int> NonQueryExecutedAsync(
+            System.Data.Common.DbCommand command,
+            CommandExecutedEventData eventData,
+            int result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Armed
+                && !Cancelled
+                && command.CommandText.Contains("UPDATE \"Attachments\"", StringComparison.Ordinal)
+                && command.CommandText.Contains("\"OwnerKind\"", StringComparison.Ordinal))
+            {
+                Cancelled = true;
+                _cancellation.Cancel();
+            }
+
+            return ValueTask.FromResult(result);
+        }
     }
 
     private sealed class TestFormFile : IFormFile
