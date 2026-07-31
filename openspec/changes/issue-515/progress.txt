@@ -78,3 +78,17 @@
 - Review-fix verification: full Server SpecTests 3541/3541, Slack SpecTests namespace 139/139,
   Sessions SpecTests namespace 393/393, UnitTests 1673/1673, ArchTests 51/51, Slack adapter
   typecheck, and Slack adapter tests 8/8 passed.
+
+## Review finding fixes
+
+- Added `SlackThreadLaunchReservations` with a unique `(ConnectionId, WorkspaceTeamId,
+  ConversationId, ThreadTs)` key. Channel-root launches reserve the thread before accepting the
+  inbox item or creating an Agent session; concurrent messages either establish the reservation,
+  retry while it is in progress, or reuse the bound session. Connection deletion removes the
+  reservation rows.
+- Multi-Agent ambiguity now selects a workspace-wide claimant using the sender's Owner identity.
+  The sender's own mentioned or bound Connection may process the prompt, while other-owner
+  deliveries stay silent; the existing durable prompt claim still limits the outbox prompt to one.
+- Added regression coverage for concurrent same-Connection launches and different-owner ambiguity,
+  plus reservation unit and migration tests. The latest full Server SpecTests run passed 3544/3544;
+  UnitTests passed 1675/1675 and ArchTests passed 51/51.

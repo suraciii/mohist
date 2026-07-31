@@ -384,9 +384,7 @@ Connection 的 Mohist 操作者发起：系统生成新的单次认领码，新 
 
 ## 实装差距
 
-Agent 接入、`mohist-slack` 服务及以上 Slack 行为尚未实装。当前 Web UI 与 CLI 已有 Agent
-创建、启动、读取和继续会话的基础路径，但尚未达到“Agent 独立可用”的完整产品契约；在接入
-Slack 前还需要补齐 SessionInput/AgentTurn、Slack 接入服务身份验证、重复请求保护、可断线
-续读的执行状态、Agent Skills 执行和并发限制。技术边界与实施顺序见
-[`design/agent-api.md`](../design/agent-api.md) 和
-[`design/slack-agent-connection.md`](../design/slack-agent-connection.md)。
+频道根消息提及、已绑定 thread 追问、多个 Bot 的归属提示、重复投递保护和 Owner-only
+频道权限已经实装。当前仍未提供 Allowlist/Anyone、已有 thread 历史和文件、频道控制操作，
+以及不同 Mohist Server 之间的多 Bot 协调。私聊接入、Agent 执行、结果查询和继续会话仍按
+前文契约工作；尚未完成的能力不应被理解为 Slack 已经支持。
