@@ -92,3 +92,24 @@ was wrong. No code change needed.
   (the same static-seed pattern is used elsewhere without change).
   Left untouched — fixing it is outside the T-001 scope and a
   pre-existing infrastructure concern.
+
+# issue-524 / T-002 — New task switching
+
+## Codebase Patterns
+
+- `SlackConnectionRoutes` already performs prompt normalization and the existing empty-prompt rejection before Agent lookup; New task empty-text handling follows that same ordering and response text.
+- `LaunchConnectionAsync` derives the idempotency key from the Slack message identity, so a redelivery can safely re-enter the New task launch branch while returning the coordinator's original identities.
+- `SlackDmSessionMappingStore.SetCurrentSessionIdAsync` is the switch point: New task launches first, then replaces the DM conversation's current session without touching the prior Job or Session.
+- Integration specs use `MohistIntegrationFixture` with an in-memory SQLite database, fake Slack API, and fake Runner registration/polling; no real network or filesystem is needed.
+
+## Decisions
+
+- The marker is the case-insensitive leading phrase `new task`, followed only by whitespace or end-of-input. Messages containing the phrase later remain follow-ups.
+- Empty New task prompts are rejected before inbox acceptance, Agent lookup, launch, and mapping changes. This preserves the existing empty-prompt behavior and avoids creating even a deduplication row for a rejected command.
+- The New task acknowledgement starts with `Starting a new task.`; redelivered accepted messages use the distinct already-accepted text.
+
+## Verification
+
+- `SlackDmNewTaskIngressSpecs`: 4 / 4 pass, covering mapping switch, prior running Job completion after switching, marker disambiguation, and empty-text rejection.
+- `SlackConnectionRoutesNewTaskMarkerTests`: 22 / 22 pass, covering case-insensitive standalone matching, stripping, and ack variants.
+- Full `npm test` was run twice. The Server SpecTests assembly remained affected by unrelated parallel flakes: `ProjectEventTailApiSpecs` / `AgentSessionQuerierAgentConnectionSpecs` (SQLite `no such table: AgentSessions`), plus one `AgentLaunchObservationRoutesSpecs` timing assertion on the second run. The affected tests pass when run in isolation; the new T-002 specs pass both focused and full-assembly runs.

@@ -317,6 +317,14 @@ public static class SlackConnectionRoutes
                 return ApiResults.Ok(new { kind = "rejected", reason });
             }
 
+            var isNewTask = TryStripNewTaskMarker(prompt, out var newTaskPrompt);
+            if (isNewTask && string.IsNullOrWhiteSpace(newTaskPrompt))
+            {
+                const string reason = "Please send a task for the Agent to perform.";
+                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, reason, null, ct);
+                return ApiResults.Ok(new { kind = "rejected", reason });
+            }
+
             var agent = await agents.GetByIdAsync(projectId, connection.AgentId);
             if (agent is null)
                 return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
@@ -339,6 +347,35 @@ public static class SlackConnectionRoutes
             catch (SlackProviderInboxCapacityExceededException ex)
             {
                 return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
+            }
+
+            if (isNewTask)
+            {
+                var newTaskLaunch = await launcher.LaunchConnectionAsync(agent, newTaskPrompt, new ConnectionLaunchOrigin(
+                    connectionId, body.TeamId, body.SenderSlackUserId, body.ConversationId, body.MessageTs), ct);
+                await mapping.SetCurrentSessionIdAsync(
+                    projectId,
+                    connectionId,
+                    body.TeamId,
+                    body.SenderSlackUserId,
+                    body.ConversationId,
+                    newTaskLaunch.SessionId,
+                    ct);
+                var newTaskAck = BuildNewTaskAck(accepted.AlreadyExisted, dispatchDecision.Reason);
+                await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
+                    newTaskAck,
+                    $"slack-ack:{identity.AsKey()}",
+                    ct);
+                await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+                return ApiResults.Ok(new
+                {
+                    kind = accepted.AlreadyExisted ? "queued" : "accepted",
+                    sessionId = newTaskLaunch.SessionId,
+                    jobKey = newTaskLaunch.JobKey,
+                    inputId = newTaskLaunch.InputId,
+                    turnId = newTaskLaunch.TurnId,
+                    newTask = true,
+                });
             }
 
             var currentSessionId = await mapping.GetCurrentSessionIdAsync(
@@ -623,6 +660,63 @@ public static class SlackConnectionRoutes
             "queued" => "Continuing. Will resume after the current step finishes.",
             _ => "Continuing.",
         };
+    }
+
+    /// <summary>
+    /// Leading marker that the Owner uses to start a brand new task
+    /// instead of continuing the DM conversation. Matched
+    /// case-insensitively as a standalone leading token (followed by
+    /// whitespace or end-of-string); see <see cref="TryStripNewTaskMarker"/>.
+    /// </summary>
+    internal const string NewTaskMarker = "new task";
+
+    /// <summary>
+    /// Detects the New task leading marker in a DM prompt. Returns true
+    /// when the trimmed prompt starts with <see cref="NewTaskMarker"/>
+    /// (case-insensitive) followed by whitespace or end-of-string; on
+    /// success <paramref name="remaining"/> holds the trimmed text after
+    /// the marker (which may be empty — the caller treats that as an
+    /// empty-prompt rejection). The marker must be a standalone token:
+    /// "new tasks foo" is NOT a New task command (no whitespace after
+    /// "task"), only an Owner who explicitly types "new task" at the
+    /// start of the message triggers the branch.
+    /// </summary>
+    internal static bool TryStripNewTaskMarker(string prompt, out string remaining)
+    {
+        remaining = string.Empty;
+        if (string.IsNullOrEmpty(prompt))
+            return false;
+        var trimmed = prompt.TrimStart();
+        if (trimmed.Length < NewTaskMarker.Length)
+            return false;
+        if (!trimmed.StartsWith(NewTaskMarker, StringComparison.OrdinalIgnoreCase))
+            return false;
+        var afterMarker = trimmed.Substring(NewTaskMarker.Length);
+        if (afterMarker.Length > 0 && !char.IsWhiteSpace(afterMarker[0]))
+            return false;
+        remaining = afterMarker.TrimStart();
+        return true;
+    }
+
+    /// <summary>
+    /// Crafts the Bot's reply for the New task branch. Prefixes
+    /// "Starting a new task." so the Owner can tell the new-work ack
+    /// apart from the normal first-DM launch ack ("Task accepted and
+    /// queued for execution.") and the follow-up ack ("Continuing.").
+    /// The dispatch-decision reason supplies the operational detail
+    /// (e.g. the Unknown-readiness explanation); a Ready agent falls
+    /// back to the standard "Task accepted and queued for execution."
+    /// phrasing. A redelivered New task message replies with the
+    /// already-accepted variant just like the other branches.
+    /// </summary>
+    internal static string BuildNewTaskAck(bool inboxAlreadyExisted, string? dispatchDecisionReason)
+    {
+        if (inboxAlreadyExisted)
+            return "This new task was already accepted; execution is being resumed.";
+        var detail = !string.IsNullOrWhiteSpace(dispatchDecisionReason)
+            ? dispatchDecisionReason
+            : "Task accepted and queued for execution.";
+        return "Starting a new task. " + detail;
     }
 
     internal static async Task<string> ProbeOwnerAvailabilityAsync(
