@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CleanupLoopResult } from "../src/runtime/cleanup-loop.js"
 import type { CleanupPolicy } from "../src/core/types.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
+import type { FakeRuntimeHandles } from "./support/opencode-runtime-factory.js"
 
 const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 
@@ -36,6 +37,7 @@ interface CleanupTestState {
   onFetchConfig: (() => void) | null
   stubFetchConfigBehavior: null | (() => Promise<CleanupPolicy | null>)
   stubRunOnceResult: CleanupLoopResult
+  blockedPaths: ReadonlySet<string> | null
 }
 
 const CLEANUP_INTERVAL_FLOOR_MS = 1000
@@ -55,6 +57,7 @@ const mocks = vi.hoisted(() => {
       stuckResolved: 0,
       workspaceUsageBytes: null,
     },
+    blockedPaths: null,
   }
   return {
     state,
@@ -103,7 +106,8 @@ vi.mock("../src/server/runner-signalr.js", () => ({
 vi.mock("../src/runtime/cleanup-loop.js", () => {
   return {
     CleanupLoop: class {
-      async runOnce(policy: CleanupPolicy | null | undefined, _signal: AbortSignal): Promise<CleanupLoopResult> {
+      async runOnce(policy: CleanupPolicy | null | undefined, _signal: AbortSignal, blockedPaths: ReadonlySet<string>): Promise<CleanupLoopResult> {
+        mocks.state.blockedPaths = blockedPaths
         const call = { policy: policy ?? null, tickIndex: mocks.state.cleanupCalls.length + 1 }
         mocks.state.cleanupCalls.push(call)
         mocks.state.onCleanupCall?.(call)
@@ -129,11 +133,14 @@ function resetState() {
     stuckResolved: 0,
     workspaceUsageBytes: null,
   }
+  mocks.state.blockedPaths = null
 }
+
+let runtimeHandles: FakeRuntimeHandles
 
 beforeEach(() => {
   resetState()
-  installReadyRuntimeFactory()
+  runtimeHandles = installReadyRuntimeFactory()
   vi.clearAllMocks()
 })
 
@@ -395,6 +402,107 @@ describe("RunnerHost idle-system cleanup", () => {
     } finally {
       errorSpy.mockRestore()
     }
+  })
+
+  it("ReclaimsBeforeConfig_AndPassesOnlyTheBlockedSnapshotToCleanup", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+    const hostEvents = configureHost()
+    const cleanupEvents = observeCleanupTicks()
+    mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
+    const order: string[] = []
+    const RunnerHost = await importHost()
+    const controller = new AbortController()
+    const host = new RunnerHost(defaultOptions())
+    const run = host.run(controller.signal)
+    await waitForHostStartup(hostEvents)
+    const runtime = await runtimeHandles.runtimeCreated
+    vi.spyOn(runtime, "reclaimWhere").mockImplementation(async () => {
+      order.push("reclaim")
+      return {
+        tracked: 1,
+        candidates: 1,
+        disposed: 0,
+        busy: 1,
+        failed: 0,
+        blockedDirectories: ["/blocked"],
+        diagnostics: [],
+      }
+    })
+    const previousFetch = mocks.state.onFetchConfig
+    mocks.state.onFetchConfig = () => {
+      order.push("fetch")
+      previousFetch?.()
+    }
+    const previousCleanup = mocks.state.onCleanupCall
+    mocks.state.onCleanupCall = (call) => {
+      order.push("cleanup")
+      previousCleanup?.(call)
+    }
+
+    await advanceCleanupTick(cleanupEvents)
+
+    expect(order).toEqual(["reclaim", "fetch", "cleanup"])
+    expect(mocks.state.blockedPaths).toEqual(new Set(["/blocked"]))
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  })
+
+  it("SkipsDiskCleanup_WhenRuntimeReclamationThrows", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+    const hostEvents = configureHost()
+    const cleanupEvents = observeCleanupTicks()
+    const failure = new Error("runtime reclaim failed")
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const RunnerHost = await importHost()
+    const controller = new AbortController()
+    const host = new RunnerHost(defaultOptions())
+    const run = host.run(controller.signal)
+    await waitForHostStartup(hostEvents)
+    const runtime = await runtimeHandles.runtimeCreated
+    vi.spyOn(runtime, "reclaimWhere").mockRejectedValue(failure)
+
+    await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
+
+    expect(mocks.state.fetchConfigCalls).toHaveLength(0)
+    expect(mocks.state.cleanupCalls).toHaveLength(0)
+    expect(errorSpy).toHaveBeenCalledWith("workspace cleanup runtime reclamation failed:", failure)
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+    errorSpy.mockRestore()
+  })
+
+  it("SingleFlightsOverlappingTimerInvocations", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+    const hostEvents = configureHost()
+    const cleanupEvents = observeCleanupTicks()
+    mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
+    const reclaimStarted = deferred()
+    const reclaimGate = deferred()
+    const RunnerHost = await importHost()
+    const controller = new AbortController()
+    const host = new RunnerHost(defaultOptions())
+    const run = host.run(controller.signal)
+    await waitForHostStartup(hostEvents)
+    const runtime = await runtimeHandles.runtimeCreated
+    const reclaim = vi.spyOn(runtime, "reclaimWhere").mockImplementation(async () => {
+      reclaimStarted.resolve()
+      await reclaimGate.promise
+      return { tracked: 0, candidates: 0, disposed: 0, busy: 0, failed: 0, blockedDirectories: [], diagnostics: [] }
+    })
+
+    const firstTick = vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
+    await reclaimStarted.promise
+    await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
+    expect(reclaim).toHaveBeenCalledTimes(1)
+
+    const fetch = cleanupEvents.fetches.next()
+    const cleanup = cleanupEvents.cleanupCalls.next()
+    reclaimGate.resolve()
+    await firstTick
+    await fetch
+    await cleanup
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
   })
 
   it("IssuesIndependentFetchPerTick_NoCachingAcrossTicks", async () => {

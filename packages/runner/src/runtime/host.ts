@@ -115,6 +115,7 @@ export class RunnerHost {
   private readonly cleanupLoop: CleanupLoop
   private readonly cleanupConvergenceIntervalMs: number
   private readonly cleanupLoopIntervalMs: number
+  private cleanupInFlight: Promise<void> | null = null
   private readonly modelRediscoveryIntervalMs: number
   private readonly workflowSessionTurnCoordinator = new WorkflowSessionTurnCoordinator()
   private readonly buildGitHash: string | null
@@ -198,6 +199,7 @@ export class RunnerHost {
       this.workspaceRegistry,
       new DefaultCleanupRunner(options.runnerRoot),
       options.runnerRoot,
+      () => this.openCodeRuntime,
     )
     this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry)
     this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
@@ -348,10 +350,35 @@ export class RunnerHost {
     )
   }
 
-  private async runCleanupOnce(signal: AbortSignal): Promise<void> {
+  private runCleanupOnce(signal: AbortSignal): Promise<void> {
+    if (this.cleanupInFlight) return this.cleanupInFlight
+    const pass = this.executeCleanupOnce(signal)
+    this.cleanupInFlight = pass
+    void pass.finally(() => {
+      if (this.cleanupInFlight === pass) this.cleanupInFlight = null
+    })
+    return pass
+  }
+
+  private async executeCleanupOnce(signal: AbortSignal): Promise<void> {
     try {
+      const runtime = this.openCodeRuntime
+      let blockedPaths = new Set<string>()
+      if (runtime) {
+        let reclaim: Awaited<ReturnType<OpenCodeRuntime["reclaimWhere"]>>
+        try {
+          reclaim = await runtime.reclaimWhere((directory) => {
+            const entry = this.workspaceRegistry.findByWorkspacePath(directory)
+            return entry?.phase === "eligible" || entry?.phase === "stuck"
+          })
+        } catch (error) {
+          console.error("workspace cleanup runtime reclamation failed:", error)
+          return
+        }
+        blockedPaths = new Set(reclaim.blockedDirectories)
+      }
       const policy = await this.connection.fetchConfig(signal)
-      const result = await this.cleanupLoop.runOnce(policy, signal)
+      const result = await this.cleanupLoop.runOnce(policy, signal, blockedPaths)
       if (result.retentionRemoved > 0 || result.budgetRemoved > 0 || result.guardAborted > 0 || result.stuckResolved > 0) {
         console.log(
           `workspace cleanup: retention=${result.retentionRemoved} budget=${result.budgetRemoved} guardAborted=${result.guardAborted} stuck=${result.stuckResolved} usage=${result.workspaceUsageBytes ?? "unknown"}`,

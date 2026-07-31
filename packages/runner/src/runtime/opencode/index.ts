@@ -60,6 +60,8 @@ export type {
   DirectoryReleaseResult,
 } from "./directory-instance.js"
 
+export type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
+
 export {
   getOpenCodeRuntimeFactory,
   setOpenCodeRuntimeFactoryForTest,

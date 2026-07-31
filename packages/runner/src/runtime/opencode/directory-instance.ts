@@ -1,6 +1,7 @@
 import { resolve } from "node:path"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { RuntimeDiagnostic } from "./types.js"
+import type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
 
 export type DirectoryReleaseOutcome = "untracked" | "disposed" | "busy" | "failed"
 
@@ -30,6 +31,8 @@ interface DirectoryEntry {
   admitted: number
   used: boolean
   disposing: boolean
+  removing: boolean
+  generationInvalidated: boolean
   readonly waiters: Array<() => void>
   pendingDispose: Promise<DirectoryReleaseResult> | null
   pendingOperations: Set<Promise<unknown>>
@@ -100,6 +103,42 @@ export class OpenCodeDirectoryInstances {
     }
   }
 
+  async withRemovalFence<T>(directory: string, callback: () => Promise<T>): Promise<WorkspaceRemovalFenceResult<T>> {
+    const key = resolve(directory)
+    let entry = this.entries.get(key)
+    if (entry && (entry.removing || entry.disposing || entry.pendingDispose || entry.admitted > 0 || entry.pendingOperations.size > 0)) {
+      return { kind: "busy" }
+    }
+    if (!entry) {
+      entry = this.newEntry()
+      this.entries.set(key, entry)
+    }
+
+    entry.removing = true
+    entry.disposing = true
+    const pending = this.prepareRemoval(key, entry)
+    entry.pendingDispose = pending
+    const release = await pending
+    entry.pendingDispose = null
+    if (entry.generationInvalidated || this.entries.get(key) !== entry) {
+      this.completeRemoval(key, entry)
+      return { kind: "busy" }
+    }
+    if (entry.used && release.outcome !== "disposed") {
+      this.retainAfterRemovalFailure(entry)
+      return release.outcome === "busy" ? { kind: "busy" } : { kind: "failed" }
+    }
+
+    try {
+      const value = await callback()
+      return { kind: "completed", value }
+    } catch {
+      return { kind: "failed" }
+    } finally {
+      this.completeRemoval(key, entry)
+    }
+  }
+
   async release(directory: string): Promise<DirectoryReleaseResult> {
     const key = resolve(directory)
     const entry = this.entries.get(key)
@@ -116,8 +155,14 @@ export class OpenCodeDirectoryInstances {
   resetGeneration(): void {
     const oldEntries = [...this.entries.values()]
     this.generation += 1
-    this.entries.clear()
-    for (const entry of oldEntries) {
+    for (const [directory, entry] of [...this.entries.entries()]) {
+      if (entry.removing) {
+        entry.generationInvalidated = true
+        continue
+      }
+      this.entries.delete(directory)
+    }
+    for (const entry of oldEntries.filter((candidate) => !candidate.removing)) {
       for (const waiter of entry.waiters.splice(0)) waiter()
     }
   }
@@ -126,18 +171,10 @@ export class OpenCodeDirectoryInstances {
     while (true) {
       let entry = this.entries.get(directory)
       if (!entry) {
-        entry = {
-          generation: this.generation,
-          admitted: 0,
-          used: false,
-          disposing: false,
-          waiters: [],
-          pendingDispose: null,
-          pendingOperations: new Set(),
-        }
+        entry = this.newEntry()
         this.entries.set(directory, entry)
       }
-      if (!entry.disposing) {
+      if (!entry.disposing && !entry.removing) {
         entry.admitted += 1
         return entry
       }
@@ -196,6 +233,38 @@ export class OpenCodeDirectoryInstances {
     return result
   }
 
+  private async prepareRemoval(directory: string, entry: DirectoryEntry): Promise<DirectoryReleaseResult> {
+    if (!entry.used) return { directory, outcome: "untracked" }
+    const client = this.client()
+    if (!client) return this.failure(directory, "opencode-runtime-unavailable", "OpenCode client is unavailable while removing a workspace")
+    try {
+      const statuses = await client.session.status({ directory }, { throwOnError: true })
+      const snapshot = readStatusSnapshot(statuses?.data)
+      if (snapshot.kind === "busy") return { directory, outcome: "busy", diagnostic: snapshot.diagnostic }
+      if (snapshot.kind === "invalid") return { directory, outcome: "failed", diagnostic: snapshot.diagnostic }
+      if (entry.generationInvalidated) return { directory, outcome: "busy" }
+      const disposed = await client.instance.dispose({ directory }, { throwOnError: true })
+      if (disposed?.data !== true) return this.failure(directory, "opencode-instance-dispose-unconfirmed", "OpenCode Instance disposal was not confirmed")
+      return { directory, outcome: "disposed" }
+    } catch (cause) {
+      return this.failure(directory, "opencode-instance-release-failed", errorMessage(cause, "OpenCode directory Instance release failed"))
+    }
+  }
+
+  private newEntry(): DirectoryEntry {
+    return {
+      generation: this.generation,
+      admitted: 0,
+      used: false,
+      disposing: false,
+      removing: false,
+      generationInvalidated: false,
+      waiters: [],
+      pendingDispose: null,
+      pendingOperations: new Set(),
+    }
+  }
+
   private completeDispose(directory: string, entry: DirectoryEntry, result: DirectoryReleaseResult): void {
     if (this.entries.get(directory) !== entry || entry.generation !== this.generation) return
     entry.disposing = false
@@ -205,6 +274,22 @@ export class OpenCodeDirectoryInstances {
       for (const waiter of entry.waiters.splice(0)) waiter()
       return
     }
+    for (const waiter of entry.waiters.splice(0)) waiter()
+  }
+
+  private completeRemoval(directory: string, entry: DirectoryEntry): void {
+    if (this.entries.get(directory) !== entry) return
+    entry.removing = false
+    entry.disposing = false
+    entry.pendingDispose = null
+    this.entries.delete(directory)
+    for (const waiter of entry.waiters.splice(0)) waiter()
+  }
+
+  private retainAfterRemovalFailure(entry: DirectoryEntry): void {
+    entry.removing = false
+    entry.disposing = false
+    entry.pendingDispose = null
     for (const waiter of entry.waiters.splice(0)) waiter()
   }
 

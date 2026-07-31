@@ -41,6 +41,7 @@ import type {
 import { errorKindFor, normalizeInvalidInput, normalizeMissingSession, normalizeTurnFailed, normalizeUnavailableRuntime } from "./errors.js"
 import type { OpencodeServerHandle } from "./server-process.js"
 import type { RuntimeEventSubscription } from "./event-subscription.js"
+import type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
 import { runTurn, bindTurnInFlightTracker, type TurnExecutionDeps } from "./turn.js"
 import {
   OpenCodeDirectoryInstances,
@@ -96,6 +97,11 @@ export class OpenCodeRuntime {
 
   async release(directory: string): Promise<DirectoryReleaseResult> {
     return await this.directoryInstances.release(directory)
+  }
+
+  async withRemovalFence<T>(directory: string, callback: () => Promise<T>): Promise<WorkspaceRemovalFenceResult<T>> {
+    if (!this.state.ready || !this.state.server) return { kind: "failed" }
+    return await this.directoryInstances.withRemovalFence(directory, callback)
   }
 
   /**

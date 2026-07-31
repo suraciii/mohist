@@ -175,6 +175,129 @@ describe("OpenCodeDirectoryInstances", () => {
     await next
   })
 
+  it("fences an untracked directory without calling the SDK", async () => {
+    const fake = buildDirectoryClient()
+    const boundary = new OpenCodeDirectoryInstances(() => fake.client)
+    const callbackStarted = deferred<void>()
+    const callbackGate = deferred<void>()
+    const removal = boundary.withRemovalFence("/virtual/untracked", async () => {
+      callbackStarted.resolve()
+      await callbackGate.promise
+      return true
+    })
+    await callbackStarted.promise
+
+    let operationStarted = false
+    const operation = boundary.withOperation("/virtual/untracked", async (lease) => {
+      operationStarted = true
+      lease.markUsed()
+    })
+    expect(operationStarted).toBe(false)
+    expect(fake.sessionStatus).not.toHaveBeenCalled()
+    expect(fake.instanceDispose).not.toHaveBeenCalled()
+
+    callbackGate.resolve()
+    expect((await removal)).toEqual({ kind: "completed", value: true })
+    await operation
+    expect(operationStarted).toBe(true)
+  })
+
+  it("rejects a removal fence when a retracked operation wins the TOCTOU race", async () => {
+    const fake = buildDirectoryClient()
+    const boundary = new OpenCodeDirectoryInstances(() => fake.client)
+    await used(boundary, "/virtual/project")
+    expect((await boundary.release("/virtual/project")).outcome).toBe("disposed")
+
+    const operationGate = deferred<void>()
+    const operation = boundary.withOperation("/virtual/project", async (lease) => {
+      lease.markUsed()
+      await operationGate.promise
+    })
+    const callback = vi.fn(async () => true)
+    await expect(boundary.withRemovalFence("/virtual/project", callback)).resolves.toEqual({ kind: "busy" })
+    expect(callback).not.toHaveBeenCalled()
+
+    operationGate.resolve()
+    await operation
+  })
+
+  it("keeps removal busy while a pending operation settles", async () => {
+    const fake = buildDirectoryClient()
+    const boundary = new OpenCodeDirectoryInstances(() => fake.client)
+    const pending = deferred<void>()
+    await boundary.withOperation("/virtual/project", async (lease) => {
+      lease.markUsed()
+      lease.trackPending(pending.promise)
+    })
+
+    const callback = vi.fn(async () => true)
+    await expect(boundary.withRemovalFence("/virtual/project", callback)).resolves.toEqual({ kind: "busy" })
+    expect(callback).not.toHaveBeenCalled()
+    pending.resolve()
+  })
+
+  it("holds a tracked removal fence through status, dispose, and callback", async () => {
+    const fake = buildDirectoryClient()
+    const statusStarted = deferred<void>()
+    const statusGate = deferred<{ data: unknown }>()
+    const disposeStarted = deferred<void>()
+    const disposeGate = deferred<{ data: unknown }>()
+    fake.sessionStatus.mockImplementationOnce(async () => {
+      statusStarted.resolve()
+      return await statusGate.promise
+    })
+    fake.instanceDispose.mockImplementationOnce(async () => {
+      disposeStarted.resolve()
+      return await disposeGate.promise
+    })
+    const boundary = new OpenCodeDirectoryInstances(() => fake.client)
+    await used(boundary, "/virtual/project")
+    const callbackStarted = deferred<void>()
+    const callbackGate = deferred<void>()
+    const removal = boundary.withRemovalFence("/virtual/project", async () => {
+      callbackStarted.resolve()
+      await callbackGate.promise
+      return true
+    })
+    await statusStarted.promise
+
+    let operationStarted = false
+    const operation = boundary.withOperation("/virtual/project", async (lease) => {
+      operationStarted = true
+      lease.markUsed()
+    })
+    statusGate.resolve({ data: {} })
+    await disposeStarted.promise
+    expect(operationStarted).toBe(false)
+    disposeGate.resolve({ data: true })
+    await callbackStarted.promise
+    expect(operationStarted).toBe(false)
+
+    callbackGate.resolve()
+    await expect(removal).resolves.toEqual({ kind: "completed", value: true })
+    await operation
+    expect(operationStarted).toBe(true)
+  })
+
+  it("releases a failed callback fence without retaining a disposed Instance", async () => {
+    const fake = buildDirectoryClient()
+    const boundary = new OpenCodeDirectoryInstances(() => fake.client)
+    await used(boundary, "/virtual/project")
+    const callbackFailure = new Error("delete failed")
+    await expect(boundary.withRemovalFence("/virtual/project", async () => {
+      throw callbackFailure
+    })).resolves.toEqual({ kind: "failed" })
+
+    let operationStarted = false
+    await boundary.withOperation("/virtual/project", async (lease) => {
+      operationStarted = true
+      lease.markUsed()
+    })
+    expect(operationStarted).toBe(true)
+    expect(fake.sessionStatus).toHaveBeenCalledTimes(1)
+    expect(fake.instanceDispose).toHaveBeenCalledTimes(1)
+  })
+
   it("does not block a different directory while one directory is disposing", async () => {
     const fake = buildDirectoryClient()
     const statusStarted = deferred<void>()
@@ -237,6 +360,52 @@ describe("OpenCodeDirectoryInstances", () => {
     expect((await boundary.release("/virtual/project")).outcome).toBe("disposed")
     expect(fake.sessionStatus).toHaveBeenCalledTimes(2)
     expect(fake.instanceDispose).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps waiters fenced until a started callback settles across generation reset", async () => {
+    const fake = buildDirectoryClient()
+    const boundary = new OpenCodeDirectoryInstances(() => fake.client)
+    const callbackStarted = deferred<void>()
+    const callbackGate = deferred<void>()
+    const removal = boundary.withRemovalFence("/virtual/untracked", async () => {
+      callbackStarted.resolve()
+      await callbackGate.promise
+      return true
+    })
+    await callbackStarted.promise
+
+    let operationStarted = false
+    const operation = boundary.withOperation("/virtual/untracked", async (lease) => {
+      operationStarted = true
+      lease.markUsed()
+    })
+    boundary.resetGeneration()
+    expect(operationStarted).toBe(false)
+
+    callbackGate.resolve()
+    await expect(removal).resolves.toEqual({ kind: "completed", value: true })
+    await operation
+    expect(operationStarted).toBe(true)
+  })
+
+  it("does not start a removal callback after generation reset invalidates SDK release", async () => {
+    const fake = buildDirectoryClient()
+    const statusStarted = deferred<void>()
+    const statusGate = deferred<{ data: unknown }>()
+    fake.sessionStatus.mockImplementationOnce(async () => {
+      statusStarted.resolve()
+      return await statusGate.promise
+    })
+    const boundary = new OpenCodeDirectoryInstances(() => fake.client)
+    await used(boundary, "/virtual/project")
+    const callback = vi.fn(async () => true)
+    const removal = boundary.withRemovalFence("/virtual/project", callback)
+    await statusStarted.promise
+
+    boundary.resetGeneration()
+    statusGate.resolve({ data: {} })
+    await expect(removal).resolves.toEqual({ kind: "busy" })
+    expect(callback).not.toHaveBeenCalled()
   })
 })
 
