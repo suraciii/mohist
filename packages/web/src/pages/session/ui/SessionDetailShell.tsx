@@ -15,7 +15,7 @@ import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
 import { useMediaQuery } from '@/shared/lib/use-media-query'
 import { agentInputAttachmentContentPath, getAgentLaunchObservationMeaning } from '../../../entities/agent'
-import type { AgentTurnObservation, SessionInputObservation } from '../../../entities/coder-session'
+import type { AgentTurnObservation, SessionInputObservation, SessionRecoveryObservation } from '../../../entities/coder-session'
 import type { StatusKind, EmptyStateKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
 import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
@@ -198,6 +198,7 @@ export function SessionDetailShell({
     recoverySessionName,
     recoverySessionId,
     handleRecoverySuccess,
+    recoveryHistory,
     issueNumber,
     cancel,
     stop,
@@ -252,14 +253,14 @@ export function SessionDetailShell({
         )}
         {(recoverySessionName || recoverySessionId) && (
           <div className="contents md:block md:shrink-0">
-            <SessionRecoveryActions
+               <SessionRecoveryActions
               issueNumber={issueNumber}
               sessionName={recoverySessionName ?? ''}
               genericSessionId={recoverySessionId ?? undefined}
-              activity={meta?.activity}
-              recoveryAvailable={recoveryAvailable}
-              onSuccess={handleRecoverySuccess}
-              bare
+                 activity={meta?.activity}
+                 recoveryAvailable={recoveryAvailable}
+                 onSettled={handleRecoverySuccess}
+                 bare
 
             />
           </div>
@@ -474,7 +475,8 @@ export function SessionDetailShell({
                {observationGuidance}
              </div>
            )}
-           <SessionInputTurnEvidence inputs={meta.inputs} turns={meta.turns} />
+            <SessionInputTurnEvidence inputs={meta.inputs} turns={meta.turns} />
+            <SessionRecoveryHistory history={recoveryHistory} />
            {recoveryBarContent && (
              <div
                data-testid="session-recovery-bar"
@@ -1000,6 +1002,20 @@ function SessionInputTurnEvidence({
               <span className="font-mono text-muted-foreground">{turn.id}</span>
               <span data-testid={`session-turn-status-${turn.id}`} className="rounded-full border border-border px-1.5 py-0.5 text-[10px]">{turn.status}</span>
             </div>
+            {turn.result && (
+              <div data-testid={`session-turn-result-${turn.id}`} className="mt-2 space-y-1 border-t border-border pt-2 text-xs">
+                <div className="font-medium text-foreground">Terminal result</div>
+                {turn.result.message && <div data-testid={`session-turn-result-message-${turn.id}`}>{turn.result.message}</div>}
+                {turn.result.output && (
+                  <pre data-testid={`session-turn-result-output-${turn.id}`} className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 font-mono text-[11px]">
+                    {turn.result.output}
+                  </pre>
+                )}
+                {turn.result.failureCategory && <div>Category: {turn.result.failureCategory}</div>}
+                {turn.result.failureReason && <div>Failure: {turn.result.failureReason}</div>}
+                {turn.result.exitCode != null && <div>Exit code: {turn.result.exitCode}</div>}
+              </div>
+            )}
             <div className="mt-2 space-y-1">
               {turn.inputIds.map((inputId) => {
                 const input = inputById.get(inputId)
@@ -1021,6 +1037,33 @@ function SessionInputTurnEvidence({
             <span className="font-mono">{input.id}</span>
             <span data-testid={`session-input-acceptance-${input.id}`}>accepted: {input.acceptance}</span>
             <span data-testid={`session-input-delivery-${input.id}`}>delivered: unknown</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function SessionRecoveryHistory({ history }: { history?: SessionRecoveryObservation[] | null }) {
+  if (!history?.length) return null
+
+  return (
+    <section
+      data-testid="session-recovery-history"
+      className="border-b border-border bg-muted/20 px-4 py-3"
+      aria-label="Session recovery history"
+    >
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Recovery history</div>
+      <div className="space-y-1.5">
+        {history.map((entry, index) => (
+          <div key={`${entry.type}-${entry.recordedAt}-${index}`} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {entry.type === 'reset' ? 'Runtime context reset' : entry.type === 'compaction' ? 'Context compacted' : entry.type}
+            </span>
+            <span>{entry.recordedAt}</span>
+            {entry.reason && <span>Reason: {entry.reason}</span>}
+            {entry.strategy && <span>Strategy: {entry.strategy}</span>}
+            {entry.runtimeSessionId && <span className="font-mono">Runtime: {entry.runtimeSessionId}</span>}
           </div>
         ))}
       </div>

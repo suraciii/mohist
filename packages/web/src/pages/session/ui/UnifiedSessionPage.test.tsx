@@ -190,6 +190,20 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
     expect(screen.queryByTestId('session-stop-trigger')).not.toBeInTheDocument()
   })
 
+  it('keeps a queued turn cancellable when the Session activity projection is idle', () => {
+    summary = baseSummary({
+      activity: 'idle',
+      recoveryAvailable: false,
+      currentTurnId: 'turn-queued',
+      turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
+    })
+    renderPage()
+
+    expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
+    expect(screen.queryByTestId('session-stop-trigger')).not.toBeInTheDocument()
+    expect(screen.getByTestId('recovery')).toHaveAttribute('data-recovery-available', 'false')
+  })
+
   it('renders only the Stop Turn button when the current turn is executing', () => {
     summary = baseSummary({
       activity: 'active',
@@ -265,5 +279,33 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
     summary = baseSummary({ activity: 'idle', currentTurnId: null })
     renderPage()
     expect(screen.getByTestId('recovery')).toHaveAttribute('data-recovery-available', 'true')
+  })
+
+  it('renders terminal turn results and persistent recovery history', () => {
+    summary = baseSummary({
+      turns: [{
+        id: 'turn-1',
+        sequence: 1,
+        inputIds: ['input-1'],
+        status: 'failed',
+        result: {
+          message: 'The launch failed',
+          output: 'diagnostic output',
+          failureCategory: 'timeout',
+          failureReason: 'runner timed out',
+          exitCode: 1,
+        },
+      }],
+      recoveryHistory: [
+        { type: 'reset', recordedAt: '2026-07-31T10:02:00.000Z', reason: 'reset', runtimeSessionId: 'runtime-2' },
+        { type: 'compaction', recordedAt: '2026-07-31T10:03:00.000Z', strategy: 'summary' },
+      ],
+    })
+    renderPage()
+
+    expect(screen.getByTestId('session-turn-result-turn-1')).toHaveTextContent('The launch failed')
+    expect(screen.getByTestId('session-turn-result-output-turn-1')).toHaveTextContent('diagnostic output')
+    expect(screen.getByTestId('session-recovery-history')).toHaveTextContent('Runtime context reset')
+    expect(screen.getByTestId('session-recovery-history')).toHaveTextContent('Context compacted')
   })
 })

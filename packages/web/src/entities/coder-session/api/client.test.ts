@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { getUnifiedSessionSummary, getUnifiedSessionTranscript, postFollowup } from './client'
+import { getUnifiedSessionSummary, getUnifiedSessionTranscript, postFollowup, unifiedSessionTranscriptQueryOptions } from './client'
 
 useMswServer()
 
@@ -26,6 +26,11 @@ describe('unified session reads', () => {
       '/api/projects/proj-1/sessions/session%2F1',
       '/api/projects/proj-1/sessions/session%2F1/transcript?runtimeSessionId=runtime-1',
     ])
+  })
+
+  it('does not enable the transcript query before the current runtime binding is known', () => {
+    expect(unifiedSessionTranscriptQueryOptions('proj-1', 'session-1').enabled).toBe(false)
+    expect(unifiedSessionTranscriptQueryOptions('proj-1', 'session-1', 'runtime-1').enabled).toBe(true)
   })
 })
 

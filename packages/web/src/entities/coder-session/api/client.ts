@@ -50,7 +50,7 @@ export function unifiedSessionTranscriptQueryOptions(
   return {
     queryKey: ['unified-session', projectId, sessionId, 'transcript', runtimeSessionId ?? null] as const,
     queryFn: () => getUnifiedSessionTranscript(projectId!, sessionId, runtimeSessionId),
-    enabled: !!projectId && !!sessionId,
+    enabled: !!projectId && !!sessionId && !!runtimeSessionId,
     refetchInterval: (query: { state: { data: AgentSessionTranscriptResponse | undefined } }) => {
       const turns = query.state.data?.turns
       return turns?.some((turn) => turn.incomplete) ? 5000 : false

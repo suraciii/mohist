@@ -237,3 +237,19 @@ to confirm the issue is ready to close. No source changes were needed.
 `git status --porcelain` after each step shows only ignored build outputs
 (`bin/`, `obj/`, `dist/`, `node_modules/`). The worktree stays clean, and
 nothing was committed or reverted to suppress a failure.
+
+## Continuation verification
+
+The review-fix implementation is present but not yet committed. `review.md`
+was not edited and remains intentionally excluded from the commit.
+
+- Server focused specs: 60/60 pass, including unified summary/routes,
+  recovery, and runtime-filter coverage.
+- Server focused unit tests: 8/8 pass.
+- Web typecheck, FSD checks, test-boundary checks, and Vitest: 5087/5087
+  tests pass across 384 files.
+- Browser rerun for Activity, compact Session, and workflow Session fixtures:
+  17/17 pass after migrating stale route/control/response-shape assertions.
+- `npm test` is not green yet: `Mohist.Server.UnitTests` 1680/1681,
+  `Mohist.Server.ArchTests` 50/51, and `Mohist.Server.SpecTests` 3533/3534.
+  Failure details still need investigation in a later continuation.

@@ -77,6 +77,7 @@ export interface SessionRecoveryActionsProps {
   status?: string | null | undefined
   recoveryAvailable?: boolean
   onSuccess?: () => void
+  onSettled?: () => void
   className?: string
   compactLabel?: string
   resetLabel?: string
@@ -117,6 +118,7 @@ export function SessionRecoveryActions({
   activity,
   recoveryAvailable,
   onSuccess,
+  onSettled,
   className,
   compactLabel = 'Compact',
   resetLabel = 'Reset',
@@ -152,6 +154,7 @@ export function SessionRecoveryActions({
     onError: (err) => {
       setInlineError(resolveErrorMessage(err))
     },
+    onSettled,
   })
 
   const resetMutation = useMutation({
@@ -172,6 +175,7 @@ export function SessionRecoveryActions({
     onError: (err) => {
       setInlineError(resolveErrorMessage(err))
     },
+    onSettled,
   })
 
   const anyPending = compactMutation.isPending || resetMutation.isPending

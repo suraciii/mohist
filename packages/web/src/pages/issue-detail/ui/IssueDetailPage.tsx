@@ -508,7 +508,7 @@ export function IssueDetailPage({
 
               {showWorkflowSections && (
                 <div id="workflow" className="scroll-mt-20" data-testid="workflow-view-frame">
-                  <WorkflowView issue={issue} readOnly />
+                  <WorkflowView issue={issue} readOnly dependencies={{ workflowSessionsHook: useWorkflowRunSessions }} />
                 </div>
               )}
 

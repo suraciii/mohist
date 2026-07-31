@@ -42,6 +42,7 @@ public class UnifiedSessionSummarySpecs
     private const int WorkflowIssueNumber = 100;
     private const string EnrichedActiveTurnId = "turn-active-1";
     private const string EnrichedActiveInputId = "input-active-1";
+    private const string EnrichedQueuedTurnId = "turn-queued-1";
     private const string UnsupportedSourceSession = "s_summary_unsupported";
 
     private static readonly DateTime CreatedAt = new(2026, 8, 1, 9, 0, 0, DateTimeKind.Utc);
@@ -115,6 +116,55 @@ public class UnifiedSessionSummarySpecs
         Assert.False(data.GetProperty("recoveryAvailable").GetBoolean());
         Assert.Equal("active", data.GetProperty("activity").GetString());
         Assert.Equal(EnrichedActiveTurnId, data.GetProperty("currentTurnId").GetString());
+    }
+
+    [Fact]
+    public async Task Show_AgentLaunchSession_PrefersExecutingTurnOverLaterQueuedTurn()
+    {
+        var db = await BuildEnrichedDbAsync(seedActiveAgent: true, seedQueuedTurn: true);
+        var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, AgentLaunchSession, CreateQuerier(db), CancellationToken.None);
+        var data = await OkDataAsync(result);
+
+        Assert.Equal(EnrichedActiveTurnId, data.GetProperty("currentTurnId").GetString());
+        Assert.False(data.GetProperty("recoveryAvailable").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Show_AgentLaunchSession_QueuedTurnBlocksRecoveryEvenWhenActivityIsIdle()
+    {
+        var db = await BuildEnrichedDbAsync(seedQueuedIdleTurn: true);
+        var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, AgentLaunchSession, CreateQuerier(db), CancellationToken.None);
+        var data = await OkDataAsync(result);
+
+        Assert.Equal(EnrichedQueuedTurnId, data.GetProperty("currentTurnId").GetString());
+        Assert.False(data.GetProperty("recoveryAvailable").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Show_AgentLaunchSession_ExposesTerminalTurnResult()
+    {
+        var db = await BuildEnrichedDbAsync(seedTurnResult: true);
+        var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, AgentLaunchSession, CreateQuerier(db), CancellationToken.None);
+        var data = await OkDataAsync(result);
+        var turn = data.GetProperty("turns")[0];
+        var turnResult = turn.GetProperty("result");
+
+        Assert.Equal("initial launch completed", turnResult.GetProperty("message").GetString());
+        Assert.Equal("artifact output", turnResult.GetProperty("output").GetString());
+        Assert.Equal(0, turnResult.GetProperty("exitCode").GetInt32());
+    }
+
+    [Fact]
+    public async Task Show_AgentLaunchSession_ExposesRecoveryHistory()
+    {
+        var db = await BuildEnrichedDbAsync(seedRecoveryHistory: true);
+        var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, AgentLaunchSession, CreateQuerier(db), CancellationToken.None);
+        var data = await OkDataAsync(result);
+        var history = data.GetProperty("recoveryHistory");
+
+        Assert.Equal(2, history.GetArrayLength());
+        Assert.Equal("reset", history[0].GetProperty("type").GetString());
+        Assert.Equal("compaction", history[1].GetProperty("type").GetString());
     }
 
     [Fact]
@@ -192,18 +242,24 @@ public class UnifiedSessionSummarySpecs
     private static async Task<SummaryTestDb> BuildEnrichedDbAsync(
         bool seedActiveAgent = false,
         bool seedActiveWorkflow = false,
-        bool seedPriorRuntimeFailure = false)
+        bool seedPriorRuntimeFailure = false,
+        bool seedQueuedTurn = false,
+        bool seedQueuedIdleTurn = false,
+        bool seedTurnResult = false,
+        bool seedRecoveryHistory = false)
     {
         var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
 
         await SeedAgentAsync(factory);
         await SeedEnrichedSessionAsync(factory, "agent-launch", AgentLaunchSession, "rt-agent",
-            "gpt-4o", active: seedActiveAgent, recordedMinutes: 2, lastDataMinutes: 5);
+            "gpt-4o", active: seedActiveAgent, recordedMinutes: 2, lastDataMinutes: 5,
+            seedQueuedTurn: seedQueuedTurn, seedQueuedIdleTurn: seedQueuedIdleTurn, seedTurnResult: seedTurnResult);
         await SeedEnrichedSessionAsync(factory, "workflow", WorkflowSession, "rt-workflow",
             "claude-3", active: seedActiveWorkflow, recordedMinutes: 3, lastDataMinutes: 8);
         await SeedEnrichedTranscriptAsync(factory, AgentLaunchSession, "rt-agent",
-            "gpt-4o", "rate_limited", "OpenCode provider rate limit", 2, 1, seedPriorRuntimeFailure);
+            "gpt-4o", "rate_limited", "OpenCode provider rate limit", 2, 1, seedPriorRuntimeFailure,
+            seedRecoveryHistory);
         await SeedEnrichedTranscriptAsync(factory, WorkflowSession, "rt-workflow",
             "claude-3", "context_exhaustion", "Runtime context window exhausted", 3, 2, false);
 
@@ -273,7 +329,8 @@ public class UnifiedSessionSummarySpecs
     private static async Task SeedEnrichedSessionAsync(
         IDbContextFactory<MohistDbContext> factory,
         string sourceKind, string sessionId, string runtimeSessionId, string model,
-        bool active = false, int recordedMinutes = 2, int lastDataMinutes = 5)
+        bool active = false, int recordedMinutes = 2, int lastDataMinutes = 5,
+        bool seedQueuedTurn = false, bool seedQueuedIdleTurn = false, bool seedTurnResult = false)
     {
         var agentId = sourceKind == "agent-launch" ? AgentId : null;
         var agentName = sourceKind == "agent-launch" ? AgentName : null;
@@ -281,19 +338,43 @@ public class UnifiedSessionSummarySpecs
         var sessionName = sourceKind == "workflow" ? WorkflowSessionName : null;
         var issueNumber = sourceKind == "workflow" ? (int?)WorkflowIssueNumber : null;
         var labels = BuildLabels(sourceKind, agentId, agentName, workflowRunId, sessionName, issueNumber);
-        object[] turns = active ? new object[]
+        var turns = new List<object>();
+        if (seedTurnResult)
         {
-            new
+            turns.Add(new
+            {
+                id = EnrichedActiveTurnId, sequence = 1L,
+                inputIds = new[] { EnrichedActiveInputId },
+                status = "completed", jobId = (string?)null,
+                result = new { message = "initial launch completed", output = "artifact output", exitCode = 0 },
+                recordedAt = CreatedAt.AddMinutes(recordedMinutes),
+                updatedAt = CreatedAt.AddMinutes(lastDataMinutes),
+            });
+        }
+        else if (active)
+        {
+            turns.Add(new
             {
                 id = EnrichedActiveTurnId, sequence = 1L,
                 inputIds = new[] { EnrichedActiveInputId },
                 status = "executing", jobId = (string?)null,
                 recordedAt = CreatedAt.AddMinutes(recordedMinutes),
                 updatedAt = CreatedAt.AddMinutes(lastDataMinutes),
-            },
-        } : new object[0];
-        object[] inputs = active ? new object[]
+            });
+        }
+        if (seedQueuedTurn || seedQueuedIdleTurn)
         {
+            turns.Add(new
+            {
+                id = EnrichedQueuedTurnId, sequence = 2L,
+                inputIds = Array.Empty<string>(),
+                status = "queued", jobId = (string?)null,
+                recordedAt = CreatedAt.AddMinutes(recordedMinutes + 1),
+                updatedAt = CreatedAt.AddMinutes(lastDataMinutes + 1),
+            });
+        }
+        var inputs = turns.Count == 0 ? new List<object>() :
+        [
             new
             {
                 id = EnrichedActiveInputId, sequence = 1L,
@@ -302,7 +383,7 @@ public class UnifiedSessionSummarySpecs
                 recordedAt = CreatedAt.AddMinutes(recordedMinutes),
                 jobId = (string?)null,
             },
-        } : new object[0];
+        ];
 
         var stateJson = JsonSerializer.Serialize(new
         {
@@ -313,7 +394,7 @@ public class UnifiedSessionSummarySpecs
             status = new
             {
                 agentRuntimeSessionId = runtimeSessionId,
-                activity = active ? "active" : "idle",
+                activity = active && !seedTurnResult ? "active" : "idle",
                 createdAt = CreatedAt,
                 lastDataAt = CreatedAt.AddMinutes(lastDataMinutes),
                 usageSummary = new
@@ -321,7 +402,7 @@ public class UnifiedSessionSummarySpecs
                     inputTokens = 120L, outputTokens = 60L, totalTokens = 180L,
                     costAmount = 0.42d, costCurrency = "USD",
                 },
-                turns,
+                turns = turns.ToArray(),
                 inputs,
             },
         }, JSON.Options);
@@ -360,7 +441,8 @@ public class UnifiedSessionSummarySpecs
         IDbContextFactory<MohistDbContext> factory,
         string sessionId, string runtimeSessionId,
         string resolvedModel, string failureCategory, string failureReason,
-        int totalTools, int errorTools, bool seedPriorRuntimeFailure)
+        int totalTools, int errorTools, bool seedPriorRuntimeFailure,
+        bool seedRecoveryHistory = false)
     {
         await using var db = factory.CreateDbContext();
 
@@ -453,6 +535,38 @@ public class UnifiedSessionSummarySpecs
                     failureCategory = "prior-category-should-not-leak",
                 }, JSON.Options),
                 LastSeenAt = CreatedAt.AddMinutes(8),
+            });
+        }
+
+        if (seedRecoveryHistory)
+        {
+            db.AgentSessionTranscriptParts.Add(new AgentSessionTranscriptPartRow
+            {
+                TurnId = currentTurn.Id,
+                Sequence = 101,
+                Type = TranscriptPartTypes.SessionContextReset,
+                CorrelationKey = "recovery-reset",
+                PayloadJson = JsonSerializer.Serialize(new { reason = "reset", observedAt = CreatedAt.AddMinutes(21) }, JSON.Options),
+                FirstSeenAt = CreatedAt.AddMinutes(21),
+                LastSeenAt = CreatedAt.AddMinutes(21),
+            });
+            db.AgentSessionTranscriptParts.Add(new AgentSessionTranscriptPartRow
+            {
+                TurnId = currentTurn.Id,
+                Sequence = 102,
+                Type = TranscriptPartTypes.Compaction,
+                CorrelationKey = "recovery-compaction",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    strategy = "summary",
+                    summary = "Earlier context retained",
+                    contextWindowUsedBefore = 900L,
+                    contextWindowUsedAfter = 300L,
+                    contextWindowSize = 1000L,
+                    recordedAt = CreatedAt.AddMinutes(22),
+                }, JSON.Options),
+                FirstSeenAt = CreatedAt.AddMinutes(22),
+                LastSeenAt = CreatedAt.AddMinutes(22),
             });
         }
 

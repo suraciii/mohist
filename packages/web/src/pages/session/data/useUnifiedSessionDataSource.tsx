@@ -71,6 +71,7 @@ function buildMetadata(summary: UnifiedSessionSummaryDto, turnCount: number): Se
     usage: summary.usage,
     inputs: summary.inputs,
     turns: summary.turns,
+    recoveryHistory: summary.recoveryHistory,
   }
 }
 
@@ -161,6 +162,7 @@ export function useUnifiedSessionDataSource(
       result = (await followup.mutateAsync({ sessionId, text, attachments: attachmentIds, idempotencyKey })) as SessionFollowupResult
     } catch (error) {
       followupKeys.current.set(retryKey, idempotencyKey)
+      reconcileUnifiedQueries()
       throw error
     }
     const normalized = result
@@ -206,7 +208,7 @@ export function useUnifiedSessionDataSource(
   }, [summary?.currentTurnId, summary?.turns])
 
   const cancel = useMemo<SessionTurnControlHandle | null>(() => {
-    if (!summary?.currentTurnId || !isRunning || !runtimeSessionId || !summary.runtime) return null
+    if (!summary?.currentTurnId || !runtimeSessionId || !summary.runtime) return null
     if (currentTurn?.status !== 'queued') return null
     return {
       turnId: summary.currentTurnId,
@@ -217,7 +219,7 @@ export function useUnifiedSessionDataSource(
   }, [cancelSession, currentTurn?.status, isRunning, runtimeSessionId, summary?.currentTurnId, summary?.runtime, turnControl.isPending])
 
   const stop = useMemo<SessionTurnControlHandle | null>(() => {
-    if (!summary?.currentTurnId || !isRunning || !runtimeSessionId || !summary.runtime) return null
+    if (!summary?.currentTurnId || !runtimeSessionId || !summary.runtime) return null
     if (currentTurn?.status !== 'executing') return null
     return {
       turnId: summary.currentTurnId,
@@ -275,6 +277,7 @@ export function useUnifiedSessionDataSource(
     recoveryAvailable: summary?.recoveryAvailable ?? false,
     recoverySessionName: summary?.sessionName ?? summary?.agentName ?? sessionId,
     recoverySessionId: sessionId || null,
+    recoveryHistory: summary?.recoveryHistory ?? null,
     metadataQueryKey,
     transcriptQueryKey,
     handleRecoverySuccess,

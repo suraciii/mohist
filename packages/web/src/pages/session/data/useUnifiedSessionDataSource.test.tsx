@@ -203,6 +203,23 @@ describe('useUnifiedSessionDataSource — follow-up commands', () => {
     expect(followupCalls[1].idempotencyKey).toBe(originalKey)
   })
 
+  it('reconciles authoritative reads when a follow-up request is rejected', async () => {
+    const mutateAsync = vi.fn().mockRejectedValue(new Error('Session is active'))
+    const deps = makeDependencies({
+      useGenericFollowup: (() => ({ mutateAsync, isPending: false })) as never,
+    })
+    const { result, queryClient } = renderUnifiedHook(deps)
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    await act(async () => {
+      await expect(result.current.sendFollowup('Retry after rejection')).rejects.toThrow('Session is active')
+    })
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map((call) => JSON.stringify((call[0] as { queryKey: unknown[] }).queryKey))
+    expect(invalidatedKeys.some((key) => key.includes('"unified-session","proj-1","session-1"'))).toBe(true)
+    expect(invalidatedKeys.some((key) => key.includes('"agent-sessions"'))).toBe(true)
+  })
+
   it('invalidates the unified summary, transcript prefix, and Session-list queries after a successful follow-up', async () => {
     const deps = makeDependencies()
     const { result, queryClient } = renderUnifiedHook(deps)
@@ -239,6 +256,26 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
     expect(result.current.cancel?.state).toBe('queued')
     expect(result.current.cancel?.turnId).toBe('turn-queued')
     expect(result.current.stop).toBeNull()
+  })
+
+  it('exposes cancel for a queued turn even when the activity field is idle', () => {
+    const deps = makeDependencies({
+      useUnifiedSessionSummary: (() => ({
+        data: makeSummary({
+          activity: 'idle',
+          recoveryAvailable: false,
+          currentTurnId: 'turn-queued',
+          turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
+        }),
+        isLoading: false,
+        isError: false,
+      })) as never,
+    })
+    const { result } = renderUnifiedHook(deps)
+
+    expect(result.current.cancel?.turnId).toBe('turn-queued')
+    expect(result.current.stop).toBeNull()
+    expect(result.current.recoveryAvailable).toBe(false)
   })
 
   it('exposes stop only when the current turn is executing and suppresses cancel', () => {

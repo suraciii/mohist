@@ -1,4 +1,4 @@
-import type { AgentSessionTranscriptResponse, FollowupStatus, SessionFollowupResult, SessionMetadata, SessionStatusKind, SessionTurn } from '../../../entities/coder-session'
+import type { AgentSessionTranscriptResponse, FollowupStatus, SessionFollowupResult, SessionMetadata, SessionRecoveryObservation, SessionStatusKind, SessionTurn } from '../../../entities/coder-session'
 import type { AgentLaunchObservationDto } from '../../../entities/agent'
 import type { DisplayTurn } from '../../../widgets/session-transcript'
 
@@ -65,6 +65,7 @@ export interface SessionDataSourceResult {
   recoveryAvailable?: boolean
   recoverySessionName: string | null
   recoverySessionId?: string | null
+  recoveryHistory?: SessionRecoveryObservation[] | null
 
   metadataQueryKey: readonly unknown[]
   transcriptQueryKey: readonly unknown[]

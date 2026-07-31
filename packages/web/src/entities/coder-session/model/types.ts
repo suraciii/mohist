@@ -88,6 +88,7 @@ export interface UnifiedSessionSummaryDto {
   currentTurnId?: string | null
   inputs?: SessionInputObservation[] | null
   turns?: AgentTurnObservation[] | null
+  recoveryHistory?: SessionRecoveryObservation[] | null
 }
 
 export interface AgentSessionMetadataCounts {
@@ -126,6 +127,7 @@ export interface AgentSessionMetadata {
   usage?: AgentSessionUsage
   inputs?: SessionInputObservation[] | null
   turns?: AgentTurnObservation[] | null
+  recoveryHistory?: SessionRecoveryObservation[] | null
 }
 
 export interface SessionInputObservation {
@@ -150,6 +152,27 @@ export interface AgentTurnObservation {
   sequence: number
   inputIds: string[]
   status: string
+  result?: AgentTurnResultObservation | null
+}
+
+export interface AgentTurnResultObservation {
+  message?: string | null
+  output?: string | null
+  failureReason?: string | null
+  failureCategory?: string | null
+  exitCode?: number | null
+}
+
+export interface SessionRecoveryObservation {
+  type: 'reset' | 'compaction' | string
+  recordedAt: string
+  runtimeSessionId?: string | null
+  reason?: string | null
+  strategy?: string | null
+  summary?: string | null
+  contextWindowUsedBefore?: number | null
+  contextWindowUsedAfter?: number | null
+  contextWindowSize?: number | null
 }
 
 export type FollowupOutcome = 'accepted' | 'rejected' | 'unknown'
@@ -273,6 +296,7 @@ export interface SessionMetadata {
   usage?: AgentSessionUsage
   inputs?: SessionInputObservation[] | null
   turns?: AgentTurnObservation[] | null
+  recoveryHistory?: SessionRecoveryObservation[] | null
 }
 
 export interface TextPart {
@@ -323,7 +347,7 @@ export interface ErrorPart {
   id: string
   type: 'error'
   message: string
-  kind: 'timeout' | 'failed' | 'cancelled' | 'recovery'
+  kind: 'timeout' | 'failed' | 'cancelled' | 'recovery' | 'context-reset' | 'compaction'
   at: string
 }
 

@@ -17,6 +17,8 @@ internal static class SessionTranscriptBuilder
         foreach (var turn in transcript.Turns)
         {
             var at = turn.StartedAt.ToString("o");
+            partsByTurn.TryGetValue(turn.Id, out var parts);
+            var recoveryPrompt = parts is null ? null : RecoveryPromptText(parts);
             var dto = new AgentSessionTranscriptTurnDto
             {
                 Id = $"turn-{turn.Sequence}",
@@ -25,7 +27,7 @@ internal static class SessionTranscriptBuilder
                 Incomplete = false,
                 User = new AgentSessionTranscriptUserDto
                 {
-                    Text = turn.PromptText,
+                    Text = string.IsNullOrWhiteSpace(turn.PromptText) ? recoveryPrompt ?? string.Empty : turn.PromptText,
                     Kind = AgentSessionJsonHelper.NormalizePromptKind(turn.PromptKind),
                     SentAt = at,
                     RuntimeSessionId = turn.RuntimeSessionId,
@@ -33,9 +35,10 @@ internal static class SessionTranscriptBuilder
             };
             toolPartIndex.Clear();
 
-            if (partsByTurn.TryGetValue(turn.Id, out var parts))
+            if (parts is not null)
             {
                 var partIndex = 0;
+                var recoveryMarkerKeys = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var part in parts)
                 {
                     var payload = AgentSessionJsonHelper.ParsePayloadOrEmpty(part.PayloadJson);
@@ -89,6 +92,42 @@ internal static class SessionTranscriptBuilder
                                 At = partAt,
                             });
                         }
+                        continue;
+                    }
+
+                    if (part.Type == TranscriptPartTypes.SessionContextReset)
+                    {
+                        var reason = AgentSessionJsonHelper.GetStringProp(payload, "reason");
+                        AddRecoveryMarker(
+                            dto,
+                            $"{dto.Id}-p{++partIndex}",
+                            "context-reset",
+                            string.IsNullOrWhiteSpace(reason)
+                                ? "Subsequent turns use a new runtime context."
+                                : $"Reason: {reason}. Subsequent turns use a new runtime context.",
+                            partAt);
+                        continue;
+                    }
+
+                    if (part.Type is TranscriptPartTypes.Compaction or "compaction_event")
+                    {
+                        var key = $"compaction:{part.PayloadJson}";
+                        if (!recoveryMarkerKeys.Add(key))
+                            continue;
+
+                        var strategy = AgentSessionJsonHelper.GetStringProp(payload, "strategy");
+                        var summary = AgentSessionJsonHelper.GetStringProp(payload, "summary");
+                        var details = string.IsNullOrWhiteSpace(strategy) ? null : $"Strategy: {strategy}.";
+                        var message = string.Join(
+                            " ",
+                            new[] { details, string.IsNullOrWhiteSpace(summary) ? null : summary }
+                                .Where(value => !string.IsNullOrWhiteSpace(value)));
+                        AddRecoveryMarker(
+                            dto,
+                            $"{dto.Id}-p{++partIndex}",
+                            "compaction",
+                            string.IsNullOrWhiteSpace(message) ? "Context history was compacted." : message,
+                            partAt);
                     }
                 }
             }
@@ -107,6 +146,37 @@ internal static class SessionTranscriptBuilder
             LastActivityAt = lastActivityAt,
         };
     }
+
+    private static string? RecoveryPromptText(IReadOnlyList<AgentSessionTranscriptPartRow> parts)
+    {
+        var reset = parts.FirstOrDefault(part => part.Type == TranscriptPartTypes.SessionContextReset);
+        if (reset is not null)
+        {
+            var reason = AgentSessionJsonHelper.GetStringProp(
+                AgentSessionJsonHelper.ParsePayloadOrEmpty(reset.PayloadJson),
+                "reason");
+            return string.IsNullOrWhiteSpace(reason) ? "Context reset" : $"Context reset: {reason}";
+        }
+
+        return parts.Any(part => part.Type is TranscriptPartTypes.Compaction or "compaction_event")
+            ? "Context compaction"
+            : null;
+    }
+
+    private static void AddRecoveryMarker(
+        AgentSessionTranscriptTurnDto turn,
+        string id,
+        string kind,
+        string message,
+        string at) =>
+        turn.Assistant.Add(new AgentSessionTranscriptPartDto
+        {
+            Id = id,
+            Type = "error",
+            Message = message,
+            Kind = kind,
+            At = at,
+        });
 
     private static void UpsertToolPart(
         AgentSessionTranscriptTurnDto turn,

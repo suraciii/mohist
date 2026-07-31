@@ -276,7 +276,26 @@ public sealed record AgentTurnObservationDto(
     string Id,
     long Sequence,
     IReadOnlyList<string> InputIds,
-    string Status);
+    string Status,
+    [property: JsonPropertyName("result")] AgentTurnResultObservationDto? Result = null);
+
+public sealed record AgentTurnResultObservationDto(
+    string? Message,
+    string? Output,
+    string? FailureReason,
+    string? FailureCategory,
+    int? ExitCode);
+
+public sealed record AgentSessionRecoveryObservationDto(
+    string Type,
+    string RecordedAt,
+    string? RuntimeSessionId,
+    string? Reason,
+    string? Strategy,
+    string? Summary,
+    long? ContextWindowUsedBefore,
+    long? ContextWindowUsedAfter,
+    long? ContextWindowSize);
 
 /// <summary>
 /// Lightweight association entry returned by the issue/epic agent-session
@@ -386,7 +405,8 @@ public sealed record UnifiedSessionSummaryDto(
     [property: JsonPropertyName("recoveryAvailable")] bool RecoveryAvailable,
     [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null,
     [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
-    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null);
+    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null,
+    [property: JsonPropertyName("recoveryHistory")] IReadOnlyList<AgentSessionRecoveryObservationDto>? RecoveryHistory = null);
 
 /// <summary>
 /// Lightweight unified read shape for an AgentSession in the source-filtered

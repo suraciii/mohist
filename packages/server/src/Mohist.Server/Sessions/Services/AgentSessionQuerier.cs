@@ -48,7 +48,7 @@ public class AgentSessionQuerier : IScopedService
         if (session is null) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var transcript = await LoadTranscriptAsync(db, session.Session.Id, null, ct);
+        var transcript = await LoadTranscriptAsync(db, session.Session.Id, session.Session.Status.AgentRuntimeSessionId, ct);
         return new WorkflowSessionDetailDto(ToWorkflowDto(session), SessionTranscriptBuilder.Build(transcript));
     }
 
@@ -417,7 +417,11 @@ public class AgentSessionQuerier : IScopedService
         var session = await FindReadableSessionAsync(db, projectId, issueNumber, sessionName, ct);
         if (session is null) return null;
 
-        var transcript = await LoadTranscriptAsync(db, session.Session.Id, runtimeSessionId, ct);
+        var transcript = await LoadTranscriptAsync(
+            db,
+            session.Session.Id,
+            runtimeSessionId ?? session.Session.Status.AgentRuntimeSessionId,
+            ct);
         return SessionTranscriptBuilder.Build(transcript);
     }
 
@@ -515,7 +519,11 @@ public class AgentSessionQuerier : IScopedService
         var session = await FindGenericSessionAsync(projectId, sessionId, ct);
         if (session is null) return null;
 
-        var transcript = await LoadTranscriptAsync(db, session.Session.Id, runtimeSessionId, ct);
+        var transcript = await LoadTranscriptAsync(
+            db,
+            session.Session.Id,
+            runtimeSessionId ?? session.Session.Status.AgentRuntimeSessionId,
+            ct);
         return SessionTranscriptBuilder.Build(transcript);
     }
 
@@ -595,10 +603,11 @@ public class AgentSessionQuerier : IScopedService
             SessionName: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.SessionName) : null,
             ContextRefs: BuildUnifiedContextRefs(record),
             Usage: AgentSessionDtoMapper.ToUsageDto(usage),
-            RecoveryAvailable: session.Status.Activity == AgentSessionActivity.Idle,
+            RecoveryAvailable: IsRecoveryAvailable(session),
             CurrentTurnId: CurrentTurnId(session),
             Inputs: AgentSessionObservationMapper.Inputs(session.Status),
-            Turns: AgentSessionObservationMapper.Turns(session.Status));
+            Turns: AgentSessionObservationMapper.Turns(session.Status),
+            RecoveryHistory: transcriptSummary.RecoveryHistory);
     }
 
     /// <summary>
@@ -620,7 +629,11 @@ public class AgentSessionQuerier : IScopedService
         if (record is null) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var transcript = await LoadTranscriptAsync(db, record.Session.Id, runtimeSessionId, ct);
+        var transcript = await LoadTranscriptAsync(
+            db,
+            record.Session.Id,
+            runtimeSessionId ?? record.Session.Status.AgentRuntimeSessionId,
+            ct);
         return SessionTranscriptBuilder.Build(transcript);
     }
 
@@ -683,7 +696,39 @@ public class AgentSessionQuerier : IScopedService
             summary.FailureCategory,
             summary.FailureReason,
             summary.ToolCallCount,
-            summary.ToolErrorCount);
+            summary.ToolErrorCount,
+            BuildRecoveryHistory(loaded));
+    }
+
+    private static IReadOnlyList<AgentSessionRecoveryObservationDto>? BuildRecoveryHistory(
+        TranscriptPartLoaderResult loaded)
+    {
+        var turnById = loaded.Turns.ToDictionary(turn => turn.Id);
+        var recoveryParts = loaded.Parts
+            .Where(part => part.Type is TranscriptPartTypes.SessionContextReset or TranscriptPartTypes.Compaction)
+            .OrderBy(part => turnById.TryGetValue(part.TurnId, out var turn) ? turn.Sequence : long.MaxValue)
+            .ThenBy(part => part.Sequence)
+            .ThenBy(part => part.Id)
+            .ToList();
+        if (recoveryParts.Count == 0) return null;
+
+        return recoveryParts.Select(part =>
+        {
+            var payload = AgentSessionJsonHelper.ParsePayloadOrEmpty(part.PayloadJson);
+            var isReset = part.Type == TranscriptPartTypes.SessionContextReset;
+            return new AgentSessionRecoveryObservationDto(
+                Type: isReset ? "reset" : "compaction",
+                RecordedAt: AgentSessionJsonHelper.GetStringProp(payload, "recordedAt")
+                    ?? AgentSessionJsonHelper.GetStringProp(payload, "observedAt")
+                    ?? part.FirstSeenAt.ToString("o"),
+                RuntimeSessionId: turnById.GetValueOrDefault(part.TurnId)?.RuntimeSessionId,
+                Reason: isReset ? AgentSessionJsonHelper.GetStringProp(payload, "reason") : null,
+                Strategy: isReset ? null : AgentSessionJsonHelper.GetStringProp(payload, "strategy"),
+                Summary: isReset ? null : AgentSessionJsonHelper.GetStringProp(payload, "summary"),
+                ContextWindowUsedBefore: isReset ? null : AgentSessionJsonHelper.GetLongProp(payload, "contextWindowUsedBefore"),
+                ContextWindowUsedAfter: isReset ? null : AgentSessionJsonHelper.GetLongProp(payload, "contextWindowUsedAfter"),
+                ContextWindowSize: isReset ? null : AgentSessionJsonHelper.GetLongProp(payload, "contextWindowSize"));
+        }).ToArray();
     }
 
     /// <summary>
@@ -767,9 +812,17 @@ public class AgentSessionQuerier : IScopedService
     }
 
     private static string? CurrentTurnId(AgentSession session) =>
-        session.Status.Turns?
-            .LastOrDefault(turn => turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing)
-            ?.Id;
+        session.Status.Turns?.FirstOrDefault(turn => turn.Status == AgentTurnStatus.Executing)?.Id
+        ?? session.Status.Turns?.LastOrDefault(turn => turn.Status == AgentTurnStatus.Queued)?.Id;
+
+    private static bool IsRecoveryAvailable(AgentSession session) =>
+        session.Status.Activity == AgentSessionActivity.Idle
+        && session.Status.PendingReset is null
+        && session.Status.PendingStop is null
+        && session.Status.PendingFollowup is null
+        && (session.Status.PendingFollowups is null || session.Status.PendingFollowups.Count == 0)
+        && !(session.Status.Turns ?? [])
+            .Any(turn => turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
 
     private async Task<AgentSessionRecord?> FindCurrentSessionAsync(
         MohistDbContext db,
@@ -918,13 +971,17 @@ public class AgentSessionQuerier : IScopedService
         return new AgentSessionTranscriptData(turns, parts);
     }
 
-    private static IReadOnlyList<TranscriptEventProjection> ToTranscriptProjectionsInSequenceOrder(TranscriptPartLoaderResult loaded) =>
-        loaded.Parts
+    private static IReadOnlyList<TranscriptEventProjection> ToTranscriptProjectionsInSequenceOrder(TranscriptPartLoaderResult loaded)
+    {
+        var turnSequenceByTurnId = loaded.Turns.ToDictionary(turn => turn.Id, turn => turn.Sequence);
+        return loaded.Parts
             .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
-            .OrderBy(part => part.Sequence)
+            .OrderBy(part => turnSequenceByTurnId.GetValueOrDefault(part.TurnId, long.MaxValue))
+            .ThenBy(part => part.Sequence)
             .ThenBy(part => part.Id)
             .Select(part => AgentSessionDtoMapper.ToProjection(loaded.SessionByTurnId[part.TurnId], part))
             .ToList();
+    }
 }
 
 internal sealed record TranscriptEventProjection
@@ -987,4 +1044,5 @@ internal sealed record UnifiedTranscriptSummary(
     string? FailureCategory,
     string? FailureReason,
     int? ToolCallCount,
-    int? ToolErrorCount);
+    int? ToolErrorCount,
+    IReadOnlyList<AgentSessionRecoveryObservationDto>? RecoveryHistory);
