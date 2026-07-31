@@ -169,3 +169,14 @@ was wrong. No code change needed.
 - Focused Slack specs: 22 / 22 passed, covering follow-up replay after a switch, New task replay after a later switch, control replay after later work begins, concurrent New task mapping, and the additive migration.
 - `SlackDmSessionMappingStoreTests`: 11 / 11 passed, including old-message ordering.
 - Full `npm test` ran twice after the change. Both runs passed Workflow Definition (175), CLI (1,482), Server Unit (1,659), and Server Arch (50), but the parallel Server SpecTests assembly had unrelated Agent launch/observation flakes: first run 3,561 / 3,562, then 3,560 / 3,562. The failed classes passed in isolation: `AgentSessionLaunchRoutesSpecs` 14 / 14 and `AgentLaunchObservationRoutesSpecs` 10 / 10. The focused Slack suite remained green.
+
+# issue-524 / Review fix: atomic inbox routing
+
+## Decision
+
+- DM route classification now completes before provider inbox acceptance. The chosen route kind and any Session/Turn target are written into the inbox row by the same transaction that records the Slack message identity. Redelivery always reads that durable route; it never reconstructs a target from a later conversation mapping.
+
+## Verification
+
+- Focused Slack specs: 30 / 30 passed, including inbox route durability across store recreation, DM follow-up/New task/control paths, and mapping migration coverage.
+- Full `npm test` passed Workflow Definition (175), CLI (1,482), Server Unit (1,659), and Server Arch (50). Server SpecTests had one pre-existing parallel failure in `AgentLaunchObservationRoutesSpecs.Observation_AfterAuthoritativeTerminalReport_ResolvesUnknownToCompleted` (3,562 / 3,563 passed); the class passed in isolation, 10 / 10.

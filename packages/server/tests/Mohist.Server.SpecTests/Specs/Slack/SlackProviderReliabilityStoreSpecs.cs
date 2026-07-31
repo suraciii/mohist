@@ -24,14 +24,38 @@ public sealed class SlackProviderReliabilityStoreSpecs
             health);
         var draft = Draft("1.0000");
 
-        var first = await store.AcceptAsync(draft);
-        var duplicate = await store.AcceptAsync(draft);
+        var first = await store.AcceptAsync(draft, Route());
+        var duplicate = await store.AcceptAsync(draft, Route());
 
         Assert.False(first.AlreadyExisted);
         Assert.True(duplicate.AlreadyExisted);
         Assert.Equal(first.Id, duplicate.Id);
         Assert.Empty(health.Reasons);
         Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries);
+    }
+
+    [Fact]
+    public async Task Inbox_AcceptPersistsTheRouteBeforeTheMessageCanBeRedelivered()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var health = new RecordingHealthBackpressurer();
+        var firstStore = new SlackProviderInboxStore(
+            new TestDbContextFactory(database.Options),
+            new FakeTimeProvider(Start),
+            Options.Create(new SlackProviderOptions { InboxCapacityPerConnection = 1 }),
+            health);
+        var accepted = await firstStore.AcceptAsync(Draft("3.0000"), Route());
+        var restartedStore = new SlackProviderInboxStore(
+            new TestDbContextFactory(database.Options),
+            new FakeTimeProvider(Start),
+            Options.Create(new SlackProviderOptions { InboxCapacityPerConnection = 1 }),
+            health);
+
+        var route = await restartedStore.GetRouteAsync("proj_a", accepted.Id);
+
+        Assert.Equal(SlackProviderInboxRouteKinds.Followup, route.Kind);
+        Assert.Equal("session-1", route.SessionId);
+        Assert.Null(route.TurnId);
     }
 
     [Fact]
@@ -45,8 +69,8 @@ public sealed class SlackProviderReliabilityStoreSpecs
             Options.Create(new SlackProviderOptions { InboxCapacityPerConnection = 1 }),
             health);
 
-        await store.AcceptAsync(Draft("1.0000"));
-        await Assert.ThrowsAsync<SlackProviderInboxCapacityExceededException>(() => store.AcceptAsync(Draft("2.0000")));
+        await store.AcceptAsync(Draft("1.0000"), Route());
+        await Assert.ThrowsAsync<SlackProviderInboxCapacityExceededException>(() => store.AcceptAsync(Draft("2.0000"), Route()));
 
         Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries);
         Assert.Equal(SlackProviderBackpressureReasons.InboxOverflow, Assert.Single(health.Reasons));
@@ -139,6 +163,9 @@ public sealed class SlackProviderReliabilityStoreSpecs
 
     private static SlackProviderInboxDraft Draft(string messageTs) => new(
         "proj_a", "conn_1", new SlackMessageIdentity("team-1", "D1", messageTs), "U1");
+
+    private static SlackProviderInboxRouteDraft Route() =>
+        new(SlackProviderInboxRouteKinds.Followup, "session-1");
 
     private static SlackOutboxDraft OutboxDraft(string kind, string payload) => new(
         "proj_a", "conn_1", "team-1", "D1", kind, "dispatch-1", $"\"{payload}\"");

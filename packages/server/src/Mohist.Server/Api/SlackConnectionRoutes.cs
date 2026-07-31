@@ -351,18 +351,7 @@ public static class SlackConnectionRoutes
                 }
             }
 
-            SlackProviderInboxAcceptResult accepted;
-            try
-            {
-                accepted = await inbox.AcceptAsync(new SlackProviderInboxDraft(
-                    projectId, connectionId, identity, body.SenderSlackUserId), ct);
-            }
-            catch (SlackProviderInboxCapacityExceededException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
-            }
-
-            var route = await ResolveInboxRouteAsync(
+            var routeDraft = await ResolveInboxRouteDraftAsync(
                 projectId,
                 connectionId,
                 body.ConversationId,
@@ -371,9 +360,20 @@ public static class SlackConnectionRoutes
                 mapping,
                 sessions,
                 grains,
-                inbox,
-                accepted.Id,
                 ct);
+
+            SlackProviderInboxAcceptResult accepted;
+            try
+            {
+                accepted = await inbox.AcceptAsync(new SlackProviderInboxDraft(
+                    projectId, connectionId, identity, body.SenderSlackUserId), routeDraft, ct);
+            }
+            catch (SlackProviderInboxCapacityExceededException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
+            }
+
+            var route = await inbox.GetRouteAsync(projectId, accepted.Id, ct);
 
             if (route.Kind is SlackProviderInboxRouteKinds.Cancel or SlackProviderInboxRouteKinds.Stop)
             {
@@ -804,7 +804,7 @@ public static class SlackConnectionRoutes
         text.StartsWith(keyword, StringComparison.OrdinalIgnoreCase)
         && (text.Length == keyword.Length || char.IsWhiteSpace(text[keyword.Length]));
 
-    private static async Task<SlackProviderInboxRoute> ResolveInboxRouteAsync(
+    private static async Task<SlackProviderInboxRouteDraft> ResolveInboxRouteDraftAsync(
         string projectId,
         string connectionId,
         string conversationId,
@@ -813,55 +813,34 @@ public static class SlackConnectionRoutes
         SlackDmSessionMappingStore mapping,
         AgentSessionQuerier sessions,
         IGrainFactory grains,
-        SlackProviderInboxStore inbox,
-        string inboxId,
         CancellationToken ct)
     {
-        var existing = await inbox.GetRouteAsync(projectId, inboxId, ct);
-        if (existing is not null)
-            return existing;
-
         if (isNewTask)
-            return await inbox.GetOrAssignRouteAsync(
-                projectId, inboxId, new(SlackProviderInboxRouteKinds.NewTaskLaunch), ct);
+            return new(SlackProviderInboxRouteKinds.NewTaskLaunch);
 
         var sessionId = await mapping.GetCurrentSessionIdAsync(projectId, connectionId, conversationId, ct);
         if (controlCommand is null)
-            return await inbox.GetOrAssignRouteAsync(
-                projectId,
-                inboxId,
-                string.IsNullOrWhiteSpace(sessionId)
-                    ? new(SlackProviderInboxRouteKinds.Launch)
-                    : new(SlackProviderInboxRouteKinds.Followup, sessionId),
-                ct);
+            return string.IsNullOrWhiteSpace(sessionId)
+                ? new(SlackProviderInboxRouteKinds.Launch)
+                : new(SlackProviderInboxRouteKinds.Followup, sessionId);
 
         if (string.IsNullOrWhiteSpace(sessionId))
-            return await inbox.GetOrAssignRouteAsync(
-                projectId, inboxId, new(SlackProviderInboxRouteKinds.NoActiveWork), ct);
+            return new(SlackProviderInboxRouteKinds.NoActiveWork);
 
         var target = await sessions.ResolveCancelTargetAsync(projectId, sessionId, ct);
         if (target is null)
-            return await inbox.GetOrAssignRouteAsync(
-                projectId, inboxId, new(SlackProviderInboxRouteKinds.NoActiveWork), ct);
+            return new(SlackProviderInboxRouteKinds.NoActiveWork);
 
         var current = await grains.GetGrain<IAgentSessionGrain>(target.SessionId).ResolveCurrentTurnControlAsync();
         if (current is null)
         {
             var turns = await grains.GetGrain<IAgentSessionGrain>(target.SessionId).ListTurnsAsync();
-            return await inbox.GetOrAssignRouteAsync(
-                projectId,
-                inboxId,
-                new(turns.Count == 0 ? SlackProviderInboxRouteKinds.NoActiveWork : SlackProviderInboxRouteKinds.AlreadyEnded),
-                ct);
+            return new(turns.Count == 0 ? SlackProviderInboxRouteKinds.NoActiveWork : SlackProviderInboxRouteKinds.AlreadyEnded);
         }
 
-        return await inbox.GetOrAssignRouteAsync(
-            projectId,
-            inboxId,
-            controlCommand == TurnControlCommand.Cancel
-                ? new(SlackProviderInboxRouteKinds.Cancel, target.SessionId, current.TurnId)
-                : new(SlackProviderInboxRouteKinds.Stop, target.SessionId, current.TurnId),
-            ct);
+        return controlCommand == TurnControlCommand.Cancel
+            ? new(SlackProviderInboxRouteKinds.Cancel, target.SessionId, current.TurnId)
+            : new(SlackProviderInboxRouteKinds.Stop, target.SessionId, current.TurnId);
     }
 
     private static async Task<TurnControlReply> ExecuteTurnControlAsync(
