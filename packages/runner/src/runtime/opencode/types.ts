@@ -74,6 +74,29 @@ export interface RuntimeTurnRequest {
    */
   readonly deadlineMs?: number | null
   readonly options?: RuntimeTurnOptions | null
+  /**
+   * Optional native file parts appended to the prompt body. The
+   * runtime carries them as `FilePartInput` entries alongside the
+   * single text part on `client.session.prompt`. Issue-513: this is
+   * the per-runtime visibility hook for image attachments — the
+   * Agent always has the workspace file as the source of truth; the
+   * file part is additive so the model can see the image directly
+   * when the runtime supports it.
+   */
+  readonly fileParts?: readonly RuntimeFilePart[] | null
+}
+
+/**
+ * Native file part delivered through `client.session.prompt`'s
+ * `parts` array. The OpenCode SDK accepts a data URL (e.g.
+ * `data:image/png;base64,...`) for `url`; the Runner uses this only
+ * for image attachments, and the data is fetched through the
+ * owning-input scoped content route — never a caller temp URL.
+ */
+export interface RuntimeFilePart {
+  readonly mime: string
+  readonly filename: string
+  readonly url: string
 }
 
 export interface RuntimeTurnEvent {
@@ -121,6 +144,7 @@ export interface RuntimeTurnResult {
 export interface RuntimeFollowupRequest {
   readonly target: RuntimeSessionTarget
   readonly prompt: string
+  readonly fileParts?: readonly RuntimeFilePart[] | null
   readonly options?: RuntimeTurnOptions | null
 }
 

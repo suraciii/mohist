@@ -898,6 +898,72 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
+    public async Task AgentLaunch_AttachUploadsFilesSendsIdsAndReportsVerdicts()
+    {
+        var uploadNumber = 0;
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (request.Method == HttpMethod.Post && path.EndsWith("/attachments", StringComparison.Ordinal))
+            {
+                uploadNumber++;
+                var id = $"att_{uploadNumber}";
+                var fileName = uploadNumber == 1 ? "notes.md" : "diagram.bin";
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { id, fileName, contentType = "text/plain", size = uploadNumber == 1 ? 5 : 3 },
+                }));
+            }
+
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    jobId = "job-attach",
+                    sessionId = "session-attach",
+                    inputId = "input-attach",
+                    turnId = "turn-attach",
+                    agentId = "agent-123",
+                    agentName = "reviewer",
+                    status = "queued",
+                    attachments = new[] { new { id = "att_1", name = "notes.md", contentType = "text/plain", size = 5 } },
+                    rejectedAttachments = new[] { new { id = "att_2", reason = "unsupported-type", message = "Binary files are not supported." } },
+                },
+            }));
+        });
+        var output = new StringWriter();
+        var fileSystem = FileSystemWithProject();
+        fileSystem.AddFile("/tmp/notes.md", "hello");
+        fileSystem.AddFile("/tmp/diagram.bin", "raw");
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "launch", "reviewer", "--attach", "/tmp/notes.md", "--attach", "/tmp/diagram.bin", "--idempotency-key", "launch-attach"],
+            output: output,
+            fileSystem: fileSystem);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.All(handler.Requests.Take(2), request => Assert.Equal("/api/projects/proj_123/attachments", request.RequestUri?.PathAndQuery));
+        Assert.Contains("notes.md", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.Contains("diagram.bin", handler.Requests[1].Body, StringComparison.Ordinal);
+        var body = JsonNode.Parse(handler.Requests[2].Body!)!.AsObject();
+        Assert.Equal("", body["prompt"]?.GetValue<string>());
+        Assert.Equal("att_1", body["attachments"]?[0]?.GetValue<string>());
+        Assert.Equal("att_2", body["attachments"]?[1]?.GetValue<string>());
+        Assert.Equal("launch-attach", handler.Requests[2].Headers["Idempotency-Key"].Single());
+
+        var stdout = output.ToString();
+        Assert.Contains("Attachments to submit:", stdout, StringComparison.Ordinal);
+        Assert.Contains("/tmp/notes.md (notes.md, 5 B)", stdout, StringComparison.Ordinal);
+        Assert.Contains("Attachments ready:", stdout, StringComparison.Ordinal);
+        Assert.Contains("accepted: notes.md (id=att_1)", stdout, StringComparison.Ordinal);
+        Assert.Contains("rejected: att_2 (unsupported-type): Binary files are not supported.", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AgentUpdate_MissingInstructionsFileFailsWithScopedUsageBeforeHttp()
     {
         var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));

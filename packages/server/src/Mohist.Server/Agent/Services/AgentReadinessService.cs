@@ -50,6 +50,13 @@ public sealed class AgentReadinessService : IScopedService
         return Evaluate(agent, await _jobs.GetLatestExecutionAsync(projectId, agent.Id, ct));
     }
 
+    public async Task EnsureLaunchableAsync(string projectId, AgentInfo agent, CancellationToken ct = default)
+    {
+        var readiness = await GetAsync(projectId, agent, ct);
+        if (readiness.Conclusion == AgentReadinessConclusions.NeedsSetup)
+            throw new AgentReadinessException(readiness);
+    }
+
     public static AgentReadinessResult Evaluate(AgentInfo agent, AgentExecutionHistory? history)
     {
         var structuralGaps = StructuralGaps(agent);

@@ -1,121 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
-import { ProjectProvider } from '../../../entities/project'
-import type {
-  AgentAvailabilitySummaryEntry,
-  AgentInfo,
-  AgentSessionLaunchContext,
-  AgentSessionLaunchResponse,
-} from '../../../entities/agent'
-import {
-  AgentSessionComposerPage,
-  type AgentSessionComposerDataHook,
-  type AgentSessionComposerPageComponents,
-} from './AgentSessionComposerPage'
-
-const state = {
-  agentsData: [] as AgentInfo[],
-  availabilityData: [] as AgentAvailabilitySummaryEntry[],
-  launchCalls: [] as Array<{ agentRef: string; body: unknown; idempotencyKey?: string }>,
-  launchError: null as { error: string; code?: string } | null,
-  launchFailuresRemaining: -1,
-}
-
-const components: AgentSessionComposerPageComponents = {
-  AttachmentComposer: ({ value, onChange, onBlur, placeholder }) => (
-    <textarea
-      data-testid="prompt-textarea"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      onBlur={onBlur}
-      placeholder={placeholder}
-    />
-  ),
-}
-
-const dataHook: AgentSessionComposerDataHook = () => {
-  const launchMutation = useMutation<
-    AgentSessionLaunchResponse,
-    Error,
-    { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null; idempotencyKey?: string }
-  >({
-    mutationFn: async ({ agentRef, prompt, context, idempotencyKey }) => {
-      state.launchCalls.push({ agentRef, body: { prompt, context }, idempotencyKey })
-      if (state.launchError && (state.launchFailuresRemaining < 0 || state.launchFailuresRemaining-- > 0)) {
-        throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
-      }
-      return {
-        sessionId: 'sess-123',
-        agentId: agentRef,
-        agentName: 'Agent 1',
-        status: 'running',
-        transcriptUrl: '',
-      } as AgentSessionLaunchResponse
-    },
-  })
-  return {
-    agents: state.agentsData,
-    agentsLoading: false,
-    availability: state.availabilityData,
-    availabilityLoading: false,
-    launchMutation,
-  }
-}
-
-function createQueryClient() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
-}
-
-function makeAgent(id: string, overrides: Partial<AgentInfo> = {}): AgentInfo {
-  return {
-    id,
-    projectId: 'proj-1',
-    name: `Agent ${id}`,
-    description: '',
-    instructions: '',
-    agentConfig: null,
-    skills: [],
-    maxConcurrentRuns: null,
-    status: 'active',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-    ...overrides,
-  }
-}
-
-function LocationProbe() {
-  const location = useLocation()
-  return <div data-testid="current-path">{location.pathname}</div>
-}
-
-function renderPage(initialEntries = ['/agent-sessions/new']) {
-  const queryClient = createQueryClient()
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <ProjectProvider
-        initialProjectId="proj-1"
-        initialProjects={[{
-          id: 'proj-1', name: 'Test',
-          createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-          repositories: [],
-        }]}
-      >
-        <MemoryRouter initialEntries={initialEntries}>
-          <Routes>
-            <Route
-              path="/agent-sessions/new"
-              element={<AgentSessionComposerPage components={components} dataHook={dataHook} />}
-            />
-            <Route path="/:projectName/agent-sessions/:sessionId" element={<div>Agent Session</div>} />
-          </Routes>
-          <LocationProbe />
-        </MemoryRouter>
-      </ProjectProvider>
-    </QueryClientProvider>,
-  )
-}
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { makeAgent, renderPage, state } from '../../../../tests/support/agent-session-composer-test-support'
 
 describe('AgentSessionComposerPage', () => {
   beforeEach(() => {
@@ -124,6 +9,7 @@ describe('AgentSessionComposerPage', () => {
     state.launchCalls.length = 0
     state.launchError = null
     state.launchFailuresRemaining = -1
+    state.launchResponse = null
   })
 
   afterEach(() => {
@@ -250,6 +136,7 @@ describe('AgentSessionComposerPage', () => {
       body: {
         prompt: 'Analyze this',
         context: { issueNumber: 42, epicNumber: 7, repository: 'org/repo', workspacePath: '/workspace' },
+        attachments: [],
       },
     })
     expect(state.launchCalls[0].body).not.toHaveProperty('runtime')
@@ -257,6 +144,23 @@ describe('AgentSessionComposerPage', () => {
     expect(state.launchCalls[0].body).not.toHaveProperty('variant')
     expect(state.launchCalls[0].body).not.toHaveProperty('skills')
     expect(state.launchCalls[0].body).not.toHaveProperty('maxConcurrentRuns')
+  })
+
+  it('sends attachment ids explicitly and displays mixed acceptance results', async () => {
+    state.agentsData = [makeAgent('agent-1')]
+    state.launchResponse = {
+      attachments: [{ id: 'att-ok', name: 'accepted.txt', contentType: 'text/plain', size: 4 }],
+      rejectedAttachments: [{ id: 'att-bad', reason: 'UnsupportedType', message: 'Archive files are not supported.' }],
+    }
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Use [accepted.txt](att:att-ok) and [rejected.zip](att:att-bad)' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    await waitFor(() => expect(screen.getByTestId('launch-attachment-results')).toBeInTheDocument())
+    expect(state.launchCalls[0].body).toMatchObject({ attachments: ['att-ok', 'att-bad'] })
+    expect(screen.getByTestId('attachment-result-accepted-att-ok')).toHaveTextContent('accepted.txt')
+    expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent('Archive files are not supported.')
   })
 
   it('navigates to session detail on success', async () => {

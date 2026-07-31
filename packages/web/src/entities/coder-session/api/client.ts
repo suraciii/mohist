@@ -108,6 +108,21 @@ export interface SessionFollowupResult {
   code?: string | null
   inputAcceptance?: string | null
   turnStatus?: string | null
+  attachments?: SessionAttachment[] | null
+  rejectedAttachments?: SessionAttachmentRejection[] | null
+}
+
+export interface SessionAttachment {
+  id: string
+  name: string
+  contentType?: string | null
+  size: number
+}
+
+export interface SessionAttachmentRejection {
+  id: string
+  reason: string
+  message: string
 }
 
 export function postFollowup(
@@ -116,13 +131,14 @@ export function postFollowup(
   text: string,
   projectId?: string | null,
   idempotencyKey?: string,
+  attachments?: string[],
 ): Promise<SessionFollowupResult> {
   const requestKey = idempotencyKey ?? createIdempotencyKey()
   return request<SessionFollowupResult>(
     projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/followup`),
     {
       method: 'POST',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, ...(attachments?.length ? { attachments } : {}) }),
       headers: { 'Idempotency-Key': requestKey },
     },
   )

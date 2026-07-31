@@ -23,7 +23,7 @@ export interface AgentExecutionDefinition {
 }
 
 export type SessionTarget =
-  | { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string; binding?: RuntimeSessionBinding }
+  | { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string; agentSessionId?: string; binding?: RuntimeSessionBinding }
   | { kind: "generic"; projectId: string; sessionId: string; definition?: AgentExecutionDefinition; binding?: RuntimeSessionBinding }
 
 /**
@@ -86,8 +86,9 @@ export interface ReceiveFollowupSessionTarget {
 
 /**
  * Unified payload delivered by the server-side `ReceiveFollowup` SignalR
- * method. The `text` field is always present and non-empty (the server
- * rejects empty / whitespace text with 400 before pushing).
+ * method. The `text` field is always present. It may be empty when accepted
+ * attachment descriptors are present; the server rejects an empty input
+ * only when there are no accepted attachments to deliver.
  */
 export interface ReceiveFollowupPayload {
   target?: ReceiveFollowupSessionTarget
@@ -112,6 +113,20 @@ export interface ReceiveFollowupPayload {
    * callers.
    */
   turnId?: string
+  /**
+   * Issue-513 T-003: accepted attachment descriptors for this
+   * follow-up turn. The Runner uses these to materialize the
+   * workspace, build the system-attributed manifest block, and pass
+   * native image parts on OpenCode. Bytes are NEVER carried on the
+   * wire; the Runner fetches content through the owning-input
+   * scoped content route.
+   */
+  attachments?: ReadonlyArray<{
+    readonly id: string
+    readonly name: string
+    readonly contentType: string | null
+    readonly size: number
+  }>
 }
 
 // Payload delivered by the server-side `ReceiveWorkflowRunStatus` SignalR
@@ -181,6 +196,7 @@ export function sessionTargetFromWireTarget(target: ReceiveFollowupSessionTarget
       projectId,
       workflowRunId: target.workflowRunId,
       sessionName: target.sessionName,
+      ...(target.sessionId ? { agentSessionId: target.sessionId } : {}),
       ...(binding ? { binding } : {}),
     }
   }

@@ -230,6 +230,11 @@ internal static class SessionCommands
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
         var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file)" };
         var textFileOpt = new Option<string?>("--text-file") { Description = "Read followup text from a UTF-8 file path, or - for stdin (mutually exclusive with --text)" };
+        var attachOpt = new Option<string[]?>("--attach")
+        {
+            Description = "Attach a local file to the follow-up. Repeat for multiple files.",
+            AllowMultipleArgumentsPerToken = true,
+        };
         var idempotencyKeyOpt = new Option<string?>("--idempotency-key") { Description = "Reuse this key to safely retry a follow-up after response loss" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionFollowup)));
@@ -237,6 +242,7 @@ internal static class SessionCommands
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(textOpt);
         cmd.Options.Add(textFileOpt);
+        cmd.Options.Add(attachOpt);
         cmd.Options.Add(idempotencyKeyOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(outputOpt);
@@ -245,6 +251,7 @@ internal static class SessionCommands
             var sessionId = ctx.GetValue(sessionIdArg);
             var text = ctx.GetValue(textOpt);
             var textFile = ctx.GetValue(textFileOpt);
+            var attachPaths = ctx.GetValue(attachOpt) ?? [];
             var suppliedIdempotencyKey = ctx.GetValue(idempotencyKeyOpt);
             var project = ctx.GetValue(projectOpt);
             var output = ctx.GetValue(outputOpt);
@@ -252,10 +259,15 @@ internal static class SessionCommands
 
             async Task<int> FollowupAsync()
             {
-                var resolvedText = await BodyInputResolver.ResolveAsync(
-                    text, textFile,
-                    new BodyInputResolver.SourceFlags("--text", "--text-file", "text"),
-                    api.FileSystem, api.StandardInput, api.Error);
+                var resolvedText = attachPaths.Length > 0
+                    && text is null
+                    && string.IsNullOrWhiteSpace(textFile)
+                    ? new BodyInputResolver.Result.Success("")
+                    : await BodyInputResolver.ResolveAsync(
+                        text, textFile,
+                        new BodyInputResolver.SourceFlags("--text", "--text-file", "text"),
+                        api.FileSystem, api.StandardInput, api.Error,
+                        allowEmptyBody: attachPaths.Length > 0);
                 if (resolvedText is BodyInputResolver.Result.Failure)
                     return CommandHelpHook.RenderNearestUsage(ctx, api.Error);
 
@@ -264,6 +276,10 @@ internal static class SessionCommands
 
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
+
+                var uploads = await AgentAttachmentInput.UploadAsync(api, resolvedProjectId, attachPaths, mode);
+                if (uploads is null)
+                    return 1;
 
                 var textValue = ((BodyInputResolver.Result.Success)resolvedText).Body;
                 var idempotencyKey = string.IsNullOrWhiteSpace(suppliedIdempotencyKey)
@@ -279,9 +295,12 @@ internal static class SessionCommands
                         api.Error.WriteLine($"If the outcome is unknown, retry with --idempotency-key {idempotencyKey}.");
                     }
                 }
+                var attachmentIds = uploads.Select(attachment => attachment.Id).ToArray();
                 return await api.PrintPostWithOutputAsync(
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/followup"),
-                    new { text = textValue },
+                    attachmentIds.Length == 0
+                        ? new { text = textValue }
+                        : new { text = textValue, attachments = attachmentIds },
                     mode,
                     nameof(MohistCliApi.TableShape.SessionFollowup),
                     rawJson: true,

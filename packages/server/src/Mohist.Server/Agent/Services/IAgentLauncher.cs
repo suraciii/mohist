@@ -1,6 +1,8 @@
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Subscriptions;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Agent.Services;
@@ -69,12 +71,36 @@ public interface IAgentLauncher
     /// Replays resolve to the same identities; conflicting replays
     /// raise <see cref="Grains.LaunchIdempotencyConflictException"/>.
     /// </summary>
+    /// <param name="attachments">
+    /// Accepted attachment descriptors the route already validated
+    /// and bound to <paramref name="preMintedInputId"/>. Null or
+    /// empty when the launch carries no attachments. Carried into
+    /// the canonical plan and onto the dispatch envelope so the
+    /// Runner sees the same accepted set the API surfaced to the
+    /// caller.
+    /// </param>
+    /// <param name="preMintedInputId">
+    /// Optional input id the route mints up front so it can
+    /// validate+bind attachments against a stable owner before the
+    /// coordinator commits the plan. The coordinator adopts this id
+    /// verbatim instead of minting a fresh one. Null/empty when no
+    /// attachments are supplied.
+    /// </param>
+    /// <param name="preMintedTurnId">
+    /// Optional turn id mirroring <paramref name="preMintedInputId"/>;
+    /// the coordinator adopts it verbatim. Null/empty when no
+    /// attachments are supplied.
+    /// </param>
     Task<AgentLaunchResult> LaunchIdempotentAsync(
         AgentInfo agent,
         string prompt,
         AgentLaunchContext context,
         string idempotencyKey,
         AgentLaunchCoordinatorRequest request,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+        string? preMintedSessionId = null,
+        string? preMintedInputId = null,
+        string? preMintedTurnId = null,
         CancellationToken ct = default);
 
     Task<AgentLaunchResult> LaunchConnectionAsync(

@@ -145,16 +145,17 @@ export function useGenericSessionDataSource(
     : undefined
   const workflowContextLabel = workflowContextPath ? 'Workflow context' : undefined
 
-  const sendFollowup = useCallback(async (text: string) => {
-    const retryKey = `${sessionId}:${text}`
+  const sendFollowup = useCallback(async (text: string, attachmentIds: string[] = []) => {
+    const retryKey = `${sessionId}:${text}:${attachmentIds.join(',')}`
     const idempotencyKey = followupKeys.current.get(retryKey) ?? createIdempotencyKey()
     followupKeys.current.set(retryKey, idempotencyKey)
-    const result = await genericFollowup.mutateAsync({ sessionId, text, idempotencyKey })
+    const result = await genericFollowup.mutateAsync({ sessionId, text, attachments: attachmentIds, idempotencyKey })
     setFollowupResult(result)
     if (result.status === 'unknown') {
       throw new Error('Follow-up outcome is unknown. Retry with the same key.')
     }
     followupKeys.current.delete(retryKey)
+    return result
   }, [genericFollowup, sessionId])
   const followupStatus = useMemo(() => {
     if (!followupResult) return null
@@ -194,6 +195,8 @@ export function useGenericSessionDataSource(
     statusKind,
     isRunning,
     canFollowup,
+    supportsInputAttachments: true,
+    projectId,
     followupIsPending: genericFollowup.isPending,
     followupStatus,
     sendFollowup,

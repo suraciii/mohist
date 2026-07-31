@@ -2,10 +2,15 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
+import { AttachmentComposer, AttachmentResults, type AttachmentResultsValue, type UploadAttachment } from '@/shared/ui'
+import { extractAttachmentIds } from '../../../entities/issue'
 import type { FollowupStatus } from '../../../entities/coder-session'
 
 export interface SessionFollowupComposerProps {
-  onSend: (text: string) => Promise<void> | void
+  onSend: (text: string, attachmentIds?: string[]) => Promise<SessionFollowupSubmissionResult | void> | SessionFollowupSubmissionResult | void
+  projectId?: string | null
+  allowAttachments?: boolean
+  uploadAttachment?: UploadAttachment
   isSending?: boolean
   disabled?: boolean
   className?: string
@@ -16,11 +21,19 @@ export interface SessionFollowupComposerProps {
   followupStatus?: FollowupStatus | null
 }
 
+export interface SessionFollowupSubmissionResult {
+  attachments?: AttachmentResultsValue['accepted']
+  rejectedAttachments?: AttachmentResultsValue['rejected']
+}
+
 type ButtonState = 'idle' | 'sending' | 'sent'
 type ResolvedState = 'interactive' | 'queued' | 'unavailable'
 
 export function SessionFollowupComposer({
   onSend,
+  projectId = null,
+  allowAttachments = true,
+  uploadAttachment,
   isSending: isSendingProp = false,
   disabled = false,
   className,
@@ -33,9 +46,13 @@ export function SessionFollowupComposer({
   const [inlineError, setInlineError] = useState<string | null>(null)
   const [sentFlash, setSentFlash] = useState(false)
   const [localSending, setLocalSending] = useState(false)
+  const [attachmentResult, setAttachmentResult] = useState<AttachmentResultsValue | null>(null)
+  const [composerKey, setComposerKey] = useState(0)
   const sentFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const trimmed = text.trim()
+  const attachmentIds = extractAttachmentIds(text)
+  const attachmentsEnabled = Boolean(projectId) && allowAttachments
   const isSending = isSendingProp || localSending
 
   const resolvedState: ResolvedState = state === 'closed' ? 'unavailable' : state ?? (
@@ -63,7 +80,7 @@ export function SessionFollowupComposer({
 
   const canSend =
     !disabled &&
-    trimmed.length > 0 &&
+    (trimmed.length > 0 || attachmentIds.length > 0) &&
     !isSending
 
   useEffect(() => {
@@ -82,14 +99,22 @@ export function SessionFollowupComposer({
     if (!canSend) return
     setInlineError(null)
     setSentFlash(false)
+    setAttachmentResult(null)
     if (sentFlashTimerRef.current !== null) {
       clearTimeout(sentFlashTimerRef.current)
       sentFlashTimerRef.current = null
     }
     setLocalSending(true)
     try {
-      await onSend(trimmed)
+      const result = await (attachmentIds.length > 0 ? onSend(trimmed, attachmentIds) : onSend(trimmed))
+      if (result && (result.attachments?.length || result.rejectedAttachments?.length)) {
+        setAttachmentResult({
+          accepted: result.attachments,
+          rejected: result.rejectedAttachments,
+        })
+      }
       setText('')
+      if (attachmentsEnabled) setComposerKey((key) => key + 1)
       if (!hasQueuedFollowup) {
         setSentFlash(true)
         sentFlashTimerRef.current = setTimeout(() => {
@@ -163,17 +188,34 @@ export function SessionFollowupComposer({
       )}
     >
       <div className="flex items-end gap-2">
-        <Textarea
-          data-testid="session-followup-input"
-          value={text}
-          onChange={(evt) => setText(evt.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          rows={2}
-          disabled={disabled || isSending}
-          aria-label="Followup message"
-          className="h-10 min-h-10 resize-none md:h-auto md:min-h-12"
-        />
+        {attachmentsEnabled ? (
+          <AttachmentComposer
+            key={composerKey}
+            projectId={projectId!}
+            value={text}
+            onChange={setText}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            rows={2}
+            disabled={disabled || isSending}
+            data-testid="session-followup-input"
+            aria-label="Followup message"
+            uploadAttachment={uploadAttachment}
+            className="min-w-0 flex-1"
+          />
+        ) : (
+          <Textarea
+            data-testid="session-followup-input"
+            value={text}
+            onChange={(evt) => setText(evt.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            rows={2}
+            disabled={disabled || isSending}
+            aria-label="Followup message"
+            className="h-10 min-h-10 resize-none md:h-auto md:min-h-12"
+          />
+        )}
         <Button
           type="submit"
           size="sm"
@@ -184,6 +226,12 @@ export function SessionFollowupComposer({
           {isSending ? 'Sending...' : 'Send'}
         </Button>
       </div>
+
+      <AttachmentResults
+        accepted={attachmentResult?.accepted}
+        rejected={attachmentResult?.rejected}
+        className="mt-2"
+      />
 
       <div className="mt-1 flex items-center justify-between text-xs" aria-live="polite">
         <span

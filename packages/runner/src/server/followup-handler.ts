@@ -3,7 +3,7 @@
 // `AgentSessionRuntimeEventOutbox`.
 //
 // Behaviour:
-//   - drops silently on null / missing payload, missing/empty text, no
+//   - drops silently on null / missing payload, missing/empty input, no
 //     resolver, resolver returning null, resolver throwing (logged)
 //   - resolves the runtime accessor at invocation time (host-owned
 //     late binding), so a runtime built or replaced after
@@ -48,6 +48,12 @@ import type { FollowupOperationJournalStore } from "../runtime/followup-operatio
 import type { ServerConnection } from "./connection.js"
 import { SkillResolver } from "../runtime/skill-resolver.js"
 import { buildExecutionEnvelope } from "../runtime/execution-envelope.js"
+import {
+  attachmentManifestEnvelope,
+  deliverAcceptedAttachments,
+  parseAttachmentDescriptors,
+  type DeliveredAttachment,
+} from "../runtime/attachment-delivery.js"
 
 export interface FollowupHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
@@ -97,7 +103,10 @@ async function handleFollowup(
   payload: ReceiveFollowupPayload | null | undefined,
   deps: FollowupHandlerDeps,
 ): Promise<FollowupDeliveryResult> {
-  if (!payload || typeof payload.text !== "string" || payload.text.length === 0) return unavailable()
+  if (!payload) return unavailable()
+  const text = typeof payload.text === "string" ? payload.text : ""
+  const descriptors = parseAttachmentDescriptors(payload.attachments)
+  if (text.trim().length === 0 && descriptors.length === 0) return unavailable()
   const resolver = deps.followupTargetResolver ?? null
   const outbox = deps.agentSessionRuntimeEventOutbox ?? null
   if (!resolver || !outbox) return unavailable()
@@ -187,8 +196,27 @@ async function handleFollowup(
     }
   }
 
+  const attachmentDelivery = await deliverAcceptedAttachments(
+    {
+      projectId: sessionTarget.projectId,
+      agentSessionId: sessionTarget.kind === "generic" ? sessionTarget.sessionId : sessionTarget.agentSessionId ?? "",
+      inputId: payload.inputId ?? "",
+      workDir: selectedTarget.workDir,
+      connection,
+      signal: new AbortController().signal,
+    },
+    descriptors,
+  )
+  const deliveredAttachments = attachmentDelivery.attachments
+  const composedPrompt = attachmentManifestEnvelope(
+    buildExecutionEnvelope(text, definition?.instructions, resolvedSkills.skills),
+    deliveredAttachments,
+  )
+  const fileParts = deliveredAttachments
+    .flatMap((entry) => entry.status === "delivered" && entry.filePart ? [entry.filePart] : [])
+
   try {
-    await enqueueFollowupInput(outbox, sessionTarget, selectedTarget, payload, deps.randomId ?? defaultFollowupRecordId)
+    await enqueueFollowupInput(outbox, sessionTarget, selectedTarget, payload, text, deps.randomId ?? defaultFollowupRecordId)
   } catch (error) {
     if (operationId && operationKey && deps.followupOperationJournal) {
       await deps.followupOperationJournal.release(operationKey, operationId).catch(() => undefined)
@@ -199,7 +227,8 @@ async function handleFollowup(
 
   const followupRequest = {
     target: { runtime: binding.runtime, runtimeSessionId: selectedTarget.runtimeSessionId, workDir: selectedTarget.workDir },
-    prompt: buildExecutionEnvelope(payload.text, definition?.instructions, resolvedSkills.skills),
+    prompt: composedPrompt,
+    ...(fileParts.length > 0 ? { fileParts } : {}),
     ...(definition ? { options: {
       model: definition.model ?? null,
       variant: definition.variant ?? null,
@@ -308,6 +337,7 @@ async function enqueueFollowupInput(
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   payload: ReceiveFollowupPayload,
+  text: string,
   randomId: () => string,
 ): Promise<void> {
   // Issue-522 T-001 D1: when the server mints a stable inputId and
@@ -328,7 +358,7 @@ async function enqueueFollowupInput(
       type: "session.input",
       payload: {
         role: "user",
-        text: payload.text,
+        text,
         kind: "followup",
         sentAt: new Date().toISOString(),
         ...(payload.operationId ? { operationId: payload.operationId } : {}),

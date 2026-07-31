@@ -108,6 +108,31 @@ public static class AttachmentRoutes
             }
         });
 
+        projects.MapGet("/agent-sessions/{sessionId}/inputs/{inputId}/attachments/{attachmentId}/content", async (
+            HttpContext ctx,
+            [FromRoute] string projectRef,
+            string sessionId,
+            string inputId,
+            string attachmentId,
+            AttachmentService attachments) =>
+        {
+            var project = IssueRoutes.GetRequiredProject(ctx);
+            try
+            {
+                var content = await attachments.OpenAgentInputContentAsync(
+                    project.Id, sessionId, inputId, attachmentId, ctx.RequestAborted);
+                return content is null ? ApiResults.NotFound("Attachment not found") : StreamAttachment(ctx, content);
+            }
+            catch (AttachmentNotFoundException)
+            {
+                return ApiResults.NotFound("Recorded attachment content is missing");
+            }
+            catch (AttachmentStorageException ex)
+            {
+                return ApiResults.Fail(ex.Message, 500, "attachment_storage_error");
+            }
+        });
+
         projects.MapDelete("/issues/{number:int}/attachments/{attachmentId}", async (
             HttpContext ctx,
             [FromRoute] string projectRef,

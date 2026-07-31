@@ -100,6 +100,16 @@ export interface SessionInputObservation {
   sequence: number
   source: string
   acceptance: string
+  attachments?: SessionInputAttachmentObservation[] | null
+}
+
+export interface SessionInputAttachmentObservation {
+  id: string
+  name: string
+  contentType?: string | null
+  size: number
+  source: string
+  availability: string
 }
 
 export interface AgentTurnObservation {

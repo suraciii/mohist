@@ -341,7 +341,10 @@ export class OpenCodeRuntime {
       await client.session.promptAsync({
         sessionID: request.target.runtimeSessionId,
         directory: request.target.workDir,
-        parts: [{ type: "text", text: request.prompt }],
+        parts: [
+          { type: "text", text: request.prompt },
+          ...(request.fileParts ?? []).map((part) => ({ type: "file" as const, ...part })),
+        ],
         ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),
         ...(variant ? { variant } : {}),
       }, { throwOnError: true })

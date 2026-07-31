@@ -587,6 +587,61 @@ public class CliSessionCommandSpecs
     }
 
     [Fact]
+    public async Task SessionFollowup_AttachUploadsFileSendsIdAndReportsVerdict()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (request.Method == HttpMethod.Post && path.EndsWith("/attachments", StringComparison.Ordinal))
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { id = "att_followup", fileName = "context.txt", contentType = "text/plain", size = 7 },
+                }));
+            }
+
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    status = "accepted",
+                    inputId = "input-followup-attach",
+                    turnId = "turn-followup-attach",
+                    inputAcceptance = "accepted",
+                    turnStatus = "queued",
+                    attachments = new[] { new { id = "att_followup", name = "context.txt", contentType = "text/plain", size = 7 } },
+                    rejectedAttachments = Array.Empty<object>(),
+                },
+            }));
+        });
+        fileSystem.AddFile("/tmp/context.txt", "context");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["session", "followup", StableSessionId, "--attach", "/tmp/context.txt", "--idempotency-key", "followup-attach"],
+            output,
+            error,
+            fileSystem,
+            executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal("/api/projects/proj_test/attachments", handler.Requests[0].RequestUri?.PathAndQuery);
+        Assert.Contains("context.txt", handler.Requests[0].Body, StringComparison.Ordinal);
+        var body = JsonNode.Parse(handler.Requests[1].Body!)!.AsObject();
+        Assert.Equal("", body["text"]?.GetValue<string>());
+        Assert.Equal("att_followup", body["attachments"]?[0]?.GetValue<string>());
+        Assert.Equal("followup-attach", handler.Requests[1].Headers["Idempotency-Key"].Single());
+
+        var stdout = output.ToString();
+        Assert.Contains("Attachments to submit:", stdout, StringComparison.Ordinal);
+        Assert.Contains("/tmp/context.txt (context.txt, 7 B)", stdout, StringComparison.Ordinal);
+        Assert.Contains("accepted: context.txt (id=att_followup)", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SessionFollowup_ExplicitIdempotencyKey_IsSentAndReturnedIdentitiesArePrinted()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>

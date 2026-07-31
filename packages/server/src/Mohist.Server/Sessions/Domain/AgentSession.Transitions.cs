@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Sessions.Domain;
@@ -354,20 +355,36 @@ public static partial class AgentSessionExtensions
         /// replay carrying the same ids; mismatched ids or
         /// pre-existing immutable source metadata raise a conflict.
         /// </summary>
+        /// <param name="attachments">
+        /// Ordered child record of attachment descriptors carried by
+        /// the accepted input. The transition owns the persistence of
+        /// this list alongside the text so the accepted set survives a
+        /// grain reload and is queryable via the input surface.
+        /// Replays with the same input id must supply an equivalent
+        /// (id + name + content-type + size) ordered set; a mismatch
+        /// raises a conflict (the launch identity is immutable once
+        /// accepted).
+        /// </param>
         public IReadOnlyList<AgentSessionEvent> EnsureInitialLaunch(
             string inputId,
             string turnId,
             string prompt,
             string source,
             string jobId,
-            DateTime now)
+            DateTime now,
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null)
         {
             if (string.IsNullOrWhiteSpace(inputId))
                 throw new ArgumentException("Input id is required.", nameof(inputId));
             if (string.IsNullOrWhiteSpace(turnId))
                 throw new ArgumentException("Turn id is required.", nameof(turnId));
-            if (string.IsNullOrWhiteSpace(prompt))
-                throw new ArgumentException("Prompt is required.", nameof(prompt));
+            var normalizedAttachments = NormalizeAttachmentDescriptors(attachments);
+            var hasText = !string.IsNullOrWhiteSpace(prompt);
+            var hasAttachments = normalizedAttachments is { Count: > 0 };
+            if (!hasText && !hasAttachments)
+                throw new ArgumentException(
+                    "Prompt is required unless at least one attachment is accepted.",
+                    nameof(prompt));
             if (string.IsNullOrWhiteSpace(jobId))
                 throw new ArgumentException("Job id is required.", nameof(jobId));
 
@@ -379,10 +396,11 @@ public static partial class AgentSessionExtensions
                 var existing = inputs[inputIndex];
                 if (!string.Equals(existing.Text, prompt, StringComparison.Ordinal)
                     || !string.Equals(existing.Source, source, StringComparison.Ordinal)
-                    || !string.Equals(existing.JobId, jobId, StringComparison.Ordinal))
+                    || !string.Equals(existing.JobId, jobId, StringComparison.Ordinal)
+                    || !AttachmentDescriptorsEquivalent(existing.Attachments, normalizedAttachments))
                 {
                     throw new InvalidOperationException(
-                        $"AgentSession {session.Id} already has input '{inputId}' with different content/source/job.");
+                        $"AgentSession {session.Id} already has input '{inputId}' with different content/source/job/attachments.");
                 }
             }
             else
@@ -394,7 +412,8 @@ public static partial class AgentSessionExtensions
                     Source: source,
                     Acceptance: AgentSessionInputAcceptance.Accepted,
                     RecordedAt: now,
-                    JobId: jobId));
+                    JobId: jobId,
+                    Attachments: normalizedAttachments));
             }
 
             var turns = (session.Status.Turns ?? []).ToList();
@@ -439,7 +458,8 @@ public static partial class AgentSessionExtensions
             string turnId,
             string prompt,
             string source,
-            DateTime now)
+            DateTime now,
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null)
         {
             if (string.IsNullOrWhiteSpace(inputId))
                 throw new ArgumentException("Input id is required.", nameof(inputId));
@@ -449,6 +469,8 @@ public static partial class AgentSessionExtensions
                 throw new ArgumentException("Prompt is required.", nameof(prompt));
             if (string.IsNullOrWhiteSpace(source))
                 throw new ArgumentException("Source is required.", nameof(source));
+
+            var normalizedAttachments = NormalizeAttachmentDescriptors(attachments);
 
             var inputs = (session.Status.Inputs ?? []).ToList();
             var turns = (session.Status.Turns ?? []).ToList();
@@ -462,10 +484,11 @@ public static partial class AgentSessionExtensions
                 var existing = inputs[inputIndex];
                 if (!string.Equals(existing.Text, prompt, StringComparison.Ordinal)
                     || !string.Equals(existing.Source, source, StringComparison.Ordinal)
-                    || !string.IsNullOrWhiteSpace(existing.JobId))
+                    || !string.IsNullOrWhiteSpace(existing.JobId)
+                    || !AttachmentDescriptorsEquivalent(existing.Attachments, normalizedAttachments))
                 {
                     throw new InvalidOperationException(
-                        $"AgentSession {session.Id} already has input '{inputId}' with different content/source/job linkage.");
+                        $"AgentSession {session.Id} already has input '{inputId}' with different content/source/job/attachments linkage.");
                 }
             }
 
@@ -512,7 +535,9 @@ public static partial class AgentSessionExtensions
                 Text: prompt,
                 Source: source,
                 Acceptance: AgentSessionInputAcceptance.Accepted,
-                RecordedAt: now));
+                RecordedAt: now,
+                JobId: null,
+                Attachments: normalizedAttachments));
             turns.Add(new AgentTurnRecord(
                 Id: turnId,
                 Sequence: turns.Count + 1,
@@ -937,6 +962,22 @@ public static partial class AgentSessionExtensions
         /// <see cref="AgentSessionFollowupAcceptResult"/> identity
         /// before dispatching to the runner.
         /// </summary>
+        /// <param name="text">
+        /// Follow-up text. May be empty when the input carries at
+        /// least one accepted attachment — the spec's
+        /// "non-empty text OR at least one accepted attachment"
+        /// constraint is enforced here. Validation already rejects
+        /// inputs with neither text nor attachments upstream of the
+        /// grain.
+        /// </param>
+        /// <param name="attachments">
+        /// Ordered attachment child record carried by the accepted
+        /// input. Stored alongside the text so the accepted set
+        /// survives a grain reload and is queryable via the input
+        /// surface. Replays with the same idempotency key must
+        /// supply an equivalent (id + name + content-type + size)
+        /// ordered set; a mismatch raises a conflict.
+        /// </param>
         public AgentSessionFollowupAcceptResult AcceptFollowup(
             string inputId,
             string turnId,
@@ -944,7 +985,8 @@ public static partial class AgentSessionExtensions
             string text,
             string source,
             string idempotencyKey,
-            DateTime now)
+            DateTime now,
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null)
         {
             if (string.IsNullOrWhiteSpace(inputId))
                 throw new ArgumentException("Input id is required.", nameof(inputId));
@@ -952,10 +994,18 @@ public static partial class AgentSessionExtensions
                 throw new ArgumentException("Turn id is required.", nameof(turnId));
             if (string.IsNullOrWhiteSpace(operationId))
                 throw new ArgumentException("Operation id is required.", nameof(operationId));
-            if (string.IsNullOrWhiteSpace(text))
-                throw new ArgumentException("Text is required.", nameof(text));
             if (string.IsNullOrWhiteSpace(source))
                 throw new ArgumentException("Source is required.", nameof(source));
+
+            var normalizedAttachments = NormalizeAttachmentDescriptors(attachments);
+            var hasText = !string.IsNullOrWhiteSpace(text);
+            var hasAttachments = normalizedAttachments is { Count: > 0 };
+            if (!hasText && !hasAttachments)
+            {
+                throw new ArgumentException(
+                    "Follow-up input requires non-empty text or at least one accepted attachment.",
+                    nameof(text));
+            }
 
             var inputs = (session.Status.Inputs ?? []).ToList();
             var turns = (session.Status.Turns ?? []).ToList();
@@ -969,9 +1019,12 @@ public static partial class AgentSessionExtensions
             if (existing is not null)
             {
                 // Idempotent retry: cannot mutate an already-accepted
-                // input's identity (id, text, source must match).
-                if (!string.Equals(existing.Text, text, StringComparison.Ordinal)
-                    || !string.Equals(existing.Source, source, StringComparison.Ordinal))
+                // input's identity (text, source, attachment set must match).
+                var expectedText = hasText ? text : string.Empty;
+                var existingText = existing.Text ?? string.Empty;
+                if (!string.Equals(existingText, expectedText, StringComparison.Ordinal)
+                    || !string.Equals(existing.Source, source, StringComparison.Ordinal)
+                    || !AttachmentDescriptorsEquivalent(existing.Attachments, normalizedAttachments))
                 {
                     throw new InvalidOperationException(
                         $"AgentSession {session.Id} already accepts idempotency key '{idempotencyKey}' with different content.");
@@ -998,17 +1051,22 @@ public static partial class AgentSessionExtensions
                     TurnStatus: existingTurn.Status);
             }
 
-            var candidateTurn = ChooseFollowupTurnForAssignment(turns, leases);
+            var candidateTurn = ChooseFollowupTurnForAssignment(
+                turns,
+                leases,
+                inputs,
+                hasAttachments);
 
             var newInput = new AgentSessionInputRecord(
                 Id: inputId,
                 Sequence: inputs.Count + 1,
-                Text: text,
+                Text: text ?? string.Empty,
                 Source: source,
                 Acceptance: AgentSessionInputAcceptance.Accepted,
                 RecordedAt: now,
                 JobId: null,
-                IdempotencyKey: idempotencyKey);
+                IdempotencyKey: idempotencyKey,
+                Attachments: normalizedAttachments);
 
             AgentTurnRecord updatedTurn;
             var createdNewTurn = false;
@@ -1082,7 +1140,8 @@ public static partial class AgentSessionExtensions
                 AlreadyAccepted: false,
                 ShouldRedeliver: true,
                 InputAcceptance: newInput.Acceptance,
-                TurnStatus: updatedTurn.Status);
+                TurnStatus: updatedTurn.Status,
+                Attachments: normalizedAttachments);
         }
 
         /// <summary>
@@ -1094,8 +1153,13 @@ public static partial class AgentSessionExtensions
         /// </summary>
         private static AgentTurnRecord? ChooseFollowupTurnForAssignment(
             IReadOnlyList<AgentTurnRecord> turns,
-            IReadOnlyList<AgentSessionFollowupLease> leases)
+            IReadOnlyList<AgentSessionFollowupLease> leases,
+            IReadOnlyList<AgentSessionInputRecord> inputs,
+            bool incomingHasAttachments)
         {
+            if (incomingHasAttachments)
+                return null;
+
             for (var i = turns.Count - 1; i >= 0; i--)
             {
                 var candidate = turns[i];
@@ -1105,6 +1169,9 @@ public static partial class AgentSessionExtensions
                     continue;
                 if (leases.Any(lease => string.Equals(lease.TurnId, candidate.Id, StringComparison.Ordinal)
                     && lease.PayloadSealed))
+                    continue;
+                if (candidate.InputIds.Any(inputId => inputs.Any(input => input.Id == inputId
+                    && input.Attachments is { Count: > 0 })))
                     continue;
                 return candidate;
             }
@@ -1284,5 +1351,53 @@ public static partial class AgentSessionExtensions
             at is null
                 ? long.MinValue
                 : at.Value.Ticks / ContextUsageHistoryBucket.Ticks;
+
+        /// <summary>
+        /// Returns a defensive copy of the supplied attachment
+        /// descriptors, preserving order and dropping null / blank-id
+        /// entries. The list is stored on the durable input record so
+        /// callers may not mutate the original collection after the
+        /// transition completes.
+        /// </summary>
+        private static IReadOnlyList<AgentSessionInputAttachmentDescriptor>? NormalizeAttachmentDescriptors(
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? descriptors)
+        {
+            if (descriptors is null || descriptors.Count == 0) return null;
+            var copy = new List<AgentSessionInputAttachmentDescriptor>(descriptors.Count);
+            foreach (var descriptor in descriptors)
+            {
+                if (descriptor is null || string.IsNullOrWhiteSpace(descriptor.Id)) continue;
+                copy.Add(descriptor);
+            }
+            return copy.Count == 0 ? null : copy;
+        }
+
+        /// <summary>
+        /// Idempotency check for the attachment child record on
+        /// <see cref="AgentSessionInputRecord"/>. Two descriptor lists
+        /// are equivalent when they carry the same ordered ids and
+        /// matching name / content-type / size tuples — accepted-at is
+        /// intentionally excluded because the wall-clock stamp is not
+        /// a property of the immutable launch identity.
+        /// </summary>
+        private static bool AttachmentDescriptorsEquivalent(
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? left,
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? right)
+        {
+            var leftCount = left?.Count ?? 0;
+            var rightCount = right?.Count ?? 0;
+            if (leftCount != rightCount) return false;
+            if (leftCount == 0) return true;
+            for (var index = 0; index < leftCount; index++)
+            {
+                var a = left![index];
+                var b = right![index];
+                if (!string.Equals(a.Id, b.Id, StringComparison.Ordinal)) return false;
+                if (!string.Equals(a.OriginalFileName, b.OriginalFileName, StringComparison.Ordinal)) return false;
+                if (!string.Equals(a.ContentType, b.ContentType, StringComparison.Ordinal)) return false;
+                if (a.Size != b.Size) return false;
+            }
+            return true;
+        }
     }
 }

@@ -16,6 +16,7 @@ import {
   launchAgentSessionMutationOptions,
   getAgentLaunchObservationMeaning,
   postGenericFollowup,
+  agentInputAttachmentContentPath,
 } from './agent-sessions'
 useMswServer()
 
@@ -29,6 +30,14 @@ describe('getAgentLaunchObservationMeaning', () => {
     ['Unknown', 'reconcile'],
   ] as const)('maps %s from the DTO without using Session activity', (turnStatus, meaning) => {
     expect(getAgentLaunchObservationMeaning({ turnStatus })).toBe(meaning)
+  })
+})
+
+describe('agentInputAttachmentContentPath', () => {
+  it('keeps attachment content scoped to the session input', () => {
+    expect(agentInputAttachmentContentPath('proj-1', 'session/ignored', 'input-1', 'att-1')).toBe(
+      '/projects/proj-1/agent-sessions/session%2Fignored/inputs/input-1/attachments/att-1/content',
+    )
   })
 })
 
@@ -86,7 +95,7 @@ describe('getGenericSessionTranscript (client fn)', () => {
 })
 
 describe('launchAgentSession (client fn)', () => {
-  it('POSTs to the launch endpoint with prompt and context', async () => {
+  it('POSTs to the launch endpoint with prompt, context, and explicit attachments', async () => {
     const captured: { url: string; method: string; body: unknown }[] = []
     server.use(
       http.post('*/api/projects/:projectId/agents/:agentRef/sessions', async ({ request }) => {
@@ -102,13 +111,14 @@ describe('launchAgentSession (client fn)', () => {
     await launchAgentSession('proj-1', 'agent-foo', {
       prompt: 'Hello',
       context: { issueNumber: 42, },
+      attachments: ['att-1'],
     })
 
     expect(captured).toEqual([
       {
         url: '/api/projects/proj-1/agents/agent-foo/sessions',
         method: 'POST',
-        body: { prompt: 'Hello', context: { issueNumber: 42, } },
+        body: { prompt: 'Hello', context: { issueNumber: 42, }, attachments: ['att-1'] },
       },
     ])
   })
@@ -129,7 +139,7 @@ describe('launchAgentSession (client fn)', () => {
 })
 
 describe('postGenericFollowup (client fn)', () => {
-  it('POSTs to the followup endpoint with text', async () => {
+  it('POSTs to the followup endpoint with text and explicit attachments', async () => {
     const captured: { url: string; method: string; body: unknown; key: string }[] = []
     server.use(
       http.post('*/api/projects/:projectId/agent-sessions/:sessionId/followup', async ({ request }) => {
@@ -143,13 +153,13 @@ describe('postGenericFollowup (client fn)', () => {
       }),
     )
 
-    await postGenericFollowup('proj-1', 'sess-abc', { text: 'Continue' }, 'followup-key')
+    await postGenericFollowup('proj-1', 'sess-abc', { text: 'Continue', attachments: ['att-1'] }, 'followup-key')
 
     expect(captured).toEqual([
       {
         url: '/api/projects/proj-1/agent-sessions/sess-abc/followup',
         method: 'POST',
-        body: { text: 'Continue' },
+        body: { text: 'Continue', attachments: ['att-1'] },
         key: 'followup-key',
       },
     ])

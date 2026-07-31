@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure;
 
@@ -25,6 +26,15 @@ public sealed record FollowupDeliveryRequest(
     string? WorkDir,
     AgentExecutionDefinition? Definition,
     string OperationId,
-    IReadOnlyList<string> InputTexts);
+    IReadOnlyList<string> InputTexts,
+    /// <summary>
+    /// Accepted attachment descriptors for the dispatched turn. Empty
+    /// when the turn is text-only. The Runner uses these to materialize
+    /// the workspace and to build the honest, system-attributed manifest
+    /// block; bytes are never carried over the wire — content is fetched
+    /// via the owning-input scoped content route.
+    /// </summary>
+    IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    string? InputId = null);
 
 public sealed record FollowupDeliveryResult(bool Accepted);

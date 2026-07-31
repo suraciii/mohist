@@ -27,10 +27,11 @@ internal static class BodyInputResolver
         string? bodyFile,
         IFileSystem fileSystem,
         TextReader standardInput,
-        TextWriter error) =>
+        TextWriter error,
+        bool allowEmptyBody = false) =>
         ResolveAsync(inlineBody, bodyFile,
             new SourceFlags("--body", "--body-file", "issue body"),
-            fileSystem, standardInput, error);
+            fileSystem, standardInput, error, allowEmptyBody);
 
     public static async Task<Result> ResolveAsync(
         string? inlineBody,
@@ -38,7 +39,8 @@ internal static class BodyInputResolver
         SourceFlags flags,
         IFileSystem fileSystem,
         TextReader standardInput,
-        TextWriter error)
+        TextWriter error,
+        bool allowEmptyBody = false)
     {
         var hasInline = inlineBody is not null;
         var hasFile = !string.IsNullOrWhiteSpace(bodyFile);
@@ -88,7 +90,7 @@ internal static class BodyInputResolver
             }
         }
 
-        if (string.IsNullOrWhiteSpace(resolved))
+        if (string.IsNullOrWhiteSpace(resolved) && !allowEmptyBody)
         {
             var message = $"{flags.BodyKind} is required (resolved body is empty)";
             await error.WriteLineAsync(message)

@@ -93,6 +93,11 @@ export async function writeText(path: string, content: string) {
   await writeFile(path, content)
 }
 
+export async function writeBinary(path: string, content: Uint8Array) {
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, content)
+}
+
 export async function deleteFile(path: string) {
   await rm(path, { force: true })
 }

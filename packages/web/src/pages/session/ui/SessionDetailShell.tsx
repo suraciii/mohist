@@ -14,9 +14,10 @@ import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
 import { useMediaQuery } from '@/shared/lib/use-media-query'
-import { getAgentLaunchObservationMeaning } from '../../../entities/agent'
+import { agentInputAttachmentContentPath, getAgentLaunchObservationMeaning } from '../../../entities/agent'
 import type { StatusKind, EmptyStateKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
+import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
 
 export interface SessionDetailShellComponents {
   SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
@@ -199,6 +200,8 @@ export function SessionDetailShell({
     cancel,
     emptyStateKind,
     launchObservation,
+    projectId,
+    supportsInputAttachments = false,
   } = data
 
   // ── All hooks must be before any early return ──
@@ -206,6 +209,18 @@ export function SessionDetailShell({
   const headerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const { locate } = useTranscriptLocate({ scrollContainerRef })
+  const resolveInputAttachment = useCallback((inputId: string, attachmentId: string): MarkdownAttachment | null => {
+    if (!supportsInputAttachments || !projectId) return null
+    const input = meta?.inputs?.find((candidate) => candidate.id === inputId)
+    const attachment = input?.attachments?.find((candidate) => candidate.id === attachmentId)
+    if (!attachment) return null
+    return {
+      url: `/api${agentInputAttachmentContentPath(projectId, sessionKey, inputId, attachmentId)}`,
+      contentType: attachment.contentType || 'application/octet-stream',
+      fileName: attachment.name,
+      size: attachment.size,
+    }
+  }, [meta?.inputs, projectId, sessionKey, supportsInputAttachments])
   const failedTools = selectFailedToolCalls(displayTurns)
   const failedGroupIds = selectToolCallGroupIds(displayTurns)
   const isUserScrollingRef = useRef(false)
@@ -353,10 +368,10 @@ export function SessionDetailShell({
     }
   }, [queuedFollowup, sessionKey, transcriptVersion])
 
-  const handleFollowupSend = useCallback(async (text: string) => {
+  const handleFollowupSend = useCallback(async (text: string, attachmentIds: string[] = []) => {
     setQueuedFollowup({ sessionKey, transcriptVersion })
     try {
-      await sendFollowup(text)
+      return await sendFollowup(text, attachmentIds)
     } catch (error) {
       setQueuedFollowup((current) => current?.sessionKey === sessionKey ? null : current)
       throw error
@@ -465,6 +480,8 @@ export function SessionDetailShell({
           {hasTurns ? (
             <SessionTranscriptLayout
               turns={displayTurns}
+              inputIdsByTurn={meta?.turns?.map((turn) => turn.inputIds)}
+              resolveAttachment={resolveInputAttachment}
               isRunning={isRunning}
               isThinking={isThinking}
               isStreaming={isStreaming}
@@ -477,14 +494,16 @@ export function SessionDetailShell({
 
         {showFollowupComposer && (
           <div data-testid="session-followup-composer-region">
-            <SessionFollowupComposer
-              onSend={handleFollowupSend}
-              isSending={followupIsPending}
-              disabled={!canFollowup}
-              hasQueuedFollowup={queuedFollowup?.sessionKey === sessionKey}
-              followupStatus={followupStatus}
-              className="py-0.5"
-            />
+              <SessionFollowupComposer
+                onSend={handleFollowupSend}
+                projectId={projectId}
+                allowAttachments={supportsInputAttachments}
+                isSending={followupIsPending}
+                disabled={!canFollowup}
+                hasQueuedFollowup={queuedFollowup?.sessionKey === sessionKey}
+                followupStatus={followupStatus}
+                className="py-0.5"
+              />
           </div>
         )}
 

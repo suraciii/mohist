@@ -9,6 +9,7 @@
 
 import type {
   OpenCodeRuntime,
+  RuntimeFilePart,
   RuntimeCancelRequest,
   RuntimeCancelResult,
   RuntimeFollowupRequest,
@@ -93,6 +94,7 @@ export interface FollowupCallTarget {
 export interface FollowupCallRequest {
   readonly target: FollowupCallTarget
   readonly prompt: string
+  readonly fileParts?: readonly RuntimeFilePart[] | null
   readonly options?: { readonly model?: string | null; readonly variant?: string | null; readonly skills?: readonly { readonly name: string; readonly instructions: string }[] }
 }
 
@@ -190,6 +192,7 @@ async function callOpenCodeFollowup(
   const opencodeRequest: RuntimeFollowupRequest = {
     target: { runtime: "opencode", runtimeSessionId: request.target.runtimeSessionId, workDir: request.target.workDir },
     prompt: request.prompt,
+    ...(request.fileParts && request.fileParts.length > 0 ? { fileParts: request.fileParts } : {}),
     ...(request.options ? { options: {
       model: parseFollowupModel(request.options.model),
       variant: request.options.variant ?? null,

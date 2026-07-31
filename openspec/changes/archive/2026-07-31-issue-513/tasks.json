@@ -1,0 +1,99 @@
+{
+  "project": "mohist-local",
+  "description": "Make explicit file attachments a first-class, owned part of Agent input across launch and follow-up on Web and CLI, delivered to the Runtime as readable content.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server: Agent-input attachment ownership, scoped content route and retention",
+      "spec": "specs/attachment-input-lifecycle/spec.md#content-is-readable-only-through-the-owning-inputs-execution-path",
+      "description": "Add an `agent-input` owner kind to the shared AttachmentService (alongside issue/comment) with a bind operation that binds accepted attachment ids to an owning agent session+input and clears the pending expiry; add a content route scoped to the owning agent-session/input that returns content only when ownership matches; and confirm retention protects bound attachments from pending cleanup while still expiring never-bound uploads. This is the resource foundation; no session-API caller yet.",
+      "acceptanceCriteria": [
+        "Binding an attachment to an agent-input owner sets OwnerKind=agent-input and clears ExpiresAt; the shared CleanupExpiredPendingAsync does not remove it after its pending TTL (unit test with injectable TimeProvider and a fake IAttachmentStorage).",
+        "A scoped agent-session/input content route returns content for an attachment owned by that input and returns not-found/denied for one owned by a different session or by no owner (spec test).",
+        "An attachment id already bound to one owner is rejected when presented for binding to a different owner (unit test).",
+        "Bound agent-input attachments expose name/content-type/size/source metadata and the stored record contains no caller temp URL, token, or raw platform event payload (unit test)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server agent-input attachment ownership kind, scoped content route, and retention behavior with passing unit/spec tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Reuses AttachmentService/AttachmentRow as-is; new OwnerKind constant + bind + content method only. Maps to design D2 and capability attachment-input-lifecycle."
+    },
+    {
+      "id": "T-002",
+      "title": "Server: Agent input accepts explicit attachments (launch + follow-up) and dispatches descriptors",
+      "spec": "specs/session-input-attachments/spec.md#a-sessioninput-carries-explicit-attachments-alongside-or-instead-of-text",
+      "description": "Extend the Agent launch and follow-up APIs and the AgentSession domain to accept explicit attachments: add an ordered Attachments child record to AgentSessionInputRecord (new Orleans Id slot for backward-compatible deserialization), accept an `attachments` field in the launch/follow-up bodies and AllowedTopLevelFields, validate-and-bind each id via T-001 at acceptance (persisted together with the input record), return a per-attachment accept/reject-with-reason result, relax the mandatory-text rule to 'non-empty text or >=1 accepted attachment', and carry accepted attachment descriptors in the AgentJobInput / FollowupDeliveryRequest dispatch payload.",
+      "acceptanceCriteria": [
+        "Launch and follow-up with attachments-only and no text are accepted, create a normal SessionInput (with the Attachments child record) and AgentTurn, and Mohist injects no fabricated prompt (spec test with a fake runtime).",
+        "An input with empty text and no usable attachment is rejected before any execution (spec test).",
+        "Each submitted attachment yields a definitive accepted/rejected-with-reason result returned to the caller; rejected attachments are not bound and not delivered; all-rejected-with-no-text rejects the whole input (spec test).",
+        "An attachment already bound to another SessionInput/session is rejected for a new input (spec test).",
+        "Accepted attachments survive a Server grain reload and appear as descriptors in the dispatch payload (unit/spec test with injectable time)."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server launch/follow-up attachment acceptance, AgentSessionInputRecord child record, per-file results, and dispatch descriptors with passing tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Maps to design D1 + D3 and capability session-input-attachments. Validation+bind is persisted with the input record so the accepted set is authoritative across restart."
+    },
+    {
+      "id": "T-003",
+      "title": "Runner: deliver accepted attachments to the Runtime as readable content",
+      "spec": "specs/agent-attachment-delivery/spec.md#accepted-attachments-reach-the-runtime-as-readable-content",
+      "description": "In the runner, consume accepted attachment descriptors from the AgentJob/follow-up dispatch, fetch each accepted attachment's content via the server's scoped content route using the runner server connection, materialize files into the workspace under .mohist/attachments/<inputId>/, pass an honest system-attributed attachment manifest block as turn content (never impersonating the user, no fabricated prompt), and pass native image parts on runtimes whose prompt API supports them. Resolve content only through the owning-input scope; never use caller temp URLs/tokens.",
+      "acceptanceCriteria": [
+        "A turn consuming an input with an accepted attachment delivers the attachment content to the Runtime as readable content (file materialized in the workspace and/or a native image part), not an unresolvable text or URL reference (spec test with a fake server content route and a fake runtime).",
+        "An attachment-only turn executes with content delivered and no fabricated prompt (spec test).",
+        "The runner fetches content only via the owning input's scoped path, and the resulting instructions/reply/transcript contain no caller temp URL, token, or raw platform event payload (spec test).",
+        "A delivery-time fetch failure surfaces the attachment as unavailable honestly and is not reported as delivered (unit test)."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner attachment resolution, workspace materialization, manifest block, and image-part delivery with passing tests",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Maps to design D4 and capability agent-attachment-delivery. Manifest block is attributed to the system and states facts (same framing as the existing [mohist-execution-definition] block)."
+    },
+    {
+      "id": "T-004",
+      "title": "Web: attach files at Agent launch and follow-up with preview and per-file results",
+      "spec": "specs/agent-attachment-entry/spec.md#web-attaches-files-as-explicit-input-resources-not-inline-text-references",
+      "description": "In the Web UI, make the Agent session launch composer send an explicit attachmentIds array (reuse extractAttachmentIds) instead of relying on inline att: text, add AttachmentComposer plus attachment send to the follow-up composer, show pending files before submission (name and size), display the per-attachment acceptance result (accepted / rejected + reason), and resolve att: references via MarkdownReader.resolveAttachment against the scoped agent-input content path.",
+      "acceptanceCriteria": [
+        "Launch and follow-up in the Web submit attachments as explicit owned input attachments, not solely as inline att: text references (component/test asserting the request body carries attachments).",
+        "The composer lists each pending file with name and size before submission (component test).",
+        "After submission the UI displays each accepted attachment and each rejected attachment with its reason (component test using a fake API returning mixed results)."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web launch and follow-up attachment UI (composer, preview, per-file results) with passing component tests",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Maps to design D5 (Web) and capability agent-attachment-entry. Depends on T-003 so the entry is end-to-end usable (user attaches -> Agent reads -> user sees result)."
+    },
+    {
+      "id": "T-005",
+      "title": "CLI: attach files at Agent launch and follow-up with per-file results",
+      "spec": "specs/agent-attachment-entry/spec.md#users-attach-files-at-agent-launch-and-follow-up",
+      "description": "Add a repeatable `--attach <path>` flag to `mo agent launch` and to the session follow-up command; upload each file via POST /attachments, send the collected ids as `attachments`, list the pending attachments before submission, and print the per-attachment accepted/rejected result.",
+      "acceptanceCriteria": [
+        "`mo agent launch --attach <path>` and the follow-up command with --attach submit attachments as explicit input attachments (CLI test against a fake server asserting the request body carries attachments).",
+        "The CLI reports the attachments it will submit and prints per-attachment accepted/rejected results with reasons (CLI test)."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "CLI launch and follow-up --attach with result reporting and passing tests",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Maps to design D5 (CLI) and capability agent-attachment-entry. Independent of T-004 (different package) but shares the same server contract."
+    }
+  ]
+}

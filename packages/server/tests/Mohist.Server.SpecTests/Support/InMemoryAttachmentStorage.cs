@@ -120,6 +120,25 @@ public sealed class InMemoryAttachmentStorage : IAttachmentStorage
         }
     }
 
+    /// <summary>
+    /// Removes the metadata for the given storage path so the next
+    /// <see cref="ReadMetadataAsync"/> returns null. Used to simulate
+    /// a storage backend that no longer serves a previously-uploaded
+    /// attachment. The bytes remain in the fake so other storage
+    /// tests can still observe the path.
+    /// </summary>
+    public void MarkUnreadable(string storagePath)
+    {
+        var normalized = ParseStoragePath(storagePath);
+        lock (_gate)
+        {
+            if (_attachments.TryGetValue(normalized, out var stored))
+            {
+                _attachments[normalized] = stored with { Metadata = null! };
+            }
+        }
+    }
+
     private static string ParseStoragePath(string storagePath)
     {
         if (string.IsNullOrWhiteSpace(storagePath))

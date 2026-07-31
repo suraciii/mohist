@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Sessions.Domain;
@@ -444,13 +445,46 @@ public sealed record AgentSessionFollowupAcceptResult(
     [property: Id(3)] bool AlreadyAccepted,
     [property: Id(4)] bool ShouldRedeliver,
     [property: Id(5)] AgentSessionInputAcceptance InputAcceptance = AgentSessionInputAcceptance.Accepted,
-    [property: Id(6)] AgentTurnStatus TurnStatus = AgentTurnStatus.Queued);
+    [property: Id(6)] AgentTurnStatus TurnStatus = AgentTurnStatus.Queued,
+    /// <summary>
+    /// Accepted attachment descriptors for the input. The list is
+    /// empty when the input is text-only or carries no accepted
+    /// attachments. Append-only Orleans field id (next free after
+    /// <see cref="TurnStatus"/>).
+    /// </summary>
+    [property: Id(7)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    /// <summary>
+    /// Per-attachment verdicts the route validated at acceptance.
+    /// Preserves the caller's original id order so the response
+    /// surface renders the same order the user submitted; rejected
+    /// entries carry a stable reason code and human-readable
+    /// message. Append-only Orleans field id (next free after
+    /// <see cref="Attachments"/>).
+    /// </summary>
+    [property: Id(8)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionFollowupDispatch(
     [property: Id(0)] string TurnId,
     [property: Id(1)] string OperationId,
-    [property: Id(2)] IReadOnlyList<string> InputTexts);
+    /// <summary>
+    /// Per-input text payloads flattened across all inputs assigned
+    /// to the turn. Preserved verbatim for the existing single-text
+    /// dispatch envelope.
+    /// </summary>
+    [property: Id(2)] IReadOnlyList<string> InputTexts,
+    /// <summary>
+    /// Accepted attachment descriptors carried by the dispatched
+    /// turn. Empty when the turn is text-only. Append-only Orleans
+    /// field id (next free after <see cref="InputTexts"/>).
+    /// </summary>
+    [property: Id(3)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    /// <summary>
+    /// The owning input id for the dispatched attachment content route.
+    /// A follow-up currently consumes one input; null preserves the
+    /// legacy multi-input shape without inventing an owner scope.
+    /// </summary>
+    [property: Id(4)] string? InputId = null);
 
 /// <summary>
 /// Lookup result of <see cref="AgentSessionExtensions.FindFollowupInputByIdempotencyKey"/>.
@@ -483,6 +517,17 @@ public sealed record AgentSessionTranscriptEvidence(
 /// that the prompt is recorded; the runtime's eventual delivery
 /// result is recorded as a separate turn status update, not as
 /// reverting the input acceptance.
+///
+/// <para>
+/// <see cref="Attachments"/> carries the ordered list of attachments
+/// accepted at input validation time. Attachments are persisted as a
+/// child record of the input so the accepted set is authoritative
+/// across restart and is queryable via the same input/turn surface as
+/// the text. Append-only Orleans field id (next free after
+/// <see cref="IdempotencyKey"/>); absent on records written before
+/// attachments were attached to inputs — the runtime treats an absent
+/// or empty list as no attachments.
+/// </para>
 /// </summary>
 [GenerateSerializer]
 public sealed record AgentSessionInputRecord(
@@ -493,7 +538,8 @@ public sealed record AgentSessionInputRecord(
     [property: Id(4)] AgentSessionInputAcceptance Acceptance,
     [property: Id(5)] DateTime RecordedAt,
     [property: Id(6)] string? JobId = null,
-    [property: Id(7)] string? IdempotencyKey = null);
+    [property: Id(7)] string? IdempotencyKey = null,
+    [property: Id(8)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
 
 public enum AgentSessionInputAcceptance
 {

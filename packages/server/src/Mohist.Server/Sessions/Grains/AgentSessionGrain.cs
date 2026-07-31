@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
@@ -518,10 +519,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionFollowupAcceptResult> AcceptFollowupAsync(AcceptFollowupCommand command)
     {
         ArgumentNullException.ThrowIfNull(command);
-        if (string.IsNullOrWhiteSpace(command.Text))
-            throw new ArgumentException("Text is required.", nameof(command));
         if (string.IsNullOrWhiteSpace(command.Source))
             throw new ArgumentException("Source is required.", nameof(command));
+
+        var hasText = !string.IsNullOrWhiteSpace(command.Text);
+        var hasAttachments = command.Attachments is { Count: > 0 };
+        if (!hasText && !hasAttachments)
+        {
+            throw new ArgumentException(
+                "Follow-up input requires non-empty text or at least one accepted attachment.",
+                nameof(command));
+        }
 
         var session = await GetRequiredAsync();
         EnsureRuntimeSessionPresent(session);
@@ -547,8 +555,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (existing is not null)
         {
             var accepted = existing.Input;
-            if (!string.Equals(accepted.Text, command.Text, StringComparison.Ordinal)
-                || !string.Equals(accepted.Source, command.Source, StringComparison.Ordinal))
+            var expectedText = hasText ? command.Text : string.Empty;
+            var existingText = accepted.Text ?? string.Empty;
+            if (!string.Equals(existingText, expectedText, StringComparison.Ordinal)
+                || !string.Equals(accepted.Source, command.Source, StringComparison.Ordinal)
+                || !AttachmentSetEquivalent(accepted.Attachments, command.Attachments))
             {
                 throw new InvalidOperationException(
                     $"AgentSession {session.Id} already has input '{accepted.Id}' with different content/source for idempotency key.");
@@ -563,23 +574,54 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 TurnId: existingTurn.Id,
                 OperationId: existing.OperationId ?? string.Empty,
                 AlreadyAccepted: true,
-                ShouldRedeliver: existingTurn.Status == AgentTurnStatus.Queued);
+                ShouldRedeliver: existingTurn.Status == AgentTurnStatus.Queued,
+                InputAcceptance: accepted.Acceptance,
+                TurnStatus: existingTurn.Status,
+                Attachments: accepted.Attachments);
         }
 
         const int maxQueuedTurns = 16;
         if (session.CountQueuedFollowupInputs() >= maxQueuedTurns)
             throw new AgentSessionFollowupCapacityExceededException(session.Id, maxQueuedTurns);
 
+        var inputId = string.IsNullOrWhiteSpace(command.PreMintedInputId)
+            ? Guid.NewGuid().ToString("N")
+            : command.PreMintedInputId!;
+        var turnId = string.IsNullOrWhiteSpace(command.PreMintedTurnId)
+            ? Guid.NewGuid().ToString("N")
+            : command.PreMintedTurnId!;
+
         var result = session.AcceptFollowup(
-            inputId: Guid.NewGuid().ToString("N"),
-            turnId: Guid.NewGuid().ToString("N"),
+            inputId: inputId,
+            turnId: turnId,
             operationId: Guid.NewGuid().ToString("N"),
-            text: command.Text,
+            text: command.Text ?? string.Empty,
             source: command.Source,
             idempotencyKey: key,
-            now: Now());
+            now: Now(),
+            attachments: command.Attachments);
         await CommitAsync(session, Array.Empty<AgentSessionEvent>());
-        return result;
+        return result with { AttachmentResults = command.AttachmentResults };
+    }
+
+    private static bool AttachmentSetEquivalent(
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? persisted,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? supplied)
+    {
+        var persistedCount = persisted?.Count ?? 0;
+        var suppliedCount = supplied?.Count ?? 0;
+        if (persistedCount != suppliedCount) return false;
+        if (persistedCount == 0) return true;
+        for (var index = 0; index < persistedCount; index++)
+        {
+            var a = persisted![index];
+            var b = supplied![index];
+            if (!string.Equals(a.Id, b.Id, StringComparison.Ordinal)) return false;
+            if (!string.Equals(a.OriginalFileName, b.OriginalFileName, StringComparison.Ordinal)) return false;
+            if (!string.Equals(a.ContentType, b.ContentType, StringComparison.Ordinal)) return false;
+            if (a.Size != b.Size) return false;
+        }
+        return true;
     }
 
     public async Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync()
@@ -594,10 +636,32 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (index < 0 || leases[index].Dispatching) return null;
         var inputs = (session.Status.Inputs ?? []).ToDictionary(input => input.Id, StringComparer.Ordinal);
         var texts = turn.InputIds.Select(id => inputs[id].Text).ToArray();
+        var attachments = CollectAttachmentsForDispatch(inputs, turn.InputIds);
         leases[index] = leases[index] with { Dispatching = true, PayloadSealed = true };
         SetPendingFollowups(session, leases);
         await CommitAsync(session, []);
-        return new AgentSessionFollowupDispatch(turn.Id, leases[index].OperationId, texts);
+        var inputId = turn.InputIds.Count == 1 ? turn.InputIds[0] : null;
+        return new AgentSessionFollowupDispatch(turn.Id, leases[index].OperationId, texts, attachments, inputId);
+    }
+
+    private static IReadOnlyList<AgentSessionInputAttachmentDescriptor>? CollectAttachmentsForDispatch(
+        IReadOnlyDictionary<string, AgentSessionInputRecord> inputs,
+        IReadOnlyList<string> inputIds)
+    {
+        var collected = new List<AgentSessionInputAttachmentDescriptor>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var inputId in inputIds)
+        {
+            if (!inputs.TryGetValue(inputId, out var input)) continue;
+            if (input.Attachments is null) continue;
+            foreach (var descriptor in input.Attachments)
+            {
+                if (descriptor is null) continue;
+                if (!seen.Add(descriptor.Id)) continue;
+                collected.Add(descriptor);
+            }
+        }
+        return collected.Count == 0 ? null : collected;
     }
 
     public async Task ReleaseFollowupDispatchAsync(string operationId)
@@ -2041,8 +2105,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             throw new ArgumentException("Input id is required.", nameof(command));
         if (string.IsNullOrWhiteSpace(command.TurnId))
             throw new ArgumentException("Turn id is required.", nameof(command));
-        if (string.IsNullOrWhiteSpace(command.Prompt))
-            throw new ArgumentException("Prompt is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.Prompt)
+            && (command.Attachments is null || command.Attachments.Count == 0))
+            throw new ArgumentException(
+                "Prompt is required unless at least one attachment is accepted.",
+                nameof(command));
         if (string.IsNullOrWhiteSpace(command.JobId))
             throw new ArgumentException("Job id is required.", nameof(command));
 
@@ -2069,7 +2136,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 prompt: command.Prompt,
                 source: command.Source,
                 jobId: command.JobId,
-                now: Now());
+                now: Now(),
+                attachments: command.Attachments);
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
@@ -2100,10 +2168,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             if (!string.Equals(inputMatch.Text, command.Prompt, StringComparison.Ordinal)
                 || !string.Equals(inputMatch.Source, command.Source, StringComparison.Ordinal)
-                || !string.Equals(inputMatch.JobId, command.JobId, StringComparison.Ordinal))
+                || !string.Equals(inputMatch.JobId, command.JobId, StringComparison.Ordinal)
+                || !AttachmentSetEquivalent(inputMatch.Attachments, command.Attachments))
             {
                 throw new InvalidOperationException(
-                    $"AgentSession {SessionId} already has input '{command.InputId}' with different content/source/job.");
+                    $"AgentSession {SessionId} already has input '{command.InputId}' with different content/source/job/attachments.");
             }
         }
 
@@ -2192,7 +2261,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             turnId: command.TurnId,
             prompt: command.Prompt,
             source: command.Source,
-            now: Now());
+            now: Now(),
+            attachments: command.Attachments);
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);

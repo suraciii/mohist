@@ -1,0 +1,127 @@
+## Codebase Patterns
+
+- `AttachmentService.OwnerKind*` constants drive the existing issue/comment ownership; bind helpers follow the `Bind*Async` / `Validate*Bind*Async` pair pattern that reuses `ValidateAvailableAsync` + `EnsureAttachmentLimit`. `CleanupExpiredPendingAsync` keys on `OwnerKind == null`, so any new owner kind that clears `ExpiresAt` is automatically retention-protected without extra logic.
+- `AttachmentRow.OwnerId` is a free-form string (max 256) used to carry owner-scoped identity. For a composite owner (session+input), encode as a `/`-separated string; both session and input ids are `Guid.NewGuid().ToString("N")` (32 hex chars, no slashes) so the separator is unambiguous.
+- API attachment routes register inside the project group (`/api/projects/{projectRef}`) and use `IssueRoutes.GetRequiredProject(ctx)` to resolve the project. Spec tests in the integration collection reuse the fixture's `_fixture.Services.CreateAsyncScope()` to grab `AttachmentService` directly for cases where there's no API caller yet (e.g., bind before the launch/follow-up API exists).
+- Fake `IAttachmentStorage` exists in two flavors: a full `InMemoryAttachmentStorage` in SpecTests/Support (used by HTTP spec tests) and a lighter `FakeAttachmentStorage` in UnitTests/Support (used by service-level unit tests with `FakeTimeProvider`). Keep the UnitTests version in UnitTests/Support rather than crossing the SpecTests project boundary.
+- Service unit tests use in-memory SQLite with `EnsureCreated()` against `MohistDbContext`, a `TestDbContextFactory` wrapping `DbContextOptions`, and `FakeTimeProvider` for time. `using var db = database.CreateContext();` (not `await using`) matches the existing AesGcmSecretStoreTests pattern; use `SingleAsync`/`AnyAsync`/`ToListAsync` for awaited EF calls.
+
+## T-001 decisions
+
+- Added `OwnerKindAgentInput = "agent-input"` and a composite owner-id builder `BuildAgentInputOwnerId(sessionId, inputId)` returning `"{sessionId}/{inputId}"`. The route path mirrors this: `/api/projects/{projectRef}/agent-sessions/{sessionId}/inputs/{inputId}/attachments/{attachmentId}/content`.
+- The content route uses the same `StreamAttachment` helper as issue/comment attachments, so disposition + content-type handling stays uniform. No projectId-or-issue gate (no need to look up an issue first — ownership is the only gate, exactly as the spec mandates).
+- Validation path delegates to a new `ValidateAgentInputBindCoreAsync` that mirrors the issue/comment helpers; this keeps the rejection contract (missing id, already bound) identical to the existing flows.
+- `AttachmentRow` itself is unchanged — name/content-type/size/source are already stored on the row and never needed a caller-temp-URL/token/event-payload column, so the "no secrets in the stored record" criterion is satisfied by the existing schema; the unit test asserts that no such columns exist rather than scrubbing values.
+
+## Gotchas
+
+- `OwnerId` already has `HasMaxLength(16)` set on the kind column and `HasMaxLength(256)` on `OwnerId`. The composite `{sessionId}/{inputId}` (33 chars max) fits comfortably.
+- EF's `Single`/`Any`/`ToList` are sync, `SingleAsync`/`AnyAsync`/`ToListAsync` are the awaited versions. Misusing `await db.X.Single(...)` compiles but produces a confusing "X does not contain GetAwaiter" LSP/runtime error — always use the *Async variants in awaited test code.
+- For the integration HTTP tests, `MohistIntegrationFixture` already wires `InMemoryAttachmentStorage` into DI, so the spec test can bind via `scope.ServiceProvider.GetRequiredService<AttachmentService>()` without constructing a new storage. The unit test path constructs its own `FakeAttachmentStorage` to keep the service boundary clean.
+
+## T-002 decisions
+
+- Added `AgentSessionInputAttachmentDescriptor` (Orleans `[GenerateSerializer]` record with `[property: Id(N)]` on constructor params — append-only Orleans field ids keep existing persisted state backward compatible) and `AgentSessionInputAcceptance`/`AgentInputAttachmentAcceptanceBatch` plus `AgentInputAttachmentRejectionReason` (NotFound, Expired, NotReadable, ExceedsSizeLimit, UnsupportedType, AlreadyBound).
+- `AgentSessionInputRecord.Attachments` is the new ordered child record slot at `[Id(8)]`; persisted alongside the existing `Text`/`Source`/etc. so the accepted set survives a grain reload. The replay/equivalence check (in the Session and Job grains) folds the attachment set into the immutable launch identity so a replay with a different attachment set raises a conflict.
+- `AttachmentService.ValidateAndBindAgentInputAsync` returns a per-file batch (descriptor for accepted, reason for rejected) and persists only the accepted set; rejected attachments stay pending (OwnerKind = null, ExpiresAt preserved) so the cleanup sweep reaps them on their original schedule. The aggregate per-owner limit applies across already-bound + new submissions — over-limit rejects the whole submission with no binding applied.
+- The launch and follow-up routes share the same allowlist change (`{ "text"/"prompt", "context"/..., "attachments" }`), the same "non-empty text OR ≥1 accepted attachment" rule, and the same response shape (`attachments[]`/`rejectedAttachments[]` + per-file verdict). `LaunchCoordinatorRequest` and `AcceptFollowupCommand` carry an `AttachmentIds`/`Attachments` array respectively so the coordinator fingerprint and idempotency conflict path cover attachment replays.
+- `AgentLaunchCoordinatorGrain`, `AgentJobGrain.PrepareManualLaunchAsync`/`SubmitAsync`, and `EnsureInitialLaunch`/`AcceptFollowup` extension methods relax the "non-empty prompt" guard to "non-empty prompt OR ≥1 accepted attachment" — the dispatch envelope (`with.attachments` for AgentJob, `attachments[]` for follow-up) carries the descriptors verbatim so the Runner can resolve content via the scoped content route. Accepted attachment bytes are never carried over the wire.
+- The Coordinator advances through PrepareJob → EnsureInitialLaunch → SubmitJob; each step catches and logs exceptions so the reminder retries on partial failure. The coordinator's `Completed` flag flips to true only after `SubmitPreparedLaunchAsync` returns, so an AttachmentService bind failure surfaces as `LaunchSetupPending` (503) and the reminder retries — not a successful but empty launch.
+- `FollowupDeliveryRequest.Attachments` (Orleans `[GenerateSerializer]`) is forwarded as `payload.attachments` in `RunnerFollowupDeliveryDispatcher.DispatchAsync`. Runner-side wiring is T-003's surface.
+- Spec tests use a new `AgentSessionInputAttachmentAcceptanceSpecs` collection (`IntegrationApi`) — not the existing `LaunchRoutesTestSupport` (different collection, different fixture) — because the new tests need both the launch coordinator's AttachmentService integration and a fake in-memory attachment storage the test can corrupt (`MarkUnreadable`) to simulate storage-side failures.
+
+## T-002 gotchas
+
+- DI picks `AttachmentService`'s 4-arg constructor (`TimeProvider time`) over the 3-arg `IOptions<>` one because the integration fixture registers `TimeProvider` after `MohistServiceRegistration` runs — `RemoveAll<TimeProvider>()` + `AddSingleton<TimeProvider>(_timeProvider)` in `ConfigureTestServices` is required for the FakeTimeProvider to win; otherwise validation runs against wall-clock and seeded `ExpiresAt` in the past fires the `Expired` reason prematurely.
+- The session grain had a duplicate "Prompt is required" guard at `AgentSessionGrain.EnsureInitialLaunchAsync` in addition to the transition's `EnsureInitialLaunch`. Both must be relaxed to "prompt OR attachments" — fixing only the transition lets the coordinator silently drop the input and the launch returns `launch_setup_pending` (the silent exception is caught in the coordinator's `AdvanceAsync` try/catch).
+- `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull` is the project default; the `AgentSessionFollowupResult.Attachments`/`RejectedAttachments` fields must default to empty arrays rather than null so the JSON response shape stays stable across all response paths (the spec test deserializes them via `GetProperty`, which throws on missing keys).
+- `AttachmentService.ValidateAndBindAgentInputAsync` checks `row.Size > _options.MaxFileBytes` BEFORE checking readability, but the unit test approach (seed a row whose `Size` exceeds the runtime limit) requires bypassing the upload's own size guard — the cleanest path is the FakeTimeProvider + a row inserted via `db.Attachments.Add` so the upload pipeline never sees it.
+- `InMemoryAttachmentStorage.MarkUnreadable(storagePath)` requires the storage path (not the attachment id) and the path must pass `ParseStoragePath` (3 segments, ends in `/content`). Always use `storage.GenerateStoragePath(projectId, attachmentId)` rather than hand-formatting the path.
+- For HTTP integration tests the `Attachments: []` (empty array) is intentional — JSON omits null fields. The followup route returns `Attachments: accepted ?? []` and `RejectedAttachments: rejected ?? []` to guarantee both keys always serialize.
+
+## T-003 decisions
+
+- Runner attachment delivery is centralized in `runtime/attachment-delivery.ts`: accepted descriptors are fetched through `ServerConnection.openAgentInputAttachment`, written below `.mohist/attachments/<inputId>/<attachmentId>/<safeName>`, and represented in a factual `[mohist-attachments]` block. Fetch or materialization failures remain `unavailable` entries and never produce a delivered file or native part.
+- OpenCode receives additive native `file` parts only for image content, using a data URL built from bytes already fetched through the owning-input route. Pi remains workspace-only; both runtimes receive the same manifest content.
+- Follow-up dispatches must carry the stable owning `InputId`; the server now adds it to `AgentSessionFollowupDispatch` and the SignalR payload. Workflow follow-ups also carry the canonical agent session id on the wire so the scoped content route remains usable.
+- The follow-up handler accepts an empty text when descriptors are present, materializes attachments before invoking the runtime, and keeps the durable `session.input` event text-only. Caller URL/token/raw event fields are not read or copied into the prompt, manifest, or outbox record.
+
+## T-003 verification
+
+- Added runner tests for AgentJob and follow-up attachment-only turns, workspace materialization, OpenCode image parts, scoped URL construction, unavailable delivery, manifest attribution, path containment, and secret non-leakage.
+- `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, `npm run test:ci -w packages/runner`, and `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore` are the required final checks; the first full runner test run exposed and was fixed by preserving the existing `FollowupTarget` object shape.
+
+## T-003 follow-up
+
+- Attachment workspace roots now sanitize the dispatch-provided input id as a single path segment; this preserves the normal UUID path while preventing malformed wire values from escaping `.mohist/attachments`.
+- Added an AgentJob executor assertion that a fetched image reaches the fake OpenCode runtime as a native data URL file part; text attachments continue to assert workspace-only delivery.
+
+## T-004 decisions
+
+- Web launch derives the explicit `attachments` request array with the existing `extractAttachmentIds` helper. The existing `att:` Markdown links remain in composer text for preview and transcript rendering, but are no longer the only attachment transport.
+- Follow-up uses the same shared `AttachmentComposer` only for generic Agent sessions; workflow issue-session follow-up remains text-only because its compatibility alias has not adopted the attachment acceptance contract. The generic data source includes attachment ids in the retry fingerprint and returns the server result to the composer.
+- Launch and follow-up render accepted and rejected attachment results with the same shared `AttachmentResults` component. A launch with attachment verdicts stays on the composer until the user opens the created session, ensuring mixed acceptance is visible before navigation.
+- Agent input observations now include persisted attachment descriptors. The transcript prompt path maps each turn's input ids to the scoped `agent-sessions/{session}/inputs/{input}/attachments/{attachment}/content` URL and resolves `att:` links through `MarkdownReader`.
+
+## T-004 verification
+
+- Added Web coverage for explicit launch/follow-up request bodies, pending file name/size preview, mixed acceptance rendering, scoped attachment URL construction, and transcript Markdown resolution.
+- `npm run typecheck -w packages/web`, `npm run test:run -w packages/web`, `npm run check:fsd -w packages/web`, and `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore` pass.
+
+## T-005 decisions
+
+- CLI launch and session follow-up use a repeatable `--attach` option. Each local path is read through the existing `IFileSystem`, uploaded as multipart field `file` to the project-scoped `/attachments` endpoint, and only the returned attachment ids are sent in the launch/follow-up JSON `attachments` array.
+- Attachment-only CLI inputs send an empty `prompt`/`text` value and the collected ids; no user prompt is synthesized. Existing text-only input validation remains unchanged, while whitespace text is allowed when at least one attachment was requested.
+- Human output prints the requested paths and sizes before the input request, then prints accepted and rejected server verdicts with ids and rejection reason/message. JSON stdout remains machine-readable; pre-submit notices use stderr outside table mode.
+
+## T-005 verification
+
+- `dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passes with zero warnings/errors.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passes all 1475 CLI tests, including launch and follow-up multipart/body/result specs.
+
+## Final verification repair
+
+- The first full verification failed for three concrete reasons: `AttachmentService` depended directly on attachment contracts declared under `Sessions.Domain`, the new acceptance spec exceeded the 24KB C# test-file ratchet, and a newly created follow-up input did not copy its accepted descriptors into `AgentSessionFollowupAcceptResult`.
+- Moved the shared attachment acceptance/descriptor contracts to `Mohist.Server.Contracts`, split the acceptance spec support helpers into a suffix-compliant partial file, and returned the normalized descriptors from the new follow-up transition.
+- Focused verification now passes: server architecture 50/50, server unit tests 1640/1640, and the issue-513 acceptance class 8/8.
+- The complete verify then found the Web launch page test at 509 lines, over the 500-line boundary. Extracted its fake state/render support into `packages/web/tests/support`, keeping all 30 page assertions in the active test file; Web typecheck, FSD, test-boundary, and page tests pass.
+- Final `npm run verify` passes with no Git-visible verification-only changes.
+
+## Review fixes
+
+- Launch attachment ownership now pre-mints the canonical AgentSession id, validates Agent/context/readiness before binding, and makes the coordinator adopt that id. The scoped content route therefore uses the same session/input pair recorded in the durable launch plan.
+- Agent-input binding is a conditional `OwnerKind == null` claim. A losing concurrent claimant receives `AlreadyBound`; an idempotent call against the same owner receives the original accepted descriptor.
+- Attachment-bearing follow-ups do not share a queued turn with other inputs, preserving the existing single-input scoped delivery path.
+- Accepted descriptors and session observations now expose `source = upload` and `availability = usable`.
+- Server unit tests, server build, and Web typecheck pass. Full server specs exercise the new attachment cases successfully but still have an unrelated `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId` shared-runner isolation failure.
+
+## CI repair
+
+- Split the queued attachment-turn regression into its own partial spec file, keeping the existing follow-up grain spec under the C# test-file size ratchet.
+- AgentJob route polling now drains unrelated pending dispatches and waits for the requested job after releasing the runner slot. The full .NET CI command passes: architecture 51/51, server specs 3514/3514, server unit 1677/1677, CLI 1484/1484, and workflow definition 175/175.
+
+## Idempotency repair
+
+- Attachment ownership identities are now deterministic from the idempotency key: launch uses the project/key pair for its session and input, while follow-up uses the session/key pair. A follow-up without an explicit key receives a fresh generated key before ownership binding.
+- The conditional claim also treats an already identical owner as accepted, closing the race where concurrent matching requests both observed a pending row before one claimed it.
+- Added HTTP regressions for attachment-bearing follow-up retry and simultaneous same-key launch. Server specs pass 3516/3516.
+
+## Rejected follow-up repair
+
+- The generic follow-up route resolves the canonical session before binding any attachment. Rejected follow-up outcomes now restore only attachments newly claimed by that request to pending ownership and the standard pending TTL.
+- Added regressions proving missing-session and conflicting same-key follow-ups leave their attachment pending and unreadable through the scoped content route. Server specs pass 3518/3518.
+
+## Conflicting launch repair
+
+- Manual launch now restores only attachments newly claimed by a request when the coordinator rejects it for an idempotency conflict, validation/readiness failure, or unexpected setup failure. Recovering launch plans keep their accepted attachments.
+- Added a concurrent same-key, different-attachment launch regression that proves the losing attachment returns to pending ownership and is unavailable through the winning input scope. Server specs pass 3519/3519.
+
+## Cancellation repair
+
+- Launch preserves newly claimed attachments only after successful acceptance or a durable `launch_setup_pending` plan; all other exits, including request cancellation, restore the new claims with `CancellationToken.None`.
+- Follow-up rolls back with `CancellationToken.None` when cancellation interrupts its post-bind canonical-target lookup. Added unit coverage for restoring an agent-input claim to pending ownership and TTL. Server unit tests pass 1678/1678 and server specs pass 3519/3519.
+
+## Atomic attachment claim repair
+
+- Agent-input attachment claims now commit as one database transaction. Cancellation after any per-file claim rolls the entire batch back with `CancellationToken.None`, so no synthetic agent-input owner escapes before a durable input exists.
+- A deterministic command interceptor cancels after the first of two claims, proving both rows remain pending with their TTL and neither can be opened through the synthetic session/input scope. Server unit tests pass 1679/1679 and server specs pass 3519/3519.

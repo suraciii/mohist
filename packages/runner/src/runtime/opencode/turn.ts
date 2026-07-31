@@ -54,6 +54,7 @@ import type {
   RuntimeTurnOptions,
   RuntimeTurnRequest,
   RuntimeTurnResult,
+  RuntimeFilePart,
 } from "./types.js"
 import {
   DEFAULT_PROVIDER_ERROR_POLICY,
@@ -155,6 +156,7 @@ export async function runTurn(
       sessionId,
       directory: request.target.workDir,
       prompt: request.prompt,
+      fileParts: request.fileParts ?? null,
       model,
       variant,
       policy,
@@ -296,6 +298,7 @@ interface ExecutePromptArgs {
   readonly sessionId: string
   readonly directory: string
   readonly prompt: string
+  readonly fileParts: readonly RuntimeFilePart[] | null
   readonly model: { providerID: string; modelID: string } | null
   readonly variant: string | null
   readonly policy: RuntimeProviderErrorPolicy
@@ -428,7 +431,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     const promptCall = args.client.session.prompt({
       sessionID: args.sessionId,
       directory: args.directory,
-      ...buildPromptBody(args.prompt, args.model, args.variant),
+      ...buildPromptBody(args.prompt, args.fileParts, args.model, args.variant),
     }, { throwOnError: true }).then(
       (response: unknown) => ({ ok: true as const, response }),
       (cause: unknown) => ({ ok: false as const, cause }),
@@ -642,10 +645,18 @@ function providerStatusDiagnostic(cause: unknown): RuntimeDiagnostic {
 
 function buildPromptBody(
   prompt: string,
+  fileParts: readonly RuntimeFilePart[] | null,
   model: { providerID: string; modelID: string } | null,
   variant: string | null,
 ) {
-  const parts = [{ type: "text" as const, text: prompt }]
+  const parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; filename: string; url: string }> = [
+    { type: "text", text: prompt },
+  ]
+  if (fileParts) {
+    for (const part of fileParts) {
+      parts.push({ type: "file", mime: part.mime, filename: part.filename, url: part.url })
+    }
+  }
   return {
     parts,
     ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),

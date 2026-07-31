@@ -252,7 +252,7 @@ export function useIssueSessionDataSource(
   const [followupResult, setFollowupResult] = useState<SessionFollowupResult | null>(null)
   const cancelMutation = useCancel()
   const canFollowup = canFollowupSession(activity) && !!runtimeSessionId && !!detail?.runtime && !!recoverySessionName
-  const sendFollowup = useCallback(async (text: string) => {
+  const sendFollowup = useCallback(async (text: string, _attachmentIds: string[] = []) => {
     const retryKey = `${recoverySessionName}:${text}`
     const idempotencyKey = followupKeys.current.get(retryKey) ?? createIdempotencyKey()
     followupKeys.current.set(retryKey, idempotencyKey)
@@ -262,6 +262,7 @@ export function useIssueSessionDataSource(
       throw new Error('Follow-up outcome is unknown. Retry with the same key.')
     }
     followupKeys.current.delete(retryKey)
+    return result
   }, [followup, issueNumber, recoverySessionName])
   const currentTurnId = metadata?.currentTurnId
   const followupStatus = useMemo<FollowupStatus | null>(() => {
@@ -337,6 +338,8 @@ export function useIssueSessionDataSource(
     statusKind,
     isRunning,
     canFollowup,
+    supportsInputAttachments: false,
+    projectId,
     followupIsPending: followup.isPending,
     followupStatus,
     sendFollowup,

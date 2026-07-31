@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
+import { MarkdownReader } from '@/shared/ui'
+import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
 import type { DisplayPrompt } from '../model/session-transcript-display'
 import { promptKindLabel } from '../model/prompt-kind-labels'
 
@@ -9,9 +11,10 @@ function formatDateTime(iso: string): string {
 
 interface PromptBlockProps {
   prompt: DisplayPrompt
+  resolveAttachment?: (id: string) => MarkdownAttachment | null | undefined
 }
 
-export function PromptBlock({ prompt }: PromptBlockProps) {
+export function PromptBlock({ prompt, resolveAttachment }: PromptBlockProps) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
 
@@ -69,7 +72,9 @@ export function PromptBlock({ prompt }: PromptBlockProps) {
       </div>
 
       {expanded && (
-        <pre className="whitespace-pre-wrap break-all text-sm leading-relaxed mt-2 border-t border-border pt-2 font-mono text-xs text-muted-foreground">{prompt.text}</pre>
+        <div className="mt-2 border-t border-border pt-2">
+          <MarkdownReader content={prompt.text} resolveAttachment={resolveAttachment} className="text-muted-foreground" />
+        </div>
       )}
 
       <div className="flex items-center gap-2 mt-2">

@@ -8,6 +8,7 @@ import { PromptBlock } from './PromptBlock'
 import { AssistantParts } from './AssistantParts'
 import type { ExpansionRegistry, HighlightRegistry } from '../model/use-transcript-locate'
 import { useHighlight } from '../model/use-highlight'
+import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString()
@@ -20,9 +21,11 @@ interface TurnListProps {
   now?: number
   expansionRegistry?: ExpansionRegistry
   highlightRegistry?: HighlightRegistry
+  inputIdsByTurn?: string[][]
+  resolveAttachment?: (inputId: string, attachmentId: string) => MarkdownAttachment | null | undefined
 }
 
-export function TurnList({ turns, turnRefs, isRunning, now, expansionRegistry, highlightRegistry }: TurnListProps) {
+export function TurnList({ turns, turnRefs, isRunning, now, expansionRegistry, highlightRegistry, inputIdsByTurn, resolveAttachment }: TurnListProps) {
   return (
     <div role="log" className="space-y-6 min-w-0">
       {turns.map((turn, index) => (
@@ -38,6 +41,8 @@ export function TurnList({ turns, turnRefs, isRunning, now, expansionRegistry, h
           now={now}
           expansionRegistry={expansionRegistry}
           highlightRegistry={highlightRegistry}
+          inputIds={inputIdsByTurn?.[index - 1]}
+          resolveAttachment={resolveAttachment}
         />
       ))}
     </div>
@@ -52,9 +57,11 @@ interface TurnItemProps {
   now?: number
   expansionRegistry?: ExpansionRegistry
   highlightRegistry?: HighlightRegistry
+  inputIds?: string[]
+  resolveAttachment?: (inputId: string, attachmentId: string) => MarkdownAttachment | null | undefined
 }
 
-export function TurnItem({ turn, index, registerRef, isRunning, now, expansionRegistry, highlightRegistry }: TurnItemProps) {
+export function TurnItem({ turn, index, registerRef, isRunning, now, expansionRegistry, highlightRegistry, inputIds = [], resolveAttachment }: TurnItemProps) {
   const { isHighlighted, setHighlighted } = useHighlight({ now })
 
   useEffect(() => {
@@ -85,7 +92,14 @@ export function TurnItem({ turn, index, registerRef, isRunning, now, expansionRe
       style={{ contentVisibility: 'auto', containIntrinsicSize: '3rem' }}
     >
       <TurnDivider index={index} kind={turn.prompt.kind} startedAt={turn.startedAt} completedAt={turn.completedAt} />
-      <div className="min-w-0"><PromptBlock prompt={turn.prompt} /></div>
+      <div className="min-w-0"><PromptBlock
+        prompt={turn.prompt}
+        resolveAttachment={inputIds.length > 0 && resolveAttachment
+          ? (attachmentId) => inputIds
+            .map((inputId) => resolveAttachment(inputId, attachmentId))
+            .find((attachment): attachment is MarkdownAttachment => attachment != null)
+          : undefined}
+      /></div>
       {turn.assistantParts.length > 0 && (
         <div className="min-w-0">
           <AssistantParts parts={turn.assistantParts} isRunning={isRunning} now={now} expansionRegistry={expansionRegistry} highlightRegistry={highlightRegistry} />
