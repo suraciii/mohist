@@ -6,7 +6,7 @@
  * OpenCode process directly, does NOT pass `--pure`, and does NOT clean
  * up a `.opencode` lockfile.
  *
- * The server lives on `127.0.0.1` on an OS-assigned port by default.
+ * The server lives on `127.0.0.1` on an OS-assigned port.
  * The client is constructed against that URL and the work directory
  * is passed per call (the SDK requires `directory` on the client).
  *
@@ -34,7 +34,7 @@ export function createOpenCodeFetch(dispatcher: Dispatcher, fetchImpl: typeof fe
 }
 
 export const createSpawnedOpencodeServer: OpencodeServerFactory = async (directory, signal) => {
-  const server = await createOpencodeServer({ signal })
+  const server = await createOpencodeServer({ signal, port: 0 })
   const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
   const client = createOpencodeClient({
     baseUrl: server.url,

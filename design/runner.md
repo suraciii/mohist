@@ -293,10 +293,12 @@ worktree；删除 worktree 也不能替代 Runtime 释放。两类回收共用 R
 每轮 single-flight：上一轮未结束时不重叠执行下一轮。周期维护先执行 Runtime 释放，再执行
 磁盘策略；Runtime 释放不依赖 retention、storage budget 或 Server 配置读取成功。
 
-磁盘删除有额外顺序约束：如果当前 Runtime generation 仍记录该目录有尚未释放的资源，
-自动清理必须等到 Runtime 确认释放后才能删除目录和移除注册表条目。手动 workspace
-cleanup 也遵循相同顺序；Runtime 确认目录仍忙或无法判断时，本次删除明确失败或延后，
-不能先删目录再丢失释放所需的身份。OpenCode 的具体条件见
+磁盘删除有额外并发约束。周期 Runtime 回收成功只说明当时已经释放，不授权稍后的磁盘
+删除；两者之间可能有新操作重新使用该目录。每次自动或手动删除都必须重新取得该目录的
+Runtime removal fence，并在同一独占边界内完成必要的 Runtime 释放、目录删除和注册表
+移除。即使 Runtime 尚未记录该目录，也要用临时 fence 阻止删除期间进入新操作，但不能
+为了确认而创建 Runtime resource。Runtime 确认目录仍忙、无法判断或释放失败时，本次删除
+明确失败或延后。OpenCode 的具体条件见
 [`runtimes/opencode.md`](runtimes/opencode.md#directory-instance-回收)。
 
 ## 落盘状态

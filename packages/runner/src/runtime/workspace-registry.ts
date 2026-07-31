@@ -62,6 +62,7 @@ export class WorkspaceRegistry {
   private readonly filePath: string
   private readonly now: () => Date
   private entries: Map<string, WorkspaceRegistryEntry> = new Map()
+  private pathIndex: Map<string, string> = new Map()
   private loaded = false
 
   constructor(runnerRoot: string, options: WorkspaceRegistryOptions = {}) {
@@ -97,10 +98,9 @@ export class WorkspaceRegistry {
   findByWorkspacePath(workspacePath: string): WorkspaceRegistryEntry | null {
     this.ensureLoaded()
     const target = resolve(workspacePath)
-    for (const entry of this.entries.values()) {
-      if (resolve(entry.workspacePath) === target) return { ...entry }
-    }
-    return null
+    const workflowRunId = this.pathIndex.get(target)
+    const entry = workflowRunId ? this.entries.get(workflowRunId) : undefined
+    return entry ? { ...entry } : null
   }
 
   // Upsert a workspace registration in the `active` phase. Called from
@@ -115,18 +115,27 @@ export class WorkspaceRegistry {
     this.ensureLoaded()
     if (!input.workflowRunId) throw new Error("workspace registry register requires workflowRunId")
     if (!input.workspacePath) throw new Error("workspace registry register requires workspacePath")
+    const workspacePath = resolve(input.workspacePath)
+    const owner = this.pathIndex.get(workspacePath)
+    if (owner && owner !== input.workflowRunId) {
+      throw new Error(`workspace registry path is already owned by workflowRunId ${owner}`)
+    }
     const materializedAt = this.now().toISOString()
     const existing = this.entries.get(input.workflowRunId)
     const entry: WorkspaceRegistryEntry = {
       issueNumber: input.issueNumber,
       workflowRunId: input.workflowRunId,
-      workspacePath: resolve(input.workspacePath),
+      workspacePath,
       runBranch: input.runBranch ?? null,
       phase: "active",
       materializedAt,
       terminalAt: existing?.terminalAt ?? null,
     }
+    if (existing && this.pathIndex.get(existing.workspacePath) === input.workflowRunId && existing.workspacePath !== workspacePath) {
+      this.pathIndex.delete(existing.workspacePath)
+    }
     this.entries.set(input.workflowRunId, entry)
+    this.pathIndex.set(workspacePath, input.workflowRunId)
     await this.persist()
     return { ...entry }
   }
@@ -188,8 +197,10 @@ export class WorkspaceRegistry {
   // disk reality. Returns true when an entry was actually removed.
   async remove(workflowRunId: string): Promise<boolean> {
     this.ensureLoaded()
-    const had = this.entries.delete(workflowRunId)
-    if (!had) return false
+    const existing = this.entries.get(workflowRunId)
+    if (!existing) return false
+    this.entries.delete(workflowRunId)
+    if (this.pathIndex.get(existing.workspacePath) === workflowRunId) this.pathIndex.delete(existing.workspacePath)
     await this.persist()
     return true
   }
@@ -218,6 +229,7 @@ export class WorkspaceRegistry {
 
   private async loadFromDisk(): Promise<void> {
     this.entries = new Map()
+    this.pathIndex = new Map()
     if (!exists(this.filePath)) {
       this.loaded = true
       return
@@ -247,6 +259,8 @@ export class WorkspaceRegistry {
       this.loaded = true
       return
     }
+    const nextEntries = new Map<string, WorkspaceRegistryEntry>()
+    const nextPathIndex = new Map<string, string>()
     for (const [key, value] of Object.entries(file.entries)) {
       if (!value || typeof value !== "object") continue
       const entry = value as Partial<WorkspaceRegistryEntry>
@@ -254,16 +268,27 @@ export class WorkspaceRegistry {
       if (typeof entry.workspacePath !== "string" || entry.workspacePath.length === 0) continue
       if (entry.phase !== "active" && entry.phase !== "eligible" && entry.phase !== "stuck") continue
       if (typeof entry.materializedAt !== "string") continue
-      this.entries.set(key, {
+      const workspacePath = resolve(entry.workspacePath)
+      if (nextPathIndex.has(workspacePath)) {
+        this.entries = new Map()
+        this.pathIndex = new Map()
+        this.loaded = true
+        return
+      }
+      const loadedEntry = {
         issueNumber: typeof entry.issueNumber === "number" ? entry.issueNumber : 0,
         workflowRunId: entry.workflowRunId,
-        workspacePath: resolve(entry.workspacePath),
+        workspacePath,
         runBranch: typeof entry.runBranch === "string" ? entry.runBranch : null,
         phase: entry.phase,
         materializedAt: entry.materializedAt,
         terminalAt: typeof entry.terminalAt === "string" ? entry.terminalAt : null,
-      })
+      }
+      nextEntries.set(key, loadedEntry)
+      nextPathIndex.set(workspacePath, key)
     }
+    this.entries = nextEntries
+    this.pathIndex = nextPathIndex
     this.loaded = true
   }
 

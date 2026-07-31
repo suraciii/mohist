@@ -2,6 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
 import { buildRuntime, DEFAULT_SESSION_ID } from "./support/opencode-turn-test-support.js"
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -229,6 +237,63 @@ describe("OpenCodeRuntime.runTurn — single in-flight work prompt", () => {
 })
 
 describe("OpenCodeRuntime.runTurn — deadline abort on silent hang", () => {
+  it("keeps directory release busy when abort wins before the prompt settles", async () => {
+    const { deps, client } = buildRuntime()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const promptStarted = deferred<void>()
+    const promptFinished = deferred<unknown>()
+    client.sessionPrompt.mockImplementationOnce(async () => {
+      promptStarted.resolve()
+      return await promptFinished.promise
+    })
+
+    const controller = new AbortController()
+    const turn = runtime.runTurn({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+      prompt: "abort before prompt settles",
+    }, controller.signal)
+    await promptStarted.promise
+    controller.abort()
+
+    const result = await turn
+    expect(result.ok).toBe(false)
+    expect((await runtime.release("/tmp/projA")).outcome).toBe("busy")
+    expect(client.instanceDispose).not.toHaveBeenCalled()
+
+    promptFinished.resolve({ data: { parts: [] } })
+    await runtime.shutdown()
+  })
+
+  it("keeps directory release busy when abort wins before initial status settles", async () => {
+    const { deps, client } = buildRuntime()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const statusStarted = deferred<void>()
+    const statusFinished = deferred<{ data: unknown }>()
+    client.sessionStatus.mockImplementationOnce(async () => {
+      statusStarted.resolve()
+      return await statusFinished.promise
+    })
+
+    const controller = new AbortController()
+    const turn = runtime.runTurn({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+      prompt: "abort before status settles",
+    }, controller.signal)
+    await statusStarted.promise
+    controller.abort()
+
+    const result = await turn
+    expect(result.ok).toBe(false)
+    expect(client.sessionPrompt).not.toHaveBeenCalled()
+    expect((await runtime.release("/tmp/projA")).outcome).toBe("busy")
+    expect(client.instanceDispose).not.toHaveBeenCalled()
+
+    statusFinished.resolve({ data: {} })
+    await runtime.shutdown()
+  })
+
   it("A silently hanging turn is aborted via client.session.abort() and returns interrupted when the executor signal aborts", async () => {
     vi.useFakeTimers()
     try {
@@ -588,6 +653,42 @@ describe("OpenCodeRuntime.runTurn — provider-error failure policy", () => {
 })
 
 describe("OpenCodeRuntime.runTurn — restart reconciliation", () => {
+  it("holds directory release while reconnect reconciliation is pending after the prompt returns", async () => {
+    const { deps, client, subscription } = buildRuntime()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const promptStarted = deferred<void>()
+    const promptFinished = deferred<unknown>()
+    client.sessionPrompt.mockImplementationOnce(async () => {
+      promptStarted.resolve()
+      return await promptFinished.promise
+    })
+    const reconciliationStarted = deferred<void>()
+    const reconciliationFinished = deferred<{ data: unknown }>()
+
+    const turn = runtime.runTurn({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+      prompt: "do",
+    }, new AbortController().signal)
+    await promptStarted.promise
+    client.sessionStatus.mockImplementationOnce(async () => {
+      reconciliationStarted.resolve()
+      return await reconciliationFinished.promise
+    })
+    subscription.emit({ type: "server.connected", payload: {} })
+    await reconciliationStarted.promise
+
+    promptFinished.resolve({ data: { parts: [{ type: "text", text: "done" }] } })
+    const result = await turn
+    expect(result.ok).toBe(true)
+    expect((await runtime.release("/tmp/projA")).outcome).toBe("busy")
+    expect(client.instanceDispose).not.toHaveBeenCalled()
+
+    reconciliationFinished.resolve({ data: {} })
+    await runtime.shutdown()
+  })
+
   it("Rebuilds after a transport failure whose abort confirmation cannot reach the server", async () => {
     vi.useFakeTimers()
     try {

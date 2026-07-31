@@ -21,6 +21,16 @@ import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtim
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import * as runtimeModule from "../src/runtime/opencode/index.js"
 
+function deferred<T = void>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 class FakeSubscription implements RuntimeEventSubscription {
   private listeners = new Set<(event: RuntimeGlobalEvent) => void>()
   closed = false
@@ -59,6 +69,7 @@ interface BuildArgs {
   resolveSession?: { runtimeSessionId: string; activeTurn: boolean }
   failSessionGet?: boolean
   failSessionStatus?: boolean
+  closeGate?: Promise<void>
 }
 
 interface BuildResult {
@@ -66,11 +77,16 @@ interface BuildResult {
   subscription: FakeSubscription
   client: FakeClientHandles
   closed: { value: boolean }
+  closeStarted: Promise<void>
 }
 
 function buildDeps(args: BuildArgs = {}): BuildResult {
   const subscription = new FakeSubscription()
   const closed = { value: false }
+  let resolveCloseStarted!: () => void
+  const closeStarted = new Promise<void>((resolve) => {
+    resolveCloseStarted = resolve
+  })
   const health = vi.fn(async () => ({ data: { ok: true } }))
   const sessionCreate = vi.fn(async (params: { directory?: string; model?: unknown }) => ({
     data: { id: `ses_${(params.directory ?? "default").replace(/[^a-z0-9]+/gi, "_")}` },
@@ -110,6 +126,8 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
     directory: "/tmp/work",
     client: clientProxy as unknown as OpencodeClient,
     async close() {
+      resolveCloseStarted()
+      if (args.closeGate) await args.closeGate
       closed.value = true
     },
   }
@@ -122,7 +140,7 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
     eventSubscriptionFactory: () => subscription,
     ...(args.rebuildDelayMs !== undefined ? { rebuildDelayMs: args.rebuildDelayMs } : {}),
   }
-  return { deps, subscription, client: clientHandles, closed }
+  return { deps, subscription, client: clientHandles, closed, closeStarted }
 }
 
 describe("parseModelIdentifier", () => {
@@ -334,6 +352,24 @@ describe("OpenCodeRuntime readiness contract", () => {
 })
 
 describe("OpenCodeRuntime on simulated server exit", () => {
+  it("fails closed while the old server is still closing after disconnect", async () => {
+    const closeGate = deferred<void>()
+    const { deps, subscription, closeStarted } = buildDeps({ closeGate: closeGate.promise })
+    const runtime = new OpenCodeRuntime(deps)
+    const started = await runtime.start()
+    expect(started.ok).toBe(true)
+
+    const callback = vi.fn(async () => true)
+    subscription.emit({ type: "server.disconnected", payload: {} })
+    await closeStarted
+
+    await expect(runtime.withRemovalFence("/tmp/projA", callback)).resolves.toEqual({ kind: "failed" })
+    expect(callback).not.toHaveBeenCalled()
+
+    closeGate.resolve()
+    await runtime.start()
+  })
+
   it("ready() becomes false, in-flight createSession fails, and a background rebuild re-passes readiness", async () => {
     vi.useFakeTimers()
     try {

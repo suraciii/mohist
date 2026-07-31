@@ -4,6 +4,7 @@ import { defaultRunnerRoot, issueWorkspacePath, readMarkerWorkflowRunId, validat
 import { deleteDirectory } from "../system/process.js"
 import type { CleanupPolicy } from "../core/types.js"
 import type { WorkspaceRegistry, WorkspaceRegistryEntry } from "./workspace-registry.js"
+import type { WorkspaceRemovalFence } from "./workspace-removal-fence.js"
 
 export interface CleanupRunner {
   isUnderRunnerRoot(root: string, candidate: string): boolean
@@ -35,11 +36,13 @@ export class CleanupLoop {
     private readonly registry: WorkspaceRegistry,
     private readonly runner: CleanupRunner,
     private readonly runnerRoot: string,
+    private readonly removalFence: () => WorkspaceRemovalFence | null = () => null,
   ) {}
 
   async runOnce(
     policy: CleanupPolicy | null | undefined,
     signal: AbortSignal,
+    blockedPaths: ReadonlySet<string> = new Set(),
   ): Promise<CleanupLoopResult> {
     const result: CleanupLoopResult = {
       retentionRemoved: 0,
@@ -66,6 +69,7 @@ export class CleanupLoop {
     // re-evaluation ends.
     for (const entry of eligible) {
       if (signal.aborted) break
+      if (blockedPaths.has(entry.workspacePath)) continue
       const verdict = await this.evaluateGuards(entry)
       if (verdict.ok) continue
       console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} — ${verdict.message}`)
@@ -89,7 +93,7 @@ export class CleanupLoop {
         if (signal.aborted) break
         if (!entry.terminalAt) continue
         if (new Date(entry.terminalAt).getTime() > cutoff) continue
-        const removed = await this.safeRemove(entry)
+        const removed = await this.safeRemove(entry, blockedPaths)
         if (removed) result.retentionRemoved++
         else result.guardAborted++
       }
@@ -124,7 +128,7 @@ export class CleanupLoop {
           currentUsage -= entrySize
         }
 
-        const removed = await this.safeRemove(entry)
+        const removed = await this.safeRemove(entry, blockedPaths)
         if (removed) result.budgetRemoved++
         else result.guardAborted++
       }
@@ -170,45 +174,58 @@ export class CleanupLoop {
     return { ok: true }
   }
 
-  async safeRemove(entry: WorkspaceRegistryEntry): Promise<boolean> {
-    const verdict = await this.evaluateGuards(entry)
-    if (!verdict.ok) {
-      console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} — ${verdict.message}`)
-      return false
-    }
+  async safeRemove(entry: WorkspaceRegistryEntry, blockedPaths: ReadonlySet<string> = new Set()): Promise<boolean> {
+    if (blockedPaths.has(entry.workspacePath)) return false
+    const fence = this.removalFence()
+    const remove = async (): Promise<boolean> => {
+      const verdict = await this.evaluateGuards(entry)
+      if (!verdict.ok) {
+        console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} — ${verdict.message}`)
+        return false
+      }
 
-    if (!this.runner.pathExists(entry.workspacePath)) {
-      await this.registry.remove(entry.workflowRunId)
-      return true
-    }
+      if (!this.runner.pathExists(entry.workspacePath)) {
+        await this.registry.remove(entry.workflowRunId)
+        return true
+      }
 
-    if (this.runner.validateAndDeleteWorkspace) {
-      try {
+      if (this.runner.validateAndDeleteWorkspace) {
         if (!(await this.runner.validateAndDeleteWorkspace(entry))) {
           console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} - workspace identity is invalid`)
           return false
         }
         await this.registry.remove(entry.workflowRunId)
         return true
+      }
+
+      if (this.runner.validateWorkspace && !(await this.runner.validateWorkspace(entry))) {
+        console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} - workspace identity is invalid`)
+        return false
+      }
+
+      await this.runner.deleteDirectory(entry.workspacePath)
+      await this.registry.remove(entry.workflowRunId)
+      return true
+    }
+
+    if (!fence) {
+      try {
+        return await remove()
       } catch (error) {
         console.error(`workspace cleanup: failed to remove ${entry.workspacePath}:`, error)
         return false
       }
     }
 
-    if (this.runner.validateWorkspace && !(await this.runner.validateWorkspace(entry))) {
-      console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} - workspace identity is invalid`)
-      return false
-    }
-
-    try {
-      await this.runner.deleteDirectory(entry.workspacePath)
-      await this.registry.remove(entry.workflowRunId)
-      return true
-    } catch (error) {
-      console.error(`workspace cleanup: failed to remove ${entry.workspacePath}:`, error)
-      return false
-    }
+    const result = await fence.withRemovalFence(entry.workspacePath, async () => {
+      try {
+        return await remove()
+      } catch (error) {
+        console.error(`workspace cleanup: failed to remove ${entry.workspacePath}:`, error)
+        return false
+      }
+    })
+    return result.kind === "completed" ? result.value : false
   }
 }
 

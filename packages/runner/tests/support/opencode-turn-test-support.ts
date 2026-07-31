@@ -38,6 +38,7 @@ export interface FakeClientHandles {
   sessionMessages: ReturnType<typeof vi.fn>
   sessionGet: ReturnType<typeof vi.fn>
   sessionStatus: ReturnType<typeof vi.fn>
+  instanceDispose: ReturnType<typeof vi.fn>
 }
 
 export interface BuildRuntimeArgs {
@@ -88,9 +89,11 @@ export function buildRuntime(args: BuildRuntimeArgs = {}): BuildRuntimeResult {
   const sessionMessages = vi.fn(async () => ({ data: [] }))
   const sessionGet = vi.fn(async () => ({ data: { id: "ses_1" } }))
   const sessionStatus = vi.fn(async () => ({ data: {} }))
+  const instanceDispose = vi.fn(async () => ({ data: true }))
   const clientProxy = {
     global: { health, event: vi.fn(async () => ({ stream: (async function* () { void subscription })() })) },
     session: { create: sessionCreate, prompt: sessionPrompt, promptAsync: sessionPromptAsync, abort: sessionAbort, messages: sessionMessages, get: sessionGet, status: sessionStatus },
+    instance: { dispose: instanceDispose },
   }
   const server: OpencodeServerHandle = {
     url: "http://fake",
@@ -98,7 +101,7 @@ export function buildRuntime(args: BuildRuntimeArgs = {}): BuildRuntimeResult {
     client: clientProxy as unknown as OpencodeClient,
     async close() {},
   }
-  const client: FakeClientHandles = { health, sessionCreate, sessionPrompt, sessionPromptAsync, sessionAbort, sessionMessages, sessionGet, sessionStatus }
+  const client: FakeClientHandles = { health, sessionCreate, sessionPrompt, sessionPromptAsync, sessionAbort, sessionMessages, sessionGet, sessionStatus, instanceDispose }
   const deps: OpenCodeRuntimeDeps = {
     directory: "/tmp/work",
     serverFactory: async () => server,
