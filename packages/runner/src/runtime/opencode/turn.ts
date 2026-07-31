@@ -475,13 +475,18 @@ async function finishTransportFailure(
   cause: unknown,
   promptDiagnostics: RuntimeDiagnostic[],
 ): Promise<PromptFailure> {
+  const transportDiagnostic: RuntimeDiagnostic = {
+    severity: "error",
+    code: "opencode-transport-failed",
+    message: `OpenCode local transport failed: ${errorMessage(cause, "unknown transport error")}`,
+  }
   const abortResult = await abortAndConfirmSession(args.client, args.sessionId, args.directory)
   if (!abortResult.ok) {
-    const error = normalizeAbortUnconfirmed(abortResult.message, promptDiagnostics)
+    const error = normalizeAbortUnconfirmed(abortResult.message, [...promptDiagnostics, transportDiagnostic])
     return { kind: "failure", error, diagnostics: [...error.diagnostics] }
   }
   const error = toUnavailableOrTurnError(cause, "OpenCode local transport failed")
-  return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
+  return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics, transportDiagnostic] }
 }
 
 interface RetryTracker {
