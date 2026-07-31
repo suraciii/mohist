@@ -8,13 +8,22 @@ namespace Mohist.Server.Agent.Grains;
 
 public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
 {
-    Task<bool> IsWorkRunnableAsync(string runnerId, string workId);
     Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result);
     Task<AgentJobStatus> GetStatusAsync();
     Task<AgentJobCancelResult> CancelAsync() =>
         Task.FromResult(new AgentJobCancelResult(AgentJobCancelDisposition.AlreadyEnded, AgentJobStatus.Unknown));
     Task<string?> GetCurrentWorkIdAsync();
-    Task AssignRunnerAsync(string runnerId, string workId);
+
+    /// <summary>
+    /// Owner-led poll-time claim. Atomically transitions a pending
+    /// AgentJob assigned to <paramref name="runnerId"/> into Running and
+    /// returns the persisted dispatch snapshot. Returns <c>null</c>
+    /// when the job is not assigned to <paramref name="runnerId"/>,
+    /// not pending, or no longer exists. Revision-checked; concurrent
+    /// claims retry safely.
+    /// </summary>
+    Task<ClaimResult?> ClaimNextAsync(string runnerId);
+
     Task<bool> RecordRuntimeSessionBindingAsync(string runnerId, string workId, string sessionId, string runtimeSessionId) =>
         Task.FromResult(false);
     Task SubmitAsync(AgentJobInput input);
@@ -81,7 +90,6 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// belongs to a different plan.
     /// </summary>
     Task SubmitPreparedLaunchAsync() => Task.CompletedTask;
-
     /// <summary>
     /// Move a non-terminal AgentJob to <see cref="AgentJobStatus.Unknown"/>
     /// Used when a Runner disconnect, a status
@@ -100,6 +108,20 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     Task ReconcileRunningAsync(string runnerId, string workId) => Task.CompletedTask;
     Task ConcurrencyPermitGrantedAsync() => Task.CompletedTask;
 }
+
+/// <summary>
+/// Outcome of an owner-led claim. <see cref="Dispatch"/> is the
+/// immutable dispatch snapshot persisted at admission time. The grain
+/// returns <c>null</c> when the claim was skipped (no assignment,
+/// status no longer pending, or revision conflict the caller should
+/// retry past).
+/// </summary>
+[GenerateSerializer]
+public sealed record ClaimResult(
+    [property: Id(0)] string AgentJobId,
+    [property: Id(1)] string RunnerId,
+    [property: Id(2)] string WorkId,
+    [property: Id(3)] WorkDispatch Dispatch);
 
 [GenerateSerializer]
 public sealed record PrepareManualLaunchCommand(
@@ -143,7 +165,10 @@ public sealed record AgentJobRuntimeSnapshot(
     [property: Id(1)] string? RunnerId,
     [property: Id(2)] string? CurrentWorkId,
     [property: Id(3)] string? FailureReason,
-    [property: Id(4)] int DispatchAttempts = 0,
+    // [Id(4)] DispatchAttempts removed by the owner-ledger migration: the
+    // readiness timeout is now wall-clock from ReadySince, not a dispatch
+    // attempt counter. The id stays free so an older snapshot payload
+    // deserializes without colliding on later ids.
     [property: Id(5)] bool RunnerAccepted = false,
     [property: Id(6)] bool HasPendingSessionClose = false,
     [property: Id(7)] string? ProjectId = null,
@@ -293,8 +318,8 @@ public enum AgentJobCancelDisposition
 /// <see cref="Runtime"/> is the resolved execution backend. It is
 /// captured here so editing the Agent's backend
 /// config after launch cannot change the in-flight execution; recovery
-/// reuses the snapshotted runtime rather than re-reading mutable
-/// Agent config. Append-only Orleans field id (next free after Prompt).
+/// reuses the snapshotted runtime rather than re-reading mutable Agent
+/// config. Append-only Orleans field id (next free after Prompt).
 /// </para>
 ///
 /// <para>

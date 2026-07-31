@@ -199,6 +199,10 @@ public class AgentLauncherSpecs
 
             var jobKey = TriggerJobKey(projectId, eventId, subscriptionId);
             var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
+            using (var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null))
+            {
+                poll.EnsureSuccessStatusCode();
+            }
             var before = await job.GetRuntimeSnapshotAsync();
             Assert.Equal(AgentJobStatus.Running, before.Status);
             Assert.Equal(runnerId, before.RunnerId);

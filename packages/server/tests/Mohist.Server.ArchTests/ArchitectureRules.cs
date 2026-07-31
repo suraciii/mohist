@@ -519,6 +519,10 @@ public class ArchitectureRules
         ("Issue", "Epic"),
         ("Issue", "Workflow"),
         ("Issue", "Project"),
+        // Runner's lifecycle gate owns the shared capacity decision for a
+        // poll. It invokes the AgentJob owner's atomic claim only after that
+        // decision; the AgentJob ledger remains the sole source of work state.
+        ("Runner", "Agent"),
         ("Runner", "Sessions"),
         ("Runner", "Workflow"),
         ("Workflow", "Sessions"),

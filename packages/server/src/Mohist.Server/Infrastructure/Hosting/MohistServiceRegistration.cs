@@ -92,7 +92,6 @@ public static class MohistServiceRegistration
         services.AddScoped<AgentLaunchObservationAssembler>();
         services.AddScoped<SlackSetupVerifier>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
-        services.AddSingleton<IAgentJobWorkCoordinator>(sp => sp.GetRequiredService<AgentJobWorkCoordinator>());
         services.AddSingleton<Mohist.Server.Sessions.Services.IAgentSessionConnectionRegistry>(sp =>
             sp.GetRequiredService<Mohist.Server.Runner.Services.SignalR.RunnerConnectionTracker>());
 
@@ -262,7 +261,6 @@ public static class MohistServiceRegistration
             CopyJsonOptions(JSON.Options, o.SerializerOptions);
         });
         services.AddScoped<RunnerDefinitionStore>();
-        services.AddScoped<RunnerWorkStore>();
         services.AddScoped<TaskLogService>();
         services.AddScoped<TaskLogStore>();
         services.AddSignalR()

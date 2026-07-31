@@ -37,11 +37,9 @@ public class AgentJobTerminalTranscriptPersistenceSpecs : AgentJobGrainTestSuppo
             AgentId: "agent-test"));
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-
         _fixture.SessionPersistence.QueueFailures(100);
-        await runner.ReportAgentJobResultAsync(
-            jobKey,
+        await job.ReportResultAsync(
+            runnerId,
             workId,
             new WorkResult(Status: "failed", Message: "transient", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
 
@@ -49,12 +47,13 @@ public class AgentJobTerminalTranscriptPersistenceSpecs : AgentJobGrainTestSuppo
         Assert.True((await job.GetRuntimeSnapshotAsync()).HasPendingSessionClose);
 
         _fixture.SessionPersistence.ResetFailures();
-        var replay = await runner.ReportAgentJobResultAsync(
-            jobKey,
+        var replay = await job.ReportResultAsync(
+            runnerId,
             workId,
             new WorkResult(Status: "failed", Message: "transient", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
 
-        Assert.False(replay.Tracked);
+        Assert.False(replay.Accepted);
+        Assert.Equal("stale", replay.Reason);
         Assert.False((await job.GetRuntimeSnapshotAsync()).HasPendingSessionClose);
 
         var persisted = Assert.Single(

@@ -43,13 +43,28 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         string runnerId,
         string expectedSessionId)
     {
-        var assignment = await _fixture.AgentJobDispatches.WaitForRunnerAcceptedAsync(agentJobId);
-        Assert.Equal(runnerId, assignment.RunnerId);
-
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
         var dispatch = await PollDispatchOnceAsync(runnerId, expectedSessionId);
-        return dispatch ?? throw new XunitException(
-            $"Runner '{runnerId}' accepted AgentJob '{agentJobId}' but did not return its dispatch for AgentSessionId '{expectedSessionId}'.\n" +
+        if (dispatch is null)
+        {
+            throw new XunitException(
+                $"Runner '{runnerId}' did not return AgentJob '{agentJobId}' for AgentSessionId '{expectedSessionId}'.\n" +
             $"Runner registry:\n{await _fixture.DescribeRunnerRegistryAsync()}");
+        }
+
+        Assert.Equal(agentJobId, dispatch.AgentJobId);
+        return dispatch;
+    }
+
+    protected async Task<string> PollAgentJobDispatchAsync(string agentJobId, string runnerId)
+    {
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
+        using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+        var dispatch = await response.ReadFirstDispatchElementAsync()
+            ?? throw new InvalidOperationException("Expected an AgentJob dispatch from /poll");
+        Assert.Equal(agentJobId, dispatch.GetProperty("agentJobId").GetString());
+        return dispatch.GetProperty("workId").GetString()
+            ?? throw new InvalidOperationException("AgentJob dispatch returned no work id");
     }
 
     private async Task<PollSnapshot?> PollDispatchOnceAsync(string runnerId, string expectedSessionId)
@@ -341,6 +356,14 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         return records.Count;
     }
 
+    protected async Task<int> CountAgentJobsAsync(string projectId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.AgentJobs.CountAsync(job => job.ProjectId == projectId);
+    }
+
     protected static async Task<IReadOnlyList<JsonElement>> LoadSessionClosedPayloadsAsync(
         IDbContextFactory<MohistDbContext> dbFactory,
         string sessionId)
@@ -369,51 +392,16 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         return scope.ServiceProvider.GetRequiredService<AgentSessionQuery>();
     }
 
-    /// <summary>
-    /// Looks up the AgentJob grain that owns the dispatched work for the
-    /// given generic session id. The launch endpoint mints a fresh
-    /// <c>agent-job-launch-{guid}</c> key per launch, so this probes the
-    /// runner registry to find the active work item and recovers the key.
-    /// A job that found no runner on its first attempt owns no work item
-    /// until a backoff retry lands, and the frozen fake clock releases those
-    /// only on demand. The registry is shared, so the session id must be
-    /// matched or a concurrent job's grain is returned.
-    /// </summary>
     protected async Task<IAgentJobGrain?> FindAgentJobGrainAsync(string sessionId)
     {
-        return await TestWait.ForAsync(
-            () => ProbeAgentJobGrainAsync(sessionId),
-            job => job is not null,
+        var launch = await TestWait.ForAsync(
+            () => _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetInitialLaunchAsync(),
+            snapshot => !string.IsNullOrWhiteSpace(snapshot?.Turn?.JobId),
             TimeSpan.FromSeconds(1),
             TimeSpan.FromMilliseconds(100),
-            $"agent job grain for session '{sessionId}'",
+            $"initial launch for session '{sessionId}'",
             _fixture.ReleaseDispatchBackoffAsync);
-    }
-
-    protected async Task<IAgentJobGrain?> ProbeAgentJobGrainAsync(string sessionId)
-    {
-        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        var runners = await registry.ListRunnerIdsAsync();
-        foreach (var runnerId in runners)
-        {
-            var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            var state = await runner.GetRuntimeStateAsync();
-            foreach (var work in state.ActiveWorks)
-            {
-                if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
-                {
-                    var job = _fixture.Grains.GetGrain<IAgentJobGrain>(work.OwnerId);
-                    var snapshot = await job.GetRuntimeSnapshotAsync();
-                    if (snapshot.CurrentWorkId == work.WorkId
-                        && string.Equals(snapshot.AgentSessionId, sessionId, StringComparison.Ordinal))
-                    {
-                        return job;
-                    }
-                }
-            }
-        }
-
-        return null;
+        return _fixture.Grains.GetGrain<IAgentJobGrain>(launch!.Turn!.JobId!);
     }
 
     protected async Task<AgentJobRuntimeSnapshot?> FindAgentJobSnapshotAsync(string sessionId)

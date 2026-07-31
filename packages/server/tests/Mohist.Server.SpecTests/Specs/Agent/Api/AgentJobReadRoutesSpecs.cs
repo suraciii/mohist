@@ -322,7 +322,7 @@ internal sealed class AgentJobReadTestDb : IDisposable
             });
             db.SaveChanges();
         }
-        var store = new AgentJobStore(factory, Microsoft.Extensions.Logging.Abstractions.NullLogger<AgentJobStore>.Instance);
+        var store = new AgentJobStore(factory, Microsoft.Extensions.Logging.Abstractions.NullLogger<AgentJobStore>.Instance, new Microsoft.Extensions.Time.Testing.FakeTimeProvider());
         return new AgentJobReadTestDb(database, store, new AgentQuerier(factory), new AgentJobQuerier(factory));
     }
 
@@ -355,6 +355,7 @@ internal sealed class ReadAgentJobGrain : IAgentJobGrain
         Task.FromResult(new AgentJobReportResult(false, "not-under-test"));
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_status);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
+    public Task<ClaimResult?> ClaimNextAsync(string runnerId) => Task.FromResult<ClaimResult?>(null);
     public Task AssignRunnerAsync(string runnerId, string workId) => Task.CompletedTask;
     public Task<bool> RecordRuntimeSessionBindingAsync(string runnerId, string workId, string sessionId, string runtimeSessionId) =>
         Task.FromResult(false);
@@ -368,7 +369,7 @@ internal sealed class ReadAgentJobGrain : IAgentJobGrain
     }
     public Task<AgentJobTerminalResult> WaitForTerminalAsync() => GetTerminalResultAsync();
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() =>
-        Task.FromResult(new AgentJobRuntimeSnapshot(_status, null, null, null, 0, false, false, _projectId, _executionDefinition));
+        Task.FromResult(new AgentJobRuntimeSnapshot(_status, null, null, null, false, false, _projectId, _executionDefinition));
     public Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan) => Task.FromResult(plan);
     public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
     public Task MarkUnknownAsync(string reason) => Task.CompletedTask;

@@ -158,6 +158,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
 
             var jobGrain = await FindAgentJobGrainAsync(sessionId);
             Assert.NotNull(jobGrain);
+            await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
 
             // Drive past the configured 8s timeout via fake time.
             await WaitForJobTerminalAsync(
@@ -262,6 +263,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
 
             var jobGrain = await FindAgentJobGrainAsync(sessionId);
             Assert.NotNull(jobGrain);
+            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
 
             // Force the Job into Unknown via the report-timeout path.
             await WaitForJobTerminalAsync(
@@ -277,7 +279,6 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             // Reconciliation: an authoritative terminal report from
             // the original Runner resolves the same Job and Turn to
             // Completed — no second dispatch, no new Input/Turn.
-            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             var report = await jobGrain!.ReportResultAsync(
                 runnerId,
@@ -301,46 +302,6 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
                 obs.GetProperty("inputId").GetString());
             Assert.Equal(launchPayload.GetProperty("data").GetProperty("turnId").GetString(),
                 obs.GetProperty("turnId").GetString());
-        }
-        finally
-        {
-            await DrainDispatchAsync(runnerId);
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
-    public async Task Observation_AfterAuthoritativeRunningReport_ResolvesUnknownToActiveExecutingTurn()
-    {
-        var projectId = await CreateProjectAsync("obs-resolve-running");
-        var runnerId = $"obs-resolve-running-runner-{Guid.NewGuid():N}";
-        var agent = await CreateAgentAsync(projectId, "obs-resolve-running-agent");
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-
-        try
-        {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "recover to running" });
-            Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
-            var data = (await launch.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-            var jobId = data.GetProperty("jobId").GetString()!;
-
-            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
-            var beforeTimeout = await jobGrain.GetRuntimeSnapshotAsync();
-            Assert.False(string.IsNullOrWhiteSpace(beforeTimeout.RunnerId));
-            Assert.False(string.IsNullOrWhiteSpace(beforeTimeout.CurrentWorkId));
-
-            _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));
-            await jobGrain.CheckTimeoutsAsync();
-            Assert.Equal(AgentJobStatus.Unknown, await jobGrain.GetStatusAsync());
-
-            await jobGrain.ReconcileRunningAsync(beforeTimeout.RunnerId!, beforeTimeout.CurrentWorkId!);
-
-            var observation = await ReadObservationAsync(projectId, jobId);
-            Assert.NotNull(observation);
-            var obs = observation!.Value.GetProperty("data");
-            Assert.Equal("running", obs.GetProperty("jobStatus").GetString());
-            Assert.Equal("executing", obs.GetProperty("turnStatus").GetString());
-            Assert.Equal("active", obs.GetProperty("sessionActivity").GetString());
         }
         finally
         {

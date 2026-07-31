@@ -4,9 +4,10 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
@@ -139,18 +140,18 @@ public class TaskLogRouteSpecs
             workflowRunId, projectId, issueNumber);
     }
 
-    private async Task SeedRunnerWorkAsync(string runnerId, string ownerKind, string ownerId, string workId, string status = "outstanding")
+    private async Task SeedAgentJobAsync(string runnerId, string ownerId, string workId, string status = "running")
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        db.RunnerWorks.Add(new RunnerWorkRow
+        var state = $"{{\"status\":\"{status}\",\"runnerId\":\"{runnerId}\",\"workId\":\"{workId}\",\"input\":{{\"prompt\":\"task log\",\"agentId\":\"agent\"}}}}";
+        db.AgentJobs.Add(new AgentJobRow
         {
-            RunnerId = runnerId,
-            OwnerKind = ownerKind,
-            OwnerId = ownerId,
+            JobKey = ownerId,
+            State = state,
+            AssignedRunnerId = runnerId,
             WorkId = workId,
-            TakenAt = _fixture.TimeProvider.GetUtcNow(),
-            Status = status,
+            RunningSince = _fixture.TimeProvider.GetUtcNow().ToString("O"),
         });
         await db.SaveChangesAsync();
     }
@@ -214,7 +215,7 @@ public class TaskLogRouteSpecs
     {
         var agentJobId = $"aj-tasklog-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
-        await SeedRunnerWorkAsync(RunnerId, "agent-job", agentJobId, workId);
+        await SeedAgentJobAsync(RunnerId, agentJobId, workId);
 
         using var response = await PostTaskLogAsync(
             $"/api/agent-jobs/{agentJobId}/work/{workId}/task-log",

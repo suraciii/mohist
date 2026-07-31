@@ -157,32 +157,21 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
     public async Task Launch_ArchivedAgent_Returns409_WithoutCreatingSessionOrJob()
     {
         var projectId = await CreateProjectAsync("launch-archived");
-        var runnerId = $"launch-archived-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "archived-launch-agent");
         using var archive = await _fixture.Client.DeleteAsync($"/api/projects/{projectId}/agents/{agent.Id}");
         archive.EnsureSuccessStatusCode();
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
+        var jobCountBefore = await CountAgentJobsAsync(projectId);
 
-        try
-        {
-            var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "should not launch" });
 
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "should not launch" });
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(payload.GetProperty("success").GetBoolean());
+        Assert.Equal("agent_archived", payload.GetProperty("code").GetString());
 
-            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.False(payload.GetProperty("success").GetBoolean());
-            Assert.Equal("agent_archived", payload.GetProperty("code").GetString());
-
-            var sessionCountAfter = await CountAgentLaunchSessionsAsync(projectId);
-            Assert.Equal(sessionCountBefore, sessionCountAfter);
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            Assert.Equal(HttpStatusCode.NoContent, poll.StatusCode);
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
+        Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
+        Assert.Equal(jobCountBefore, await CountAgentJobsAsync(projectId));
     }
 
     [Fact]
@@ -353,9 +342,11 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
             var jobGrain = await FindAgentJobGrainAsync(sessionId);
             Assert.NotNull(jobGrain);
+            await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
 
             // The fixture configures JobTimeout=8s. An inconclusive
             // timeout remains Unknown so a caller cannot safely replay

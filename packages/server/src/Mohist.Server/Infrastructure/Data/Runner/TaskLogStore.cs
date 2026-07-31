@@ -6,9 +6,8 @@ namespace Mohist.Server.Infrastructure.Data.Runner;
 
 /// <summary>
 /// Dedicated persistence and cursor-paginated query for ops task
-/// execution logs. Mirrors <see cref="RunnerWorkStore"/>'s
-/// placement convention and writes directly with no grain
-/// involvement, matching the artifact-upload independence.
+/// execution logs. Writes directly with no grain involvement, matching
+/// the artifact-upload independence.
 /// </summary>
 public class TaskLogStore
 {

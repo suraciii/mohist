@@ -34,6 +34,12 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     {
         var (project, agent, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-ok");
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId);
+        var launch = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetInitialLaunchAsync();
+        Assert.NotNull(launch?.Turn?.JobId);
+        using (var poll = await _client.PostAsync($"/api/runner/{_runnerId}/poll", content: null))
+        {
+            poll.EnsureSuccessStatusCode();
+        }
         var activeWorksBefore = await GetActiveWorkSnapshotAsync(runner);
         Assert.NotEmpty(activeWorksBefore);
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
@@ -314,8 +320,8 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             var jobId = Assert.Single(await jobs.ListByAgentAsync(project.Id, agent.Id)).JobKey;
             var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
             var snapshot = await job.GetRuntimeSnapshotAsync();
-            await _fixture.Grains.GetGrain<IRunnerGrain>(snapshot.RunnerId!).ReportAgentJobResultAsync(
-                jobId,
+            await job.ReportResultAsync(
+                snapshot.RunnerId!,
                 snapshot.CurrentWorkId!,
                 new WorkResult("completed"));
 

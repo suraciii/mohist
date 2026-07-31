@@ -81,8 +81,7 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
 
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportAgentJobResultAsync(jobKey, workId,
+        await job.ReportResultAsync(runnerId, workId,
             new WorkResult(
                 "completed",
                 "ok",
@@ -123,8 +122,7 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
 
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportAgentJobResultAsync(jobKey, workId,
+        await job.ReportResultAsync(runnerId, workId,
             new WorkResult(
                 "failed",
                 "boom",

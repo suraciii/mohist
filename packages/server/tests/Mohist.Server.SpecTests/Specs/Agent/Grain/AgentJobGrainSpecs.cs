@@ -82,12 +82,11 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             AgentJobId: jobKey,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var report = await runner.ReportAgentJobResultAsync(
-            jobKey,
+        var report = await job.ReportResultAsync(
+            runnerId,
             workId,
             new WorkResult("completed", "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0, ArtifactUploadIds: ["artifact-1"]));
-        Assert.True(report.Tracked);
+        Assert.True(report.Accepted);
 
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
@@ -98,6 +97,35 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         Assert.Equal(0, terminal.ExitCode);
         Assert.Equal(new[] { "artifact-1" }, terminal.ArtifactUploadIds);
         Assert.Null(terminal.FailureReason);
+    }
+
+    [Fact]
+    public async Task ReportResultAsync_AdmittedPendingJob_IsRejectedWithoutChangingLedgerState()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-pending-report-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-pending-report-{Guid.NewGuid():N}");
+
+        await job.SubmitAsync(MakeInput("must be claimed first", projectId));
+        var assigned = await WaitForAsync(
+            () => job.GetRuntimeSnapshotAsync(),
+            snapshot => snapshot.Status == AgentJobStatus.Pending
+                && snapshot.RunnerId == runnerId
+                && !string.IsNullOrWhiteSpace(snapshot.CurrentWorkId),
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            "pending AgentJob assignment");
+
+        var report = await job.ReportResultAsync(
+            runnerId,
+            assigned.CurrentWorkId!,
+            new WorkResult("completed", "must not complete"));
+
+        Assert.False(report.Accepted);
+        Assert.Equal("not-running", report.Reason);
+        var after = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Pending, after.Status);
+        Assert.Equal(assigned.RunnerId, after.RunnerId);
+        Assert.Equal(assigned.CurrentWorkId, after.CurrentWorkId);
     }
 
     [Fact]
@@ -118,12 +146,11 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             AgentJobId: jobKey,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var report = await runner.ReportAgentJobResultAsync(
-            jobKey,
+        var report = await job.ReportResultAsync(
+            runnerId,
             workId,
             new WorkResult("failed", "boom", Output: JSON.DeserializeElement("{\"error\":\"x\"}"), ExitCode: 1));
-        Assert.True(report.Tracked);
+        Assert.True(report.Accepted);
 
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
@@ -152,18 +179,19 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             AgentJobId: jobKey,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportAgentJobResultAsync(jobKey, workId, new WorkResult("completed", "first result"));
+        await job.ReportResultAsync(runnerId, workId, new WorkResult("completed", "first result"));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
         var firstTerminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Completed, firstTerminal.Status);
         Assert.Equal("first result", firstTerminal.Message);
 
-        await runner.ReportAgentJobResultAsync(
-            jobKey,
+        var replay = await job.ReportResultAsync(
+            runnerId,
             workId,
             new WorkResult("failed", "second result"));
+        Assert.False(replay.Accepted);
+        Assert.Equal("stale", replay.Reason);
 
         var stillTerminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Completed, stillTerminal.Status);
@@ -222,8 +250,8 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
 
         Assert.Equal(1, await gate.GetActiveCountAsync());
         var snapshot = await job.GetRuntimeSnapshotAsync();
-        await Grains.GetGrain<IRunnerGrain>(runnerId).ReportAgentJobResultAsync(
-            jobKey,
+        await job.ReportResultAsync(
+            runnerId,
             snapshot.CurrentWorkId!,
             new WorkResult("completed"));
     }
@@ -240,19 +268,18 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         await firstJob.SubmitAsync(MakeInput("occupy slot", projectId, "/tmp/agent-job-capacity-first"));
         await WaitForStatusAsync(firstJob, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        await secondJob.SubmitAsync(MakeInput("wait for slot", projectId, "/tmp/agent-job-capacity-second"));
+        await secondJob.SubmitAsync(MakeInput("no capacity", projectId, "/tmp/agent-job-capacity-second"));
 
-        var secondStatus = await WaitForAsync(
-            () => secondJob.GetStatusAsync(),
-            status => status == AgentJobStatus.Pending,
-            TimeSpan.FromMilliseconds(150),
-            TimeSpan.FromMilliseconds(25),
-            "second job remains pending while runner slot is occupied");
-        Assert.Equal(AgentJobStatus.Pending, secondStatus);
+        await WaitForStatusAsync(secondJob, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
         var secondSnapshot = await secondJob.GetRuntimeSnapshotAsync();
         Assert.Null(secondSnapshot.RunnerId);
         Assert.Null(secondSnapshot.CurrentWorkId);
+        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, secondSnapshot.FailureReason);
+
+        var secondTerminal = await secondJob.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, secondTerminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, secondTerminal.FailureReason);
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var activeWorks = (await runner.GetRuntimeStateAsync()).ActiveWorks;
@@ -356,10 +383,24 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task PollClaimedJob_WithoutReport_TransitionsToUnknownAtJobTimeout()
+    {
+        var (_, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-polled-timeout-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-polled-timeout-{Guid.NewGuid():N}");
+
+        await job.SubmitAsync(MakeInput("never reports after poll", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
+
+        Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
+    }
+
+    [Fact]
     public async Task DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime()
     {
-        await ClearGlobalRunnerRegistryAsync();
         var projectId = $"agent-job-reset-project-{Guid.NewGuid():N}";
+        await RegisterAgentJobRunnerAsync("runner-a", projectId);
         var sessionId = $"agent-job-reset-session-{Guid.NewGuid():N}";
         var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await session.OpenAsync(new OpenAgentSessionCommand(
@@ -375,18 +416,20 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
                 })));
         await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-a"));
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(10));
+        await Grains.GetGrain<IRunnerGrain>("runner-a").TouchPresenceAsync();
 
         var job = JobGrain($"agent-job-reset-{Guid.NewGuid():N}");
         await job.SubmitAsync(new AgentJobInput("delayed failure", ProjectId: projectId, AgentSessionId: sessionId, AgentId: "agent-test"));
-        await job.AssignRunnerAsync("runner-a", "work-a");
-        Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", workId, sessionId, "runtime-a"));
         // Repeat of the same runtimeSessionId is idempotent — the
         // runner may re-report the binding after a reconnect, and
         // the grain must accept it as a no-op (no state mutation, no
         // lineage append). Mismatched values on a repeat report are
         // rejected (#410 T-001 AC).
-        Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
-        Assert.False(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-b"));
+        Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", workId, sessionId, "runtime-a"));
+        Assert.False(await job.RecordRuntimeSessionBindingAsync("runner-a", workId, sessionId, "runtime-b"));
 
         await session.ResetAsync(new ResetAgentSessionCommand("runtime-a", "runtime-b"));
 
@@ -407,8 +450,8 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     [Fact]
     public async Task AttachedGenericJobFailure_RecordsOneTerminalFactWithRuntimeFailureCategory()
     {
-        await ClearGlobalRunnerRegistryAsync();
         var projectId = $"agent-job-close-project-{Guid.NewGuid():N}";
+        await RegisterAgentJobRunnerAsync("runner-a", projectId);
         var sessionId = $"agent-job-close-session-{Guid.NewGuid():N}";
         var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await session.OpenAsync(new OpenAgentSessionCommand(
@@ -426,10 +469,11 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
 
         var job = JobGrain($"agent-job-close-{Guid.NewGuid():N}");
         await job.SubmitAsync(new AgentJobInput("record terminal failure", ProjectId: projectId, AgentSessionId: sessionId, AgentId: "agent-test"));
-        await job.AssignRunnerAsync("runner-a", "work-a");
-        Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", workId, sessionId, "runtime-a"));
 
-        await job.ReportResultAsync("runner-a", "work-a", new WorkResult(
+        await job.ReportResultAsync("runner-a", workId, new WorkResult(
             "failed",
             "prompt timed out",
             Output: JSON.DeserializeElement("""{"failureCategory":"prompt_timeout"}"""),
@@ -499,24 +543,6 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         await job.SubmitAsync(input with { });
 
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
-    }
-
-    [Fact]
-    public async Task SubmitAsync_NoEligibleRunner_IncrementsDispatchAttemptsAcrossRetries()
-    {
-        await ClearGlobalRunnerRegistryAsync();
-
-        var jobKey = $"agent-job-retry-attempts-{Guid.NewGuid():N}";
-        var job = JobGrain(jobKey);
-
-        await job.SubmitAsync(MakeInput("retry attempts", $"missing-project-{Guid.NewGuid():N}", "/tmp/agent-job-retry"));
-
-        _fixture.TimeProvider.Advance(TimeSpan.FromMilliseconds(75));
-        await job.CheckTimeoutsAsync();
-        var snapshot = await job.GetRuntimeSnapshotAsync();
-
-        Assert.Equal(AgentJobStatus.Pending, snapshot.Status);
-        Assert.True(snapshot.DispatchAttempts >= 2);
     }
 
 }

@@ -1,0 +1,67 @@
+{
+  "project": "mohist-local",
+  "description": "Unify AgentJob and WorkflowRun dispatch under owner-led ledgers and remove Runner work staging.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Make AgentJob its own dispatch ledger",
+      "spec": "specs/work-dispatch-ledger/spec.md#Work-owners-maintain-the-dispatch-ledger",
+      "description": "Make the indexed AgentJobs row the atomic AgentJob owner ledger for lifecycle JSON, assignment, readiness, running work, and immutable dispatch data. Migrate legacy AgentJob state deterministically, replace push retries with owner readiness timeout, and add atomic AgentJob claim and owner report validation.",
+      "acceptanceCriteria": [
+        "An admitted AgentJob persists lifecycle state, runner assignment, ready time, work identity, and reconstructable dispatch in one revision-checked database transaction without creating a Runner work record.",
+        "An interrupted AgentJob write leaves the next poll able to observe either the complete old ledger or complete new ledger, never running work without its queryable dispatch fields.",
+        "When all eligible runners are already full during admission, launch returns a terminal runner-unavailable AgentJob with no pending dispatch; only a later claim race can leave an admitted job pending for the readiness timeout.",
+        "Migration uses one injected migration timestamp for every valid legacy pending row, preserves valid running work without pending timeout, excludes terminal rows from active queries, and aborts without changes for malformed nonterminal rows.",
+        "Server specs cover admission outcomes, activation recovery, interrupted owner writes, atomic claim, stale report rejection, readiness timeout with fake time, deterministic migration states, and query cost independent of terminal history.",
+        "The server test suite for the affected Agent and persistence modules passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Atomic AgentJobs owner ledger, deterministic data migration, and owner-led AgentJob grain behavior.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Replace the Orleans-state-plus-best-effort-mirror path; AgentJobs is the single durable AgentJob ledger and owner commands remain the authority for claims and reports."
+    },
+    {
+      "id": "T-002",
+      "title": "Unify poll delivery and claim scheduling",
+      "spec": "specs/work-dispatch-ledger/spec.md#Polling-prioritizes-recovery-and-enforces-shared-capacity",
+      "description": "Extend DispatchService and Runner poll admission to assemble redelivery and new claims from WorkflowRun and AgentJob ledgers in one recovery-first order. Integrate AgentJob claims with the existing Runner lifecycle gate so both owners share capacity and dispatch construction failures retain recoverable owner state.",
+      "acceptanceCriteria": [
+        "A runner poll returns ready AgentJob work without push assignment, and redelivers missing running work from either owner before claiming pending work, including immediately after an AgentJob ledger transition.",
+        "Assigned pending work precedes unassigned work, and mixed WorkflowRun and AgentJob candidates are served by readiness time within each candidate layer.",
+        "No poll can claim work beyond the runner's combined configured slots; a capacity race leaves the AgentJob pending for a later poll.",
+        "A failed claim is skipped, ordinary dispatch rendering failures are retried by a later poll, and a retired action fails only the exact active owner work.",
+        "Server specs cover mixed-owner poll order, redelivery, capacity races, activation recovery, and deterministic dispatch rejection using fake time and in-memory stores."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Stateless mixed-owner poll assembly and shared-capacity claim path in DispatchService and Runner lifecycle handling.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Do not introduce a queue, cursor, cache, or generic work aggregate."
+    },
+    {
+      "id": "T-003",
+      "title": "Remove Runner work staging and relay paths",
+      "spec": "specs/work-dispatch-ledger/spec.md#Runner-owns-presence-capacity-and-closeout-only",
+      "description": "Switch AgentJob reports, active-work views, task-log authorization, and runner-loss closeout to owner-led paths. Remove Runner AgentJob work state, persistence, hydration, assignment/reconciliation APIs, report relay, and the obsolete RunnerWorks schema after the new path has no consumers.",
+      "acceptanceCriteria": [
+        "AgentJob reports reach the owning grain directly, and both accepted and stale responses acknowledge runner report retries.",
+        "Runner runtime state and AgentJob task-log authorization derive active work from AgentJob projection data rather than RunnerWorks.",
+        "Unregister and presence expiry report runner-lost to each running owner; AgentJob records a failed terminal result and a later report is stale.",
+        "No production path reads or writes Runner-held AgentJob work, and the RunnerWorks table, store, state types, relay, and legacy push/reconciliation tests are removed.",
+        "Server specs cover direct report acknowledgement, task-log authorization, runner-loss closeout, stale late reports, and absence of Runner work persistence; the affected server test suite passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Runner resource-lifecycle-only implementation, direct owner reporting, owner-derived read paths, and removal migration for RunnerWorks.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "The behavioral cutover is forward-only once new owner-led work is accepted; retain schema rollback only before cutover."
+    }
+  ]
+}

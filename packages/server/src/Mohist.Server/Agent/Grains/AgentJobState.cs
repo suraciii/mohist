@@ -33,4 +33,5 @@ public sealed class AgentJobState
     [Id(20)] public string? ConcurrencyPermitToken { get; set; }
     [Id(21)] public bool ConcurrencyPermitHeld { get; set; }
     [Id(22)] public string? WaitingReason { get; set; }
+    [Id(23)] public DateTimeOffset? ReadySince { get; set; }
 }

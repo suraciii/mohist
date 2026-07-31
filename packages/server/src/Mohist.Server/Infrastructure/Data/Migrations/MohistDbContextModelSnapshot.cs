@@ -509,6 +509,57 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AssignedRunnerId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReadySince")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RunningSince")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DispatchJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkType")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stage")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IssueProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("IssueNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AgentSessionId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InitialInputId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InitialTurnId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ProjectId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -537,6 +588,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasKey("JobKey");
                     b.HasIndex("AgentId", "ProjectId", "SubmittedAt")
                         .HasDatabaseName("IX_AgentJobs_AgentId_ProjectId_SubmittedAt");
+                    b.HasIndex("AssignedRunnerId", "Status")
+                        .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status");
+                    b.HasIndex("AssignedRunnerId", "Status", "ReadySince")
+                        .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status_ReadySince");
+                    b.HasIndex("Status", "ReadySince")
+                        .HasDatabaseName("IX_AgentJobs_Status_ReadySince");
                     b.ToTable("AgentJobs", (string)null);
                 });
 
@@ -1491,56 +1548,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_Runners_Slots_Positive", "\"Slots\" > 0");
                         });
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.RunnerWorkRow", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTimeOffset?>("FinishedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OwnerId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OwnerKind")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RunnerId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("TakenAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WorkId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RunnerId", "Status");
-
-                    b.HasIndex("RunnerId", "OwnerKind", "OwnerId", "WorkId");
-
-                    b.ToTable("RunnerWorks", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.TaskLogBatchRow", b =>

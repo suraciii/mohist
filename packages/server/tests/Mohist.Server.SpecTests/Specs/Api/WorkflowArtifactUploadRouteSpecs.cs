@@ -268,9 +268,23 @@ public class WorkflowArtifactUploadRouteSpecs
     public async Task AgentJobUploadEndpoint_AcceptsMultipartForRunningJob()
     {
         var jobId = $"agent-job-upload-{Guid.NewGuid():N}";
-        var workId = $"agent-work-{Guid.NewGuid():N}";
+        var runnerId = $"agent-upload-runner-{Guid.NewGuid():N}";
+        var projectId = $"agent-upload-project-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = new[] { "spec/task" },
+            hostname = "test-host",
+            projectId,
+        });
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
-        await job.AssignRunnerAsync("runner-agent-upload", workId);
+        await job.SubmitAsync(new AgentJobInput(
+            "upload agent artifact",
+            ProjectId: projectId,
+            AgentId: "agent-test"));
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var dispatch = await runner.PollAsync(_fixture.Services);
+        Assert.NotNull(dispatch);
+        var workId = dispatch.WorkId;
 
         var path = "review.md";
         var payload = Encoding.UTF8.GetBytes("agent artifact content");
