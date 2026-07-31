@@ -115,3 +115,8 @@
 
 - Manual launch now restores only attachments newly claimed by a request when the coordinator rejects it for an idempotency conflict, validation/readiness failure, or unexpected setup failure. Recovering launch plans keep their accepted attachments.
 - Added a concurrent same-key, different-attachment launch regression that proves the losing attachment returns to pending ownership and is unavailable through the winning input scope. Server specs pass 3519/3519.
+
+## Cancellation repair
+
+- Launch preserves newly claimed attachments only after successful acceptance or a durable `launch_setup_pending` plan; all other exits, including request cancellation, restore the new claims with `CancellationToken.None`.
+- Follow-up rolls back with `CancellationToken.None` when cancellation interrupts its post-bind canonical-target lookup. Added unit coverage for restoring an agent-input claim to pending ownership and TTL. Server unit tests pass 1678/1678 and server specs pass 3519/3519.

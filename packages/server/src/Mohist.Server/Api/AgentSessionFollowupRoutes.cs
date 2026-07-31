@@ -238,7 +238,17 @@ public static class AgentSessionFollowupRoutes
         CancellationToken ct,
         Func<CancellationToken, Task>? rollbackAcceptedAttachments = null)
     {
-        var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
+        CanonicalFollowupTarget? target;
+        try
+        {
+            target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            if (rollbackAcceptedAttachments is not null)
+                await rollbackAcceptedAttachments(CancellationToken.None);
+            throw;
+        }
         if (target is null)
             return await RollbackAndReturnAsync(
                 Rejected(sessionId, "not_found", $"Agent session {sessionId} not found"),
@@ -312,7 +322,7 @@ public static class AgentSessionFollowupRoutes
         CancellationToken ct)
     {
         if (rollbackAcceptedAttachments is not null)
-            await rollbackAcceptedAttachments(ct);
+            await rollbackAcceptedAttachments(CancellationToken.None);
         return result;
     }
 

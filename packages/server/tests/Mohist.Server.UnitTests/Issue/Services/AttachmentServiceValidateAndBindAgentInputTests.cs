@@ -50,6 +50,24 @@ public sealed class AttachmentServiceValidateAndBindAgentInputTests
     }
 
     [Fact]
+    public async Task UnbindAgentInput_RestoresPendingOwnershipAndExpiry()
+    {
+        var (database, _, time, service) = NewStack();
+        var projectId = "proj-unbind";
+        var upload = await service.UploadAsync(projectId, NewFormFile("notes.txt", "text/plain", "hello"u8.ToArray()));
+
+        await service.ValidateAndBindAgentInputAsync(projectId, "session-1", "input-1", [upload.Id]);
+        time.Advance(TimeSpan.FromHours(1));
+        await service.UnbindAgentInputAsync(projectId, "session-1", "input-1", [upload.Id]);
+
+        await using var db = database.CreateContext();
+        var row = await db.Attachments.AsNoTracking().SingleAsync(attachment => attachment.Id == upload.Id);
+        Assert.Null(row.OwnerKind);
+        Assert.Null(row.OwnerId);
+        Assert.Equal(time.GetUtcNow().Add(AttachmentService.PendingTtl), row.ExpiresAt);
+    }
+
+    [Fact]
     public async Task ValidateAndBindAgentInput_RejectsNotFoundWithReason()
     {
         var (_, _, _, service) = NewStack();

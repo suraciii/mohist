@@ -231,12 +231,13 @@ public static class AgentSessionLaunchRoutes
                 Title: null);
 
             AgentLaunchResult result;
+            var retainNewlyBoundAttachments = false;
             Task RollbackNewlyBoundAttachmentsAsync() => attachments.UnbindAgentInputAsync(
                 project.Id,
                 preMintedSessionId,
                 preMintedInputId,
                 attachmentBatch.NewlyBoundAttachmentIds ?? [],
-                ct);
+                CancellationToken.None);
             try
             {
                 result = await launcher.LaunchIdempotentAsync(
@@ -253,15 +254,14 @@ public static class AgentSessionLaunchRoutes
                     preMintedInputId,
                     preMintedTurnId,
                     ct);
+                retainNewlyBoundAttachments = true;
             }
             catch (ArgumentException ex)
             {
-                await RollbackNewlyBoundAttachmentsAsync();
                 return ApiResults.BadRequest(ex.Message, "validation_failed");
             }
             catch (LaunchIdempotencyConflictException ex)
             {
-                await RollbackNewlyBoundAttachmentsAsync();
                 return ApiResults.Conflict(
                     ex.Message,
                     "launch_idempotency_conflict",
@@ -269,17 +269,17 @@ public static class AgentSessionLaunchRoutes
             }
             catch (LaunchSetupPendingException ex)
             {
+                retainNewlyBoundAttachments = true;
                 return LaunchSetupPending(ex);
             }
             catch (AgentReadinessException ex)
             {
-                await RollbackNewlyBoundAttachmentsAsync();
                 return ReadinessRejected(ex);
             }
-            catch (Exception) when (!ct.IsCancellationRequested)
+            finally
             {
-                await RollbackNewlyBoundAttachmentsAsync();
-                throw;
+                if (!retainNewlyBoundAttachments)
+                    await RollbackNewlyBoundAttachmentsAsync();
             }
 
             return AcceptedLaunch(project.Id, result, attachmentBatch.Results);
