@@ -211,3 +211,29 @@ New tests:
   always receives a fresh key. The composer reads the same
   `followupStatus` label (`Outcome unknown — retry with the same
   key`) so retry UX is unchanged from T-002.
+
+## Final verification (issue-523 close)
+
+Re-ran the full verify suite against the committed T-001/T-002/T-003 work
+to confirm the issue is ready to close. No source changes were needed.
+
+- `git status` → working tree clean; branch 8 commits ahead of
+  `origin/master` with T-001, T-002, T-003 already committed.
+- `npm run build` → `dotnet build Mohist.sln -p:SkipWebBuild=true` clean,
+  Web Vite bundle emitted, runner/slack `tsc` builds clean, `assert-web-build.mjs`
+  exits 0.
+- `dotnet test Mohist.sln -p:SkipWebBuild=true` →
+  - `Mohist.Workflow.Definition.Tests`: 175/175
+  - `Mohist.Cli.Tests`: 1484/1484
+  - `Mohist.Server.UnitTests`: 1679/1679
+  - `Mohist.Server.ArchTests`: 51/51
+  - `Mohist.Server.SpecTests`: 3529/3529 (incl. `UnifiedSessionRoutesSpecs`
+    and `UnifiedSessionSummarySpecs`)
+- `npm run typecheck -w packages/web` → passes.
+- `npm run check:fsd -w packages/web` → 498 production modules checked,
+  no boundary violations.
+- `npm run test:run -w packages/web` → 5082/5082, 384/384 files in 15.48s.
+
+`git status --porcelain` after each step shows only ignored build outputs
+(`bin/`, `obj/`, `dist/`, `node_modules/`). The worktree stays clean, and
+nothing was committed or reverted to suppress a failure.

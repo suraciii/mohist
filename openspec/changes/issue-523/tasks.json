@@ -19,7 +19,7 @@
       "type": "WRITE",
       "output": "Extended unified Session read DTO, querier, and route contract with source-aware Server spec coverage.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Build on `UnifiedSessionSummaryDto`, `AgentSessionQuerier.GetUnifiedSessionSummaryAsync`, and `UnifiedSessionRoutes`; the Session domain remains the only owner of activity, turns, and bindings."
     },
     {
@@ -41,7 +41,7 @@
       "type": "WRITE",
       "output": "A single stable-ID Web Session detail route and shared tracking data source with source-agnostic read behavior.",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "Keep presentation dependencies downward under the Web FSD rules. Existing `SessionDetailShell` and `useSessionTranscript` remain the shared rendering and live-event primitives."
     },
     {
@@ -62,7 +62,7 @@
       "type": "WRITE",
       "output": "Unified Web Session controls with authoritative outcomes and regression coverage for follow-up, turn control, Compact, and Reset.",
       "dependsOn": ["T-002"],
-      "passes": false,
+      "passes": true,
       "notes": "Reuse the canonical `/agent-sessions/{sessionId}` command APIs and Session-domain decision rules; do not branch command dispatch by Session source."
     }
   ]
