@@ -91,7 +91,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("DmConversationId")
+                    b.Property<string>("ConversationId")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -120,6 +120,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ThreadTs")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
@@ -174,7 +178,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("DispatchedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("DmConversationId")
+                    b.Property<string>("ConversationId")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -1793,6 +1797,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/slack-conversation-id\"')", true);
 
+                    b.Property<string>("LabelSlackThreadTs")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/slack-thread-ts\"')", true);
+
                     b.Property<string>("Activity")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -1864,6 +1873,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("LabelSlackConversationId")
                         .HasDatabaseName("IX_AgentSessions_LabelSlackConversationId");
+
+                    b.HasIndex("LabelSlackThreadTs")
+                        .HasDatabaseName("IX_AgentSessions_LabelSlackThreadTs");
 
                     b.ToTable("AgentSessions", (string)null);
                 });

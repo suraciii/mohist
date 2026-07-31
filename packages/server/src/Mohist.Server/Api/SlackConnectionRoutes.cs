@@ -278,7 +278,11 @@ public static class SlackConnectionRoutes
                 return ApiResults.NotFound("Slack Connection was not found.");
             if (connection.DesiredState == DesiredStateKind.Disabled)
                 return ApiResults.Ok(new { kind = "rejected", reason = "This Connection is disabled." });
-            if (body is null || !body.IsDirectMessage)
+            if (body is null)
+                return ApiResults.Ok(new { kind = "ignored" });
+            if (!TryGetHumanSender(body, out var senderSlackUserId))
+                return ApiResults.Ok(new { kind = "ignored" });
+            if (!body.IsDirectMessage)
                 return ApiResults.Ok(new { kind = "ignored" });
             if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
                 return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
@@ -291,21 +295,21 @@ public static class SlackConnectionRoutes
             var decision = await claims.HandleInboundDmAsync(
                 projectId,
                 connectionId,
-                new SlackInboundDm(body.SenderSlackUserId, body.Text ?? string.Empty),
+                new SlackInboundDm(senderSlackUserId, body.Text ?? string.Empty),
                 ct);
             if (decision.Kind == SlackInboundDecisionKind.Claimed)
             {
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, "Owner claimed successfully.", null, ct);
+                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, "Owner claimed successfully.", null, ct, body.ThreadTs);
                 return ApiResults.Ok(new { kind = "claimed" });
             }
             if (decision.Kind == SlackInboundDecisionKind.Transferred)
             {
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, "Owner transferred successfully.", null, ct);
+                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, "Owner transferred successfully.", null, ct, body.ThreadTs);
                 return ApiResults.Ok(new { kind = "transferred" });
             }
             if (decision.Kind == SlackInboundDecisionKind.Rejected)
             {
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, decision.Reason ?? "The message was rejected.", null, ct);
+                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, decision.Reason ?? "The message was rejected.", null, ct, body.ThreadTs);
                 return ApiResults.Ok(new { kind = "rejected", reason = decision.Reason });
             }
 
@@ -319,7 +323,7 @@ public static class SlackConnectionRoutes
             if (string.IsNullOrWhiteSpace(prompt))
             {
                 const string reason = "Please send a task for the Agent to perform.";
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, reason, null, ct);
+                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                 return ApiResults.Ok(new { kind = "rejected", reason });
             }
 
@@ -327,7 +331,7 @@ public static class SlackConnectionRoutes
             if (isNewTask && string.IsNullOrWhiteSpace(newTaskPrompt))
             {
                 const string reason = "Please send a task for the Agent to perform.";
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, reason, null, ct);
+                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                 return ApiResults.Ok(new { kind = "rejected", reason });
             }
 
@@ -346,7 +350,7 @@ public static class SlackConnectionRoutes
                 if (!dispatchDecision.Accepted)
                 {
                     await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId,
-                        dispatchDecision.Reason!, null, ct);
+                        dispatchDecision.Reason!, null, ct, body.ThreadTs);
                     return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
                 }
             }
@@ -366,7 +370,7 @@ public static class SlackConnectionRoutes
             try
             {
                 accepted = await inbox.AcceptAsync(new SlackProviderInboxDraft(
-                    projectId, connectionId, identity, body.SenderSlackUserId), routeDraft, ct);
+                    projectId, connectionId, identity, senderSlackUserId), routeDraft, ct);
             }
             catch (SlackProviderInboxCapacityExceededException ex)
             {
@@ -394,7 +398,8 @@ public static class SlackConnectionRoutes
                     body.ConversationId,
                     control.Reply,
                     $"slack-ack:{identity.AsKey()}",
-                    ct);
+                    ct,
+                    body.ThreadTs);
                 await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
                 return ApiResults.Ok(new
                 {
@@ -413,7 +418,8 @@ public static class SlackConnectionRoutes
                 await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
                     reply,
                     $"slack-ack:{identity.AsKey()}",
-                    ct);
+                    ct,
+                    body.ThreadTs);
                 await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
                 return ApiResults.Ok(new { kind = route.Kind, control = true });
             }
@@ -429,7 +435,7 @@ public static class SlackConnectionRoutes
                         agent!,
                         isRoutedNewTask ? newTaskPrompt : prompt,
                         new ConnectionLaunchOrigin(
-                            connectionId, body.TeamId, body.SenderSlackUserId, body.ConversationId, body.MessageTs),
+                            connectionId, body.TeamId, senderSlackUserId, body.ConversationId, body.MessageTs, body.ThreadTs),
                         ct);
                     sessionId = await inbox.SetRouteSessionIdAsync(projectId, accepted.Id, launch.SessionId, ct);
                 }
@@ -438,7 +444,7 @@ public static class SlackConnectionRoutes
                     projectId,
                     connectionId,
                     body.TeamId,
-                    body.SenderSlackUserId,
+                    senderSlackUserId,
                     body.ConversationId,
                     sessionId,
                     body.MessageTs,
@@ -451,7 +457,8 @@ public static class SlackConnectionRoutes
                 await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
                     acknowledgement,
                     $"slack-ack:{identity.AsKey()}",
-                    ct);
+                    ct,
+                    body.ThreadTs);
                 await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
                 return ApiResults.Ok(new
                 {
@@ -477,7 +484,8 @@ public static class SlackConnectionRoutes
             await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
                 followupAck,
                 $"slack-ack:{identity.AsKey()}",
-                ct);
+                ct,
+                body.ThreadTs);
             await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
             return ApiResults.Ok(new
             {
@@ -571,7 +579,8 @@ public static class SlackConnectionRoutes
         string conversationId,
         string text,
         string? dispatchRef,
-        CancellationToken ct) =>
+        CancellationToken ct,
+        string? threadTs = null) =>
         await outbox.EnqueueAsync(new SlackOutboxDraft(
             projectId,
             connection.Id,
@@ -579,7 +588,8 @@ public static class SlackConnectionRoutes
             conversationId,
             SlackOutboxKinds.UserAction,
             dispatchRef,
-            JsonSerializer.Serialize(new { text })), ct);
+            JsonSerializer.Serialize(new { text }),
+            threadTs), ct);
 
     private static async Task EnqueueRequiredReplyAsync(
         SlackOutboxStore outbox,
@@ -588,7 +598,8 @@ public static class SlackConnectionRoutes
         string conversationId,
         string text,
         string dispatchRef,
-        CancellationToken ct) =>
+        CancellationToken ct,
+        string? threadTs = null) =>
         await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
             projectId,
             connection.Id,
@@ -596,7 +607,8 @@ public static class SlackConnectionRoutes
             conversationId,
             SlackOutboxKinds.UserAction,
             dispatchRef,
-            JsonSerializer.Serialize(new { text })), ct);
+            JsonSerializer.Serialize(new { text }),
+            threadTs), ct);
 
     private static string RemoveBotMention(string text, string botUserId)
     {
@@ -604,6 +616,19 @@ public static class SlackConnectionRoutes
         if (!string.IsNullOrWhiteSpace(botUserId))
             result = result.Replace($"<@{botUserId}>", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
         return result;
+    }
+
+    private static bool TryGetHumanSender(SlackIngressBody body, out string senderSlackUserId)
+    {
+        senderSlackUserId = body.SenderSlackUserId?.Trim() ?? string.Empty;
+        var senderKind = body.SenderKind?.Trim().ToLowerInvariant();
+        if (senderKind is "bot" or "unknown")
+        {
+            senderSlackUserId = string.Empty;
+            return false;
+        }
+
+        return senderSlackUserId.Length != 0;
     }
 
     /// <summary>
@@ -977,7 +1002,10 @@ public sealed class SlackIngressBody
     public string TeamId { get; init; } = string.Empty;
     public string ConversationId { get; init; } = string.Empty;
     public string MessageTs { get; init; } = string.Empty;
-    public string SenderSlackUserId { get; init; } = string.Empty;
+    public string? ThreadTs { get; init; }
+    public IReadOnlyList<string> MentionedUserIds { get; init; } = Array.Empty<string>();
+    public string? SenderSlackUserId { get; init; }
+    public string? SenderKind { get; init; }
     public string? Text { get; init; }
 }
 

@@ -331,7 +331,9 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         {
             labels[AgentSessionQueryMetadataKeys.ConnectionId] = origin.ConnectionId;
             labels[AgentSessionQueryMetadataKeys.SlackUserId] = origin.SlackUserId;
-            labels[AgentSessionQueryMetadataKeys.SlackConversationId] = origin.DmConversationId;
+            labels[AgentSessionQueryMetadataKeys.SlackConversationId] = origin.ConversationId;
+            if (!string.IsNullOrWhiteSpace(origin.ThreadTs))
+                labels[AgentSessionQueryMetadataKeys.SlackThreadTs] = origin.ThreadTs;
         }
 
         var metadata = new AgentSessionMetadata(labels, null);

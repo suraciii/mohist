@@ -13,7 +13,7 @@ public sealed class SlackProviderInboxRow
     public string ConnectionId { get; set; } = string.Empty;
     public string SlackMessageIdentity { get; set; } = string.Empty;
     public string WorkspaceTeamId { get; set; } = string.Empty;
-    public string DmConversationId { get; set; } = string.Empty;
+    public string ConversationId { get; set; } = string.Empty;
     public string SlackUserId { get; set; } = string.Empty;
     public string? RouteKind { get; set; }
     public string? RouteSessionId { get; set; }

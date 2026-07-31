@@ -39,6 +39,7 @@ public class AgentSessionRow
     public string? LabelConnectionId { get; set; }
     public string? LabelSlackUserId { get; set; }
     public string? LabelSlackConversationId { get; set; }
+    public string? LabelSlackThreadTs { get; set; }
 
     /// <summary>
     /// Stored projected copy of <c>State.status.activity</c>. Sourced from

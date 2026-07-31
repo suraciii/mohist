@@ -1,0 +1,15 @@
+## Codebase Patterns
+
+- The current mo CLI uses `mo issue view 515 --project ...`; the requested `mo issue show ...` form is not supported by this workspace CLI.
+- Slack adapter tests use fake Socket, Web, and transport implementations. Server Slack specs run directly with the xUnit v3 assembly and `-namespace Mohist.Server.SpecTests.Specs.Slack`; the dotnet test VSTest filter is ignored by Microsoft.Testing.Platform here.
+- SQLite generated columns are visible to schema assertions through `pragma_table_xinfo`, not `pragma_table_info`.
+- `SlackDmSessionMappingStore` and `SlackDmSessionMappingRow` remain DM-specific. Shared Slack message identity, inbox, terminal delivery, and outbox use `ConversationId`.
+
+## T-001
+
+- `SlackEnvelope` now carries nullable `threadTs`, ordered de-duplicated `mentionedUserIds`, nullable `senderSlackUserId`, and `senderKind` (`human`, `bot`, or `unknown`). Missing-user events normalize successfully so the adapter can acknowledge them.
+- `ConnectionLaunchOrigin` keeps the existing Orleans field ids, renames its conversation field to `ConversationId`, and adds optional field id 5 `ThreadTs`. The coordinator fingerprint includes `ThreadTs`; connection-launched sessions stamp `SlackThreadTs` when present.
+- Terminal delivery CloudEvents, outbox drafts/rows/read models, and adapter `Delivery` carry optional thread identity. The adapter only includes Slack `thread_ts` for threaded deliveries, leaving DM requests unchanged.
+- Server ingress ignores bot and unknown sender kinds before inbox acceptance. A missing sender kind is treated as human only when a stable sender id is present, preserving existing DM callers while adapter traffic is explicit.
+- Added migration `20260731120000_AddSlackThreadDelivery` renames shared inbox/outbox conversation columns, adds outbox `ThreadTs`, and adds the stored session thread-label projection.
+- Verification: `npm run typecheck -w packages/mohist-slack`, `npm run test:ci -w packages/mohist-slack`, Slack SpecTests (102), and the affected Agent service UnitTests (24) pass without network access. The earlier full SpecTests baseline had one unrelated OTLP exporter connection-refused failure; the focused Slack namespace passed.

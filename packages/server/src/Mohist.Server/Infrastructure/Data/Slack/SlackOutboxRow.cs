@@ -13,7 +13,8 @@ public sealed class SlackOutboxRow
     public string ProjectId { get; set; } = string.Empty;
     public string ConnectionId { get; set; } = string.Empty;
     public string WorkspaceTeamId { get; set; } = string.Empty;
-    public string DmConversationId { get; set; } = string.Empty;
+    public string ConversationId { get; set; } = string.Empty;
+    public string? ThreadTs { get; set; }
     public string Kind { get; set; } = string.Empty;
     public string State { get; set; } = string.Empty;
     public string? DispatchRef { get; set; }

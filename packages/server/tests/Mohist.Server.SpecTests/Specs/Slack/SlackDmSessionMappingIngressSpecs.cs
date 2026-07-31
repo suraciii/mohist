@@ -89,7 +89,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var uniqueIdentities = await db.SlackProviderInboxRows
             .Where(row => row.ConnectionId == connection.Id
-                && row.DmConversationId == "D-DM-REPLAY")
+                && row.ConversationId == "D-DM-REPLAY")
             .CountAsync();
         Assert.Equal(1, uniqueIdentities);
     }

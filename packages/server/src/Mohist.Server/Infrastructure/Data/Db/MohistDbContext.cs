@@ -205,6 +205,8 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql(JsonExtractLabel(AgentSessionQueryMetadataKeys.SlackUserId), stored: true);
             entity.Property(e => e.LabelSlackConversationId)
                 .HasComputedColumnSql(JsonExtractLabel(AgentSessionQueryMetadataKeys.SlackConversationId), stored: true);
+            entity.Property(e => e.LabelSlackThreadTs)
+                .HasComputedColumnSql(JsonExtractLabel(AgentSessionQueryMetadataKeys.SlackThreadTs), stored: true);
 
             // Virtual projection of status.activity, lowered
             // to match the existing Status column convention. Powers the
@@ -259,6 +261,8 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelSlackUserId_CreatedAt");
             entity.HasIndex(e => e.LabelSlackConversationId)
                 .HasDatabaseName("IX_AgentSessions_LabelSlackConversationId");
+            entity.HasIndex(e => e.LabelSlackThreadTs)
+                .HasDatabaseName("IX_AgentSessions_LabelSlackThreadTs");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>
@@ -1188,7 +1192,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.SlackMessageIdentity).HasMaxLength(512).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.DmConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.RouteKind).HasMaxLength(32);
             entity.Property(e => e.RouteSessionId).HasMaxLength(512);
@@ -1218,7 +1222,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.DmConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ThreadTs).HasMaxLength(64);
             entity.Property(e => e.Kind).HasMaxLength(32).IsRequired();
             entity.Property(e => e.State).HasMaxLength(32).IsRequired();
             entity.Property(e => e.DispatchRef).HasMaxLength(256);
