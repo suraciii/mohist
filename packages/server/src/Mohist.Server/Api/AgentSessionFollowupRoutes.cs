@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Contracts;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Services.SignalR;

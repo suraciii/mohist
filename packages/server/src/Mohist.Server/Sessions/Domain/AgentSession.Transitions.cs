@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Sessions.Domain;
@@ -1135,7 +1136,8 @@ public static partial class AgentSessionExtensions
                 AlreadyAccepted: false,
                 ShouldRedeliver: true,
                 InputAcceptance: newInput.Acceptance,
-                TurnStatus: updatedTurn.Status);
+                TurnStatus: updatedTurn.Status,
+                Attachments: normalizedAttachments);
         }
 
         /// <summary>

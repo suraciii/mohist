@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Mohist.Server.Contracts;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Sessions.Domain;
 

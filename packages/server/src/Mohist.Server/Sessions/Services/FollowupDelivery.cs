@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure;
 

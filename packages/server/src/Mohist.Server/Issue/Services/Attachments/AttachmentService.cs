@@ -6,9 +6,9 @@ using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Contracts;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Issue.Services.Attachments;

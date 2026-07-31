@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Events;

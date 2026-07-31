@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Sessions.Domain;
@@ -539,68 +540,6 @@ public sealed record AgentSessionInputRecord(
     [property: Id(6)] string? JobId = null,
     [property: Id(7)] string? IdempotencyKey = null,
     [property: Id(8)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
-
-/// <summary>
-/// Per-attachment child descriptor stored on
-/// <see cref="AgentSessionInputRecord"/>. Captures the user-visible
-/// provenance (id, name, content type, size) and the moment the
-/// attachment was accepted so the dispatch payload can carry the
-/// descriptor and the Runner can resolve the content via the scoped
-/// content route (<c>.../agent-sessions/{id}/inputs/{inputId}/attachments/{attId}/content</c>).
-/// Bytes are intentionally NOT stored on the descriptor — the server
-/// owns the storage and only the owning input's execution path may
-/// read the content.
-/// </summary>
-[GenerateSerializer]
-public sealed record AgentSessionInputAttachmentDescriptor(
-    [property: Id(0)] string Id,
-    [property: Id(1)] string OriginalFileName,
-    [property: Id(2)] string? ContentType,
-    [property: Id(3)] long Size,
-    [property: Id(4)] DateTimeOffset AcceptedAt);
-
-/// <summary>
-/// Per-attachment acceptance verdict surfaced to the API caller when
-/// a SessionInput is accepted. The shape mirrors the spec's
-/// "each submitted attachment receives a definitive acceptance
-/// result" requirement: an accepted attachment carries the descriptor
-/// the dispatch needs, a rejected attachment carries a stable reason
-/// code and a human-readable message. The reason codes match the
-/// spec's minimum set (not-found, not-readable, exceeds-size-limit,
-/// unsupported-type) plus the cross-owner rejection specific to
-/// Mohist's per-input ownership model.
-/// </summary>
-public enum AgentInputAttachmentRejectionReason
-{
-    NotFound,
-    Expired,
-    NotReadable,
-    ExceedsSizeLimit,
-    UnsupportedType,
-    AlreadyBound,
-}
-
-[GenerateSerializer]
-public sealed record AgentInputAttachmentAcceptance(
-    [property: Id(0)] string Id,
-    [property: Id(1)] AgentSessionInputAttachmentDescriptor? Descriptor,
-    [property: Id(2)] AgentInputAttachmentRejectionReason? RejectionReason,
-    [property: Id(3)] string? RejectionMessage)
-{
-    public bool IsAccepted => Descriptor is not null;
-}
-
-/// <summary>
-/// Batch of per-file accept/reject verdicts returned by
-/// <see cref="Mohist.Server.Issue.Services.Attachments.AttachmentService.ValidateAndBindAgentInputAsync"/>.
-/// Preserves the caller's original id ordering so the API can render
-/// the same order the user submitted; <see cref="AcceptedCount"/>
-/// surfaces the aggregate count without forcing the caller to walk
-/// the list.
-/// </summary>
-public sealed record AgentInputAttachmentAcceptanceBatch(
-    IReadOnlyList<AgentInputAttachmentAcceptance> Results,
-    int AcceptedCount);
 
 public enum AgentSessionInputAcceptance
 {

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;

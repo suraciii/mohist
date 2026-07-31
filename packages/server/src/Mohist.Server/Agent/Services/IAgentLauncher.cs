@@ -1,5 +1,6 @@
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Subscriptions;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;

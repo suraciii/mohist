@@ -78,3 +78,11 @@
 
 - `dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passes with zero warnings/errors.
 - `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passes all 1475 CLI tests, including launch and follow-up multipart/body/result specs.
+
+## Final verification repair
+
+- The first full verification failed for three concrete reasons: `AttachmentService` depended directly on attachment contracts declared under `Sessions.Domain`, the new acceptance spec exceeded the 24KB C# test-file ratchet, and a newly created follow-up input did not copy its accepted descriptors into `AgentSessionFollowupAcceptResult`.
+- Moved the shared attachment acceptance/descriptor contracts to `Mohist.Server.Contracts`, split the acceptance spec support helpers into a suffix-compliant partial file, and returned the normalized descriptors from the new follow-up transition.
+- Focused verification now passes: server architecture 50/50, server unit tests 1640/1640, and the issue-513 acceptance class 8/8.
+- The complete verify then found the Web launch page test at 509 lines, over the 500-line boundary. Extracted its fake state/render support into `packages/web/tests/support`, keeping all 30 page assertions in the active test file; Web typecheck, FSD, test-boundary, and page tests pass.
+- Final `npm run verify` passes with no Git-visible verification-only changes.

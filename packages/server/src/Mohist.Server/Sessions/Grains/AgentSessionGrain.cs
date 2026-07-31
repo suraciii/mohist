@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
