@@ -480,6 +480,36 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PostQuery_WideColumnName_StaysWithinResponseByteCap()
+    {
+        const int aliasLength = 10_000;
+        const int cellBytes = 2 * 1024;
+        var alias = new string('\u0001', aliasLength);
+        var sql = "WITH RECURSIVE cnt(x) AS (" +
+                  "SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 1000) " +
+                  $"SELECT hex(randomblob({cellBytes / 2})) AS \"{alias}\" FROM cnt;";
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            JsonSerializer.Serialize(new { sql }),
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var responseBody = await response.Content.ReadAsStringAsync();
+        AssertResponseWithinByteCap(responseBody);
+
+        using var doc = JsonDocument.Parse(responseBody);
+        var data = doc.RootElement.GetProperty("data");
+        Assert.True(data.GetProperty("rows").GetArrayLength() > 0);
+        Assert.True(data.GetProperty("rows").GetArrayLength() < TraceQuerier.MaxQueryResponseRows);
+        Assert.True(data.GetProperty("truncated").GetBoolean());
+        Assert.Equal("byte_limit", data.GetProperty("truncate_reason").GetString());
+    }
+
+    [Fact]
     public async Task PostQuery_ModerateRowsUnderRowCap_TruncatesByByteLimit()
     {
         const int rowCount = TraceQuerier.MaxQueryResponseRows;

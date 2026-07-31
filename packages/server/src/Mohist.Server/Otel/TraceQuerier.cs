@@ -170,7 +170,9 @@ public sealed class TraceQuerier : IOtelQueryExecutor
             }
 
             var rows = new List<Dictionary<string, object?>>(Math.Min(MaxQueryResponseRows, 16));
-            var accumulatedBytes = ResponsePrefixBytes;
+            var accumulatedBytes = ResponsePrefixBytes
+                + JsonSerializer.SerializeToUtf8Bytes(fieldNames, JSON.Options).LongLength
+                + ColumnsToRowsBytes;
             while (await reader.ReadAsync(executionToken))
             {
                 if (rows.Count >= MaxQueryResponseRows)
@@ -321,8 +323,9 @@ public sealed class TraceQuerier : IOtelQueryExecutor
         return JsonSerializer.SerializeToUtf8Bytes(value, JSON.Options).LongLength;
     }
 
-    private const long ResponsePrefixBytes = 32;
-    private const long MaxResponseSuffixBytes = 50;
+    private const long ResponsePrefixBytes = 35;
+    private const long ColumnsToRowsBytes = 9;
+    private const long MaxResponseSuffixBytes = 51;
 
     private static string NormalizeSql(string raw)
     {

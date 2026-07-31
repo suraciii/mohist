@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json.Nodes;
 using Mohist.Cli.Tests.Support;
 using Xunit;
@@ -294,6 +295,26 @@ public class CliOtelCommandSpecs
     }
 
     [Fact]
+    public async Task OtelQuery_DisposesServerResponse()
+    {
+        TrackingHttpContent? content = null;
+        var (_, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) =>
+            {
+                content = new TrackingHttpContent(
+                    "{\"success\":true,\"data\":{\"columns\":[\"total\"],\"rows\":[{\"total\":1}],\"truncated\":false}}");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+            });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT 1"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.NotNull(content);
+        Assert.True(content!.Disposed);
+    }
+
+    [Fact]
     public async Task OtelQuery_ServerRejects_SurfacesErrorAndCode()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
@@ -487,6 +508,28 @@ public class CliOtelCommandSpecs
         {
             CallCount++;
             throw new HttpRequestException("Connection refused (simulated).", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused));
+        }
+    }
+
+    private sealed class TrackingHttpContent(string value) : HttpContent
+    {
+        private readonly byte[] _bytes = Encoding.UTF8.GetBytes(value);
+
+        public bool Disposed { get; private set; }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            stream.WriteAsync(_bytes).AsTask();
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = _bytes.Length;
+            return true;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = disposing;
+            base.Dispose(disposing);
         }
     }
 }
