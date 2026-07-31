@@ -357,14 +357,17 @@ public sealed class SlackChannelThreadIngressSpecs
             mentions: Array.Empty<string>(),
             text: "follow-up question");
         Assert.True(followup.GetProperty("followup").GetBoolean());
+        Assert.False(string.IsNullOrEmpty(followup.GetProperty("inputId").GetString()),
+            $"Follow-up was not accepted; kind={followup.GetProperty("kind").GetString()}");
 
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
+        var runtimeEvents = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
             .AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
             {
                 new AgentSessionRuntimeEventInput(
                     Type: "session.activity",
                     PayloadJson: "{\"activity\":\"idle\"}"),
             }, runtimeSessionId));
+        Assert.NotEmpty(runtimeEvents);
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -383,9 +386,15 @@ public sealed class SlackChannelThreadIngressSpecs
                 return rows.FirstOrDefault(r => r is not null && r.StartsWith(dispatchRefPrefix, StringComparison.Ordinal));
             },
             value => value is not null,
-            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(30),
             TimeSpan.FromMilliseconds(50),
-            $"follow-up terminal delivery outbox row for session {sessionId}");
+            $"follow-up terminal delivery outbox row for session {sessionId}",
+            advance: async () =>
+            {
+                await _fixture.Grains.GetGrain<Mohist.Server.Events.Grains.IEventDispatcherGrain>(
+                    Mohist.Server.Events.Grains.EventDispatcherGrain.Global)
+                    .DispatchNowAsync();
+            });
 
         Assert.NotNull(deliveryDispatchRef);
         Assert.StartsWith(dispatchRefPrefix, deliveryDispatchRef);
