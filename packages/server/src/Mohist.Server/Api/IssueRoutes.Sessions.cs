@@ -120,10 +120,13 @@ public static partial class IssueRoutes
                 sessionId,
                 text,
                 idempotencyKey,
-                sessions,
-                grains,
-                dispatcher,
-                ctx.RequestAborted);
+                attachments: null,
+                attachmentResults: null,
+                preMintedInputId: null,
+                sessions: sessions,
+                grains: grains,
+                dispatcher: dispatcher,
+                ct: ctx.RequestAborted);
         });
 
         group.MapPost("/{number:int}/sessions/{name}/cancel", async (

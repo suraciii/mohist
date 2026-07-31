@@ -12,6 +12,7 @@ import {
   type RuntimeTurnObserver,
   type RuntimeTurnRequest,
   type RuntimeTurnResult,
+  type RuntimeFilePart,
 } from "./opencode/index.js"
 import type {
   PiRuntime,
@@ -26,6 +27,14 @@ import type { ServerConnection } from "../server/connection.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from "./binding-recovery.js"
 import { SkillResolver, type ResolvedSkill } from "./skill-resolver.js"
 import { buildExecutionEnvelope } from "./execution-envelope.js"
+import {
+  attachmentManifestEnvelope,
+  buildAttachmentContext,
+  deliverAcceptedAttachments,
+  readAttachmentDescriptors,
+  type AttachmentDescriptor,
+  type DeliveredAttachment,
+} from "./attachment-delivery.js"
 
 /**
  * Agent-owned execution entry for `ownerKind === "agent-job"` work.
@@ -74,8 +83,9 @@ export class AgentJobExecutor {
 
     const payload = work.with ?? null
     const prompt = readPrompt(payload)
-    if (!prompt) {
-      return failureResult("invalid-input", "AgentJob requires 'prompt' in dispatch with-payload")
+    const attachmentDescriptors = readAttachmentDescriptors(payload)
+    if (!prompt && attachmentDescriptors.length === 0) {
+      return failureResult("invalid-input", "AgentJob requires 'prompt' or at least one accepted attachment in dispatch with-payload")
     }
 
     const instructions = readOptionalString(payload, "instructions")
@@ -97,7 +107,15 @@ export class AgentJobExecutor {
 
     const resolvedSkills = await this.skillResolver.resolve(skillNames, workDir)
     if (!resolvedSkills.ok) return failureResult(resolvedSkills.code, resolvedSkills.message)
-    const composed = buildExecutionEnvelope(prompt, instructions, resolvedSkills.skills)
+
+    let attachmentDelivery: readonly DeliveredAttachment[]
+    try {
+      const delivery = await this.resolveAttachments(work, workDir, attachmentDescriptors, signal)
+      attachmentDelivery = delivery.attachments
+    } catch (error) {
+      return failureResult("attachment-delivery-failed", `AgentJob failed to resolve attachments: ${errorMessage(error)}`)
+    }
+    const composed = attachmentManifestEnvelope(buildExecutionEnvelope(prompt ?? "", instructions, resolvedSkills.skills), attachmentDelivery)
 
     let binding: BindingResolution
     try {
@@ -109,7 +127,26 @@ export class AgentJobExecutor {
     if (runtimeName === "pi") {
       return this.executePi(work, signal, payload, composed, model, modelInput, variant, workDir, binding, resolvedSkills.skills)
     }
-    return this.executeOpenCode(work, signal, payload, composed, model, modelInput, variant, workDir, binding, resolvedSkills.skills)
+    return this.executeOpenCode(work, signal, payload, composed, model, modelInput, variant, workDir, binding, resolvedSkills.skills, attachmentDelivery)
+  }
+
+  private async resolveAttachments(
+    work: DispatchWorkItem,
+    workDir: string,
+    descriptors: readonly AttachmentDescriptor[],
+    signal: AbortSignal,
+  ) {
+    if (descriptors.length === 0 || !work.projectId || !work.agentSessionId || !work.initialInputId) {
+      return deliverAcceptedAttachments(buildAttachmentContext(this.connection, work, workDir, signal), descriptors)
+    }
+    return deliverAcceptedAttachments({
+      projectId: work.projectId,
+      agentSessionId: work.agentSessionId,
+      inputId: work.initialInputId,
+      workDir,
+      connection: this.connection,
+      signal,
+    }, descriptors)
   }
 
   private async executeOpenCode(
@@ -123,6 +160,7 @@ export class AgentJobExecutor {
     workDir: string,
     binding: BindingResolution,
     skills: readonly ResolvedSkill[],
+    attachments: readonly DeliveredAttachment[],
   ): Promise<WorkItemResult> {
     const runtime = resolveAccessor(this.runtimes.openCode)
     if (!runtime) {
@@ -165,6 +203,10 @@ export class AgentJobExecutor {
       selected = recovery.binding.runtimeSessionId
     }
 
+    const fileParts = attachments
+      .filter((entry): entry is Extract<DeliveredAttachment, { status: "delivered" }> => entry.status === "delivered" && entry.filePart !== null)
+      .map((entry) => entry.filePart as RuntimeFilePart)
+
     const turnRequest: RuntimeTurnRequest = {
       target: {
         runtime: "opencode",
@@ -172,6 +214,7 @@ export class AgentJobExecutor {
         workDir,
       },
       prompt: composed,
+      ...(fileParts.length > 0 ? { fileParts } : {}),
       options: {
         model: model.kind === "ok" ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
         variant: variant ?? null,
@@ -382,7 +425,7 @@ function parseModel(input: string | null): ParsedModel {
 
 function collectUnknownKeys(payload: JsonObject | null): readonly string[] | undefined {
   if (!payload || typeof payload !== "object") return undefined
-  const known = new Set(["prompt", "instructions", "model", "variant", "runtime", "skills"])
+  const known = new Set(["prompt", "instructions", "model", "variant", "runtime", "skills", "attachments"])
   const unknown: string[] = []
   for (const key of Object.keys(payload)) {
     if (!known.has(key)) unknown.push(key)

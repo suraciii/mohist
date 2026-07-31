@@ -259,7 +259,16 @@ public sealed record AgentSessionInputObservationDto(
     string Id,
     long Sequence,
     string Source,
-    string Acceptance);
+    string Acceptance,
+    IReadOnlyList<AgentSessionInputAttachmentObservationDto>? Attachments = null);
+
+public sealed record AgentSessionInputAttachmentObservationDto(
+    string Id,
+    string Name,
+    string? ContentType,
+    long Size,
+    string Source,
+    string Availability);
 
 public sealed record AgentTurnObservationDto(
     string Id,

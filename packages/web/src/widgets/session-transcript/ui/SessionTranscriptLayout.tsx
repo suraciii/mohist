@@ -11,6 +11,7 @@ import { TurnList } from './TurnList'
 import { CopyFullTextButton } from './CopyFullTextButton'
 import { CurrentActivityBar } from './CurrentActivityBar'
 import { MiniTimeline } from './MiniTimeline'
+import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
 
 interface TranscriptEmptyStateProps {
   isRunning: boolean
@@ -50,6 +51,8 @@ interface SessionTranscriptLayoutProps {
   isStreaming?: boolean
   scrollContainerRef?: RefObject<HTMLElement | null>
   now?: number
+  inputIdsByTurn?: string[][]
+  resolveAttachment?: (inputId: string, attachmentId: string) => MarkdownAttachment | null | undefined
 }
 
 export function SessionTranscriptLayout({
@@ -59,6 +62,8 @@ export function SessionTranscriptLayout({
   isStreaming,
   scrollContainerRef,
   now: providedNow,
+  inputIdsByTurn,
+  resolveAttachment,
 }: SessionTranscriptLayoutProps) {
   const { expansionRegistry, highlightRegistry, locate } = useTranscriptLocate({ scrollContainerRef })
   const toolCallGroupIds = useMemo(() => selectToolCallGroupIds(turns), [turns])
@@ -110,7 +115,16 @@ export function SessionTranscriptLayout({
             <div className="mb-3 flex items-center justify-end gap-2">
               <CopyFullTextButton turns={turns} />
             </div>
-            <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} now={now} expansionRegistry={expansionRegistry} highlightRegistry={highlightRegistry} />
+            <TurnList
+              turns={turns}
+              turnRefs={turnRefs}
+              isRunning={isRunning}
+              now={now}
+              expansionRegistry={expansionRegistry}
+              highlightRegistry={highlightRegistry}
+              inputIdsByTurn={inputIdsByTurn}
+              resolveAttachment={resolveAttachment}
+            />
             {isRunning && isThinking && turns.length > 0 && now !== undefined && thinkingStartedAt !== null && (
               <ThinkingPlaceholder now={now} thinkingStartedAt={thinkingStartedAt} />
             )}

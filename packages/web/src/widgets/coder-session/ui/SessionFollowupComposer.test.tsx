@@ -1,9 +1,9 @@
 import '@testing-library/jest-dom'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, type Mock } from 'vitest'
-import { SessionFollowupComposer } from './SessionFollowupComposer'
+import { SessionFollowupComposer, type SessionFollowupComposerProps } from './SessionFollowupComposer'
 
-const onSendMock: Mock<(text: string) => Promise<void>> = vi.fn()
+const onSendMock: Mock<SessionFollowupComposerProps['onSend']> = vi.fn()
 
 function renderComposer(props: Partial<React.ComponentProps<typeof SessionFollowupComposer>> = {}) {
   return render(
@@ -148,6 +148,48 @@ describe('SessionFollowupComposer — sending and success state', () => {
       expect(onSendMock).toHaveBeenCalledTimes(2)
     })
     expect(onSendMock).toHaveBeenNthCalledWith(2, 'second attempt')
+  })
+
+  it('lists pending files and sends their explicit ids', async () => {
+    const uploadAttachment = vi.fn(async ({ file }: { file: File }) => ({
+      id: 'att-followup',
+      fileName: file.name,
+      contentType: file.type,
+      size: file.size,
+    }))
+    renderComposer({ projectId: 'proj-1', uploadAttachment })
+
+    const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
+    fireEvent.change(input, { target: { value: 'Review the attached file' } })
+    fireEvent.change(screen.getByLabelText('Choose attachment files'), {
+      target: { files: [new File(['abc'], 'notes.txt', { type: 'text/plain' })] },
+    })
+
+    await screen.findByText('notes.txt')
+    expect(screen.getByText('3 B')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('session-followup-send'))
+
+    await waitFor(() => expect(onSendMock).toHaveBeenCalledWith(
+      expect.stringContaining('[notes.txt](att:att-followup)'),
+      ['att-followup'],
+    ))
+  })
+
+  it('shows accepted files and rejected reasons returned by the API', async () => {
+    onSendMock.mockResolvedValue({
+      attachments: [{ id: 'att-ok', name: 'accepted.txt', contentType: 'text/plain', size: 4 }],
+      rejectedAttachments: [{ id: 'att-bad', name: 'rejected.zip', reason: 'UnsupportedType', message: 'Archive files are not supported.' }],
+    })
+    renderComposer({ projectId: 'proj-1' })
+
+    const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
+    fireEvent.change(input, { target: { value: 'Use [accepted.txt](att:att-ok) and [rejected.zip](att:att-bad)' } })
+    fireEvent.click(screen.getByTestId('session-followup-send'))
+
+    await waitFor(() => expect(screen.getByTestId('attachment-result-accepted-att-ok')).toBeInTheDocument())
+    expect(screen.getByTestId('attachment-result-accepted-att-ok')).toHaveTextContent('accepted.txt')
+    expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent('rejected.zip')
+    expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent('Archive files are not supported.')
   })
 })
 

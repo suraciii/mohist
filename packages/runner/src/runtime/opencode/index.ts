@@ -29,6 +29,7 @@ export type {
   RuntimeTurnOptions,
   RuntimeTurnRequest,
   RuntimeTurnResult,
+  RuntimeFilePart,
 } from "./types.js"
 
 export { parseModelIdentifier } from "./model-string.js"

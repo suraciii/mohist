@@ -14,9 +14,11 @@ import type {
   AgentReadinessResult,
   AgentSessionLaunchContext,
 } from '../../../entities/agent'
+import { extractAttachmentIds } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { AttachmentComposer as DefaultAttachmentComposer } from '../../../shared/ui/attachment-composer'
+import { AttachmentResults, type AttachmentResultAccepted, type AttachmentResultRejected } from '../../../shared/ui/attachment-results'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
@@ -229,6 +231,11 @@ export function AgentSessionComposerPage({
 
   const [prompt, setPrompt] = useState('')
   const [promptTouched, setPromptTouched] = useState(false)
+  const [launchAttachmentResult, setLaunchAttachmentResult] = useState<{
+    accepted: AttachmentResultAccepted[]
+    rejected: AttachmentResultRejected[]
+    sessionPath: string
+  } | null>(null)
   const launchKeyRef = useRef<string | null>(null)
 
   const selectedAgent = useMemo(
@@ -247,9 +254,10 @@ export function AgentSessionComposerPage({
   const launchBlockedByReadiness = isNeedsSetup
 
   const promptEmpty = !prompt.trim()
-  const showPromptError = promptTouched && promptEmpty
+  const attachmentIds = useMemo(() => extractAttachmentIds(prompt), [prompt])
+  const showPromptError = promptTouched && promptEmpty && attachmentIds.length === 0
 
-  const canLaunch = !promptEmpty
+  const canLaunch = (!promptEmpty || attachmentIds.length > 0)
     && !!selectedAgentRef
     && !isArchived
     && !launchBlockedByReadiness
@@ -279,17 +287,25 @@ export function AgentSessionComposerPage({
         agentRef: selectedAgentRef,
         prompt: prompt.trim(),
         context: hasContext ? context : null,
+        attachments: attachmentIds,
         idempotencyKey: launchKeyRef.current ??= crypto.randomUUID(),
       },
       {
         onSuccess: (data) => {
-          launchKeyRef.current = null
           const jobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
-          navigate(toProjectPath(`/agent-sessions/${encodeURIComponent(data.sessionId)}${jobQuery}`))
+          const sessionPath = `/agent-sessions/${encodeURIComponent(data.sessionId)}${jobQuery}`
+          const accepted = data.attachments ?? []
+          const rejected = data.rejectedAttachments ?? []
+          launchKeyRef.current = null
+          if (accepted.length > 0 || rejected.length > 0) {
+            setLaunchAttachmentResult({ accepted, rejected, sessionPath })
+            return
+          }
+          navigate(toProjectPath(sessionPath))
         },
       },
     )
-  }, [canLaunch, selectedAgent, selectedAgentRef, contextRefs, prompt, launchMutation, navigate, toProjectPath])
+  }, [attachmentIds, canLaunch, selectedAgent, selectedAgentRef, contextRefs, prompt, launchMutation, navigate, toProjectPath])
 
   const launchError = launchMutation.error
   const launchFeedback = getAgentLaunchErrorFeedback(launchError, selectedReadiness)
@@ -448,7 +464,7 @@ export function AgentSessionComposerPage({
 
         <div className="space-y-1.5">
           <Label htmlFor="prompt">
-            Prompt <span className="text-destructive">*</span>
+            Prompt <span className="text-muted-foreground">(optional when files are attached)</span>
           </Label>
           <AttachmentComposer
             projectId={projectId!}
@@ -459,10 +475,30 @@ export function AgentSessionComposerPage({
           />
           {showPromptError && (
             <p data-testid="prompt-error" className="text-xs text-destructive">
-              Prompt is required to launch a session.
+              Prompt is required unless at least one file is attached.
             </p>
           )}
         </div>
+
+        {launchAttachmentResult && (
+          <div data-testid="launch-attachment-results" className="space-y-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">Attachments submitted</p>
+              <p className="text-xs text-muted-foreground">The Agent received only the files marked accepted.</p>
+            </div>
+            <AttachmentResults
+              accepted={launchAttachmentResult.accepted}
+              rejected={launchAttachmentResult.rejected}
+            />
+            <Button
+              type="button"
+              data-testid="open-launched-session"
+              onClick={() => navigate(toProjectPath(launchAttachmentResult.sessionPath))}
+            >
+              Open Session
+            </Button>
+          </div>
+        )}
 
         <div className="flex items-center justify-end gap-3">
           <Button

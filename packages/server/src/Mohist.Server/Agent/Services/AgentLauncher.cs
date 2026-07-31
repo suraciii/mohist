@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Subscriptions;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
@@ -130,11 +131,15 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         AgentLaunchContext context,
         string idempotencyKey,
         AgentLaunchCoordinatorRequest request,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+        string? preMintedSessionId = null,
+        string? preMintedInputId = null,
+        string? preMintedTurnId = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
-        ArgumentNullException.ThrowIfNull(prompt);
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(request);
         if (string.IsNullOrWhiteSpace(idempotencyKey))
         {
             throw new ArgumentException(
@@ -142,11 +147,12 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(idempotencyKey));
         }
 
-        var trimmedPrompt = prompt.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedPrompt))
+        var hasAttachments = attachments is { Count: > 0 };
+        var trimmedPrompt = prompt?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedPrompt) && !hasAttachments)
         {
             throw new ArgumentException(
-                "Prompt must not be empty or whitespace.",
+                "Prompt must not be empty or whitespace unless at least one attachment is accepted.",
                 nameof(prompt));
         }
 
@@ -176,7 +182,11 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             EpicNumber: context.EpicNumber,
             Repository: context.Repository,
             Title: context.Title,
-            Request: request));
+            Request: request,
+            PreMintedSessionId: preMintedSessionId,
+            PreMintedInputId: preMintedInputId,
+            PreMintedTurnId: preMintedTurnId,
+            Attachments: attachments));
 
         return new AgentLaunchResult(
             SessionId: outcome.SessionId,
@@ -187,7 +197,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentName: outcome.AgentName);
     }
 
-    public async Task<AgentLaunchResult> LaunchConnectionAsync(
+public async Task<AgentLaunchResult> LaunchConnectionAsync(
         AgentInfo agent,
         string prompt,
         ConnectionLaunchOrigin origin,
@@ -197,7 +207,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         ArgumentNullException.ThrowIfNull(origin);
         var trimmedPrompt = prompt?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmedPrompt))
-            throw new ArgumentException("Prompt must not be empty or whitespace.", nameof(prompt));
+            throw new ArgumentException(
+                "Prompt must not be empty or whitespace (connection launches do not accept attachments).",
+                nameof(prompt));
 
         var context = new AgentLaunchContext(agent.ProjectId);
         var key = $"slack:{origin.WorkspaceTeamId}:{origin.DmConversationId}:{origin.MessageTs}";
@@ -224,7 +236,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             EpicNumber: null,
             Repository: null,
             Title: null,
-            Request: new AgentLaunchCoordinatorRequest(trimmedPrompt, agent.Id, null, null, null, null, null, null),
+            Request: new AgentLaunchCoordinatorRequest(trimmedPrompt, agent.Id, null, null, null, null, null, null, null),
             ConnectionOrigin: origin));
 
         return new AgentLaunchResult(outcome.SessionId, outcome.JobKey, outcome.InputId, outcome.TurnId, outcome.AgentId, outcome.AgentName);

@@ -674,7 +674,7 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
     }
 
     [Fact]
-    public async Task AcceptFollowup_EmptyText_Throws()
+    public async Task AcceptFollowup_EmptyTextWithoutAttachments_Throws()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-empty-text");
 
@@ -683,7 +683,7 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
                 Text: "",
                 Source: "agent-session-followup",
                 IdempotencyKey: "empty-key")));
-        Assert.Contains("Text", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("text", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

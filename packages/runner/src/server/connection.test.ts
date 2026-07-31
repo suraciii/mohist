@@ -70,3 +70,32 @@ describe("ServerConnection workflow runtime events", () => {
       "project", "run", "session", { runtimeEvents: [{ type: "session.input" }] }, signal)).rejects.toThrow("acceptance mismatch")
   })
 })
+
+describe("ServerConnection agent-input attachments", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("fetches bytes only through the owning input scoped route", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("content", {
+      status: 200,
+      headers: {
+        "content-type": "text/plain",
+        "content-disposition": "attachment; filename=notes.txt",
+      },
+    }))
+
+    const content = await new ServerConnection(options).openAgentInputAttachment(
+      "project/1",
+      "session/1",
+      "input/1",
+      "attachment/1",
+      signal,
+    )
+
+    expect(new TextDecoder().decode(content?.bytes)).toBe("content")
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      "http://server/api/projects/project%2F1/agent-sessions/session%2F1/inputs/input%2F1/attachments/attachment%2F1/content",
+    )
+    expect(JSON.stringify(fetchSpy.mock.calls[0]?.[1])).not.toContain("temp")
+    expect(JSON.stringify(fetchSpy.mock.calls[0]?.[1])).not.toContain("token")
+  })
+})
