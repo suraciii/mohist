@@ -15,7 +15,7 @@ import { projectTurn, useSessionTranscript } from '../../../widgets/session-tran
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 import { resolveFollowupStatus } from './followupStatus'
-import type { EmptyStateKind, SessionCancelOptions, SessionDataSourceResult } from './SessionDataSource'
+import type { EmptyStateKind, SessionCancelOptions, SessionDataSourceResult, SessionTurnControlHandle } from './SessionDataSource'
 
 export interface UnifiedSessionDataSourceDependencies {
   useSessionTranscript: typeof useSessionTranscript
@@ -122,12 +122,19 @@ export function useUnifiedSessionDataSource(
     [projectId, runtimeSessionId, sessionId],
   )
 
-  const handleRecoverySuccess = useCallback(() => {
+  const reconcileUnifiedQueries = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: metadataQueryKey })
     queryClient.invalidateQueries({ queryKey: transcriptQueryKey })
+    queryClient.invalidateQueries({ queryKey: ['unified-session', projectId, sessionId, 'transcript'] })
     queryClient.invalidateQueries({ queryKey: ['agent-sessions'] })
     queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
-  }, [metadataQueryKey, queryClient, transcriptQueryKey])
+    queryClient.invalidateQueries({ queryKey: ['agents', projectId] })
+    queryClient.invalidateQueries({ queryKey: ['workflow-run-sessions'] })
+  }, [metadataQueryKey, projectId, queryClient, sessionId, transcriptQueryKey])
+
+  const handleRecoverySuccess = useCallback(() => {
+    reconcileUnifiedQueries()
+  }, [reconcileUnifiedQueries])
 
   const transcript = useTranscript({
     issueNumber: 0,
@@ -149,15 +156,22 @@ export function useUnifiedSessionDataSource(
     const retryKey = `${sessionId}:${text}:${attachmentIds.join(',')}`
     const idempotencyKey = followupKeys.current.get(retryKey) ?? createIdempotencyKey()
     followupKeys.current.set(retryKey, idempotencyKey)
-    const result = await followup.mutateAsync({ sessionId, text, attachments: attachmentIds, idempotencyKey })
-    const normalized = result as SessionFollowupResult
+    let result: SessionFollowupResult
+    try {
+      result = (await followup.mutateAsync({ sessionId, text, attachments: attachmentIds, idempotencyKey })) as SessionFollowupResult
+    } catch (error) {
+      followupKeys.current.set(retryKey, idempotencyKey)
+      throw error
+    }
+    const normalized = result
     setFollowupResult(normalized)
+    reconcileUnifiedQueries()
     if (normalized.status === 'unknown') {
       throw new Error('Follow-up outcome is unknown. Retry with the same key.')
     }
     followupKeys.current.delete(retryKey)
     return normalized
-  }, [followup, sessionId])
+  }, [followup, reconcileUnifiedQueries, sessionId])
 
   const followupStatus = useMemo(() => {
     if (!followupResult) return null
@@ -166,22 +180,52 @@ export function useUnifiedSessionDataSource(
     return resolveFollowupStatus(followupResult, input, turn)
   }, [followupResult, summary?.inputs, summary?.turns])
 
-  const cancelSession = useCallback((operation: 'cancel' | 'stop' = 'stop', options?: SessionCancelOptions) => {
+  const cancelSession = useCallback((operation: 'cancel' | 'stop', options?: SessionCancelOptions) => {
+    if (!summary?.currentTurnId) {
+      options?.onSettled?.()
+      return
+    }
     turnControl.mutate(
-      { sessionId, turnId: summary?.currentTurnId ?? '', operation },
+      { sessionId, turnId: summary.currentTurnId, operation },
       {
-        onSuccess: (result) => options?.onSuccess?.({ state: result.state ?? 'unknown' }),
-        onSettled: options?.onSettled,
+        onSuccess: (result) => {
+          reconcileUnifiedQueries()
+          options?.onSuccess?.({ state: result.state ?? 'unknown' })
+        },
+        onSettled: () => {
+          reconcileUnifiedQueries()
+          options?.onSettled?.()
+        },
       },
     )
-  }, [sessionId, summary?.currentTurnId, turnControl])
+  }, [reconcileUnifiedQueries, sessionId, summary?.currentTurnId, turnControl])
 
-  const cancel = useMemo(
-    () => summary?.currentTurnId && isRunning && runtimeSessionId && summary.runtime
-      ? { turnId: summary.currentTurnId, mutate: cancelSession, isPending: turnControl.isPending }
-      : null,
-    [cancelSession, isRunning, runtimeSessionId, summary?.currentTurnId, summary?.runtime, turnControl.isPending],
-  )
+  const currentTurn = useMemo(() => {
+    if (!summary?.currentTurnId || !summary.turns) return null
+    return summary.turns.find((turn) => turn.id === summary.currentTurnId) ?? null
+  }, [summary?.currentTurnId, summary?.turns])
+
+  const cancel = useMemo<SessionTurnControlHandle | null>(() => {
+    if (!summary?.currentTurnId || !isRunning || !runtimeSessionId || !summary.runtime) return null
+    if (currentTurn?.status !== 'queued') return null
+    return {
+      turnId: summary.currentTurnId,
+      state: 'queued',
+      mutate: (options) => cancelSession('cancel', options),
+      isPending: turnControl.isPending,
+    }
+  }, [cancelSession, currentTurn?.status, isRunning, runtimeSessionId, summary?.currentTurnId, summary?.runtime, turnControl.isPending])
+
+  const stop = useMemo<SessionTurnControlHandle | null>(() => {
+    if (!summary?.currentTurnId || !isRunning || !runtimeSessionId || !summary.runtime) return null
+    if (currentTurn?.status !== 'executing') return null
+    return {
+      turnId: summary.currentTurnId,
+      state: 'executing',
+      mutate: (options) => cancelSession('stop', options),
+      isPending: turnControl.isPending,
+    }
+  }, [cancelSession, currentTurn?.status, isRunning, runtimeSessionId, summary?.currentTurnId, summary?.runtime, turnControl.isPending])
 
   const fromActivity = searchParams.get('from') === 'activity'
   const issueNumber = summary?.contextRefs?.issueNumber ?? 0
@@ -222,6 +266,7 @@ export function useUnifiedSessionDataSource(
     followupStatus,
     sendFollowup,
     cancel,
+    stop,
     contextWindowUsed: meta?.usage?.contextWindowUsed ?? null,
     contextWindowSize: meta?.usage?.contextWindowSize ?? null,
     contextUsagePercent: meta?.usage?.contextUsagePercent ?? null,

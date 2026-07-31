@@ -125,3 +125,89 @@ Web (`packages/web`):
 
 - Workflow navigation uses `WorkflowRunSession.id`; `sessionName` remains display/context data only. The issue decision test helper still accepts name-only fixtures as a compatibility fallback, while production workflow rows always carry the stable id.
 - The unified transcript query key includes the current runtime binding. Summary invalidation uses the stable Session key and transcript invalidation uses the stable prefix so a new binding refetches without retaining the prior runtime view.
+
+## T-003: Operate AgentSessions from the unified Web page
+
+### What changed
+
+Web (`packages/web`):
+
+- `pages/session/data/SessionDataSource.ts` — replaced the single
+  `cancel` handle with two independent handles (`cancel` for queued
+  current turn, `stop` for executing current turn). Introduced
+  `SessionTurnControlHandle` so availability and dispatch come from
+  one source of truth.
+- `pages/session/data/useUnifiedSessionDataSource.tsx`:
+  - Resolves the current turn from `summary.turns` and only enables
+    `cancel` when `currentTurn.status === 'queued'` (and `stop` when
+    `=== 'executing'`). Both handles share one underlying mutation
+    call with the matching operation.
+  - Adds `reconcileUnifiedQueries` that invalidates the unified
+    summary, transcript prefix (all runtime bindings), agent-session
+    list, workflow-run list, agent and workflow-run-session caches.
+    `handleRecoverySuccess` now routes through this helper, and the
+    follow-up mutation as well as the turn-control mutation both
+    invoke it on settle so rejected, failed, and unknown outcomes
+    still refresh the authoritative view.
+  - Follow-up retains the original idempotency key only when the
+    Server reports `unknown`; the composer reuses the same key when
+    the user retries the identical text/attachments payload.
+- `pages/session/ui/SessionDetailShell.tsx` — the header now exposes
+  a single Cancel Turn button (queued) and a single Stop Turn button
+  (executing), each with `data-turn-state` so tests can assert
+  availability. The confirmation dialog adopts `data-control-operation`
+  and Stop surfaces a `stop-requested` acknowledgement that defers to
+  the Session view for the terminal result.
+- `widgets/coder-session/ui/SessionRecoveryActions` continues to
+  dispatch through `compactGenericSession` / `resetGenericSession`
+  keyed on the unified `recoverySessionId`, so Compact and Reset
+  reuse the canonical Session-ID API for both agent-launch and
+  Workflow Sessions and require an explicit confirmation.
+- `tests/SessionDetailShell.followup-queue.spec.tsx` and
+  `tests/SessionDetailShell.sibling-nav-dedup.spec.tsx` updated to
+  supply the new `stop: null` field on the synthesized
+  `SessionDataSourceResult` fixture.
+
+New tests:
+
+- `pages/session/data/useUnifiedSessionDataSource.test.tsx` (13 tests):
+  follow-up accepts without spawning a Session/AgentJob, unknown
+  outcome retains the original idempotency key, follow-up reconciles
+  the unified queries, cancel exposes only for queued turn, stop
+  exposes only for executing turn, idle/unknown activity keeps both
+  null, recovery actions gate off during an active turn, cancel
+  dispatches with the queued operation, stop surfaces the
+  stop-requested acknowledgement, recovery success invalidates the
+  same queries, and both `agent-launch` and `workflow` Sessions
+  drive the follow-up/turn-control flows through the same canonical
+  APIs.
+- `pages/session/ui/UnifiedSessionPage.test.tsx` (extended):
+  cancel/stop button visibility for queued/executing turns,
+  confirmation dialog text and dispatch for both operations,
+  stop-requested acknowledgement, and recovery gating per the
+  unified `recoveryAvailable` flag.
+
+### Verification run
+
+- `npm run typecheck -w packages/web` passes.
+- `npm run check:fsd -w packages/web` passes.
+- `npm run test:run -w packages/web` passes — 5082 tests, 384 files.
+- No new module enters a new FSD layer; all edits stay within the
+  `pages/session` slice and the existing entities/widgets.
+
+### Gotchas / decisions
+
+- The shared turn-control mutation now receives its operation via a
+  captured closure (`cancelSession('cancel' | 'stop', options)`),
+  removing the older pattern where the UI dispatched the operation
+  to a single shared mutate. This makes the data source shape a
+  honest mirror of the Session-domain decision rules.
+- Cancellation that lands on an executing turn still falls through to
+  the Stop behaviour on the Server side (`TurnControlResultKind.Executing`
+  ⇒ `state = executing, action = stop`), and the page surfaces the
+  Server reply verbatim rather than relabelling it.
+- The unknown-idempotency-key retention key is scoped to the
+  identical text/attachment payload; a follow-up with new text
+  always receives a fresh key. The composer reads the same
+  `followupStatus` label (`Outcome unknown — retry with the same
+  key`) so retry UX is unchanged from T-002.

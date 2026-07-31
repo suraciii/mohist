@@ -200,6 +200,7 @@ export function SessionDetailShell({
     handleRecoverySuccess,
     issueNumber,
     cancel,
+    stop,
     emptyStateKind,
     launchObservation,
     projectId,
@@ -442,6 +443,7 @@ export function SessionDetailShell({
       turnCount={displayTurnCount}
       siblingNav={siblingNav}
       cancel={cancel}
+      stop={stop}
       headerRef={headerRef}
     />
   )
@@ -595,6 +597,7 @@ function SessionHeader({
   turnCount,
   siblingNav,
   cancel,
+  stop,
   headerRef,
 }: {
   backPath: string
@@ -607,12 +610,16 @@ function SessionHeader({
   turnCount: number
   siblingNav?: React.ReactNode
   cancel: SessionDataSourceResult['cancel']
+  stop: SessionDataSourceResult['stop']
   headerRef: RefObject<HTMLDivElement | null>
 }) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
-  const [controlOperation, setControlOperation] = useState<'cancel' | 'stop'>('stop')
+  const [controlOperation, setControlOperation] = useState<'cancel' | 'stop'>('cancel')
   const [cancelState, setCancelState] = useState<string | null>(null)
   const showCancelControl = cancel != null
+  const showStopControl = stop != null
+  const activeControl = controlOperation === 'cancel' ? cancel : stop
+  const activeControlIsPending = activeControl?.isPending ?? false
 
   const changedFiles = meta?.changedFiles
   const fileSummary = changedFiles && changedFiles.length > 0
@@ -749,41 +756,49 @@ function SessionHeader({
         )}
       </div>
 
-      {showCancelControl && (
+      {(showCancelControl || showStopControl) && (
         <div
           data-testid="session-header-secondary-actions"
-          className="mt-1 flex justify-end"
+          className="mt-1 flex justify-end gap-1"
         >
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => { setControlOperation('cancel'); setCancelDialogOpen(true) }}
-            data-testid="session-cancel-trigger"
-            aria-label="Cancel Turn"
-            type="button"
-          >
-            <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            Cancel Turn
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => { setControlOperation('stop'); setCancelDialogOpen(true) }}
-            data-testid="session-stop-trigger"
-            aria-label="Stop Turn"
-            type="button"
-          >
-            <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            Stop Turn
-          </Button>
+          {showCancelControl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setControlOperation('cancel'); setCancelDialogOpen(true) }}
+              data-testid="session-cancel-trigger"
+              data-control-operation="cancel"
+              data-turn-state="queued"
+              aria-label="Cancel Turn"
+              type="button"
+            >
+              <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              Cancel Turn
+            </Button>
+          )}
+          {showStopControl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setControlOperation('stop'); setCancelDialogOpen(true) }}
+              data-testid="session-stop-trigger"
+              data-control-operation="stop"
+              data-turn-state="executing"
+              aria-label="Stop Turn"
+              type="button"
+            >
+              <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              Stop Turn
+            </Button>
+          )}
         </div>
       )}
 
-      {showCancelControl && cancel && (
+      {(showCancelControl || showStopControl) && activeControl && (
         <AlertDialog
           open={cancelDialogOpen}
           onOpenChange={(open) => {
-            if (cancel.isPending) return
+            if (activeControlIsPending) return
             setCancelDialogOpen(open)
           }}
           title={controlOperation === 'cancel' ? 'Cancel this Turn?' : 'Stop this Turn?'}
@@ -793,9 +808,9 @@ function SessionHeader({
           confirmLabel={controlOperation === 'cancel' ? 'Cancel Turn' : 'Stop Turn'}
           cancelLabel="Keep running"
           tone="destructive"
-          loading={cancel.isPending}
+          loading={activeControlIsPending}
           onConfirm={() => {
-            cancel.mutate(controlOperation, {
+            activeControl.mutate({
               onSuccess: (result) => {
                 setCancelState(result.state)
                 setCancelDialogOpen(false)
@@ -803,12 +818,14 @@ function SessionHeader({
             })
           }}
           data-testid="session-cancel-alert"
+          data-control-operation={controlOperation}
         />
       )}
       {cancelState && (
         <div className="px-4 pt-2 text-xs text-muted-foreground" role="status" data-testid="session-cancel-result">
           Turn result: {cancelState}
           {cancelState === 'unknown' && <span> Verification: Session view</span>}
+          {cancelState === 'stop-requested' && <span> Verification: Session view (Runtime will report terminal result)</span>}
         </div>
       )}
 
