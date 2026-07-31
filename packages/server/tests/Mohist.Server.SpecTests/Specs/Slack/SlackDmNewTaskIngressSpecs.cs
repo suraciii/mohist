@@ -185,11 +185,13 @@ public sealed class SlackDmNewTaskIngressSpecs
 
     private async Task<(string RunnerId, string WorkId)> AcceptLaunchAsync(string jobKey, string runnerId)
     {
-        var assignment = await _fixture.AgentJobDispatches.WaitForRunnerAcceptedAsync(jobKey);
-        Assert.Equal(runnerId, assignment.RunnerId);
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(jobKey);
         using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
         var dispatch = Assert.Single(await poll.ReadDispatchElementsAsync());
-        return (runnerId, dispatch.GetProperty("workId").GetString()!);
+        var assignment = await _fixture.AgentJobDispatches.WaitForRunnerAcceptedAsync(jobKey);
+        Assert.Equal(runnerId, assignment.RunnerId);
+        Assert.Equal(dispatch.GetProperty("workId").GetString(), assignment.WorkId);
+        return (assignment.RunnerId, assignment.WorkId);
     }
 
     private async Task<string> ReadReplyAsync(AgentConnection connection, string conversationId, string messageTs)
