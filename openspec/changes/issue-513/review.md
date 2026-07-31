@@ -1,14 +1,15 @@
 # Review
 
-The rebased branch preserves the AgentJob terminal-wait contract from master
-and the attachment descriptor flow introduced by this change. The interface
-merge retains both dependencies and the attachment fields remain append-only.
+The cancellation repair makes the per-file conditional claims one database
+transaction and rolls that transaction back independently of the request
+cancellation token. The regression interrupts after the first claim and proves
+that both rows remain pending and unreadable through the synthetic input scope.
 
 Evidence reviewed:
 
-- `dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore -m:1 -p:UseSharedCompilation=false --nologo` completed with zero warnings and errors.
-- Agent input attachment acceptance specs passed 8/8.
-- Attachment validation and binding unit tests passed 13/13.
-- The previously reported changed-files recovery test passed 20/20 in isolation.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-build` passed 1679/1679.
+- `ValidateAndBindAgentInput_CancellationAfterFirstClaimRollsBackWholeBatch`
+  covers the partial-claim cancellation path with a deterministic command
+  interceptor.
 
 <promise>PASS</promise>
