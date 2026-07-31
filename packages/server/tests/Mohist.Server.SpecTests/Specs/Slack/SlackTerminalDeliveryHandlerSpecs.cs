@@ -66,7 +66,8 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
             workLabel = "ship the release",
             connectionId = "conn-1",
             workspaceTeamId = "team-1",
-            dmConversationId = "D1",
+            conversationId = "D1",
+            threadTs = "1710000000.000001",
             status,
             message = "completed with token=xoxb-secret",
             output = "raw tool output: internal command log",
@@ -91,6 +92,8 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         var rows = (await scope.ServiceProvider.GetRequiredService<SlackOutboxStore>().ListAsync("proj-1", "conn-1")).Entries;
         var row = Assert.Single(rows);
         Assert.Equal(expectedKind, row.Kind);
+        Assert.Equal("D1", row.ConversationId);
+        Assert.Equal("1710000000.000001", row.ThreadTs);
         var text = JsonDocument.Parse(row.PayloadJson).RootElement.GetProperty("text").GetString()!;
         Assert.StartsWith("Task: ship the release\n", text, StringComparison.Ordinal);
         Assert.Contains($"Conclusion: {expectedConclusion}", text);
@@ -107,7 +110,7 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
             + "Then summarize the safest rollout.";
         var pending = new PendingTerminalDeliveryEvent(
             EventId: "delivery-1",
-            Origin: new ConnectionLaunchOrigin("conn-1", "team-1", "U_OWNER", "D1", "1710000000.000001"),
+            Origin: new ConnectionLaunchOrigin("conn-1", "team-1", "U_OWNER", "C1", "1710000000.000001", "1710000000.000000"),
             Status: AgentJobStatus.Completed,
             Message: "completed",
             FailureReason: null,
@@ -124,6 +127,8 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
 
         var workLabel = envelope.Data!.Value.GetProperty("workLabel").GetString();
         Assert.Equal(prompt[..80], workLabel);
+        Assert.Equal("C1", envelope.Data.Value.GetProperty("conversationId").GetString());
+        Assert.Equal("1710000000.000000", envelope.Data.Value.GetProperty("threadTs").GetString());
     }
 
     [Fact]

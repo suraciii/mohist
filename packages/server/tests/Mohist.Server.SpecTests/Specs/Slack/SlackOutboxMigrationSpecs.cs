@@ -40,6 +40,25 @@ public class SlackOutboxMigrationSpecs
     }
 
     [Fact]
+    public async Task Thread_delivery_migration_uses_generic_conversation_and_thread_columns()
+    {
+        await using var database = CreateDatabase("20260731120000_AddSlackThreadDelivery");
+        await using var context = database.CreateDbContext();
+
+        var outboxColumns = await ReadColumnTypesAsync(context, "SlackOutboxRows");
+        Assert.Contains("ConversationId", outboxColumns.Keys);
+        Assert.Contains("ThreadTs", outboxColumns.Keys);
+        Assert.DoesNotContain("DmConversationId", outboxColumns.Keys);
+
+        var inboxColumns = await ReadColumnTypesAsync(context, "SlackProviderInboxRows");
+        Assert.Contains("ConversationId", inboxColumns.Keys);
+        Assert.DoesNotContain("DmConversationId", inboxColumns.Keys);
+
+        var sessionColumns = await ReadColumnTypesAsync(context, "AgentSessions");
+        Assert.Contains("LabelSlackThreadTs", sessionColumns.Keys);
+    }
+
+    [Fact]
     public async Task Up_CreatesFiveIndexes()
     {
         await using var database = CreateDatabase("20260729110000_AddSlackProviderInboxOutbox");
@@ -133,7 +152,7 @@ public class SlackOutboxMigrationSpecs
     {
         var connection = context.Database.GetDbConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT \"name\", \"type\" FROM pragma_table_info('{tableName}')";
+        command.CommandText = $"SELECT \"name\", \"type\" FROM pragma_table_xinfo('{tableName}')";
 
         await using var reader = await command.ExecuteReaderAsync();
         var result = new Dictionary<string, string>(StringComparer.Ordinal);

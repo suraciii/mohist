@@ -89,6 +89,42 @@ public sealed class AgentConnectionStore : IScopedService
         return configured;
     }
 
+    /// <summary>
+    /// Workspace-scoped projection of the active, identity-bound Mohist
+    /// Bots in this workspace. Each row pairs the Slack <c>BotUserId</c>
+    /// with the owning <see cref="AgentConnection"/> so the channel
+    /// state machine can resolve <c>mentionedUserIds ∩ workspaceBots</c>
+    /// and pick the right Connection to address. Only Connections with a
+    /// bound Slack identity (<c>WorkspaceTeamId</c>, <c>AppId</c>,
+    /// <c>BotUserId</c>), non-deleted, Enabled, and the requested
+    /// <see cref="DesiredStateKind.Enabled"/> are returned. Returns an
+    /// empty list when no Bot lives in the workspace — every channel
+    /// message then degenerates to "not mine" or "ignored" without
+    /// adapter-held state.
+    /// </summary>
+    public async Task<IReadOnlyList<WorkspaceBoundBot>> ListBoundBotsByWorkspaceAsync(
+        string workspaceTeamId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceTeamId))
+            throw new ArgumentException("WorkspaceTeamId is required.", nameof(workspaceTeamId));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.AgentConnections.AsNoTracking()
+            .Where(connection => connection.DeletedAt == null
+                && connection.DesiredState == DesiredStateKind.Enabled
+                && connection.WorkspaceTeamId == workspaceTeamId
+                && connection.BotUserId != string.Empty)
+            .OrderBy(connection => connection.Id)
+            .Select(connection => new WorkspaceBoundBot(
+                connection.ProjectId,
+                connection.Id,
+                connection.AgentId,
+                connection.BotUserId,
+                connection.OwnerSlackUserId))
+            .ToListAsync(ct);
+    }
+
     public async Task<AgentConnection> CreateAsync(AgentConnection connection, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -312,3 +348,22 @@ public sealed class AgentConnectionDuplicateException(string projectId, string a
 }
 
 public sealed record SlackAdapterConnection(string ProjectId, string ConnectionId);
+
+/// <summary>
+/// Workspace-scoped projection of the identity-bound Mohist Bots in
+/// <see cref="AgentConnectionStore"/>. Returned by
+/// <see cref="AgentConnectionStore.ListBoundBotsByWorkspaceAsync"/> so
+/// the channel ingress can compute the set of Bots that the workspace
+/// actually exposes ("W" in D4 of the channel design) and resolve
+/// <c>M ∩ W</c> (mentioned user ids that are Mohist Bots) without
+/// trusting arbitrary human mentions as Bots. Each row pairs the
+/// Bot's stable Slack user id with the Connection that owns the
+/// routing, so the channel state machine can identify which
+/// Connection is being addressed.
+/// </summary>
+public sealed record WorkspaceBoundBot(
+    string ProjectId,
+    string ConnectionId,
+    string AgentId,
+    string BotUserId,
+    string? OwnerSlackUserId = null);

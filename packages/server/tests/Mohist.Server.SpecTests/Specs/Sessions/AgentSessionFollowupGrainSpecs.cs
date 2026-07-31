@@ -21,11 +21,20 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
     public async Task AcceptFollowup_PersistsInputWithStableIdSequenceAndNoJobId()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-followup");
+        var provenance = new AgentSessionInputProvenance(
+            ProviderKind: "slack",
+            WorkspaceId: "T123",
+            ConversationId: "C123",
+            ThreadId: "1710000000.000001",
+            MemberId: "U123",
+            MessageId: "1710000000.000002",
+            ConnectionId: "connection-1");
 
         var result = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "follow up text",
             Source: "agent-session-followup",
-            IdempotencyKey: "followup-1"));
+            IdempotencyKey: "followup-1",
+            Provenance: provenance));
 
         Assert.False(string.IsNullOrWhiteSpace(result.InputId));
         Assert.False(string.IsNullOrWhiteSpace(result.TurnId));
@@ -42,6 +51,7 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         Assert.Equal(AgentSessionInputAcceptance.Accepted, input.Acceptance);
         Assert.Null(input.JobId);
         Assert.Equal("followup-1", input.IdempotencyKey);
+        Assert.Equal(provenance, input.Provenance);
     }
 
     [Fact]

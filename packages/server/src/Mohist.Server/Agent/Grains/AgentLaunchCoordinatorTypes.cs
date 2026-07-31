@@ -205,8 +205,9 @@ public static class AgentLaunchCoordinatorCodec
             connectionOrigin?.ConnectionId ?? string.Empty,
             connectionOrigin?.WorkspaceTeamId ?? string.Empty,
             connectionOrigin?.SlackUserId ?? string.Empty,
-            connectionOrigin?.DmConversationId ?? string.Empty,
-            connectionOrigin?.MessageTs ?? string.Empty);
+            connectionOrigin?.ConversationId ?? string.Empty,
+            connectionOrigin?.MessageTs ?? string.Empty,
+            connectionOrigin?.ThreadTs ?? string.Empty);
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }

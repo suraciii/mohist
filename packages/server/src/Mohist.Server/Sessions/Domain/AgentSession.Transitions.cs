@@ -372,7 +372,8 @@ public static partial class AgentSessionExtensions
             string source,
             string jobId,
             DateTime now,
-            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null)
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+            AgentSessionInputProvenance? provenance = null)
         {
             if (string.IsNullOrWhiteSpace(inputId))
                 throw new ArgumentException("Input id is required.", nameof(inputId));
@@ -397,7 +398,8 @@ public static partial class AgentSessionExtensions
                 if (!string.Equals(existing.Text, prompt, StringComparison.Ordinal)
                     || !string.Equals(existing.Source, source, StringComparison.Ordinal)
                     || !string.Equals(existing.JobId, jobId, StringComparison.Ordinal)
-                    || !AttachmentDescriptorsEquivalent(existing.Attachments, normalizedAttachments))
+                    || !AttachmentDescriptorsEquivalent(existing.Attachments, normalizedAttachments)
+                    || !Equals(existing.Provenance, provenance))
                 {
                     throw new InvalidOperationException(
                         $"AgentSession {session.Id} already has input '{inputId}' with different content/source/job/attachments.");
@@ -413,7 +415,8 @@ public static partial class AgentSessionExtensions
                     Acceptance: AgentSessionInputAcceptance.Accepted,
                     RecordedAt: now,
                     JobId: jobId,
-                    Attachments: normalizedAttachments));
+                    Attachments: normalizedAttachments,
+                    Provenance: provenance));
             }
 
             var turns = (session.Status.Turns ?? []).ToList();
@@ -459,7 +462,8 @@ public static partial class AgentSessionExtensions
             string prompt,
             string source,
             DateTime now,
-            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null)
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+            AgentSessionInputProvenance? provenance = null)
         {
             if (string.IsNullOrWhiteSpace(inputId))
                 throw new ArgumentException("Input id is required.", nameof(inputId));
@@ -485,7 +489,8 @@ public static partial class AgentSessionExtensions
                 if (!string.Equals(existing.Text, prompt, StringComparison.Ordinal)
                     || !string.Equals(existing.Source, source, StringComparison.Ordinal)
                     || !string.IsNullOrWhiteSpace(existing.JobId)
-                    || !AttachmentDescriptorsEquivalent(existing.Attachments, normalizedAttachments))
+                    || !AttachmentDescriptorsEquivalent(existing.Attachments, normalizedAttachments)
+                    || !Equals(existing.Provenance, provenance))
                 {
                     throw new InvalidOperationException(
                         $"AgentSession {session.Id} already has input '{inputId}' with different content/source/job/attachments linkage.");
@@ -537,7 +542,8 @@ public static partial class AgentSessionExtensions
                 Acceptance: AgentSessionInputAcceptance.Accepted,
                 RecordedAt: now,
                 JobId: null,
-                Attachments: normalizedAttachments));
+                Attachments: normalizedAttachments,
+                Provenance: provenance));
             turns.Add(new AgentTurnRecord(
                 Id: turnId,
                 Sequence: turns.Count + 1,
@@ -986,7 +992,8 @@ public static partial class AgentSessionExtensions
             string source,
             string idempotencyKey,
             DateTime now,
-            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null)
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+            AgentSessionInputProvenance? provenance = null)
         {
             if (string.IsNullOrWhiteSpace(inputId))
                 throw new ArgumentException("Input id is required.", nameof(inputId));
@@ -1024,7 +1031,8 @@ public static partial class AgentSessionExtensions
                 var existingText = existing.Text ?? string.Empty;
                 if (!string.Equals(existingText, expectedText, StringComparison.Ordinal)
                     || !string.Equals(existing.Source, source, StringComparison.Ordinal)
-                    || !AttachmentDescriptorsEquivalent(existing.Attachments, normalizedAttachments))
+                    || !AttachmentDescriptorsEquivalent(existing.Attachments, normalizedAttachments)
+                    || !Equals(existing.Provenance, provenance))
                 {
                     throw new InvalidOperationException(
                         $"AgentSession {session.Id} already accepts idempotency key '{idempotencyKey}' with different content.");
@@ -1066,7 +1074,8 @@ public static partial class AgentSessionExtensions
                 RecordedAt: now,
                 JobId: null,
                 IdempotencyKey: idempotencyKey,
-                Attachments: normalizedAttachments);
+                Attachments: normalizedAttachments,
+                Provenance: provenance);
 
             AgentTurnRecord updatedTurn;
             var createdNewTurn = false;

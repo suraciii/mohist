@@ -89,6 +89,8 @@ public class SlackProviderInboxMigrationSpecs
         Assert.True(await TableExistsAsync(context, "SlackProviderInboxRows"));
         var applied = await context.Database.GetAppliedMigrationsAsync();
         Assert.Contains(applied, m => m == "20260729110000_AddSlackProviderInboxOutbox");
+        var columns = await ReadColumnTypesAsync(context, "SlackProviderInboxRows");
+        Assert.Equal("TEXT", columns["ThreadTs"]);
     }
 
     [Fact]

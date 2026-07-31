@@ -288,7 +288,7 @@ public sealed class SlackDmWorkControlSpecs : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var payload = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id
-                && row.DmConversationId == conversationId
+                && row.ConversationId == conversationId
                 && row.DispatchRef == $"slack-ack:T123/{conversationId}/{messageTs}")
             .Select(row => row.PayloadJson)
             .SingleAsync();

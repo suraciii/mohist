@@ -82,6 +82,10 @@ public class MohistDbContext : DbContext
     public DbSet<SlackOutboxRow> SlackOutboxRows { get; set; } = null!;
     public DbSet<SlackOwnerClaimCodeRow> SlackOwnerClaimCodes { get; set; } = null!;
     public DbSet<SlackDmSessionMappingRow> SlackDmSessionMappings { get; set; } = null!;
+    public DbSet<SlackThreadSessionMappingRow> SlackThreadSessionMappings { get; set; } = null!;
+
+    public DbSet<SlackThreadLaunchReservationRow> SlackThreadLaunchReservations { get; set; } = null!;
+    public DbSet<SlackAmbiguousPromptRow> SlackAmbiguousPrompts { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -205,6 +209,8 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql(JsonExtractLabel(AgentSessionQueryMetadataKeys.SlackUserId), stored: true);
             entity.Property(e => e.LabelSlackConversationId)
                 .HasComputedColumnSql(JsonExtractLabel(AgentSessionQueryMetadataKeys.SlackConversationId), stored: true);
+            entity.Property(e => e.LabelSlackThreadTs)
+                .HasComputedColumnSql(JsonExtractLabel(AgentSessionQueryMetadataKeys.SlackThreadTs), stored: true);
 
             // Virtual projection of status.activity, lowered
             // to match the existing Status column convention. Powers the
@@ -259,6 +265,8 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelSlackUserId_CreatedAt");
             entity.HasIndex(e => e.LabelSlackConversationId)
                 .HasDatabaseName("IX_AgentSessions_LabelSlackConversationId");
+            entity.HasIndex(e => e.LabelSlackThreadTs)
+                .HasDatabaseName("IX_AgentSessions_LabelSlackThreadTs");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>
@@ -1188,7 +1196,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.SlackMessageIdentity).HasMaxLength(512).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.DmConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ThreadTs).HasMaxLength(64);
             entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.RouteKind).HasMaxLength(32);
             entity.Property(e => e.RouteSessionId).HasMaxLength(512);
@@ -1218,7 +1227,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.DmConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ThreadTs).HasMaxLength(64);
             entity.Property(e => e.Kind).HasMaxLength(32).IsRequired();
             entity.Property(e => e.State).HasMaxLength(32).IsRequired();
             entity.Property(e => e.DispatchRef).HasMaxLength(256);
@@ -1237,6 +1247,9 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_DeliveryUncertainAt");
             entity.HasIndex(e => new { e.ConnectionId, e.DispatchRef, e.Kind, e.State })
                 .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_DispatchRef_Kind_State");
+            entity.HasIndex(e => new { e.ConnectionId, e.DispatchRef, e.Kind })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackOutboxRows_ConnectionId_DispatchRef_Kind");
         });
 
         modelBuilder.Entity<SlackDmSessionMappingRow>(entity =>
@@ -1257,6 +1270,76 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("UX_SlackDmSessionMappings_ConnectionId_DmConversationId");
             entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.UpdatedAt })
                 .HasDatabaseName("IX_SlackDmSessionMappings_ProjectId_ConnectionId_UpdatedAt");
+        });
+
+        modelBuilder.Entity<SlackThreadSessionMappingRow>(entity =>
+        {
+            entity.ToTable("SlackThreadSessionMappings");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ThreadTs).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.RootMessageTs).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ConnectionId, e.WorkspaceTeamId, e.ConversationId, e.ThreadTs })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackThreadSessionMappings_ConnectionId_WorkspaceTeamId_ConversationId_ThreadTs");
+            entity.HasIndex(e => new { e.ProjectId, e.WorkspaceTeamId, e.ConversationId, e.ThreadTs })
+                .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_WorkspaceTeamId_ConversationId_ThreadTs");
+            entity.HasIndex(e => new { e.WorkspaceTeamId, e.ConversationId, e.ThreadTs })
+                .HasDatabaseName("IX_SlackThreadSessionMappings_WorkspaceTeamId_ConversationId_ThreadTs");
+            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.UpdatedAt })
+                .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_ConnectionId_UpdatedAt");
+        });
+
+        modelBuilder.Entity<SlackThreadLaunchReservationRow>(entity =>
+        {
+            entity.ToTable("SlackThreadLaunchReservations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ThreadTs).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.LaunchMessageTs).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SessionId).HasMaxLength(512);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ConnectionId, e.WorkspaceTeamId, e.ConversationId, e.ThreadTs })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackThreadLaunchReservations_ConnectionId_WorkspaceTeamId_ConversationId_ThreadTs");
+            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.UpdatedAt })
+                .HasDatabaseName("IX_SlackThreadLaunchReservations_ProjectId_ConnectionId_UpdatedAt");
+        });
+
+        modelBuilder.Entity<SlackAmbiguousPromptRow>(entity =>
+        {
+            entity.ToTable("SlackAmbiguousPrompts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.MessageTs).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ThreadTs).HasMaxLength(64);
+            entity.Property(e => e.WinningConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.MentionedConnectionIdsJson).IsRequired();
+            entity.Property(e => e.PromptedAt).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.WorkspaceTeamId, e.ConversationId, e.MessageTs })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackAmbiguousPrompts_WorkspaceTeamId_ConversationId_MessageTs");
+            entity.HasIndex(e => new { e.ProjectId, e.UpdatedAt })
+                .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_UpdatedAt");
         });
     }
 

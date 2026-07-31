@@ -212,7 +212,7 @@ public async Task<AgentLaunchResult> LaunchConnectionAsync(
                 nameof(prompt));
 
         var context = new AgentLaunchContext(agent.ProjectId);
-        var key = $"slack:{origin.WorkspaceTeamId}:{origin.DmConversationId}:{origin.MessageTs}";
+        var key = $"slack:{origin.WorkspaceTeamId}:{origin.ConversationId}:{origin.MessageTs}";
         var resolvedRuntime = ResolveRuntime(agent.AgentConfig);
         var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
