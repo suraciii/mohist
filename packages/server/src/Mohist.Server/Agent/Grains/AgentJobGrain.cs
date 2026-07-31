@@ -289,8 +289,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return new AgentJobReportResult(false, "stale");
         }
 
-        if (State.Status != AgentJobStatus.Running
-            && (State.RunnerId is null || State.WorkId is null))
+        if (State.Status != AgentJobStatus.Running)
         {
             _log.LogWarning(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: unexpected status {Status}",

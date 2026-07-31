@@ -95,6 +95,29 @@ public sealed class AgentJobOwnerLedgerMigrationSpecs
     }
 
     [Fact]
+    public async Task Up_MalformedRunningSnapshot_RebuildsDispatchFromCompleteLegacyInput()
+    {
+        await using var database = TestSqliteDatabase.CreateEmpty();
+        MigratedSqliteTemplate.CopyTo(database.Keeper, BeforeMigration);
+        const string state = "{\"status\":\"running\",\"runnerId\":\"runner-a\",\"workId\":\"work-a\",\"runningSince\":\"2026-01-01T00:00:00Z\",\"dispatchSnapshot\":\"not-json\",\"input\":{\"prompt\":\"run\",\"projectId\":\"project-a\",\"agentId\":\"agent-a\"}}";
+
+        await using (var db = database.CreateContext())
+        {
+            await InsertStateAsync(db, "running-malformed-snapshot", state);
+            await db.Database.GetService<IMigrator>().MigrateAsync(Migration);
+        }
+
+        await using var migrated = database.CreateContext();
+        var dispatchJson = Assert.Single(await ReadColumnAsync(
+            migrated,
+            "DispatchJson",
+            "SELECT \"DispatchJson\" FROM \"AgentJobs\" WHERE \"JobKey\" = 'running-malformed-snapshot'"));
+        var dispatch = JsonSerializer.Deserialize<WorkDispatch>(dispatchJson!, JSON.Options);
+        Assert.NotNull(dispatch);
+        Assert.Equal("work-a", dispatch!.WorkId);
+    }
+
+    [Fact]
     public async Task Up_PascalCaseRunningStateIsVisibleToOwnerLedgerQueries()
     {
         await using var database = TestSqliteDatabase.CreateEmpty();

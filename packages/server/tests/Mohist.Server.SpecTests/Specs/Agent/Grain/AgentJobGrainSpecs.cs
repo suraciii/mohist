@@ -100,6 +100,35 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task ReportResultAsync_AdmittedPendingJob_IsRejectedWithoutChangingLedgerState()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-pending-report-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-pending-report-{Guid.NewGuid():N}");
+
+        await job.SubmitAsync(MakeInput("must be claimed first", projectId));
+        var assigned = await WaitForAsync(
+            () => job.GetRuntimeSnapshotAsync(),
+            snapshot => snapshot.Status == AgentJobStatus.Pending
+                && snapshot.RunnerId == runnerId
+                && !string.IsNullOrWhiteSpace(snapshot.CurrentWorkId),
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            "pending AgentJob assignment");
+
+        var report = await job.ReportResultAsync(
+            runnerId,
+            assigned.CurrentWorkId!,
+            new WorkResult("completed", "must not complete"));
+
+        Assert.False(report.Accepted);
+        Assert.Equal("not-running", report.Reason);
+        var after = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Pending, after.Status);
+        Assert.Equal(assigned.RunnerId, after.RunnerId);
+        Assert.Equal(assigned.CurrentWorkId, after.CurrentWorkId);
+    }
+
+    [Fact]
     public async Task ReportResultAsync_TransitionsRunningToFailed_OnFailure()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-fail-runner-{Guid.NewGuid():N}");

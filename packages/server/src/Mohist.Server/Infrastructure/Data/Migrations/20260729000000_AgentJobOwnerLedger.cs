@@ -275,7 +275,11 @@ public partial class AgentJobOwnerLedger : Migration
             "ReadySince" = NULL,
             "RunningSince" = COALESCE(json_extract("State", '$.runningSince'), json_extract("State", '$.RunningSince')),
             "DispatchJson" = CASE
-                WHEN length(trim(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')), char(9,10,11,12,13,32))) > 0
+                WHEN json_type(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END) = 'object'
+                    AND length(trim(json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.workId'), char(9,10,11,12,13,32))) > 0
+                    AND json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.workType') = 'agent-job'
+                    AND json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.ownerKind') = 'agent-job'
+                    AND json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.agentJobId') = "JobKey"
                     THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))
                 ELSE json_object(
                     'workflowRunId', '',
