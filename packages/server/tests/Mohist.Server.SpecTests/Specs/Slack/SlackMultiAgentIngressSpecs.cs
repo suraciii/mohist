@@ -155,9 +155,8 @@ public sealed class SlackMultiAgentIngressSpecs
     [Fact]
     public async Task Multi_agent_thread_no_mention_starts_no_work_and_prompts_once()
     {
-        var sharedProjectId = $"project_{Guid.NewGuid():N}";
-        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-4", "U_BOT_A4", "A_BOT_A4", sharedProjectId);
-        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-4", "U_BOT_B4", "A_BOT_B4", sharedProjectId);
+        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-4", "U_BOT_A4", "A_BOT_A4");
+        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-4", "U_BOT_B4", "A_BOT_B4");
 
         var firstA = await PostChannelAsync(connectionA, "C-multi-thread",
             messageTs: "1710000000.010400",

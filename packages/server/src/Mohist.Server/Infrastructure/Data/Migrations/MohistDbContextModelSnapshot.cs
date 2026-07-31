@@ -588,6 +588,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("ProjectId", "WorkspaceTeamId", "ConversationId", "ThreadTs")
                         .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_WorkspaceTeamId_ConversationId_ThreadTs");
 
+                    b.HasIndex("WorkspaceTeamId", "ConversationId", "ThreadTs")
+                        .HasDatabaseName("IX_SlackThreadSessionMappings_WorkspaceTeamId_ConversationId_ThreadTs");
+
                     b.ToTable("SlackThreadSessionMappings", (string)null);
                 });
 

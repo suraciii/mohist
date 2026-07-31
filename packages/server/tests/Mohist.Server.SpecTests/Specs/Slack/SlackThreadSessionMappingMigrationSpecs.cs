@@ -63,6 +63,18 @@ public class SlackThreadSessionMappingMigrationSpecs
     }
 
     [Fact]
+    public async Task Up_AddsWorkspaceLookupIndex()
+    {
+        await using var database = CreateDatabase();
+        await using var context = database.CreateDbContext();
+
+        var indexes = await ReadIndexesAsync(context, "SlackThreadSessionMappings");
+        Assert.Equal(
+            new[] { "WorkspaceTeamId", "ConversationId", "ThreadTs" },
+            indexes["IX_SlackThreadSessionMappings_WorkspaceTeamId_ConversationId_ThreadTs"]);
+    }
+
+    [Fact]
     public async Task Up_UniqueConstraintRejectsSameBindingForSameConnection()
     {
         await using var database = CreateDatabase("20260731130000_AddSlackThreadSessionMappings");

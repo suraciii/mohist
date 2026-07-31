@@ -60,6 +60,9 @@ public sealed class SlackChannelThreadIngressSpecs
             connection.ProjectId, connection.WorkspaceTeamId, connection.Id,
             "C-channel-A", "1710000000.000100");
         Assert.Equal(sessionId, stored);
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var session = await db.AgentSessions.SingleAsync(row => row.Id == sessionId);
+        Assert.Equal("1710000000.000100", session.LabelSlackThreadTs);
         Assert.NotNull(data.GetProperty("jobKey").GetString());
     }
 

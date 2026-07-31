@@ -1286,6 +1286,8 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("UX_SlackThreadSessionMappings_ConnectionId_WorkspaceTeamId_ConversationId_ThreadTs");
             entity.HasIndex(e => new { e.ProjectId, e.WorkspaceTeamId, e.ConversationId, e.ThreadTs })
                 .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_WorkspaceTeamId_ConversationId_ThreadTs");
+            entity.HasIndex(e => new { e.WorkspaceTeamId, e.ConversationId, e.ThreadTs })
+                .HasDatabaseName("IX_SlackThreadSessionMappings_WorkspaceTeamId_ConversationId_ThreadTs");
             entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.UpdatedAt })
                 .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_ConnectionId_UpdatedAt");
         });

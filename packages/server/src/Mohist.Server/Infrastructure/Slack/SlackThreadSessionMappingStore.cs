@@ -107,6 +107,32 @@ public sealed class SlackThreadSessionMappingStore : IScopedService, IAgentConne
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<SlackThreadBinding>> ListBindingsByWorkspaceAsync(
+        string workspaceTeamId,
+        string conversationId,
+        string threadTs,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceTeamId))
+            throw new ArgumentException("WorkspaceTeamId is required.", nameof(workspaceTeamId));
+        if (string.IsNullOrWhiteSpace(conversationId))
+            throw new ArgumentException("ConversationId is required.", nameof(conversationId));
+        if (string.IsNullOrWhiteSpace(threadTs))
+            throw new ArgumentException("ThreadTs is required.", nameof(threadTs));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.SlackThreadSessionMappings.AsNoTracking()
+            .Where(row => row.WorkspaceTeamId == workspaceTeamId
+                && row.ConversationId == conversationId
+                && row.ThreadTs == threadTs)
+            .OrderBy(row => row.ConnectionId)
+            .Select(row => new SlackThreadBinding(
+                row.ConnectionId,
+                row.SessionId,
+                row.RootMessageTs))
+            .ToListAsync(ct);
+    }
+
 /// <summary>
 /// Inserts a thread binding if and only if no row exists for the
 /// same <c>(Connection, Workspace, Conversation, Thread)</c>. An

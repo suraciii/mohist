@@ -1068,8 +1068,8 @@ public static class SlackConnectionRoutes
 
         var workspaceBots = await req.Connections.ListBoundBotsByWorkspaceAsync(body.TeamId, ct);
         var mentionedWorkspaceBots = MentionedWorkspaceBots(mentionedUserIds, workspaceBots);
-        var threadBindings = await req.ThreadMapping.ListBindingsAsync(
-            projectId, body.TeamId, body.ConversationId, rootTs, ct);
+        var threadBindings = await req.ThreadMapping.ListBindingsByWorkspaceAsync(
+            body.TeamId, body.ConversationId, rootTs, ct);
 
         if (mentionedWorkspaceBots.Count >= 2)
             return await HandleAmbiguousPromptAsync(
@@ -1388,7 +1388,7 @@ public static class SlackConnectionRoutes
                 agent,
                 prompt,
                 new ConnectionLaunchOrigin(
-                    connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, body.ThreadTs),
+                    connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
                 ct);
             sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, launch.SessionId, ct);
         }
@@ -1397,7 +1397,7 @@ public static class SlackConnectionRoutes
         {
             var bindResult = await req.ThreadMapping.UpsertAsync(
                 projectId, body.TeamId, connection.Id, body.ConversationId, rootTs,
-                req.SenderSlackUserId, sessionId, body.MessageTs, ct);
+                req.SenderSlackUserId, sessionId, rootTs, ct);
             sessionId = bindResult.SessionId;
             if (bindResult.AlreadyExisted)
                 sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, sessionId, ct);

@@ -135,6 +135,27 @@ public class SlackThreadSessionMappingStoreTests
     }
 
     [Fact]
+    public async Task ListBindingsByWorkspaceAsync_IncludesBindingsAcrossProjects()
+    {
+        await using var harness = CreateHarness();
+        var otherProject = $"project_{Guid.NewGuid():N}";
+        var otherConnection = $"connection_{Guid.NewGuid():N}";
+        await harness.Store.UpsertAsync(
+            harness.ProjectId, "T123", harness.ConnectionId, "C-shared", "1710.0001",
+            "U_OWNER", "session-A", "1710.0001");
+        await harness.Store.UpsertAsync(
+            otherProject, "T123", otherConnection, "C-shared", "1710.0001",
+            "U_OWNER", "session-B", "1710.0001");
+
+        var bindings = await harness.Store.ListBindingsByWorkspaceAsync(
+            "T123", "C-shared", "1710.0001");
+
+        Assert.Equal(2, bindings.Count);
+        Assert.Contains(bindings, binding => binding.SessionId == "session-A");
+        Assert.Contains(bindings, binding => binding.SessionId == "session-B");
+    }
+
+    [Fact]
     public async Task UpsertAsync_ThrowsOnEmptyArguments()
     {
         await using var harness = CreateHarness();
