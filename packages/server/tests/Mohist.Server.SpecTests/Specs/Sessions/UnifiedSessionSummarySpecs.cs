@@ -189,6 +189,20 @@ public class UnifiedSessionSummarySpecs
     }
 
     [Fact]
+    public async Task Show_AgentLaunchSession_DoesNotUseHistoricalFacts_WhenRuntimeBindingIsMissing()
+    {
+        var db = await BuildEnrichedDbAsync(seedPriorRuntimeFailure: true, agentRuntimeSessionId: null);
+        var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, AgentLaunchSession, CreateQuerier(db), CancellationToken.None);
+        var data = await OkDataAsync(result);
+
+        Assert.Equal("gpt-4o", data.GetProperty("resolvedModel").GetString());
+        Assert.False(data.TryGetProperty("failureCategory", out _));
+        Assert.False(data.TryGetProperty("failureReason", out _));
+        Assert.False(data.TryGetProperty("toolCallCount", out _));
+        Assert.False(data.TryGetProperty("toolErrorCount", out _));
+    }
+
+    [Fact]
     public async Task Show_AgentLaunchSession_CarriesUsageFromSession()
     {
         var db = await BuildEnrichedDbAsync();
@@ -199,6 +213,19 @@ public class UnifiedSessionSummarySpecs
         Assert.Equal(60, usage.GetProperty("outputTokens").GetInt64());
         Assert.Equal(180, usage.GetProperty("totalTokens").GetInt64());
         Assert.Equal(0.42, usage.GetProperty("costAmount").GetDouble());
+    }
+
+    [Fact]
+    public async Task Show_AgentLaunchSession_ExposesEventOnlyCompactionHistory()
+    {
+        var db = await BuildEnrichedDbAsync(seedCompactionEventOnly: true);
+        var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, AgentLaunchSession, CreateQuerier(db), CancellationToken.None);
+        var data = await OkDataAsync(result);
+        var history = data.GetProperty("recoveryHistory");
+
+        Assert.Equal(1, history.GetArrayLength());
+        Assert.Equal("compaction", history[0].GetProperty("type").GetString());
+        Assert.Equal("Earlier context retained", history[0].GetProperty("summary").GetString());
     }
 
     [Fact]
@@ -246,20 +273,22 @@ public class UnifiedSessionSummarySpecs
         bool seedQueuedTurn = false,
         bool seedQueuedIdleTurn = false,
         bool seedTurnResult = false,
-        bool seedRecoveryHistory = false)
+        bool seedRecoveryHistory = false,
+        bool seedCompactionEventOnly = false,
+        string? agentRuntimeSessionId = "rt-agent")
     {
         var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
 
         await SeedAgentAsync(factory);
-        await SeedEnrichedSessionAsync(factory, "agent-launch", AgentLaunchSession, "rt-agent",
+        await SeedEnrichedSessionAsync(factory, "agent-launch", AgentLaunchSession, agentRuntimeSessionId,
             "gpt-4o", active: seedActiveAgent, recordedMinutes: 2, lastDataMinutes: 5,
             seedQueuedTurn: seedQueuedTurn, seedQueuedIdleTurn: seedQueuedIdleTurn, seedTurnResult: seedTurnResult);
         await SeedEnrichedSessionAsync(factory, "workflow", WorkflowSession, "rt-workflow",
             "claude-3", active: seedActiveWorkflow, recordedMinutes: 3, lastDataMinutes: 8);
         await SeedEnrichedTranscriptAsync(factory, AgentLaunchSession, "rt-agent",
             "gpt-4o", "rate_limited", "OpenCode provider rate limit", 2, 1, seedPriorRuntimeFailure,
-            seedRecoveryHistory);
+            seedRecoveryHistory, seedCompactionEventOnly);
         await SeedEnrichedTranscriptAsync(factory, WorkflowSession, "rt-workflow",
             "claude-3", "context_exhaustion", "Runtime context window exhausted", 3, 2, false);
 
@@ -293,7 +322,7 @@ public class UnifiedSessionSummarySpecs
 
     private static async Task SeedBareSessionAsync(
         IDbContextFactory<MohistDbContext> factory,
-        string sourceKind, string sessionId, string runtimeSessionId, string model,
+        string sourceKind, string sessionId, string? runtimeSessionId, string model,
         string? agentId = null, string? agentName = null,
         string? workflowRunId = null, string? sessionName = null, int? issueNumber = null)
     {
@@ -328,7 +357,7 @@ public class UnifiedSessionSummarySpecs
 
     private static async Task SeedEnrichedSessionAsync(
         IDbContextFactory<MohistDbContext> factory,
-        string sourceKind, string sessionId, string runtimeSessionId, string model,
+        string sourceKind, string sessionId, string? runtimeSessionId, string model,
         bool active = false, int recordedMinutes = 2, int lastDataMinutes = 5,
         bool seedQueuedTurn = false, bool seedQueuedIdleTurn = false, bool seedTurnResult = false)
     {
@@ -442,7 +471,7 @@ public class UnifiedSessionSummarySpecs
         string sessionId, string runtimeSessionId,
         string resolvedModel, string failureCategory, string failureReason,
         int totalTools, int errorTools, bool seedPriorRuntimeFailure,
-        bool seedRecoveryHistory = false)
+        bool seedRecoveryHistory = false, bool seedCompactionEventOnly = false)
     {
         await using var db = factory.CreateDbContext();
 
@@ -556,6 +585,28 @@ public class UnifiedSessionSummarySpecs
                 Sequence = 102,
                 Type = TranscriptPartTypes.Compaction,
                 CorrelationKey = "recovery-compaction",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    strategy = "summary",
+                    summary = "Earlier context retained",
+                    contextWindowUsedBefore = 900L,
+                    contextWindowUsedAfter = 300L,
+                    contextWindowSize = 1000L,
+                    recordedAt = CreatedAt.AddMinutes(22),
+                }, JSON.Options),
+                FirstSeenAt = CreatedAt.AddMinutes(22),
+                LastSeenAt = CreatedAt.AddMinutes(22),
+            });
+        }
+
+        if (seedCompactionEventOnly)
+        {
+            db.AgentSessionTranscriptParts.Add(new AgentSessionTranscriptPartRow
+            {
+                TurnId = currentTurn.Id,
+                Sequence = 101,
+                Type = RuntimeEventTypes.CompactionEvent,
+                CorrelationKey = "recovery-compaction-event",
                 PayloadJson = JsonSerializer.Serialize(new
                 {
                     strategy = "summary",

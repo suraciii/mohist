@@ -300,7 +300,7 @@ describe('useSessionTranscript', () => {
     expect(transcript).toContain('\n\n')
   })
 
-  it('accepts events when page physical binding is temporarily missing but logical session identity matches', () => {
+  it('rejects events when page physical binding is temporarily missing', () => {
     renderSessionTranscriptWithoutBinding([persistedEvent('persisted')])
     expect(screen.getByTestId('transcript').textContent).toBe('persisted')
 
@@ -313,10 +313,10 @@ describe('useSessionTranscript', () => {
       })
     })
 
-    expect(screen.getByTestId('transcript').textContent).toBe('persisted live')
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
   })
 
-  it('accepts events when page physical binding is missing and event provides a runtimeSessionId', () => {
+  it('rejects events when page physical binding is missing even if the event provides a runtimeSessionId', () => {
     renderSessionTranscriptWithoutBinding([persistedEvent('persisted')])
 
     act(() => {
@@ -328,7 +328,7 @@ describe('useSessionTranscript', () => {
       })
     })
 
-    expect(screen.getByTestId('transcript').textContent).toBe('persisted live')
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
   })
 
   it('rejects events from a different logical session', () => {

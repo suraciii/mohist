@@ -503,7 +503,7 @@ public class AgentSessionQuerier : IScopedService
         TranscriptPartLoaderResult loaded)
     {
         _ = turnSequenceByTurnId;
-        if (string.IsNullOrWhiteSpace(currentRuntimeSessionId)) return true;
+        if (string.IsNullOrWhiteSpace(currentRuntimeSessionId)) return false;
         var turn = loaded.Turns.FirstOrDefault(t => t.Id == projection.TurnId);
         return turn is not null
             && string.Equals(turn.RuntimeSessionId, currentRuntimeSessionId, StringComparison.Ordinal);
@@ -705,18 +705,24 @@ public class AgentSessionQuerier : IScopedService
     {
         var turnById = loaded.Turns.ToDictionary(turn => turn.Id);
         var recoveryParts = loaded.Parts
-            .Where(part => part.Type is TranscriptPartTypes.SessionContextReset or TranscriptPartTypes.Compaction)
+            .Where(part => part.Type is TranscriptPartTypes.SessionContextReset
+                or TranscriptPartTypes.Compaction
+                or RuntimeEventTypes.CompactionEvent)
             .OrderBy(part => turnById.TryGetValue(part.TurnId, out var turn) ? turn.Sequence : long.MaxValue)
             .ThenBy(part => part.Sequence)
             .ThenBy(part => part.Id)
             .ToList();
         if (recoveryParts.Count == 0) return null;
 
-        return recoveryParts.Select(part =>
+        var seenCompactions = new HashSet<string>(StringComparer.Ordinal);
+        var history = new List<AgentSessionRecoveryObservationDto>(recoveryParts.Count);
+        foreach (var part in recoveryParts)
         {
             var payload = AgentSessionJsonHelper.ParsePayloadOrEmpty(part.PayloadJson);
             var isReset = part.Type == TranscriptPartTypes.SessionContextReset;
-            return new AgentSessionRecoveryObservationDto(
+            if (!isReset && !seenCompactions.Add(part.PayloadJson)) continue;
+
+            history.Add(new AgentSessionRecoveryObservationDto(
                 Type: isReset ? "reset" : "compaction",
                 RecordedAt: AgentSessionJsonHelper.GetStringProp(payload, "recordedAt")
                     ?? AgentSessionJsonHelper.GetStringProp(payload, "observedAt")
@@ -727,8 +733,10 @@ public class AgentSessionQuerier : IScopedService
                 Summary: isReset ? null : AgentSessionJsonHelper.GetStringProp(payload, "summary"),
                 ContextWindowUsedBefore: isReset ? null : AgentSessionJsonHelper.GetLongProp(payload, "contextWindowUsedBefore"),
                 ContextWindowUsedAfter: isReset ? null : AgentSessionJsonHelper.GetLongProp(payload, "contextWindowUsedAfter"),
-                ContextWindowSize: isReset ? null : AgentSessionJsonHelper.GetLongProp(payload, "contextWindowSize"));
-        }).ToArray();
+                ContextWindowSize: isReset ? null : AgentSessionJsonHelper.GetLongProp(payload, "contextWindowSize")));
+        }
+
+        return history.ToArray();
     }
 
     /// <summary>
