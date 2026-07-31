@@ -74,6 +74,8 @@ export interface CommandLineOptions {
   timeoutMs?: number
 }
 
+const ABORT_FORCE_KILL_GRACE_MS = 5_000
+
 export async function ensureDir(path: string) {
   await mkdir(path, { recursive: true })
 }
@@ -132,7 +134,11 @@ export async function runCommand(
     // We consult it lazily from inside the error / close handlers so we
     // never race Node's internal abort listener.
     const wasTimeout = () => timeoutHandle?.timedOut() === true
-    const onAbort = () => killProcess(child)
+    const onAbort = () => {
+      killProcess(child)
+      const forceKillTimer = setTimeout(() => killProcess(child, "SIGKILL"), ABORT_FORCE_KILL_GRACE_MS)
+      forceKillTimer.unref()
+    }
     const cleanup = () => {
       effectiveSignal.removeEventListener("abort", onAbort)
       timeoutHandle?.dispose()

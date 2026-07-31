@@ -4,7 +4,6 @@ import type { ActionResult, JsonObject } from "../core/types.js"
 import type { ActionHost } from "./host.js"
 import { arrayInput, numberInput, stringInput } from "../core/json.js"
 import { deleteFile, exists, readText, runCommand, writeText, type CommandLineOptions } from "../system/process.js"
-import { timeoutSignal } from "../system/timeout-signal.js"
 import { resolveActionPath } from "./expectations.js"
 import { fail, succeed } from "./action-result.js"
 
@@ -30,8 +29,10 @@ export async function scriptAction(inputs: JsonObject, host: ActionHost): Promis
   await writeText(file, run)
   try {
     const timeoutMs = numberInput(inputs, "timeout")
-    const signal = timeoutMs ? timeoutSignal(host.signal, timeoutMs) : host.signal
-    const result = await runCommand(shell, [file], host.workDir, signal, undefined, logLineOptions(host, "action:script"))
+    const result = await runCommand(shell, [file], host.workDir, host.signal, undefined, {
+      ...logLineOptions(host, "action:script"),
+      timeoutMs,
+    })
     if (result.exitCode !== 0) {
       return fail(result.status === "timeout" ? "timeout" : "script-failed", scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr), { exitCode: result.exitCode })
     }
