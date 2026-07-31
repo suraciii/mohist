@@ -90,6 +90,7 @@ public sealed class SlackDmSessionMappingStore : IScopedService, IAgentConnectio
         string slackUserId,
         string dmConversationId,
         string sessionId,
+        string messageTs = "",
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(projectId))
@@ -103,30 +104,20 @@ public sealed class SlackDmSessionMappingStore : IScopedService, IAgentConnectio
 
         var now = _timeProvider.GetUtcNow();
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var existing = await db.SlackDmSessionMappings
-            .FirstOrDefaultAsync(row => row.ProjectId == projectId
-                && row.ConnectionId == connectionId
-                && row.DmConversationId == dmConversationId, ct);
-        if (existing is null)
-        {
-            db.SlackDmSessionMappings.Add(new SlackDmSessionMappingRow
-            {
-                Id = $"slkdmmp_{Guid.NewGuid():N}",
-                ProjectId = projectId,
-                ConnectionId = connectionId,
-                WorkspaceTeamId = workspaceTeamId,
-                SlackUserId = slackUserId,
-                DmConversationId = dmConversationId,
-                CurrentSessionId = sessionId,
-                UpdatedAt = now,
-            });
-        }
-        else
-        {
-            existing.CurrentSessionId = sessionId;
-            existing.UpdatedAt = now;
-        }
-        await db.SaveChangesAsync(ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "SlackDmSessionMappings" (
+                "Id", "ProjectId", "ConnectionId", "WorkspaceTeamId", "SlackUserId",
+                "DmConversationId", "CurrentSessionId", "CurrentMessageTs", "UpdatedAt")
+            VALUES (
+                {$"slkdmmp_{Guid.NewGuid():N}"}, {projectId}, {connectionId}, {workspaceTeamId}, {slackUserId},
+                {dmConversationId}, {sessionId}, {messageTs}, {now})
+            ON CONFLICT("ConnectionId", "DmConversationId") DO UPDATE SET
+                "CurrentSessionId" = excluded."CurrentSessionId",
+                "CurrentMessageTs" = excluded."CurrentMessageTs",
+                "UpdatedAt" = excluded."UpdatedAt"
+            WHERE "SlackDmSessionMappings"."CurrentMessageTs" IS NULL
+                OR excluded."CurrentMessageTs" >= "SlackDmSessionMappings"."CurrentMessageTs";
+            """, ct);
     }
 
     /// <summary>

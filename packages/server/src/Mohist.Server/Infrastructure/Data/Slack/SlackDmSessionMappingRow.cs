@@ -18,5 +18,6 @@ public sealed class SlackDmSessionMappingRow
     public string SlackUserId { get; set; } = string.Empty;
     public string DmConversationId { get; set; } = string.Empty;
     public string CurrentSessionId { get; set; } = string.Empty;
+    public string? CurrentMessageTs { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

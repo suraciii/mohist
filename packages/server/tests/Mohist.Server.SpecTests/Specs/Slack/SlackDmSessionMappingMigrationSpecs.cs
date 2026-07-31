@@ -14,7 +14,7 @@ public class SlackDmSessionMappingMigrationSpecs
     [Fact]
     public async Task Up_CreatesSlackDmSessionMappingsTable()
     {
-        await using var database = CreateDatabase("20260731100000_AddSlackDmSessionMapping");
+        await using var database = CreateDatabase("20260731110000_AddSlackInboxRoutes");
         await using var context = database.CreateDbContext();
 
         Assert.True(await context.SlackDmSessionMappings.AnyAsync() == false);
@@ -28,7 +28,7 @@ public class SlackDmSessionMappingMigrationSpecs
         // The schema is asserted end-to-end in SlackConnectionApiSpecs and the
         // store unit test; this spec only verifies the migration history is
         // recorded so downstream migrations see the new table.
-        await using var database = CreateDatabase("20260731100000_AddSlackDmSessionMapping");
+        await using var database = CreateDatabase("20260731110000_AddSlackInboxRoutes");
         var migrations = await ReadAppliedMigrationsAsync(database.Connection);
         Assert.Contains("20260731100000_AddSlackDmSessionMapping", migrations);
     }
@@ -36,7 +36,7 @@ public class SlackDmSessionMappingMigrationSpecs
     [Fact]
     public async Task Up_UniqueConstraintRejectsDuplicateConversation()
     {
-        await using var database = CreateDatabase("20260731100000_AddSlackDmSessionMapping");
+        await using var database = CreateDatabase("20260731110000_AddSlackInboxRoutes");
         await using var context = database.CreateDbContext();
 
         var now = new DateTimeOffset(2026, 7, 31, 0, 0, 0, TimeSpan.Zero);
@@ -71,7 +71,7 @@ public class SlackDmSessionMappingMigrationSpecs
     [Fact]
     public async Task Up_AllowsDifferentDmConversationsUnderSameConnection()
     {
-        await using var database = CreateDatabase("20260731100000_AddSlackDmSessionMapping");
+        await using var database = CreateDatabase("20260731110000_AddSlackInboxRoutes");
         await using var context = database.CreateDbContext();
 
         var now = new DateTimeOffset(2026, 7, 31, 0, 0, 0, TimeSpan.Zero);
@@ -103,6 +103,20 @@ public class SlackDmSessionMappingMigrationSpecs
         Assert.Equal(2, await context.SlackDmSessionMappings.CountAsync());
     }
 
+    [Fact]
+    public async Task Up_AddsInboxRoutingAndCurrentMessageColumns()
+    {
+        await using var database = CreateDatabase("20260731110000_AddSlackInboxRoutes");
+        await using var context = database.CreateDbContext();
+        var inboxColumns = await ReadColumnNamesAsync(context, "SlackProviderInboxRows");
+        var mappingColumns = await ReadColumnNamesAsync(context, "SlackDmSessionMappings");
+
+        Assert.Contains("RouteKind", inboxColumns);
+        Assert.Contains("RouteSessionId", inboxColumns);
+        Assert.Contains("RouteTurnId", inboxColumns);
+        Assert.Contains("CurrentMessageTs", mappingColumns);
+    }
+
     private static TestDatabase CreateDatabase(string? migratedTo = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -127,6 +141,18 @@ public class SlackDmSessionMappingMigrationSpecs
             result.Add(reader.GetString(0));
         }
         return result;
+    }
+
+    private static async Task<IReadOnlyList<string>> ReadColumnNamesAsync(MohistDbContext context, string tableName)
+    {
+        var connection = context.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT \"name\" FROM pragma_table_info('{tableName}')";
+        var columns = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            columns.Add(reader.GetString(0));
+        return columns;
     }
 
     private sealed class TestDatabase : IAsyncDisposable

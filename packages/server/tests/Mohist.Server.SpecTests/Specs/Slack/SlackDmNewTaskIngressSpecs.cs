@@ -120,6 +120,36 @@ public sealed class SlackDmNewTaskIngressSpecs
             .ToListAsync(), identity => identity.EndsWith("1710000000.000800", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task Redelivered_new_task_does_not_restore_an_older_current_session()
+    {
+        var connection = await CreateConnectionAsync();
+        var first = await PostIngressAsync(connection, "D-DM-REPLAY-NEW", "1710000000.000100", "new task first work");
+        var second = await PostIngressAsync(connection, "D-DM-REPLAY-NEW", "1710000000.000200", "new task second work");
+
+        var replay = await PostIngressAsync(connection, "D-DM-REPLAY-NEW", "1710000000.000100", "new task first work");
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var mapping = scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
+        Assert.Equal(second.GetProperty("sessionId").GetString(), await mapping.GetCurrentSessionIdAsync(
+            connection.ProjectId, connection.Id, "D-DM-REPLAY-NEW"));
+        Assert.Equal(first.GetProperty("sessionId").GetString(), replay.GetProperty("sessionId").GetString());
+    }
+
+    [Fact]
+    public async Task Concurrent_new_tasks_keep_the_latest_message_as_current()
+    {
+        var connection = await CreateConnectionAsync();
+        var results = await Task.WhenAll(
+            PostIngressAsync(connection, "D-DM-CONCURRENT", "1710000000.000100", "new task first work"),
+            PostIngressAsync(connection, "D-DM-CONCURRENT", "1710000000.000200", "new task second work"));
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var mapping = scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
+        Assert.Equal(results[1].GetProperty("sessionId").GetString(), await mapping.GetCurrentSessionIdAsync(
+            connection.ProjectId, connection.Id, "D-DM-CONCURRENT"));
+    }
+
     private async Task<JsonElement> PostIngressAsync(
         AgentConnection connection,
         string conversationId,

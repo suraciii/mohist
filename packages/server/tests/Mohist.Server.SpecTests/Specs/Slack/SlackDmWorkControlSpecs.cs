@@ -132,6 +132,26 @@ public sealed class SlackDmWorkControlSpecs
         Assert.Equal(AgentTurnStatus.Cancelled, records.Single(turn => turn.Id == turns.SecondTurnId).Status);
     }
 
+    [Fact]
+    public async Task Redelivered_cancel_does_not_affect_later_current_work()
+    {
+        var connection = await CreateConnectionAsync();
+        var cancelled = await SeedQueuedSessionAsync(connection, "D-DM-CONTROL-REPLAY");
+        await PostIngressAsync(connection, "D-DM-CONTROL-REPLAY", "1710000000.001100", "cancel");
+        var later = await SeedExecutingSessionAsync(connection, "D-DM-CONTROL-REPLAY", setCurrent: true);
+        var hub = _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+        hub.Clear();
+
+        var replay = await PostIngressAsync(connection, "D-DM-CONTROL-REPLAY", "1710000000.001100", "cancel");
+
+        Assert.Equal("already_ended", replay.GetProperty("kind").GetString());
+        Assert.Equal(AgentTurnStatus.Cancelled,
+            Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(cancelled.SessionId).ListTurnsAsync()).Status);
+        Assert.Equal(AgentTurnStatus.Executing,
+            Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(later.SessionId).ListTurnsAsync()).Status);
+        Assert.Empty(hub.Invocations);
+    }
+
     private async Task<(string SessionId, string TurnId)> SeedQueuedSessionAsync(
         AgentConnection connection,
         string conversationId)

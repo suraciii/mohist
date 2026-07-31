@@ -162,6 +162,38 @@ public sealed class SlackDmSessionMappingIngressSpecs
         Assert.True(data.TryGetProperty("inputId", out _),
             "follow-up path must surface the SessionInput id");
         Assert.True(data.GetProperty("followup").GetBoolean());
+
+        var switched = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+        {
+            isDirectMessage = true,
+            teamId = connection.WorkspaceTeamId,
+            conversationId = "D-DM-FOLLOWUP",
+            messageTs = "1710000000.000400",
+            senderSlackUserId = "U_OWNER",
+            text = "new task separate work",
+        });
+        switched.EnsureSuccessStatusCode();
+
+        using var replay = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+        {
+            isDirectMessage = true,
+            teamId = connection.WorkspaceTeamId,
+            conversationId = "D-DM-FOLLOWUP",
+            messageTs = "1710000000.000300",
+            senderSlackUserId = "U_OWNER",
+            text = "more details",
+        });
+        replay.EnsureSuccessStatusCode();
+        using var replayDocument = JsonDocument.Parse(await replay.Content.ReadAsStringAsync());
+        var replayData = replayDocument.RootElement.GetProperty("data");
+
+        Assert.Equal(sessionId, replayData.GetProperty("sessionId").GetString());
+        await using var verifyScope = _fixture.Services.CreateAsyncScope();
+        var state = await verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>().AgentSessions
+            .Where(row => row.Id == sessionId)
+            .Select(row => row.State)
+            .SingleAsync();
+        Assert.Equal(1, JsonDocument.Parse(state).RootElement.GetProperty("status").GetProperty("turns").GetArrayLength());
     }
 
     [Fact]

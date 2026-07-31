@@ -184,6 +184,18 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RouteKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RouteSessionId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RouteTurnId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SlackMessageIdentity")
                         .IsRequired()
                         .HasMaxLength(512)
@@ -469,6 +481,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("CurrentSessionId")
                         .IsRequired()
                         .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CurrentMessageTs")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("DmConversationId")

@@ -127,6 +127,78 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
         }
     }
 
+    public async Task<SlackProviderInboxRoute> GetOrAssignRouteAsync(
+        string projectId,
+        string id,
+        SlackProviderInboxRouteDraft draft,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentException.ThrowIfNullOrWhiteSpace(draft.Kind);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        _ = await db.SlackProviderInboxRows
+            .Where(row => row.ProjectId == projectId && row.Id == id && row.RouteKind == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.RouteKind, draft.Kind)
+                .SetProperty(row => row.RouteSessionId, draft.SessionId)
+                .SetProperty(row => row.RouteTurnId, draft.TurnId), ct);
+        var route = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Id == id)
+            .Select(row => new { row.RouteKind, row.RouteSessionId, row.RouteTurnId })
+            .SingleOrDefaultAsync(ct);
+        if (route?.RouteKind is null)
+            throw new InvalidOperationException($"Slack inbox entry {id} does not exist.");
+
+        return new SlackProviderInboxRoute(route.RouteKind, route.RouteSessionId, route.RouteTurnId);
+    }
+
+    public async Task<SlackProviderInboxRoute?> GetRouteAsync(
+        string projectId,
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var route = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Id == id)
+            .Select(row => new { row.RouteKind, row.RouteSessionId, row.RouteTurnId })
+            .SingleOrDefaultAsync(ct);
+        return route?.RouteKind is null
+            ? null
+            : new SlackProviderInboxRoute(route.RouteKind, route.RouteSessionId, route.RouteTurnId);
+    }
+
+    public async Task<string> SetRouteSessionIdAsync(
+        string projectId,
+        string id,
+        string sessionId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.SlackProviderInboxRows
+            .Where(row => row.ProjectId == projectId && row.Id == id && row.RouteSessionId == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.RouteSessionId, sessionId), ct);
+        var persisted = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Id == id)
+            .Select(row => row.RouteSessionId)
+            .SingleOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(persisted))
+            throw new InvalidOperationException($"Slack inbox entry {id} does not have a routed session.");
+        if (!string.Equals(persisted, sessionId, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Slack inbox entry {id} resolved to a different session.");
+
+        return persisted;
+    }
+
     /// <summary>
     /// Marks an accepted inbox entry dispatched. Called after the
     /// launcher has been invoked for that identity; freeing the slot is

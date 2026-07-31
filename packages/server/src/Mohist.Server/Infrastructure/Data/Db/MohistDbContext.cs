@@ -1190,6 +1190,9 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.DmConversationId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.RouteKind).HasMaxLength(32);
+            entity.Property(e => e.RouteSessionId).HasMaxLength(512);
+            entity.Property(e => e.RouteTurnId).HasMaxLength(512);
             entity.Property(e => e.AcceptedAt).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.HasIndex(e => new { e.ConnectionId, e.SlackMessageIdentity })
@@ -1247,6 +1250,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.DmConversationId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.CurrentSessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.CurrentMessageTs).HasMaxLength(64);
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.HasIndex(e => new { e.ConnectionId, e.DmConversationId })
                 .IsUnique()

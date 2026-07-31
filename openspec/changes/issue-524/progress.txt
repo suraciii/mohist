@@ -155,3 +155,16 @@ was wrong. No code change needed.
 - `Mohist.Server.SpecTests` class `GenericAgentSessionCancelApiSpecs`: 18 / 18 passed after sharing control operations.
 - `Mohist.Server.SpecTests` class `SlackDmWorkControlSpecs`: 6 / 6 passed, covering cancel queued, stop executing, cancel-to-stop, stale Session isolation, no active work, and single-Turn targeting.
 - Final `npm test`: passed — Workflow Definition 175, CLI 1482, Server Unit 1658, Server Arch 50, Server Spec 3558, Web 5200 with 1 skipped, Runner 1450, mohist-slack 5.
+
+# issue-524 / Review fixes
+
+## Decisions
+
+- The Slack provider inbox now owns the durable routing fence for each accepted message: route kind plus the selected Session and Turn where applicable. A redelivery reads that fence before consulting the current conversation mapping, so a later New task cannot redirect an earlier follow-up or control message.
+- Launch routes persist the canonical Session returned by the idempotent launcher. Mapping writes retain the Slack message timestamp and only move forward by that timestamp, so an older launch or New task replay cannot restore an obsolete current Session.
+- The mapping write is a single SQLite `INSERT ... ON CONFLICT ... DO UPDATE`, replacing the read-then-insert race. Concurrent first messages may still each launch independently, but no ingress request fails on the mapping's unique constraint and the latest Slack message remains current.
+
+## Verification
+
+- Focused Slack specs: 22 / 22 passed, covering follow-up replay after a switch, New task replay after a later switch, control replay after later work begins, concurrent New task mapping, and the additive migration.
+- `SlackDmSessionMappingStoreTests`: 11 / 11 passed, including old-message ordering.

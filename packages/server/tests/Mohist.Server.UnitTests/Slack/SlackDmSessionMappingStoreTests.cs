@@ -178,6 +178,19 @@ public class SlackDmSessionMappingStoreTests
         }
     }
 
+    [Fact]
+    public async Task SetCurrentSessionIdAsync_DoesNotLetAnOlderMessageReplaceTheCurrentSession()
+    {
+        await using var harness = CreateHarness();
+        await harness.Store.SetCurrentSessionIdAsync(
+            harness.ProjectId, harness.ConnectionId, "T123", "U_OWNER", "D-order", "session-new", "1710000000.000200");
+        await harness.Store.SetCurrentSessionIdAsync(
+            harness.ProjectId, harness.ConnectionId, "T123", "U_OWNER", "D-order", "session-old", "1710000000.000100");
+
+        Assert.Equal("session-new", await harness.Store.GetCurrentSessionIdAsync(
+            harness.ProjectId, harness.ConnectionId, "D-order"));
+    }
+
     private static Harness CreateHarness()
     {
         var keeper = new SqliteConnection($"Data Source=dm-store-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
