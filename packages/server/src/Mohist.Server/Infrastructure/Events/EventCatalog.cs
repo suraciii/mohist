@@ -43,6 +43,7 @@ public static class EventCatalog
         ReverseDns.RunnerDisconnected,
         ReverseDns.AgentJobFailed,
         ReverseDns.AgentJobTerminalDelivery,
+        ReverseDns.AgentSessionFollowupDelivery,
         ReverseDns.IssueCompleted,
         ReverseDns.IssueCancelled,
         ReverseDns.IssueWorkStarted,
