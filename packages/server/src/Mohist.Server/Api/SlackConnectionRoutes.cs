@@ -263,6 +263,7 @@ public static class SlackConnectionRoutes
             SlackOutboxStore outbox,
             SlackDmSessionMappingStore mapping,
             SlackThreadSessionMappingStore threadMapping,
+            SlackAmbiguousPromptStore ambiguousPrompts,
             AgentQuerier agents,
              IAgentLauncher launcher,
              IGrainFactory grains,
@@ -302,7 +303,8 @@ public static class SlackConnectionRoutes
                 return await HandleChannelIngressAsync(
                     HandleChannelIngressRequest.From(
                         projectId, connection, identity, senderSlackUserId, body,
-                        threadMapping, sessions, agents, claims, inbox, outbox,
+                        connections, threadMapping, ambiguousPrompts,
+                        sessions, agents, claims, inbox, outbox,
                         launcher, grains, followupDispatcher,
                         runnerHub, runnerConnections,
                         http.RequestServices),
@@ -1046,8 +1048,12 @@ public static class SlackConnectionRoutes
     /// between <c>LaunchConnectionAsync</c> and <c>BindAsync</c> still
     /// routes subsequent thread replies to the original session.
     /// <para>
-    /// Multi-Agent thread cases and the once-only ambiguity prompt are
-    /// delegated to T-003; T-002 ships the single-Agent path only.
+    /// Workspace-scoped multi-Agent attribution (D4) and the once-only
+    /// ambiguity prompt (D5) live here. Mention parsing yields the
+    /// ordered list of stable Slack user ids the adapter extracted; the
+    /// state machine intersects them with the workspace's identity-bound
+    /// Bots (<c>M ∩ W</c>) so arbitrary human mentions are never
+    /// treated as Bot mentions.
     /// </para>
     /// </summary>
     private static async Task<IResult> HandleChannelIngressAsync(HandleChannelIngressRequest req, CancellationToken ct)
@@ -1057,89 +1063,129 @@ public static class SlackConnectionRoutes
         var connection = req.Connection;
 
         var rootTs = !string.IsNullOrWhiteSpace(body.ThreadTs) ? body.ThreadTs : body.MessageTs;
-        var mentionedBotUserIds = BuildMentionedBotIds(body.MentionedUserIds);
+        var mentionedUserIds = BuildMentionedBotIds(body.MentionedUserIds);
         var ownBotUserId = connection.BotUserId ?? string.Empty;
 
-        var singleBinding = await ResolveSingleBindingAsync(
-            req, projectId, body.TeamId, body.ConversationId, rootTs, ct);
-        var target = ResolveChannelTarget(
-            mentionedBotUserIds, ownBotUserId, singleBinding, connection.Id);
+        var workspaceBots = await req.Connections.ListBoundBotsByWorkspaceAsync(body.TeamId, ct);
+        var mentionedWorkspaceBots = MentionedWorkspaceBots(mentionedUserIds, workspaceBots);
+        var threadBindings = await req.ThreadMapping.ListBindingsAsync(
+            projectId, body.TeamId, body.ConversationId, rootTs, ct);
 
-        if (target is ChannelTargetKind.Ambiguous)
+        if (mentionedWorkspaceBots.Count >= 2)
+            return await HandleAmbiguousPromptAsync(
+                req,
+                mentionedWorkspaceBots.Select(b => b.BotUserId).ToArray(),
+                mentionedWorkspaceBots.Select(b => b.ConnectionId).Distinct(StringComparer.Ordinal).ToArray(),
+                ct);
+
+        if (mentionedWorkspaceBots.Count == 1)
         {
-            return ApiResults.Ok(new
+            var addressedBot = mentionedWorkspaceBots[0];
+            if (!string.Equals(addressedBot.BotUserId, ownBotUserId, StringComparison.Ordinal))
+                return ApiResults.Ok(new { kind = "ignored" });
+
+            if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
             {
-                kind = "ambiguous",
-                reason = "Multiple Agents could answer this; mention a single Bot to address one.",
-            });
-        }
-
-        if (target is ChannelTargetKind.ThreadFollowupOther)
-            return ApiResults.Ok(new { kind = "ignored" });
-
-        if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
-        {
-            const string reason = "This Slack Connection is available only to its owner.";
-            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
-            return ApiResults.Ok(new { kind = "rejected", reason });
-        }
-
-        var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
-        if (target is ChannelTargetKind.RootMention && string.IsNullOrWhiteSpace(prompt))
-        {
-            const string reason = "Please send a task for the Agent to perform.";
-            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
-            return ApiResults.Ok(new { kind = "rejected", reason });
-        }
-
-        if (target is ChannelTargetKind.RootMention)
-        {
-            var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
-            if (agent is null)
-                return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
-
-            var dispatchDecision = AgentConnectionDispatchDecision.For(
-                AgentReadinessDeriver.Derive(agent.AgentConfig));
-            if (!dispatchDecision.Accepted)
-            {
-                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-                    dispatchDecision.Reason!, null, ct, body.ThreadTs);
-                return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
+                const string reason = "This Slack Connection is available only to its owner.";
+                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                return ApiResults.Ok(new { kind = "rejected", reason });
             }
 
-            return await LaunchChannelRootAsync(req, agent, prompt, rootTs, ct);
-        }
+            var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
+            var isRootMention = string.IsNullOrWhiteSpace(body.ThreadTs);
 
-        var reconciledSessionId = singleBinding?.SessionId;
-        if (reconciledSessionId is null)
-        {
-            reconciledSessionId = await ReconcileSessionIdAsync(
+            var ownBinding = threadBindings.FirstOrDefault(
+                binding => string.Equals(binding.ConnectionId, connection.Id, StringComparison.Ordinal));
+            var otherBotsInThread = threadBindings.Any(
+                binding => !string.Equals(binding.ConnectionId, connection.Id, StringComparison.Ordinal));
+
+            if (ownBinding is not null && !isRootMention)
+                return await DispatchChannelFollowupAsync(req, ownBinding.SessionId, prompt, ct);
+
+            if (isRootMention)
+            {
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    const string reason = "Please send a task for the Agent to perform.";
+                    await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                    return ApiResults.Ok(new { kind = "rejected", reason });
+                }
+                return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
+            }
+
+            if (otherBotsInThread)
+            {
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    const string reason = "Please send a task for the Agent to perform.";
+                    await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                    return ApiResults.Ok(new { kind = "rejected", reason });
+                }
+                return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
+            }
+
+            var reconciled = await ReconcileSessionIdAsync(
                 req, projectId, body.TeamId, body.ConversationId, rootTs, ct);
+            if (reconciled is not null)
+                return await DispatchChannelFollowupAsync(req, reconciled, prompt, ct);
+
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                const string reason = "Please send a task for the Agent to perform.";
+                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                return ApiResults.Ok(new { kind = "rejected", reason });
+            }
+            return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
         }
 
-        if (reconciledSessionId is null)
-            return ApiResults.Ok(new { kind = "ignored" });
+        if (threadBindings.Count >= 2)
+        {
+            var botLookup = workspaceBots.ToDictionary(b => b.ConnectionId, b => b.BotUserId, StringComparer.Ordinal);
+            var botLabels = threadBindings
+                .Select(binding => botLookup.TryGetValue(binding.ConnectionId, out var label) ? label : binding.ConnectionId)
+                .ToArray();
+            var connectionIds = threadBindings
+                .Select(binding => binding.ConnectionId)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            return await HandleAmbiguousPromptAsync(req, botLabels, connectionIds, ct);
+        }
 
-        return await DispatchChannelFollowupAsync(req, reconciledSessionId, prompt, ct);
-    }
+        if (threadBindings.Count == 1)
+        {
+            var binding = threadBindings[0];
+            if (!string.Equals(binding.ConnectionId, connection.Id, StringComparison.Ordinal))
+                return ApiResults.Ok(new { kind = "ignored" });
 
-    /// <summary>
-    /// Looks up the binding for the inbound (workspace, channel, thread)
-    /// tuple. Returns the single binding when exactly one Connection
-    /// owns the thread; null otherwise (zero or several bindings, which
-    /// disambiguates only by mention in the caller).
-    /// </summary>
-    private static async Task<SlackThreadBinding?> ResolveSingleBindingAsync(
-        HandleChannelIngressRequest req,
-        string projectId,
-        string workspaceTeamId,
-        string conversationId,
-        string rootTs,
-        CancellationToken ct)
-    {
-        var threadBindings = await req.ThreadMapping.ListBindingsAsync(
-            projectId, workspaceTeamId, conversationId, rootTs, ct);
-        return threadBindings.Count == 1 ? threadBindings[0] : null;
+            if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
+            {
+                const string reason = "This Slack Connection is available only to its owner.";
+                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                return ApiResults.Ok(new { kind = "rejected", reason });
+            }
+
+            var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
+            return await DispatchChannelFollowupAsync(req, binding.SessionId, prompt, ct);
+        }
+
+        if (!string.IsNullOrWhiteSpace(body.ThreadTs))
+        {
+            var reconciled = await ReconcileSessionIdAsync(
+                req, projectId, body.TeamId, body.ConversationId, rootTs, ct);
+            if (reconciled is not null)
+            {
+                if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
+                {
+                    const string reason = "This Slack Connection is available only to its owner.";
+                    await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                    return ApiResults.Ok(new { kind = "rejected", reason });
+                }
+                var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
+                return await DispatchChannelFollowupAsync(req, reconciled, prompt, ct);
+            }
+        }
+
+        return ApiResults.Ok(new { kind = "ignored" });
     }
 
     /// <summary>
@@ -1222,42 +1268,33 @@ public static class SlackConnectionRoutes
     }
 
     /// <summary>
-    /// Resolves which Agent — if any — should answer this channel message.
-    /// <list type="bullet">
-    /// <item><description><see cref="ChannelTargetKind.RootMention"/> — this Connection is the unique mentioned Bot in a root message (or a thread reply that explicitly names it while no other Bot is mentioned).</description></item>
-    /// <item><description><see cref="ChannelTargetKind.ThreadFollowupOwn"/> — the thread is bound to this Connection and the message does not mention a different Bot.</description></item>
-    /// <item><description><see cref="ChannelTargetKind.ThreadFollowupOther"/> — the thread is bound to exactly one other Connection; this Connection stays silent.</description></item>
-    /// <item><description><see cref="ChannelTargetKind.Ambiguous"/> — multi-Bot mention or multi-Agent thread reply without a mention.</description></item>
-    /// <item><description><see cref="ChannelTargetKind.NotMine"/> — plain channel message with no Bot mention and no bound thread.</description></item>
-    /// </list>
+    /// Filters the parsed mention list down to the subset that maps to
+    /// identity-bound Mohist Bots in the same workspace. The result is
+    /// the <c>M ∩ W</c> set D4 uses to attribute channel messages —
+    /// arbitrary human mentions are never treated as Bot mentions, and
+    /// a Bot managed by another Mohist Server never appears here.
+    /// Deduplicates by <c>BotUserId</c> so multiple Connections bound to
+    /// the same Bot (a test setup convenience or a future multi-workspace
+    /// Bot) never collapse a single-Bot mention into a multi-Bot prompt.
     /// </summary>
-    private static ChannelTargetKind ResolveChannelTarget(
-        IReadOnlyList<string> mentionedBotUserIds,
-        string ownBotUserId,
-        SlackThreadBinding? singleBinding,
-        string ownConnectionId)
+    private static IReadOnlyList<WorkspaceBoundBot> MentionedWorkspaceBots(
+        IReadOnlyList<string> mentionedUserIds,
+        IReadOnlyList<WorkspaceBoundBot> workspaceBots)
     {
-        if (mentionedBotUserIds.Count >= 2)
-            return ChannelTargetKind.Ambiguous;
-
-        if (mentionedBotUserIds.Count == 1)
+        if (mentionedUserIds.Count == 0 || workspaceBots.Count == 0)
+            return Array.Empty<WorkspaceBoundBot>();
+        var mentionedSet = new HashSet<string>(mentionedUserIds, StringComparer.Ordinal);
+        var result = new List<WorkspaceBoundBot>(workspaceBots.Count);
+        var seenBotIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var bot in workspaceBots)
         {
-            var mentioned = mentionedBotUserIds[0];
-            if (string.Equals(mentioned, ownBotUserId, StringComparison.Ordinal))
-            {
-                if (singleBinding is null
-                    || string.Equals(singleBinding.ConnectionId, ownConnectionId, StringComparison.Ordinal))
-                    return ChannelTargetKind.RootMention;
-                return ChannelTargetKind.ThreadFollowupOther;
-            }
-            return ChannelTargetKind.NotMine;
+            if (!mentionedSet.Contains(bot.BotUserId))
+                continue;
+            if (!seenBotIds.Add(bot.BotUserId))
+                continue;
+            result.Add(bot);
         }
-
-        if (singleBinding is null)
-            return ChannelTargetKind.NotMine;
-        if (string.Equals(singleBinding.ConnectionId, ownConnectionId, StringComparison.Ordinal))
-            return ChannelTargetKind.ThreadFollowupOwn;
-        return ChannelTargetKind.ThreadFollowupOther;
+        return result;
     }
 
     private static IReadOnlyList<string> BuildMentionedBotIds(IReadOnlyList<string>? mentioned)
@@ -1273,18 +1310,45 @@ public static class SlackConnectionRoutes
         return result;
     }
 
-    private enum ChannelTargetKind
+    /// <summary>
+    /// Claims and posts the once-only "pick a single Agent" prompt for
+    /// an ambiguous channel message. The race-winning Connection
+    /// (D5 first-writer-wins on
+    /// <c>(WorkspaceTeamId, ConversationId, MessageTs)</c>) enqueues a
+    /// UserAction reply via its own outbox; every loser observes the
+    /// row exists and no-ops, so concurrent per-Connection ingress
+    /// calls and Slack redeliveries collapse to one prompt. The prompt
+    /// copies the inbound <c>ThreadTs</c> onto the delivery so a root
+    /// ambiguous message is prompted at the channel root and a thread
+    /// ambiguous reply is prompted in the same thread.
+    /// </summary>
+    private static async Task<IResult> HandleAmbiguousPromptAsync(
+        HandleChannelIngressRequest req,
+        IReadOnlyList<string> ambiguousBotLabels,
+        IReadOnlyList<string> mentionedConnectionIds,
+        CancellationToken ct)
     {
-        NotMine,
-        Ambiguous,
-        RootMention,
-        ThreadFollowupOwn,
-        ThreadFollowupOther,
+        var body = req.Body;
+        var projectId = req.ProjectId;
+        var connection = req.Connection;
+
+        var labelSummary = string.Join(", ", ambiguousBotLabels);
+        var promptText = $"Multiple Agents could answer this; mention a single Bot to address one. Mentioned: {labelSummary}.";
+
+        var claim = await req.AmbiguousPrompts.TryClaimAsync(
+            projectId, body.TeamId, body.ConversationId, body.MessageTs,
+            body.ThreadTs, connection.Id, mentionedConnectionIds, ct);
+
+        if (!claim.Claimed)
+            return ApiResults.Ok(new { kind = "ambiguous", reason = "Another Bot is responding.", winner = claim.WinningConnectionId });
+
+        await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+            promptText, null, ct, body.ThreadTs);
+        return ApiResults.Ok(new { kind = "ambiguous", reason = promptText });
     }
 
     private static async Task<IResult> LaunchChannelRootAsync(
         HandleChannelIngressRequest req,
-        AgentInfo agent,
         string prompt,
         string rootTs,
         CancellationToken ct)
@@ -1293,6 +1357,19 @@ public static class SlackConnectionRoutes
         var projectId = req.ProjectId;
         var connection = req.Connection;
         var dispatchRef = $"slack-thread:{body.TeamId}:{body.ConversationId}:{rootTs}";
+
+        var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
+        if (agent is null)
+            return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
+
+        var dispatchDecision = AgentConnectionDispatchDecision.For(
+            AgentReadinessDeriver.Derive(agent.AgentConfig));
+        if (!dispatchDecision.Accepted)
+        {
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                dispatchDecision.Reason!, null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
+        }
 
         var routeDraft = new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.LaunchThread);
         SlackProviderInboxAcceptResult accepted;
@@ -1469,7 +1546,9 @@ internal sealed record HandleChannelIngressRequest(
     SlackMessageIdentity Identity,
     string SenderSlackUserId,
     SlackIngressBody Body,
+    AgentConnectionStore Connections,
     SlackThreadSessionMappingStore ThreadMapping,
+    SlackAmbiguousPromptStore AmbiguousPrompts,
     AgentSessionQuerier Sessions,
     AgentQuerier Agents,
     SlackOwnerClaimService Claims,
@@ -1488,7 +1567,9 @@ internal sealed record HandleChannelIngressRequest(
         SlackMessageIdentity identity,
         string senderSlackUserId,
         SlackIngressBody body,
+        AgentConnectionStore connections,
         SlackThreadSessionMappingStore threadMapping,
+        SlackAmbiguousPromptStore ambiguousPrompts,
         AgentSessionQuerier sessions,
         AgentQuerier agents,
         SlackOwnerClaimService claims,
@@ -1501,7 +1582,8 @@ internal sealed record HandleChannelIngressRequest(
         RunnerConnectionTracker runnerConnections,
         IServiceProvider services) =>
         new(projectId, connection, identity, senderSlackUserId, body,
-            threadMapping, sessions, agents, claims, inbox, outbox,
+            connections, threadMapping, ambiguousPrompts,
+            sessions, agents, claims, inbox, outbox,
             launcher, grains, followupDispatcher, runnerHub, runnerConnections, services);
 }
 
