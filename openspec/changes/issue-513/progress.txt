@@ -67,3 +67,14 @@
 
 - Added Web coverage for explicit launch/follow-up request bodies, pending file name/size preview, mixed acceptance rendering, scoped attachment URL construction, and transcript Markdown resolution.
 - `npm run typecheck -w packages/web`, `npm run test:run -w packages/web`, `npm run check:fsd -w packages/web`, and `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore` pass.
+
+## T-005 decisions
+
+- CLI launch and session follow-up use a repeatable `--attach` option. Each local path is read through the existing `IFileSystem`, uploaded as multipart field `file` to the project-scoped `/attachments` endpoint, and only the returned attachment ids are sent in the launch/follow-up JSON `attachments` array.
+- Attachment-only CLI inputs send an empty `prompt`/`text` value and the collected ids; no user prompt is synthesized. Existing text-only input validation remains unchanged, while whitespace text is allowed when at least one attachment was requested.
+- Human output prints the requested paths and sizes before the input request, then prints accepted and rejected server verdicts with ids and rejection reason/message. JSON stdout remains machine-readable; pre-submit notices use stderr outside table mode.
+
+## T-005 verification
+
+- `dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passes with zero warnings/errors.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passes all 1475 CLI tests, including launch and follow-up multipart/body/result specs.

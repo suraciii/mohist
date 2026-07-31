@@ -237,6 +237,7 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"agent id:   {StringOf(data, "agentId")}");
         _out.WriteLine($"agent name: {StringOf(data, "agentName")}");
         _out.WriteLine($"status:     {StringOf(data, "status")}");
+        RenderAttachmentResults(data);
         _out.WriteLine($"transcript: {StringOf(data, "transcriptUrl")}");
         _out.WriteLine($"job:        {StringOf(data, "jobUrl")}");
         _out.WriteLine($"observation: {StringOf(data, "observationUrl")}");
@@ -584,8 +585,34 @@ internal sealed partial class TableRenderer
         if (!string.IsNullOrEmpty(turnStatus))
             _out.WriteLine($"turn status:       {turnStatus}");
 
+        RenderAttachmentResults(data);
+
         if (string.Equals(outcome, "unknown", StringComparison.OrdinalIgnoreCase))
             _out.WriteLine("reconcile:        retry with the same idempotency key");
+    }
+
+    private void RenderAttachmentResults(JsonNode data)
+    {
+        var accepted = data["attachments"] as JsonArray ?? [];
+        var rejected = data["rejectedAttachments"] as JsonArray ?? [];
+        if (accepted.Count == 0 && rejected.Count == 0)
+            return;
+
+        _out.WriteLine("attachments:");
+        foreach (var attachment in accepted.OfType<JsonObject>())
+        {
+            var name = StringOf(attachment, "name");
+            var id = StringOf(attachment, "id");
+            _out.WriteLine($"  accepted: {(!string.IsNullOrWhiteSpace(name) ? name : id)} (id={id})");
+        }
+        foreach (var attachment in rejected.OfType<JsonObject>())
+        {
+            var id = StringOf(attachment, "id");
+            var reason = StringOf(attachment, "reason");
+            var message = StringOf(attachment, "message");
+            var detail = string.IsNullOrWhiteSpace(message) ? "" : $": {message}";
+            _out.WriteLine($"  rejected: {id} ({reason}){detail}");
+        }
     }
 
     private void RenderSessionCancel(JsonNode? data)

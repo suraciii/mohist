@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
+using System.Net.Http.Headers;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -1122,6 +1123,24 @@ internal sealed class MohistCliApi
         return await ReadSuccessDataAsync(response!);
     }
 
+    internal async Task<JsonNode?> UploadAttachmentAsync(string projectId, string path)
+    {
+        using var stream = _fileSystem.OpenRead(path);
+        using var form = new MultipartFormDataContent();
+        using var file = new StreamContent(stream);
+        file.Headers.ContentType = new MediaTypeHeaderValue(AgentAttachmentInput.ContentTypeFor(path));
+        form.Add(file, "file", Path.GetFileName(path));
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{Uri.EscapeDataString(projectId)}/attachments")
+        {
+            Content = form,
+        };
+        using var response = await _http.SendAsync(request, Invocation.CancellationToken).ConfigureAwait(false);
+        return await ReadSuccessDataAsync(response).ConfigureAwait(false);
+    }
+
     public async Task<int> PrintWorkflowProfilesDescribedAsync(string? projectId = null, string mode = "table")
     {
         var path = projectId is not null
@@ -1298,8 +1317,14 @@ internal sealed class MohistCliApi
     /// Public entry point so commands can print the body of a Server response
     /// (success or failure) without exposing the full private surface.
     /// </summary>
-    public Task<int> PrintServerResponseAsync(HttpResponseMessage response, JsonNode? successDataFallback = null) =>
-        PrintResponseAsync(response, successDataFallback);
+    public Task<int> PrintServerResponseAsync(
+        HttpResponseMessage response,
+        JsonNode? successDataFallback = null,
+        string? mode = null,
+        string? tableShape = null) =>
+        mode is null
+            ? PrintResponseAsync(response, successDataFallback)
+            : PrintEnvelopeAsync(response, mode, tableShape, successDataFallback);
 
     private async Task<int> PrintRawResponseAsync(HttpResponseMessage response)
     {

@@ -636,6 +636,11 @@ internal static class AgentCommands
         var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
         var promptOpt = new Option<string?>("--prompt") { Description = "Prompt text (mutually exclusive with --prompt-file)" };
         var promptFileOpt = new Option<string?>("--prompt-file") { Description = "Read prompt from a UTF-8 file path, or - for stdin (mutually exclusive with --prompt)" };
+        var attachOpt = new Option<string[]?>("--attach")
+        {
+            Description = "Attach a local file to the input. Repeat for multiple files.",
+            AllowMultipleArgumentsPerToken = true,
+        };
         var issueRefOpt = new Option<int?>("--issue") { Description = "Optional context reference: record the issue number on the session metadata" };
         var epicRefOpt = new Option<string?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
         var repositoryRefOpt = new Option<string?>("--repo") { Description = "Optional context reference: record the repository on the session metadata" };
@@ -647,6 +652,7 @@ internal static class AgentCommands
         cmd.Arguments.Add(agentRefArg);
         cmd.Options.Add(promptOpt);
         cmd.Options.Add(promptFileOpt);
+        cmd.Options.Add(attachOpt);
         cmd.Options.Add(issueRefOpt);
         cmd.Options.Add(epicRefOpt);
         cmd.Options.Add(repositoryRefOpt);
@@ -659,6 +665,7 @@ internal static class AgentCommands
             var agentRef = ctx.GetValue(agentRefArg);
             var prompt = ctx.GetValue(promptOpt);
             var promptFile = ctx.GetValue(promptFileOpt);
+            var attachPaths = ctx.GetValue(attachOpt) ?? [];
             var issueRef = ctx.GetValue(issueRefOpt);
             var epicRef = ctx.GetValue(epicRefOpt);
             var repositoryRef = ctx.GetValue(repositoryRefOpt);
@@ -670,10 +677,15 @@ internal static class AgentCommands
 
             async Task<int> LaunchAsync()
             {
-                var resolvedPrompt = await BodyInputResolver.ResolveAsync(
-                    prompt, promptFile,
-                    new BodyInputResolver.SourceFlags("--prompt", "--prompt-file", "prompt"),
-                    api.FileSystem, api.StandardInput, TextWriter.Null);
+                var resolvedPrompt = attachPaths.Length > 0
+                    && prompt is null
+                    && string.IsNullOrWhiteSpace(promptFile)
+                    ? new BodyInputResolver.Result.Success("")
+                    : await BodyInputResolver.ResolveAsync(
+                        prompt, promptFile,
+                        new BodyInputResolver.SourceFlags("--prompt", "--prompt-file", "prompt"),
+                        api.FileSystem, api.StandardInput, TextWriter.Null,
+                        allowEmptyBody: attachPaths.Length > 0);
                 if (resolvedPrompt is BodyInputResolver.Result.Failure promptFailure)
                     return CommandHelpHook.RenderUsageFailure(ctx, api.Error, promptFailure.Message);
 
@@ -684,6 +696,10 @@ internal static class AgentCommands
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
+                var uploads = await AgentAttachmentInput.UploadAsync(api, resolvedProjectId, attachPaths, mode);
+                if (uploads is null)
+                    return 1;
+
                 var promptText = ((BodyInputResolver.Result.Success)resolvedPrompt).Body;
                 var idempotencyKey = string.IsNullOrWhiteSpace(suppliedIdempotencyKey)
                     ? Guid.NewGuid().ToString("N")
@@ -692,9 +708,14 @@ internal static class AgentCommands
                     api.Output.WriteLine($"Idempotency-Key: {idempotencyKey}");
 
                 var contextRefs = BuildLaunchContext(issueRef, epicRef, repositoryRef, workspacePath);
-                object body = contextRefs is null
+                var attachmentIds = uploads.Select(attachment => attachment.Id).ToArray();
+                object body = contextRefs is null && attachmentIds.Length == 0
                     ? new { prompt = promptText }
-                    : new { prompt = promptText, context = contextRefs };
+                    : contextRefs is null
+                        ? new { prompt = promptText, attachments = attachmentIds }
+                        : attachmentIds.Length == 0
+                            ? new { prompt = promptText, context = contextRefs }
+                            : new { prompt = promptText, context = contextRefs, attachments = attachmentIds };
 
                 using var response = await api.SendAsync(
                     HttpMethod.Post,
@@ -720,7 +741,10 @@ internal static class AgentCommands
 
                 if (string.Equals(mode, "json", StringComparison.Ordinal))
                     return await api.PrintRawServerResponseAsync(response);
-                return await api.PrintServerResponseAsync(response);
+                return await api.PrintServerResponseAsync(
+                    response,
+                    mode: mode,
+                    tableShape: nameof(MohistCliApi.TableShape.AgentSessionLaunch));
             }
         });
         return cmd;
