@@ -41,7 +41,13 @@ import type {
 import { errorKindFor, normalizeInvalidInput, normalizeMissingSession, normalizeTurnFailed, normalizeUnavailableRuntime } from "./errors.js"
 import type { OpencodeServerHandle } from "./server-process.js"
 import type { RuntimeEventSubscription } from "./event-subscription.js"
+import type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
 import { runTurn, bindTurnInFlightTracker, type TurnExecutionDeps } from "./turn.js"
+import {
+  OpenCodeDirectoryInstances,
+  type DirectoryReclaimResult,
+  type DirectoryReleaseResult,
+} from "./directory-instance.js"
 
 export interface OpenCodeRuntimeDeps {
   readonly directory: string
@@ -70,6 +76,7 @@ export class OpenCodeRuntime {
   private readonly state: InternalState
   private startInFlight: Promise<RuntimeResult<RuntimeReadyState>> | null = null
   private inFlight: ReturnType<typeof bindTurnInFlightTracker> | null = null
+  private readonly directoryInstances: OpenCodeDirectoryInstances
 
   constructor(deps: OpenCodeRuntimeDeps) {
     this.deps = deps
@@ -81,6 +88,20 @@ export class OpenCodeRuntime {
       exitWatcher: null,
       rebuildTriggered: false,
     }
+    this.directoryInstances = new OpenCodeDirectoryInstances(() => this.state.server?.client ?? null)
+  }
+
+  async reclaimWhere(predicate: (directory: string) => boolean): Promise<DirectoryReclaimResult> {
+    return await this.directoryInstances.reclaimWhere(predicate)
+  }
+
+  async release(directory: string): Promise<DirectoryReleaseResult> {
+    return await this.directoryInstances.release(directory)
+  }
+
+  async withRemovalFence<T>(directory: string, callback: () => Promise<T>): Promise<WorkspaceRemovalFenceResult<T>> {
+    if (!this.state.ready || !this.state.server) return { kind: "failed" }
+    return await this.directoryInstances.withRemovalFence(directory, callback)
   }
 
   /**
@@ -128,50 +149,59 @@ export class OpenCodeRuntime {
       const error = normalizeMissingSession()
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    let sessionData: { id: string }
-    try {
-      const resolved = await this.state.server.client.session.get({
-        sessionID: request.target.runtimeSessionId,
-        directory: request.target.workDir,
-      }, { throwOnError: true })
-      const data = resolved.data
-      if (!data || typeof data !== "object" || data.id !== request.target.runtimeSessionId) {
-        const error = normalizeTurnFailed({ message: "OpenCode session.get returned a malformed or mismatched Session" })
+    const runtimeSessionId = request.target.runtimeSessionId
+    return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+      const server = this.state.server
+      if (!server || !this.state.ready) {
+        const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
         return { ok: false, error, diagnostics: error.diagnostics }
       }
-      sessionData = data
-    } catch (cause) {
-      if ((cause as { status?: number } | undefined)?.status === 404) {
-        const error = normalizeMissingSession()
+      lease.markUsed()
+      let sessionData: { id: string }
+      try {
+        const resolved = await server.client.session.get({
+          sessionID: runtimeSessionId,
+          directory: request.target.workDir,
+        }, { throwOnError: true })
+        const data = resolved.data
+        if (!data || typeof data !== "object" || data.id !== request.target.runtimeSessionId) {
+          const error = normalizeTurnFailed({ message: "OpenCode session.get returned a malformed or mismatched Session" })
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        sessionData = data
+      } catch (cause) {
+        if ((cause as { status?: number } | undefined)?.status === 404) {
+          const error = normalizeMissingSession()
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to resolve persisted Runtime Session") })
         return { ok: false, error, diagnostics: error.diagnostics }
       }
-      const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to resolve persisted Runtime Session") })
-      return { ok: false, error, diagnostics: error.diagnostics }
-    }
-    try {
-      const statusResponse = await this.state.server.client.session.status(
-        { directory: request.target.workDir },
-        { throwOnError: true },
-      )
-      const statuses = statusResponse.data
-      if (!statuses || typeof statuses !== "object") {
-        const error = normalizeTurnFailed({ message: "session.status returned no status map" })
+      try {
+        const statusResponse = await server.client.session.status(
+          { directory: request.target.workDir },
+          { throwOnError: true },
+        )
+        const statuses = statusResponse.data
+        if (!statuses || typeof statuses !== "object") {
+          const error = normalizeTurnFailed({ message: "session.status returned no status map" })
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        const status = statuses[runtimeSessionId]
+        return {
+          ok: true,
+          value: {
+            runtimeSessionId: sessionData.id,
+            workDir: request.target.workDir,
+            activeTurn: status !== undefined && status.type !== "idle",
+          },
+          diagnostics: [],
+        }
+      } catch (cause) {
+        const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to read Runtime Session active-turn status") })
         return { ok: false, error, diagnostics: error.diagnostics }
       }
-      const status = statuses[request.target.runtimeSessionId]
-      return {
-        ok: true,
-        value: {
-          runtimeSessionId: sessionData.id,
-          workDir: request.target.workDir,
-          activeTurn: status !== undefined && status.type !== "idle",
-        },
-        diagnostics: [],
-      }
-    } catch (cause) {
-      const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to read Runtime Session active-turn status") })
-      return { ok: false, error, diagnostics: error.diagnostics }
-    }
+    })
   }
 
   async createSession(
@@ -181,33 +211,40 @@ export class OpenCodeRuntime {
       const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    const client = this.state.server.client
-    try {
-      const created = await client.session.create({
-        directory: request.target.workDir,
-        ...(request.model ? { model: { providerID: request.model.providerID, id: request.model.modelID } } : {}),
-      }, { throwOnError: true })
-      const data = created?.data as { id?: string } | undefined
-      if (!data || typeof data.id !== "string") {
-        const error = normalizeTurnFailed({ message: "session.create returned no id" })
+    return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+      const server = this.state.server
+      if (!server || !this.state.ready) {
+        const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
         return { ok: false, error, diagnostics: error.diagnostics }
       }
-      const result: RuntimeSessionCreateResult = {
-        runtimeSessionId: data.id,
-        workDir: request.target.workDir,
+      lease.markUsed()
+      try {
+        const created = await server.client.session.create({
+          directory: request.target.workDir,
+          ...(request.model ? { model: { providerID: request.model.providerID, id: request.model.modelID } } : {}),
+        }, { throwOnError: true })
+        const data = created?.data as { id?: string } | undefined
+        if (!data || typeof data.id !== "string") {
+          const error = normalizeTurnFailed({ message: "session.create returned no id" })
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        const result: RuntimeSessionCreateResult = {
+          runtimeSessionId: data.id,
+          workDir: request.target.workDir,
+        }
+        return { ok: true, value: result, diagnostics: [] }
+      } catch (cause) {
+        const raw = toRawError(cause)
+        const kind = errorKindFor(raw)
+        const error =
+          kind === "unavailable-runtime"
+            ? normalizeUnavailableRuntime()
+            : kind === "turn-failed"
+              ? normalizeTurnFailed(raw)
+              : normalizeTurnFailed(raw)
+        return { ok: false, error, diagnostics: error.diagnostics }
       }
-      return { ok: true, value: result, diagnostics: [] }
-    } catch (cause) {
-      const raw = toRawError(cause)
-      const kind = errorKindFor(raw)
-      const error =
-        kind === "unavailable-runtime"
-          ? normalizeUnavailableRuntime()
-          : kind === "turn-failed"
-            ? normalizeTurnFailed(raw)
-            : normalizeTurnFailed(raw)
-      return { ok: false, error, diagnostics: error.diagnostics }
-    }
+    })
   }
 
   /**
@@ -256,18 +293,27 @@ export class OpenCodeRuntime {
       }])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    const server = this.state.server
     try {
-      const deps: TurnExecutionDeps = {
-        client: server.client,
-        events: this.state.events,
-        ...(this.deps.providerErrorPolicy ? { policy: this.deps.providerErrorPolicy } : {}),
-      }
-      const result = await runTurn(request, deps, signal, observer)
-      if (!result.ok && result.error.diagnostics.some((diagnostic) => diagnostic.code === "opencode-transport-failed")) {
-        this.triggerRebuild(server)
-      }
-      return result
+      return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+        const server = this.state.server
+        const events = this.state.events
+        if (!server || !this.state.ready || !events) {
+          const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        const deps: TurnExecutionDeps = {
+          client: server.client,
+          events,
+          ...(this.deps.providerErrorPolicy ? { policy: this.deps.providerErrorPolicy } : {}),
+          markDirectoryUsed: lease.markUsed,
+          trackPendingOperation: lease.trackPending,
+        }
+        const result = await runTurn(request, deps, signal, observer)
+        if (!result.ok && result.error.diagnostics.some((diagnostic) => diagnostic.code === "opencode-transport-failed")) {
+          this.triggerRebuild(server)
+        }
+        return result
+      })
     } finally {
       inFlight.end(sessionKey)
     }
@@ -315,53 +361,62 @@ export class OpenCodeRuntime {
       )
       return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
     }
+    const runtimeSessionId = request.target.runtimeSessionId
 
-    const client = this.state.server.client
-    try {
-      const resolved = await client.session.get({
-        sessionID: request.target.runtimeSessionId,
-        directory: request.target.workDir,
-      }, { throwOnError: true })
-      const resolvedData = resolved.data
-      if (!resolvedData || resolvedData.id !== request.target.runtimeSessionId) {
-        const error = normalizeMissingSession()
+    return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+      const server = this.state.server
+      if (!server || !this.state.ready) {
+        const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+      lease.markUsed()
+      const client = server.client
+      try {
+        const resolved = await client.session.get({
+          sessionID: runtimeSessionId,
+          directory: request.target.workDir,
+        }, { throwOnError: true })
+        const resolvedData = resolved.data
+        if (!resolvedData || resolvedData.id !== runtimeSessionId) {
+          const error = normalizeMissingSession()
+          return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+        }
+      } catch (cause) {
+        const status = (cause as { status?: number } | undefined)?.status
+        if (status === 404) {
+          const error = normalizeMissingSession()
+          return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+        }
+        const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to resolve persisted Runtime Session") })
         return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
       }
-    } catch (cause) {
-      const status = (cause as { status?: number } | undefined)?.status
-      if (status === 404) {
-        const error = normalizeMissingSession()
-        return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-      }
-      const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to resolve persisted Runtime Session") })
-      return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-    }
 
-    try {
-      await client.session.promptAsync({
-        sessionID: request.target.runtimeSessionId,
-        directory: request.target.workDir,
-        parts: [
-          { type: "text", text: request.prompt },
-          ...(request.fileParts ?? []).map((part) => ({ type: "file" as const, ...part })),
-        ],
-        ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),
-        ...(variant ? { variant } : {}),
-      }, { throwOnError: true })
-      const facts: RuntimeFollowupFacts = {
-        runtimeSessionId: request.target.runtimeSessionId,
-        workDir: request.target.workDir,
-      }
-      return { ok: true, value: { facts, diagnostics }, diagnostics }
-    } catch (cause) {
-      const status = (cause as { status?: number } | undefined)?.status
-      if (status === 404) {
-        const error = normalizeMissingSession()
+      try {
+        await client.session.promptAsync({
+          sessionID: runtimeSessionId,
+          directory: request.target.workDir,
+          parts: [
+            { type: "text", text: request.prompt },
+            ...(request.fileParts ?? []).map((part) => ({ type: "file" as const, ...part })),
+          ],
+          ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),
+          ...(variant ? { variant } : {}),
+        }, { throwOnError: true })
+        const facts: RuntimeFollowupFacts = {
+          runtimeSessionId,
+          workDir: request.target.workDir,
+        }
+        return { ok: true, value: { facts, diagnostics }, diagnostics }
+      } catch (cause) {
+        const status = (cause as { status?: number } | undefined)?.status
+        if (status === 404) {
+          const error = normalizeMissingSession()
+          return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+        }
+        const error = normalizeTurnFailed({ message: errorMessage(cause, "OpenCode follow-up prompt failed") })
         return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
       }
-      const error = normalizeTurnFailed({ message: errorMessage(cause, "OpenCode follow-up prompt failed") })
-      return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-    }
+    })
   }
 
   /**
@@ -394,28 +449,36 @@ export class OpenCodeRuntime {
       )
       return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
     }
+    const runtimeSessionId = request.target.runtimeSessionId
 
-    const client = this.state.server.client
-    try {
-      await client.session.abort({
-        sessionID: request.target.runtimeSessionId,
-        directory: request.target.workDir,
-      }, { throwOnError: true })
-      const facts: RuntimeCancelFacts = {
-        runtimeSessionId: request.target.runtimeSessionId,
-        workDir: request.target.workDir,
-        cancelled: true,
+    return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
+      const server = this.state.server
+      if (!server || !this.state.ready) {
+        const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
+        return { ok: false, error, diagnostics: error.diagnostics }
       }
-      return { ok: true, value: { facts, diagnostics }, diagnostics }
-    } catch (cause) {
-      const status = (cause as { status?: number } | undefined)?.status
-      if (status === 404) {
-        const error = normalizeMissingSession()
+      lease.markUsed()
+      try {
+        await server.client.session.abort({
+          sessionID: runtimeSessionId,
+          directory: request.target.workDir,
+        }, { throwOnError: true })
+        const facts: RuntimeCancelFacts = {
+          runtimeSessionId,
+          workDir: request.target.workDir,
+          cancelled: true,
+        }
+        return { ok: true, value: { facts, diagnostics }, diagnostics }
+      } catch (cause) {
+        const status = (cause as { status?: number } | undefined)?.status
+        if (status === 404) {
+          const error = normalizeMissingSession()
+          return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+        }
+        const error = normalizeTurnFailed({ message: errorMessage(cause, "OpenCode cancel failed") })
         return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
       }
-      const error = normalizeTurnFailed({ message: errorMessage(cause, "OpenCode cancel failed") })
-      return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-    }
+    })
   }
 
   private ensureInFlightTracker() {
@@ -432,6 +495,7 @@ export class OpenCodeRuntime {
    */
   async shutdown(options: { clearDiagnostic?: boolean } = {}): Promise<void> {
     const { events, server } = this.state
+    this.directoryInstances.resetGeneration()
     this.state.events = null
     this.state.server = null
     this.state.ready = false
@@ -538,6 +602,7 @@ export class OpenCodeRuntime {
     if (!this.state.ready) return
     if (this.state.server !== server) return
     this.state.rebuildTriggered = true
+    this.directoryInstances.resetGeneration()
     this.state.ready = false
     this.state.diagnostic = {
       severity: "error",

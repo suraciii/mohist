@@ -211,10 +211,19 @@ AgentSession、current binding、transcript 或磁盘 workspace，也不能据�
 后，按既有 Session resolve 与 missing recovery 规则继续。
 
 同一轮 Runner workspace 维护必须先尝试 Instance 回收，再应用磁盘 retention / budget。
-当前 Server generation 已使用过的终态目录，在 dispose 尚未成功、状态仍忙或状态未知时，
-不得自动删除 workspace 或移除其注册表条目。手动 workspace cleanup 使用同一释放能力和
-顺序。没有当前 generation 使用记录表示该 OpenCode 进程没有需要为此目录释放的已知
-Instance，不应为了确认而调用 dispose。
+这次回收结果只用于尽快释放内存和排除当时仍 busy / failed 的目录，不是稍后删除的授权；
+回收后可能有新 Runtime 请求重新记录同一 directory。
+
+每次自动或手动 workspace 删除都必须重新取得该 directory 的 removal fence。fence 与普通
+Runtime operation 使用同一个 directory admission 边界，并从重新检查本地 operation、读取
+status、必要时 dispose 开始，持续到磁盘删除和注册表移除 callback 结束后才释放。fence
+期间到达的新 operation 等待，不能在 dispose 与删除之间重新建立 Instance。
+
+当前 generation 没有使用记录时，removal fence 仍建立一个临时独占 entry 并直接执行删除
+callback；它不能调用 status 或 dispose，因为盲目确认可能创建 Instance。若 fence 开始时
+目录已经 busy、状态未知或 dispose 失败，callback 不执行，本次删除延后或明确失败。Runtime
+generation 在 callback 开始前被替换时，旧结果不能启动删除；callback 已经开始时，removal
+fence 独立存续到 callback settle，不能因 generation reset 提前放入等待操作。
 
 ### 失败与范围
 
@@ -517,8 +526,10 @@ snapshot、完成状态、process loss、回收 tick 与 error。
 - directory Instance 回收：只处理当前 Server generation 已使用且 WorkflowRun 为
   `Completed` / `Stopped` 的目录；busy、retry、未知状态与并发请求均延后；成功 dispose
   后不重复调用，后续新请求会重新跟踪；Server rebuild 清空旧 generation；
-- Instance 回收先于自动与手动 workspace 删除，未确认释放时保留目录和注册表身份；
-  周期成本不随无关历史 WorkflowRun 或已释放目录增长；
+- Instance 周期回收先于 workspace 磁盘策略；每次自动与手动删除还要在同一 directory
+  removal fence 内完成必要的 dispose、磁盘删除和注册表移除，未确认释放时保留身份；
+  untracked 目录只建立临时 fence，不调用 status / dispose；
+- 周期成本不随无关历史 WorkflowRun 或已释放目录增长；
 - 最小 `{ promise }` Workflow Action Output 与现有 expectation 语义；
 - 两段式收尾：期限前警告注入（仅一次、fire-and-forget）、期限不足 5 分钟时执行
   开始即警告、期限到达 abort、被警告后提前结束不再 abort；全部以 fake clock 驱动。
@@ -577,15 +588,14 @@ Session 与 global event 调用做了一次冒烟验证（详见
 表内 `client.session.*` 与 `client.global.event()` 调用可用；
 `client.v2.session.wait()` 与 `client.v2.session.compact()` 仍返回
 `ServiceUnavailableError`，确认不进入执行链。
-实际锁定的 SDK 版本见实装差距小节。`client.instance.dispose()` 尚未包含在该次记录中，
-落地 Directory Instance 回收前必须补做真实 Server 冒烟验证。
+2026-07-31 又使用锁定的 `@opencode-ai/sdk/v2` 1.18.3 和 OpenCode CLI 1.18.10，
+通过 Runner 的 OS-assigned loopback Server factory，在临时 directory 上验证了
+`client.global.health()` 返回 healthy、`client.session.status({ directory })` 返回空
+status map，以及 `client.instance.dispose({ directory })` 返回 `data: true`；finally
+关闭 Server 与 dispatcher 后临时 directory 无残留，现有 4096 端口 Server 未受影响。
+实际锁定的 SDK 版本见实装差距小节。`client.instance.dispose()` 的 smoke 证据已补齐。
 
 ## 实装差距
-
-Directory Instance 回收尚未落地。当前 `OpenCodeRuntime` 不跟踪 current Server generation
-访问过的 directory，也不调用 `client.instance.dispose()`；WorkflowRun 终态目前只驱动
-磁盘 workspace 的 eligibility 与 retention / budget cleanup。对应实施 issue 待从本
-spec 创建。
 
 「Prompt 期限与两段式收尾」在 `OpenCodeRuntime` 落地后由独立 issue 跟进；当前期限
 到达直接终止执行，agent 没有收尾机会。

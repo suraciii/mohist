@@ -8,6 +8,7 @@
 import * as signalR from "@microsoft/signalr"
 import { WorkspaceManager } from "../runtime/workspace.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
+import type { WorkspaceRemovalFence } from "../runtime/workspace-removal-fence.js"
 import {
   isUnderRunnerRoot,
   resolveWorkspaceQuery,
@@ -47,6 +48,7 @@ import type { ServerConnection } from "./connection.js"
 import type { PiTurnObserver } from "../runtime/pi/index.js"
 import {
   callSessionCommand,
+  resolveAccessor,
   resolveCommandRuntime,
   type CommandRuntimeAccessors,
 } from "./command-runtime.js"
@@ -232,6 +234,7 @@ export class RunnerSignalRClient {
     registerWorkspaceRemovalHandler(this.connection, {
       runnerRoot: this.runnerRoot,
       registry: this.registry,
+      removalFence: () => resolveAccessor(this.openCodeRuntime) as WorkspaceRemovalFence | null,
     })
 
     registerFollowupHandler(this.connection, {

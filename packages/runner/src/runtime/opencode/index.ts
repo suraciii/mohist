@@ -54,6 +54,14 @@ export {
 export { OpenCodeRuntime } from "./runtime.js"
 export type { OpenCodeRuntimeDeps } from "./runtime.js"
 
+export type {
+  DirectoryReclaimResult,
+  DirectoryReleaseOutcome,
+  DirectoryReleaseResult,
+} from "./directory-instance.js"
+
+export type { WorkspaceRemovalFenceResult } from "../workspace-removal-fence.js"
+
 export {
   getOpenCodeRuntimeFactory,
   setOpenCodeRuntimeFactoryForTest,

@@ -78,6 +78,8 @@ export interface TurnExecutionDeps {
   readonly client: OpencodeClient
   readonly events: RuntimeEventSubscription
   readonly policy?: RuntimeProviderErrorPolicy
+  readonly markDirectoryUsed?: () => void
+  readonly trackPendingOperation?: (promise: Promise<unknown>) => Promise<void>
   /**
    * Optional hook to inspect retry / session events after they
    * arrive; used by tests to assert routing. Not used in
@@ -163,6 +165,7 @@ export async function runTurn(
       signal: effectiveSignal,
       deadlineMs,
       deadlineExpired: () => timeoutHandle?.timedOut() === true,
+      trackPendingOperation: deps.trackPendingOperation,
       onEvent: (event) => {
         deps.onEvent?.(event)
         if (event.sessionID !== sessionId) return
@@ -258,6 +261,7 @@ async function resolvePhysicalSession(
     const error = normalizeInterrupted()
     return { ok: false, error, diagnostics: error.diagnostics }
   }
+  deps.markDirectoryUsed?.()
   if (target.runtimeSessionId) {
     try {
       const resolved = await deps.client.session.get({
@@ -305,6 +309,7 @@ interface ExecutePromptArgs {
   readonly signal: AbortSignal
   readonly deadlineMs?: number
   readonly deadlineExpired: () => boolean
+  readonly trackPendingOperation?: (promise: Promise<unknown>) => Promise<void>
   readonly onEvent?: (event: RuntimeGlobalEvent) => void
 }
 
@@ -362,6 +367,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
       resolveAbort("reconciliation-failed")
     })
     reconciliationInFlight = pending
+    args.trackPendingOperation?.(pending)
     void pending.finally(() => {
       if (reconciliationInFlight === pending) reconciliationInFlight = null
     })
@@ -370,7 +376,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     const requestId = permissionRequestIdFor(event, args.sessionId, args.directory)
     if (requestId === null || repliedPermissionIds.has(requestId)) return
     repliedPermissionIds.add(requestId)
-    void args.client.permission.reply({
+    const pendingReply = args.client.permission.reply({
       requestID: requestId,
       directory: args.directory,
       reply: "once",
@@ -386,6 +392,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
       }
       resolveAbort("permission-reply-failed")
     })
+    args.trackPendingOperation?.(pendingReply)
   }
   const unsubscribe = args.events.subscribe((event) => {
     if (event.type === "server.connected") startReconciliation()
@@ -415,6 +422,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
       () => ({ ok: true as const }),
       (cause: unknown) => ({ ok: false as const, cause }),
     )
+    args.trackPendingOperation?.(initialStatus)
     const initialRace = await Promise.race([initialStatus, abortPromise.promise])
     if (typeof initialRace === "string") {
       return finishAbortedTurn(args, retryTracker, initialRace, reconciliationFailure, permissionFailure, promptDiagnostics)
@@ -436,6 +444,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
       (response: unknown) => ({ ok: true as const, response }),
       (cause: unknown) => ({ ok: false as const, cause }),
     )
+    args.trackPendingOperation?.(promptCall)
     const raced = await Promise.race([promptCall, abortPromise.promise])
     if (typeof raced === "string") {
       return finishAbortedTurn(args, retryTracker, raced, reconciliationFailure, permissionFailure, promptDiagnostics)
@@ -736,7 +745,8 @@ function scheduleDeadlineWarning(args: ExecutePromptArgs, diagnostics: RuntimeDi
   let fired = false
   const timer = setTimeout(() => {
     fired = true
-    void injectDeadlineWarning(client, args, diagnostics)
+    const pendingWarning = injectDeadlineWarning(client, args, diagnostics)
+    args.trackPendingOperation?.(pendingWarning)
   }, delay)
   return () => {
     if (!fired) clearTimeout(timer)

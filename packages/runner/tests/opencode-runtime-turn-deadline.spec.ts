@@ -31,12 +31,21 @@ class FakeSubscription implements RuntimeEventSubscription {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 interface FakeClientHandles {
   sessionCreate: ReturnType<typeof vi.fn>
   sessionPrompt: ReturnType<typeof vi.fn>
   sessionPromptAsync: ReturnType<typeof vi.fn>
   sessionAbort: ReturnType<typeof vi.fn>
   sessionGet: ReturnType<typeof vi.fn>
+  instanceDispose: ReturnType<typeof vi.fn>
 }
 
 interface BuildArgs {
@@ -81,6 +90,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
   const sessionAbort = vi.fn(async (_params: { sessionID: string; directory?: string }) => ({ data: args.abortResult ?? true }))
   const sessionGet = vi.fn(async () => ({ data: { id: "ses_1" } }))
   const sessionStatus = vi.fn(async () => ({ data: {} }))
+  const instanceDispose = vi.fn(async () => ({ data: true }))
 
   const clientProxy = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })), event: vi.fn() },
@@ -93,6 +103,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
       messages: vi.fn(),
       status: sessionStatus,
     },
+    instance: { dispose: instanceDispose },
   }
   const server: OpencodeServerHandle = {
     url: "http://fake",
@@ -108,6 +119,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     sessionPromptAsync,
     sessionAbort,
     sessionGet,
+    instanceDispose,
   }
   const deps: OpenCodeRuntimeDeps = {
     directory: "/tmp/work",
@@ -186,6 +198,47 @@ describe("OpenCodeRuntime.runTurn — deadline declaration opt-out", () => {
 })
 
 describe("OpenCodeRuntime.runTurn — warning injection (deadline > warning window)", () => {
+  it("holds directory release while the warning prompt is pending after the main prompt returns", async () => {
+    vi.useFakeTimers()
+    try {
+      const { deps, client } = buildRuntime()
+      const runtime = new OpenCodeRuntime(deps)
+      await runtime.start()
+      const promptStarted = deferred<void>()
+      const promptFinished = deferred<unknown>()
+      client.sessionPrompt.mockImplementationOnce(async () => {
+        promptStarted.resolve()
+        return await promptFinished.promise
+      })
+      const warningStarted = deferred<void>()
+      const warningFinished = deferred<unknown>()
+      client.sessionPromptAsync.mockImplementationOnce(async () => {
+        warningStarted.resolve()
+        return await warningFinished.promise
+      })
+
+      const turn = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "long running",
+        deadlineMs: 30 * 60 * 1000,
+      }, new AbortController().signal)
+      await promptStarted.promise
+      await vi.advanceTimersByTimeAsync(25 * 60 * 1000)
+      await warningStarted.promise
+
+      promptFinished.resolve({ data: { parts: [{ type: "text", text: "done" }] } })
+      const result = await turn
+      expect(result.ok).toBe(true)
+      expect((await runtime.release("/tmp/projA")).outcome).toBe("busy")
+      expect(client.instanceDispose).not.toHaveBeenCalled()
+
+      warningFinished.resolve({ data: true })
+      await runtime.shutdown()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("Injects the wrap-up warning exactly once at deadline - WARNING_WINDOW_MS", async () => {
     vi.useFakeTimers()
     try {
