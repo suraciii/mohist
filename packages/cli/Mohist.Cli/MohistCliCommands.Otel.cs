@@ -90,8 +90,8 @@ internal static class OtelCommands
         if (response is null)
             return CliExitCode.For(CliExitOutcome.OperationFailure);
 
-        await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
-        JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream).ConfigureAwait(false);
+        var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        JsonNode? node = string.IsNullOrWhiteSpace(content) ? null : JsonNode.Parse(content);
 
         var envelope = MohistCliApi.ExtractEnvelope(node, response);
         if (!envelope.HasBody)

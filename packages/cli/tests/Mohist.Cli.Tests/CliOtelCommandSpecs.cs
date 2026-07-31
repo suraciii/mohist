@@ -84,6 +84,23 @@ public class CliOtelCommandSpecs
     }
 
     [Fact]
+    public async Task OtelQuery_NonSeekableResponse_RendersServerResult()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Ndjson([
+                """{"success":true,"data":{"columns":["total"],"rows":[{"total":1}],"truncated":false}}""",
+            ])));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT COUNT(*) AS total FROM traces"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("total", output.ToString());
+        Assert.Empty(error.ToString());
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public async Task OtelQuery_DbOption_RejectedAsUnknownOption()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
