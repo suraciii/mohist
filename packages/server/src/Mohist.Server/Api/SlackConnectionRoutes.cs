@@ -268,6 +268,7 @@ public static class SlackConnectionRoutes
             SlackOutboxStore outbox,
             SlackDmSessionMappingStore mapping,
             SlackThreadSessionMappingStore threadMapping,
+            SlackThreadLaunchReservationStore threadLaunchReservations,
             SlackAmbiguousPromptStore ambiguousPrompts,
             AgentQuerier agents,
              IAgentLauncher launcher,
@@ -308,7 +309,7 @@ public static class SlackConnectionRoutes
                 return await HandleChannelIngressAsync(
                     HandleChannelIngressRequest.From(
                         projectId, connection, identity, senderSlackUserId, body,
-                        connections, threadMapping, ambiguousPrompts,
+                        connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
                         sessions, agents, claims, inbox, outbox,
                         launcher, grains, followupDispatcher,
                         runnerHub, runnerConnections,
@@ -1105,9 +1106,19 @@ public static class SlackConnectionRoutes
                 .Select(bot => bot.ConnectionId)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
-            if (!mentionedConnectionIds.Contains(connection.Id, StringComparer.Ordinal))
+            var claimantConnectionId = mentionedWorkspaceBots
+                .Where(bot => string.Equals(bot.OwnerSlackUserId, req.SenderSlackUserId, StringComparison.Ordinal))
+                .Select(bot => bot.ConnectionId)
+                .FirstOrDefault()
+                ?? mentionedConnectionIds[0];
+            var currentConnectionIsMentioned = mentionedConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
+            var senderOwnsCurrentConnection = string.Equals(
+                req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal);
+            if (!currentConnectionIsMentioned
+                || (!senderOwnsCurrentConnection
+                    && !string.Equals(claimantConnectionId, connection.Id, StringComparison.Ordinal)))
                 return ApiResults.Ok(new { kind = "ignored" });
-            if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
+            if (!senderOwnsCurrentConnection)
                 return await RejectNonOwnerChannelMessageAsync(req, ct);
             return await HandleAmbiguousPromptAsync(
                 req,
@@ -1182,9 +1193,20 @@ public static class SlackConnectionRoutes
                 .Select(binding => binding.ConnectionId)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
-            if (!bindingConnectionIds.Contains(connection.Id, StringComparer.Ordinal))
+            var claimantConnectionId = threadBindings
+                .Select(binding => workspaceBots.FirstOrDefault(bot =>
+                    string.Equals(bot.ConnectionId, binding.ConnectionId, StringComparison.Ordinal)
+                    && string.Equals(bot.OwnerSlackUserId, req.SenderSlackUserId, StringComparison.Ordinal))?.ConnectionId)
+                .FirstOrDefault(connectionId => connectionId is not null)
+                ?? bindingConnectionIds[0];
+            var currentConnectionIsBound = bindingConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
+            var senderOwnsCurrentConnection = string.Equals(
+                req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal);
+            if (!currentConnectionIsBound
+                || (!senderOwnsCurrentConnection
+                    && !string.Equals(claimantConnectionId, connection.Id, StringComparison.Ordinal)))
                 return ApiResults.Ok(new { kind = "ignored" });
-            if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
+            if (!senderOwnsCurrentConnection)
                 return await RejectNonOwnerChannelMessageAsync(req, ct);
             var botLookup = workspaceBots.ToDictionary(b => b.ConnectionId, b => b.BotUserId, StringComparer.Ordinal);
             var botLabels = threadBindings
@@ -1420,6 +1442,34 @@ public static class SlackConnectionRoutes
             return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
         }
 
+        var reservation = await req.ThreadLaunchReservations.ReserveAsync(
+            projectId,
+            body.TeamId,
+            connection.Id,
+            body.ConversationId,
+            rootTs,
+            body.MessageTs,
+            req.SenderSlackUserId,
+            ct);
+        if (reservation.Kind == SlackThreadLaunchReservationKind.InProgress)
+            return ApiResults.Conflict(
+                "Another launch is already being established for this Slack thread; retry this message.",
+                "slack_thread_launch_in_progress");
+        if (reservation.Kind == SlackThreadLaunchReservationKind.Bound)
+        {
+            await req.ThreadMapping.UpsertAsync(
+                projectId,
+                body.TeamId,
+                connection.Id,
+                body.ConversationId,
+                rootTs,
+                req.SenderSlackUserId,
+                reservation.SessionId!,
+                rootTs,
+                ct);
+            return await DispatchChannelFollowupAsync(req, reservation.SessionId!, prompt, ct);
+        }
+
         var routeDraft = new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.LaunchThread);
         SlackProviderInboxAcceptResult accepted;
         try
@@ -1433,9 +1483,10 @@ public static class SlackConnectionRoutes
         }
 
         AgentLaunchResult? launch = null;
-        var sessionId = accepted.AlreadyExisted
-            ? (await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct)).SessionId
+        var existingRoute = accepted.AlreadyExisted
+            ? await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct)
             : null;
+        var sessionId = existingRoute?.SessionId ?? reservation.SessionId;
         if (string.IsNullOrWhiteSpace(sessionId))
         {
             launch = await req.Launcher.LaunchConnectionAsync(
@@ -1444,8 +1495,11 @@ public static class SlackConnectionRoutes
                 new ConnectionLaunchOrigin(
                     connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
                 ct);
-            sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, launch.SessionId, ct);
+            sessionId = launch.SessionId;
         }
+
+        if (existingRoute?.SessionId is null)
+            sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, sessionId!, ct);
 
         if (!string.IsNullOrWhiteSpace(sessionId))
         {
@@ -1455,6 +1509,14 @@ public static class SlackConnectionRoutes
             sessionId = bindResult.SessionId;
             if (bindResult.AlreadyExisted)
                 sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, sessionId, ct);
+            await req.ThreadLaunchReservations.BindSessionAsync(
+                projectId,
+                body.TeamId,
+                connection.Id,
+                body.ConversationId,
+                rootTs,
+                sessionId,
+                ct);
         }
 
         var acknowledgement = accepted.AlreadyExisted
@@ -1596,6 +1658,7 @@ internal sealed record HandleChannelIngressRequest(
     SlackIngressBody Body,
     AgentConnectionStore Connections,
     SlackThreadSessionMappingStore ThreadMapping,
+    SlackThreadLaunchReservationStore ThreadLaunchReservations,
     SlackAmbiguousPromptStore AmbiguousPrompts,
     AgentSessionQuerier Sessions,
     AgentQuerier Agents,
@@ -1617,6 +1680,7 @@ internal sealed record HandleChannelIngressRequest(
         SlackIngressBody body,
         AgentConnectionStore connections,
         SlackThreadSessionMappingStore threadMapping,
+        SlackThreadLaunchReservationStore threadLaunchReservations,
         SlackAmbiguousPromptStore ambiguousPrompts,
         AgentSessionQuerier sessions,
         AgentQuerier agents,
@@ -1630,7 +1694,7 @@ internal sealed record HandleChannelIngressRequest(
         RunnerConnectionTracker runnerConnections,
         IServiceProvider services) =>
         new(projectId, connection, identity, senderSlackUserId, body,
-            connections, threadMapping, ambiguousPrompts,
+            connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
             sessions, agents, claims, inbox, outbox,
             launcher, grains, followupDispatcher, runnerHub, runnerConnections, services);
 }

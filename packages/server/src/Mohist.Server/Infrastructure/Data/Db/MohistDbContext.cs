@@ -83,6 +83,8 @@ public class MohistDbContext : DbContext
     public DbSet<SlackOwnerClaimCodeRow> SlackOwnerClaimCodes { get; set; } = null!;
     public DbSet<SlackDmSessionMappingRow> SlackDmSessionMappings { get; set; } = null!;
     public DbSet<SlackThreadSessionMappingRow> SlackThreadSessionMappings { get; set; } = null!;
+
+    public DbSet<SlackThreadLaunchReservationRow> SlackThreadLaunchReservations { get; set; } = null!;
     public DbSet<SlackAmbiguousPromptRow> SlackAmbiguousPrompts { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
@@ -1291,6 +1293,28 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_SlackThreadSessionMappings_WorkspaceTeamId_ConversationId_ThreadTs");
             entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.UpdatedAt })
                 .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_ConnectionId_UpdatedAt");
+        });
+
+        modelBuilder.Entity<SlackThreadLaunchReservationRow>(entity =>
+        {
+            entity.ToTable("SlackThreadLaunchReservations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ThreadTs).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.LaunchMessageTs).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SessionId).HasMaxLength(512);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ConnectionId, e.WorkspaceTeamId, e.ConversationId, e.ThreadTs })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackThreadLaunchReservations_ConnectionId_WorkspaceTeamId_ConversationId_ThreadTs");
+            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.UpdatedAt })
+                .HasDatabaseName("IX_SlackThreadLaunchReservations_ProjectId_ConnectionId_UpdatedAt");
         });
 
         modelBuilder.Entity<SlackAmbiguousPromptRow>(entity =>

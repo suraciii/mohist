@@ -75,6 +75,22 @@ public class SlackThreadSessionMappingMigrationSpecs
     }
 
     [Fact]
+    public async Task Up_CreatesLaunchReservationTableAndUniqueIndex()
+    {
+        await using var database = CreateDatabase("20260731170000_AddSlackThreadLaunchReservations");
+        await using var context = database.CreateDbContext();
+
+        var columns = await ReadColumnNamesAsync(context, "SlackThreadLaunchReservations");
+        Assert.Contains("LaunchMessageTs", columns);
+        Assert.Contains("SessionId", columns);
+
+        var indexes = await ReadIndexesAsync(context, "SlackThreadLaunchReservations");
+        Assert.Equal(
+            new[] { "ConnectionId", "WorkspaceTeamId", "ConversationId", "ThreadTs" },
+            indexes["UX_SlackThreadLaunchReservations_ConnectionId_WorkspaceTeamId_ConversationId_ThreadTs"]);
+    }
+
+    [Fact]
     public async Task Up_UniqueConstraintRejectsSameBindingForSameConnection()
     {
         await using var database = CreateDatabase("20260731130000_AddSlackThreadSessionMappings");

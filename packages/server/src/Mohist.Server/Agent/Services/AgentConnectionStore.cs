@@ -120,7 +120,8 @@ public sealed class AgentConnectionStore : IScopedService
                 connection.ProjectId,
                 connection.Id,
                 connection.AgentId,
-                connection.BotUserId))
+                connection.BotUserId,
+                connection.OwnerSlackUserId))
             .ToListAsync(ct);
     }
 
@@ -364,4 +365,5 @@ public sealed record WorkspaceBoundBot(
     string ProjectId,
     string ConnectionId,
     string AgentId,
-    string BotUserId);
+    string BotUserId,
+    string? OwnerSlackUserId = null);

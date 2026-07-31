@@ -63,6 +63,46 @@ public sealed class SlackMultiAgentIngressSpecs
     }
 
     [Fact]
+    public async Task Ambiguous_message_is_not_rejected_by_a_non_claiming_owner()
+    {
+        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-owner-routing", "U_OWNER_A", "A_OWNER_A");
+        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-owner-routing", "U_OWNER_B", "A_OWNER_B");
+        var messageTs = "1710000000.010150";
+        var text = $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> choose";
+
+        var prompt = await PostChannelAsync(
+            connectionA,
+            "C-multi-owner-routing",
+            messageTs,
+            null,
+            new[] { connectionA.BotUserId, connectionB.BotUserId },
+            text,
+            connectionA.OwnerSlackUserId);
+        var otherDelivery = await PostChannelAsync(
+            connectionB,
+            "C-multi-owner-routing",
+            messageTs,
+            null,
+            new[] { connectionA.BotUserId, connectionB.BotUserId },
+            text,
+            connectionA.OwnerSlackUserId);
+
+        Assert.Equal("ambiguous", prompt.GetProperty("kind").GetString());
+        Assert.Equal("ignored", otherDelivery.GetProperty("kind").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Single(await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connectionA.Id
+                && row.ConversationId == "C-multi-owner-routing")
+            .ToListAsync());
+        Assert.Empty(await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connectionB.Id
+                && row.ConversationId == "C-multi-owner-routing")
+            .ToListAsync());
+    }
+
+    [Fact]
     public async Task Two_connections_mentioning_same_multi_bot_prompt_once()
     {
         var connectionA = await CreateConnectionAsync("agent-A", "T-multi-2", "U_BOT_A2", "A_BOT_A2");
@@ -235,7 +275,14 @@ public sealed class SlackMultiAgentIngressSpecs
             threadTs: "1710000000.010400",
             mentions: Array.Empty<string>(),
             text: "human discussion");
+        var otherReply = await PostChannelAsync(connectionB, "C-multi-thread",
+            messageTs: "1710000000.010420",
+            threadTs: "1710000000.010400",
+            mentions: Array.Empty<string>(),
+            text: "human discussion",
+            senderSlackUserId: connectionA.OwnerSlackUserId);
         Assert.Equal("ambiguous", reply.GetProperty("kind").GetString());
+        Assert.Equal("ignored", otherReply.GetProperty("kind").GetString());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -249,6 +296,64 @@ public sealed class SlackMultiAgentIngressSpecs
                 && row.SlackMessageIdentity.EndsWith("1710000000.010420"))
             .ToListAsync();
         Assert.Empty(inboxRowsForReply);
+    }
+
+    [Fact]
+    public async Task Concurrent_mentions_of_new_agent_share_one_session()
+    {
+        var sharedProjectId = $"project_{Guid.NewGuid():N}";
+        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-launch", "U_OWNER_A", "A_LAUNCH_A", sharedProjectId);
+        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-launch", "U_OWNER_B", "A_LAUNCH_B", sharedProjectId);
+        var conversationId = "C-multi-launch";
+        var rootTs = "1710000000.010600";
+        await PostChannelAsync(
+            connectionA,
+            conversationId,
+            rootTs,
+            null,
+            new[] { connectionA.BotUserId },
+            $"<@{connectionA.BotUserId}> establish thread");
+
+        var messages = new[]
+        {
+            (MessageTs: "1710000000.010610", Text: $"<@{connectionB.BotUserId}> first B task"),
+            (MessageTs: "1710000000.010620", Text: $"<@{connectionB.BotUserId}> second B task"),
+        };
+        var attempts = await Task.WhenAll(messages.Select(message => PostChannelAttemptAsync(
+            connectionB,
+            conversationId,
+            message.MessageTs,
+            rootTs,
+            new[] { connectionB.BotUserId },
+            message.Text,
+            connectionB.OwnerSlackUserId)));
+
+        for (var index = 0; index < attempts.Length; index++)
+        {
+            if (attempts[index].Status == HttpStatusCode.Conflict)
+                await PostChannelAsync(
+                    connectionB,
+                    conversationId,
+                    messages[index].MessageTs,
+                    rootTs,
+                    new[] { connectionB.BotUserId },
+                    messages[index].Text,
+                    connectionB.OwnerSlackUserId);
+            else
+                Assert.Equal(HttpStatusCode.OK, attempts[index].Status);
+        }
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Single(await db.AgentSessions
+            .Where(row => row.LabelConnectionId == connectionB.Id)
+            .ToListAsync());
+        Assert.Equal(2, await db.AgentJobs.CountAsync(row => row.ProjectId == sharedProjectId));
+        var mapping = scope.ServiceProvider.GetRequiredService<SlackThreadSessionMappingStore>();
+        var bindings = await mapping.ListBindingsAsync(
+            sharedProjectId, connectionB.WorkspaceTeamId, conversationId, rootTs);
+        Assert.Equal(2, bindings.Count);
+        Assert.Single(bindings, binding => binding.ConnectionId == connectionB.Id);
     }
 
     [Fact]
@@ -488,7 +593,29 @@ public sealed class SlackMultiAgentIngressSpecs
         string messageTs,
         string? threadTs,
         string[] mentions,
-        string text)
+        string text,
+        string? senderSlackUserId = null)
+    {
+        var result = await PostChannelAttemptAsync(
+            connection,
+            conversationId,
+            messageTs,
+            threadTs,
+            mentions,
+            text,
+            senderSlackUserId);
+        Assert.Equal(HttpStatusCode.OK, result.Status);
+        return result.Data!.Value;
+    }
+
+    private async Task<(HttpStatusCode Status, JsonElement? Data)> PostChannelAttemptAsync(
+        AgentConnection connection,
+        string conversationId,
+        string messageTs,
+        string? threadTs,
+        string[] mentions,
+        string text,
+        string? senderSlackUserId = null)
     {
         var body = new
         {
@@ -498,14 +625,18 @@ public sealed class SlackMultiAgentIngressSpecs
             messageTs,
             threadTs,
             mentionedUserIds = mentions,
-            senderSlackUserId = connection.OwnerSlackUserId ?? "U_OWNER",
+            senderSlackUserId = senderSlackUserId ?? connection.OwnerSlackUserId ?? "U_OWNER",
             senderKind = "human",
             text,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
-        response.EnsureSuccessStatusCode();
-        var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return document.RootElement.GetProperty("data").Clone();
+        if (!response.IsSuccessStatusCode)
+            return (response.StatusCode, null);
+        var raw = await response.Content.ReadAsStringAsync();
+        if (string.IsNullOrWhiteSpace(raw))
+            return (response.StatusCode, null);
+        var document = JsonDocument.Parse(raw);
+        return (response.StatusCode, document.RootElement.GetProperty("data").Clone());
     }
 
     private async Task<AgentConnection> CreateConnectionAsync(
