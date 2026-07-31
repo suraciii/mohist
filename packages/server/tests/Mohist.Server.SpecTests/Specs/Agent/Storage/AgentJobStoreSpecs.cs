@@ -400,11 +400,27 @@ public class AgentJobStoreSpecs : IAsyncLifetime
         await _store.InsertLedgerAsync(NewPendingRecord(runningKey, "runner-a", _time.GetUtcNow()));
         await _store.ClaimAsync(runningKey, "runner-a", _time.GetUtcNow());
 
-        var pending = await _store.ListAssignedPendingForRunnerAsync("runner-a");
+        var pending = await _store.ListAssignedPendingForRunnerAsync("runner-a", limit: 10);
         var running = await _store.ListRunningForRunnerAsync("runner-a");
 
         Assert.Equal(new[] { pendingKey }, pending.Select(r => r.JobKey).ToArray());
         Assert.Equal(new[] { runningKey }, running.Select(r => r.JobKey).ToArray());
+    }
+
+    [Fact]
+    public async Task ListAssignedPendingForRunner_AppliesLimit()
+    {
+        var runnerId = $"runner-limited-{Guid.NewGuid():N}";
+        var first = $"ledger-limited-first-{Guid.NewGuid():N}";
+        var second = $"ledger-limited-second-{Guid.NewGuid():N}";
+        var third = $"ledger-limited-third-{Guid.NewGuid():N}";
+        await _store.InsertLedgerAsync(NewPendingRecord(first, runnerId, _time.GetUtcNow()));
+        await _store.InsertLedgerAsync(NewPendingRecord(second, runnerId, _time.GetUtcNow().AddMinutes(1)));
+        await _store.InsertLedgerAsync(NewPendingRecord(third, runnerId, _time.GetUtcNow().AddMinutes(2)));
+
+        var result = await _store.ListAssignedPendingForRunnerAsync(runnerId, limit: 2);
+
+        Assert.Equal([first, second], result.Select(record => record.JobKey));
     }
 
     [Fact]

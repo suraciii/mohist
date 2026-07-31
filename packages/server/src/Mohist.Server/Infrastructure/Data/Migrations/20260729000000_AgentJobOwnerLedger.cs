@@ -16,7 +16,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations;
 /// <item><description>Adds scheduling columns and a row-level <c>Revision</c>
 /// ETag for optimistic concurrency.</description></item>
 /// <item><description>Backfills the new columns from the legacy state JSON,
-/// using one injected migration timestamp for every valid legacy pending
+/// using one migration execution timestamp for every valid legacy pending
 /// row, preserving valid running rows without applying a pending timeout,
 /// and excluding terminal rows from active scheduling projections.</description></item>
 /// <item><description>Validates every nonterminal legacy row can rebuild a
@@ -30,7 +30,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations;
 [Migration("20260729000000_AgentJobOwnerLedger")]
 public partial class AgentJobOwnerLedger : Migration
 {
-    private const string MigrationTimestamp = "2026-07-29T00:00:00.0000000+00:00";
 
     protected override void Up(MigrationBuilder migrationBuilder)
     {
@@ -131,9 +130,11 @@ public partial class AgentJobOwnerLedger : Migration
         // Validate that every nonterminal row can rebuild a dispatch
         // ledger before any write commits. The whole migration runs inside
         // a transaction so a single malformed row aborts without changes.
-        migrationBuilder.Sql(ValidationSql);
+        migrationBuilder.Sql(CreateValidationTableSql);
+        migrationBuilder.Sql(ValidateLegacyStateSql);
+        migrationBuilder.Sql("DROP TABLE \"AgentJobOwnerLedgerValidation\";");
 
-        // One injected migration timestamp for every valid legacy pending
+        // One migration execution timestamp for every valid legacy pending
         // row; running rows retain their existing assignment + dispatch
         // and get no pending-timeout projection. Terminal rows get a
         // null scheduling projection (excluded from active queries).
@@ -193,32 +194,34 @@ public partial class AgentJobOwnerLedger : Migration
         migrationBuilder.DropColumn(name: "Revision", table: "AgentJobs");
     }
 
-    // Validates every nonterminal legacy AgentJob row can rebuild a
-    // dispatch ledger. A row fails validation when its state cannot
-    // produce a dispatch snapshot — typically because it is nonterminal
-    // but lacks the work identity, runner identity, or input required to
-    // reconstruct the WorkDispatch envelope the runner expects.
-    //
-    // The query is intentionally non-mutating: any failure here aborts
-    // the migration inside the surrounding transaction.
-    private const string ValidationSql = $"""
-        SELECT 1
-        FROM "AgentJobs"
-        WHERE json_type("State", '$') = 'object'
-          AND LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) IN ('pending', 'running', 'unknown')
-          AND (
-              length(trim(COALESCE(json_extract("State", '$.runnerId'), json_extract("State", '$.RunnerId')), char(9,10,11,12,13,32))) > 0
-              AND length(trim(COALESCE(json_extract("State", '$.workId'), json_extract("State", '$.WorkId')), char(9,10,11,12,13,32))) = 0
-              OR (
-                  LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) IN ('pending', 'unknown')
-                  AND length(trim(COALESCE(json_extract("State", '$.input.prompt'), json_extract("State", '$.Input.Prompt')), char(9,10,11,12,13,32))) = 0
-              )
-              OR (
-                  LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) = 'running'
-                  AND length(trim(COALESCE(json_extract("State", '$.runningSince'), json_extract("State", '$.RunningSince')), char(9,10,11,12,13,32))) = 0
-              )
-          )
-        LIMIT 1;
+    private const string CreateValidationTableSql = """
+        CREATE TABLE "AgentJobOwnerLedgerValidation" (
+            "Valid" INTEGER NOT NULL CHECK("Valid" = 1)
+        );
+        """;
+
+    private const string ValidateLegacyStateSql = """
+        INSERT INTO "AgentJobOwnerLedgerValidation" ("Valid")
+        SELECT CASE WHEN
+            json_type("State", '$') = 'object'
+            AND LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) IN ('pending', 'running', 'unknown')
+            AND (
+                length(trim(COALESCE(json_extract("State", '$.input.prompt'), json_extract("State", '$.Input.Prompt'), ''), char(9,10,11,12,13,32))) = 0
+                OR (
+                    LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) = 'running'
+                    AND (
+                        length(trim(COALESCE(json_extract("State", '$.runnerId'), json_extract("State", '$.RunnerId'), ''), char(9,10,11,12,13,32))) = 0
+                        OR length(trim(COALESCE(json_extract("State", '$.workId'), json_extract("State", '$.WorkId'), ''), char(9,10,11,12,13,32))) = 0
+                        OR length(trim(COALESCE(json_extract("State", '$.runningSince'), json_extract("State", '$.RunningSince'), ''), char(9,10,11,12,13,32))) = 0
+                    )
+                )
+                OR (
+                    LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) IN ('pending', 'unknown')
+                    AND length(trim(COALESCE(json_extract("State", '$.runnerId'), json_extract("State", '$.RunnerId'), ''), char(9,10,11,12,13,32))) > 0
+                    AND length(trim(COALESCE(json_extract("State", '$.workId'), json_extract("State", '$.WorkId'), ''), char(9,10,11,12,13,32))) = 0
+                )
+            ) THEN 0 ELSE 1 END
+        FROM "AgentJobs";
         """;
 
     // Backfills the new scheduling columns from the legacy state JSON.
@@ -287,15 +290,15 @@ public partial class AgentJobOwnerLedger : Migration
         WHERE json_type("State", '$') = 'object'
           AND LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) = 'running';
 
-        -- Pending rows (with or without prepared assignment): one
-        -- injected timestamp for every valid legacy pending row. If the
+        -- Pending rows (with or without prepared assignment): one execution
+        -- timestamp for every valid legacy pending row. If the
         -- legacy row already had a prepared assignment, preserve the
         -- runner id; otherwise the row stays unassigned and will be picked
         -- up by a poll-time claim from the eligible-pending query.
         UPDATE "AgentJobs"
         SET "AssignedRunnerId" = COALESCE(json_extract("State", '$.runnerId'), json_extract("State", '$.RunnerId')),
             "WorkId" = COALESCE(json_extract("State", '$.workId'), json_extract("State", '$.WorkId')),
-            "ReadySince" = '{MigrationTimestamp}',
+            "ReadySince" = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'),
             "RunningSince" = NULL,
             "DispatchJson" = CASE
                 WHEN length(trim(COALESCE(json_extract("State", '$.runnerId'), json_extract("State", '$.RunnerId')), char(9,10,11,12,13,32))) > 0

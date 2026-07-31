@@ -5,6 +5,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Grains;
+using Orleans.Runtime;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
@@ -169,5 +170,38 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
         Assert.Single(response.Dispatches);
         Assert.Equal(workflowId, response.Dispatches[0].WorkflowRunId);
         Assert.Equal(AgentJobStatus.Pending, await job.GetStatusAsync());
+    }
+
+    [Fact]
+    public async Task Poll_CapacityRace_ExpiresAgentJobFromOwnerReadySince()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+        var projectId = $"mixed-capacity-timeout-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(
+            projectId,
+            $"mixed-capacity-timeout-runner-{Guid.NewGuid():N}",
+            maxWorkflowSlots: 1);
+        var job = Grains.GetGrain<IAgentJobGrain>($"mixed-capacity-timeout-job-{Guid.NewGuid():N}");
+        await job.SubmitAsync(new AgentJobInput(
+            "expire after capacity race",
+            WorkspacePath: "/tmp/mixed-capacity-timeout",
+            ProjectId: projectId,
+            AgentId: "agent-test"));
+
+        var workflowId = $"mixed-capacity-timeout-workflow-{Guid.NewGuid():N}";
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
+        await workflow.StartAsync(TestInput(projectId));
+        await workflow.AssignWorkerAsync(runnerId);
+        Assert.NotNull(await workflow.ClaimNextAsync(runnerId));
+        await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        await job.ReceiveReminder("agent-job-recovery", new TickStatus(now, TimeSpan.FromSeconds(1), now));
+
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
     }
 }

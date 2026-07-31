@@ -168,8 +168,7 @@ public sealed class DispatchService : IScopedService
                     candidate.WorkflowRunId));
 
         var agentCandidates = assigned
-            ? (await _agentJobs.ListAssignedPendingForRunnerAsync(runnerId, ct))
-                .Take(candidateLimit)
+            ? (await _agentJobs.ListAssignedPendingForRunnerAsync(runnerId, candidateLimit, ct))
                 .Select(record => new PendingCandidate(
                     record.ReadySince ?? DateTimeOffset.MinValue,
                     WorkDispatchOwnerKinds.AgentJob,

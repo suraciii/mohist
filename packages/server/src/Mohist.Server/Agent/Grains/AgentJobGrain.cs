@@ -114,7 +114,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (State.Input is null && State.RoutedPlan is null)
             return;
 
-        if (State.RoutedPlan is not null && !State.RunnerAccepted)
+        if (State.RoutedPlan is not null && State.Input is null && !State.RunnerAccepted)
         {
             await EnsureRecoveryReminderAsync();
             await AdvancePreparedLaunchAsync();
@@ -123,6 +123,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (State.Status == AgentJobStatus.Running)
         {
+            if (JobTimeoutExceeded())
+            {
+                await OnJobTimeoutAsync();
+                return;
+            }
             ArmJobTimeout();
             return;
         }
@@ -132,11 +137,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
-        // Re-armed pending job — re-attempt admission. If a runner became
-        // available since the last try, the row moves to Pending with
-        // AssignedRunnerId + ReadySince + DispatchJson; otherwise the
-        // readiness-timeout check below trips on the next tick.
-        await TryAdmitAsync();
+        if (State.Status == AgentJobStatus.Pending)
+            await EvaluatePendingAsync();
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -245,6 +247,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             ?? throw new AgentJobLedgerReconstructionException(
                 $"AgentJob '{Key}' claim returned a row without a parseable dispatch snapshot");
 
+        ArmJobTimeout();
         await SafeRunnerAcceptedAsync(runnerId, State.WorkId!);
 
         return new ClaimResult(Key, runnerId, State.WorkId!, dispatch);
@@ -804,33 +807,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (State.Status == AgentJobStatus.Pending)
         {
-            // Owner readiness timeout: the pending row ages from
-            // ReadySince; once it crosses the configured bound, terminal
-            // runner-unavailable is the only correct outcome. No
-            // dispatch-attempt counter; the bound is wall-clock from
-            // ReadySince.
-            if (ReadinessTimeoutExceeded())
-            {
-                await EnterTerminalStateAsync(
-                    AgentJobStatus.Failed,
-                    null,
-                    AgentJobFailureReasons.RunnerUnavailable,
-                    AgentJobFailureReasons.RunnerUnavailable,
-                    AgentJobFailureReasons.RunnerUnavailable,
-                    "readiness timeout exceeded without claim",
-                    null,
-                    null,
-                    null);
-                return;
-            }
-
-            // A later poll may have cleared the dispatch snapshot (for
-            // example, a capacity race); let the admission path retry.
-            if (string.IsNullOrWhiteSpace(State.RunnerId)
-                || string.IsNullOrWhiteSpace(_ledger?.DispatchJson))
-            {
-                await TryAdmitAsync();
-            }
+            await EvaluatePendingAsync();
             return;
         }
 
@@ -994,6 +971,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         State.RunnerId = runnerId;
         State.WorkId = workId;
+        State.ReadySince = now;
         State.RunnerAccepted = false;
         State.RunningSince = null;
 
@@ -1032,6 +1010,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             "AgentJob {Id} admitted to runner {Runner} as work {Work} (readySince={ReadySince})",
             Key, runnerId, workId, now);
 
+        await EnsureRecoveryReminderAsync();
         await SafeAssignmentPreparedAsync(runnerId, workId);
 
         return true;
@@ -1164,6 +1143,30 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (bound <= TimeSpan.Zero)
             return false;
         return _timeProvider.GetUtcNow() >= State.ReadySince.Value + bound;
+    }
+
+    private async Task EvaluatePendingAsync()
+    {
+        if (ReadinessTimeoutExceeded())
+        {
+            await EnterTerminalStateAsync(
+                AgentJobStatus.Failed,
+                null,
+                AgentJobFailureReasons.RunnerUnavailable,
+                AgentJobFailureReasons.RunnerUnavailable,
+                AgentJobFailureReasons.RunnerUnavailable,
+                "readiness timeout exceeded without claim",
+                null,
+                null,
+                null);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(State.RunnerId)
+            || string.IsNullOrWhiteSpace(_ledger?.DispatchJson))
+        {
+            await TryAdmitAsync();
+        }
     }
 
     private bool JobTimeoutExceeded()
@@ -1450,7 +1453,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
-        if (State.RoutedPlan is not null && !State.RunnerAccepted)
+        if (State.RoutedPlan is not null && State.Input is null && !State.RunnerAccepted)
         {
             await AdvancePreparedLaunchAsync();
             return;
@@ -1465,30 +1468,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (State.Status == AgentJobStatus.Pending)
         {
-            // The reminder also drives the readiness-timeout check. If
-            // the deadline elapsed, the timeout fires synchronously; if
-            // not, we re-arm admission in case the runner landscape
-            // changed since the last attempt.
-            if (ReadinessTimeoutExceeded())
-            {
-                await EnterTerminalStateAsync(
-                    AgentJobStatus.Failed,
-                    null,
-                    AgentJobFailureReasons.RunnerUnavailable,
-                    AgentJobFailureReasons.RunnerUnavailable,
-                    AgentJobFailureReasons.RunnerUnavailable,
-                    "readiness timeout exceeded without claim",
-                    null,
-                    null,
-                    null);
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(State.RunnerId)
-                || string.IsNullOrWhiteSpace(_ledger?.DispatchJson))
-            {
-                await TryAdmitAsync();
-            }
+            await EvaluatePendingAsync();
             return;
         }
 
@@ -1553,6 +1533,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _state.RunnerId ??= record.AssignedRunnerId;
         _state.WorkId ??= record.WorkId;
         _state.SubmittedAt ??= record.ReadySince;
+        _state.ReadySince ??= record.ReadySince;
         _state.RunningSince ??= record.RunningSince;
         _hydrated = true;
     }

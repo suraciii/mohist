@@ -354,6 +354,20 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task PollClaimedJob_WithoutReport_TransitionsToUnknownAtJobTimeout()
+    {
+        var (_, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-polled-timeout-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-polled-timeout-{Guid.NewGuid():N}");
+
+        await job.SubmitAsync(MakeInput("never reports after poll", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
+
+        Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
+    }
+
+    [Fact]
     public async Task DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime()
     {
         var projectId = $"agent-job-reset-project-{Guid.NewGuid():N}";

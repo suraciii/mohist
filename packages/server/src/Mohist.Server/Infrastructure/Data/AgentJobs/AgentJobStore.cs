@@ -83,6 +83,7 @@ public interface IAgentJobStore
     /// </summary>
     Task<IReadOnlyList<AgentJobLedgerRecord>> ListAssignedPendingForRunnerAsync(
         string runnerId,
+        int limit,
         CancellationToken ct = default);
 
     /// <summary>
@@ -232,14 +233,16 @@ public class AgentJobStore : IAgentJobStore
         var affected = await db.Database.ExecuteSqlInterpolatedAsync(
             $"""
             UPDATE "AgentJobs"
-            SET "State" = json_set(
-                    json_set("State",
-                        '$.status', 'running',
-                        '$.runnerId', {existing.AssignedRunnerId},
-                        '$.workId', {existing.WorkId},
-                        '$.runnerAccepted', json('true'),
-                        '$.runningSince', {runningSinceText}),
-                    '$.revision', {nextRevision}),
+            SET "State" = json_remove(
+                    json_set(
+                        json_set("State",
+                            '$.status', 'running',
+                            '$.runnerId', {existing.AssignedRunnerId},
+                            '$.workId', {existing.WorkId},
+                            '$.runnerAccepted', json('true'),
+                            '$.runningSince', {runningSinceText}),
+                        '$.revision', {nextRevision}),
+                    '$.readySince'),
                 "Revision" = {nextRevision},
                 "RunningSince" = {runningSinceText},
                 "ReadySince" = NULL
@@ -309,6 +312,7 @@ public class AgentJobStore : IAgentJobStore
 
     public async Task<IReadOnlyList<AgentJobLedgerRecord>> ListAssignedPendingForRunnerAsync(
         string runnerId,
+        int limit,
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -316,6 +320,7 @@ public class AgentJobStore : IAgentJobStore
             .Where(r => r.AssignedRunnerId == runnerId && r.Status == "pending")
             .OrderBy(r => r.ReadySince)
             .ThenBy(r => r.JobKey)
+            .Take(limit)
             .ToListAsync(ct);
         return rows.Select(ToRecord).ToList();
     }

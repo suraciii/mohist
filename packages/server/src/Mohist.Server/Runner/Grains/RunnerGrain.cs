@@ -34,6 +34,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private RunnerInfo? _info;
     private string? _pendingBuildGitHash;
     private readonly IPersistentState<RunnerState> _state;
+    private readonly IPersistentState<LegacyRunnerRegistrationState> _legacyState;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private bool _pollAdmitted;
     private DateTimeOffset _lastPresenceAt;
@@ -61,7 +62,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         IAgentJobStore agentJobStore,
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
-        [PersistentState("runner")] IPersistentState<RunnerState> state)
+        [PersistentState("runner")] IPersistentState<RunnerState> state,
+        [PersistentState("runner-works")] IPersistentState<LegacyRunnerRegistrationState> legacyState)
     {
         _workflowRuns = workflowRuns;
         _definitions = definitions;
@@ -69,6 +71,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _log = log;
         _timeProvider = timeProvider;
         _state = state;
+        _legacyState = legacyState;
     }
 
     private string RunnerId => this.GetPrimaryKeyString();
@@ -78,6 +81,20 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _slots = await _definitions.GetOrInitAsync(RunnerId, ct);
         if (!_state.RecordExists)
             await _state.ReadStateAsync();
+        if (!_state.RecordExists)
+        {
+            if (!_legacyState.RecordExists)
+                await _legacyState.ReadStateAsync();
+            if (_legacyState.RecordExists)
+            {
+                _state.State = new RunnerState
+                {
+                    LastKnownInfo = _legacyState.State.LastKnownInfo,
+                    LastKnownActionCatalogJson = _legacyState.State.LastKnownActionCatalogJson,
+                };
+                await _state.WriteStateAsync();
+            }
+        }
         var state = _state.State ??= new RunnerState();
         _info = state.LastKnownInfo;
         if (_info is not null && state.LastKnownActionCatalogJson is not null)

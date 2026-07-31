@@ -362,3 +362,31 @@ polling can retry.
   pick up the same work id. This implements the
   "runner-loss reassignment" gap that the previous turn had
   flagged as a follow-up.
+
+# Review Fixes
+
+## Fixed
+
+- AgentJob admission now persists and hydrates `ReadySince`, starts the owner
+  reminder after admission, and routes routed launches with input through the
+  pending deadline evaluation. Poll claims arm the execution timeout, and a
+  reactivated expired running job enters the timeout outcome immediately.
+- The owner-ledger migration validates nonterminal legacy state through a
+  transactional SQLite constraint before backfill, and assigns pending rows a
+  single execution timestamp instead of a source-code timestamp.
+- Runner activation reads the legacy registration record once when no current
+  state exists, persists the compact replacement state, and preserves the
+  action catalog. It does not restore legacy work records.
+- Assigned-pending AgentJob queries accept and apply a SQL limit before rows
+  are materialized for mixed-owner polling.
+
+## Verification
+
+- `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore`
+- Focused AgentJob, migration, mixed-dispatch, and Runner activation specs.
+- Full Server spec suite: 3463 passed.
+- Full architecture suite: 51 passed.
+- `npm test`: all .NET suites, Web tests, and Slack tests passed. The command
+  remains red because the unrelated Runner test typecheck rejects
+  `packages/runner/src/system/process.test.ts:26` (`string | number` is not
+  assignable to `Signals`).
