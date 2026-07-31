@@ -97,3 +97,23 @@
 - Slack adapter typecheck passed and adapter tests passed 8/8. A repository `npm test` run hit the
   pre-existing AgentLaunchObservation runner-poll race once; the standalone SpecTests rerun passed
   3544/3544.
+
+## Second review fix
+
+- Follow-up terminal delivery: AgentSessionGrain now emits an AgentSessionFollowupDelivery
+  CloudEvent when a non-launch turn transitions to terminal on a session with Slack connection
+  metadata. SlackFollowupDeliveryHandler subscribes to this event and enqueues the result into the
+  outbox with thread provenance. Added SlackWorkspaceTeamId to session metadata labels.
+- Rejected follow-up ack: BuildFollowupAck now has a "rejected" branch instead of falling through
+  to "Continuing.".
+- Channel backpressure: moved the IsBackpressured gate from the top of HandleChannelIngressAsync
+  into LaunchChannelRootAsync and DispatchChannelFollowupAsync, so non-target messages (ignored,
+  not-mine) are acknowledged even on backpressured connections.
+- Abandoned reservation: ReserveAsync now reaps stale reservations (SessionId IS NULL and older
+  than 5 minutes) before inserting, so a crashed launch no longer permanently blocks the thread.
+- Ambiguous prompt race: added a unique index UX_SlackOutboxRows_ConnectionId_DispatchRef_Kind on
+  the outbox table; EnqueueRequiredAsync now catches the unique-constraint conflict atomically
+  instead of relying on check-then-insert.
+- Followup_during_execution test now attaches a physical session before sending the follow-up,
+  matching the runtime binding the session grain requires.
+- Verification: SpecTests 3544/3544, UnitTests 1675/1675, ArchTests 51/51 all pass.
