@@ -77,10 +77,14 @@ internal renames and additive storage are acceptable.
 
 `normalizeSocketEvent` (`mohist-slack/src/adapter.ts:152`) SHALL extract `thread_ts` from the
 Slack event (absent on a root message; present on a thread reply) and parse every `<@U...>` token
-from `event.text` into an ordered, de-duplicated list of mentioned Slack user ids. `SlackEnvelope`
-(`mohist-slack/src/types.ts:12`) gains `threadTs: string | null` and
-`mentionedUserIds: readonly string[]`. The server-side `SlackIngressBody`
-(`Api/SlackConnectionRoutes.cs:973`) gains the matching `ThreadTs` and `MentionedUserIds`.
+from `event.text` into an ordered, de-duplicated list of mentioned Slack user ids. It also normalizes
+sender facts as `human`, `bot`, or `unknown`: Slack Bot subtype / `bot_id` events are `bot`; an event
+without a stable user id is `unknown`; all other events with a user id are `human`. Stable message
+identity remains `(team, conversation, messageTs)`, so a Bot or unknown event is still acknowledged
+even though it cannot become an input. `SlackEnvelope` (`mohist-slack/src/types.ts:12`) gains
+`threadTs: string | null`, `mentionedUserIds: readonly string[]`, `senderKind`, and nullable
+`senderSlackUserId`. The server-side `SlackIngressBody` (`Api/SlackConnectionRoutes.cs:973`) gains
+the matching fields.
 
 The mention list is the **complete** set parsed from the text, not a boolean "am I mentioned".
 Cross-connection attribution (D4) needs to know whether *other* workspace Bots are also mentioned,
@@ -94,37 +98,59 @@ stable identity (`team/conversation/ts`). Slack's `<@U...>` mention format is do
 **Alternatives:** (a) Forward raw `event.text` and parse in the Server — rejected: pushes Slack
 wire-format knowledge into Server authority and across two trust seams. (b) Have the adapter report
 only "my bot was mentioned" — rejected: cannot detect multi-bot mentions, which is the core
-attribution requirement.
+attribution requirement. (c) Continue rejecting events without `event.user` in the adapter —
+rejected: the throw occurs before Socket Mode acknowledgement and turns an ignored Bot/unknown event
+into an infinite redelivery.
 
-### D2. A thread→session binding store keyed by (Connection, ThreadTs), separate from the DM current-session mapping
+### D2. A thread→session binding store keyed by (Connection, Channel, ThreadTs), with durable reconciliation
 
 Add `Infrastructure/Slack/SlackThreadSessionMappingStore.cs` with
 `Infrastructure/Data/Slack/SlackThreadSessionMappingRow.cs`, uniquely indexed on
-`(ConnectionId, ThreadTs)` → `SessionId` (plus `ProjectId/WorkspaceTeamId/ChannelId/SlackUserId`
-denormalized for audit). It implements `IAgentConnectionProviderCleanup` so Connection delete
-cascades. Two operations: `GetSessionIdAsync(projectId, connectionId, threadTs)` and
-`BindAsync(projectId, connectionId, threadTs, sessionId)` — an idempotent upsert that does **not**
-swap on repeat (a bound `(connection, thread)` keeps its session; threads have no New-task switch).
+`(ConnectionId, ConversationId, ThreadTs)` → `SessionId` (plus `ProjectId/WorkspaceTeamId/SlackUserId`
+denormalized for audit). `ConversationId` is part of the key because Slack guarantees `MessageTs`
+only within a channel; the same Connection can be present in several channels. It implements
+`IAgentConnectionProviderCleanup` so Connection delete cascades. Operations are:
+
+- `GetSessionIdAsync(projectId, connectionId, conversationId, threadTs)`;
+- `ListBindingsAsync(projectId, conversationId, threadTs)` to resolve the exact set and cardinality
+  of Agents bound to one thread; and
+- `BindAsync(projectId, connectionId, conversationId, threadTs, sessionId)`, an idempotent upsert
+  that does **not** swap on repeat (a bound `(connection, channel, thread)` keeps its session;
+  threads have no New-task switch).
+
 Thread identity is the root message ts: for a root mention it is the message's own ts; for a reply
 it is the envelope `thread_ts`.
 
-Multi-Agent-per-thread falls out of the key: different Connections produce different rows under
-the same `thread_ts`, each pointing at its own session. There is no "current session per thread"
-shared across Agents.
+Multi-Agent-per-thread falls out of the key: different Connections produce different rows under the
+same `(conversation, thread_ts)`, each pointing at its own session. There is no "current session per
+thread" shared across Agents.
+
+`LaunchConnectionAsync` and the mapping write cannot share a transaction. The launch branch SHALL
+therefore first persist the resolved session id on the accepted root inbox route, then idempotently
+bind that persisted id before replying. Every channel ingress that finds no mapping SHALL reconcile
+before classifying the message: it looks up the accepted root inbox route by
+`(connection, conversation, threadTs)` and, if that route has a session id, repairs the mapping; if
+the route is absent but a unique session with matching connection/conversation/thread provenance
+labels exists, it repairs from that session. Only after both recovery sources are absent is the thread
+treated as unbound. This makes a crash after launch but before `BindAsync` recoverable by either root
+redelivery or the next thread reply.
 
 **Rationale:** the DM mapping (524 D1) is a *current-session* concept whose upsert swaps on a New
 task and whose unique key is `(ConnectionId, DmConversationId)`. Thread binding is append-once-per-
-`(connection, thread)` with no swap. Overloading the DM store would either prevent multiple Agents
-per thread (its unique key collapses them) or risk a thread reply swapping a "current" session that
-threads do not have. The inbox/outbox/DM-mapping trio established the per-connection infrastructure
-pattern; a fourth store of the same shape is consistent.
+`(connection, channel, thread)` with no swap. Overloading the DM store would either prevent multiple
+Agents per thread (its unique key collapses them) or risk a thread reply swapping a "current" session
+that threads do not have. The inbox/outbox/DM-mapping trio established the per-connection
+infrastructure pattern; a fourth store of the same shape is consistent. The inbox route and Session
+labels are durable recovery facts already owned by the Server, so reconciliation adds no second
+authority.
 
 **Alternatives:** (a) Reuse `SlackDmSessionMappingStore` keyed on `threadTs` — rejected: its
-New-task swap semantics and unique index are wrong for threads (above). (b) Store the binding on
-the inbox row and scan — rejected: the inbox is a per-message dedup log, not a thread index; a
-follow-up would need an unindexed scan. (c) A `SlackThreadRoutingGrain` keyed by thread — rejected
-for v1: the inbox dedup already serializes same-message access; the binding is low-write (one bind
-per launch) and read-once per ingress, so a relational row suffices without activation machinery.
+New-task swap semantics and unique index are wrong for threads (above). (b) Store the binding only
+on the inbox row and scan — rejected: the inbox is a per-message dedup log, not a thread index; a
+follow-up would need an unindexed scan. The inbox is retained as a reconciliation source, not the
+steady-state index. (c) A `SlackThreadRoutingGrain` keyed by thread — rejected for v1: the inbox
+dedup already serializes same-message access; the binding is low-write (one bind per launch) and
+read-once per ingress, so a relational row suffices without activation machinery.
 
 ### D3. A single classifying ingress runs the channel attribution + routing state machine
 
@@ -134,9 +160,10 @@ state machine. Classification happens **before** inbox persistence (514 D5 princ
 and ambiguous messages leave no inbox row. For the connection `C` processing a channel message, the
 machine is:
 
-1. **Acceptance gate.** Ignore (no resources) when: sender is a Bot or unidentifiable; or the
-   message is a plain channel message — i.e. not a root mention of any workspace Bot and not a
-   reply in a thread bound to `C`.
+1. **Acceptance gate.** A normalized `bot` or `unknown` sender is acknowledged and ignored with no
+   resources. A human sender's plain channel message — i.e. not a root mention of any workspace Bot
+   and not a reply in a thread with a binding — is also ignored. The `ListBindingsAsync` result from
+   D2, not a per-Connection lookup alone, determines whether the thread has one or several bindings.
 2. **Target resolution** (using D4's workspace bot set `W` and the parsed mentions `M`):
    - `|M ∩ W| ≥ 2` → **ambiguous**; contribute to the once-only prompt (D5), trigger nothing.
    - `|M ∩ W| = 1`, target `T`:
@@ -144,9 +171,9 @@ machine is:
      - `T = C` → `C` is the target. Route launch if `C` is not bound in this thread (D2),
        otherwise follow-up the bound session.
    - `|M ∩ W| = 0` (no Bot mention) and the message is a thread reply:
-     - thread bound to exactly `C` → follow-up `C`'s session.
-     - thread bound to ≥2 Agents → **ambiguous**; contribute to the once-only prompt, trigger nothing.
-     - thread bound to 0 Agents → plain channel message → ignore (covered by gate).
+     - thread binding list contains exactly `C` → follow-up `C`'s session.
+     - thread binding list contains ≥2 Agents → **ambiguous**; contribute to the once-only prompt, trigger nothing.
+     - thread binding list is empty → plain channel message → ignore (covered by gate).
 3. **Owner check (D7).** Once `C` is the resolved target, require `sender == C.OwnerSlackUserId`;
    else reject with a reason and create nothing.
 4. **Route.** Launch reuses `LaunchConnectionAsync` + `BindAsync`; follow-up reuses
@@ -189,12 +216,12 @@ Because each mentioned Connection receives the Slack event independently (each A
 Socket Mode connection), an ambiguous message produces one ingress call per mentioned Connection.
 Without a connection-agnostic dedup, each would post its own choose-one prompt, violating "只提示
 一次" (AC4). Add `Infrastructure/Slack/SlackAmbiguousPromptStore.cs` with a row uniquely indexed on
-`(WorkspaceTeamId, ConversationId, MessageTs)` → `{ PromptedAt, MentionedConnectionIds }`.
+`(WorkspaceTeamId, ConversationId, MessageTs)` → `{ PromptedAt, MentionedConnectionIds, ThreadTs? }`.
 `TryClaimAsync(...)` is a first-writer-wins `INSERT ... ON CONFLICT DO NOTHING`: the winner enqueues
 the choose-one prompt (naming the mentioned Agents/Bots) via its own outbox and acks; losers observe
-the row exists and no-op. The store is connection-agnostic and implements
-`IAgentConnectionProviderCleanup` only notionally (rows are workspace-scoped; a dedicated sweep on
-Connection delete is optional since rows are advisory and small).
+the row exists and no-op. The winning delivery copies the inbound `ThreadTs`: a root message is sent
+as a channel root reply, while an ambiguous thread reply is sent in that same thread. The store is
+connection-agnostic; its short-lived advisory rows do not participate in per-Connection cleanup.
 
 The prompt is advisory: after it, the user re-`@`s a single Bot, whose ingress then sees
 `|M ∩ W| = 1, target = self` and proceeds normally (D3).
@@ -263,10 +290,10 @@ owns that surface and would have to migrate any premature model.
 - **[Each channel message produces one ingress call per mentioned Connection (D3/D4)]** -> each call
   is cheap (classification precedes persistence); non-attributed Connections no-op without writes.
   Slack inherently fans out per-App; this is the cost of independent Bot identities.
-- **[Thread binding read is not in the same transaction as the launch (D2)]** -> a crash between
-  launch and bind leaves a session unbound; the next reply re-launches. The launch is idempotent, so
-  no duplicate work is created — the user sees a second launch instead of a follow-up. Same trade-off
-  as 524 D1; acceptable for v1.
+- **[Thread binding read is not in the same transaction as the launch (D2)]** -> persist the routed
+  session id before reply and reconcile a missing mapping from that route or from the unique Session
+  provenance labels before classifying any reply. Fault-injection tests cover a crash after launch
+  and before binding; an unmentioned reply must still continue the original session.
 - **[Mention parsing depends on Slack's `<@U...>` format (D1)]** -> if Slack changes tokenization,
   attribution degrades to "no Bot mentioned" (message ignored) rather than wrong attribution — a
   safe failure direction. Documented assumption.
@@ -278,16 +305,18 @@ owns that surface and would have to migrate any premature model.
 
 ## Migration Plan
 
-1. **Adapter envelope (D1):** `normalizeSocketEvent` + `SlackEnvelope` gain `threadTs` and
-   `mentionedUserIds`; outbox drain posts `thread_ts`. Add TS types + tests.
-2. **Storage (D2, D4, D5):** `SlackThreadSessionMappingStore` + row + EF migration;
+1. **Adapter envelope (D1):** `normalizeSocketEvent` + `SlackEnvelope` gain `threadTs`,
+   `mentionedUserIds`, and normalized sender kind; Bot/unknown events are acknowledged and ignored.
+   Outbox drain posts `thread_ts`. Add TS types + tests.
+2. **Storage (D2, D4, D5):** `SlackThreadSessionMappingStore` + channel-scoped row, binding-list
+   query, DbContext index, and EF migration; inbox route/provenance lookup for binding repair;
    `SlackAmbiguousPromptStore` + row + migration; `AgentConnectionStore.ListBoundBotsByWorkspaceAsync`.
    All additive.
 3. **Ingress state machine (D3, D7):** channel branch in `/ingress`; channel route kinds; owner
    check; reuse `LaunchConnectionAsync` / `AcceptFollowupAsync`. DM path untouched.
 4. **Origin/labels/delivery/outbox thread passthrough (D6):** `ConnectionLaunchOrigin.ThreadTs` +
-   `ConversationId` rename; `SlackThreadTs` label; terminal-delivery + outbox `ThreadTs`; adapter
-   `Delivery.threadTs`.
+   `ConversationId` rename; `SlackThreadTs` label and channel/thread provenance query; terminal-
+   delivery + outbox `ThreadTs`; adapter `Delivery.threadTs`.
 5. **Tests + docs:** fake Slack (thread events, mention lists, member directory), fake
    adapter↔Server transport, injectable `TimeProvider`; update the 实装差距 notes in
    `design/slack-agent-connection.md` (step 4 channel/thread now landing) and `docs/agent-connections.md`.
@@ -298,8 +327,8 @@ rewritten and no Agent/Job/Session loses addressability.
 
 ## Open Questions
 
-- **Choose-one prompt wording (D5):** confirm whether it names Agents, Bots, or both, and whether it
-  is posted to the thread or the channel root.
+- **Choose-one prompt wording (D5):** confirm whether it names Agents, Bots, or both. Its location is
+  fixed: root for a root message and the same thread for a thread reply.
 - **Workspace bot-list caching (D4):** defer caching until ingress volume is measured; confirm a
   follow-up owns it if needed.
 - **Thread binding lifecycle (D2):** should an idle binding be reaped after a long quiet period, or

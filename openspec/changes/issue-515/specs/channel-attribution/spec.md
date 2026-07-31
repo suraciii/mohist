@@ -1,6 +1,6 @@
 ### Requirement: Only DMs, explicit mentions, and bound-thread replies enter Mohist
 
-The Connection boundary SHALL accept for processing only: a direct message, a channel message that explicitly mentions a Bot, or a reply in a thread that is already bound to an Agent. Any other channel message, any message whose sender is a Bot, and any message from an unidentified sender SHALL be ignored before any Job, Session, SessionInput, or inbox entry is created, and the text of such ignored messages SHALL NOT enter Mohist's persistent record or logs.
+The Connection boundary SHALL accept for processing only: a direct message, a channel message that explicitly mentions a Bot, or a reply in a thread that is already bound to an Agent. The normalized provider envelope SHALL distinguish a human sender from a Bot sender and an unknown sender. Any other channel message, any message whose sender is a Bot, and any message from an unknown sender SHALL be acknowledged to Slack and ignored before any Job, Session, SessionInput, or inbox entry is created, and the text of such ignored messages SHALL NOT enter Mohist's persistent record or logs.
 
 #### Scenario: A plain channel message without a mention is ignored
 
@@ -11,12 +11,13 @@ The Connection boundary SHALL accept for processing only: a direct message, a ch
 #### Scenario: A message sent by a Bot is ignored
 
 - **WHEN** a channel message whose sender is a Bot arrives, including the receiving Bot's own messages
-- **THEN** no Job, Session, SessionInput, or inbox entry is created and the Bot's message does not become another Agent's input
+- **THEN** Mohist acknowledges and ignores the event without creating a Job, Session, SessionInput, or inbox entry
+- **AND** the Bot's message does not become another Agent's input
 
-#### Scenario: A message from an unidentified sender is ignored
+#### Scenario: A message with no stable sender identity is ignored
 
-- **WHEN** a channel message arrives whose sender identity cannot be confirmed as a workspace member
-- **THEN** no Job, Session, SessionInput, or inbox entry is created
+- **WHEN** a channel message arrives whose normalized sender kind is unknown because it has no stable Slack user identity
+- **THEN** Mohist acknowledges and ignores the event without creating a Job, Session, SessionInput, or inbox entry
 
 #### Scenario: A reply in an unbound thread without a mention is ignored
 
@@ -59,12 +60,17 @@ When the target Agent cannot be determined unambiguously, the Connection boundar
 
 ### Requirement: The choose-one prompt is sent at most once per ambiguous message
 
-When an ambiguous message is held back because its target cannot be determined, the Bot SHALL post at most one prompt asking the user to choose a single Agent, and that prompt SHALL be posted into the originating conversation. A redelivery of the same ambiguous message SHALL NOT produce a second prompt.
+When an ambiguous message is held back because its target cannot be determined, the Bot SHALL post at most one prompt asking the user to choose a single Agent. For an ambiguous channel root message, the prompt SHALL be posted as a channel root reply; for an ambiguous thread reply, the prompt SHALL be posted in that same thread. A redelivery of the same ambiguous message SHALL NOT produce a second prompt.
 
 #### Scenario: An ambiguous mention prompts the user to choose once
 
 - **WHEN** a channel message mentions multiple Mohist Bots managed by the same Server
-- **THEN** the Bot posts exactly one prompt into the originating conversation asking the user to choose a single Agent
+- **THEN** the Bot posts exactly one prompt in the originating channel root or thread asking the user to choose a single Agent
+
+#### Scenario: An ambiguous thread reply is prompted in the same thread
+
+- **WHEN** an unmentioned reply arrives in a thread bound to multiple Agents
+- **THEN** the Bot posts the choose-one prompt in that same thread and not as a channel root message
 
 #### Scenario: A redelivered ambiguous message does not repeat the prompt
 
