@@ -61,8 +61,8 @@ internal static class CommandPresentations
             summary: "Configure outgoing notification channels",
             boundary: "Notification setup is local to this CLI host; it does not contact the Server.");
         AttachToArea(root, "otel", CommandCapability.Operations,
-            summary: "Query local OpenTelemetry traces",
-            boundary: "Telemetry is local; commands do not need Server access and never modify remote state.");
+            summary: "Query OpenTelemetry traces through the Server",
+            boundary: "Telemetry queries and status are served by the configured Server; the CLI does not read local telemetry storage.");
         AttachToArea(root, "skill", CommandCapability.Tools,
             summary: "Manage coder agent skills",
             boundary: "Skills are local assets; commands list, view, and install them without Server access.",
@@ -552,7 +552,7 @@ internal static class CommandPresentations
             public void Attach(Command group)
             {
                 CommandPresentationCatalog.Attach(Find(group, "query"), new CommandPresentation(
-                    CommandCapability.Operations, "Run a SQL query against otel.db directly (does not require the server)"));
+                    CommandCapability.Operations, "Run a SQL query against OpenTelemetry traces through the Server"));
                 CommandPresentationCatalog.Attach(Find(group, "status"), new CommandPresentation(
                     CommandCapability.Operations, "Show OTel collector status and database statistics (requires server)"));
             }

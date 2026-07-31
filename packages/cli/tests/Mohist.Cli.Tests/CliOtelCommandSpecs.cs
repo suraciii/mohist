@@ -8,7 +8,7 @@ namespace Mohist.Cli.Tests;
 public class CliOtelCommandSpecs
 {
     [Fact]
-    public void OtelRoot_Help_ListsSubcommands()
+    public void OtelRoot_Help_DescribesServerRoutedCommands()
     {
         var exitCode = Run(["otel", "--help"], out var output, out _);
 
@@ -16,6 +16,8 @@ public class CliOtelCommandSpecs
         var text = output.ToString();
         Assert.Contains("query", text);
         Assert.Contains("status", text);
+        Assert.Contains("through the Server", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("otel.db directly", text, StringComparison.Ordinal);
     }
 
     [Fact]
