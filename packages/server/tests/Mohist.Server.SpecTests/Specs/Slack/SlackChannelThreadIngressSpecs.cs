@@ -316,6 +316,10 @@ public sealed class SlackChannelThreadIngressSpecs
             text: "<@U123> long task");
         var firstSessionId = first.GetProperty("sessionId").GetString();
 
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(firstSessionId!)
+            .AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                "runtime-channel-C", "/mohist-tests/slack-channel-C"));
+
         var followup = await PostChannelAsync(connection, "C-channel-C",
             messageTs: "1710000000.000310",
             threadTs: "1710000000.000300",
