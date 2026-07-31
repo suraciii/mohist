@@ -1,0 +1,73 @@
+{
+  "project": "mohist",
+  "description": "Enable Owner-only Slack channel mentions and durable multi-Agent thread conversations without ambiguous routing.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Generalize Slack transport and delivery for threads",
+      "spec": "specs/channel-thread-routing/spec.md#Acknowledgement and result for thread-bound work are posted into the thread",
+      "description": "Make the stateless mohist-slack protocol and Server delivery lineage capable of carrying Slack thread identity end to end. Normalize thread_ts and the complete mention list, carry thread provenance through connection launch, session metadata, terminal delivery, and the outbox, and render outbound replies with thread_ts while preserving DM behavior.",
+      "acceptanceCriteria": [
+        "SlackEnvelope and SlackIngressBody carry nullable threadTs and a de-duplicated full mention list; adapter tests cover a channel root event, a thread reply, and multiple mentions.",
+        "Connection launch origin, coordinator fingerprint, session metadata labels, terminal delivery payload, outbox persistence/read model, and adapter Delivery carry optional thread identity; accepted channel work can be audited by workspace, channel, thread, and member.",
+        "The adapter calls Slack chat.postMessage with thread_ts for a threaded delivery and omits it for a DM delivery; terminal results and user-action acknowledgements retain their conversation target.",
+        "Existing DM routing and delivery behavior remains unchanged when threadTs is absent.",
+        "Relevant Server tests plus npm run typecheck -w packages/mohist-slack and npm run test:ci -w packages/mohist-slack pass without network access."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Thread-capable Slack adapter envelope/delivery contract and Server provenance/outbox plumbing with tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D1 and D6 as one bounded transport/provenance module. Rename DmConversationId to ConversationId only in the shared connection-origin and delivery path; keep SlackDmSessionMappingStore DM-specific."
+    },
+    {
+      "id": "T-002",
+      "title": "Deliver Owner-only channel launch and single-Agent thread continuity",
+      "spec": "specs/channel-thread-routing/spec.md#A channel root mention launches work bound to the thread",
+      "description": "Add durable per-Connection thread bindings and extend the existing single ingress route with the safe Owner-only channel path. An unambiguous root mention launches through the existing Agent API and binds the session to the thread; an unambiguous reply in a singly-bound thread reuses follow-up dispatch, with no new job or session.",
+      "acceptanceCriteria": [
+        "A new SQLite-backed SlackThreadSessionMappingStore, row, DbContext registration, migration, and Connection-delete cleanup persist exactly one session per Connection plus thread root timestamp and survive Server or adapter restart.",
+        "An Owner root mention with a task creates exactly one AgentJob, AgentSession, SessionInput, and AgentTurn through LaunchConnectionAsync, binds that session to the root thread, and acknowledges in the same thread; a bare mention creates no Agent resources and requests a task.",
+        "An Owner reply in a thread bound to exactly one Agent accepts a follow-up into that AgentSession without re-mention, preserves queued/executing acknowledgement semantics, and creates no new AgentJob or AgentSession.",
+        "The channel acceptance gate ignores Bot-self, unidentified-sender, plain unbound-channel, and unbound-thread messages without writing an inbox row or persisting their text; a non-Owner mention or bound-thread reply is explicitly rejected without Agent resources.",
+        "Duplicate root mentions and thread replies, including after adapter or Server restart, resolve to their original SessionInput and never create duplicate jobs, inputs, turns, or bindings.",
+        "Server spec tests cover root launch, bare mention, follow-up after terminal and during execution, owner-only rejection, ignored input, provenance, binding restart recovery, and redelivery; npm test passes without real Slack, network, process, or wall-clock dependencies."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Usable Owner-only single-Agent channel and thread workflow backed by durable Server-held thread bindings.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Implements design D2, D3, D7 and the single-target part of D4. Classify before inbox acceptance. Multi-target messages must fail closed with no Agent work; T-003 adds the once-only user prompt and full multi-Agent routing guardrails."
+    },
+    {
+      "id": "T-003",
+      "title": "Add multi-Agent thread attribution and once-only ambiguity prompts",
+      "spec": "specs/channel-attribution/spec.md#Mohist does not guess when the target Agent is ambiguous",
+      "description": "Complete cross-Connection channel attribution for workspaces with several Mohist Bots. Resolve mentioned Bot identities within a workspace, preserve independent bindings for multiple Agents in one thread, and use a workspace-scoped first-writer-wins record so ambiguous input yields one choose-one prompt and no Agent work.",
+      "acceptanceCriteria": [
+        "AgentConnectionStore exposes the active, identity-bound Bots for one workspace, and ingress resolves a message against that set rather than treating arbitrary human mentions as Bots.",
+        "A first explicit mention of a previously unbound Bot in an existing thread launches and binds a distinct AgentSession without changing or contaminating any existing Agent binding; an explicit single-Bot reply in a multi-Agent thread continues only that Bot's session.",
+        "A multi-Bot mention and an unmentioned reply in a multi-Agent thread start, continue, and persist no Agent work. Both produce at most one choose-one prompt in the originating channel or thread, including concurrent per-Connection ingress and Slack redelivery.",
+        "The workspace-scoped ambiguous-prompt dedup record is migration-backed, first-writer-wins on workspace plus conversation plus message identity, and does not require adapter-held durable state.",
+        "Server spec tests cover multi-Bot mention suppression, one prompt across two Connection ingress calls, prompt redelivery suppression, multi-Agent thread no-mention suppression, explicit target isolation, and the first second-Agent binding; npm test passes using fake Slack/adapter interactions and injectable time only.",
+        "Update docs/agent-connections.md and design/slack-agent-connection.md implementation-gap sections to state that channel/thread routing and multi-Agent attribution are implemented."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Complete multi-Agent channel/thread attribution with durable once-only ambiguity feedback and regression coverage.",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Implements design D4 and D5 and completes the multi-Agent requirements in both specs. The ambiguity prompt uses the race-winning Connection's existing outbox; no workspace-wide sender or cross-Server coordination is introduced."
+    }
+  ]
+}
