@@ -432,6 +432,56 @@ public sealed class SlackMultiAgentIngressSpecs
         Assert.Contains("Multiple Agents", promptRow!.PayloadJson);
     }
 
+    [Fact]
+    public async Task Unrelated_connection_does_not_claim_ambiguous_prompt()
+    {
+        var sharedProjectId = $"project_{Guid.NewGuid():N}";
+        var connectionA = await CreateConnectionAsync("agent-A", "T-unrelated", "U_OWNER_A", "A_UNRELATED_A", sharedProjectId);
+        var connectionB = await CreateConnectionAsync("agent-B", "T-unrelated", "U_OWNER_B", "A_UNRELATED_B", sharedProjectId);
+        var connectionC = await CreateConnectionAsync("agent-C", "T-unrelated", "U_OWNER_C", "A_UNRELATED_C", sharedProjectId);
+
+        var root = await PostChannelAsync(
+            connectionC,
+            "C-unrelated-root",
+            "1710000000.010900",
+            null,
+            new[] { connectionA.BotUserId, connectionB.BotUserId },
+            $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> choose");
+        Assert.Equal("ignored", root.GetProperty("kind").GetString());
+
+        await PostChannelAsync(
+            connectionA,
+            "C-unrelated-thread",
+            "1710000000.010910",
+            null,
+            new[] { connectionA.BotUserId },
+            $"<@{connectionA.BotUserId}> first");
+        await PostChannelAsync(
+            connectionB,
+            "C-unrelated-thread",
+            "1710000000.010920",
+            "1710000000.010910",
+            new[] { connectionB.BotUserId },
+            $"<@{connectionB.BotUserId}> second");
+
+        var reply = await PostChannelAsync(
+            connectionC,
+            "C-unrelated-thread",
+            "1710000000.010930",
+            "1710000000.010910",
+            Array.Empty<string>(),
+            "human discussion");
+        Assert.Equal("ignored", reply.GetProperty("kind").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connectionC.Id
+                && (row.ConversationId == "C-unrelated-root"
+                    || row.ConversationId == "C-unrelated-thread"))
+            .ToListAsync());
+    }
+
     private async Task<JsonElement> PostChannelAsync(
         AgentConnection connection,
         string conversationId,

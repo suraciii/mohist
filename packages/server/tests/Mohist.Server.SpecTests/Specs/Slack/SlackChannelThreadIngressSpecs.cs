@@ -67,6 +67,37 @@ public sealed class SlackChannelThreadIngressSpecs
     }
 
     [Fact]
+    public async Task Root_redelivery_retries_when_inbox_route_has_no_session()
+    {
+        var connection = await CreateConnectionAsync();
+        const string conversationId = "C-channel-root-recovery";
+        const string messageTs = "1710000000.000105";
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var inbox = scope.ServiceProvider.GetRequiredService<SlackProviderInboxStore>();
+            await inbox.AcceptAsync(
+                new SlackProviderInboxDraft(
+                    connection.ProjectId,
+                    connection.Id,
+                    new SlackMessageIdentity(connection.WorkspaceTeamId, conversationId, messageTs),
+                    "U_OWNER"),
+                new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.LaunchThread));
+        }
+
+        var replay = await PostChannelAsync(
+            connection,
+            conversationId,
+            messageTs,
+            threadTs: null,
+            mentions: new[] { connection.BotUserId },
+            text: "<@U123> recover root launch");
+
+        Assert.False(string.IsNullOrWhiteSpace(replay.GetProperty("sessionId").GetString()));
+        Assert.Equal("queued", replay.GetProperty("kind").GetString());
+    }
+
+    [Fact]
     public async Task Bare_root_mention_with_no_task_creates_no_resources_and_asks_for_task()
     {
         var connection = await CreateConnectionAsync();
@@ -134,11 +165,19 @@ public sealed class SlackChannelThreadIngressSpecs
     public async Task Followup_redelivery_rebuilds_a_missing_acknowledgement()
     {
         var connection = await CreateConnectionAsync();
-        await PostChannelAsync(connection, "C-channel-replay-ack",
+        var first = await PostChannelAsync(connection, "C-channel-replay-ack",
             messageTs: "1710000000.000250",
             threadTs: null,
             mentions: new[] { connection.BotUserId },
             text: "<@U123> first task");
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(first.GetProperty("sessionId").GetString()!)
+            .MarkTurnTerminalAsync(
+                first.GetProperty("turnId").GetString()!,
+                AgentTurnStatus.Completed,
+                null);
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(first.GetProperty("sessionId").GetString()!)
+            .AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                "runtime-channel-replay-ack", "/mohist-tests/slack-replay"));
         await PostChannelAsync(connection, "C-channel-replay-ack",
             messageTs: "1710000000.000260",
             threadTs: "1710000000.000250",
@@ -165,6 +204,91 @@ public sealed class SlackChannelThreadIngressSpecs
         var outbox = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
         Assert.True(await outbox.SlackOutboxRows.AnyAsync(row => row.ConnectionId == connection.Id
             && row.DispatchRef == "slack-thread-followup:T123:C-channel-replay-ack:1710000000.000260"));
+    }
+
+    [Fact]
+    public async Task Followup_redelivery_retries_when_inbox_was_accepted_before_followup()
+    {
+        var connection = await CreateConnectionAsync();
+        const string conversationId = "C-channel-followup-recovery";
+        const string rootTs = "1710000000.000270";
+        const string followupTs = "1710000000.000271";
+        var first = await PostChannelAsync(
+            connection,
+            conversationId,
+            rootTs,
+            threadTs: null,
+            mentions: new[] { connection.BotUserId },
+            text: "<@U123> first task");
+        var sessionId = first.GetProperty("sessionId").GetString()!;
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .MarkTurnTerminalAsync(
+                first.GetProperty("turnId").GetString()!,
+                AgentTurnStatus.Completed,
+                null);
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                "runtime-channel-followup-recovery", "/mohist-tests/slack-recovery"));
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var inbox = scope.ServiceProvider.GetRequiredService<SlackProviderInboxStore>();
+            await inbox.AcceptAsync(
+                new SlackProviderInboxDraft(
+                    connection.ProjectId,
+                    connection.Id,
+                    new SlackMessageIdentity(connection.WorkspaceTeamId, conversationId, followupTs),
+                    "U_OWNER"),
+                new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.FollowupThread, sessionId));
+        }
+
+        var replay = await PostChannelAsync(
+            connection,
+            conversationId,
+            followupTs,
+            threadTs: rootTs,
+            mentions: Array.Empty<string>(),
+            text: "recover follow-up");
+
+        Assert.Equal(sessionId, replay.GetProperty("sessionId").GetString());
+        Assert.True(replay.GetProperty("followup").GetBoolean());
+        Assert.NotEqual("already_accepted", replay.GetProperty("kind").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(replay.GetProperty("inputId").GetString()));
+    }
+
+    [Fact]
+    public async Task Empty_bound_thread_reply_is_rejected_before_inbox_acceptance()
+    {
+        var connection = await CreateConnectionAsync();
+        const string conversationId = "C-channel-empty-followup";
+        const string rootTs = "1710000000.000280";
+        const string followupTs = "1710000000.000281";
+        await PostChannelAsync(
+            connection,
+            conversationId,
+            rootTs,
+            threadTs: null,
+            mentions: new[] { connection.BotUserId },
+            text: "<@U123> first task");
+
+        var rejected = await PostChannelAsync(
+            connection,
+            conversationId,
+            followupTs,
+            threadTs: rootTs,
+            mentions: new[] { connection.BotUserId },
+            text: "<@U123>");
+
+        Assert.Equal("rejected", rejected.GetProperty("kind").GetString());
+        Assert.Equal("Please send a task for the Agent to perform.", rejected.GetProperty("reason").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.ConversationId == conversationId
+                && row.SlackMessageIdentity.EndsWith(followupTs))
+            .ToListAsync());
     }
 
     [Fact]

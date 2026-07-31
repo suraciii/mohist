@@ -1085,12 +1085,18 @@ public static class SlackConnectionRoutes
 
         if (mentionedWorkspaceBots.Count >= 2)
         {
+            var mentionedConnectionIds = mentionedWorkspaceBots
+                .Select(bot => bot.ConnectionId)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (!mentionedConnectionIds.Contains(connection.Id, StringComparer.Ordinal))
+                return ApiResults.Ok(new { kind = "ignored" });
             if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
                 return await RejectNonOwnerChannelMessageAsync(req, ct);
             return await HandleAmbiguousPromptAsync(
                 req,
                 mentionedWorkspaceBots.Select(b => b.BotUserId).ToArray(),
-                mentionedWorkspaceBots.Select(b => b.ConnectionId).Distinct(StringComparer.Ordinal).ToArray(),
+                mentionedConnectionIds,
                 ct);
         }
 
@@ -1156,17 +1162,19 @@ public static class SlackConnectionRoutes
 
         if (threadBindings.Count >= 2)
         {
+            var bindingConnectionIds = threadBindings
+                .Select(binding => binding.ConnectionId)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (!bindingConnectionIds.Contains(connection.Id, StringComparer.Ordinal))
+                return ApiResults.Ok(new { kind = "ignored" });
             if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
                 return await RejectNonOwnerChannelMessageAsync(req, ct);
             var botLookup = workspaceBots.ToDictionary(b => b.ConnectionId, b => b.BotUserId, StringComparer.Ordinal);
             var botLabels = threadBindings
                 .Select(binding => botLookup.TryGetValue(binding.ConnectionId, out var label) ? label : binding.ConnectionId)
                 .ToArray();
-            var connectionIds = threadBindings
-                .Select(binding => binding.ConnectionId)
-                .Distinct(StringComparer.Ordinal)
-                .ToArray();
-            return await HandleAmbiguousPromptAsync(req, botLabels, connectionIds, ct);
+            return await HandleAmbiguousPromptAsync(req, botLabels, bindingConnectionIds, ct);
         }
 
         if (threadBindings.Count == 1)
@@ -1408,15 +1416,11 @@ public static class SlackConnectionRoutes
             return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
         }
 
-        string sessionId;
-        AgentLaunchResult? launch;
-        if (accepted.AlreadyExisted)
-        {
-            var route = await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct);
-            sessionId = route.SessionId ?? string.Empty;
-            launch = null;
-        }
-        else
+        AgentLaunchResult? launch = null;
+        var sessionId = accepted.AlreadyExisted
+            ? (await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct)).SessionId
+            : null;
+        if (string.IsNullOrWhiteSpace(sessionId))
         {
             launch = await req.Launcher.LaunchConnectionAsync(
                 agent,
@@ -1465,6 +1469,14 @@ public static class SlackConnectionRoutes
         var connection = req.Connection;
         var dispatchRef = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
 
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            const string reason = "Please send a task for the Agent to perform.";
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                reason, null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = "rejected", reason });
+        }
+
         var routeDraft = new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.FollowupThread, sessionId);
         SlackProviderInboxAcceptResult accepted;
         try
@@ -1475,14 +1487,6 @@ public static class SlackConnectionRoutes
         catch (SlackProviderInboxCapacityExceededException ex)
         {
             return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
-        }
-
-        if (accepted.AlreadyExisted)
-        {
-            await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-                BuildFollowupAck("already_accepted", inboxAlreadyExisted: true), dispatchRef, ct, body.ThreadTs);
-            await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-            return ApiResults.Ok(new { kind = "already_accepted", sessionId, threadRoot = body.ThreadTs ?? body.MessageTs });
         }
 
         var idempotencyKey = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
