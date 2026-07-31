@@ -294,7 +294,7 @@ public sealed class FakeOtelQueryExecutor : IOtelQueryExecutor
             throw;
         }
 
-        return new QueryResult([], false, null);
+        return new QueryResult([], [], false, null);
     }
 
     public TaskCompletionSource<bool> BlockStarted { get; private set; } =

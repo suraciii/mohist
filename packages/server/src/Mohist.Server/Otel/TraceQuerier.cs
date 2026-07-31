@@ -175,7 +175,7 @@ public sealed class TraceQuerier : IOtelQueryExecutor
             {
                 if (rows.Count >= MaxQueryResponseRows)
                 {
-                    return new QueryResult(rows, Truncated: true, TruncateReason: RowLimitTruncateReason);
+                    return new QueryResult(fieldNames, rows, Truncated: true, TruncateReason: RowLimitTruncateReason);
                 }
 
                 var estimatedRowBytes = ComputeRowBytes(fieldNames);
@@ -201,7 +201,7 @@ public sealed class TraceQuerier : IOtelQueryExecutor
                 if (oversizedCell
                     || accumulatedBytes + separatorBytes + estimatedRowBytes + MaxResponseSuffixBytes > MaxQueryResponseBytes)
                 {
-                    return new QueryResult(rows, Truncated: true, TruncateReason: ByteLimitTruncateReason);
+                    return new QueryResult(fieldNames, rows, Truncated: true, TruncateReason: ByteLimitTruncateReason);
                 }
 
                 var row = new Dictionary<string, object?>(fieldCount, StringComparer.Ordinal);
@@ -212,7 +212,7 @@ public sealed class TraceQuerier : IOtelQueryExecutor
                 rows.Add(row);
                 accumulatedBytes += separatorBytes + estimatedRowBytes;
             }
-            return new QueryResult(rows, Truncated: false, TruncateReason: null);
+            return new QueryResult(fieldNames, rows, Truncated: false, TruncateReason: null);
         }
         finally
         {
@@ -409,6 +409,7 @@ public interface IOtelQueryExecutor
 }
 
 public sealed record QueryResult(
+    [property: JsonPropertyName("columns")] IReadOnlyList<string> Columns,
     [property: JsonPropertyName("rows")] IReadOnlyList<Dictionary<string, object?>> Rows,
     [property: JsonPropertyName("truncated")] bool Truncated,
     [property: JsonPropertyName("truncate_reason")] string? TruncateReason);
