@@ -126,7 +126,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | `service` | `start`、`stop`、`restart`、`status`、`logs`、`uninstall`，target 为 `server`、`runner` 或 `slack` |
 | `event` | `tail`；`dead-letter list/redeliver` |
 | `notification` | `setup` |
-| `otel` | `status`、`query`、`traces` |
+| `otel` | `status`、`query <sql>`、`traces`，`query` 经 Server 执行并支持 `--json <fields>` 字段选择 |
 | `skill` | `list`、`view`、`install`、`path`、`sync` |
 | `help` | 查看 `output`、`environment`、`exit-codes` 等共用规则 |
 | `install` | 安装 `server`、`runner` 或 `slack` |
@@ -402,8 +402,7 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - `agent connection` 命令组与 Slack setup。
 - `install/update/service ... slack` 与 `mohist-slack` 受管服务。
 - Agent launch/follow-up 暴露稳定的 SessionInput 与 AgentTurn 身份。
-- `otel query` 经 Server 查询能力执行并支持 `--json` 字段选择（当前直读本机追踪存储、只输出
-  表格），不再接受 `--db`；新增 `otel traces` 类型化列表（issue #529、#530）。
+- 新增 `otel traces` 类型化列表（issue #530）。
 
 ### 已闭合
 

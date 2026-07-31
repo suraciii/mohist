@@ -24,3 +24,9 @@
 - Focused run of `Mohist.Cli.Tests` via the built assembly (`Mohist.Cli.Tests -class Mohist.Cli.Tests.CliOtelCommandSpecs`) reports 19 passed, 0 failed. Full suite passes 1443/1443.
 - `dotnet build packages/cli/Mohist.Cli` succeeds with 0 warnings. `dotnet build packages/cli/tests/Mohist.Cli.Tests` succeeds with 0 warnings. `npm run typecheck:scripts` succeeds.
 - The pre-existing archtest failure (`OtelQueryRoutesIntegrationSpecs.cs` growing past the 24,000-byte ratchet) is from T-001's columns-assertion additions, not from T-002.
+
+## T-003
+
+- Removed the `otel query` bullet from the `### spec 在前，实现追赶` section of `docs/cli-reference.md`; the feature now matches the documented contract.
+- Kept the `新增 `otel traces` 类型化列表（issue #530）` bullet in place since that part of the gap is still open.
+- Updated the `otel` cheat-sheet row to `status`、`query <sql>`、`traces`，`query` 经 Server 执行并支持 ``--json <fields>`` 字段选择, matching the Server-routed shape with `--json` field selection.
