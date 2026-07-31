@@ -118,6 +118,57 @@ public sealed class AgentJobOwnerLedgerMigrationSpecs
     }
 
     [Fact]
+    public async Task Up_RunningSnapshotWithDifferentWorkId_RebuildsDispatchFromLegacyInput()
+    {
+        await using var database = TestSqliteDatabase.CreateEmpty();
+        MigratedSqliteTemplate.CopyTo(database.Keeper, BeforeMigration);
+        const string state = "{\"status\":\"running\",\"runnerId\":\"runner-a\",\"workId\":\"work-a\",\"runningSince\":\"2026-01-01T00:00:00Z\",\"dispatchSnapshot\":\"{\\\"workflowRunId\\\":\\\"\\\",\\\"workId\\\":\\\"other-work\\\",\\\"workType\\\":\\\"agent-job\\\",\\\"ownerKind\\\":\\\"agent-job\\\",\\\"agentJobId\\\":\\\"running-mismatched-work\\\"}\",\"input\":{\"prompt\":\"run\",\"projectId\":\"project-a\",\"agentId\":\"agent-a\"}}";
+
+        await using (var db = database.CreateContext())
+        {
+            await InsertStateAsync(db, "running-mismatched-work", state);
+            await db.Database.GetService<IMigrator>().MigrateAsync(Migration);
+        }
+
+        await using var migrated = database.CreateContext();
+        var dispatchJson = Assert.Single(await ReadColumnAsync(
+            migrated,
+            "DispatchJson",
+            "SELECT \"DispatchJson\" FROM \"AgentJobs\" WHERE \"JobKey\" = 'running-mismatched-work'"));
+        var dispatch = JsonSerializer.Deserialize<WorkDispatch>(dispatchJson!, JSON.Options);
+
+        Assert.NotNull(dispatch);
+        Assert.Equal("work-a", dispatch!.WorkId);
+    }
+
+    [Theory]
+    [InlineData("pending")]
+    [InlineData("unknown")]
+    public async Task Up_AssignedLegacyStateWithMalformedSnapshot_RebuildsDispatch(string status)
+    {
+        await using var database = TestSqliteDatabase.CreateEmpty();
+        MigratedSqliteTemplate.CopyTo(database.Keeper, BeforeMigration);
+        var jobKey = $"{status}-malformed-snapshot";
+        var state = "{\"status\":\"" + status + "\",\"runnerId\":\"runner-a\",\"workId\":\"work-a\",\"dispatchSnapshot\":\"not-json\",\"input\":{\"prompt\":\"run\",\"projectId\":\"project-a\",\"agentId\":\"agent-a\"}}";
+
+        await using (var db = database.CreateContext())
+        {
+            await InsertStateAsync(db, jobKey, state);
+            await db.Database.GetService<IMigrator>().MigrateAsync(Migration);
+        }
+
+        await using var migrated = database.CreateContext();
+        var dispatchJson = Assert.Single(await ReadColumnAsync(
+            migrated,
+            "DispatchJson",
+            $"SELECT \"DispatchJson\" FROM \"AgentJobs\" WHERE \"JobKey\" = '{jobKey}'"));
+        var dispatch = JsonSerializer.Deserialize<WorkDispatch>(dispatchJson!, JSON.Options);
+
+        Assert.NotNull(dispatch);
+        Assert.Equal("work-a", dispatch!.WorkId);
+    }
+
+    [Fact]
     public async Task Up_PascalCaseRunningStateIsVisibleToOwnerLedgerQueries()
     {
         await using var database = TestSqliteDatabase.CreateEmpty();

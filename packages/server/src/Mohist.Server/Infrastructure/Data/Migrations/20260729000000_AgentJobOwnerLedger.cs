@@ -237,6 +237,14 @@ public partial class AgentJobOwnerLedger : Migration
         WHERE json_type("State", '$') = 'object';
         """;
 
+    private const string ValidLegacyDispatchSnapshotSql = """
+        json_type(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END) = 'object'
+        AND json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.workId') = COALESCE(json_extract("State", '$.workId'), json_extract("State", '$.WorkId'))
+        AND json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.workType') = 'agent-job'
+        AND json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.ownerKind') = 'agent-job'
+        AND json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.agentJobId') = "JobKey"
+        """;
+
     // Backfills the new scheduling columns from the legacy state JSON.
     // One timestamp for every valid legacy pending row, valid running rows
     // keep their existing assignment + dispatch with no pending-timeout
@@ -275,11 +283,7 @@ public partial class AgentJobOwnerLedger : Migration
             "ReadySince" = NULL,
             "RunningSince" = COALESCE(json_extract("State", '$.runningSince'), json_extract("State", '$.RunningSince')),
             "DispatchJson" = CASE
-                WHEN json_type(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END) = 'object'
-                    AND length(trim(json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.workId'), char(9,10,11,12,13,32))) > 0
-                    AND json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.workType') = 'agent-job'
-                    AND json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.ownerKind') = 'agent-job'
-                    AND json_extract(CASE WHEN json_valid(COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))) = 1 THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot')) ELSE json_object() END, '$.agentJobId') = "JobKey"
+                WHEN {ValidLegacyDispatchSnapshotSql}
                     THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))
                 ELSE json_object(
                     'workflowRunId', '',
@@ -332,7 +336,10 @@ public partial class AgentJobOwnerLedger : Migration
             "DispatchJson" = CASE
                 WHEN length(trim(COALESCE(json_extract("State", '$.runnerId'), json_extract("State", '$.RunnerId')), char(9,10,11,12,13,32))) > 0
                     AND length(trim(COALESCE(json_extract("State", '$.workId'), json_extract("State", '$.WorkId')), char(9,10,11,12,13,32))) > 0
-                THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'),
+                THEN CASE
+                    WHEN {ValidLegacyDispatchSnapshotSql}
+                    THEN COALESCE(json_extract("State", '$.dispatchSnapshot'), json_extract("State", '$.DispatchSnapshot'))
+                    ELSE
                     json_object(
                         'workflowRunId', '',
                         'workId', COALESCE(json_extract("State", '$.workId'), json_extract("State", '$.WorkId')),
@@ -359,7 +366,8 @@ public partial class AgentJobOwnerLedger : Migration
                                 'path', COALESCE(json_extract("State", '$.input.workspacePath'), json_extract("State", '$.Input.WorkspacePath')))) || '')
                             ELSE NULL
                         END
-                    ))
+                    )
+                END
                 ELSE NULL
             END,
             "WorkType" = 'agent-job',

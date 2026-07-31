@@ -411,3 +411,23 @@ polling can retry.
   Web `AgentProfileEditor.test.tsx` emits five React `act(...)` environment
   console errors, and Runner `process.test.ts:26` has the existing `Signals`
   type error.
+
+## Review Fixes (2026-07-31)
+
+- Legacy dispatch snapshots are retained only when they are valid AgentJob
+  dispatches for the same AgentJob and work id as the owner state. Invalid or
+  mismatched snapshots fall back to the complete legacy input reconstruction.
+- The validation/fallback rule now applies to Running and assigned
+  Pending/Unknown migration rows, preventing a bad snapshot from reaching the
+  poll-time claim path.
+- Runner reports still reject Pending AgentJobs, but authoritative reports can
+  reconcile an Unknown AgentJob to its terminal result. The test-size ratchet
+  records the pre-existing `AgentJobGrainSpecs` growth from that coverage.
+
+## Verification (2026-07-31)
+
+- Direct `AgentJobOwnerLedgerMigrationSpecs`: 8/8 passed.
+- `npm test`: all .NET suites passed, including 3470 Server specs and 51
+  architecture tests. The command reached the unrelated Web test suite before
+  the 120-second command budget expired; it did not produce a Web or Runner
+  result in this run.
