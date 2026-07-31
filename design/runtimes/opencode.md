@@ -90,6 +90,7 @@ OpenCode 1.17.18 同时导出成熟兼容 API `client.session.*` 和新协议
 | 读取 Session 状态 | `client.session.get()`、`client.session.messages()`、`client.session.status()` |
 | 接收实时事件 | `client.global.event()` |
 | 回应一次性权限 | `client.permission.reply()` |
+| 释放 directory Instance | `client.instance.dispose()` |
 
 依赖仍然是 `@opencode-ai/sdk/v2`。选择成熟 Session namespace 是隐藏在
 `OpenCodeRuntime` 内部的实现决策，不构成另一套产品契约。在新 V2 Session 执行接口
@@ -102,6 +103,7 @@ OpenCode 1.17.18 同时导出成熟兼容 API `client.session.*` 和新协议
 
 - OpenCode Server 与 Client 生命周期；
 - 就绪状态；
+- directory Instance 的使用跟踪、空闲判定与释放；
 - 物理 Session 创建、查询、复用与中断；
 - Prompt 执行、Follow-up、Compact 与 Reset；
 - event subscription、message snapshot 核对和事件规范化；
@@ -119,9 +121,13 @@ Mohist 能力，由模块决定使用哪些 SDK operation 和状态核对步骤�
 ## 进程拓扑与就绪
 
 每个 Runner 进程拥有一个 OpenCode Server 和一个 Client，由所有 OpenCode Session
-共享。使用官方 `createOpencodeServer()` 与 `createOpencodeClient()` API，不直接 spawn
-或解析 OpenCode 进程。每次 Session SDK 调用显式传递工作目录，并启用
-`throwOnError` 让失败进入统一错误规范化；不为每个 Action 创建独立进程。
+共享。OpenCode Server 在同一进程内按 resolved directory 缓存多个 Instance；Instance
+持有该目录的配置、plugin、LSP、MCP 等运行资源。它不是 Runner 的 Git workspace，也不是
+AgentSession 或物理 Session。
+
+使用官方 `createOpencodeServer()` 与 `createOpencodeClient()` API，不直接 spawn 或解析
+OpenCode 进程。每次 Session SDK 调用显式传递工作目录，并启用 `throwOnError` 让失败进入
+统一错误规范化；不为每个 Action 创建独立进程。
 
 Mohist 认为物理 Session 的 directory 不可变。工作目录变化时创建新的物理 Session，
 不移动现有 Session。
@@ -142,6 +148,87 @@ CLI 精确匹配 SDK 版本；Server / SDK 不兼容必须形成可操作的 rea
 正常加载，不使用 `--pure`，也不清理 `.opencode` lockfile。若 plugin 持有的资源导致
 CLI 在截止时间前未退出，但 stdout 已包含可解析的非空目录，该结果只能标记为不完整
 快照并记录诊断，不能伪装成一次正常完成的发现。
+
+## Directory Instance 回收
+
+共享 Server 不以 WorkflowRun 终态自动释放 directory Instance。Runner 因此在现有
+workspace 周期维护中回收已终结 WorkflowRun 的 OpenCode Instance。此回收是执行平面的
+资源治理，不是 Workflow 状态变化，也不删除磁盘 workspace。
+
+### 候选与成本
+
+一次 OpenCode Server generation 指共享 Server 从启动成功到退出或关闭的生命周期。
+`OpenCodeRuntime` 按当前 generation 跟踪自己实际访问过的 resolved directory。任何带
+directory 的 SDK 操作在进入 OpenCode 前都把该目录记为已使用。一次
+成功的 `client.instance.dispose({ directory })` 清除该 generation 的使用记录；之后同一
+目录再次收到 Runtime 请求时重新记入。Server 退出、关闭或完成重建时，旧 generation
+的全部记录一起清空，因为旧进程中的 Instance 已经不存在。使用记录只属于 Runner 进程
+内存，不写入 `WorkspaceRegistry`；Runner 重启会同时失去旧 Server 进程和对应记录，无需恢复。
+
+周期维护只遍历这个“当前 generation 已使用且尚未成功释放”的集合，并按 resolved path
+在 [`WorkspaceRegistry`](../runner.md#本地-workspace-生命周期) 做身份查询。只有 phase 为
+`eligible` 或 `stuck` 的 workflow
+workspace 才是回收候选。`active`、未注册目录、普通 AgentJob 目录和 Runtime 启动目录都
+不回收。
+
+不能每轮扫描全部历史 WorkflowRun 或全部 `eligible` 注册表条目，也不能对当前 generation
+未使用的目录调用 dispose。OpenCode 会按 directory 建立 Instance；盲目探测或重复 dispose
+可能为了“清理”反而创建待清理的 Instance。一次成功回收后，该目录不再产生周期成本；
+后来确有新请求时才重新进入集合。
+
+### 空闲与并发
+
+WorkflowRun 终态只提供回收资格，不证明 OpenCode 已空闲。`Stopped` 不隐含 Runner 已经
+中断旧工作，成功返回的 async Follow-up 也可能仍在 OpenCode 内执行。
+
+Runtime 必须把同一 directory 的 SDK 操作 admission 与 Instance dispose 串行化。回收在
+该 directory 的独占边界内按以下顺序执行：
+
+```text
+if directory has an admitted local operation:
+  defer
+
+statuses = client.session.status({ directory })
+if statuses is missing, malformed, or contains busy / retry / unknown:
+  defer
+
+disposed = client.instance.dispose({ directory })
+if disposed is not exactly true:
+  defer
+
+forget directory for this Server generation
+```
+
+状态 map 为空或只包含 `idle` 才允许 dispose。独占边界保持到 dispose 响应确认；新的
+Prompt、Follow-up、Cancel、Compact、Reset 或 Session 查询只能在它结束后进入。新请求
+进入时会重新记录该 directory，因此 dispose 不会永久禁止后续使用。
+
+### Session 与删除边界
+
+Instance dispose 只释放该 directory 的进程内资源。它不删除 OpenCode Session、
+AgentSession、current binding、transcript 或磁盘 workspace，也不能据此把 Session activity
+改成 `idle` 或 closed。后续请求仍使用持久 binding；OpenCode 重新建立 directory Instance
+后，按既有 Session resolve 与 missing recovery 规则继续。
+
+同一轮 Runner workspace 维护必须先尝试 Instance 回收，再应用磁盘 retention / budget。
+当前 Server generation 已使用过的终态目录，在 dispose 尚未成功、状态仍忙或状态未知时，
+不得自动删除 workspace 或移除其注册表条目。手动 workspace cleanup 使用同一释放能力和
+顺序。没有当前 generation 使用记录表示该 OpenCode 进程没有需要为此目录释放的已知
+Instance，不应为了确认而调用 dispose。
+
+### 失败与范围
+
+状态读取或 dispose 失败时保留使用记录，由后续周期重试。单目录回收失败不改变
+WorkflowRun、TaskRun 或 AgentSession 结果，也不调用 `/global/dispose`，不打断其它目录。
+transport failure 仍按共享 Server 的既有规则触发 Runtime rebuild；旧 Server generation
+结束后，对应 Instance 与使用记录一起消失。
+
+回收 pass 必须 single-flight；上一轮未结束时不重叠启动下一轮。每轮只记录有界的候选数、
+busy / failed / disposed 数量和聚合诊断，避免一个持续失败的目录制造无界日志。
+
+本设计不承诺 `instance.dispose` 后进程 RSS 立即归还给操作系统，也不新增按目录空闲时长、
+mtime 或 Workflow 历史推断终态的 TTL。若 per-directory dispose 后共享 Server 仍持续增长，
+进程级 idle recycle 是独立的后续保护，不用 `/global/dispose` 冒充。
 
 ## Session 绑定
 
@@ -406,9 +493,9 @@ OpenCode 选择或默认值；选定 model / variant 是否有效仍由 OpenCode
 ## 测试
 
 默认测试不能启动真实 OpenCode，也不能使用真实 process、network、filesystem config
-或 clock。Runtime 测试注入 fake generated Client / Server factory；Host 模型发现测试注入
-fake discovery 并使用 fake timer，确定性驱动事件、snapshot、完成状态、process loss 与
-error。
+或 clock。Runtime 测试注入 fake generated Client / Server factory；Host 模型发现与周期
+workspace 维护测试注入 fake discovery / Runtime 并使用 fake timer，确定性驱动事件、
+snapshot、完成状态、process loss、回收 tick 与 error。
 
 覆盖至少包括：
 
@@ -427,6 +514,11 @@ error。
 - async Follow-up（含 idle missing recovery）、原生 summarize、Reset（含旧 Session
   missing）、restart routing 与 stale-binding rejection；
 - permission 一次性回应、重复 suppression、回应失败、missing Session、compatibility 与 process-loss failure；
+- directory Instance 回收：只处理当前 Server generation 已使用且 WorkflowRun 为
+  `Completed` / `Stopped` 的目录；busy、retry、未知状态与并发请求均延后；成功 dispose
+  后不重复调用，后续新请求会重新跟踪；Server rebuild 清空旧 generation；
+- Instance 回收先于自动与手动 workspace 删除，未确认释放时保留目录和注册表身份；
+  周期成本不随无关历史 WorkflowRun 或已释放目录增长；
 - 最小 `{ promise }` Workflow Action Output 与现有 expectation 语义；
 - 两段式收尾：期限前警告注入（仅一次、fire-and-forget）、期限不足 5 分钟时执行
   开始即警告、期限到达 abort、被警告后提前结束不再 abort；全部以 fake clock 驱动。
@@ -478,16 +570,22 @@ Mohist 跟随这些真实内部调用路径，而不是假设每个生成的 V2 
 封装在 `OpenCodeRuntime` 内；以后迁移到完整 V2 Session 执行接口时，只改变
 一个深模块，不改变 Workflow Action 或 Session 产品契约。
 
-实现开始时必须先锁定 SDK package 版本，并对上表断言的调用面在真实 OpenCode 上做
-一次冒烟验证；发现漂移时先修订本表，再进入实现。T-001 已在真实 OpenCode 1.18.3
-服务器上对上表每个调用做了一次冒烟验证（详见
+实现开始时必须先锁定 SDK package 版本，并对使用的调用面在真实 OpenCode 上做一次冒烟
+验证；发现漂移时先修订本表，再进入实现。T-001 已在真实 OpenCode 1.18.3 服务器上对
+Session 与 global event 调用做了一次冒烟验证（详见
 [`openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json)）：
 表内 `client.session.*` 与 `client.global.event()` 调用可用；
 `client.v2.session.wait()` 与 `client.v2.session.compact()` 仍返回
 `ServiceUnavailableError`，确认不进入执行链。
-实际锁定的 SDK 版本见实装差距小节。
+实际锁定的 SDK 版本见实装差距小节。`client.instance.dispose()` 尚未包含在该次记录中，
+落地 Directory Instance 回收前必须补做真实 Server 冒烟验证。
 
 ## 实装差距
+
+Directory Instance 回收尚未落地。当前 `OpenCodeRuntime` 不跟踪 current Server generation
+访问过的 directory，也不调用 `client.instance.dispose()`；WorkflowRun 终态目前只驱动
+磁盘 workspace 的 eligibility 与 retention / budget cleanup。对应实施 issue 待从本
+spec 创建。
 
 「Prompt 期限与两段式收尾」在 `OpenCodeRuntime` 落地后由独立 issue 跟进；当前期限
 到达直接终止执行，agent 没有收尾机会。
