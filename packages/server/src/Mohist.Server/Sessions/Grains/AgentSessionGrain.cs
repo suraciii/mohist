@@ -2495,7 +2495,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var envelope = new CloudEvent(
             id: $"followup-delivery:{session.Id}:{turn.Id}",
-            source: new Uri($"agent-session/{session.Id}", UriKind.Relative),
+            source: new Uri($"/mohist/agent-session/{session.Id}", UriKind.Relative),
             type: EventCatalog.ReverseDns.AgentSessionFollowupDelivery,
             time: _timeProvider.GetUtcNow(),
             data: data,
