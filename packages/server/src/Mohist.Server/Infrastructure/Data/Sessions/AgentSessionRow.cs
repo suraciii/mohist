@@ -36,6 +36,10 @@ public class AgentSessionRow
     public string? LabelTriggerEventId { get; set; }
     public string? LabelTriggerRuleId { get; set; }
 
+    public string? LabelConnectionId { get; set; }
+    public string? LabelSlackUserId { get; set; }
+    public string? LabelSlackConversationId { get; set; }
+
     /// <summary>
     /// Stored projected copy of <c>State.status.activity</c>. Sourced from
     /// the persisted Session JSON so direct-session activity can be selected

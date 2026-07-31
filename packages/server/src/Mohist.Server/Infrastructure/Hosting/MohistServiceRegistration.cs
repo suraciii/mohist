@@ -95,6 +95,19 @@ public static class MohistServiceRegistration
         services.AddSingleton<Mohist.Server.Sessions.Services.IAgentSessionConnectionRegistry>(sp =>
             sp.GetRequiredService<Mohist.Server.Runner.Services.SignalR.RunnerConnectionTracker>());
 
+        // IAgentConnectionProviderCleanup implementations are also
+        // registered as Self by the conventional services scan; Microsoft DI's
+        // IEnumerable<T> resolution only includes services registered with T as
+        // the ServiceType, so without these forward-registrations the cascade
+        // loop in AgentConnectionStore.DeleteProviderRecordsAsync sees an
+        // empty enumerable and provider rows survive a Connection delete.
+        // The forwarded lifetime matches the concrete type (scoped), so the
+        // cascade call resolves the same instance the route would resolve.
+        services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackProviderInboxStore>());
+        services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackOutboxStore>());
+        services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackDmSessionMappingStore>());
+        services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackOwnerClaimService>());
+
         var connectionString = ResolveSqliteConnectionString(configuration);
 
         services.AddMohistOpenTelemetry(configuration);

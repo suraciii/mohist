@@ -4,6 +4,8 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Slack;
 using Mohist.Server.Agent.Domain;
 
@@ -254,8 +256,11 @@ public static class SlackConnectionRoutes
             SlackOwnerClaimService claims,
             SlackProviderInboxStore inbox,
             SlackOutboxStore outbox,
+            SlackDmSessionMappingStore mapping,
             AgentQuerier agents,
             IAgentLauncher launcher,
+            IGrainFactory grains,
+            AgentSessionFollowupDispatcher followupDispatcher,
             OperatorCredential credential,
             CancellationToken ct) =>
         {
@@ -336,8 +341,47 @@ public static class SlackConnectionRoutes
                 return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
             }
 
+            var currentSessionId = await mapping.GetCurrentSessionIdAsync(
+                projectId, connectionId, body.ConversationId, ct);
+
+            var idempotencyKey = $"slack:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
+
+            if (!string.IsNullOrEmpty(currentSessionId))
+            {
+                var followupResult = await RouteFollowupAsync(
+                    projectId,
+                    currentSessionId,
+                    prompt,
+                    idempotencyKey,
+                    grains,
+                    followupDispatcher,
+                    ct);
+                var followupAck = BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted);
+                await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
+                    followupAck,
+                    $"slack-ack:{identity.AsKey()}",
+                    ct);
+                await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+                return ApiResults.Ok(new
+                {
+                    kind = followupResult.Kind,
+                    sessionId = followupResult.SessionId,
+                    inputId = followupResult.InputId,
+                    turnId = followupResult.TurnId,
+                    followup = true,
+                });
+            }
+
             var launch = await launcher.LaunchConnectionAsync(agent, prompt, new ConnectionLaunchOrigin(
                 connectionId, body.TeamId, body.SenderSlackUserId, body.ConversationId, body.MessageTs), ct);
+            await mapping.SetCurrentSessionIdAsync(
+                projectId,
+                connectionId,
+                body.TeamId,
+                body.SenderSlackUserId,
+                body.ConversationId,
+                launch.SessionId,
+                ct);
             var acknowledgement = accepted.AlreadyExisted
                 ? "This task was already accepted; execution is being resumed."
                 : dispatchDecision.Reason ?? "Task accepted and queued for execution.";
@@ -471,6 +515,114 @@ public static class SlackConnectionRoutes
         if (!string.IsNullOrWhiteSpace(botUserId))
             result = result.Replace($"<@{botUserId}>", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
         return result;
+    }
+
+    /// <summary>
+    /// Result of routing an inbound DM into the current session. The grain
+    /// call's <see cref="AgentSessionFollowupAcceptResult"/> is normalized
+    /// into a Slack-shaped kind plus the durable session/input/turn ids the
+    /// caller needs for logging and the response payload. <see cref="Status"/>
+    /// is one of <c>"queued"</c>, <c>"executing"</c>, or <c>"already_accepted"</c>
+    /// (the values <see cref="BuildFollowupAck"/> consumes), not the
+    /// underlying <see cref="Mohist.Server.Sessions.Domain.AgentTurnStatus"/>
+    /// enum verbatim — the surface is the three-way follow-up verdict the
+    /// ingress wants the Bot to read back.
+    /// </summary>
+    internal sealed record FollowupRouteResult(
+        string Kind,
+        string Status,
+        string SessionId,
+        string InputId,
+        string TurnId);
+
+    /// <summary>
+    /// Routes a normal DM into the current session of the conversation
+    /// rather than minting a new one. The session grain's idempotent
+    /// accept is keyed by the Slack message identity (same format as the
+    /// launch path so both layers of dedup collapse to one input); the
+    /// dispatcher then pumps the queued turn the same way the HTTP
+    /// follow-up route does. Exceptions raised by the grain during accept
+    /// are translated to a deterministic Slack response kind so the
+    /// ingress can post a coherent reply instead of crashing the call.
+    /// </summary>
+    private static async Task<FollowupRouteResult> RouteFollowupAsync(
+        string projectId,
+        string currentSessionId,
+        string prompt,
+        string idempotencyKey,
+        IGrainFactory grains,
+        AgentSessionFollowupDispatcher followupDispatcher,
+        CancellationToken ct)
+    {
+        var grain = grains.GetGrain<IAgentSessionGrain>(currentSessionId);
+        AgentSessionFollowupAcceptResult accept;
+        try
+        {
+            accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+                Text: prompt,
+                Source: "agent-session-followup",
+                IdempotencyKey: idempotencyKey));
+        }
+        catch (RuntimeSessionMissingException)
+        {
+            return new FollowupRouteResult("runtime_session_missing", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (RecoveryOperationInProgressException)
+        {
+            return new FollowupRouteResult("recovery_in_progress", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (AgentSessionFollowupCapacityExceededException)
+        {
+            return new FollowupRouteResult("capacity_exceeded", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (StopOperationInProgressException)
+        {
+            return new FollowupRouteResult("stop_in_progress", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (SessionActivityUnknownException)
+        {
+            return new FollowupRouteResult("session_activity_unknown", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (FollowupConcurrencyLimitException)
+        {
+            return new FollowupRouteResult("concurrency_limit", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (InvalidOperationException)
+        {
+            return new FollowupRouteResult("followup_rejected", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+
+        await followupDispatcher.DispatchNextAsync(projectId, currentSessionId, ct);
+
+        if (accept.AlreadyAccepted)
+            return new FollowupRouteResult("already_accepted", "already_accepted", currentSessionId, accept.InputId, accept.TurnId);
+        var status = accept.TurnStatus switch
+        {
+            AgentTurnStatus.Executing => "executing",
+            _ => "queued",
+        };
+        return new FollowupRouteResult("accepted", status, currentSessionId, accept.InputId, accept.TurnId);
+    }
+
+    /// <summary>
+    /// Translates the follow-up verdict into the Bot's reply text. The
+    /// <c>alreadyExisted</c> flag from the inbox store takes priority so a
+    /// redelivered Slack message still produces the original "already
+    /// accepted" phrasing even when the grain call happens to land in a
+    /// different state — the inbox dedup is the authoritative user-facing
+    /// signal; the grain call is the second-layer idempotency.
+    /// </summary>
+    private static string BuildFollowupAck(string followupStatus, bool inboxAlreadyExisted)
+    {
+        if (inboxAlreadyExisted)
+            return "This message was already accepted.";
+        return followupStatus switch
+        {
+            "already_accepted" => "This message was already accepted.",
+            "executing" => "Continuing. Running now.",
+            "queued" => "Continuing. Will resume after the current step finishes.",
+            _ => "Continuing.",
+        };
     }
 
     internal static async Task<string> ProbeOwnerAvailabilityAsync(

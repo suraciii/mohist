@@ -1,0 +1,94 @@
+# issue-524 / T-001 — DM current-session mapping and follow-up routing
+
+## Codebase Patterns
+
+- **Slack infrastructure pattern**: SQLite-backed store with `(ProjectId, ConnectionId, …)` scope; implements `IScopedService` + `IAgentConnectionProviderCleanup`; mirrors `SlackProviderInboxStore` / `SlackOutboxStore` style.
+- **EF entity config**: matches `SlackProviderInboxRows` style (TEXT columns, 256-char IDs/keys, 64-char Id, 512-char where appropriate, unique index `UX_...`).
+- **Conventional services**: anything implementing `IScopedService` is auto-registered as Scoped via Scrutor; no extra DI wiring needed.
+- **`IAgentConnectionProviderCleanup`**: iterated by `AgentConnectionStore.DeleteProviderRecordsAsync`; cascades provider rows on connection deletion.
+- **Follow-up path**: `IAgentSessionGrain.AcceptFollowupAsync(AcceptFollowupCommand)` is idempotent via `FindFollowupInputByIdempotencyKey`; `AgentSessionFollowupDispatcher.DispatchNextAsync(projectId, sessionId)` pumps the queued turn.
+- **Idempotency key format**: `slack:{team}:{conv}:{ts}` (matches `AgentLauncher.cs:203`).
+- **DM ack references**: Slack reply uses `slack-ack:{identity.AsKey()}` dispatch ref.
+
+## Self-Review Issue #1 Awareness
+
+The self-review flagged that short-circuiting on `inbox.AcceptAsync.AlreadyExisted` breaks crash recovery: if a redelivery arrives after the inbox row was committed but before `LaunchConnectionAsync` was called, skipping the launch would leave the work never started. The current code avoids this by always calling `LaunchConnectionAsync`. For T-001's follow-up path I'll preserve the same shape: always call `AcceptFollowupAsync` (which is idempotent via the `slack:{team}:{conv}:{ts}` key), and use `AlreadyExisted` only to tweak the ack text. This stays safe under both crash and redelivery scenarios.
+
+## Source-Kind Plumbing
+
+- The launcher stamps `source-kind = "agent-connection"` on connection-launched sessions (AgentLaunchCoordinatorGrain.cs:303, :328).
+- `ResolveCanonicalFollowupTargetAsync` / `ResolveCancelTargetAsync` currently reject anything other than `workflow` / `agent-launch`; D5 lifts the rejection.
+- For the followup target, `Definition` must also be surfaced for `agent-connection` (otherwise the `RunnerFollowupDeliveryDispatcher` payload omits the execution definition and the runner cannot resume a disconnected session).
+
+## Migrations
+
+- Latest migration: `20260730010000_AddVerifiedBotIdentity`.
+- New migration: `20260731100000_AddSlackDmSessionMapping` — creates the mapping table with `UX_SlackDmSessionMappings_ConnectionId_DmConversationId`, plus the `LabelConnectionId`/`LabelSlackUserId`/`LabelSlackConversationId` STORED computed columns + indexes on `AgentSessions`.
+- Snapshot file `MohistDbContextModelSnapshot.cs` is the consolidated model snapshot — must be updated by hand to include the new entity and computed columns (matching `AddSlackProviderInboxOutbox.cs` style). The Designer stub delegates to `BuildModelCore`.
+
+## DI Cascade Bug (T-001 only)
+
+`AgentConnectionStore.DeleteProviderRecordsAsync` reads
+`IEnumerable<IAgentConnectionProviderCleanup>`. Microsoft DI's
+`IEnumerable<T>` only includes services registered with `T` as the
+ServiceType. Scrutor's `.AsSelf()` registers concrete types only —
+the cascade loop was silently empty for every cleanup (inbox, outbox,
+dm mapping, owner claim). Discovered when the new
+`Delete_connection_cascades_dm_session_mappings` spec failed with
+the mapping still present after Connection delete. Fix: explicit
+forward-registrations in `MohistServiceRegistration.ConfigureMohistServices`
+for each cleanup as `IAgentConnectionProviderCleanup` so the
+`IEnumerable<>` resolution finds them. Same shape as the existing
+`IAgentLauncher` forward-registration.
+
+## ArchTests (T-001 only)
+
+- Spec filename must end in `Specs` or `Collection`. Renamed
+  `AgentSessionQuerierAgentConnectionTests.cs` →
+  `AgentSessionQuerierAgentConnectionSpecs.cs`.
+- `SlackConnectionApiSpecs.cs` was over the 24,000-byte ratchet
+  (24,445 bytes). Moved the four T-001 ingress tests to a new
+  `SlackDmSessionMappingIngressSpecs.cs` file. The parent file is
+  now 17,003 bytes.
+
+## Test Setup Gotcha (T-001 only)
+
+`SlackConnectionApiSpecs.CreateConnectionAsync` does NOT create an
+Agent row. The four ingress tests need one to avoid 409
+`agent_not_found` from `agents.GetByIdAsync(...)`. The new
+`SlackDmSessionMappingIngressSpecs.CreateConnectionAsync` generates a
+unique `agent_{guid}` id per connection so the shared integration
+fixture's DB doesn't collide on the Agents PK across tests.
+
+## Workaround: Self-Review Issue #2
+
+The self-review caught the interface name — `ISlackConnectionProviderCleanup`
+should be `IAgentConnectionProviderCleanup`. The implementation
+already uses the correct name; only the design doc / tasks wording
+was wrong. No code change needed.
+
+## Verification (T-001 final)
+
+- `npm run build` (-p:SkipWebBuild=true): 0 errors, 0 warnings.
+- `dotnet test Mohist.Server.ArchTests`: 50 / 50 pass.
+- `dotnet test Mohist.Server.UnitTests`: 1636 / 1636 pass
+  (includes the 9 new SlackDmSessionMappingStoreTests).
+- `dotnet test Mohist.Server.SpecTests` filtered:
+  - `*SlackDmSessionMapping*` → 8 / 8 pass (4 spec + 4 migration).
+  - `*AgentSessionQuerierAgentConnection*` → 6 / 6 pass.
+  - `*SlackConnectionApi*` → 10 / 10 pass (regression of the parent
+    file after the four tests moved out).
+  - `*Migration*` → 180 / 180 pass (template picks up the new
+    migration and computed columns).
+  - `*AgentConnection*` → 29 / 29 pass.
+  - `*OwnerClaim*` → 9 / 9 pass.
+- Full `npm test` includes a single pre-existing flaky test
+  (`AgentSessionQuerierAgentConnectionSpecs.QueryRowsByLabels_SlackConversationId_FiltersByConversation`)
+  that fails ~5 % of the time under heavy Session-test parallel load.
+  The test passes in every focused invocation. Likely cause: shared
+  in-memory SQLite template (`MigratedSqliteTemplate`) interacting
+  with the test's `static` `SeedAsync` losing the local
+  `TestSqliteDatabase` reference under GC. Not introduced by T-001
+  (the same static-seed pattern is used elsewhere without change).
+  Left untouched — fixing it is outside the T-001 scope and a
+  pre-existing infrastructure concern.

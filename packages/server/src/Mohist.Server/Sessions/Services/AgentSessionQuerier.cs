@@ -321,7 +321,8 @@ public class AgentSessionQuerier : IScopedService
             if (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(sessionName))
                 return null;
         }
-        else if (!string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
+        else if (!string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal)
+            && !string.Equals(sourceKind, "agent-connection", StringComparison.Ordinal))
         {
             return null;
         }
@@ -356,7 +357,8 @@ public class AgentSessionQuerier : IScopedService
             && (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(sessionName)))
             return null;
         if (!string.Equals(sourceKind, "workflow", StringComparison.Ordinal)
-            && !string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
+            && !string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal)
+            && !string.Equals(sourceKind, "agent-connection", StringComparison.Ordinal))
             return null;
 
         return new SessionCancelTarget(

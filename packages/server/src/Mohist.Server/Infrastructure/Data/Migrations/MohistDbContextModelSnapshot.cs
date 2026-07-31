@@ -455,6 +455,56 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("AgentConnections", (string)null);
                  });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackDmSessionMappingRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CurrentSessionId")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DmConversationId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlackUserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("TEXT");
+
+                    b.Property<string>("WorkspaceTeamId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectionId", "DmConversationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackDmSessionMappings_ConnectionId_DmConversationId");
+
+                    b.HasIndex("ProjectId", "ConnectionId", "UpdatedAt")
+                        .HasDatabaseName("IX_SlackDmSessionMappings_ProjectId_ConnectionId_UpdatedAt");
+
+                    b.ToTable("SlackDmSessionMappings", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeRow", b =>
                 {
                     b.Property<string>("Id")
@@ -1712,6 +1762,21 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/work-type\"')", true);
 
+                    b.Property<string>("LabelConnectionId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/connection-id\"')", true);
+
+                    b.Property<string>("LabelSlackUserId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/slack-user-id\"')", true);
+
+                    b.Property<string>("LabelSlackConversationId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/slack-conversation-id\"')", true);
+
                     b.Property<string>("Activity")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -1768,6 +1833,21 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("LabelProjectId", "LabelSourceKind", "Activity", "CreatedAt")
                         .HasDatabaseName("IX_AgentSessions_StatusProject_SourceKind_Activity_CreatedAt");
+
+                    b.HasIndex("LabelConnectionId")
+                        .HasDatabaseName("IX_AgentSessions_LabelConnectionId");
+
+                    b.HasIndex("LabelProjectId", "LabelConnectionId", "CreatedAt")
+                        .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelConnectionId_CreatedAt");
+
+                    b.HasIndex("LabelSlackUserId")
+                        .HasDatabaseName("IX_AgentSessions_LabelSlackUserId");
+
+                    b.HasIndex("LabelProjectId", "LabelSlackUserId", "CreatedAt")
+                        .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelSlackUserId_CreatedAt");
+
+                    b.HasIndex("LabelSlackConversationId")
+                        .HasDatabaseName("IX_AgentSessions_LabelSlackConversationId");
 
                     b.ToTable("AgentSessions", (string)null);
                 });

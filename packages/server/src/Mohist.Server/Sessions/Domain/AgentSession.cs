@@ -267,7 +267,8 @@ public sealed record AgentSessionMetadata(
             return;
         }
 
-        if (string.Equals(kind, "agent-launch", StringComparison.Ordinal))
+        if (string.Equals(kind, "agent-launch", StringComparison.Ordinal)
+            || string.Equals(kind, "agent-connection", StringComparison.Ordinal))
         {
             if (string.IsNullOrWhiteSpace(Label(AgentIdKey)))
                 throw new InvalidOperationException("Agent-launch AgentSession source requires an agent label.");
