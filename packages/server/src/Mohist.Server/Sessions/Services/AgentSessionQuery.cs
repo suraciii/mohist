@@ -203,6 +203,7 @@ public class AgentSessionQuery : IScopedService
                 AgentSessionQueryMetadataKeys.ConnectionId => query.Where(s => s.LabelConnectionId == value),
                 AgentSessionQueryMetadataKeys.SlackUserId => query.Where(s => s.LabelSlackUserId == value),
                 AgentSessionQueryMetadataKeys.SlackConversationId => query.Where(s => s.LabelSlackConversationId == value),
+                AgentSessionQueryMetadataKeys.SlackThreadTs => query.Where(s => s.LabelSlackThreadTs == value),
 
                 _ => query.Where(_ => false),
             };

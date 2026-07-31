@@ -30,7 +30,7 @@ class FakeTransport implements AdapterTransport {
   readonly leases: SlackConnectionRef[] = []
   readonly envelopes: SlackEnvelope[] = []
   readonly acks: Array<{ ref: SlackConnectionRef; id: string; outcome: string }> = []
-  readonly deliveries: Delivery[] = [{ id: "delivery-1", dmConversationId: "D1", payloadJson: JSON.stringify({ text: "accepted" }) }]
+  readonly deliveries: Delivery[] = [{ id: "delivery-1", conversationId: "D1", threadTs: null, payloadJson: JSON.stringify({ text: "accepted" }) }]
   connections: SlackConnectionRef[] = []
   private readonly sessionByConnection = new Map<string, AdapterSession>()
 
@@ -60,9 +60,9 @@ class FakeTransport implements AdapterTransport {
 }
 
 class FakeWeb implements SlackWebClient {
-  readonly posted: Array<{ channel: string; text: string }> = []
+  readonly posted: Array<{ channel: string; text: string; thread_ts?: string }> = []
   readonly chat = {
-    postMessage: async (input: { channel: string; text: string }) => {
+    postMessage: async (input: { channel: string; text: string; thread_ts?: string }) => {
       this.posted.push(input)
       return { ok: true }
     },
@@ -80,9 +80,84 @@ describe("mohist-slack adapter", () => {
       teamId: "T1",
       conversationId: "D1",
       messageTs: "123.456",
+      threadTs: null,
+      mentionedUserIds: [],
       senderSlackUserId: "U1",
+      senderKind: "human",
       text: "do work",
     })
+  })
+
+  it("normalizes channel threads, all mentions, bot senders, and unknown senders", () => {
+    expect(normalizeSocketEvent({
+      team_id: "T1",
+      event: {
+        type: "message",
+        channel: "C1",
+        ts: "123.456",
+        thread_ts: "123.000",
+        user: "U1",
+        text: "<@B1> ask <@B2|other> and <@B1> again",
+      },
+    })).toMatchObject({
+      threadTs: "123.000",
+      mentionedUserIds: ["B1", "B2"],
+      senderSlackUserId: "U1",
+      senderKind: "human",
+    })
+
+    expect(normalizeSocketEvent({
+      team_id: "T1",
+      event: { channel: "C1", ts: "123.457", subtype: "bot_message", bot_id: "B1", text: "reply" },
+    })).toMatchObject({
+      teamId: "T1",
+      conversationId: "C1",
+      messageTs: "123.457",
+      senderSlackUserId: null,
+      senderKind: "bot",
+    })
+
+    expect(normalizeSocketEvent({
+      team_id: "T1",
+      event: { channel: "C1", ts: "123.458", text: "system event" },
+    })).toMatchObject({
+      teamId: "T1",
+      conversationId: "C1",
+      messageTs: "123.458",
+      senderSlackUserId: null,
+      senderKind: "unknown",
+    })
+  })
+
+  it("acknowledges bot and unknown events without requiring a user id", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    const socket = new FakeSocket()
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    await expect(socket.emit({
+      team_id: "T1",
+      event: { channel: "C1", ts: "123.457", subtype: "bot_message", bot_id: "B1", text: "reply" },
+    })).resolves.toBe(true)
+    await expect(socket.emit({
+      team_id: "T1",
+      event: { channel: "C1", ts: "123.458", text: "system event" },
+    })).resolves.toBe(true)
+    expect(transport.envelopes.map((envelope) => [envelope.messageTs, envelope.senderKind])).toEqual([
+      ["123.457", "bot"],
+      ["123.458", "unknown"],
+    ])
+    controller.abort()
   })
 
   it("discovers connections, forwards every event to ingress, and drains replies", async () => {
@@ -146,6 +221,30 @@ describe("mohist-slack adapter", () => {
     transport.connections = []
     await adapter.refreshConnections(controller.signal)
     expect(sockets.get("c")?.disconnected).toBe(true)
+    controller.abort()
+  })
+
+  it("posts threaded deliveries in a thread and DM deliveries without a thread target", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.push({ id: "delivery-2", conversationId: "C1", threadTs: "1.2", payloadJson: JSON.stringify({ text: "thread reply" }) })
+    const web = new FakeWeb()
+    const socket = new FakeSocket()
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await adapter.start(controller.signal)
+    expect(web.posted).toEqual([
+      { channel: "D1", text: "accepted" },
+      { channel: "C1", text: "thread reply", thread_ts: "1.2" },
+    ])
     controller.abort()
   })
 

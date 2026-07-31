@@ -14,10 +14,11 @@ public sealed record SlackOutboxDraft(
     string ProjectId,
     string ConnectionId,
     string WorkspaceTeamId,
-    string DmConversationId,
+    string ConversationId,
     string Kind,
     string? DispatchRef,
-    string PayloadJson);
+    string PayloadJson,
+    string? ThreadTs = null);
 
 /// <summary>
 /// Result of <see cref="SlackOutboxStore.EnqueueAsync"/>. When
@@ -37,7 +38,8 @@ public sealed class SlackOutboxEntry
     public string ProjectId { get; init; } = string.Empty;
     public string ConnectionId { get; init; } = string.Empty;
     public string WorkspaceTeamId { get; init; } = string.Empty;
-    public string DmConversationId { get; init; } = string.Empty;
+    public string ConversationId { get; init; } = string.Empty;
+    public string? ThreadTs { get; init; }
     public string Kind { get; init; } = string.Empty;
     public string State { get; init; } = string.Empty;
     public string? DispatchRef { get; init; }

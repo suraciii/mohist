@@ -104,7 +104,8 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
             ConnectionId = draft.ConnectionId,
             SlackMessageIdentity = identity,
             WorkspaceTeamId = draft.Identity.WorkspaceTeamId,
-            DmConversationId = draft.Identity.DmConversationId,
+            ConversationId = draft.Identity.ConversationId,
+            ThreadTs = draft.ThreadTs,
             SlackUserId = draft.SlackUserId,
             RouteKind = route.Kind,
             RouteSessionId = route.SessionId,
@@ -151,6 +152,45 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
             throw new InvalidOperationException($"Slack inbox entry {id} does not have a route.");
 
         return new SlackProviderInboxRoute(route.RouteKind, route.RouteSessionId, route.RouteTurnId);
+    }
+
+    /// <summary>
+    /// Looks up the session id persisted on the inbox row whose message
+    /// ts matches the channel-thread root, for one Connection. Used by
+    /// the channel ingress to recover a missing thread binding after a
+    /// crash between <c>LaunchConnectionAsync</c> and
+    /// <c>BindAsync</c>: the inbox route was stamped with the session
+    /// id BEFORE the reply was posted (per D2), so this read is a
+    /// durable fallback even when the binding row never made it to
+    /// disk. Returns null when no such root inbox row exists for this
+    /// Connection — a clean first launch in a brand-new thread has
+    /// nothing to reconcile.
+    /// </summary>
+    public async Task<string?> FindRootRouteSessionIdAsync(
+        string projectId,
+        string connectionId,
+        string workspaceTeamId,
+        string conversationId,
+        string rootMessageTs,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootMessageTs);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.ConnectionId == connectionId
+                && row.WorkspaceTeamId == workspaceTeamId
+                && row.ConversationId == conversationId
+                && row.SlackMessageIdentity == $"{workspaceTeamId}/{conversationId}/{rootMessageTs}"
+                && row.RouteSessionId != null)
+            .OrderBy(row => row.Id)
+            .Select(row => row.RouteSessionId)
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task<string> SetRouteSessionIdAsync(
@@ -268,7 +308,8 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
         ConnectionId = row.ConnectionId,
         SlackMessageIdentity = row.SlackMessageIdentity,
         WorkspaceTeamId = row.WorkspaceTeamId,
-        DmConversationId = row.DmConversationId,
+        ConversationId = row.ConversationId,
+        ThreadTs = row.ThreadTs,
         SlackUserId = row.SlackUserId,
         AcceptedAt = row.AcceptedAt,
         DispatchedAt = row.DispatchedAt,

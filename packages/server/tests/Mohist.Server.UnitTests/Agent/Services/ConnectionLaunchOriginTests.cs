@@ -27,6 +27,18 @@ public sealed class ConnectionLaunchOriginTests
     }
 
     [Fact]
+    public void ThreadIdentityChangesReplayFingerprint()
+    {
+        var request = new AgentLaunchCoordinatorRequest("task", "agent", null, null, null, null, null, null);
+        var root = new ConnectionLaunchOrigin("connection", "T1", "U1", "C1", "1.0", "1.0");
+        var otherThread = root with { ThreadTs = "2.0" };
+
+        Assert.NotEqual(
+            AgentLaunchCoordinatorCodec.Fingerprint(request, root),
+            AgentLaunchCoordinatorCodec.Fingerprint(request, otherThread));
+    }
+
+    [Fact]
     public void MessageIdentityChangesCoordinatorKeyForEverySlackCoordinate()
     {
         const string projectId = "project";

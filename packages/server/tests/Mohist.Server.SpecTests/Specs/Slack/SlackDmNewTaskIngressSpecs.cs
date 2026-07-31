@@ -88,6 +88,33 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Thread_origin_is_retained_on_the_session_metadata_and_delivery_ack()
+    {
+        var connection = await CreateConnectionAsync();
+        var result = await PostIngressAsync(
+            connection,
+            "C-THREAD",
+            "1710000000.000450",
+            "thread task",
+            "1710000000.000400");
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var session = await db.AgentSessions
+            .SingleAsync(row => row.Id == result.GetProperty("sessionId").GetString());
+        Assert.Equal("C-THREAD", session.LabelSlackConversationId);
+        Assert.Equal("1710000000.000400", session.LabelSlackThreadTs);
+
+        var reply = await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.ConversationId == "C-THREAD"
+                && row.ThreadTs == "1710000000.000400")
+            .Select(row => row.PayloadJson)
+            .SingleAsync();
+        Assert.Contains("Task accepted", reply, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_normal_message_containing_new_task_words_remains_a_followup()
     {
         var connection = await CreateConnectionAsync();
@@ -124,7 +151,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             .Select(row => row.CurrentSessionId)
             .SingleAsync());
         Assert.DoesNotContain(await db.SlackProviderInboxRows
-            .Where(row => row.ConnectionId == connection.Id && row.DmConversationId == "D-DM-EMPTY")
+            .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-EMPTY")
             .Select(row => row.SlackMessageIdentity)
             .ToListAsync(), identity => identity.EndsWith("1710000000.000800", StringComparison.Ordinal));
     }
@@ -163,7 +190,8 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         AgentConnection connection,
         string conversationId,
         string messageTs,
-        string text)
+        string text,
+        string? threadTs = null)
     {
         using var response = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
@@ -171,6 +199,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             teamId = connection.WorkspaceTeamId,
             conversationId,
             messageTs,
+            threadTs,
             senderSlackUserId = "U_OWNER",
             text,
         });
@@ -210,7 +239,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var payload = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id
-                && row.DmConversationId == conversationId
+                && row.ConversationId == conversationId
                 && row.Kind == SlackOutboxKinds.UserAction
                 && row.DispatchRef == $"slack-ack:T123/{conversationId}/{messageTs}")
             .Select(row => row.PayloadJson)

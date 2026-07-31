@@ -2,8 +2,8 @@ namespace Mohist.Server.Infrastructure.Slack;
 
 /// <summary>
 /// Stable Slack message identity. Slack guarantees <c>MessageTs</c>
-/// uniqueness within a channel, so <c>(WorkspaceTeamId, DmConversationId,
-/// MessageTs)</c> uniquely identifies one DM message across the entire
+/// uniqueness within a channel, so <c>(WorkspaceTeamId, ConversationId,
+/// MessageTs)</c> uniquely identifies one message across the entire
 /// workspace and survives any number of redeliveries. The launcher uses
 /// this same triple to derive the idempotency key for the Agent API
 /// dispatch, which is what makes redelivery collapse to the same
@@ -11,17 +11,17 @@ namespace Mohist.Server.Infrastructure.Slack;
 /// </summary>
 public readonly record struct SlackMessageIdentity(
     string WorkspaceTeamId,
-    string DmConversationId,
+    string ConversationId,
     string MessageTs)
 {
-    public string AsKey() => $"{WorkspaceTeamId}/{DmConversationId}/{MessageTs}";
+    public string AsKey() => $"{WorkspaceTeamId}/{ConversationId}/{MessageTs}";
 
     public string Validate()
     {
         if (string.IsNullOrWhiteSpace(WorkspaceTeamId))
             return "WorkspaceTeamId is required.";
-        if (string.IsNullOrWhiteSpace(DmConversationId))
-            return "DmConversationId is required.";
+        if (string.IsNullOrWhiteSpace(ConversationId))
+            return "ConversationId is required.";
         if (string.IsNullOrWhiteSpace(MessageTs))
             return "MessageTs is required.";
         return string.Empty;

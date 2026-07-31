@@ -21,7 +21,18 @@ describe("HttpAdapterTransport", () => {
     const signal = new AbortController().signal
     await expect(transport.discoverConnections(signal)).resolves.toEqual([ref])
     await expect(transport.lease(ref, "a", signal)).resolves.toMatchObject({ appToken: "xapp" })
-    await transport.ingress(ref, { eventType: "message", isDirectMessage: true, teamId: "T", conversationId: "D", messageTs: "1", senderSlackUserId: "U", text: "task" }, signal)
+    await transport.ingress(ref, {
+      eventType: "message",
+      isDirectMessage: true,
+      teamId: "T",
+      conversationId: "D",
+      messageTs: "1",
+      threadTs: null,
+      mentionedUserIds: [],
+      senderSlackUserId: "U",
+      senderKind: "human",
+      text: "task",
+    }, signal)
     await transport.claimDelivery(ref, "a", signal)
     await transport.ackDelivery(ref, { id: "delivery-1", outcome: "delivered" }, signal)
     expect(calls.map((call) => call.url)).toEqual([

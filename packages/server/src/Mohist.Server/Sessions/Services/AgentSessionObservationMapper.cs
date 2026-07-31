@@ -16,7 +16,8 @@ internal static class AgentSessionObservationMapper
                 attachment.ContentType,
                 attachment.Size,
                 attachment.Source,
-                attachment.Availability)).ToArray())).ToArray();
+                attachment.Availability)).ToArray(),
+            input.Provenance)).ToArray();
 
     public static IReadOnlyList<AgentTurnObservationDto>? Turns(AgentSessionStatusSnapshot status) =>
         status.Turns?.Select(turn => new AgentTurnObservationDto(

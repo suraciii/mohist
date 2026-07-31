@@ -15,9 +15,14 @@ export interface SlackEnvelope {
   readonly teamId: string
   readonly conversationId: string
   readonly messageTs: string
-  readonly senderSlackUserId: string
+  readonly threadTs: string | null
+  readonly mentionedUserIds: readonly string[]
+  readonly senderSlackUserId: string | null
+  readonly senderKind: SlackSenderKind
   readonly text: string | null
 }
+
+export type SlackSenderKind = "human" | "bot" | "unknown"
 
 export interface IngressResult {
   readonly kind: string
@@ -26,7 +31,8 @@ export interface IngressResult {
 
 export interface Delivery {
   readonly id: string
-  readonly dmConversationId: string
+  readonly conversationId: string
+  readonly threadTs: string | null
   readonly payloadJson: string
 }
 
@@ -57,7 +63,7 @@ export interface SocketClient {
 
 export interface SlackWebClient {
   chat: {
-    postMessage(input: { channel: string; text: string }): Promise<{ ok?: boolean; error?: string }>
+    postMessage(input: { channel: string; text: string; thread_ts?: string }): Promise<{ ok?: boolean; error?: string }>
   }
 }
 

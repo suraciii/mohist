@@ -117,6 +117,46 @@ public sealed class SlackConnectionApiSpecs
     }
 
     [Fact]
+    public async Task Bot_and_unknown_sender_events_are_ignored_before_inbox_acceptance()
+    {
+        var connection = await CreateConnectionAsync();
+        var events = new[]
+        {
+            new { messageTs = "1710000000.000901", senderKind = "bot", senderSlackUserId = (string?)"B123" },
+            new { messageTs = "1710000000.000902", senderKind = "unknown", senderSlackUserId = (string?)null },
+        };
+
+        foreach (var item in events)
+        {
+            using var response = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+            {
+                isDirectMessage = false,
+                teamId = connection.WorkspaceTeamId,
+                conversationId = "C123",
+                messageTs = item.messageTs,
+                threadTs = "1710000000.000800",
+                mentionedUserIds = new[] { "U123" },
+                senderSlackUserId = item.senderSlackUserId,
+                senderKind = item.senderKind,
+                text = "ignored provider event",
+            });
+
+            response.EnsureSuccessStatusCode();
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal("ignored", document.RootElement.GetProperty("data").GetProperty("kind").GetString());
+        }
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id)
+            .ToListAsync());
+        Assert.Empty(await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id)
+            .ToListAsync());
+    }
+
+    [Fact]
     public async Task Disabled_connection_rejects_adapter_session_renewal()
     {
         var connection = await CreateConnectionAsync();
@@ -165,7 +205,7 @@ public sealed class SlackConnectionApiSpecs
                     workLabel = "queued work",
                     connectionId = connection.Id,
                     workspaceTeamId = connection.WorkspaceTeamId,
-                    dmConversationId = "D123",
+                    conversationId = "D123",
                     status = "completed",
                     message = "completed",
                     failureReason = (string?)null,

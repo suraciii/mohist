@@ -1,7 +1,10 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
@@ -16,6 +19,10 @@ namespace Mohist.Server.Api;
 
 public static class SlackConnectionRoutes
 {
+    private static readonly Regex SlackMentionToken = new(
+        @"<@(?<id>[A-Za-z0-9_-]+)(?:\|[^>]*)?>",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     public static WebApplication MapSlackConnectionRoutes(this WebApplication app)
     {
         var management = app.MapGroup("/api/projects/{projectRef}/slack-connections")
@@ -260,6 +267,9 @@ public static class SlackConnectionRoutes
             SlackProviderInboxStore inbox,
             SlackOutboxStore outbox,
             SlackDmSessionMappingStore mapping,
+            SlackThreadSessionMappingStore threadMapping,
+            SlackThreadLaunchReservationStore threadLaunchReservations,
+            SlackAmbiguousPromptStore ambiguousPrompts,
             AgentQuerier agents,
              IAgentLauncher launcher,
              IGrainFactory grains,
@@ -278,7 +288,7 @@ public static class SlackConnectionRoutes
                 return ApiResults.NotFound("Slack Connection was not found.");
             if (connection.DesiredState == DesiredStateKind.Disabled)
                 return ApiResults.Ok(new { kind = "rejected", reason = "This Connection is disabled." });
-            if (body is null || !body.IsDirectMessage)
+            if (body is null)
                 return ApiResults.Ok(new { kind = "ignored" });
             if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
                 return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
@@ -288,205 +298,32 @@ public static class SlackConnectionRoutes
             if (identityError.Length != 0)
                 return ApiResults.BadRequest(identityError, "invalid_slack_identity");
 
-            var decision = await claims.HandleInboundDmAsync(
-                projectId,
-                connectionId,
-                new SlackInboundDm(body.SenderSlackUserId, body.Text ?? string.Empty),
+            var senderKind = NormalizeSenderKind(body.SenderKind);
+            if (senderKind is SlackSenderKind.Bot or SlackSenderKind.Unknown)
+                return ApiResults.Ok(new { kind = "ignored" });
+            if (string.IsNullOrWhiteSpace(body.SenderSlackUserId))
+                return ApiResults.Ok(new { kind = "ignored" });
+            var senderSlackUserId = body.SenderSlackUserId!.Trim();
+
+            if (!body.IsDirectMessage)
+                return await HandleChannelIngressAsync(
+                    HandleChannelIngressRequest.From(
+                        projectId, connection, identity, senderSlackUserId, body,
+                        connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
+                        sessions, agents, claims, inbox, outbox,
+                        launcher, grains, followupDispatcher,
+                        runnerHub, runnerConnections,
+                        http.RequestServices),
+                    ct);
+
+            return await HandleDmIngressAsync(
+                HandleDmIngressRequest.From(
+                    projectId, connection, identity, senderSlackUserId, body,
+                    mapping, sessions, agents, claims, inbox, outbox,
+                    launcher, grains, followupDispatcher,
+                    runnerHub, runnerConnections,
+                    http.RequestServices),
                 ct);
-            if (decision.Kind == SlackInboundDecisionKind.Claimed)
-            {
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, "Owner claimed successfully.", null, ct);
-                return ApiResults.Ok(new { kind = "claimed" });
-            }
-            if (decision.Kind == SlackInboundDecisionKind.Transferred)
-            {
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, "Owner transferred successfully.", null, ct);
-                return ApiResults.Ok(new { kind = "transferred" });
-            }
-            if (decision.Kind == SlackInboundDecisionKind.Rejected)
-            {
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, decision.Reason ?? "The message was rejected.", null, ct);
-                return ApiResults.Ok(new { kind = "rejected", reason = decision.Reason });
-            }
-
-            if (connection.ConnectionHealth == Agent.Domain.ConnectionHealthKind.Degraded
-                && connection.HealthReason?.Contains("backpressured", StringComparison.OrdinalIgnoreCase) == true)
-                return ApiResults.Conflict(
-                    "This Slack Connection is backpressured; retry after pending deliveries drain.",
-                    "slack_backpressured");
-
-            var prompt = RemoveBotMention(body.Text ?? string.Empty, connection.BotUserId);
-            if (string.IsNullOrWhiteSpace(prompt))
-            {
-                const string reason = "Please send a task for the Agent to perform.";
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, reason, null, ct);
-                return ApiResults.Ok(new { kind = "rejected", reason });
-            }
-
-            var isNewTask = TryStripNewTaskMarker(prompt, out var newTaskPrompt);
-            if (isNewTask && string.IsNullOrWhiteSpace(newTaskPrompt))
-            {
-                const string reason = "Please send a task for the Agent to perform.";
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, reason, null, ct);
-                return ApiResults.Ok(new { kind = "rejected", reason });
-            }
-
-            TurnControlCommand controlCommand = default;
-            var isControl = !isNewTask && TryGetTurnControlCommand(prompt, out controlCommand);
-            AgentInfo? agent = null;
-            AgentConnectionDispatchDecision? dispatchDecision = null;
-            if (!isControl)
-            {
-                agent = await agents.GetByIdAsync(projectId, connection.AgentId);
-                if (agent is null)
-                    return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
-
-                dispatchDecision = AgentConnectionDispatchDecision.For(
-                    AgentReadinessDeriver.Derive(agent.AgentConfig));
-                if (!dispatchDecision.Accepted)
-                {
-                    await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId,
-                        dispatchDecision.Reason!, null, ct);
-                    return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
-                }
-            }
-
-            var routeDraft = await ResolveInboxRouteDraftAsync(
-                projectId,
-                connectionId,
-                body.ConversationId,
-                isNewTask,
-                isControl ? controlCommand : null,
-                mapping,
-                sessions,
-                grains,
-                ct);
-
-            SlackProviderInboxAcceptResult accepted;
-            try
-            {
-                accepted = await inbox.AcceptAsync(new SlackProviderInboxDraft(
-                    projectId, connectionId, identity, body.SenderSlackUserId), routeDraft, ct);
-            }
-            catch (SlackProviderInboxCapacityExceededException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
-            }
-
-            var route = await inbox.GetRouteAsync(projectId, accepted.Id, ct);
-
-            if (route.Kind is SlackProviderInboxRouteKinds.Cancel or SlackProviderInboxRouteKinds.Stop)
-            {
-                var control = await ExecuteTurnControlAsync(
-                    projectId,
-                    route.Kind == SlackProviderInboxRouteKinds.Cancel ? TurnControlCommand.Cancel : TurnControlCommand.Stop,
-                    route.SessionId!,
-                    route.TurnId!,
-                    sessions,
-                    grains,
-                    runnerHub,
-                    runnerConnections,
-                    ct);
-                await EnqueueRequiredReplyAsync(
-                    outbox,
-                    projectId,
-                    connection,
-                    body.ConversationId,
-                    control.Reply,
-                    $"slack-ack:{identity.AsKey()}",
-                    ct);
-                await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-                return ApiResults.Ok(new
-                {
-                    kind = control.Kind,
-                    sessionId = control.SessionId,
-                    turnId = control.TurnId,
-                    control = true,
-                });
-            }
-
-            if (route.Kind is SlackProviderInboxRouteKinds.NoActiveWork or SlackProviderInboxRouteKinds.AlreadyEnded)
-            {
-                var reply = route.Kind == SlackProviderInboxRouteKinds.AlreadyEnded
-                    ? "That work has already ended; there is no active work to cancel or stop."
-                    : "There is no active work to cancel or stop.";
-                await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
-                    reply,
-                    $"slack-ack:{identity.AsKey()}",
-                    ct);
-                await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-                return ApiResults.Ok(new { kind = route.Kind, control = true });
-            }
-
-            if (route.Kind is SlackProviderInboxRouteKinds.Launch or SlackProviderInboxRouteKinds.NewTaskLaunch)
-            {
-                var isRoutedNewTask = route.Kind == SlackProviderInboxRouteKinds.NewTaskLaunch;
-                var sessionId = route.SessionId;
-                AgentLaunchResult? launch = null;
-                if (string.IsNullOrWhiteSpace(sessionId))
-                {
-                    launch = await launcher.LaunchConnectionAsync(
-                        agent!,
-                        isRoutedNewTask ? newTaskPrompt : prompt,
-                        new ConnectionLaunchOrigin(
-                            connectionId, body.TeamId, body.SenderSlackUserId, body.ConversationId, body.MessageTs),
-                        ct);
-                    sessionId = await inbox.SetRouteSessionIdAsync(projectId, accepted.Id, launch.SessionId, ct);
-                }
-
-                await mapping.SetCurrentSessionIdAsync(
-                    projectId,
-                    connectionId,
-                    body.TeamId,
-                    body.SenderSlackUserId,
-                    body.ConversationId,
-                    sessionId,
-                    body.MessageTs,
-                    ct);
-                var acknowledgement = isRoutedNewTask
-                    ? BuildNewTaskAck(accepted.AlreadyExisted, dispatchDecision!.Reason)
-                    : accepted.AlreadyExisted
-                        ? "This task was already accepted; execution is being resumed."
-                        : dispatchDecision!.Reason ?? "Task accepted and queued for execution.";
-                await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
-                    acknowledgement,
-                    $"slack-ack:{identity.AsKey()}",
-                    ct);
-                await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-                return ApiResults.Ok(new
-                {
-                    kind = accepted.AlreadyExisted ? "queued" : "accepted",
-                    sessionId,
-                    jobKey = launch?.JobKey,
-                    inputId = launch?.InputId,
-                    turnId = launch?.TurnId,
-                    newTask = isRoutedNewTask,
-                });
-            }
-
-            var idempotencyKey = $"slack:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
-            var followupResult = await RouteFollowupAsync(
-                projectId,
-                route.SessionId!,
-                prompt,
-                idempotencyKey,
-                grains,
-                followupDispatcher,
-                ct);
-            var followupAck = BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted);
-            await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
-                followupAck,
-                $"slack-ack:{identity.AsKey()}",
-                ct);
-            await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-            return ApiResults.Ok(new
-            {
-                kind = followupResult.Kind,
-                sessionId = followupResult.SessionId,
-                inputId = followupResult.InputId,
-                turnId = followupResult.TurnId,
-                followup = true,
-            });
         });
 
         group.MapPost("/adapter-session", async (
@@ -571,7 +408,8 @@ public static class SlackConnectionRoutes
         string conversationId,
         string text,
         string? dispatchRef,
-        CancellationToken ct) =>
+        CancellationToken ct,
+        string? threadTs = null) =>
         await outbox.EnqueueAsync(new SlackOutboxDraft(
             projectId,
             connection.Id,
@@ -579,7 +417,8 @@ public static class SlackConnectionRoutes
             conversationId,
             SlackOutboxKinds.UserAction,
             dispatchRef,
-            JsonSerializer.Serialize(new { text })), ct);
+            JsonSerializer.Serialize(new { text }),
+            threadTs), ct);
 
     private static async Task EnqueueRequiredReplyAsync(
         SlackOutboxStore outbox,
@@ -588,7 +427,8 @@ public static class SlackConnectionRoutes
         string conversationId,
         string text,
         string dispatchRef,
-        CancellationToken ct) =>
+        CancellationToken ct,
+        string? threadTs = null) =>
         await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
             projectId,
             connection.Id,
@@ -596,14 +436,66 @@ public static class SlackConnectionRoutes
             conversationId,
             SlackOutboxKinds.UserAction,
             dispatchRef,
-            JsonSerializer.Serialize(new { text })), ct);
+            JsonSerializer.Serialize(new { text }),
+            threadTs), ct);
 
     private static string RemoveBotMention(string text, string botUserId)
     {
-        var result = text.Trim();
-        if (!string.IsNullOrWhiteSpace(botUserId))
-            result = result.Replace($"<@{botUserId}>", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
-        return result;
+        if (string.IsNullOrWhiteSpace(botUserId))
+            return text.Trim();
+
+        return SlackMentionToken.Replace(text.Trim(), match =>
+            string.Equals(match.Groups["id"].Value, botUserId, StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : match.Value).Trim();
+    }
+
+    private static AgentSessionInputProvenance BuildSlackInputProvenance(
+        string connectionId,
+        SlackIngressBody body,
+        string? threadTs) =>
+        new(
+            ProviderKind: "slack",
+            WorkspaceId: body.TeamId,
+            ConversationId: body.ConversationId,
+            ThreadId: threadTs,
+            MemberId: body.SenderSlackUserId!,
+            MessageId: body.MessageTs,
+            ConnectionId: connectionId);
+
+    /// <summary>
+    /// Sender kind surfaced by the adapter on the normalized envelope.
+    /// The adapter sets <see cref="Bot"/> for Slack Bot subtype /
+    /// <c>bot_id</c> events, <see cref="Unknown"/> when a stable user
+    /// id is absent, and <see cref="Human"/> otherwise. A missing
+    /// <c>SenderKind</c> field with a stable user id falls back to
+    /// <see cref="Human"/> so existing DM callers keep working; the
+    /// adapter populates the explicit value on every new envelope.
+    /// </summary>
+    internal enum SlackSenderKind
+    {
+        Human,
+        Bot,
+        Unknown,
+    }
+
+    /// <summary>
+    /// Normalizes the envelope's <c>SenderKind</c> field. Returns
+    /// <see cref="SlackSenderKind.Unknown"/> for a missing user id
+    /// (matches the adapter's "stable identity absent" decision), and
+    /// <see cref="SlackSenderKind.Human"/> when <c>SenderKind</c> is
+    /// absent but a stable user id is present so legacy DM callers
+    /// are not regressed.
+    /// </summary>
+    private static SlackSenderKind NormalizeSenderKind(string? rawKind)
+    {
+        var normalized = rawKind?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "bot" => SlackSenderKind.Bot,
+            "unknown" => SlackSenderKind.Unknown,
+            _ => SlackSenderKind.Human,
+        };
     }
 
     /// <summary>
@@ -639,6 +531,7 @@ public static class SlackConnectionRoutes
         string currentSessionId,
         string prompt,
         string idempotencyKey,
+        AgentSessionInputProvenance provenance,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
         CancellationToken ct)
@@ -650,7 +543,8 @@ public static class SlackConnectionRoutes
             accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
                 Text: prompt,
                 Source: "agent-session-followup",
-                IdempotencyKey: idempotencyKey));
+                IdempotencyKey: idempotencyKey,
+                Provenance: provenance));
         }
         catch (RuntimeSessionMissingException)
         {
@@ -710,6 +604,7 @@ public static class SlackConnectionRoutes
             "already_accepted" => "This message was already accepted.",
             "executing" => "Continuing. Running now.",
             "queued" => "Continuing. Will resume after the current step finishes.",
+            "rejected" => "Could not continue the session. Please try again or start a new task.",
             _ => "Continuing.",
         };
     }
@@ -946,6 +841,899 @@ public static class SlackConnectionRoutes
         if (reason.Contains("App and Bot", StringComparison.OrdinalIgnoreCase)) return true;
         return false;
     }
+
+    /// <summary>
+    /// Routes the DM branch of the Slack ingress. Owner-claim / transfer
+    /// detection runs first (handled by <c>SlackOwnerClaimService</c>);
+    /// the message then either starts a new AgentJob + Session via
+    /// <c>LaunchConnectionAsync</c>, continues the current DM session,
+    /// or is rejected because the prompt is empty / the Agent is not
+    /// ready / the user asked to cancel or stop. Idempotent under
+    /// Slack redelivery: the inbox dedups the message identity, and the
+    /// session grain + AgentJob grain collapse replays onto the same
+    /// session.
+    /// </summary>
+    private static async Task<IResult> HandleDmIngressAsync(HandleDmIngressRequest req, CancellationToken ct)
+    {
+        var body = req.Body;
+        var projectId = req.ProjectId;
+        var connection = req.Connection;
+
+        var decision = await req.Claims.HandleInboundDmAsync(
+            projectId,
+            connection.Id,
+            new SlackInboundDm(req.SenderSlackUserId, body.Text ?? string.Empty),
+            ct);
+        if (decision.Kind == SlackInboundDecisionKind.Claimed)
+        {
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, "Owner claimed successfully.", null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = "claimed" });
+        }
+        if (decision.Kind == SlackInboundDecisionKind.Transferred)
+        {
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, "Owner transferred successfully.", null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = "transferred" });
+        }
+        if (decision.Kind == SlackInboundDecisionKind.Rejected)
+        {
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, decision.Reason ?? "The message was rejected.", null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = "rejected", reason = decision.Reason });
+        }
+
+        if (IsBackpressured(connection))
+            return ApiResults.Conflict(
+                "This Slack Connection is backpressured; retry after pending deliveries drain.",
+                "slack_backpressured");
+
+        var prompt = RemoveBotMention(body.Text ?? string.Empty, connection.BotUserId);
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            const string reason = "Please send a task for the Agent to perform.";
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = "rejected", reason });
+        }
+
+        var isNewTask = TryStripNewTaskMarker(prompt, out var newTaskPrompt);
+        if (isNewTask && string.IsNullOrWhiteSpace(newTaskPrompt))
+        {
+            const string reason = "Please send a task for the Agent to perform.";
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = "rejected", reason });
+        }
+
+        TurnControlCommand controlCommand = default;
+        var isControl = !isNewTask && TryGetTurnControlCommand(prompt, out controlCommand);
+        AgentInfo? agent = null;
+        AgentConnectionDispatchDecision? dispatchDecision = null;
+        if (!isControl)
+        {
+            agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
+            if (agent is null)
+                return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
+
+            dispatchDecision = AgentConnectionDispatchDecision.For(
+                AgentReadinessDeriver.Derive(agent.AgentConfig));
+            if (!dispatchDecision.Accepted)
+            {
+                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                    dispatchDecision.Reason!, null, ct, body.ThreadTs);
+                return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
+            }
+        }
+
+        var routeDraft = await ResolveInboxRouteDraftAsync(
+            projectId,
+            connection.Id,
+            body.ConversationId,
+            isNewTask,
+            isControl ? controlCommand : null,
+            req.DmMapping,
+            req.Sessions,
+            req.Grains,
+            ct);
+
+        SlackProviderInboxAcceptResult accepted;
+        try
+        {
+            accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
+                projectId, connection.Id, req.Identity, req.SenderSlackUserId, body.ThreadTs), routeDraft, ct);
+        }
+        catch (SlackProviderInboxCapacityExceededException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
+        }
+
+        var route = await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct);
+
+        if (route.Kind is SlackProviderInboxRouteKinds.Cancel or SlackProviderInboxRouteKinds.Stop)
+        {
+            var control = await ExecuteTurnControlAsync(
+                projectId,
+                route.Kind == SlackProviderInboxRouteKinds.Cancel ? TurnControlCommand.Cancel : TurnControlCommand.Stop,
+                route.SessionId!,
+                route.TurnId!,
+                req.Sessions,
+                req.Grains,
+                req.RunnerHub,
+                req.RunnerConnections,
+                ct);
+            await EnqueueRequiredReplyAsync(
+                req.Outbox,
+                projectId,
+                connection,
+                body.ConversationId,
+                control.Reply,
+                $"slack-ack:{req.Identity.AsKey()}",
+                ct,
+                body.ThreadTs);
+            await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+            return ApiResults.Ok(new
+            {
+                kind = control.Kind,
+                sessionId = control.SessionId,
+                turnId = control.TurnId,
+                control = true,
+            });
+        }
+
+        if (route.Kind is SlackProviderInboxRouteKinds.NoActiveWork or SlackProviderInboxRouteKinds.AlreadyEnded)
+        {
+            var reply = route.Kind == SlackProviderInboxRouteKinds.AlreadyEnded
+                ? "That work has already ended; there is no active work to cancel or stop."
+                : "There is no active work to cancel or stop.";
+            await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                reply,
+                $"slack-ack:{req.Identity.AsKey()}",
+                ct,
+                body.ThreadTs);
+            await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+            return ApiResults.Ok(new { kind = route.Kind, control = true });
+        }
+
+        if (route.Kind is SlackProviderInboxRouteKinds.Launch or SlackProviderInboxRouteKinds.NewTaskLaunch)
+        {
+            var isRoutedNewTask = route.Kind == SlackProviderInboxRouteKinds.NewTaskLaunch;
+            var sessionId = route.SessionId;
+            AgentLaunchResult? launch = null;
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                launch = await req.Launcher.LaunchConnectionAsync(
+                    agent!,
+                    isRoutedNewTask ? newTaskPrompt : prompt,
+                    new ConnectionLaunchOrigin(
+                        connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, body.ThreadTs),
+                    ct);
+                sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, launch.SessionId, ct);
+            }
+
+            await req.DmMapping.SetCurrentSessionIdAsync(
+                projectId,
+                connection.Id,
+                body.TeamId,
+                req.SenderSlackUserId,
+                body.ConversationId,
+                sessionId,
+                body.MessageTs,
+                ct);
+            var acknowledgement = isRoutedNewTask
+                ? BuildNewTaskAck(accepted.AlreadyExisted, dispatchDecision!.Reason)
+                : accepted.AlreadyExisted
+                    ? "This task was already accepted; execution is being resumed."
+                    : dispatchDecision!.Reason ?? "Task accepted and queued for execution.";
+            await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                acknowledgement,
+                $"slack-ack:{req.Identity.AsKey()}",
+                ct,
+                body.ThreadTs);
+            await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+            return ApiResults.Ok(new
+            {
+                kind = accepted.AlreadyExisted ? "queued" : "accepted",
+                sessionId,
+                jobKey = launch?.JobKey,
+                inputId = launch?.InputId,
+                turnId = launch?.TurnId,
+                newTask = isRoutedNewTask,
+            });
+        }
+
+        var idempotencyKey = $"slack:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
+        var followupResult = await RouteFollowupAsync(
+            projectId,
+            route.SessionId!,
+            prompt,
+            idempotencyKey,
+            BuildSlackInputProvenance(connection.Id, body, body.ThreadTs),
+            req.Grains,
+            req.FollowupDispatcher,
+            ct);
+        var followupAck = BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted);
+        await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+            followupAck,
+            $"slack-ack:{req.Identity.AsKey()}",
+            ct,
+            body.ThreadTs);
+        await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+        return ApiResults.Ok(new
+        {
+            kind = followupResult.Kind,
+            sessionId = followupResult.SessionId,
+            inputId = followupResult.InputId,
+            turnId = followupResult.TurnId,
+            followup = true,
+        });
+    }
+
+    /// <summary>
+    /// Owner-only channel state machine. Classifies the message BEFORE
+    /// the inbox row is written (514 D5 principle): Bot/unknown senders
+    /// and plain unbound-channel messages return without persisting an
+    /// inbox row. A binding lookup is reconciled from the inbox route
+    /// or Session provenance when missing, so a launch that crashed
+    /// between <c>LaunchConnectionAsync</c> and <c>BindAsync</c> still
+    /// routes subsequent thread replies to the original session.
+    /// <para>
+    /// Workspace-scoped multi-Agent attribution (D4) and the once-only
+    /// ambiguity prompt (D5) live here. Mention parsing yields the
+    /// ordered list of stable Slack user ids the adapter extracted; the
+    /// state machine intersects them with the workspace's identity-bound
+    /// Bots (<c>M ∩ W</c>) so arbitrary human mentions are never
+    /// treated as Bot mentions.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> HandleChannelIngressAsync(HandleChannelIngressRequest req, CancellationToken ct)
+    {
+        var body = req.Body;
+        var projectId = req.ProjectId;
+        var connection = req.Connection;
+
+        var rootTs = !string.IsNullOrWhiteSpace(body.ThreadTs) ? body.ThreadTs : body.MessageTs;
+        var mentionedUserIds = BuildMentionedBotIds(body.MentionedUserIds);
+        var ownBotUserId = connection.BotUserId ?? string.Empty;
+
+        var workspaceBots = await req.Connections.ListBoundBotsByWorkspaceAsync(body.TeamId, ct);
+        var mentionedWorkspaceBots = MentionedWorkspaceBots(mentionedUserIds, workspaceBots);
+        var threadBindings = await req.ThreadMapping.ListBindingsByWorkspaceAsync(
+            body.TeamId, body.ConversationId, rootTs, ct);
+
+        if (mentionedWorkspaceBots.Count >= 2)
+        {
+            var mentionedConnectionIds = mentionedWorkspaceBots
+                .Select(bot => bot.ConnectionId)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            var ownerClaimantConnectionId = mentionedWorkspaceBots
+                .Where(bot => string.Equals(bot.OwnerSlackUserId, req.SenderSlackUserId, StringComparison.Ordinal))
+                .Select(bot => bot.ConnectionId)
+                .FirstOrDefault();
+            var currentConnectionIsMentioned = mentionedConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
+            var senderOwnsCurrentConnection = string.Equals(
+                req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal);
+            if (!currentConnectionIsMentioned
+                || (ownerClaimantConnectionId is not null
+                    && !senderOwnsCurrentConnection
+                    && !string.Equals(ownerClaimantConnectionId, connection.Id, StringComparison.Ordinal)))
+                return ApiResults.Ok(new { kind = "ignored" });
+            if (!senderOwnsCurrentConnection)
+                return await HandleAmbiguousNonOwnerAsync(req, mentionedConnectionIds, ct);
+            return await HandleAmbiguousPromptAsync(
+                req,
+                mentionedWorkspaceBots.Select(b => b.BotUserId).ToArray(),
+                mentionedConnectionIds,
+                ct);
+        }
+
+        if (mentionedWorkspaceBots.Count == 1)
+        {
+            var addressedBot = mentionedWorkspaceBots[0];
+            if (!string.Equals(addressedBot.BotUserId, ownBotUserId, StringComparison.Ordinal))
+                return ApiResults.Ok(new { kind = "ignored" });
+
+            if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
+            {
+                const string reason = "This Slack Connection is available only to its owner.";
+                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                return ApiResults.Ok(new { kind = "rejected", reason });
+            }
+
+            var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
+            var isRootMention = string.IsNullOrWhiteSpace(body.ThreadTs);
+
+            var ownBinding = threadBindings.FirstOrDefault(
+                binding => string.Equals(binding.ConnectionId, connection.Id, StringComparison.Ordinal));
+            var otherBotsInThread = threadBindings.Any(
+                binding => !string.Equals(binding.ConnectionId, connection.Id, StringComparison.Ordinal));
+
+            if (ownBinding is not null && !isRootMention)
+                return await DispatchChannelFollowupAsync(req, ownBinding.SessionId, prompt, ct);
+
+            if (isRootMention)
+            {
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    const string reason = "Please send a task for the Agent to perform.";
+                    await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                    return ApiResults.Ok(new { kind = "rejected", reason });
+                }
+                return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
+            }
+
+            if (otherBotsInThread)
+            {
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    const string reason = "Please send a task for the Agent to perform.";
+                    await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                    return ApiResults.Ok(new { kind = "rejected", reason });
+                }
+                return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
+            }
+
+            var reconciled = await ReconcileSessionIdAsync(
+                req, projectId, body.TeamId, body.ConversationId, rootTs, ct);
+            if (reconciled is not null)
+                return await DispatchChannelFollowupAsync(req, reconciled, prompt, ct);
+
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                const string reason = "Please send a task for the Agent to perform.";
+                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                return ApiResults.Ok(new { kind = "rejected", reason });
+            }
+            return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
+        }
+
+        if (threadBindings.Count >= 2)
+        {
+            var bindingConnectionIds = threadBindings
+                .Select(binding => binding.ConnectionId)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            var ownerClaimantConnectionId = threadBindings
+                .Select(binding => workspaceBots.FirstOrDefault(bot =>
+                    string.Equals(bot.ConnectionId, binding.ConnectionId, StringComparison.Ordinal)
+                    && string.Equals(bot.OwnerSlackUserId, req.SenderSlackUserId, StringComparison.Ordinal))?.ConnectionId)
+                .FirstOrDefault(connectionId => connectionId is not null);
+            var currentConnectionIsBound = bindingConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
+            var senderOwnsCurrentConnection = string.Equals(
+                req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal);
+            if (!currentConnectionIsBound
+                || (ownerClaimantConnectionId is not null
+                    && !senderOwnsCurrentConnection
+                    && !string.Equals(ownerClaimantConnectionId, connection.Id, StringComparison.Ordinal)))
+                return ApiResults.Ok(new { kind = "ignored" });
+            if (!senderOwnsCurrentConnection)
+                return await HandleAmbiguousNonOwnerAsync(req, bindingConnectionIds, ct);
+            var botLookup = workspaceBots.ToDictionary(b => b.ConnectionId, b => b.BotUserId, StringComparer.Ordinal);
+            var botLabels = threadBindings
+                .Select(binding => botLookup.TryGetValue(binding.ConnectionId, out var label) ? label : binding.ConnectionId)
+                .ToArray();
+            return await HandleAmbiguousPromptAsync(req, botLabels, bindingConnectionIds, ct);
+        }
+
+        if (threadBindings.Count == 1)
+        {
+            var binding = threadBindings[0];
+            if (!string.Equals(binding.ConnectionId, connection.Id, StringComparison.Ordinal))
+                return ApiResults.Ok(new { kind = "ignored" });
+
+            if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
+            {
+                const string reason = "This Slack Connection is available only to its owner.";
+                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                return ApiResults.Ok(new { kind = "rejected", reason });
+            }
+
+            var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
+            return await DispatchChannelFollowupAsync(req, binding.SessionId, prompt, ct);
+        }
+
+        if (!string.IsNullOrWhiteSpace(body.ThreadTs))
+        {
+            var reconciled = await ReconcileSessionIdAsync(
+                req, projectId, body.TeamId, body.ConversationId, rootTs, ct);
+            if (reconciled is not null)
+            {
+                if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
+                {
+                    const string reason = "This Slack Connection is available only to its owner.";
+                    await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                    return ApiResults.Ok(new { kind = "rejected", reason });
+                }
+                var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
+                return await DispatchChannelFollowupAsync(req, reconciled, prompt, ct);
+            }
+        }
+
+        return ApiResults.Ok(new { kind = "ignored" });
+    }
+
+    /// <summary>
+    /// Reconciles a session id for the inbound thread when no binding
+    /// row is present. Order:
+    /// <list type="number">
+    /// <item><description>the inbox route whose message identity equals the thread root (the launch path persists the session id BEFORE the reply per D2);</description></item>
+    /// <item><description>the unique AgentSession row whose provenance labels match (connection, conversation, root message ts).</description></item>
+    /// </list>
+    /// When both recovery sources agree, the binding row is repaired
+    /// so subsequent lookups stay index-only.
+    /// </summary>
+    private static async Task<string?> ReconcileSessionIdAsync(
+        HandleChannelIngressRequest req,
+        string projectId,
+        string workspaceTeamId,
+        string conversationId,
+        string rootTs,
+        CancellationToken ct)
+    {
+        var inboxSessionId = await ResolveInboxRootSessionIdAsync(
+            req, projectId, req.Connection.Id, workspaceTeamId, conversationId, rootTs, ct);
+        if (!string.IsNullOrWhiteSpace(inboxSessionId))
+        {
+            await req.ThreadMapping.UpsertAsync(
+                projectId, workspaceTeamId, req.Connection.Id, conversationId, rootTs,
+                req.SenderSlackUserId, inboxSessionId, rootTs, ct);
+            return inboxSessionId;
+        }
+
+        var provenanceSessionId = await ResolveSessionProvenanceAsync(
+            req, projectId, req.Connection.Id, workspaceTeamId, conversationId, rootTs, ct);
+        if (!string.IsNullOrWhiteSpace(provenanceSessionId))
+        {
+            await req.ThreadMapping.UpsertAsync(
+                projectId, workspaceTeamId, req.Connection.Id, conversationId, rootTs,
+                req.SenderSlackUserId, provenanceSessionId, rootTs, ct);
+            return provenanceSessionId;
+        }
+
+        return null;
+    }
+
+    private static async Task<string?> ResolveInboxRootSessionIdAsync(
+        HandleChannelIngressRequest req,
+        string projectId,
+        string connectionId,
+        string workspaceTeamId,
+        string conversationId,
+        string threadTs,
+        CancellationToken ct)
+    {
+        await using var scope = req.Services.CreateAsyncScope();
+        var inbox = scope.ServiceProvider.GetRequiredService<SlackProviderInboxStore>();
+        var root = await inbox.FindRootRouteSessionIdAsync(
+            projectId, connectionId, workspaceTeamId, conversationId, threadTs, ct);
+        return root;
+    }
+
+    private static async Task<string?> ResolveSessionProvenanceAsync(
+        HandleChannelIngressRequest req,
+        string projectId,
+        string connectionId,
+        string workspaceTeamId,
+        string conversationId,
+        string threadTs,
+        CancellationToken ct)
+    {
+        return await req.Sessions.FindSessionIdBySlackThreadProvenanceAsync(
+            projectId, connectionId, conversationId, threadTs, ct);
+    }
+
+    /// <summary>
+    /// Filters the parsed mention list down to the subset that maps to
+    /// identity-bound Mohist Bots in the same workspace. The result is
+    /// the <c>M ∩ W</c> set D4 uses to attribute channel messages —
+    /// arbitrary human mentions are never treated as Bot mentions, and
+    /// a Bot managed by another Mohist Server never appears here.
+    /// Deduplicates by <c>BotUserId</c> so multiple Connections bound to
+    /// the same Bot (a test setup convenience or a future multi-workspace
+    /// Bot) never collapse a single-Bot mention into a multi-Bot prompt.
+    /// </summary>
+    private static IReadOnlyList<WorkspaceBoundBot> MentionedWorkspaceBots(
+        IReadOnlyList<string> mentionedUserIds,
+        IReadOnlyList<WorkspaceBoundBot> workspaceBots)
+    {
+        if (mentionedUserIds.Count == 0 || workspaceBots.Count == 0)
+            return Array.Empty<WorkspaceBoundBot>();
+        var mentionedSet = new HashSet<string>(mentionedUserIds, StringComparer.Ordinal);
+        var result = new List<WorkspaceBoundBot>(workspaceBots.Count);
+        var seenBotIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var bot in workspaceBots)
+        {
+            if (!mentionedSet.Contains(bot.BotUserId))
+                continue;
+            if (!seenBotIds.Add(bot.BotUserId))
+                continue;
+            result.Add(bot);
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<string> BuildMentionedBotIds(IReadOnlyList<string>? mentioned)
+    {
+        if (mentioned is null || mentioned.Count == 0) return Array.Empty<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<string>(mentioned.Count);
+        foreach (var id in mentioned)
+        {
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            if (seen.Add(id)) result.Add(id);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Claims and posts the once-only "pick a single Agent" prompt for
+    /// an ambiguous channel message. The race-winning Connection
+    /// (D5 first-writer-wins on
+    /// <c>(WorkspaceTeamId, ConversationId, MessageTs)</c>) enqueues a
+    /// UserAction reply via its own outbox; every loser observes the
+    /// row exists and no-ops, so concurrent per-Connection ingress
+    /// calls and Slack redeliveries collapse to one prompt. The prompt
+    /// copies the inbound <c>ThreadTs</c> onto the delivery so a root
+    /// ambiguous message is prompted at the channel root and a thread
+    /// ambiguous reply is prompted in the same thread.
+    /// </summary>
+    private static async Task<IResult> HandleAmbiguousPromptAsync(
+        HandleChannelIngressRequest req,
+        IReadOnlyList<string> ambiguousBotLabels,
+        IReadOnlyList<string> mentionedConnectionIds,
+        CancellationToken ct)
+    {
+        var body = req.Body;
+        var projectId = req.ProjectId;
+        var connection = req.Connection;
+
+        var labelSummary = string.Join(", ", ambiguousBotLabels);
+        var promptText = $"Multiple Agents could answer this; mention a single Bot to address one. Mentioned: {labelSummary}.";
+        var dispatchRef = SlackAmbiguousPromptStore.PromptDispatchRef(
+            body.TeamId, body.ConversationId, body.MessageTs);
+
+        var claim = await req.AmbiguousPrompts.TryClaimAsync(
+            projectId, body.TeamId, body.ConversationId, body.MessageTs,
+            body.ThreadTs, connection.Id, mentionedConnectionIds, ct);
+
+        if (!claim.Claimed)
+            return ApiResults.Ok(new { kind = "ambiguous", reason = "Another Bot is responding.", winner = claim.WinningConnectionId });
+
+        await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+            promptText, dispatchRef, ct, body.ThreadTs);
+        return ApiResults.Ok(new { kind = "ambiguous", reason = promptText });
+    }
+
+    private static async Task<IResult> RejectNonOwnerChannelMessageAsync(
+        HandleChannelIngressRequest req,
+        CancellationToken ct)
+    {
+        const string reason = "This Slack Connection is available only to its owner.";
+        await EnqueueReplyAsync(req.Outbox, req.ProjectId, req.Connection, req.Body.ConversationId,
+            reason, null, ct, req.Body.ThreadTs);
+        return ApiResults.Ok(new { kind = "rejected", reason });
+    }
+
+    private static async Task<IResult> HandleAmbiguousNonOwnerAsync(
+        HandleChannelIngressRequest req,
+        IReadOnlyList<string> connectionIds,
+        CancellationToken ct)
+    {
+        var body = req.Body;
+        var claim = await req.AmbiguousPrompts.TryClaimAsync(
+            req.ProjectId,
+            body.TeamId,
+            body.ConversationId,
+            body.MessageTs,
+            body.ThreadTs,
+            req.Connection.Id,
+            connectionIds,
+            ct);
+        if (!claim.Claimed)
+            return ApiResults.Ok(new { kind = "ignored" });
+
+        const string reason = "This Slack Connection is available only to its owner.";
+        await EnqueueRequiredReplyAsync(
+            req.Outbox,
+            req.ProjectId,
+            req.Connection,
+            body.ConversationId,
+            reason,
+            SlackAmbiguousPromptStore.PromptDispatchRef(body.TeamId, body.ConversationId, body.MessageTs),
+            ct,
+            body.ThreadTs);
+        return ApiResults.Ok(new { kind = "rejected", reason });
+    }
+
+    private static bool IsBackpressured(AgentConnection connection) =>
+        connection.ConnectionHealth == Agent.Domain.ConnectionHealthKind.Degraded
+        && connection.HealthReason?.Contains("backpressured", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static async Task<IResult> LaunchChannelRootAsync(
+        HandleChannelIngressRequest req,
+        string prompt,
+        string rootTs,
+        CancellationToken ct)
+    {
+        var body = req.Body;
+        var projectId = req.ProjectId;
+        var connection = req.Connection;
+        var dispatchRef = $"slack-thread:{body.TeamId}:{body.ConversationId}:{rootTs}";
+
+        if (IsBackpressured(connection))
+            return ApiResults.Conflict(
+                "This Slack Connection is backpressured; retry after pending deliveries drain.",
+                "slack_backpressured");
+
+        var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
+        if (agent is null)
+            return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
+
+        var dispatchDecision = AgentConnectionDispatchDecision.For(
+            AgentReadinessDeriver.Derive(agent.AgentConfig));
+        if (!dispatchDecision.Accepted)
+        {
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                dispatchDecision.Reason!, null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
+        }
+
+        var reservation = await req.ThreadLaunchReservations.ReserveAsync(
+            projectId,
+            body.TeamId,
+            connection.Id,
+            body.ConversationId,
+            rootTs,
+            body.MessageTs,
+            req.SenderSlackUserId,
+            ct);
+        if (reservation.Kind == SlackThreadLaunchReservationKind.InProgress)
+            return ApiResults.Conflict(
+                "Another launch is already being established for this Slack thread; retry this message.",
+                "slack_thread_launch_in_progress");
+        if (reservation.Kind == SlackThreadLaunchReservationKind.Bound)
+        {
+            await req.ThreadMapping.UpsertAsync(
+                projectId,
+                body.TeamId,
+                connection.Id,
+                body.ConversationId,
+                rootTs,
+                req.SenderSlackUserId,
+                reservation.SessionId!,
+                rootTs,
+                ct);
+            return await DispatchChannelFollowupAsync(req, reservation.SessionId!, prompt, ct);
+        }
+
+        var routeDraft = new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.LaunchThread);
+        SlackProviderInboxAcceptResult accepted;
+        try
+        {
+            accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
+                projectId, connection.Id, req.Identity, req.SenderSlackUserId, rootTs), routeDraft, ct);
+        }
+        catch (SlackProviderInboxCapacityExceededException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
+        }
+
+        AgentLaunchResult? launch = null;
+        var existingRoute = accepted.AlreadyExisted
+            ? await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct)
+            : null;
+        var sessionId = existingRoute?.SessionId ?? reservation.SessionId;
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            launch = await req.Launcher.LaunchConnectionAsync(
+                agent,
+                prompt,
+                new ConnectionLaunchOrigin(
+                    connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
+                ct);
+            sessionId = launch.SessionId;
+        }
+
+        if (existingRoute?.SessionId is null)
+            sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, sessionId!, ct);
+
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            var bindResult = await req.ThreadMapping.UpsertAsync(
+                projectId, body.TeamId, connection.Id, body.ConversationId, rootTs,
+                req.SenderSlackUserId, sessionId, rootTs, ct);
+            sessionId = bindResult.SessionId;
+            if (bindResult.AlreadyExisted)
+                sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, sessionId, ct);
+            await req.ThreadLaunchReservations.BindSessionAsync(
+                projectId,
+                body.TeamId,
+                connection.Id,
+                body.ConversationId,
+                rootTs,
+                sessionId,
+                ct);
+        }
+
+        var acknowledgement = accepted.AlreadyExisted
+            ? "This task was already accepted; execution is being resumed."
+            : "Task accepted and queued for execution.";
+        await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+            acknowledgement, dispatchRef, ct, rootTs);
+        await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+        return ApiResults.Ok(new
+        {
+            kind = accepted.AlreadyExisted ? "queued" : "accepted",
+            sessionId,
+            jobKey = launch?.JobKey,
+            inputId = launch?.InputId,
+            turnId = launch?.TurnId,
+            threadRoot = rootTs,
+        });
+    }
+
+    private static async Task<IResult> DispatchChannelFollowupAsync(
+        HandleChannelIngressRequest req,
+        string sessionId,
+        string prompt,
+        CancellationToken ct)
+    {
+        var body = req.Body;
+        var projectId = req.ProjectId;
+        var connection = req.Connection;
+        var dispatchRef = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
+
+        if (IsBackpressured(connection))
+            return ApiResults.Conflict(
+                "This Slack Connection is backpressured; retry after pending deliveries drain.",
+                "slack_backpressured");
+
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            const string reason = "Please send a task for the Agent to perform.";
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                reason, null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = "rejected", reason });
+        }
+
+        var routeDraft = new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.FollowupThread, sessionId);
+        SlackProviderInboxAcceptResult accepted;
+        try
+        {
+            accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
+                projectId, connection.Id, req.Identity, req.SenderSlackUserId, body.ThreadTs), routeDraft, ct);
+        }
+        catch (SlackProviderInboxCapacityExceededException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
+        }
+
+        var idempotencyKey = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
+        var followupResult = await RouteFollowupAsync(
+            projectId,
+            sessionId,
+            prompt,
+            idempotencyKey,
+            BuildSlackInputProvenance(connection.Id, body, body.ThreadTs),
+            req.Grains,
+            req.FollowupDispatcher,
+            ct);
+        var ack = BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted);
+        await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+            ack, dispatchRef, ct, body.ThreadTs);
+        await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+        return ApiResults.Ok(new
+        {
+            kind = followupResult.Kind,
+            sessionId,
+            inputId = followupResult.InputId,
+            turnId = followupResult.TurnId,
+            followup = true,
+            threadRoot = body.ThreadTs ?? body.MessageTs,
+        });
+    }
+}
+
+/// <summary>
+/// Inputs the DM ingress needs to do its work, captured in a single
+/// record so the route handler can stay a thin entry point and the
+/// classifier stays a normal helper. The connection-side collaborators
+/// (<c>Agents</c>, <c>Sessions</c>, <c>Inbox</c>, <c>Outbox</c>, …)
+/// are resolved through DI once per HTTP request; this record just
+/// forwards them.
+/// </summary>
+internal sealed record HandleDmIngressRequest(
+    string ProjectId,
+    Agent.Domain.AgentConnection Connection,
+    SlackMessageIdentity Identity,
+    string SenderSlackUserId,
+    SlackIngressBody Body,
+    SlackDmSessionMappingStore DmMapping,
+    AgentSessionQuerier Sessions,
+    AgentQuerier Agents,
+    SlackOwnerClaimService Claims,
+    SlackProviderInboxStore Inbox,
+    SlackOutboxStore Outbox,
+    IAgentLauncher Launcher,
+    IGrainFactory Grains,
+    AgentSessionFollowupDispatcher FollowupDispatcher,
+    IHubContext<RunnerHub> RunnerHub,
+    RunnerConnectionTracker RunnerConnections,
+    IServiceProvider Services)
+{
+    public static HandleDmIngressRequest From(
+        string projectId,
+        Agent.Domain.AgentConnection connection,
+        SlackMessageIdentity identity,
+        string senderSlackUserId,
+        SlackIngressBody body,
+        SlackDmSessionMappingStore dmMapping,
+        AgentSessionQuerier sessions,
+        AgentQuerier agents,
+        SlackOwnerClaimService claims,
+        SlackProviderInboxStore inbox,
+        SlackOutboxStore outbox,
+        IAgentLauncher launcher,
+        IGrainFactory grains,
+        AgentSessionFollowupDispatcher followupDispatcher,
+        IHubContext<RunnerHub> runnerHub,
+        RunnerConnectionTracker runnerConnections,
+        IServiceProvider services) =>
+        new(projectId, connection, identity, senderSlackUserId, body,
+            dmMapping, sessions, agents, claims, inbox, outbox,
+            launcher, grains, followupDispatcher, runnerHub, runnerConnections, services);
+}
+
+/// <summary>
+/// Inputs the channel ingress needs to do its work, captured in a single
+/// record so the route handler can stay a thin entry point. The
+/// channel-state-machine code is path-agnostic; the connection-scoped
+/// collaborators are resolved through DI once per HTTP request and
+/// forwarded.
+/// </summary>
+internal sealed record HandleChannelIngressRequest(
+    string ProjectId,
+    Agent.Domain.AgentConnection Connection,
+    SlackMessageIdentity Identity,
+    string SenderSlackUserId,
+    SlackIngressBody Body,
+    AgentConnectionStore Connections,
+    SlackThreadSessionMappingStore ThreadMapping,
+    SlackThreadLaunchReservationStore ThreadLaunchReservations,
+    SlackAmbiguousPromptStore AmbiguousPrompts,
+    AgentSessionQuerier Sessions,
+    AgentQuerier Agents,
+    SlackOwnerClaimService Claims,
+    SlackProviderInboxStore Inbox,
+    SlackOutboxStore Outbox,
+    IAgentLauncher Launcher,
+    IGrainFactory Grains,
+    AgentSessionFollowupDispatcher FollowupDispatcher,
+    IHubContext<RunnerHub> RunnerHub,
+    RunnerConnectionTracker RunnerConnections,
+    IServiceProvider Services)
+{
+    public static HandleChannelIngressRequest From(
+        string projectId,
+        Agent.Domain.AgentConnection connection,
+        SlackMessageIdentity identity,
+        string senderSlackUserId,
+        SlackIngressBody body,
+        AgentConnectionStore connections,
+        SlackThreadSessionMappingStore threadMapping,
+        SlackThreadLaunchReservationStore threadLaunchReservations,
+        SlackAmbiguousPromptStore ambiguousPrompts,
+        AgentSessionQuerier sessions,
+        AgentQuerier agents,
+        SlackOwnerClaimService claims,
+        SlackProviderInboxStore inbox,
+        SlackOutboxStore outbox,
+        IAgentLauncher launcher,
+        IGrainFactory grains,
+        AgentSessionFollowupDispatcher followupDispatcher,
+        IHubContext<RunnerHub> runnerHub,
+        RunnerConnectionTracker runnerConnections,
+        IServiceProvider services) =>
+        new(projectId, connection, identity, senderSlackUserId, body,
+            connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
+            sessions, agents, claims, inbox, outbox,
+            launcher, grains, followupDispatcher, runnerHub, runnerConnections, services);
 }
 
 public sealed class SlackConnectionCreateBody
@@ -977,7 +1765,10 @@ public sealed class SlackIngressBody
     public string TeamId { get; init; } = string.Empty;
     public string ConversationId { get; init; } = string.Empty;
     public string MessageTs { get; init; } = string.Empty;
-    public string SenderSlackUserId { get; init; } = string.Empty;
+    public string? ThreadTs { get; init; }
+    public IReadOnlyList<string> MentionedUserIds { get; init; } = Array.Empty<string>();
+    public string? SenderSlackUserId { get; init; }
+    public string? SenderKind { get; init; }
     public string? Text { get; init; }
 }
 

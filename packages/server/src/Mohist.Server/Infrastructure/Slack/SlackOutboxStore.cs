@@ -102,7 +102,8 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             ProjectId = draft.ProjectId,
             ConnectionId = draft.ConnectionId,
             WorkspaceTeamId = draft.WorkspaceTeamId,
-            DmConversationId = draft.DmConversationId,
+            ConversationId = draft.ConversationId,
+            ThreadTs = draft.ThreadTs,
             Kind = draft.Kind,
             State = SlackOutboxStates.Pending,
             DispatchRef = draft.DispatchRef,
@@ -155,7 +156,8 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             ProjectId = draft.ProjectId,
             ConnectionId = draft.ConnectionId,
             WorkspaceTeamId = draft.WorkspaceTeamId,
-            DmConversationId = draft.DmConversationId,
+            ConversationId = draft.ConversationId,
+            ThreadTs = draft.ThreadTs,
             Kind = draft.Kind,
             State = SlackOutboxStates.Pending,
             DispatchRef = draft.DispatchRef,
@@ -165,13 +167,39 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             UpdatedAt = now,
         };
         db.SlackOutboxRows.Add(row);
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsDispatchRefConflict(ex))
+        {
+            db.Entry(row).State = EntityState.Detached;
+            var duplicate = await db.SlackOutboxRows.AsNoTracking()
+                .Where(r => r.ConnectionId == draft.ConnectionId
+                    && r.Kind == draft.Kind
+                    && r.DispatchRef == draft.DispatchRef)
+                .Select(r => new { r.Id })
+                .FirstOrDefaultAsync(ct);
+            await transaction.CommitAsync(ct);
+            return new SlackOutboxEnqueueResult(duplicate?.Id ?? string.Empty, MergedIntoExisting: true);
+        }
 
         if (backpressured)
             await _healthBackpressurer.FlipBackpressuredAsync(
                 draft.ProjectId, draft.ConnectionId, SlackProviderBackpressureReasons.OutboxOverflow, ct);
         return new SlackOutboxEnqueueResult(row.Id, MergedIntoExisting: false);
+    }
+
+    private static bool IsDispatchRefConflict(DbUpdateException ex)
+    {
+        for (var inner = (Exception?)ex; inner is not null; inner = inner.InnerException)
+        {
+            var message = inner.Message;
+            if (message.Contains("UX_SlackOutboxRows_ConnectionId_DispatchRef_Kind", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     private static Task<bool> IsEnabledConnectionAsync(
@@ -201,6 +229,7 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             return null;
 
         existing.PayloadJson = draft.PayloadJson;
+        existing.ThreadTs = draft.ThreadTs;
         existing.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
         return new SlackOutboxEnqueueResult(existing.Id, MergedIntoExisting: true);
@@ -479,8 +508,8 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             throw new ArgumentException("ConnectionId is required.", nameof(draft));
         if (string.IsNullOrWhiteSpace(draft.WorkspaceTeamId))
             throw new ArgumentException("WorkspaceTeamId is required.", nameof(draft));
-        if (string.IsNullOrWhiteSpace(draft.DmConversationId))
-            throw new ArgumentException("DmConversationId is required.", nameof(draft));
+        if (string.IsNullOrWhiteSpace(draft.ConversationId))
+            throw new ArgumentException("ConversationId is required.", nameof(draft));
         if (!SlackOutboxKinds.IsDefined(draft.Kind))
             throw new ArgumentException($"Kind '{draft.Kind}' is not one of the defined Slack outbox kinds.", nameof(draft));
         if (string.IsNullOrEmpty(draft.PayloadJson))
@@ -495,7 +524,8 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         ProjectId = row.ProjectId,
         ConnectionId = row.ConnectionId,
         WorkspaceTeamId = row.WorkspaceTeamId,
-        DmConversationId = row.DmConversationId,
+        ConversationId = row.ConversationId,
+        ThreadTs = row.ThreadTs,
         Kind = row.Kind,
         State = row.State,
         DispatchRef = row.DispatchRef,

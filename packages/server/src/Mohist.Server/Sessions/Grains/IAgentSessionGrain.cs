@@ -249,7 +249,8 @@ public sealed record AcceptFollowupCommand(
     /// response-only metadata. Append-only Orleans field id (next
     /// free after <see cref="PreMintedTurnId"/>).
     /// </summary>
-    [property: Id(6)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
+    [property: Id(6)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    [property: Id(7)] AgentSessionInputProvenance? Provenance = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(
@@ -331,7 +332,8 @@ public sealed record EnsureInitialLaunchCommand(
     /// and the dispatch payload can carry the descriptors.
     /// Append-only Orleans field id (next free after WorkDir).
     /// </summary>
-    [property: Id(8)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
+    [property: Id(8)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    [property: Id(9)] AgentSessionInputProvenance? Provenance = null);
 
 [GenerateSerializer]
 public sealed record EnsureInitialLaunchResult(
@@ -367,4 +369,5 @@ public sealed record RecordFollowupTurnCommand(
     /// dispatch payload can carry the descriptors. Append-only
     /// Orleans field id (next free after Source).
     /// </summary>
-    [property: Id(4)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
+    [property: Id(4)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    [property: Id(5)] AgentSessionInputProvenance? Provenance = null);

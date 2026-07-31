@@ -1,4 +1,4 @@
-import type { AdapterTransport, SlackConnectionRef, SlackEnvelope, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterTransport, SlackConnectionRef, SlackEnvelope, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
 
 export interface SlackAdapterOptions {
   readonly adapterId: string
@@ -124,7 +124,12 @@ export class SlackAdapter {
           const payload = JSON.parse(delivery.payloadJson) as unknown
           const text = readText(payload)
           if (!text) throw new Error("Delivery payload did not contain text")
-          const response = await runtime.web.chat.postMessage({ channel: delivery.dmConversationId, text })
+          const message: { channel: string; text: string; thread_ts?: string } = {
+            channel: delivery.conversationId,
+            text,
+          }
+          if (delivery.threadTs) message.thread_ts = delivery.threadTs
+          const response = await runtime.web.chat.postMessage(message)
           if (response.ok === false) throw new Error(response.error ?? "Slack chat.postMessage failed")
           await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "delivered" }, signal)
         } catch (error) {
@@ -155,17 +160,37 @@ export function normalizeSocketEvent(body: unknown): SlackEnvelope {
   const teamId = stringValue(event.team_id) ?? stringValue(body, "team_id")
   const conversationId = stringValue(event.channel)
   const messageTs = stringValue(event.ts) ?? stringValue(event.event_ts)
-  const senderSlackUserId = stringValue(event.user) ?? ""
-  if (!teamId || !conversationId || !messageTs || !senderSlackUserId) throw new Error("Slack event is missing its stable identity")
+  if (!teamId || !conversationId || !messageTs) throw new Error("Slack event is missing its stable identity")
+  const senderSlackUserId = stringValue(event.user)
   return {
     eventType: stringValue(event.type) ?? "message",
     isDirectMessage: event.channel_type === "im" || conversationId.startsWith("D"),
     teamId,
     conversationId,
     messageTs,
+    threadTs: stringValue(event.thread_ts),
+    mentionedUserIds: parseMentionedUserIds(typeof event.text === "string" ? event.text : null),
     senderSlackUserId,
+    senderKind: normalizeSenderKind(event),
     text: typeof event.text === "string" ? event.text : null,
   }
+}
+
+function normalizeSenderKind(event: Record<string, unknown>): SlackSenderKind {
+  if (stringValue(event.bot_id) || stringValue(event.subtype) === "bot_message")
+    return "bot"
+  return stringValue(event.user) ? "human" : "unknown"
+}
+
+function parseMentionedUserIds(text: string | null): readonly string[] {
+  if (!text) return []
+  const mentioned = new Set<string>()
+  const pattern = /<@([A-Za-z0-9_-]+)(?:\|[^>]*)?>/g
+  for (const match of text.matchAll(pattern)) {
+    const userId = match[1]
+    if (userId) mentioned.add(userId)
+  }
+  return [...mentioned]
 }
 
 function readText(value: unknown): string | null {

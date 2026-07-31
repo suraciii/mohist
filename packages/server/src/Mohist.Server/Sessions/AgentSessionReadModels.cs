@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Sessions;
 
@@ -260,7 +261,8 @@ public sealed record AgentSessionInputObservationDto(
     long Sequence,
     string Source,
     string Acceptance,
-    IReadOnlyList<AgentSessionInputAttachmentObservationDto>? Attachments = null);
+    IReadOnlyList<AgentSessionInputAttachmentObservationDto>? Attachments = null,
+    [property: JsonPropertyName("provenance")] AgentSessionInputProvenance? Provenance = null);
 
 public sealed record AgentSessionInputAttachmentObservationDto(
     string Id,

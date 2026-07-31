@@ -41,10 +41,11 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             delivery.ResolveProjectId(evt.Extensions),
             delivery.ConnectionId,
             delivery.WorkspaceTeamId,
-            delivery.DmConversationId,
+            delivery.ConversationId,
             delivery.Status == "completed" ? SlackOutboxKinds.TerminalResult : SlackOutboxKinds.ExplicitFailure,
             $"agent-job:{delivery.JobKey}:terminal-delivery",
-            JsonSerializer.Serialize(new { text = Render(delivery) })), ct);
+            JsonSerializer.Serialize(new { text = Render(delivery) }),
+            delivery.ThreadTs), ct);
 
         if (result.Suppressed)
             _log.LogInformation(
@@ -108,13 +109,14 @@ public sealed record SlackTerminalDelivery(
     string WorkLabel,
     string ConnectionId,
     string WorkspaceTeamId,
-    string DmConversationId,
+    string ConversationId,
     string Status,
     string? Message,
     string? FailureReason,
     string? FailureCategory,
     int ArtifactCount,
-    int? ExitCode)
+    int? ExitCode,
+    string? ThreadTs = null)
 {
     public void Validate()
     {
@@ -122,7 +124,7 @@ public sealed record SlackTerminalDelivery(
             || string.IsNullOrWhiteSpace(WorkLabel)
             || string.IsNullOrWhiteSpace(ConnectionId)
             || string.IsNullOrWhiteSpace(WorkspaceTeamId)
-            || string.IsNullOrWhiteSpace(DmConversationId)
+            || string.IsNullOrWhiteSpace(ConversationId)
             || Status is not ("completed" or "failed" or "unknown"))
         {
             throw new InvalidOperationException("Terminal delivery event has invalid routing or status facts.");
@@ -133,5 +135,24 @@ public sealed record SlackTerminalDelivery(
         extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
         && !string.IsNullOrWhiteSpace(projectId)
             ? projectId
-            : throw new InvalidOperationException("Terminal delivery event has no project lineage.");
+             : throw new InvalidOperationException("Terminal delivery event has no project lineage.");
+}
+
+[Subscription(
+    Type = EventCatalog.ReverseDns.AgentSessionFollowupDelivery,
+    Identity = "Mohist.Server.Infrastructure.Slack.SlackFollowupDeliveryHandler")]
+public sealed class SlackFollowupDeliveryHandler : ICloudEventHandler
+{
+    private readonly SlackTerminalDeliveryHandler _inner;
+
+    public SlackFollowupDeliveryHandler(
+        IServiceScopeFactory scopeFactory,
+        ILogger<SlackTerminalDeliveryHandler> log)
+    {
+        _inner = new SlackTerminalDeliveryHandler(scopeFactory, log);
+    }
+
+    public bool Filter(CloudEvent evt) => _inner.Filter(evt);
+
+    public Task HandleAsync(CloudEvent evt, CancellationToken ct) => _inner.HandleAsync(evt, ct);
 }
