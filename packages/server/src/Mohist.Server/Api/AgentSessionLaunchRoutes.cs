@@ -179,8 +179,9 @@ public static class AgentSessionLaunchRoutes
             // The route mints every identity used by attachment ownership.
             // The coordinator persists and adopts them as its canonical plan,
             // so a scoped content read always names the durable SessionInput.
-            var preMintedSessionId = $"agent-session-{Guid.NewGuid():N}";
-            var preMintedInputId = Guid.NewGuid().ToString("N");
+            var ownershipIdentity = $"{project.Id}\n{idempotencyKey}";
+            var preMintedSessionId = $"agent-session-{AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nsession")}";
+            var preMintedInputId = AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\ninput");
             var preMintedTurnId = Guid.NewGuid().ToString("N");
 
             AgentInputAttachmentAcceptanceBatch attachmentBatch;

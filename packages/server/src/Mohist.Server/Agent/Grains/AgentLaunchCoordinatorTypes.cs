@@ -167,6 +167,13 @@ public static class AgentLaunchCoordinatorCodec
     public static string KeyFor(string projectId, string idempotencyKey) =>
         $"agent-launch-coord/{projectId}/{Normalize(idempotencyKey)}";
 
+    public static string StableToken(string identity)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
+        return Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant();
+    }
+
     /// <summary>
     /// Stable fingerprint the coordinator compares replays against.
     /// Canonicalises the request by sorting optional fields and

@@ -69,13 +69,17 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             $"Runner '{runnerId}' to reach Online");
     }
 
-    private Task<HttpResponseMessage> LaunchAsync(string projectId, string agentId, object body)
+    private Task<HttpResponseMessage> LaunchAsync(
+        string projectId,
+        string agentId,
+        object body,
+        string? idempotencyKey = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/projects/{projectId}/agents/{agentId}/sessions")
         {
             Content = JsonContent.Create(body),
         };
-        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        request.Headers.Add("Idempotency-Key", idempotencyKey ?? Guid.NewGuid().ToString("N"));
         return _fixture.Client.SendAsync(request);
     }
 

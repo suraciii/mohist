@@ -437,7 +437,8 @@ public sealed class AttachmentService : IScopedService
                 var claimed = await db.Attachments
                     .Where(row => row.ProjectId == projectId
                         && row.Id == candidate.Row.Id
-                        && row.OwnerKind == null)
+                        && (row.OwnerKind == null
+                            || (row.OwnerKind == OwnerKindAgentInput && row.OwnerId == ownerId)))
                     .ExecuteUpdateAsync(setters => setters
                         .SetProperty(row => row.OwnerKind, OwnerKindAgentInput)
                         .SetProperty(row => row.OwnerId, ownerId)

@@ -99,3 +99,9 @@
 
 - Split the queued attachment-turn regression into its own partial spec file, keeping the existing follow-up grain spec under the C# test-file size ratchet.
 - AgentJob route polling now drains unrelated pending dispatches and waits for the requested job after releasing the runner slot. The full .NET CI command passes: architecture 51/51, server specs 3514/3514, server unit 1677/1677, CLI 1484/1484, and workflow definition 175/175.
+
+## Idempotency repair
+
+- Attachment ownership identities are now deterministic from the idempotency key: launch uses the project/key pair for its session and input, while follow-up uses the session/key pair. A follow-up without an explicit key receives a fresh generated key before ownership binding.
+- The conditional claim also treats an already identical owner as accepted, closing the race where concurrent matching requests both observed a pending row before one claimed it.
+- Added HTTP regressions for attachment-bearing follow-up retry and simultaneous same-key launch. Server specs pass 3516/3516.

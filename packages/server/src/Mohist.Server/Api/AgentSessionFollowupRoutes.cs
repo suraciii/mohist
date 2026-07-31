@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Contracts;
 using Mohist.Server.Issue.Services.Attachments;
@@ -131,11 +132,15 @@ public static class AgentSessionFollowupRoutes
             }
 
             var project = context.GetResolvedProject();
+            var idempotencyKey = AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(context);
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+                idempotencyKey = Guid.NewGuid().ToString("N");
 
             // Pre-mint the input id so we can validate+bind attachments
             // before the Session grain mints the durable input. The grain
             // adopts this id verbatim when supplied.
-            var preMintedInputId = Guid.NewGuid().ToString("N");
+            var preMintedInputId = AgentLaunchCoordinatorCodec.StableToken(
+                $"{sessionId}\n{idempotencyKey}\nfollowup-input");
 
             AgentInputAttachmentAcceptanceBatch attachmentBatch;
             try
@@ -163,7 +168,6 @@ public static class AgentSessionFollowupRoutes
                     attachmentBatch.Results);
             }
 
-            var idempotencyKey = AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(context) ?? string.Empty;
             return await ExecuteFollowupAsync(
                 project.Id,
                 sessionId,
