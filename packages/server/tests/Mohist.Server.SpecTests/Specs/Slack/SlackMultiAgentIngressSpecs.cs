@@ -230,7 +230,7 @@ public sealed class SlackMultiAgentIngressSpecs
         var connectionA = await CreateConnectionAsync("agent-A", "T-multi-owner", "U_OWNER", "A_BOT_OWNER_A");
         var connectionB = await CreateConnectionAsync("agent-B", "T-multi-owner", "U_OWNER_B", "A_BOT_OWNER_B");
 
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connectionA), new
+        var body = new
         {
             isDirectMessage = false,
             teamId = connectionA.WorkspaceTeamId,
@@ -241,12 +241,18 @@ public sealed class SlackMultiAgentIngressSpecs
             senderSlackUserId = "U_OTHER",
             senderKind = "human",
             text = $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> choose",
-        });
+        };
+        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connectionA), body);
 
         response.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("kind").GetString());
         Assert.Contains("owner", doc.RootElement.GetProperty("data").GetProperty("reason").GetString()!, StringComparison.OrdinalIgnoreCase);
+
+        using var otherResponse = await _fixture.Client.PostAsJsonAsync(IngressPath(connectionB), body);
+        otherResponse.EnsureSuccessStatusCode();
+        using var otherDoc = JsonDocument.Parse(await otherResponse.Content.ReadAsStringAsync());
+        Assert.Equal("ignored", otherDoc.RootElement.GetProperty("data").GetProperty("kind").GetString());
     }
 
     [Fact]

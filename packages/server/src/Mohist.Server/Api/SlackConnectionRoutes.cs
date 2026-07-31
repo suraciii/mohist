@@ -1106,20 +1106,20 @@ public static class SlackConnectionRoutes
                 .Select(bot => bot.ConnectionId)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
-            var claimantConnectionId = mentionedWorkspaceBots
+            var ownerClaimantConnectionId = mentionedWorkspaceBots
                 .Where(bot => string.Equals(bot.OwnerSlackUserId, req.SenderSlackUserId, StringComparison.Ordinal))
                 .Select(bot => bot.ConnectionId)
-                .FirstOrDefault()
-                ?? mentionedConnectionIds[0];
+                .FirstOrDefault();
             var currentConnectionIsMentioned = mentionedConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
             var senderOwnsCurrentConnection = string.Equals(
                 req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal);
             if (!currentConnectionIsMentioned
-                || (!senderOwnsCurrentConnection
-                    && !string.Equals(claimantConnectionId, connection.Id, StringComparison.Ordinal)))
+                || (ownerClaimantConnectionId is not null
+                    && !senderOwnsCurrentConnection
+                    && !string.Equals(ownerClaimantConnectionId, connection.Id, StringComparison.Ordinal)))
                 return ApiResults.Ok(new { kind = "ignored" });
             if (!senderOwnsCurrentConnection)
-                return await RejectNonOwnerChannelMessageAsync(req, ct);
+                return await HandleAmbiguousNonOwnerAsync(req, mentionedConnectionIds, ct);
             return await HandleAmbiguousPromptAsync(
                 req,
                 mentionedWorkspaceBots.Select(b => b.BotUserId).ToArray(),
@@ -1193,21 +1193,21 @@ public static class SlackConnectionRoutes
                 .Select(binding => binding.ConnectionId)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
-            var claimantConnectionId = threadBindings
+            var ownerClaimantConnectionId = threadBindings
                 .Select(binding => workspaceBots.FirstOrDefault(bot =>
                     string.Equals(bot.ConnectionId, binding.ConnectionId, StringComparison.Ordinal)
                     && string.Equals(bot.OwnerSlackUserId, req.SenderSlackUserId, StringComparison.Ordinal))?.ConnectionId)
-                .FirstOrDefault(connectionId => connectionId is not null)
-                ?? bindingConnectionIds[0];
+                .FirstOrDefault(connectionId => connectionId is not null);
             var currentConnectionIsBound = bindingConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
             var senderOwnsCurrentConnection = string.Equals(
                 req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal);
             if (!currentConnectionIsBound
-                || (!senderOwnsCurrentConnection
-                    && !string.Equals(claimantConnectionId, connection.Id, StringComparison.Ordinal)))
+                || (ownerClaimantConnectionId is not null
+                    && !senderOwnsCurrentConnection
+                    && !string.Equals(ownerClaimantConnectionId, connection.Id, StringComparison.Ordinal)))
                 return ApiResults.Ok(new { kind = "ignored" });
             if (!senderOwnsCurrentConnection)
-                return await RejectNonOwnerChannelMessageAsync(req, ct);
+                return await HandleAmbiguousNonOwnerAsync(req, bindingConnectionIds, ct);
             var botLookup = workspaceBots.ToDictionary(b => b.ConnectionId, b => b.BotUserId, StringComparer.Ordinal);
             var botLabels = threadBindings
                 .Select(binding => botLookup.TryGetValue(binding.ConnectionId, out var label) ? label : binding.ConnectionId)
@@ -1411,6 +1411,37 @@ public static class SlackConnectionRoutes
         const string reason = "This Slack Connection is available only to its owner.";
         await EnqueueReplyAsync(req.Outbox, req.ProjectId, req.Connection, req.Body.ConversationId,
             reason, null, ct, req.Body.ThreadTs);
+        return ApiResults.Ok(new { kind = "rejected", reason });
+    }
+
+    private static async Task<IResult> HandleAmbiguousNonOwnerAsync(
+        HandleChannelIngressRequest req,
+        IReadOnlyList<string> connectionIds,
+        CancellationToken ct)
+    {
+        var body = req.Body;
+        var claim = await req.AmbiguousPrompts.TryClaimAsync(
+            req.ProjectId,
+            body.TeamId,
+            body.ConversationId,
+            body.MessageTs,
+            body.ThreadTs,
+            req.Connection.Id,
+            connectionIds,
+            ct);
+        if (!claim.Claimed)
+            return ApiResults.Ok(new { kind = "ignored" });
+
+        const string reason = "This Slack Connection is available only to its owner.";
+        await EnqueueReplyAsync(
+            req.Outbox,
+            req.ProjectId,
+            req.Connection,
+            body.ConversationId,
+            reason,
+            SlackAmbiguousPromptStore.PromptDispatchRef(body.TeamId, body.ConversationId, body.MessageTs),
+            ct,
+            body.ThreadTs);
         return ApiResults.Ok(new { kind = "rejected", reason });
     }
 
