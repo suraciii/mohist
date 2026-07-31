@@ -196,8 +196,10 @@ export function IssueDetailPage({
         blocker: issue.blocker,
       },
       agentStatus: agentStatus ?? null,
-      workflowSessions: workflowSessions.map((s) => ({
-        sessionName: s.sessionName,
+       workflowSessions: workflowSessions.map((s) => ({
+         id: s.id,
+         sessionName: s.sessionName,
+
         activity: s.activity,
         startedAt: s.startedAt,
         createdAt: s.createdAt,

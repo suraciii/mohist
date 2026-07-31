@@ -109,7 +109,7 @@ export function renderPage(initialEntries = ['/agent-sessions/new']) {
               path="/agent-sessions/new"
               element={<AgentSessionComposerPage components={components} dataHook={dataHook} />}
             />
-            <Route path="/:projectName/agent-sessions/:sessionId" element={<div>Agent Session</div>} />
+            <Route path="/:projectName/sessions/:sessionId" element={<div>Agent Session</div>} />
           </Routes>
           <LocationProbe />
         </MemoryRouter>

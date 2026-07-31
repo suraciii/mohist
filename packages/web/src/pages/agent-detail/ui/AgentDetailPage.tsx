@@ -294,7 +294,7 @@ function SessionSection({
       {sessions.map((s) => (
         <a
           key={s.sessionId}
-          href={toProjectPath(`/agent-sessions/${encodeURIComponent(s.sessionId)}`)}
+          href={toProjectPath(`/sessions/${encodeURIComponent(s.sessionId)}`)}
           data-testid={`session-row-${s.sessionId}`}
           className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors text-sm"
         >

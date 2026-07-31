@@ -15,6 +15,7 @@ import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
 import { useMediaQuery } from '@/shared/lib/use-media-query'
 import { agentInputAttachmentContentPath, getAgentLaunchObservationMeaning } from '../../../entities/agent'
+import type { AgentTurnObservation, SessionInputObservation } from '../../../entities/coder-session'
 import type { StatusKind, EmptyStateKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
 import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
@@ -193,6 +194,7 @@ export function SessionDetailShell({
     contextUsagePercent,
     healthStatus,
     hasRecoveryActions,
+    recoveryAvailable,
     recoverySessionName,
     recoverySessionId,
     handleRecoverySuccess,
@@ -253,9 +255,11 @@ export function SessionDetailShell({
               issueNumber={issueNumber}
               sessionName={recoverySessionName ?? ''}
               genericSessionId={recoverySessionId ?? undefined}
-               activity={meta?.activity}
+              activity={meta?.activity}
+              recoveryAvailable={recoveryAvailable}
               onSuccess={handleRecoverySuccess}
               bare
+
             />
           </div>
         )}
@@ -462,21 +466,23 @@ export function SessionDetailShell({
             turnCount={displayTurnCount}
           />
           <SessionUsageSummary usage={meta.usage} />
-          {errorsEvidence}
-          {observationGuidance && (
-            <div className="border-b border-border px-4 py-2 text-xs text-muted-foreground" data-testid="launch-observation-guidance">
-              {observationGuidance}
-            </div>
-          )}
-          {recoveryBarContent && (
-            <div
-              data-testid="session-recovery-bar"
-              data-sticky="true"
-              className="sticky top-9 z-20 border-b border-border bg-background px-4 py-2 md:py-3"
-            >
-              {recoveryBarContent}
-            </div>
-          )}
+           {errorsEvidence}
+           {observationGuidance && (
+             <div className="border-b border-border px-4 py-2 text-xs text-muted-foreground" data-testid="launch-observation-guidance">
+               {observationGuidance}
+             </div>
+           )}
+           <SessionInputTurnEvidence inputs={meta.inputs} turns={meta.turns} />
+           {recoveryBarContent && (
+             <div
+               data-testid="session-recovery-bar"
+               data-sticky="true"
+               className="sticky top-9 z-20 border-b border-border bg-background px-4 py-2 md:py-3"
+             >
+               {recoveryBarContent}
+             </div>
+           )}
+
           {hasTurns ? (
             <SessionTranscriptLayout
               turns={displayTurns}
@@ -667,7 +673,20 @@ function SessionHeader({
       </div>
 
       <div
+        data-testid="session-source-context"
+        className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
+      >
+        <span className="font-medium text-foreground">
+          {meta.source === 'workflow' ? 'Workflow Session' : 'Agent Session'}
+        </span>
+        {meta.agentName && <span>Agent: {meta.agentName}</span>}
+        {meta.sessionName && meta.source === 'workflow' && <span>Work: {meta.sessionName}</span>}
+        {meta.workflowRunId && <span>Workflow run: {meta.workflowRunId}</span>}
+      </div>
+
+      <div
         data-testid="session-header-metadata-row"
+
         className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground min-w-0"
       >
         <h1
@@ -934,6 +953,61 @@ function SessionIdCopyButton({ sessionId, truncated }: { sessionId: string; trun
         </span>
       )}
     </span>
+  )
+}
+
+function SessionInputTurnEvidence({
+  inputs,
+  turns,
+}: {
+  inputs?: SessionInputObservation[] | null
+  turns?: AgentTurnObservation[] | null
+}) {
+  if (!inputs?.length && !turns?.length) return null
+  const inputById = new Map((inputs ?? []).map((input) => [input.id, input]))
+  const groupedInputIds = new Set((turns ?? []).flatMap((turn) => turn.inputIds))
+  const orderedInputs = [...(inputs ?? [])].sort((a, b) => a.sequence - b.sequence)
+
+  return (
+    <section
+      data-testid="session-input-turn-evidence"
+      className="border-b border-border bg-muted/20 px-4 py-3"
+      aria-label="Session inputs and turns"
+    >
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Inputs and turns</div>
+      <div className="space-y-2">
+        {(turns ?? []).map((turn) => (
+          <div key={turn.id} data-testid={`session-turn-evidence-${turn.id}`} className="rounded border border-border bg-background px-3 py-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+              <span className="font-medium text-foreground">Turn {turn.sequence + 1}</span>
+              <span className="font-mono text-muted-foreground">{turn.id}</span>
+              <span data-testid={`session-turn-status-${turn.id}`} className="rounded-full border border-border px-1.5 py-0.5 text-[10px]">{turn.status}</span>
+            </div>
+            <div className="mt-2 space-y-1">
+              {turn.inputIds.map((inputId) => {
+                const input = inputById.get(inputId)
+                return (
+                  <div key={inputId} data-testid={`session-input-evidence-${inputId}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <span>Input {input?.sequence ?? '?'}</span>
+                    <span className="font-mono">{inputId}</span>
+                    <span data-testid={`session-input-acceptance-${inputId}`}>accepted: {input?.acceptance ?? 'unknown'}</span>
+                    <span data-testid={`session-input-delivery-${inputId}`}>delivered: {turn.status}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+        {orderedInputs.filter((input) => !groupedInputIds.has(input.id)).map((input) => (
+          <div key={input.id} data-testid={`session-input-evidence-${input.id}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+            <span>Input {input.sequence}</span>
+            <span className="font-mono">{input.id}</span>
+            <span data-testid={`session-input-acceptance-${input.id}`}>accepted: {input.acceptance}</span>
+            <span data-testid={`session-input-delivery-${input.id}`}>delivered: unknown</span>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 

@@ -88,16 +88,40 @@ ArchTests (`packages/server/tests/Mohist.Server.ArchTests`):
 - The transcript events that carry terminal failure facts use
   `TranscriptPartTypes.SessionActivity` (i.e. type `"session.activity"`),
   not `"session.closed"` — the projector only recognises the former for
-  failure-category / failure-reason selection. The seed helper must
-  emit that type.
+  failure-category / failure-reason selection. The seed helper must emit
+  that type.
 - `AgentSessionActivity` JSON deserialisation requires the
-  `JsonStringEnumConverter` with camelCase (already wired in
-  `JSON.Options`); seeding `"executing"` rather than
-  `AgentTurnStatus.Executing.ToString()` keeps the seed independent of
-  enum-string drift.
-- The CLI `SessionShow` resource descriptor had to be updated
-  alongside the DTO; `CliFieldContractTests` enforces parity and the
-  failure mode is silent (CLI dropping fields, not erroring).
+  `JsonStringEnumConverter` with camelCase (already wired in `JSON.Options`);
+  seeding `"executing"` rather than `AgentTurnStatus.Executing.ToString()`
+  keeps the seed independent of enum-string drift.
+- The CLI `SessionShow` resource descriptor had to be updated alongside
+  the DTO; `CliFieldContractTests` enforces parity and the failure mode is
+  silent (CLI dropping fields, not erroring).
 - File-size ratchet: keep the new spec file under 26000 bytes by
   parameterising the seed helpers and inlining the bare-session seeds;
   the actual size is 25051 bytes (next 1000-byte bucket = 26000).
+
+## T-002: Deliver the stable-ID Web AgentSession tracking page
+
+### What changed
+
+Web (`packages/web`):
+
+- Added the typed unified Session read client and query hooks for `/api/projects/{projectRef}/sessions/{sessionId}` and its runtime-scoped transcript endpoint.
+- Added `useUnifiedSessionDataSource` and `UnifiedSessionPage`; both Agent-launch and Workflow sessions now map through the stable logical Session ID and reuse `SessionDetailShell` plus `useSessionTranscript`.
+- Added source context and chronological input/turn evidence to the shared shell, including acceptance, delivery/turn status, model resolution, usage/context health, tool failures, and distinct active/idle/unknown empty states.
+- Moved Agent history, Workflow Session rows, Issue transcript actions, changed-file recovery links, activity targets, task session chips, and launch completion to `/sessions/:sessionId`.
+- Live invalidation now targets unified summary/transcript keys. Transcript events remain filtered by stable Session ID and current runtime binding, so reset/recovery binding changes discard stale runtime content through the existing shared primitive.
+- Removed the duplicate source-specific detail routes, pages, data sources, and their legacy test slices.
+
+### Verification run
+
+- Focused migration and unified-page suites: 196 tests pass.
+- `npm run typecheck -w packages/web` passes.
+- `npm run check:fsd -w packages/web` passes.
+- Full `npm run test:run -w packages/web` passes after navigation expectation updates.
+
+### Gotchas / decisions
+
+- Workflow navigation uses `WorkflowRunSession.id`; `sessionName` remains display/context data only. The issue decision test helper still accepts name-only fixtures as a compatibility fallback, while production workflow rows always carry the stable id.
+- The unified transcript query key includes the current runtime binding. Summary invalidation uses the stable Session key and transcript invalidation uses the stable prefix so a new binding refetches without retaining the prior runtime view.

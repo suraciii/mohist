@@ -292,7 +292,7 @@ describe('deriveIssueDecisionActions', () => {
     const transcript = result.actions.find((a) => a.kind === 'view-transcript')
     expect(transcript).toBeTruthy()
     expect(transcript?.enabled).toBe(true)
-    expect(transcript?.to).toBe('/issues/14/workflow/sessions/review-1')
+    expect(transcript?.to).toBe('/sessions/review-1')
     expect(transcript?.label).toContain('review-1')
     expect(result.transcript?.sessionName).toBe('review-1')
   })

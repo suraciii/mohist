@@ -57,6 +57,39 @@ export interface AgentSessionEventSummary {
   toolErrorCount?: number | null
 }
 
+export interface UnifiedSessionContextRefsDto {
+  issueNumber?: number | null
+  epicNumber?: number | null
+  repository?: string | null
+  workspacePath?: string | null
+}
+
+export interface UnifiedSessionSummaryDto {
+  id: string
+  source: 'agent-launch' | 'workflow' | string
+  runtimeSessionId: string | null
+  runtime: string | null
+  activity: AgentSessionActivity
+  createdAt: string
+  lastActivityAt: string | null
+  model: string | null
+  resolvedModel: string | null
+  failureCategory: string | null
+  failureReason: string | null
+  toolCallCount: number | null
+  toolErrorCount: number | null
+  agentId?: string | null
+  agentName?: string | null
+  workflowRunId?: string | null
+  sessionName?: string | null
+  contextRefs: UnifiedSessionContextRefsDto | null
+  usage: AgentSessionUsage
+  recoveryAvailable: boolean
+  currentTurnId?: string | null
+  inputs?: SessionInputObservation[] | null
+  turns?: AgentTurnObservation[] | null
+}
+
 export interface AgentSessionMetadataCounts {
   partCount?: number
   eventCount?: number
@@ -206,6 +239,10 @@ export interface PromptSummary {
 export interface SessionMetadata {
   sessionId: string
   sessionName?: string | null
+  source?: string | null
+  agentId?: string | null
+  agentName?: string | null
+  workflowRunId?: string | null
   runtimeSessionId: string
   runtime?: string | null
   executionId: string | null

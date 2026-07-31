@@ -61,7 +61,7 @@ describe('activity event targets', () => {
       title: 'Agent Reviewer session active',
       targets: { session: { isGeneric: true }, agent: { agentId: 'agent-1' } },
     })
-    expect(event?.targets.primary?.path).toContain('/agent-sessions/session-1')
+    expect(event?.targets.primary?.path).toContain('/sessions/session-1')
   })
 
   it('links workflow-bound sessions through their issue route', () => {
@@ -74,7 +74,7 @@ describe('activity event targets', () => {
 
     const event = events.find((entry) => entry.id === 'session-snapshot-session-1')
     expect(event?.targets.session?.isGeneric).toBe(false)
-    expect(event?.targets.primary?.path).toContain('/issues/42/session/session-1?from=activity')
+    expect(event?.targets.primary?.path).toContain('/sessions/session-1?from=activity')
   })
 
   it('keeps historical workflow session targets without a snapshot row', () => {
@@ -99,7 +99,7 @@ describe('activity event targets', () => {
         runner: { path: expect.stringContaining('/runners/runner-42') },
       },
     })
-    expect(event.targets.primary?.path).toContain('/issues/42/session/workflow-session-42')
+    expect(event.targets.primary?.path).toContain('/sessions/workflow-session-42')
   })
 
   it('keeps historical generic session targets without workflow context', () => {
@@ -107,7 +107,7 @@ describe('activity event targets', () => {
       origin: 'agent-session',
       sourceAggregateKind: 'agent-session',
       sourceAggregateId: 'generic-session-1',
-      source: '/mohist/agent-sessions/generic-session-1',
+      source: '/mohist/sessions/generic-session-1',
       type: 'coder_session_started',
       subject: null,
       data: { status: 'opened' },
@@ -117,7 +117,7 @@ describe('activity event targets', () => {
       runnerId: 'runner-1',
     }))
 
-    expect(event.targets.primary?.path).toContain('/agent-sessions/generic-session-1')
+    expect(event.targets.primary?.path).toContain('/sessions/generic-session-1')
     expect(event.targets.agent?.path).toContain('/agents/agent-1')
     expect(event.targets.runner?.path).toContain('/runners/runner-1')
     expect(event.targets.workflow).toBeUndefined()
@@ -147,7 +147,7 @@ describe('activity event targets', () => {
     }))
 
     expect(event.targets.session).toMatchObject({ sessionId: 'workflow-session', isGeneric: false })
-    expect(event.targets.primary?.path).toContain('/agent-sessions/workflow-session?from=activity')
+    expect(event.targets.primary?.path).toContain('/sessions/workflow-session?from=activity')
     expect(event.targets.issue).toBeUndefined()
   })
 })
