@@ -265,6 +265,40 @@ reported set（`inFlight ∪ awaitingAck`）属于进程生命周期，必须在
 随 runner 一起丢失的工作以 `FAILED("runner-lost")` 报告给其 owner，由 owner
 决定后续；没有 `Interrupted` 状态。
 
+## 本地 workspace 生命周期
+
+Runner 拥有自己物化的 workspace 与本地 `WorkspaceRegistry`。注册表只是可重建的
+生命周期索引，不是 WorkflowRun 状态权威。每个条目只有三种 phase：
+
+| phase | 含义 |
+|---|---|
+| `active` | Runner 尚未观察到 WorkflowRun 的不可恢复终态；禁止自动回收 |
+| `eligible` | 已观察到 `Completed` 或 `Stopped`；可以释放 Runtime 资源，并按磁盘策略删除 workspace |
+| `stuck` | WorkflowRun 已终结，但磁盘删除安全检查确定性拒绝；保留目录与所有权记录，不再重复尝试自动删除 |
+
+`Failed` 是可由 Retry / Rerun 恢复的中间态，不进入 `eligible`。未知状态同样保持
+`active`。终态 push 只优化延迟；Runner 在启动、重连和周期收敛时只向 Server 批量查询
+本地仍为 `active` 的 WorkflowRun。它不扫描 Server 的完整 Workflow 历史，也不重新查询
+已经进入 `eligible` 或 `stuck` 的条目。
+
+一个 workflow workspace 同时关联两类可回收资源：
+
+- 磁盘 workspace 是 Git worktree，按 retention 与 storage budget 回收；
+- Runtime directory resource 是外部 Runtime 为该目录保留的进程内资源，按 Runtime
+  自己的安全条件尽快释放。
+
+两者只有目录身份相同，生命周期彼此独立。释放 Runtime directory resource 不删除
+worktree；删除 worktree 也不能替代 Runtime 释放。两类回收共用 Runner 已有的 workspace
+维护周期，默认每 2 分钟执行一次，不增加按 WorkflowRun 独立运行的 timer 或新的用户配置。
+每轮 single-flight：上一轮未结束时不重叠执行下一轮。周期维护先执行 Runtime 释放，再执行
+磁盘策略；Runtime 释放不依赖 retention、storage budget 或 Server 配置读取成功。
+
+磁盘删除有额外顺序约束：如果当前 Runtime generation 仍记录该目录有尚未释放的资源，
+自动清理必须等到 Runtime 确认释放后才能删除目录和移除注册表条目。手动 workspace
+cleanup 也遵循相同顺序；Runtime 确认目录仍忙或无法判断时，本次删除明确失败或延后，
+不能先删目录再丢失释放所需的身份。OpenCode 的具体条件见
+[`runtimes/opencode.md`](runtimes/opencode.md#directory-instance-回收)。
+
 ## 落盘状态
 
 runner 在 `<runnerRoot>/.mohist/runner-state/` 下持久化四类状态，全部原子写
